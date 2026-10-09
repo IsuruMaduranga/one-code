@@ -26,6 +26,7 @@ import { perCwd } from "../lib/per-cwd.ts";
 import { bashSpawn, piShellEnv, withChildProcessEnv } from "../lib/shell-spawn.ts";
 import { registerShellTool } from "../lib/shell-tool.ts";
 import { type DescriptionForm, followDescriptionForm } from "../lib/tool-variants.ts";
+import { CONTEXT_BASELINE_CHANNEL, restoredContext } from "../lib/context-stack.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../permissions/modes.ts";
 import { BASH_PARAMS, bashDescription } from "./description.ts";
 import { bashGuardReason } from "./guards.ts";
@@ -59,12 +60,21 @@ export default function bashExtension(pi: ExtensionAPI) {
 	const spawnHook = (context: BashSpawnContext): BashSpawnContext => ({ ...context, env: childProcessEnv(context.env) });
 	const base = createBashToolDefinition(process.cwd(), { shellPath, spawnHook });
 
-	// Claude Code's Bash text (description.ts): its form follows the model's
-	// tier, and the short form's "avoid cat/head/…" bullet is left out in auto
-	// mode. Permissions loads first and announces the mode at session start, so
-	// the first request already carries the right text.
+	// The tier follows the model; the permission-mode variant freezes when the
+	// first request starts. Re-registering on a mode switch changes both the
+	// description and pi's tool order, losing the entire cached prefix. Mode
+	// reminders and the live permission gate carry later changes instead.
 	let form: DescriptionForm = "short";
 	let autoMode = false;
+	let liveAutoMode = false;
+	let modeFrozen = false;
+	const restoredAutoMode = (): boolean | undefined => {
+		const baselines = restoredContext(pi.events)?.baselines;
+		// Older snapshots' last mode chose the last request's description.
+		const saved = baselines?.["bash-auto-mode"];
+		if (typeof saved === "boolean") return saved;
+		return typeof baselines?.["permission-mode"] === "string" ? baselines["permission-mode"] === "auto" : undefined;
+	};
 	const setDescription = registerShellTool(pi, {
 		name: "bash",
 		ccLabel: "Bash",
@@ -80,8 +90,23 @@ export default function bashExtension(pi: ExtensionAPI) {
 		setDescription(bashDescription(form, autoMode));
 	});
 	pi.events.on(PERMISSION_STATUS_CHANNEL, (data) => {
-		autoMode = (data as PermissionStatus).mode === "auto";
+		liveAutoMode = (data as PermissionStatus).mode === "auto";
+		if (modeFrozen) return;
+		// Permissions' startup broadcast precedes this extension's session_start.
+		// Honor a restored variant even here: a temporary re-registration would
+		// move the tool despite putting its original description back afterwards.
+		autoMode = restoredAutoMode() ?? liveAutoMode;
 		setDescription(bashDescription(form, autoMode));
+	});
+	pi.on("session_start", () => {
+		const saved = restoredAutoMode();
+		modeFrozen = saved !== undefined;
+		autoMode = saved ?? liveAutoMode;
+		setDescription(bashDescription(form, autoMode));
+	});
+	pi.on("turn_start", () => {
+		modeFrozen = true;
+		pi.events.emit(CONTEXT_BASELINE_CHANNEL, { key: "bash-auto-mode", value: autoMode });
 	});
 
 	// The user's own `!` commands, under the bundled app only: pi runs them with

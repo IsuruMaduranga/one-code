@@ -149,6 +149,25 @@ describe("projectHooksApproved", () => {
 		expect(prompts).toBe(1);
 	});
 
+	it("a dispatch still live asks again when the one that opened the shared prompt aborts", async () => {
+		const answers: Array<(ok: boolean) => void> = [];
+		const confirm = () => new Promise<boolean>((resolve) => answers.push(resolve));
+		const aborted = new AbortController();
+		const first = projectHooksApproved("/proj", [source("x")], deps({ confirm, signal: aborted.signal }));
+		const second = projectHooksApproved("/proj", [source("x")], deps({ confirm }));
+		await Promise.resolve();
+		expect(answers).toHaveLength(1);
+		aborted.abort();
+		answers[0](true); // A reply racing the abort is no decision.
+		expect(await first).toBe(false);
+		await new Promise((r) => setTimeout(r, 0));
+		expect(answers).toHaveLength(2);
+		expect(readStoredApproval("/proj", storePath)).toBeUndefined();
+		answers[1](true);
+		expect(await second).toBe(true);
+		expect(readStoredApproval("/proj", storePath)).toBe(hashProjectHooks([source("x")]));
+	});
+
 	it("no project sources means no prompt at all", async () => {
 		let prompts = 0;
 		const d = deps({

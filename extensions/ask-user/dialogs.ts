@@ -18,8 +18,8 @@ export const CHAT = "Chat about this";
 export const DONE = "Done";
 
 export interface DialogUI {
-	select(title: string, options: string[]): Promise<string | undefined>;
-	input(title: string, placeholder?: string): Promise<string | undefined>;
+	select(title: string, options: string[], opts?: { signal?: AbortSignal }): Promise<string | undefined>;
+	input(title: string, placeholder?: string, opts?: { signal?: AbortSignal }): Promise<string | undefined>;
 }
 
 /** One option's row: its label, and its description after a dash when it has one. */
@@ -27,15 +27,16 @@ export function optionRow(option: { label: string; description?: string }): stri
 	return option.description ? `${option.label} — ${option.description}` : option.label;
 }
 
-export async function askThroughDialogs(questions: Question[], ui: DialogUI): Promise<WidgetResult> {
+export async function askThroughDialogs(questions: Question[], ui: DialogUI, signal?: AbortSignal): Promise<WidgetResult> {
 	const answers: Answer[] = [];
 	for (const question of questions) {
-		const title = `${question.header}: ${question.question}`;
 		const plainRows = question.options.map(optionRow);
 		// RPC identifies a selection by its displayed string. Number every option
 		// when a row collides with another option or one of our control rows.
 		const numbered = new Set(plainRows).size !== plainRows.length || plainRows.some((row) => [DONE, TYPE_OWN, CHAT].includes(row));
 		const rows = plainRows.map((row, index) => (numbered ? `${index + 1}. ${row}` : row));
+		const previews = question.options.flatMap((option, index) => (option.preview ? [`${rows[index]}:\n${option.preview}`] : []));
+		const title = [`${question.header}: ${question.question}`, ...previews].join("\n\n");
 		// By option index: two options may share a label (with different descriptions).
 		const selected: number[] = [];
 		const labels = () => selected.map((index) => question.options[index].label);
@@ -47,13 +48,13 @@ export async function askThroughDialogs(questions: Question[], ui: DialogUI): Pr
 				TYPE_OWN,
 				CHAT,
 			];
-			const picked = await ui.select(question.multiSelect && selected.length > 0 ? `${title} (selected: ${labels().join(", ")})` : title, choices);
-			if (picked === undefined) return { kind: "cancel", answers };
+			const picked = await ui.select(question.multiSelect && selected.length > 0 ? `${title} (selected: ${labels().join(", ")})` : title, choices, { signal });
+			if (signal?.aborted || picked === undefined || !choices.includes(picked)) return { kind: "cancel", answers };
 			if (picked === CHAT) return { kind: "chat" };
 			if (picked === DONE) break;
 			if (picked === TYPE_OWN) {
-				const text = (await ui.input(title, "Type something."))?.trim();
-				if (text === undefined) return { kind: "cancel", answers };
+				const text = (await ui.input(title, "Type something.", { signal }))?.trim();
+				if (signal?.aborted || text === undefined) return { kind: "cancel", answers };
 				// A blank answer is no answer: ask the question again.
 				if (!text) continue;
 				typed = text;

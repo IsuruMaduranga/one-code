@@ -22,7 +22,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import os from "node:os";
 import { dirname, join } from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
 	buildClaudeMdBlock,
 	buildContextBlock,
@@ -32,6 +32,7 @@ import {
 	dateChangeReminder,
 	discoverContextFiles,
 	discoverOneCodeFiles,
+	externalInstructionIncludes,
 	localDate,
 	instructionRule,
 	nestedInstructionFiles,
@@ -40,13 +41,17 @@ import {
 import { collectGitStatus, GIT_SNAPSHOT_OWNER_CHANNEL } from "../lib/git-status.ts";
 import { projectMemoryDir, truncateIndex } from "../lib/memory.ts";
 import { claudeConfigDir, oneCodeStateDir, tryRealpath } from "../lib/paths.ts";
-import { CONTEXT_ORDER, REMINDER_CHANNEL, type ReminderEntry } from "../lib/reminders.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, type ReminderEntry, tailAnchor } from "../lib/reminders.ts";
+import { inContextEntries } from "../lib/compaction-boundary.ts";
 import { CONTEXT_BASELINE_CHANNEL, CONTEXT_FACTS_REFRESH_CHANNEL, restoredContext, type ContextStackSnapshot } from "../lib/context-stack.ts";
 import { compactionGitStatus, contextFactsBaseline, DATE_CHANGE_KEY, legacyResumeFactsNotice, RESUME_FACTS_KEY, resumeFactsNotice, storedFactsBaseline, type ContextFactsBaseline } from "../lib/context-facts.ts";
 import { resolveToolPath } from "../lib/tool-path.ts";
 import { sessionWorkCwd, WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
 import { pathArgument } from "../auto-mode/paths.ts";
 import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
+import { EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_SETTING, EXTERNAL_INCLUDES_YES, externalIncludesDialog, persistExternalIncludesApproval, readExternalIncludesApproval } from "../lib/claude-external-includes.ts";
+import { registerLocalCommand } from "../lib/local-command.ts";
+import { consentDialog, installConsentDialogs, startupConsentReady } from "../lib/consent-dialogs.ts";
 
 const REMINDER_KEY = "claude-context";
 const ONECODE_REMINDER_KEY = "one-code-context";
@@ -85,6 +90,7 @@ function readMemoryIndex(cwd: string): { path: string; content: string } | null 
 }
 
 export default function claudeContextExtension(pi: ExtensionAPI) {
+	const resetConsentDialogs = installConsentDialogs(pi.events);
 	/** The account email stand-in, resolved at session start. */
 	let email: string | null = null;
 	/** Claude Code's git snapshot, taken once at the conversation's first turn; undefined until then. */
@@ -103,6 +109,8 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	let blockDate = "";
 	/** The date the model was last told: the reminder's, or a later date-change notice's. */
 	let shownDate = "";
+	let hadInstructions = false;
+	let hadOneCode = false;
 	/**
 	 * Instruction files in context, by real path: the startup block's files and
 	 * their imports (`startupShown`, fixed for the session), plus nested files
@@ -110,6 +118,25 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	 */
 	let startupShown = new Set<string>();
 	let attachedNested = new Set<string>();
+	/** Where a nested instruction actually landed: a persisted result or a pinned request tail. */
+	const shownByResult = new Map<string, Set<string>>();
+	const pendingNested = new Set<string>();
+	const remember = (toolCallId: string | undefined, keys: Iterable<string>) => {
+		if (!toolCallId) return;
+		const shown = shownByResult.get(toolCallId) ?? new Set<string>();
+		for (const key of keys) shown.add(key);
+		if (shown.size) shownByResult.set(toolCallId, shown);
+	};
+	const keepRetainedAttachments = (ctx: ExtensionContext) => {
+		attachedNested = new Set(startupShown);
+		const kept = new Set(inContextEntries(ctx.sessionManager.getBranch()).flatMap((entry) =>
+			entry.type === "message" && entry.message.role === "toolResult" ? [entry.message.toolCallId] : [],
+		));
+		for (const [id, keys] of shownByResult) {
+			if (kept.has(id)) for (const key of keys) attachedNested.add(key);
+			else shownByResult.delete(id);
+		}
+	};
 	/** The entered worktree: reads there resolve below its root, not the session's original directory. */
 	let entered: WorktreeLocation | undefined;
 	pi.events.on(WORKTREE_CHANNEL, (data) => {
@@ -118,6 +145,11 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	});
 	/** The instruction rule, read with the startup block (it is settings, read once a session). */
 	let rule: ReturnType<typeof instructionRule> | undefined;
+	let includeExternal = false;
+	let approvalPending: Promise<void> | undefined;
+	let approvalAbort = new AbortController();
+	let sessionGeneration = 0;
+	let requestStarted = false;
 
 	const emitDate = (date: string) => {
 		blockDate = date;
@@ -135,15 +167,20 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	let pendingResume: ContextStackSnapshot | undefined;
 	const baseline = () => ({ startupShown: [...startupShown], shownDate, facts });
 	const publishBaseline = () => pi.events.emit(CONTEXT_BASELINE_CHANNEL, { key: "claude-context", value: baseline() });
-	const readFiles = (cwd: string) => ({
-		contextFiles: discoverContextFiles({ cwd, homeClaudeDir: claudeConfigDir(), rule: instructionRule(os.homedir()), home: os.homedir() }),
-		memoryIndex: readMemoryIndex(cwd),
-		oneCode: buildOneCodeBlock(discoverOneCodeFiles({ cwd, homeOneCodeDir: oneCodeStateDir(), home: os.homedir() })),
-	});
+	const readFiles = (cwd: string) => {
+		const oneCodeFiles = discoverOneCodeFiles({ cwd, homeOneCodeDir: oneCodeStateDir(), home: os.homedir() });
+		return {
+			contextFiles: discoverContextFiles({ cwd, homeClaudeDir: claudeConfigDir(), rule: instructionRule(os.homedir()), home: os.homedir(), includeExternal }),
+			memoryIndex: readMemoryIndex(cwd),
+			oneCodeFiles,
+			oneCode: buildOneCodeBlock(oneCodeFiles),
+		};
+	};
 	let files: ReturnType<typeof readFiles> | undefined;
 	const adoptFiles = (current: ReturnType<typeof readFiles>) => {
 		files = current;
-		startupShown = new Set(current.contextFiles.flatMap((file) =>
+		// A file either startup block carries (or imports) is never attached again on a read.
+		startupShown = new Set([...current.contextFiles, ...current.oneCodeFiles].flatMap((file) =>
 			[file.path, ...(file.imported ?? collectImportedPaths(readOrEmpty(file.path), dirname(file.path), { home: os.homedir() }))],
 		).map((path) => tryRealpath(path) ?? path));
 		attachedNested = new Set(startupShown);
@@ -155,11 +192,92 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		return takesGitSnapshot ? collectGitStatus(cwd, undefined, shellTool) : null;
 	};
 
-	pi.on("session_start", (_event, ctx) => {
+	const externalPaths = (cwd: string) => externalInstructionIncludes({ cwd, homeClaudeDir: claudeConfigDir(), rule: instructionRule(os.homedir()), home: os.homedir() });
+	const saveApproval = (ctx: ExtensionContext, approved: boolean) => {
+		includeExternal = approved;
+		try { persistExternalIncludesApproval(ctx.cwd, os.homedir(), approved); }
+		catch (error) { ctx.ui.notify(`Could not remember external CLAUDE.md include approval: ${String(error)}`, "error"); }
+	};
+	const refreshUnsentInstructions = (cwd: string) => {
+		if (requestStarted || pendingResume) return;
+		const current = readFiles(cwd);
+		adoptFiles(current);
+		const text = buildClaudeMdBlock(current);
+		if (text) pi.events.emit(REMINDER_CHANNEL, { text, scope: "every-turn", key: REMINDER_KEY, placement: "first-prepend", order: CONTEXT_ORDER.claudeMd });
+		publishBaseline();
+	};
+	const askApproval = async (ctx: ExtensionContext, paths: string[], afterStartup = false) => {
+		const gen = sessionGeneration;
+		const signal = approvalAbort.signal;
+		// No is first and focused, as in Claude Code. Escape is also a remembered no;
+		// a shutdown/superseded session is not an answer at all.
+		const choice = await consentDialog(pi.events, () => ctx.ui.select(externalIncludesDialog(paths, os.homedir()), [EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_YES], { signal }), afterStartup);
+		if (signal.aborted || gen !== sessionGeneration) return;
+		saveApproval(ctx, choice === EXTERNAL_INCLUDES_YES);
+		refreshUnsentInstructions(ctx.cwd);
+	};
+	registerLocalCommand(pi, "config", {
+		description: "Configure external CLAUDE.md includes for this project",
+		reportsResult: true,
+		handler: async (_args, ctx) => {
+			if (!ctx.hasUI) {
+				const text = "/config requires an interactive UI to change external CLAUDE.md include approval.";
+				process.stderr.write(`${text}\n`);
+				return text;
+			}
+			const gen = sessionGeneration;
+			startupConsentReady(pi.events);
+			await approvalPending;
+			if (gen !== sessionGeneration || approvalAbort.signal.aborted) return;
+			const paths = externalPaths(ctx.cwd);
+			if (!paths.length) {
+				const text = "No external CLAUDE.md includes found.";
+				ctx.ui.notify(text, "info");
+				return text;
+			}
+			const row = `${EXTERNAL_INCLUDES_SETTING}: ${includeExternal ? "true" : "false"}`;
+			const picked = await consentDialog(pi.events, () => ctx.ui.select("Config", [row], { signal: approvalAbort.signal }));
+			if (picked !== row || gen !== sessionGeneration || approvalAbort.signal.aborted) return;
+			if (includeExternal) {
+				saveApproval(ctx, false);
+				refreshUnsentInstructions(ctx.cwd);
+			} else await askApproval(ctx, paths);
+			// As in Claude Code, this changes future loads, never retracts text or
+			// rewrites the frozen first-message block after a request was sent.
+			return `${EXTERNAL_INCLUDES_SETTING}: ${includeExternal ? "true" : "false"}`;
+		},
+	});
+	const drainApproval = async () => { startupConsentReady(pi.events); await approvalPending; };
+	pi.on("before_agent_start", drainApproval);
+	pi.on("session_shutdown", () => {
+		resetConsentDialogs();
+		++sessionGeneration;
+		approvalAbort.abort();
+		approvalPending = undefined;
+	});
+
+	pi.on("session_start", (event, ctx) => {
+		resetConsentDialogs();
+		++sessionGeneration;
+		approvalAbort.abort();
+		approvalAbort = new AbortController();
+		approvalPending = undefined;
+		requestStarted = false;
+		const approval = readExternalIncludesApproval(ctx.cwd, os.homedir());
+		includeExternal = approval.approved;
 		const restored = restoredContext(pi.events);
 		pendingResume = restored;
 		files = undefined;
 		facts = undefined;
+		if ((event.reason ?? "startup") === "startup" && ctx.hasUI && !approval.approved && !approval.warningShown) {
+			const paths = externalPaths(ctx.cwd);
+			if (paths.length) {
+				// RPC installs its input reader only AFTER session_start returns.
+				// Queue after hooks/MCP consent; gate the first turn, not startup.
+				approvalPending = askApproval(ctx, paths, true);
+				approvalPending.catch(() => {});
+			}
+		}
 		if (restored) {
 			const baseline = restored.baselines["claude-context"] as { startupShown?: unknown; shownDate?: unknown; facts?: unknown } | undefined;
 			facts = storedFactsBaseline(baseline?.facts);
@@ -188,9 +306,14 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 				placement: "first-prepend",
 				order: CONTEXT_ORDER.claudeMd,
 			});
+		} else if (hadInstructions) {
+			pi.events.emit(REMINDER_CHANNEL, { remove: true, key: REMINDER_KEY });
 		}
+		hadInstructions = instructions !== null;
 		email = resolveEmail(ctx.cwd);
 		attachedNested = new Set(startupShown);
+		shownByResult.clear();
+		pendingNested.clear();
 		rule = instructionRule(os.homedir());
 		// /clear re-fires session_start: the next conversation takes its own snapshot.
 		gitStatus = undefined;
@@ -209,15 +332,22 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 				placement: "first-prepend",
 				order: CONTEXT_ORDER.oneCodeMd,
 			});
+		} else if (hadOneCode) {
+			pi.events.emit(REMINDER_CHANNEL, { remove: true, key: ONECODE_REMINDER_KEY });
 		}
 		publishBaseline();
+		hadOneCode = oneCode !== null;
 	});
 
 	// Claude Code snapshots git "at the start of the conversation": on the first
 	// turn, typed or opened from idle, never in session_start, so the several
 	// synchronous git spawns never delay the prompt opening (findings §15). The
 	// clip note names the shell tool the model has (PowerShell only without bash).
-	pi.on("turn_start", (_event, ctx) => {
+	pi.on("turn_start", async (_event, ctx) => {
+		const gen = sessionGeneration;
+		await drainApproval();
+		if (gen !== sessionGeneration || approvalAbort.signal.aborted) return;
+		requestStarted = true;
 		// Check only once, just before the first resumed request. No startup git
 		// subprocesses, and no changes to the historical first-message blocks.
 		if (pendingResume) {
@@ -268,6 +398,8 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		const cwd = sessionWorkCwd(entered, ctx.cwd);
 		const current = readFiles(cwd);
 		adoptFiles(current);
+		// Only discarded carriers need reattachment; pi can retain the recent read/tool-result tail.
+		keepRetainedAttachments(ctx);
 		email = resolveEmail(cwd);
 		gitStatus = snapshotGit(cwd);
 		blockDate = shownDate = localDate();
@@ -286,12 +418,25 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	// A branch switch leaves the attachments of the branch left behind; the new one may lack them.
 	pi.on("session_tree", () => {
 		attachedNested = new Set(startupShown);
+		shownByResult.clear();
+		pendingNested.clear();
+	});
+
+	// system-reminder runs first: any still-pending one-shots have just been pinned to this tail.
+	pi.on("context", (event) => {
+		const anchor = tailAnchor(event.messages);
+		if (anchor?.kind === "toolResult") remember(anchor.toolCallId, pendingNested);
+		pendingNested.clear();
 	});
 
 	// A successful read attaches nested instruction files and matching path rules
 	// once each. These are one-shots: never replace the frozen first-prepend block.
 	// lib/claude-context.ts owns traversal, matching and source ordering.
 	pi.on("tool_result", (event, ctx) => {
+		// A queued attachment from an earlier result was persisted into this one
+		// by system-reminder's earlier hook, even if this is not itself a read.
+		remember(event.toolCallId, pendingNested);
+		pendingNested.clear();
 		if (event.toolName !== "read" || event.isError) return;
 		const raw = pathArgument(event.input);
 		if (!raw) return;
@@ -299,13 +444,23 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		const filePath = resolveToolPath(raw, ctx.cwd);
 		// In a worktree, the directories between are below the worktree's root (its own root files
 		// are the shared checkout's, which the startup block carries).
-		const files = nestedInstructionFiles({ filePath, cwd: sessionWorkCwd(entered, ctx.cwd), rule, home: os.homedir() });
-		// A file the model read itself is in context already.
-		attachedNested.add(tryRealpath(filePath) ?? filePath);
+		const files = nestedInstructionFiles({ filePath, cwd: sessionWorkCwd(entered, ctx.cwd), rule, home: os.homedir(), includeExternal });
+		// A partial read is not evidence that the entire instruction file is shown.
+		const input = event.input as { offset?: number; limit?: number };
+		const truncated = (event.details as { truncation?: { truncated?: boolean } } | undefined)?.truncation?.truncated;
+		if ((input.offset ?? 1) <= 1 && input.limit == null && !truncated) {
+			const readKey = tryRealpath(filePath) ?? filePath;
+			attachedNested.add(readKey);
+			remember(event.toolCallId, [readKey]);
+		}
 		for (const file of files) {
 			if (attachedNested.has(file.key)) continue;
 			attachedNested.add(file.key);
-			for (const imported of file.imported) attachedNested.add(imported);
+			pendingNested.add(file.key);
+			for (const imported of file.imported) {
+				attachedNested.add(imported);
+				pendingNested.add(imported);
+			}
 			pi.events.emit(REMINDER_CHANNEL, { text: nestedInstructionText(file) });
 		}
 	});

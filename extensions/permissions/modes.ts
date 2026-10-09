@@ -131,6 +131,8 @@ export const PERMISSION_STATUS_CHANNEL = "one-code:permission-status";
 export interface PermissionStatus {
 	mode: string;
 	paused: boolean;
+	/** A tool-driven switch anchors its state/reminders to this result, not a parallel sibling's. */
+	toolCallId?: string;
 	/** `provider/id` of the classifier screening calls (or about to). */
 	classifier?: string;
 	/** Whether `classifier` is pinned by a real call, or still the planned first candidate. */

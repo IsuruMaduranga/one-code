@@ -63,6 +63,20 @@ describe("tasks: the finished list clears after 5 s", () => {
 		expect(await t.list()).toContain("#1");
 	});
 
+	it("sends RPC task progress as lines rather than an ignored component factory", async () => {
+		const t = setup({ mode: "rpc", hasUI: true });
+		await t.create({ subject: "A", description: "" });
+		await t.update({ taskId: "1", status: "in_progress" });
+		const lines = t.setWidget.mock.calls.at(-1)?.[1];
+		expect(Array.isArray(lines)).toBe(true);
+		expect(lines.join("\n")).toContain("A");
+		expect(lines.join("\n")).toContain("1 in progress");
+		expect(lines.join("\n")).not.toContain(taskToggleKey());
+		await t.update({ taskId: "1", status: "completed" });
+		vi.advanceTimersByTime(FINISHED_LIST_CLEAR_MS);
+		expect(t.setWidget).toHaveBeenLastCalledWith("cc-tasks", undefined);
+	});
+
 	it("keeps the list in a one-shot run, which has no widget", async () => {
 		const t = setup({ mode: "print", hasUI: false });
 		await t.create({ subject: "A", description: "" });

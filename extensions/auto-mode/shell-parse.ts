@@ -61,6 +61,8 @@ export interface Token {
 export interface Segment {
 	/** Leading `NAME=value` assignments, then the command word, then its arguments. */
 	tokens: Token[];
+	/** Source ranges of the command words only, never redirects or stdin. Offsets are into the parsed line. */
+	wordRanges?: { start: number; end: number }[];
 	/**
 	 * Write targets (`>`, `>>`, `>|`, `&>`, `&>>`, `>&word`), in written order.
 	 * A redirect on a compound command (`{ …; } > f`) gets a segment of its own
@@ -149,6 +151,8 @@ export interface ParseResult {
 	unknownQuoting?: string;
 	/** The first construct the pre-gate does not model, as a reason ("uses a for loop"), or undefined. */
 	complex?: string;
+	/** An expansion outside simple-command words (e.g. `((…))` or a case subject) may change shell state. */
+	unattributedExpansion?: boolean;
 	/** True when a command runs in the background (`cmd &`). */
 	background: boolean;
 	/**
@@ -331,6 +335,7 @@ class Walker {
 	readonly segments: (Segment & { start: number })[] = [];
 	unknownQuoting: string | undefined;
 	complex: string | undefined;
+	unattributedExpansion = false;
 	background = false;
 	/** Set when a part parsed on its own (a heredoc's backtick body) did not parse. */
 	failed = false;
@@ -435,8 +440,9 @@ class Walker {
 			default:
 				if (!STATEMENTS.has(node.type)) {
 					// A word in statement position (a `for` list, a `case` subject):
-					// only the commands it substitutes matter.
-					this.word(node, ctx);
+					// walk its substitutions, but keep any unmodelled state change
+					// visible to consumers proving commands independently.
+					if (this.word(node, ctx).dynamic) this.unattributedExpansion = true;
 					return;
 				}
 				this.markComplex(node.type);
@@ -479,7 +485,7 @@ class Walker {
 		if (node?.type === "variable_assignment" || node?.type === "variable_assignments") {
 			// A line that only assigns: `a=1`, `a=1 b=2`.
 			const assignments = node.type === "variable_assignment" ? [node] : node.namedChildren.filter((child) => child.type === "variable_assignment");
-			for (const assignment of assignments) segment.tokens.push(this.assignment(assignment, ctx));
+			for (const assignment of assignments) this.addWord(segment, assignment, this.assignment(assignment, ctx));
 		} else if (node) {
 			if (node.type in COMPLEX) this.markComplex(node.type);
 			let locale = false;
@@ -491,7 +497,7 @@ class Walker {
 				}
 				if (!child.isNamed) {
 					// The keyword of `export`/`unset`/`[[`: part of the command's words.
-					if (node.type !== "command" && /^[A-Za-z[\]]/.test(child.type)) segment.tokens.push({ value: child.text });
+					if (node.type !== "command" && /^[A-Za-z[\]]/.test(child.type)) this.addWord(segment, child, { value: child.text });
 					continue;
 				}
 				if (child.type === "comment") continue;
@@ -504,24 +510,29 @@ class Walker {
 					continue;
 				}
 				if (child.type === "variable_assignment") {
-					segment.tokens.push(this.assignment(child, ctx));
+					this.addWord(segment, child, this.assignment(child, ctx));
 					continue;
 				}
 				// `[[ -f x ]]`: its expressions are words for the deny forms.
 				if (child.type.endsWith("_expression") && node.type === "test_command") {
-					for (const leaf of leaves(child)) segment.tokens.push(this.word(leaf, ctx));
+					for (const leaf of leaves(child)) this.addWord(segment, leaf, this.word(leaf, ctx));
 					continue;
 				}
 				const target = child.type === "command_name" ? (child.firstNamedChild ?? child) : child;
 				const word = this.word(target, ctx);
 				if (locale && target.type === "string") this.unknownQuoting ??= LOCALE_QUOTING;
 				locale = false;
-				segment.tokens.push(word);
+				this.addWord(segment, child, word);
 			}
 		}
 		for (const redirect of outerRedirects) this.redirect(redirect, segment, ctx);
 		segment.raw = this.rawText(node, outerRedirects, at);
 		this.segments.push(segment);
+	}
+
+	private addWord(segment: Segment, node: SyntaxNode, word: Token): void {
+		segment.tokens.push(word);
+		(segment.wordRanges ??= []).push({ start: node.startIndex, end: node.endIndex });
 	}
 
 	/** The source of a command plus its own redirects, a heredoc cut at its delimiter word. */
@@ -572,7 +583,7 @@ class Walker {
 		const [target, ...rest] = destinations;
 		// The grammar hangs every word after the target on the redirect; in bash
 		// they are the command's own arguments (`cmd 2>/dev/null arg`).
-		for (const word of rest) segment.tokens.push(this.word(word, ctx));
+		for (const word of rest) this.addWord(segment, word, this.word(word, ctx));
 		if (!target) return; // `>&-`, `<&-`: close a descriptor.
 		const word = this.word(target, ctx);
 		if (word.dynamic) segment.unknownTarget = true;
@@ -639,6 +650,8 @@ class Walker {
 			for (const segment of inner.segments) {
 				this.segments.push({
 					...segment,
+					// These words were parsed from a backtick body, not from this line.
+					wordRanges: undefined,
 					enclosing: [...scope.enclosing, ...segment.enclosing],
 					scopes: [...scope.scopes, ...segment.scopes],
 					substitution: scope.substitution,
@@ -649,6 +662,7 @@ class Walker {
 			}
 			this.unknownQuoting ??= inner.unknownQuoting;
 			this.complex ??= inner.complex;
+			this.unattributedExpansion ||= !!inner.unattributedExpansion;
 			this.background ||= inner.background;
 			// `echo hi <> f` in the backticks is as unparseable as it is on its own line.
 			this.failed ||= inner.parseFailed;
@@ -820,6 +834,7 @@ export function parseCommand(command: string): ParseResult {
 			parseFailed: tree.rootNode.hasError || walker.failed,
 			unknownQuoting: walker.unknownQuoting,
 			complex: walker.complex,
+			unattributedExpansion: walker.unattributedExpansion,
 			background: walker.background,
 			substitutions: walker.substitutions,
 		};

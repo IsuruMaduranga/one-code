@@ -69,7 +69,7 @@ describe("askThroughDialogs", () => {
 	it("asks a single-select question with the options, a typed answer and chat rows", async () => {
 		const { ui, shown } = scripted([optionRow(layout.options[0])]);
 		const result = await askThroughDialogs([layout], ui);
-		expect(shown).toEqual([{ kind: "select", title: "Layout: Which layout?", options: ["Grid — Cards in rows", "List", TYPE_OWN, CHAT] }]);
+		expect(shown).toEqual([{ kind: "select", title: "Layout: Which layout?\n\nGrid — Cards in rows:\n[A][B]", options: ["Grid — Cards in rows", "List", TYPE_OWN, CHAT] }]);
 		expect(result).toEqual({ kind: "submit", answers: [{ question: "Which layout?", header: "Layout", selected: ["Grid"], freeform: false, preview: "[A][B]" }] });
 		if (result.kind === "submit") expect(formatAnswers(result.answers)).toBe('Your questions have been answered: "Which layout?"="Grid" selected preview:\n[A][B]. You can now continue with these answers in mind.');
 	});
@@ -92,6 +92,35 @@ describe("askThroughDialogs", () => {
 		const result = await askThroughDialogs([layout, langs], scripted(["List", undefined]).ui);
 		expect(result).toEqual({ kind: "cancel", answers: [{ question: "Which layout?", header: "Layout", selected: ["List"], freeform: false }] });
 		expect(await askThroughDialogs([layout], scripted([TYPE_OWN, undefined]).ui)).toEqual({ kind: "cancel", answers: [] });
+	});
+
+	for (const label of [DONE, TYPE_OWN, CHAT]) {
+		it(`selects a literal ${JSON.stringify(label)} option rather than treating it as a control`, async () => {
+			const question: Question = { question: "Pick a label", header: "Label", options: [{ label }, { label: "Other" }] };
+			const ui: DialogUI = {
+				select: async (_title, options) => options[0],
+				input: async () => undefined,
+			};
+			expect(await askThroughDialogs([question], ui)).toMatchObject({ kind: "submit", answers: [{ selected: [label] }] });
+		});
+	}
+
+	it("distinguishes different options whose label/description render identically", async () => {
+		const question: Question = { question: "Which?", header: "Q", options: [{ label: "A — B" }, { label: "A", description: "B" }] };
+		const ui: DialogUI = { select: async (_title, options) => options[1], input: async () => undefined };
+		expect(await askThroughDialogs([question], ui)).toMatchObject({ kind: "submit", answers: [{ selected: ["A"] }] });
+	});
+
+	it("records the chosen option's preview when two options share a label", async () => {
+		const question: Question = { question: "Which?", header: "Q", options: [{ label: "Layout", description: "A", preview: "first" }, { label: "Layout", description: "B", preview: "second" }] };
+		const ui: DialogUI = { select: async (_title, options) => options[1], input: async () => undefined };
+		expect(await askThroughDialogs([question], ui)).toMatchObject({ kind: "submit", answers: [{ selected: ["Layout"], preview: "second" }] });
+	});
+
+	it("shows previews before recording that the user selected a preview", async () => {
+		const { ui, shown } = scripted([optionRow(layout.options[0])]);
+		await askThroughDialogs([layout], ui);
+		expect(shown[0].title).toContain(layout.options[0].preview);
 	});
 
 	it("declines to chat", async () => {

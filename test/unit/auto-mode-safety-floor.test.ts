@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { isSafetyControlTarget, safetyControlWrite } from "../../extensions/auto-mode/safety-floor.ts";
+import { analyzeShellCommand } from "../../extensions/auto-mode/shell-analysis.ts";
 import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
 import { oneCodeProjectSettingsPath } from "../../extensions/lib/one-code-settings.ts";
 import { claudeJsonPath, forwardSlashes, toPosixPath } from "../../extensions/lib/paths.ts";
@@ -83,6 +84,109 @@ describe("safetyControlWrite: shell commands", () => {
 	it("leaves ordinary shell work alone", () => {
 		expect(check("bash", { command: "npm test" })).toBeUndefined();
 		expect(check("bash", { command: `echo hi > ${join(cwd, "out.txt")}` })).toBeUndefined();
+	});
+});
+
+describe("safetyControlWrite: read-only words in escalated compound commands", () => {
+	const observed = `git diff --check && git diff -- README.md CHANGELOG.md src/text_utils.py src/inventory.py && if rg --hidden --no-ignore -n --glob '!.git/**' --glob '!node_modules/**' --glob '!**/__pycache__/**' 'slugify' .; then echo 'Old name still present'; exit 1; else code=$?; if [ "$code" -eq 1 ]; then echo 'No old-name references found'; else exit "$code"; fi; fi && git status --short`;
+
+	it.each([
+		observed,
+		`rg -g '!**/__pycache__/**' slugify . && exit 0`,
+		`rg -g'!**/x/**' slugify . && exit 0`,
+		`grep -r --include='**/x/**' slugify . && exit 0`,
+		`grep -r --exclude-dir '**/x/**' slugify . && exit 0`,
+		`git diff -- ':!**/x/**' && exit 0`,
+		`cat .claude/settings.json && exit 0`,
+		`rg 2>/dev/null -g '!**/x/**' slugify . && exit 0`,
+		`find . -name 'settings*' -print && exit 0`,
+		`rg -g '!**/.claude/settings.json' slugify . && exit 0`,
+		`grep --exclude-dir '.claude/settings.json' slugify . && exit 0`,
+		`git diff -- ':!.claude/settings.json' && exit 0`,
+		`npm test && rg -g '!**/x/**' slugify .`,
+		`echo '😀'; rg -g '!**/x/**' slugify . && exit 0`,
+		// A -regex whose fixed tail no control file's name can end with.
+		`find src -regex '.*\\.orig' -delete`,
+		`find . -iregex '.*/node_modules/.*\\.LOG$' -delete`,
+		`find . -regex '.*/build/' -exec rm -rf {} +`,
+	])("does not floor proven read-only words: %s", (command) => {
+		expect(analyzeShellCommand({ command, cwd, home }).verdict).toBe("escalate");
+		expect(check("bash", { command })).toBeUndefined();
+		expect(check("monitor", { command })).toBeUndefined();
+	});
+
+	it.each([
+		`uniq a .claude/settings.local.json`,
+		`echo x >&.claude/settings.json`,
+		`cp x .claude/settings.json`,
+		`find .claude -name 'settings*' -delete`,
+		`rsync --delete src/ .claude/settings.json`,
+		`echo x > .claude/settings.*`,
+		`rg -g '!**/x/**' slugify . > .claude/settings.*`,
+		`rg --pre='cp x .claude/settings.json' slugify .`,
+		`git diff --output=.claude/settings.json`,
+		`sh -c 'cp x .claude/settings.json'`,
+		`echo "$(cp x .claude/settings.json)"`,
+		`cat <(cp x .claude/settings.json)`,
+		`unknown --output=.claude/settings.json`,
+		`rg -g '!**/x/**' slugify .; cp x .claude/settings.json`,
+		`cp x .claude/settings.json; rg -g '!**/x/**' slugify .`,
+		`cat .claude/settings.json > .claude/settings.json`,
+		`cat < .claude/settings.json && exit 0`,
+		`echo '😀'; cat .claude/settings.json; cp x .claude/settings.json`,
+		`cat .claude/settings.json > .claude/settings.*`,
+		`{ rg -g '!**/x/**' slugify .; } > .claude/settings.*`,
+		`rg -g '!**/x/**' slugify . && mystery '**/x/**'`,
+		`rg -g '!**/x/**' slugify . && fd --exclude '**/x/**' slugify .`,
+		`rg --unmodelled-option -g '!**/x/**' slugify .`,
+		`rg -g '!**/x/**' slugify . && sh -c 'cat .claude/settings.json'`,
+		`rg -g '!**/x/**' slugify . && echo "$(cat .claude/settings.json)"; exit 0`,
+		`echo 'cp x .claude/settings.json' | sh`,
+		`sh <<'EOF'\ncp x .claude/settings.json\nEOF`,
+		`cat <<'EOF' | sh\ncp x .claude/settings.json\nEOF`,
+		`sh <<< 'cp x .claude/settings.json'`,
+		`for f in .claude/settings.json; do mystery "$f"; done`,
+		`case .claude/settings.json in *) mystery;; esac`,
+		`cat .claude/settings.json; echo "unterminated`,
+		`cat() { cp x "$1"; }; cat .claude/settings.json`,
+		`alias cat=cp; cat .claude/settings.json`,
+		`eval "$setup"; cat .claude/settings.json`,
+		`source setup; cat .claude/settings.json`,
+		`PATH=./bin; cat .claude/settings.json`,
+		`printf -v PATH ./bin; cat .claude/settings.json`,
+		`read PATH; cat .claude/settings.json`,
+		`for PATH in ./bin; do true; done; cat .claude/settings.json`,
+		`(( PATH = 0 )); cat .claude/settings.json`,
+		`echo "$((PATH = 0))"; cat .claude/settings.json`,
+		`PATH[0]=./bin; cat .claude/settings.json`,
+		`echo "${'${PATH:=./bin}'}"; cat .claude/settings.json`,
+		`case $((PATH=0)) in *) true;; esac; cat .claude/settings.json`,
+		`echo x > "${'${PATH:=./bin}'}"; cat .claude/settings.json`,
+		`cat <<< "${'${PATH:=./bin}'}"; cat .claude/settings.json`,
+		// A later command can reuse an earlier one's words through $_.
+		`echo .claude/settings.json; rm "$_"`,
+		`echo .claude/settings.json; sed -i 's/x/y/' "$_"`,
+		`ls ~/.claude/settings.json && cp /tmp/evil "$_"`,
+		`echo .claude/settings.json; rm "${'${_}'}"`,
+		`echo .claude/settings.json; rm "${'${_%.json}'}.json"`,
+		`echo .claude/settings.json; sh <<EOF\nrm "$_"\nEOF`,
+		// -regex/-iregex match the whole path, which a file-name glob cannot model.
+		`find . -regex '.*settings.json' -delete`,
+		`find . -iregex '.*SETTINGS.JSON' -delete`,
+		`find . -regex '.*/\\.claude/.*' -exec rm {} +`,
+		`find . -regex '.*\\.json' -delete`,
+		`find . -regex '.*settings.json\\'"'"'' -delete`,
+		`find . -regex '.*\\(orig\\|json\\)' -delete`,
+		`find . -regextype posix-extended -regex '.*\\.orig' -delete`,
+		`find . -regex "$pattern" -delete`,
+		`find . -regex '.*' -delete`,
+		`find . ! -regex '.*\\.orig' -delete`,
+		`find . -not -regex '.*\\.orig' -delete`,
+		`find . -regex '.*\\.orig' -o -delete`,
+		`find . \\( -regex '.*\\.orig' -or -name x \\) -delete`,
+		`find . -regex '.*\\.orig' , -delete`,
+	])("keeps writes and unproven commands on the floor: %s", (command) => {
+		expect(check("bash", { command })).toBeDefined();
 	});
 });
 

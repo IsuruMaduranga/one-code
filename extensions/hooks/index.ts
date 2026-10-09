@@ -64,6 +64,7 @@ import { projectHooksApproved } from "./trust.ts";
 import { QueuedDelivery } from "../lib/queued-delivery.ts";
 import { SKILL_INVOCATION_TYPE, type SkillInvocationDetails } from "../skill/invoke.ts";
 import { isNotificationDetails } from "../lib/notifications.ts";
+import { consentDialog } from "../lib/consent-dialogs.ts";
 
 /** Claude Code's `hook_additional_context` attachment text (utils/messages.ts). */
 export function hookContextText(event: CcHookEvent, text: string): string {
@@ -100,7 +101,8 @@ interface HookDispatchCtx {
 	cwd: string;
 	hasUI: boolean;
 	sessionManager: { getSessionId(): string; getSessionFile(): string | undefined; getSessionDir?(): string | undefined };
-	ui: { confirm(title: string, message: string): Promise<boolean | undefined>; notify(message: string, type: "info"): void };
+	ui: { confirm(title: string, message: string, options?: { signal?: AbortSignal }): Promise<boolean | undefined>; notify(message: string, type: "info"): void };
+	signal?: AbortSignal;
 	/** Set on the shutdown snapshot: no consent prompt, no notices — the session is gone. */
 	sessionEnded?: true;
 }
@@ -156,7 +158,8 @@ export default function hooksExtension(pi: ExtensionAPI) {
 			projectAllowed = await projectHooksApproved(ctx.cwd, projectSources, {
 				hasUI: ctx.hasUI,
 				noPrompt: ctx.sessionEnded,
-				confirm: (title, message) => ctx.ui.confirm(title, message),
+				signal: ctx.signal,
+				confirm: (title, message) => consentDialog(pi.events, (signal) => ctx.ui.confirm(title, message, { signal: signal && ctx.signal ? AbortSignal.any([signal, ctx.signal]) : signal ?? ctx.signal })),
 				notify: (message) => notify(ctx, message),
 			});
 		}
@@ -201,7 +204,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		const merged: HookOutcome = {};
 		try {
 			const hooks = await collectHooks(ctx, event, matchValue);
-			if (hooks.length === 0) return merged;
+			if (hooks.length === 0 || ctx.signal?.aborted) return merged;
 			willRun?.();
 			const stdin = JSON.stringify(payload);
 			const outcomes = await Promise.all(

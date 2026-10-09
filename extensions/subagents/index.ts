@@ -16,6 +16,7 @@
  * children persist their sessions per run to make that possible).
  */
 
+import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../lib/child-writes.ts";
 import { existsSync, mkdirSync, readdirSync, renameSync, writeFileSync, readFileSync } from "node:fs";
 import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, agentCronTools, agentOwnsCronJobs } from "../lib/agent-cron.ts";
 import os from "node:os";
@@ -429,6 +430,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				live?.ui.notify(`Subagent model ${model} is not usable on this account (${reason}); automatic selection skips it from now on.`, "warning");
 				if (lastCtx) emitModelStatus(lastCtx, lastCtx.model, model);
 			},
+			(path, agent) => pi.events.emit(CHILD_WROTE_CHANNEL, { path, ...(agent ? { agent } : {}) } satisfies ChildWrote),
 		).catch((error: unknown) => {
 			runtimePromise = undefined;
 			throw error;
@@ -867,6 +869,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	};
 
 	const openView = (ctx: ExtensionContext, taskId: string) => {
+		if (ctx.mode !== "tui") {
+			ctx.ui.notify("The live subagent panel requires TUI mode. Use /tasks for task status; task_output and task_stop inspect or stop a task.", "warning");
+			return;
+		}
 		if (view) return view.retarget(taskId);
 		let currentId = taskId;
 		let scroll = 0;
@@ -2679,6 +2685,18 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	 * running task, Esc closes.
 	 */
 	const openTasksDialog = async (ctx: ExtensionContext) => {
+		if (ctx.mode === "rpc") {
+			const lines = [
+				...shellTasks.running().map((task) => `- ${task.id} [shell, running] ${task.command ?? task.description}`),
+				...liveRuns.list().filter((run) => run.depth === 0).map((run) => `- ${run.taskId} [${run.name}, ${run.status}] ${run.label}`),
+			];
+			ctx.ui.notify([
+				"The interactive task viewer requires TUI mode; showing a task snapshot instead.",
+				...(lines.length ? lines : ["No background tasks in this session."]),
+				"Use task_output to inspect a task and task_stop to stop it.",
+			].join("\n"), "info");
+			return;
+		}
 		if (!ctx.hasUI) return;
 		const build = () => {
 			const runs = liveRuns.list().filter((run) => run.depth === 0);
@@ -2789,13 +2807,21 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			// With live children, focus the strip on the newest and open its view
 			// (Claude Code's agent panel); otherwise there is nothing running, so
 			// list the catalog the way the tool's action:"list" does.
-			if (ctx.hasUI && panel.rowCount() > 1) {
+			if (ctx.hasUI && ctx.mode === "tui" && panel.rowCount() > 1) {
 				panel.setFocus(1); // row 0 is `main`; 1 is the newest live child
 				const run = panel.selectedRun();
 				if (run) {
 					openView(ctx, run.taskId);
 					return;
 				}
+			}
+			if (ctx.mode === "rpc" && registry.list().length) {
+				ctx.ui.notify([
+					"The live subagent panel requires TUI mode; showing spawned agents instead.",
+					...registry.list().map((run) => `- ${run.name} [${run.agent}] — ${agentStatus(run)} (task ${run.taskId})`),
+					"Use /tasks for task status; task_output and task_stop inspect or stop a task.",
+				].join("\n"), "info");
+				return;
 			}
 			ctx.ui.notify(`Available agents:\n${describeAgents(ctx.cwd)}`, "info");
 		},

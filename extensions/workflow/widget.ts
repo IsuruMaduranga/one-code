@@ -131,6 +131,13 @@ export class WorkflowWidget {
 		}
 		const selected = this.focusIndex;
 		const now = Date.now();
+		// RPC forwards string-array widgets but silently ignores factories.
+		if (ctx.mode === "rpc") {
+			const lines = runs.map((run) => `${run.runId} ${run.name} — ${run.status} (${run.agents.length} agents)`);
+			if (totalRuns > runs.length) lines.push(`${totalRuns - runs.length} more workflows — /workflows to list all`);
+			ctx.ui.setWidget(WIDGET_KEY, lines, { placement: "belowEditor" });
+			return;
+		}
 		ctx.ui.setWidget(
 			WIDGET_KEY,
 			(tui, theme) => {

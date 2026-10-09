@@ -12,6 +12,7 @@
  * `<sessionDir>/subagents/<taskId>/`, so a finished run can be resumed from disk.
  */
 
+import { childWriteWatcher } from "../lib/child-writes.ts";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { type AgentSession, type ExtensionError, getAgentDir, SessionManager, type ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -168,6 +169,8 @@ export class SubagentRuntime {
 	/** A child extension handler threw (pi swallows it otherwise); surfaced to the user by index.ts. */
 	private readonly onExtensionError: (runName: string | undefined, error: ExtensionError) => void;
 	private readonly onModelUnusable: (model: string, reason: string) => void;
+	/** A child's edit or write changed a file (lib/child-writes.ts); index.ts tells the parent's file-tracker. */
+	private readonly onChildWrite: (path: string, runName: string | undefined) => void;
 	/** Child session id → run name, for the bridge wrapper above. */
 	private readonly runNames = new Map<string, string>();
 	/** Child session id → agent type (`explore`, …), for the hook payload's `agent_type`. */
@@ -188,8 +191,10 @@ export class SubagentRuntime {
 		getHookBridge: () => HookBridge | undefined,
 		onExtensionError: (runName: string | undefined, error: ExtensionError) => void,
 		onModelUnusable: (model: string, reason: string) => void,
+		onChildWrite: (path: string, runName: string | undefined) => void,
 	) {
 		this.modelRuntime = modelRuntime;
+		this.onChildWrite = onChildWrite;
 		this.baseCwd = baseCwd;
 		this.getMcpTools = getMcpTools;
 		this.getHookBridge = getHookBridge;
@@ -213,11 +218,12 @@ export class SubagentRuntime {
 		getHookBridge: () => HookBridge | undefined = () => undefined,
 		onExtensionError: (runName: string | undefined, error: ExtensionError) => void = () => {},
 		onModelUnusable: (model: string, reason: string) => void = () => {},
+		onChildWrite: (path: string, runName: string | undefined) => void = () => {},
 	): Promise<SubagentRuntime> {
 		const modelRuntime = await createSharedModelRuntime(getAgentDir());
 		// Prime the catalog once; spawns read the live snapshot (see resolveModel).
 		await modelRuntime.getAvailable();
-		return new SubagentRuntime(modelRuntime, cwd, getMcpTools, getPermissionBridge, getHookBridge, onExtensionError, onModelUnusable);
+		return new SubagentRuntime(modelRuntime, cwd, getMcpTools, getPermissionBridge, getHookBridge, onExtensionError, onModelUnusable, onChildWrite);
 	}
 
 	/**
@@ -306,9 +312,12 @@ export class SubagentRuntime {
 		onSettled?: () => void,
 		sink?: LiveSink,
 	): () => void {
+		const childWrote = childWriteWatcher(session.sessionManager?.getCwd?.() ?? this.baseCwd);
 		return session.subscribe((event) => {
 			try {
 				const settled = tracker.process(event as never);
+				const wrote = childWrote(event as never);
+				if (wrote) this.onChildWrite(wrote, this.runNames.get(session.sessionId));
 				const e = event as { type?: string; toolName?: string; args?: unknown; isError?: boolean; result?: unknown; message?: { role?: string; content?: unknown } };
 				if (e.type === "tool_execution_start") {
 					sink?.onBlock?.({ kind: "call", tool: e.toolName ?? "tool", text: summarizeArgs(e.args) });

@@ -64,6 +64,11 @@ export default function tasksExtension(pi: ExtensionAPI) {
 			ctx.ui.setWidget("cc-tasks", undefined);
 			return;
 		}
+		// RPC forwards line arrays only, and has no terminal shortcut to hide it.
+		if (ctx.mode === "rpc") {
+			ctx.ui.setWidget("cc-tasks", formatTaskWidget(store));
+			return;
+		}
 		// Component form so every line passes truncateLine — subjects are
 		// unbounded model text, and pi-tui crashes on an over-wide line.
 		ctx.ui.setWidget("cc-tasks", (_tui, theme) => {

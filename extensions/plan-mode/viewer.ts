@@ -25,13 +25,14 @@ export type PlanChoice = number;
  * The plan rides in the title; a reply that is no choice is a dismissal.
  */
 export async function selectPlanChoice(
-	ui: { select(title: string, options: string[]): Promise<string | undefined> },
+	ui: { select(title: string, options: string[], opts?: { signal?: AbortSignal }): Promise<string | undefined> },
 	plan: string,
 	path: string,
 	choices: string[],
+	signal?: AbortSignal,
 ): Promise<PlanChoice | null> {
-	const label = await ui.select(`Plan (${path}):\n\n${plan}\n\nApprove the plan?`, choices);
-	const index = label === undefined ? -1 : choices.indexOf(label);
+	const label = await ui.select(`Plan (${path}):\n\n${plan}\n\nApprove the plan?`, choices, { signal });
+	const index = signal?.aborted || label === undefined ? -1 : choices.indexOf(label);
 	return index >= 0 ? index : null;
 }
 

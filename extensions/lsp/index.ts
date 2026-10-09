@@ -157,7 +157,7 @@ export default function lspExtension(pi: ExtensionAPI) {
 		if (existing?.isRunning) return existing;
 		// A server that runs project code starts only in a trusted project
 		// (trust.ts); checked here so no caller can spawn one without it.
-		if (!(await projectCodeAllowed(target, ctx))) return undefined;
+		if (!(await projectCodeAllowed(target, ctx)) || ctx.signal?.aborted) return undefined;
 		if (existing) {
 			// Crashed mid-session. Respawn with a short backoff, up to MAX_RESPAWNS
 			// times; after that record why so downstream reports the real cause (a
@@ -173,6 +173,8 @@ export default function lspExtension(pi: ExtensionAPI) {
 			clients.delete(key);
 			await new Promise((resolve) => setTimeout(resolve, 500 * count));
 		}
+
+		if (ctx.signal?.aborted) return undefined;
 
 		// Keyed on the command being spawned, not on where the config came from —
 		// a plugin configuring typescript-language-server hits the same TS7 trap.
@@ -216,9 +218,11 @@ export default function lspExtension(pi: ExtensionAPI) {
 					(await ctx.ui.confirm(
 						`Start ${target.command} in this project?`,
 						`${target.command} ${why}. Allow it only for a project you trust.\n\nThe answer for ${root} is remembered; /lsp trust allows it later.`,
+						{ signal: ctx.signal },
 					)) === true
 			: undefined;
-		if (await trustGate.allowed(target.root, confirm)) return true;
+		if (await trustGate.allowed(target.root, confirm, ctx.signal)) return true;
+		if (ctx.signal?.aborted) return false;
 		if (!startFailures.has(target.key)) {
 			startFailures.set(target.key, `${NOT_TRUSTED} ${target.command} ${why}, and this project is not trusted (run /lsp trust to allow it)`);
 		}
@@ -369,6 +373,9 @@ export default function lspExtension(pi: ExtensionAPI) {
 						return client && { all: await client.getDiagnostics(path, target.languageId) };
 					})
 				: undefined;
+			if (ctx.signal?.aborted) {
+				return { content: [{ type: "text", text: "Diagnostics cancelled because the turn was stopped." }], details: { available: false }, isError: true };
+			}
 			if (!target || !fetched) {
 				const failure = target ? startFailures.get(target.key) : undefined;
 				return {

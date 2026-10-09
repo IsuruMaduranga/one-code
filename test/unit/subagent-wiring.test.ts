@@ -6,6 +6,7 @@ import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../ext
 import backgroundExtension from "../../extensions/background/index.ts";
 import { type BackgroundTask, TASK_REGISTER_CHANNEL } from "../../extensions/background/registry.ts";
 import { DEFAULT_COALESCE_MS } from "../../extensions/lib/notifications.ts";
+import { AGENT_VIEW_CHANNEL } from "../../extensions/lib/agent-view.ts";
 import { SUBAGENT_GATE_CHANNEL } from "../../extensions/permissions/subagent-gate.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
@@ -93,6 +94,43 @@ describe("subagent model command", () => {
 		const chosen = sessionModel === session ? vision : textOnly;
 		await h.fake.commands.get("subagent")!.handler(`openai/${chosen.id}`, h.ctx);
 		expect(defaults.persistSubagentModel).toHaveBeenCalledWith(`openai/${chosen.id}`, expect.any(String), "openai");
+	});
+});
+
+describe("subagent RPC commands", () => {
+	it("reports an empty /tasks list instead of silently dismissing an unsupported custom dialog", async () => {
+		const h = await mount([], session, "rpc");
+		h.ctx.hasUI = true;
+		await h.fake.commands.get("tasks")!.handler("", h.ctx);
+		expect(h.notices()).toContain("No background tasks");
+		expect((h.ctx.ui as { custom: unknown }).custom).not.toHaveBeenCalled();
+	});
+
+	it("lists live tasks without opening an invisible agent view or changing the input target", async () => {
+		fakeResident();
+		const h = await mount([], session, "rpc");
+		h.ctx.hasUI = true;
+		const views: unknown[] = [];
+		h.fake.events.on(AGENT_VIEW_CHANNEL, (data) => views.push(data));
+		const result = await h.call("Agent", { subagent_type: "general-purpose", task: "Check the code" }) as { details: { agentRuns: AgentRunRecord[] } };
+		const record = result.details.agentRuns[0];
+		await h.fake.commands.get("agents")!.handler("", h.ctx);
+		expect(h.notices()).toContain(record.taskId);
+		expect(h.notices()).toContain("requires TUI mode");
+		expect(views).toEqual([]);
+		await h.fake.commands.get("tasks")!.handler("", h.ctx);
+		expect(h.notices()).toContain("Check the code");
+		expect(h.notices()).toContain("task_output");
+		expect((h.ctx.ui as { custom: unknown }).custom).not.toHaveBeenCalled();
+	});
+
+	it("keeps the existing /subagent status fallback in RPC", async () => {
+		const h = await mount([], session, "rpc");
+		h.ctx.hasUI = true;
+		await h.fake.commands.get("subagent")!.handler("", h.ctx);
+		expect(h.notices()).toContain("effective:");
+		expect(h.notices()).toContain("Set it with /subagent");
+		expect((h.ctx.ui as { custom: unknown }).custom).not.toHaveBeenCalled();
 	});
 });
 

@@ -67,6 +67,19 @@ describe("workflow wiring: the ultracode keyword", () => {
 	});
 });
 
+describe("workflow RPC commands", () => {
+	it("lists workflows and explains the unavailable viewer instead of silently dismissing it", async () => {
+		const fake = createFakePi();
+		workflowExtension(fake.pi as never);
+		const ctx = createFakeCtx({ mode: "rpc", hasUI: true });
+		await fake.commands.get("workflows")!.handler("", ctx);
+		const notices = (ctx._notified as Array<{ message: string }>).map((n) => n.message).join("\n");
+		expect(notices).toContain("requires TUI mode");
+		expect(notices).toContain("Usage: /workflows");
+		expect((ctx.ui as { custom: unknown }).custom).not.toHaveBeenCalled();
+	});
+});
+
 describe("workflow wiring: one-shot modes (LIFECYCLE-REVIEW-2026-09-06 M1)", () => {
 	let sessionDir: string;
 	let agentDir: string;
@@ -130,10 +143,10 @@ describe("workflow wiring: one-shot modes (LIFECYCLE-REVIEW-2026-09-06 M1)", () 
 		expect(delivered()[1]).toContain("c2");
 	}, 15_000);
 
-	it("in the TUI the same call still goes to the background", async () => {
+	it.each(["tui", "rpc"])("in %s the same call still goes to the background", async (mode) => {
 		const fake = createFakePi();
 		workflowExtension(fake.pi as never);
-		const result = (await fake.tools.get("workflow")!.execute("c1", { script }, undefined, undefined, ctxFor("tui"))) as {
+		const result = (await fake.tools.get("workflow")!.execute("c1", { script }, undefined, undefined, ctxFor(mode))) as {
 			content: Array<{ text: string }>;
 			details: { background?: boolean; runId: string };
 		};

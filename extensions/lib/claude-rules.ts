@@ -6,11 +6,17 @@ import { Lexer, type Token } from "marked";
 import { parse as parseYaml } from "yaml";
 import { absoluteFrom, comparablePath, expandTilde, forwardSlashes, isPathAtOrUnder, isRelativeInside, tryRealpath } from "./paths.ts";
 
+/** pO/Oee: instruction files larger than 4 MiB are skipped, never truncated. */
+export const MAX_INSTRUCTION_BYTES = 4_194_304;
+
 export interface RuleFile {
 	path: string;
 	key: string;
 	content: string;
 	globs?: string[];
+	/** Import/link provenance for the startup external-includes warning. */
+	parent?: string;
+	linkedFrom?: string;
 }
 
 /** f_t/H in the binary: comma lists and brace alternatives, not numeric brace ranges. */
@@ -91,8 +97,10 @@ export function ruleMatches(globs: string[] | undefined, filePath: string, base:
 	if (!globs?.length) return false;
 	let candidate = isAbsolute(filePath) ? relative(base, filePath) : filePath;
 	if (isAbsolute(filePath) && !isRelativeInside(candidate)) {
+		// Both sides resolved: a cwd reached through a symlink (or a Windows 8.3
+		// short name) spells the base differently from the file's real directory.
 		const parent = tryRealpath(dirname(filePath));
-		if (parent) candidate = relative(base, join(parent, basename(filePath)));
+		if (parent) candidate = relative(tryRealpath(base) ?? base, join(parent, basename(filePath)));
 	}
 	if (!isRelativeInside(candidate)) return false;
 	const valid = globs.filter((glob) => {
@@ -151,6 +159,8 @@ export interface RuleOptions {
 	processed?: Set<string>;
 	/** Normal CLI user rules allow external includes; project/managed rules need approval. */
 	includeExternal?: boolean;
+	/** Independent mode excludes Claude locations before reading or following their imports. */
+	allowPath?: (path: string) => boolean;
 	/**
 	 * The directory a project file belongs to (`<dir>` for `<dir>/.claude/CLAUDE.md`).
 	 * A file linked out of both it and the cwd is an external include, like an import.
@@ -159,27 +169,27 @@ export interface RuleOptions {
 }
 
 /** lJ: parent first, separate parsed imports, canonical dedupe, depths zero through four. */
-export function readRuleInstructions(path: string, opts: Pick<RuleOptions, "cwd" | "home" | "scope" | "processed" | "includeExternal" | "ownerDir">): RuleFile[] {
+export function readRuleInstructions(path: string, opts: Pick<RuleOptions, "cwd" | "home" | "scope" | "processed" | "includeExternal" | "allowPath" | "ownerDir">): RuleFile[] {
 	const includeExternal = opts.includeExternal ?? opts.scope === "User";
 	const processed = opts.processed ?? new Set<string>();
 	const realCwd = tryRealpath(opts.cwd) ?? opts.cwd;
 	const inside = (target: string) => isPathAtOrUnder(target, realCwd);
 	const realOwner = opts.ownerDir === undefined ? undefined : tryRealpath(opts.ownerDir) ?? opts.ownerDir;
-	const load = (path: string, depth = 0): RuleFile[] => {
+	const load = (path: string, depth = 0, parent?: string): RuleFile[] => {
 		const key = tryRealpath(path);
-		if (!key || depth >= 5 || processed.has(comparablePath(key)) || (depth > 0 && !includeExternal && !inside(key))) return [];
+		if (!key || depth >= 5 || processed.has(comparablePath(key)) || (opts.allowPath && (!opts.allowPath(path) || !opts.allowPath(key))) || (depth > 0 && !includeExternal && !inside(key))) return [];
 		// One Code addition: a project file linked out of the project is an include the user must approve.
 		const linkedOut = depth === 0 && realOwner !== undefined && !inside(key) && !isPathAtOrUnder(key, realOwner);
 		if (linkedOut && !includeExternal) return [];
 		try {
 			const stat = statSync(key);
-			if (!stat.isFile() || (opts.scope === "User" && !includeExternal && (stat.nlink > 1 || (depth === 0 && isLink(path))))) return [];
+			if (!stat.isFile() || stat.size > MAX_INSTRUCTION_BYTES || (opts.scope === "User" && !includeExternal && (stat.nlink > 1 || (depth === 0 && isLink(path))))) return [];
 			processed.add(comparablePath(key));
 			const ext = extname(path).toLowerCase();
 			if (ext && !TEXT_EXTENSIONS.has(ext)) return [];
 			const parsed = parseRule(readFileSync(key, "utf8"));
 			if (!parsed.content.trim()) return [];
-			return [{ path, key, ...parsed }, ...ruleImports(parsed.content, key, opts.home).flatMap((ref) => load(ref, depth + 1))];
+			return [{ path, key, ...parsed, ...(parent ? { parent } : {}) }, ...ruleImports(parsed.content, key, opts.home).flatMap((ref) => load(ref, depth + 1, key))];
 		} catch { return []; }
 	};
 	return load(path);
@@ -193,7 +203,7 @@ export function discoverRules(opts: RuleOptions): RuleFile[] {
 	const realCwd = tryRealpath(opts.cwd) ?? opts.cwd;
 	const inside = (path: string) => isPathAtOrUnder(path, realCwd);
 	const base = opts.scope === "Project" ? dirname(dirname(opts.rulesDir)) : opts.cwd;
-	const walk = (dir: string): RuleFile[] => {
+	const walk = (dir: string, linkedFrom?: string): RuleFile[] => {
 		const real = tryRealpath(dir);
 		if (!real || visited.has(comparablePath(real))) return [];
 		// o2n/Tgt allow external user rules. o$e's J1n gate checks a linked
@@ -208,8 +218,13 @@ export function discoverRules(opts: RuleOptions): RuleFile[] {
 				const key = tryRealpath(path);
 				if (!key || (!includeExternal && key !== path && !inside(key))) continue;
 				const stat = entry.isSymbolicLink() ? statSync(key) : entry;
-				if (stat.isDirectory()) files.push(...walk(key));
-				else if (stat.isFile() && entry.name.endsWith(".md")) files.push(...readRuleInstructions(key, { ...opts, processed }));
+				const source = linkedFrom ? join(linkedFrom, entry.name) : join(dir, entry.name);
+				if (stat.isDirectory()) files.push(...walk(key, source !== key ? source : undefined));
+				else if (stat.isFile() && entry.name.endsWith(".md")) {
+					files.push(...readRuleInstructions(key, { ...opts, processed }).map((file) =>
+						file.key === key && source !== key ? { ...file, linkedFrom: source } : file,
+					));
+				}
 			}
 			return files;
 		} catch { return []; }

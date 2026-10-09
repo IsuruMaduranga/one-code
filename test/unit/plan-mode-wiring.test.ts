@@ -53,6 +53,12 @@ describe("plan-mode wiring", () => {
 		expect(reminders).toHaveLength(0);
 	});
 
+	it("installs startup plan state before the first prompt can be stamped", async () => {
+		fake.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "plan", paused: false });
+		await fake.fireOne("session_start", {}, createFakeCtx({ cwd: stateDir }));
+		expect(reminders.find((r) => r.key === "permission-mode")?.placement).toBe("sticky-append");
+	});
+
 	it("without a context yet (a session that starts in plan mode), before_agent_start installs the block", async () => {
 		fake.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "plan", paused: false });
 		expect(reminders).toHaveLength(0);
@@ -134,9 +140,12 @@ describe("exit_plan_mode and the mode before planning (PERMISSIONS-REVIEW-2026-0
 		await enterPlanWithPlanText(ctx);
 		modeRequests.length = 0;
 
+		const exitReminders: Array<{ text?: string }> = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => exitReminders.push(data as { text?: string }));
 		const result = (await fake.tools.get("exit_plan_mode")!.execute("t3", {}, undefined, undefined, ctx)) as { details: { approved?: boolean } };
 		expect(result.details.approved).toBe(true);
-		expect(modeRequests).toEqual([{ mode: "acceptEdits" }]);
+		expect(exitReminders.some((entry) => entry.text?.includes("You have exited plan mode."))).toBe(true);
+		expect(modeRequests).toEqual([{ mode: "acceptEdits", toolCallId: "t3" }]);
 		const text = offered[0].join("\n");
 		expect(text).toContain("back to auto-accept edits (the mode before planning)");
 		// The fixed choice for the same mode is not listed twice; auto is still offered.
@@ -151,7 +160,7 @@ describe("exit_plan_mode and the mode before planning (PERMISSIONS-REVIEW-2026-0
 		await enterPlanWithPlanText(ctx); // the first status seen is plan itself
 		modeRequests.length = 0;
 		await fake.tools.get("exit_plan_mode")!.execute("t4", {}, undefined, undefined, ctx);
-		expect(modeRequests).toEqual([{ mode: "default" }]);
+		expect(modeRequests).toEqual([{ mode: "default", toolCallId: "t4" }]);
 		expect(offered[0].join("\n")).not.toContain("the mode before planning");
 	});
 

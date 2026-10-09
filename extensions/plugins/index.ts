@@ -23,7 +23,9 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { readFavorites, toggleFavorite } from "../lib/favorites.ts";
 import { announceArgumentHint, type CommandHint, frontmatterCommandHint } from "../lib/argument-hints.ts";
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../lib/mcp-status.ts";
-import { createUserMessageSender } from "../lib/notifications.ts";
+import { notifyOrPrint } from "../lib/headless-output.ts";
+import { createUserMessageSender, sessionOutlivesTurn } from "../lib/notifications.ts";
+import { ONE_SHOT_COMMAND_FAILED_CHANNEL } from "../lib/interrupt.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { setOverride } from "../lib/plugin-overrides.ts";
 import { pathWithinBase, pluginRoot } from "../lib/plugin-root.ts";
@@ -491,10 +493,11 @@ export default function pluginsExtension(pi: ExtensionAPI) {
 	registerLocalCommand(pi, "plugins", {
 		description: "Browse, install, and manage Claude Code-compatible plugins and marketplaces",
 		handler: async (args, ctx) => {
-			if (ctx.hasUI) {
+			if (ctx.hasUI && ctx.mode !== "rpc") {
 				await openPanel(ctx);
 				return;
 			}
+			if (ctx.mode === "rpc") ctx.ui.notify("/plugins in RPC is read-only; use the TUI to install or manage plugins and marketplaces.", "info");
 			// Non-interactive fallback: the old text listing.
 			if (discovered.plugins.length === 0) {
 				ctx.ui.notify("No plugins installed.", "info");
@@ -538,7 +541,9 @@ function registerPluginCommand(pi: ExtensionAPI, plugin: Plugin, name: string, p
 				const parsed = parseFrontmatterLoosely(readFileSync(path, "utf-8")) as { body: string };
 				body = parsed.body;
 			} catch (error) {
-				ctx.ui.notify(`Could not read ${path}: ${(error as Error).message}`, "error");
+				notifyOrPrint(ctx, `Could not read ${path}: ${(error as Error).message}. Restore the command file or reinstall the ${plugin.name} plugin, then retry.`, "error");
+				// A one-shot run must not exit 0 for a command that never ran (exit/index.ts).
+				if (!sessionOutlivesTurn(ctx.mode)) pi.events.emit(ONE_SHOT_COMMAND_FAILED_CHANNEL, {});
 				return;
 			}
 			// A `!`command's output (a `git diff` of a large change) lands in the

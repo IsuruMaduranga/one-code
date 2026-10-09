@@ -810,10 +810,11 @@ export default function skillExtension(pi: ExtensionAPI) {
 	registerLocalCommand(pi, "skills", {
 		description: "View and manage skills (on / name-only / user-only / off)",
 		handler: async (args, ctx) => {
-			if (ctx.hasUI) {
+			if (ctx.hasUI && ctx.mode !== "rpc") {
 				await openSkillsPanel(ctx);
 				return;
 			}
+			if (ctx.mode === "rpc") ctx.ui.notify("/skills in RPC is read-only; use the TUI to change skill states.", "info");
 			// Non-interactive fallback: a flat listing with each skill's state.
 			const all = skillsOnly(ctx.cwd);
 			if (all.length === 0) {

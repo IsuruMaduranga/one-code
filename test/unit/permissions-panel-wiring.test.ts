@@ -108,7 +108,9 @@ describe("/permissions wiring", () => {
 	};
 	const notices = () => (ctx._notified as Array<{ message: string }>).map((n) => n.message);
 	/** Forward-slashed: bash reads a Windows backslash as an escape, which would make the path relative. */
-	const outside = () => forwardSlashes(join(home, "elsewhere"));
+	// A short fixed path outside the project, whatever TMPDIR is: the panel clips
+	// a long subject. Never created; the classifier is stubbed.
+	const outside = () => "/outside-perm-panel/elsewhere";
 
 	it("an allowed call ends a consecutive-limit pause, so the next call is classified again", async () => {
 		for (let i = 0; i < 3; i++) {
@@ -156,6 +158,16 @@ describe("/permissions wiring", () => {
 		await openPanel(ENTER);
 		blockOnce();
 		expect((await bash(`rm -rf ${outside()} `))?.block).toBe(true);
+	});
+
+	it("tells the model the whole approved command, though the panel clips it", async () => {
+		const long = `rm -rf /outside-perm-panel/${"x".repeat(240)}`;
+		blockOnce();
+		await bash(long);
+		await openPanel("r");
+		expect(screens[0]).toContain("…");
+		expect(fake.sentMessages[0]?.message.content).toBe(`Permission granted for: bash(${long}). You may now retry this command if you would like.`);
+		expect(await bash(long)).toBeUndefined();
 	});
 
 	it("starts a turn with the grant message on retry", async () => {

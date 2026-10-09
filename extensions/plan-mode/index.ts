@@ -13,11 +13,10 @@
  * turn puts the block on the queue before the turn's next request — until
  * 2026-09-05 the mid-turn requests ran with no plan reminder while every edit
  * was denied "see the plan-mode reminder" (STEERING-REVIEW-2026-09-05 M3) —
- * and on before_agent_start, which covers a session that STARTS in plan mode
- * before this extension has seen a context (defaultMode: "plan"; permissions'
- * session_start runs first) and runs after every extension's session_start,
- * so restoring a previous path from the session branch never races a fresh
- * allocation.
+ * and on session_start, after restoring a previous path and its baseline.
+ * A session that STARTS in plan mode must install the block before the first
+ * prompt is stamped: before_agent_start is already too late to anchor it to
+ * that prompt. before_agent_start also re-announces the existing state.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -98,7 +97,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 	};
 
 	/** Re-announce path + reminder; every-turn re-emits replace by key. */
-	const refresh = (ctx: ExtensionContext) => {
+	const refresh = (ctx: ExtensionContext, toolCallId?: string) => {
 		const path = ensurePlanFile(ctx);
 		planExistedAtEntry ??= existsSync(path);
 		pi.events.emit(CONTEXT_BASELINE_CHANNEL, { key: "plan-mode", value: { path, existed: planExistedAtEntry } });
@@ -108,6 +107,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 			scope: "every-turn",
 			key: "permission-mode",
 			placement: "sticky-append",
+			toolCallId,
 		});
 	};
 
@@ -121,13 +121,13 @@ export default function planModeExtension(pi: ExtensionAPI) {
 		currentMode = status.mode;
 		if (currentMode === "plan" && previous !== "plan") modeBeforePlan = previous as PermissionMode | undefined;
 		if (currentMode !== "plan") planExistedAtEntry = undefined;
-		// Entering plan mode mid-turn: permissions' setMode has just dropped the
+		// Entering plan mode mid-turn: permissions' setMode has just closed the
 		// shared "permission-mode" key (before broadcasting this status, so this
 		// re-add is not undone) and will announce the change on the next tool
 		// result; the standing block has to be back on the queue for that same
 		// request. The path is announced over PLAN_FILE_CHANNEL inside refresh,
 		// synchronously, so setMode's announcement can name it.
-		if (currentMode === "plan" && previous !== "plan" && lastCtx) refresh(lastCtx);
+		if (currentMode === "plan" && previous !== "plan" && lastCtx) refresh(lastCtx, status.toolCallId);
 	});
 
 	pi.on("session_start", (_event, ctx) => {
@@ -140,6 +140,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 			planFilePath = path;
 			planExistedAtEntry = baseline.existed;
 		}
+		if (currentMode === "plan") refresh(ctx);
 	});
 
 	pi.on("before_agent_start", (_event, ctx) => {
@@ -163,8 +164,8 @@ export default function planModeExtension(pi: ExtensionAPI) {
 			...ccToolRenderers("Enter plan mode"),
 			description: ENTER_PLAN_MODE_DESCRIPTION,
 			parameters: Type.Object({}),
-			async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-				pi.events.emit(MODE_CHANNEL, { mode: "plan" });
+			async execute(toolCallId, _params, _signal, _onUpdate, ctx) {
+				pi.events.emit(MODE_CHANNEL, { mode: "plan", toolCallId });
 				// setMode broadcasts synchronously over the status channel, so the
 				// listener above has already installed the block and announced the
 				// path (or the mode was plan already and both stand); name the file in
@@ -185,7 +186,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 		...ccToolRenderers("Exit plan mode"),
 		description: EXIT_PLAN_MODE_DESCRIPTION,
 		parameters: Type.Object({}),
-		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+		async execute(toolCallId, _params, signal, _onUpdate, ctx) {
 			// Guard the out-of-sequence call: without this, a cold exit_plan_mode
 			// (never entered plan mode) allocates a fresh empty plan file and blames
 			// "the plan file is empty" — a plausible but wrong cause a weak model
@@ -252,7 +253,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 			];
 			const choices = options.map((o) => o.label);
 
-			const choice = ctx.mode === "rpc" ? await selectPlanChoice(ctx.ui, plan, path, choices) : await ctx.ui.custom<PlanChoice | null>((tui, theme, _keybindings, done) => {
+			const choice = ctx.mode === "rpc" ? await selectPlanChoice(ctx.ui, plan, path, choices, signal) : await ctx.ui.custom<PlanChoice | null>((tui, theme, _keybindings, done) => {
 				const paint = safeThemePaint(theme);
 				const maxVisible = 12;
 				let offset = 0;
@@ -303,10 +304,10 @@ export default function planModeExtension(pi: ExtensionAPI) {
 
 			const picked = choice != null ? options[choice] : undefined;
 			if (picked?.mode) {
-				pi.events.emit(MODE_CHANNEL, { mode: picked.mode });
+				pi.events.emit(MODE_CHANNEL, { mode: picked.mode, toolCallId });
 				// Claude Code's exit reminder, queued from execute so it is written
 				// into this result after the mode notice.
-				pi.events.emit(REMINDER_CHANNEL, { text: exitedPlanModeText(path) });
+				pi.events.emit(REMINDER_CHANNEL, { text: exitedPlanModeText(path), toolCallId });
 				return {
 					content: [{ type: "text", text: approvedPlanText(path, plan) }],
 					details: { plan, approved: true },

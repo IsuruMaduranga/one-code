@@ -153,12 +153,14 @@ export default function memoryExtension(pi: ExtensionAPI) {
 		reportsResult: true,
 		handler: async (_args, ctx): Promise<string | undefined> => {
 			const entries = memoryEntriesFor(ctx.cwd);
-			if (!ctx.hasUI) {
+			if (!ctx.hasUI || ctx.mode === "rpc") {
+				const limitation = ctx.mode === "rpc" ? "/memory editing is unavailable in RPC; use the TUI or open a listed path in your editor.\n\n" : "";
 				const lines = entries.map(
 					(e, i) => `${i + 1}. ${e.title}${e.description ? ` — ${e.description}` : ""}  [${e.path}]`,
 				);
-				ctx.ui.notify(`Memory / CLAUDE.md files:\n${lines.join("\n")}`, "info");
-				return undefined;
+				const stdout = `${limitation}Memory / CLAUDE.md files:\n${lines.join("\n")}`;
+				ctx.ui.notify(stdout, "info");
+				return ctx.mode === "rpc" ? limitation.trim() : undefined;
 			}
 			const mode: ModeView = { running: configMode(), saved: savedConfigMode(), fromEnv: configModeFromEnv() !== undefined };
 			const savedBefore = mode.saved;

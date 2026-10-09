@@ -7,6 +7,7 @@ import { CLASSIFIER_SETTING_CHANGED_CHANNEL, SUBAGENT_DEFAULT_CHANGED_CHANNEL } 
 import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts";
 import { createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
+import { captureUserTurns } from "./helpers/user-turn.ts";
 
 const model = (provider: string, id: string, input: number, api = "anthropic-messages") =>
 	({ provider, id, name: id, api, cost: { input, output: input * 5 }, contextWindow: 200_000 }) as any;
@@ -15,17 +16,20 @@ const anthropic = [model("anthropic", "claude-opus-5", 5), model("anthropic", "c
 let home: string;
 let cwd: string;
 let fake: FakePi;
+let startTurn: () => Promise<void>;
 let setModel: ReturnType<typeof vi.fn>;
 
 function ctxFor(current: any | undefined, mode: "tui" | "rpc" | "print" | "json" = "print") {
 	const notified: string[] = [];
+	vi.spyOn(console, "error").mockImplementation((text) => notified.push(text));
 	return {
 		notified,
 		ctx: {
 			cwd,
-			hasUI: mode === "tui",
+			hasUI: mode === "tui" || mode === "rpc",
 			mode,
 			waitForIdle: vi.fn(async () => {}),
+			isIdle: () => true,
 			sessionManager: { getSessionDir: () => join(cwd, ".sessions") },
 			model: current,
 			thinkingLevel: "medium",
@@ -50,11 +54,13 @@ beforeEach(() => {
 	// A clean environment for the checks that read it.
 	for (const key of ["CLAUDE_CODE_SUBAGENT_MODEL", "CC_PROMPT_TIER", "CLAUDE_CONFIG_DIR"]) vi.stubEnv(key, "");
 	fake = createFakePi();
+	startTurn = captureUserTurns(fake);
 	setModel = vi.fn(async () => true);
 	fake.pi.setModel = setModel;
 	doctorExtension(fake.pi as never);
 });
 afterEach(() => {
+	vi.restoreAllMocks();
 	vi.unstubAllEnvs();
 	rmSync(home, { recursive: true, force: true });
 	rmSync(cwd, { recursive: true, force: true });
@@ -74,8 +80,8 @@ describe("/doctor wiring", () => {
 		expect(all.every((c) => (c.description ?? "").length > 20)).toBe(true);
 	});
 
-	it("`report` prints the report as a notification outside the TUI, marking a missing provider", async () => {
-		const { ctx, notified } = ctxFor(undefined);
+	it.each(["print", "rpc"] as const)("`report` prints the report as a notification in %s, marking a missing provider", async (mode) => {
+		const { ctx, notified } = ctxFor(undefined, mode);
 		await run("report", ctx);
 		expect(notified).toHaveLength(1);
 		expect(notified[0]).toContain("One Code doctor");
@@ -159,7 +165,7 @@ describe("/doctor wiring", () => {
 			await vi.waitFor(() => expect(fake.sentUserMessages).toHaveLength(1));
 			expect(returned).toBe(false);
 			expect(ctx.waitForIdle).not.toHaveBeenCalled();
-			await fake.fire("agent_start", {});
+			await startTurn();
 			await vi.waitFor(() => expect(ctx.waitForIdle).toHaveBeenCalledTimes(1));
 			expect(returned).toBe(false);
 		} finally {
@@ -196,6 +202,7 @@ describe("/doctor preset on an unpriced provider", () => {
 	it("explains that no preset can be applied instead of calling a valid name unknown", async () => {
 		const unpriced = { provider: "ollama", id: "local", name: "local", api: "openai-completions", cost: undefined, contextWindow: 8000 } as any;
 		const notified: string[] = [];
+	vi.spyOn(console, "error").mockImplementation((text) => notified.push(text));
 		const ctx = {
 			cwd,
 			hasUI: false,

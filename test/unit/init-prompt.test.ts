@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import initExtension from "../../extensions/init/index.ts";
 import { INIT_PROMPT } from "../../extensions/init/prompt.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { captureUserTurns } from "./helpers/user-turn.ts";
 
 describe("/init prompt", () => {
 	it("keeps the text", () => {
@@ -23,6 +24,7 @@ describe("/init prompt", () => {
 
 	it.each(["print", "json"])("waits for the triggered turn in %s mode", async (mode) => {
 		const fake = createFakePi();
+		const startTurn = captureUserTurns(fake);
 		initExtension(fake.pi as never);
 		let settle!: () => void;
 		const idle = new Promise<void>((resolve) => { settle = resolve; });
@@ -32,12 +34,12 @@ describe("/init prompt", () => {
 		let returned = false;
 		const run = fake.commands.get("init")!.handler("", createFakeCtx({ mode, waitForIdle })).then(() => { returned = true; });
 		try {
+			await vi.waitFor(() => expect(fake.sentUserMessages).toHaveLength(1));
 			await fake.fire("before_agent_start", {});
-			expect(fake.sentUserMessages).toHaveLength(1);
 			expect(returned).toBe(false);
 			expect(waitForIdle).not.toHaveBeenCalled();
 			active = true;
-			await fake.fire("agent_start", {});
+			await startTurn();
 			await vi.waitFor(() => expect(waitForIdle).toHaveBeenCalledTimes(1));
 			expect(returned).toBe(false);
 		} finally {

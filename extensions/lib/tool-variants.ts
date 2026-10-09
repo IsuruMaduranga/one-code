@@ -10,12 +10,11 @@
  *
  * pi copies a tool's description when the tool is registered, so a tool whose
  * text depends on the session is registered again when that text changes
- * (`registerVariantTool`). Re-registering keeps the tool's place in the active
- * set and in the tools array, and it happens only when the text differs, so
- * for a fixed model and mode the tools array stays byte-identical across turns.
- * The tier changes only with the model, which starts a new provider cache
- * anyway; a mode change is a user action and costs one miss, as it does in
- * Claude Code.
+ * (`registerVariantTool`). This can also move a tool in pi's active tool
+ * order, so only a model-tier change may re-register after the first request.
+ * The tier changes with the model, which starts a new provider cache anyway.
+ * Permission-mode variants freeze at the first request (bash/index.ts); live
+ * changes ride reminders and the permission gate, never the cached tool list.
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";

@@ -411,7 +411,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		return { classifier: first ? `${first.model.provider}/${first.model.id}` : undefined, pinned: false };
 	};
 
-	const applyBadge = (sessionModel?: Model<Api>) => {
+	const applyBadge = (sessionModel?: Model<Api>, toolCallId?: string) => {
 		// A below-editor widget, not a footer status: Claude Code renders the
 		// mode line directly under the input box, and the workflow status strip
 		// sorts itself below this line by re-setting on the status channel
@@ -436,6 +436,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			paused: pauseTracker.isPaused(),
 			classifier: display.classifier,
 			pinned: display.pinned,
+			...(toolCallId ? { toolCallId } : {}),
 		} satisfies PermissionStatus);
 	};
 
@@ -721,10 +722,11 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	};
 
 	/** `startup`: the session opens in this mode, so there is no switch to announce, only the mode's standing block. */
-	const setMode = (next: PermissionMode, startup = false) => {
+	const setMode = (next: PermissionMode, startup = false, toolCallId?: string) => {
+		const changed = mode !== next;
 		mode = next;
 		process.env[MODE_ENV] = next;
-		// The standing block of the mode being left goes first, BEFORE the status
+		// Close the standing block of the mode being left BEFORE the status
 		// broadcast in applyBadge: the plan-mode extension owns the shared
 		// "permission-mode" key while planning (it knows the plan file) and
 		// re-installs its block synchronously from that broadcast when the mode
@@ -732,18 +734,16 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// leave a turn entered mid-stream with no plan reminder until the next
 		// prompt (STEERING-REVIEW-2026-09-05 M3). Auto installs its own block below.
 		const previousMode = restoredContext(pi.events)?.baselines["permission-mode"];
-		if (mode !== "auto" && !(startup && mode === "plan" && previousMode === "plan")) {
+		if (mode !== "auto" && !(mode === "plan" && (startup ? previousMode === "plan" : !changed))) {
 			pi.events.emit(REMINDER_CHANNEL, { remove: true, key: "permission-mode" });
 		}
 		pi.events.emit(CONTEXT_BASELINE_CHANNEL, { key: "permission-mode", value: mode });
-		applyBadge();
+		applyBadge(undefined, toolCallId);
 		// Every switch is announced once on the tail of the next request (the next
 		// tool result mid-turn, the prompt between turns), so the model learns of
 		// the change where it reads next. The standing block carries the rules
-		// but rides the turn's user message, behind the model's own actions — so
-		// for plan mode the announcement, the one thing guaranteed to land
-		// mid-turn, also names the plan file (published by plan-mode's refresh
-		// inside the applyBadge broadcast above).
+		// from that point forward; the announcement also names the plan file
+		// (published by plan-mode's refresh inside the applyBadge broadcast above).
 		const planNote =
 			mode === "plan"
 				? planFilePath
@@ -757,6 +757,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text: `The user's permission mode is now "${mode}".${planNote}`,
 				key: "permission-mode-change",
+				toolCallId,
 			});
 		}
 		if (mode === "auto") {
@@ -770,6 +771,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				// Session state: rides every user message since auto mode came on, so
 				// the cached prefix holds turn to turn (lib/reminders.ts).
 				placement: "sticky-append",
+				toolCallId,
 			});
 		}
 	};
@@ -984,8 +986,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	// `/auto-mode model` does after its own write, so the next call re-plans.
 	pi.events.on(CLASSIFIER_SETTING_CHANGED_CHANNEL, () => resetClassifierChoice(badgeCtx?.model));
 	pi.events.on(MODE_CHANNEL, (data) => {
-		const requested = normalizePermissionMode((data as { mode?: unknown })?.mode);
-		if (requested) setMode(requested);
+		const request = data as { mode?: unknown; toolCallId?: unknown } | undefined;
+		const requested = normalizePermissionMode(request?.mode);
+		if (requested) setMode(requested, false, typeof request?.toolCallId === "string" ? request.toolCallId : undefined);
 	});
 
 	// The plan-mode extension announces the plan file on PLAN_FILE_CHANNEL;
@@ -1071,8 +1074,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			if (settled()) return blockOutsideReads ? "block" : "allow";
 			const settingsFile = tildify(oneCodeSettingsPath(home), home);
 			const title = `${OUTSIDE_READ_TITLE}\n\n  ${toolName} ${path}\n\n${OUTSIDE_READ_QUESTION}\n\n${OUTSIDE_READ_EXPLAINER(settingsFile)}`;
-			const choice = await ctx.ui.select(title, Object.values(OUTSIDE_READ_ANSWERS));
-			if (choice !== OUTSIDE_READ_ANSWERS.allow && choice !== OUTSIDE_READ_ANSWERS.block) return "ask_again";
+			const choice = await ctx.ui.select(title, Object.values(OUTSIDE_READ_ANSWERS), { signal: ctx.signal });
+			if (ctx.signal?.aborted || (choice !== OUTSIDE_READ_ANSWERS.allow && choice !== OUTSIDE_READ_ANSWERS.block)) return "ask_again";
 			outsideReadSeen = true;
 			markOutsideReadPromptSeen(oneCodeSettingsPath(home));
 			if (choice === OUTSIDE_READ_ANSWERS.allow) return "allow";
@@ -1188,7 +1191,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const trustProject = async (withProject: typeof result, firing: TrustFiring) => {
 			const repoDirs = repoWorkspaceDirs().map((dir) => dir.raw);
 			const { title, message } = describeProjectAllow(projectAllowRaw, firing, repoDirs);
-			const approved = (await serializePrompt(() => ctx.ui.confirm(title, message))) === true;
+			const approved = (await serializePrompt(() => ctx.ui.confirm(title, message, { signal: ctx.signal }))) === true;
+			if (ctx.signal?.aborted) return;
 			if (approved) {
 				projectAllowTrusted = true;
 				persistProjectAllowApproval(projectRoot, projectTrustList());
@@ -1325,6 +1329,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 					denials.record({
 						toolName: normalizedTool,
 						display: `${event.toolName}(${previewSubject(matchSubject)})`,
+						fullDisplay: `${event.toolName}(${matchSubject})`,
 						inputKey,
 						reason: outcome.reason,
 						...(outcome.ruleId ? { rule: outcome.ruleId } : {}),
@@ -1370,8 +1375,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			home: os.homedir(),
 		});
 		const { choice, unanswered } = await askMaybeTimed(pausedResume, title, serializePrompt, (text, timeout) =>
-			ctx.ui.select(text, askOptions(grant), timeout ? { timeout } : undefined),
+			ctx.ui.select(text, askOptions(grant), { signal: ctx.signal, timeout }),
 		);
+		if (ctx.signal?.aborted) return { block: true, reason: "The turn was stopped while waiting for the user's approval." };
 		if (unanswered) {
 			logDecision(ctx, { tool: event.toolName, subject: matchSubject, outcome: "block", source: "user", reason: "resume prompt unanswered" });
 			return { block: true, reason: DENIED_UNANSWERED_RESUME };
@@ -1404,7 +1410,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 
 		// The "tell the agent what to do differently" option has to actually carry
 		// the user's words, or the model is left guessing why it was stopped.
-		const feedback = await serializePrompt(() => ctx.ui.input("What should the agent do instead?", "Optional — press Esc to skip"));
+		const feedback = await serializePrompt(() => ctx.ui.input("What should the agent do instead?", "Optional — press Esc to skip", { signal: ctx.signal }));
 		return {
 			block: true,
 			reason: userDenialText(feedback),
@@ -1911,7 +1917,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 
 		const approved = denials.approve(state.approved);
 		const retried = approved.filter((d) => state.retry.has(d.id));
-		const displays = approved.map((d) => d.display);
+		// Model-facing: never the panel's clipped preview.
+		const displays = approved.map((d) => d.fullDisplay);
 		if (retried.length > 0) {
 			// Claude Code's retry: a banner says what was allowed, and a turn starts
 			// with the grant message.
@@ -1941,9 +1948,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	pi.registerCommand("permissions", {
 		description: "Review recently denied calls and manage permission rules, auto mode rules and workspace directories",
 		handler: async (args: string, ctx: ExtensionContext) => {
-			if (!ctx.hasUI) {
-				announceLocalCommand(pi, { name: "permissions", args });
-				ctx.ui.notify(permissionsSummary(), "info");
+			if (!ctx.hasUI || ctx.mode === "rpc") {
+				const limitation = ctx.mode === "rpc" ? "/permissions in RPC is read-only; use the TUI to manage rules or approve recently denied calls.\n\n" : "";
+				announceLocalCommand(pi, { name: "permissions", args, stdout: limitation.trim() });
+				ctx.ui.notify(`${limitation}${permissionsSummary()}`, "info");
 				return;
 			}
 			await runPermissionsPanel(ctx, "permissions", args);
@@ -1966,6 +1974,12 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				return;
 			}
 			if (!input) {
+				if (ctx.mode === "rpc") {
+					const message = "The workspace panel is unavailable in RPC. Use /add-dir <path> to add a directory.";
+					announceLocalCommand(pi, { name: "add-dir", args, stdout: message });
+					ctx.ui.notify(message, "info");
+					return;
+				}
 				await runPermissionsPanel(ctx, "add-dir", args, (state) => {
 					state.tab = "workspace";
 					state.dialog = { kind: "addDir", draft: "" };
@@ -1983,8 +1997,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				"Yes, and remember this directory",
 				"No",
 			]);
-			if (!choice || choice === "No") return;
-			const change = addWorkspaceDirectory(ctx, checked.path, choice !== "Yes, for this session");
+			if (choice !== "Yes, for this session" && choice !== "Yes, and remember this directory") return;
+			const change = addWorkspaceDirectory(ctx, checked.path, choice === "Yes, and remember this directory");
 			announceLocalCommand(pi, { name: "add-dir", args, stdout: change });
 			ctx.ui.notify(change, "info");
 		},

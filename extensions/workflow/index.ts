@@ -23,6 +23,7 @@
  * delivers the message. On older pi a queued message does not arm.
  */
 
+import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../lib/child-writes.ts";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
@@ -267,6 +268,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 						unusableModels.add(model);
 						pi.events.emit(MODEL_UNUSABLE_CHANNEL, { model, reason } satisfies ModelUnusableEvent);
 					},
+					onChildWrite: (path, agent) => pi.events.emit(CHILD_WROTE_CHANNEL, { path, ...(agent ? { agent } : {}) } satisfies ChildWrote),
 				});
 				widget.attach(handle);
 
@@ -355,7 +357,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 		handler: async (args, ctx) => {
 			lastCtx = ctx;
 			const [action, runId] = args.trim().split(/\s+/);
-			if (!action && ctx.hasUI) {
+			if (!action && ctx.hasUI && ctx.mode === "tui") {
 				await openViewer(ctx, { height: "full" });
 				return;
 			}
@@ -391,6 +393,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 				for (const w of saved) lines.push(`  ${w.name} (${w.source}) — ${w.meta?.description ?? w.path}`);
 			}
 			if (!lines.length) lines.push(`No workflow runs yet and no saved workflows found (${projectConfigDirName()}/workflows/).`);
+			if (!action && ctx.mode === "rpc") lines.unshift("The interactive workflow viewer requires TUI mode; listing workflows instead.");
 			lines.push("Usage: /workflows [stop <runId> | log <runId>]");
 			ctx.ui.notify(lines.join("\n"), "info");
 		},

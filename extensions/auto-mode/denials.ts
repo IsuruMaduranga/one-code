@@ -27,8 +27,10 @@ export interface AutoModeDenial {
 	id: number;
 	/** The normalized tool name (`bash`, `write`, `mcp__server__tool`). */
 	toolName: string;
-	/** What the user sees for the call: `bash(rm -rf dist)`. */
+	/** What the user sees for the call: `bash(rm -rf dist)`, its subject clipped at 200 characters for the panel. */
 	display: string;
+	/** The same call unclipped, for the text the model reads (the grant message, the breadcrumb). */
+	fullDisplay: string;
 	/** The exact call (`denialInputKey`). */
 	inputKey: string;
 	/** The classifier's reason (a grounded rule name, or the failure it explained). */
