@@ -955,9 +955,11 @@ export function createUserMessageSender(pi: Pick<ExtensionAPI, "on" | "sendUserM
 		sending.disable();
 	});
 	// A replacement session (/new, /resume) reuses this extension instance:
-	// its commands report their failures again.
+	// its commands report their failures again, and never queue behind a
+	// reservation the old session left unreleased.
 	pi.on("session_start", () => {
 		active = true;
+		previous = Promise.resolve();
 	});
 	return async (
 		ctx: Parameters<typeof awaitOneShotTurn>[0],
