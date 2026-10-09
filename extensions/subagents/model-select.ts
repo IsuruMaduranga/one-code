@@ -401,9 +401,10 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 	// spends the saving on retries. It excludes unpriced and uncatalogued
 	// models by construction; those sessions degrade to the session model below.
 	if (sessionModel && !suppressAutomatic) {
-		// `strict` requires a genuinely cheaper model and yields nothing when the
-		// session price is unknown, so a cheap-tier pick never silently upgrades an
-		// unpriced session. Reuse the `contained` set computed above for the hot path.
+		// The candidates are always strictly cheaper than the session model, and
+		// there are none when the session price is unknown, so a cheap-tier pick
+		// never silently upgrades an unpriced session. Reuse the `contained` set
+		// computed above for the hot path.
 		const cheaper = sameTierContainedCandidates(available, sessionModel, { contained, requireImageInput })[0];
 		if (cheaper) return { model: cheaper, source: "automatic", notices };
 	}

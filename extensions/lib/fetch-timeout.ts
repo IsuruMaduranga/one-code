@@ -12,7 +12,9 @@ export async function fetchWithTimeout<T>(
 	options: { init?: RequestInit; signal?: AbortSignal; fetchImpl?: typeof fetch } = {},
 ): Promise<T> {
 	const controller = new AbortController();
-	const timer = setTimeout(() => controller.abort(new Error(`${new URL(url).host} did not answer within ${timeoutMs} ms`)), timeoutMs);
+	// Parsed up front: a malformed URL fails the call, never the timer callback.
+	const host = new URL(url).host;
+	const timer = setTimeout(() => controller.abort(new Error(`${host} did not answer within ${timeoutMs} ms`)), timeoutMs);
 	timer.unref?.();
 	const signal = options.signal ? AbortSignal.any([controller.signal, options.signal]) : controller.signal;
 	const aborted = new Promise<never>((_, reject) => {
