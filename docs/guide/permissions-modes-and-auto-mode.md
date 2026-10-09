@@ -527,16 +527,16 @@ Session grants from the approval prompt don't apply in auto mode either.
 
 ### The classifier model
 
-The classifier runs on a model from the same provider as your session,
-chosen automatically as the cheapest model that is at least as capable as
-the floor: a Sonnet-class model when your session runs a Sonnet-class or
-stronger model, a Haiku-class model otherwise. A weak classifier is a
-measurably weaker boundary; in testing, a Haiku-class classifier scored an
-explicitly requested recursive delete far below the block threshold that a
-Sonnet-class classifier applied to the same command.
+The classifier always stays on your session's provider. It runs on the
+cheapest model in your session's tier or above, never dearer than your own
+model: there's no point screening a model with a weaker or more expensive one.
+An Opus session screens with Sonnet 5.5, and GPT-6 Astra with GPT-6 Sol. If no
+cheaper model in your tier fits your session's context window, your own model
+screens its calls. The details are in
+[Automatic model selection](providers-and-models.md#automatic-model-selection).
 
-The classifier is selected automatically. When auto mode is active, the
-banner shows the classifier in use.
+When auto mode is on, the banner shows which classifier is in use, and a
+notice tells you when your own model is screening and why.
 
 ### The safety floor
 

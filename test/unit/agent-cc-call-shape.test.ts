@@ -1,4 +1,6 @@
+import { validateToolArguments } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
+import { prepareAgentArguments } from "../../extensions/subagents/agent-args.ts";
 import subagentsExtension from "../../extensions/subagents/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
@@ -53,5 +55,40 @@ describe("Agent tool, Claude Code call shape (H1)", () => {
 		expect(result.isError).toBe(true);
 		expect(text(result)).toMatch(/Unknown agent/);
 		expect(text(result)).not.toMatch(/`task` is required/);
+	});
+});
+
+/**
+ * The schema requires `task` (a weak model sent run options without one, again
+ * and again, while it was optional). pi runs prepareArguments before
+ * validating, so `prompt` and `action: "list"` still pass.
+ */
+describe("Agent tool, required task", () => {
+	const validate = (args: Record<string, unknown>) => {
+		const tool = agentTool() as unknown as { name: string; parameters: unknown; prepareArguments?: (a: unknown) => unknown };
+		const prepared = tool.prepareArguments ? tool.prepareArguments(args) : args;
+		return () => validateToolArguments(tool as never, { type: "toolCall", id: "c1", name: "Agent", arguments: prepared } as never);
+	};
+
+	it("marks task required in the schema", () => {
+		expect((agentTool() as unknown as { parameters: { required?: string[] } }).parameters.required).toContain("task");
+	});
+
+	it("rejects a run with no task before execute", () => {
+		expect(validate({ subagent_type: "explore", name: "x", action: "run" })).toThrow(/task/);
+	});
+
+	it("accepts Claude Code's prompt as the task", () => {
+		expect(validate({ subagent_type: "explore", description: "Find X", prompt: "Find X" })()).toMatchObject({ task: "Find X" });
+	});
+
+	it("accepts a catalog list without a task", () => {
+		expect(validate({ action: "list" })()).toMatchObject({ action: "list", task: "" });
+	});
+
+	it("leaves an explicit task and non-objects alone", () => {
+		const args = { subagent_type: "explore", task: "Do it", prompt: "other" };
+		expect(prepareAgentArguments(args)).toBe(args);
+		expect(prepareAgentArguments("nope")).toBe("nope");
 	});
 });

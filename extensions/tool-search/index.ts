@@ -357,9 +357,16 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 			// discovered the miss later as an opaque InputValidationError. Always
 			// surface the unmatched names.
 			const requested = selectedRequests(params.query);
-			const notFound = requested
+			// A requested tool that is already callable (an eager tool, or one loaded
+			// earlier) is a harmless no-op, as in Claude Code: the model proceeds
+			// instead of retrying a name it was told does not exist.
+			const active = pi.getActiveTools();
+			const alreadyActive = (name: string) => active.find((tool) => tool.toLowerCase() === name);
+			const unmatched = requested
 				? requested.filter((request) => !matches.some((m) => m.name.toLowerCase() === request.name))
 				: [];
+			const eager = [...new Set(unmatched.flatMap((request) => alreadyActive(request.name) ?? []))];
+			const notFound = unmatched.filter((request) => !alreadyActive(request.name));
 			// A withheld name can still sit in the frozen listing (withdrawn by a model
 			// change after the first request), so it gets "do not retry", not a
 			// spelling hint. Both notes quote the model's own spelling.
@@ -370,6 +377,13 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 					? ` Not found (not deferred tool names — check spelling, or search by keyword instead of \`select:\`): ${missing.join(", ")}.`
 					: "") +
 				(withdrawn.length > 0 ? ` Withdrawn for the current model (do not retry): ${withdrawn.join(", ")}.` : "");
+
+			if (matches.length === 0 && eager.length > 0) {
+				return {
+					content: [{ type: "text", text: `Already loaded: ${eager.join(", ")}.${notFoundNote}` }],
+					details: { matches: eager, added: [] as string[], notFound },
+				};
+			}
 
 			if (matches.length === 0) {
 				const names = available.map((t) => t.name).join(", ") || "(none)";
@@ -382,22 +396,23 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 				};
 			}
 
-			const active = pi.getActiveTools();
 			const added = matches.map((m) => m.name).filter((name) => !active.includes(name));
 			if (added.length > 0) {
 				pi.setActiveTools([...new Set([...active, ...added])]);
 				loads.set(toolCallId, added);
 			}
 
-			const loaded = matches.map((m) => m.name);
+			const loaded = [...new Set([...matches.map((m) => m.name), ...eager])];
+			const already = loaded.filter((name) => !added.includes(name));
 			return {
 				content: [
 					{
 						type: "text",
 						text:
-							(added.length > 0
-								? `Loaded ${added.join(", ")}. These tools are now callable.`
-								: `Already loaded: ${loaded.join(", ")}.`) + notFoundNote,
+							[
+								added.length > 0 ? `Loaded ${added.join(", ")}. These tools are now callable.` : "",
+								already.length > 0 ? `Already loaded: ${already.join(", ")}.` : "",
+							].filter(Boolean).join(" ") + notFoundNote,
 					},
 				],
 				details: { matches: loaded, added, notFound },

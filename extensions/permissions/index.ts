@@ -699,6 +699,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				config: autoConfig,
 				signal: opts?.signal ?? ctx.signal,
 				state: classifierState,
+				cacheKey: `${ctx.sessionManager.getSessionId()}:auto-mode`,
 				onUsage: onClassifierUsage,
 				onModelUnusable: onClassifierModelUnusable,
 				onNotice: (message, level) => {
@@ -2064,6 +2065,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				config: autoConfig,
 				signal,
 				state: classifierState,
+				cacheKey: `${ctx.sessionManager.getSessionId()}:auto-mode`,
 				onNotice: (message, level) => ctx.ui.notify(message, level),
 				onUsage: onClassifierUsage,
 				onModelUnusable: onClassifierModelUnusable,

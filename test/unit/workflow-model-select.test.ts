@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import { pinCatalog } from "./catalog-fixture.ts";
 import { resolveWorkflowAgentModel } from "../../extensions/workflow/agent-session.ts";
 
 const model = (id: string, input: number) =>
@@ -32,8 +33,18 @@ const resolve = (overrides: Partial<Parameters<typeof resolveWorkflowAgentModel>
 	});
 
 describe("workflow model defaults", () => {
-	it("uses the same automatic floor-gated default as foreground subagents", () => {
-		// A Sol session delegates to Terra (workhorse floor), not the cheap-line Luna.
+	beforeEach(() =>
+		pinCatalog([
+			{ id: "openai/gpt-5.6-sol", released: "2026-07-09", price: [5, 20] },
+			{ id: "openai/gpt-5.6-terra", released: "2026-07-09", price: [2, 8] },
+			{ id: "openai/gpt-5.6-astra", released: "2026-07-09", price: [10, 40] },
+			{ id: "openai/gpt-5.6-luna", released: "2026-07-09", price: [0.2, 0.8] },
+			{ id: "openai/gpt-5.4-mini", released: "2026-07-09", price: [0.3, 1.2] },
+		]),
+	);
+
+	it("uses the same automatic same-tier default as foreground subagents", () => {
+		// A Sol session delegates to Terra (its own workhorse tier), not the cheap-line Luna.
 		const result = resolve();
 		expect(result.model?.id).toBe("gpt-5.6-terra");
 		expect(result.thinkingLevel).toBe("high");

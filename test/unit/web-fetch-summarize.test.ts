@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { pinCatalog } from "./catalog-fixture.ts";
 import { pickReaderModel, READER_MAX_CHARS, readerMessages } from "../../extensions/web-fetch/summarize.ts";
 
 /** Minimal structural stand-in; only provider/id/cost are consulted. */
@@ -7,6 +8,11 @@ const model = (provider: string, id: string, input?: number) =>
 
 describe("pickReaderModel", () => {
 	it("prefers a vetted smaller same-provider model", () => {
+		pinCatalog([
+			{ id: "anthropic/claude-fable-5", released: "2026-09-01", price: [10, 50] },
+			{ id: "anthropic/claude-haiku-4-5", released: "2025-10-15", price: [1, 5] },
+			{ id: "openai/gpt-5-mini", released: "2026-09-01", price: [0.25, 2] },
+		]);
 		const catalog = [
 			model("anthropic", "claude-fable-5", 15),
 			model("anthropic", "claude-haiku-4-5", 1),

@@ -6,6 +6,7 @@ import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
+import { pinCatalog } from "./catalog-fixture.ts";
 
 /** pi's RPC dialogs only dismiss on abort when the extension supplies a signal. */
 function rpcDialog<T>(options: { signal?: AbortSignal } | undefined, cancelled: T): Promise<T> {
@@ -38,6 +39,12 @@ describe("RPC permission prompt cancellation", () => {
 		for (const racing of [false, true]) it(`aborting the ${kind} prompt ${racing ? "while an approval arrives" : "while waiting"} never grants access`, async () => {
 			const cwd = join(root, "project");
 			mkdirSync(join(cwd, ".claude"), { recursive: true });
+			// Sonnet 4.6 is workhorse in this catalog, so the gate shows Claude Code's prompt.
+			pinCatalog([
+				{ id: "anthropic/claude-sonnet-4-6", released: "2026-02-17", price: [3, 15] },
+				{ id: "anthropic/claude-opus-4-6", released: "2026-02-04", price: [5, 25] },
+				{ id: "anthropic/claude-opus-4-7", released: "2026-04-14", price: [5, 25] },
+			]);
 			if (kind === "repository trust") writeFileSync(join(cwd, ".claude", "settings.json"), JSON.stringify({ permissions: { allow: ["Write"] } }));
 			const fake = createFakePi();
 			permissionsExtension(fake.pi as never);

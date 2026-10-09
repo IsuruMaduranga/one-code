@@ -32,7 +32,8 @@ import {
 	VERSION as PI_VERSION,
 } from "@earendil-works/pi-coding-agent";
 import { loadAutoModeConfig } from "../auto-mode/config.ts";
-import { configuredCapabilityKey, loadCapabilitySnapshot, refreshCapabilitySnapshot, snapshotIsStale } from "../lib/capability-index.ts";
+import { catalogIsStale, loadCatalogSources, readCatalogRefreshEnabled, refreshModelCatalog } from "../lib/model-catalog-data.ts";
+import { BUILTIN_PROVIDER_POLICIES } from "../lib/model-policy.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../lib/model-unusable.ts";
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../lib/mcp-status.ts";
 import { notifyOrPrint } from "../lib/headless-output.ts";
@@ -88,20 +89,22 @@ export default function doctorExtension(pi: ExtensionAPI) {
 		return snapshot;
 	};
 
-	// The Artificial Analysis snapshot behind the measured capability floor
-	// (lib/capability-index.ts): refreshed at most daily, only from a session
-	// that outlives the turn, never awaited in session_start (findings §15, §19),
-	// inert once the session is shutting down. A failure is logged once.
-	// Request surfaces keep their frozen tier until session_start/model_select;
-	// automatic model selection can use the refreshed scores immediately.
+	// The public model catalogs behind the tiers (lib/model-catalog-data.ts):
+	// refreshed at most daily, only from a session that outlives the turn, never
+	// awaited in session_start (findings §15, §19), inert once the session is
+	// shutting down, off with `refreshModelCatalog: false`. A failure is logged
+	// once and the copy on disk (or the bundled one) keeps serving. Request
+	// surfaces keep their frozen tier until session_start/model_select;
+	// automatic model selection uses the refreshed catalog immediately.
 	let shuttingDown = false;
 	let refreshWarned = false;
-	const refreshCapability = async (ctx: ExtensionContext, home: string): Promise<void> => {
-		const outcome = await refreshCapabilitySnapshot({ key: configuredCapabilityKey(home), stateDir: oneCodeStateDir(process.env, home) });
+	const refreshCatalog = async (ctx: ExtensionContext, home: string): Promise<void> => {
+		if (!readCatalogRefreshEnabled(oneCodeSettingsPath(home))) return;
+		const outcome = await refreshModelCatalog({ stateDir: oneCodeStateDir(process.env, home), piProviders: Object.keys(BUILTIN_PROVIDER_POLICIES) });
 		if (outcome.status === "failed" && !refreshWarned && !shuttingDown) {
 			refreshWarned = true;
 			try {
-				notifyOrPrint(ctx, `Capability scores not refreshed: ${outcome.error}. Automatic picks keep using the last snapshot, if any.`, "warning");
+				notifyOrPrint(ctx, `Model catalogs not refreshed: ${outcome.error}. Model tiers keep using the copy on disk.`, "warning");
 			} catch {
 				// A UI hiccup must not fail the report that awaits this refresh.
 			}
@@ -109,9 +112,9 @@ export default function doctorExtension(pi: ExtensionAPI) {
 	};
 	pi.on("session_start", (_event, ctx) => {
 		const home = os.homedir();
-		if (!sessionOutlivesTurn(ctx.mode) || !configuredCapabilityKey(home)) return;
-		if (!snapshotIsStale(loadCapabilitySnapshot(oneCodeStateDir(process.env, home)))) return;
-		void refreshCapability(ctx, home).catch(() => {});
+		if (!sessionOutlivesTurn(ctx.mode) || !readCatalogRefreshEnabled(oneCodeSettingsPath(home))) return;
+		if (!catalogIsStale(loadCatalogSources(oneCodeStateDir(process.env, home)))) return;
+		void refreshCatalog(ctx, home).catch(() => {});
 	});
 	pi.on("session_shutdown", () => {
 		shuttingDown = true;
@@ -120,10 +123,10 @@ export default function doctorExtension(pi: ExtensionAPI) {
 	const gather = async (ctx: ExtensionContext, options: { network: boolean }): Promise<DoctorReport> => {
 		const home = os.homedir();
 		const version = oneCodeVersion();
-		// Two unrelated endpoints (npm registry, Artificial Analysis): overlap them.
-		// The snapshot refresh is a no-op when fresh or keyless, bounded by FETCH_TIMEOUT_MS.
+		// Unrelated endpoints (npm registry, the model catalogs): overlap them.
+		// The catalog refresh is a no-op when fresh or turned off, bounded by its fetch timeout.
 		const [latest] = options.network
-			? await Promise.all([lookupLatestVersion({ install: installKind(), current: version, env: process.env }), refreshCapability(ctx, home)])
+			? await Promise.all([lookupLatestVersion({ install: installKind(), current: version, env: process.env }), refreshCatalog(ctx, home)])
 			: [undefined];
 		// One read of pi's settings serves both views; made inside their own
 		// try, since a malformed settings file throws.

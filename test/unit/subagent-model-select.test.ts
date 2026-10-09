@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { pinCatalog } from "./catalog-fixture.ts";
 import {
 	applicableSubagentDefault,
 	loadSubagentDefault,
@@ -39,11 +40,46 @@ const setting = (spec: string, setForContainment?: string): SubagentDefault => (
 
 const anthropic = [
 	model("anthropic", "claude-opus-4-8", 5),
-	model("anthropic", "claude-sonnet-5", 3),
+	model("anthropic", "claude-sonnet-5-5", 3),
 	model("anthropic", "claude-haiku-4-5", 1),
 	model("anthropic", "claude-haiku-4-5-20251001", 1),
 ];
 const openai = [model("openai", "gpt-5.1", 1.25), model("openai", "gpt-5-mini", 0.25)];
+
+// One release date per vendor, so nothing supersedes anything. Anthropic: Opus
+// 4.8 and Sonnet 5.5 frontier by the parity gate, Haiku cheap. OpenAI: the
+// unmarked and codex models workhorse by price, the minis and Luna cheap,
+// nano tiny by name; `gpt-6-zz` and `claude-mystery` are in no catalog.
+beforeEach(() =>
+	pinCatalog([
+		{ id: "anthropic/claude-opus-4-8", released: "2026-09-01", price: [5, 25] },
+		{ id: "anthropic/claude-fable-5", released: "2026-09-01", price: [10, 50] },
+		{ id: "anthropic/claude-sonnet-5-5", released: "2026-09-01", price: [3, 15], servedAs: ["openrouter/anthropic/claude-sonnet-5.5"] },
+		{ id: "anthropic/claude-sonnet-5", released: "2026-09-01", price: [3, 15], servedAs: ["openrouter/anthropic/claude-sonnet-5"] },
+		{
+			id: "anthropic/claude-haiku-4-5",
+			released: "2025-10-15",
+			price: [1, 5],
+			servedAs: ["anthropic/claude-haiku-4-5-20251001", "openrouter/anthropic/claude-haiku-4.5", "openrouter/anthropic/claude-haiku-4.5-0731"],
+		},
+		{ id: "openai/gpt-5.1", released: "2026-09-01", price: [1.25, 10] },
+		{ id: "openai/gpt-5.1-codex", released: "2026-09-01", price: [1, 8] },
+		{ id: "openai/gpt-5.2", released: "2026-09-01", price: [1.75, 14] },
+		{ id: "openai/gpt-5-mini", released: "2026-09-01", price: [0.25, 2] },
+		{ id: "openai/gpt-5.4-mini", released: "2026-09-01", price: [0.3, 1.2] },
+		{ id: "openai/gpt-5-nano", released: "2026-09-01", price: [0.05, 0.4] },
+		{ id: "openai/gpt-5.6-sol", released: "2026-09-01", price: [5, 20] },
+		{ id: "openai/gpt-5.6-terra", released: "2026-09-01", price: [2, 8] },
+		{ id: "openai/gpt-5.6-luna", released: "2026-09-01", price: [0.2, 0.8] },
+		{ id: "openai/gpt-6", released: "2026-09-01", price: [10, 40] },
+		{ id: "openai/gpt-6-codex", released: "2026-09-01", price: [4, 16] },
+		{ id: "openai/gpt-6-mini", released: "2026-09-01", price: [0.4, 1.6] },
+		{ id: "openai/gpt-6-nano", released: "2026-09-01", price: [0.1, 0.4] },
+		{ id: "zhipuai/glm-4.6", released: "2026-09-01", price: [0.5, 2] },
+		{ id: "zhipuai/glm-4.5-air", released: "2026-09-01", price: [0.1, 0.4] },
+		{ id: "zhipuai/glm-4.7", released: "2026-09-01", price: [0.6, 2.2] },
+	]),
+);
 
 describe("resolveSubagentModel: aliases", () => {
 	it("prefers the undated id over a -MMDD snapshot when an alias matches both", () => {
@@ -102,7 +138,7 @@ describe("resolveSubagentModel: aliases", () => {
 		expect(resolveSubagentModel({ requested: "opus", sessionModel: codex[1], available: codex }).model?.id).toBe("gpt-5.6-terra");
 		expect(resolveSubagentModel({ requested: "fable", sessionModel: codex[0], available: codex }).model?.id).toBe("gpt-5.6-sol");
 		// A name match still wins over the tier reading on a provider that has one.
-		expect(resolveSubagentModel({ requested: "sonnet", sessionModel: anthropic[0], available: anthropic }).model?.id).toBe("claude-sonnet-5");
+		expect(resolveSubagentModel({ requested: "sonnet", sessionModel: anthropic[0], available: anthropic }).model?.id).toBe("claude-sonnet-5-5");
 	});
 
 	it("stays with the session's model-creator namespace on a gateway", () => {
@@ -125,7 +161,7 @@ describe("resolveSubagentModel: aliases", () => {
 			sessionModel: anthropic[1],
 			available: anthropic,
 		});
-		expect(resolution.model?.id).toBe("claude-sonnet-5");
+		expect(resolution.model?.id).toBe("claude-sonnet-5-5");
 	});
 });
 
@@ -136,7 +172,7 @@ describe("resolveSubagentModel: precedence and exact references", () => {
 			resolveSubagentModel({ ...input, requested: "haiku", agentModel: "sonnet", configuredDefault: setting("opus") }).model?.id,
 		).toBe("claude-haiku-4-5");
 		expect(resolveSubagentModel({ ...input, agentModel: "sonnet", configuredDefault: setting("opus") }).model?.id).toBe(
-			"claude-sonnet-5",
+			"claude-sonnet-5-5",
 		);
 		expect(resolveSubagentModel({ ...input, configuredDefault: setting("opus") }).model?.id).toBe("claude-opus-4-8");
 	});
@@ -239,7 +275,7 @@ describe("resolveSubagentModel: precedence and exact references", () => {
 			sessionModel: anthropic[0],
 			available: anthropic,
 		});
-		expect(resolution.model?.id).toBe("claude-sonnet-5");
+		expect(resolution.model?.id).toBe("claude-sonnet-5-5");
 		expect(resolution.source).toBe("automatic");
 		expect(resolution.notices[0]).toContain("not available");
 	});
@@ -255,17 +291,17 @@ describe("resolveSubagentModel: precedence and exact references", () => {
 		expect(resolution.source).toBe("default");
 	});
 
-	it("automatically chooses the cheapest model at the session's floor when nothing is requested", () => {
-		// The classifier's floor, shared: an opus session delegates to sonnet,
-		// never haiku (a weak worker spends the saving on retries).
+	it("automatically chooses the cheapest model in the session's tier when nothing is requested", () => {
+		// The classifier's rule, shared: an Opus session delegates to the cheaper
+		// frontier Sonnet, never Haiku (a weak worker spends the saving on retries).
 		const resolution = resolveSubagentModel({ sessionModel: anthropic[0], available: anthropic });
-		expect(resolution.model?.id).toBe("claude-sonnet-5");
+		expect(resolution.model?.id).toBe("claude-sonnet-5-5");
 		expect(resolution.source).toBe("automatic");
 	});
 
-	it("keeps a Sonnet session's subagents on Sonnet: nothing cheaper meets the workhorse floor", () => {
+	it("keeps a Sonnet session's subagents on Sonnet: nothing cheaper is in its tier", () => {
 		const resolution = resolveSubagentModel({ sessionModel: anthropic[1], available: anthropic });
-		expect(resolution.model?.id).toBe("claude-sonnet-5");
+		expect(resolution.model?.id).toBe("claude-sonnet-5-5");
 		expect(resolution.source).toBe("session");
 	});
 
@@ -298,11 +334,10 @@ describe("resolveSubagentModel: precedence and exact references", () => {
 		expect(unpricedCandidate.source).toBe("session");
 	});
 
-	it("holds the automatic pick to the session's tier floor in a future family the anchors do not know", () => {
-		// No anchor matches gpt-6; name class and price decide. Raw cheapest would
-		// pick the unknown $0.05 model or the nano; the workhorse floor (the
-		// session is workhorse-class) excludes the mini too, so the cheaper
-		// unmarked sibling is the worker.
+	it("holds the automatic pick to the session's tier", () => {
+		// Raw cheapest would pick the uncatalogued $0.05 model or the nano; the
+		// session's workhorse tier excludes the mini too, so the cheaper
+		// workhorse sibling is the worker.
 		const catalog = [
 			model("openai", "gpt-6", 10),
 			model("openai", "gpt-6-codex", 4),
@@ -323,15 +358,14 @@ describe("resolveSubagentModel: precedence and exact references", () => {
 			sessionModel: anthropic[0],
 			available: anthropic,
 		});
-		expect(resolution.model?.id).toBe("claude-sonnet-5");
+		expect(resolution.model?.id).toBe("claude-sonnet-5-5");
 		expect(resolution.source).toBe("automatic");
 		expect(resolution.notices[0]).toContain("falling back");
 	});
 });
 
 describe("resolveSubagentModel: agent-file provider containment", () => {
-	// gpt-5.1-codex: the cheaper workhorse-class sibling the automatic pick lands on
-	// (no facts in unit tests, so the $1 price floor is what keeps it workhorse).
+	// gpt-5.1-codex: the cheaper workhorse sibling the automatic pick lands on.
 	const openaiCatalog = [model("openai", "gpt-5.1", 1.25), model("openai", "gpt-5-mini", 0.25), model("openai", "gpt-5.1-codex", 1)];
 
 	it("does not honor a cross-provider agent-file model on a non-Claude session", () => {
@@ -709,7 +743,7 @@ describe("subagentStatusModel", () => {
 		// A user who just ran /subagent must see their choice land in the banner;
 		// hiding it because it happens to match the session reads as "not saved".
 		expect(subagentStatusModel(setting, { model: anthropic[1], source: "default" })).toEqual({
-			model: "anthropic/claude-sonnet-5",
+			model: "anthropic/claude-sonnet-5-5",
 			via: "setting",
 		});
 		expect(subagentStatusModel(envVar, { model: anthropic[2], source: "default" })).toEqual({
@@ -896,13 +930,13 @@ describe("subagentModelNotes: the model is told what its child actually runs on"
 		// names the SESSION model in the same position — so the answer is always
 		// spelled out rather than left to be inferred from a mention.
 		const resolution = resolveSubagentModel({
-			requested: "anthropic/claude-sonnet-5",
+			requested: "anthropic/claude-sonnet-5-5",
 			sessionModel: openai[0],
 			available: catalog,
 		});
-		expect(resolution.model?.id).toBe("claude-sonnet-5");
+		expect(resolution.model?.id).toBe("claude-sonnet-5-5");
 		expect(subagentModelNotes(resolution).at(-1)).toBe(
-			"This subagent runs on anthropic/claude-sonnet-5 (the model this call named).",
+			"This subagent runs on anthropic/claude-sonnet-5-5 (the model this call named).",
 		);
 	});
 
@@ -914,7 +948,15 @@ describe("subagentModelNotes: the model is told what its child actually runs on"
 });
 
 describe("resolveSubagentModel — image modality gate", () => {
-	// Fake ids so models.dev facts never intrude. session is workhorse + image-capable.
+	// The session is workhorse and image-capable; both flash rows are cheap.
+	beforeEach(() =>
+		pinCatalog([
+			{ id: "openai/gpt-5-main", released: "2026-09-01", price: [2, 8] },
+			{ id: "openai/gpt-5-big", released: "2026-09-01", price: [3, 12] },
+			{ id: "openai/gpt-5-flash-text", released: "2026-09-01", price: [0.2, 0.8] },
+			{ id: "openai/gpt-5-flash-vision", released: "2026-09-01", price: [0.25, 1] },
+		]),
+	);
 	const withInput = (id: string, cost: number, input: string[]) =>
 		({ provider: "openai", id, name: id, cost: { input: cost, output: cost * 4 }, input }) as any;
 	const session = withInput("gpt-5-main", 2, ["text", "image"]);

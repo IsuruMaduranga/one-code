@@ -75,7 +75,7 @@ export function runtimeProtectedDirs(): string[] {
 /**
  * The harness's own secret stores, files and directories, which a read tool
  * outside the working space must not read unclassified: One Code's settings
- * (web search and capability-index API keys) and MCP OAuth token store, pi's
+ * (web search API keys, the model tiers) and MCP OAuth token store, pi's
  * `models.json` (custom-provider `apiKey` values) and `auth.json`, Claude
  * Code's user settings (`env` keys, `apiKeyHelper`) and `.claude.json`. The
  * basename denylist (`auto-mode/sensitive.ts`) cannot name these without

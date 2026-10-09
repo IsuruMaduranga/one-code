@@ -1,20 +1,21 @@
 /**
  * The catalog-wide tier snapshot: every row of pi's bundled model catalog, the
- * tier it gets with the bundled model facts, and the rule that decided. The
- * fixture is a REVIEWED artifact — a change to the classifier, the anchor map,
- * the facts table or pi's catalog shows up here as a diff to read line by line,
- * never as a silent re-tiering. Regenerate after review with
+ * tier it gets with the model catalogs bundled in this release, and the rule
+ * that decided. The fixture is a REVIEWED artifact — a change to the tier
+ * algorithm, the bundled catalogs (`scripts/gen-model-catalog.mjs`) or pi's
+ * catalog shows up here as a diff to read line by line, never as a silent
+ * re-tiering. Regenerate after review with
  *
  *   UPDATE_TIER_SNAPSHOT=1 npx vitest run test/unit/model-tier-catalog.test.ts
  *
- * working-docs/features/tiering/plan.md (Phase 1 acceptance).
+ * working-docs/decisions/model-tiers.md.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { setModelFactsForTest } from "../../extensions/lib/model-facts.ts";
+import { beforeEach, describe, expect, it } from "vitest";
+import { bundledSources, setCatalogSourcesForTest } from "../../extensions/lib/model-catalog-data.ts";
 import { classifyModelTier } from "../../extensions/lib/model-tier.ts";
 
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "model-tier-catalog.json");
@@ -32,10 +33,10 @@ async function bundledCatalog(): Promise<Model<Api>[]> {
 }
 
 describe("catalog-wide tier snapshot", () => {
-	// The bundled facts, not the hermetic empty table: a file-level beforeEach runs
-	// after test/setup.ts's global one, so it wins.
-	beforeEach(() => setModelFactsForTest(undefined));
-	afterAll(() => setModelFactsForTest({}));
+	// The bundled catalogs, not the hermetic empty one nor this machine's
+	// refreshed copy: a file-level beforeEach runs after test/setup.ts's global
+	// one, so it wins.
+	beforeEach(() => setCatalogSourcesForTest(bundledSources()));
 
 	it("classifies every bundled catalog row exactly as the reviewed fixture says", async () => {
 		const catalog = await bundledCatalog();

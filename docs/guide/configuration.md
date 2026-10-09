@@ -63,7 +63,7 @@ session is your own pi, not the app.
 | `mcp/project-approvals.json` | Which projects' MCP servers you approved. |
 | `permissions/project-allow-approvals.json` | Which projects' allow rules you trusted. |
 | `mcp-auth/<server>-<hash>.json` | OAuth tokens for MCP servers, one file per server name, URL and headers, owner-readable only. |
-| `cache/artificial-analysis.json` | The cached model-capability snapshot, when a key is set. |
+| `cache/model-catalog/` | The daily copy of the models.dev, OpenRouter and Hugging Face catalogs behind the model tiers. |
 | `hooks/hooks-decisions.jsonl` | A hook decision log, written only while `CC_HOOKS_DEBUG` is set. |
 
 The bundled app also keeps a timestamp of its last update check at
@@ -77,6 +77,9 @@ appear in `projects/<slug>/settings.json`.
 | Key | Type | Set by | Effect |
 |---|---|---|---|
 | `subagentModel` | string | `/subagent` | Default model for subagents and workflow agents: `provider/model-id`, a short alias, or `inherit`. |
+| `suggestNewerModels` | boolean | By hand | Suggest a newer model in the same line at a similar or lower price. Defaults to `true`; `false` turns off notices and the `/doctor` suggestion. |
+| `modelTiers` | object | By hand (user settings only) | Your own tier for a model, keyed by `provider/id` or bare id: `frontier`, `workhorse`, `cheap` or `tiny`. See [Prompting adapts to the model](providers-and-models.md#prompting-adapts-to-the-model). |
+| `refreshModelCatalog` | boolean | By hand | `false` stops the daily refresh of the model catalogs behind the tiers; the copy on disk stays in use. Defaults to `true`. |
 | `permissions.allow` | string array | `/allow` (per repository) or `/allow … global` | Allow rules in Claude Code's format. |
 | `autoMode.environment` | string array | `/auto-mode setup` | Describes your environment to the classifier. |
 | `autoMode.hard_deny`, `autoMode.soft_deny`, `autoMode.allow` | string array | `/auto-mode setup` | Extra classifier rules, appended to the built-ins. |
@@ -84,7 +87,6 @@ appear in `projects/<slug>/settings.json`.
 | `autoMode.logDecisions` | boolean | By hand | Log every gate decision next to the session files. |
 | `webSearch.apiKeys.brave`, `webSearch.apiKeys.tavily` | string | By hand | Search keys when the environment variables are not set. |
 | `webSearch.order` | string array | By hand | Order of the fallback search backends: `brave`, `tavily`, `exa-free`. |
-| `capabilityIndex.artificialAnalysisApiKey` | string | By hand | Artificial Analysis key for measured model selection. |
 | `disabledMcpServers` | string array | `/mcp` (user or per repository) | MCP servers kept disabled. |
 | `artifacts.autoOpen` | boolean | By hand | `false` stops the browser opening when the model publishes a new artifact. Defaults to `true`. |
 | `enableWorkflows` | boolean | By hand (user or per repository) | `false` turns the `workflow` tool off. Defaults to `true`. |
@@ -140,6 +142,18 @@ Set the subagent default with `/subagent`, or apply a preset with
 `/doctor preset <economical|balanced|quality>`. See
 [Providers and models](providers-and-models.md) and
 [Choose the subagent model](subagents-and-workflows.md#choose-the-subagent-model).
+
+If you pick a model that has a newer version in the same line, say Qwen 3.6
+27B when Qwen 3.8 27B exists, One Code tells you when the session starts or
+when you switch models. It only suggests a model you can use with your
+credentials, released later, and priced at most 10% higher (blending three
+input tokens to one output token, since coding work is input-heavy). If both
+models have confirmed coding scores, the newer one can't score lower.
+
+The notice shows once per session and model, with the `/model` command to
+switch. It never switches for you and never enters the conversation, and
+`/doctor` reports the same suggestion. Print and JSON runs don't show it. To
+turn it off, add `"suggestNewerModels": false` to `~/.onecode/settings.json`.
 
 ## Permission settings
 

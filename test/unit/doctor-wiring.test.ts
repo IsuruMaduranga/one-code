@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import doctorExtension from "../../extensions/doctor/index.ts";
+import { pinCatalog, pinReleaseDates } from "./catalog-fixture.ts";
+import { MODEL_UNUSABLE_CHANNEL } from "../../extensions/lib/model-unusable.ts";
 import { SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../../extensions/lib/settings-channels.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts";
 import { createFakePi, type FakePi } from "./helpers/fake-pi.ts";
@@ -53,7 +55,7 @@ beforeEach(() => {
 	vi.stubEnv("ONECODE_NO_UPDATE_CHECK", "1");
 	vi.stubEnv("CC_VERSION", "");
 	// A clean environment for the checks that read it.
-	for (const key of ["CLAUDE_CODE_SUBAGENT_MODEL", "CC_PROMPT_TIER", "CLAUDE_CONFIG_DIR", "AA_API_KEY"]) vi.stubEnv(key, "");
+	for (const key of ["CLAUDE_CODE_SUBAGENT_MODEL", "CC_PROMPT_TIER", "CLAUDE_CONFIG_DIR"]) vi.stubEnv(key, "");
 	sessionStarted = false;
 	fake = createFakePi();
 	startTurn = captureUserTurns(fake);
@@ -98,6 +100,25 @@ describe("/doctor wiring", () => {
 		expect(ctx.waitForIdle).not.toHaveBeenCalled();
 	});
 
+	it("/doctor report shows the newer-model fix and drops models refused by the account", async () => {
+		const main = model("anthropic", "claude-opus-4-8", 5);
+		const newer = model("anthropic", "claude-opus-5-5", 4);
+		pinReleaseDates({
+			"anthropic/claude-opus-4-8": { releaseDate: "2026-06-01" },
+			"anthropic/claude-opus-5-5": { releaseDate: "2026-09-01" },
+		});
+		const { ctx, notified } = ctxFor(main, "rpc");
+		ctx.modelRegistry.getAvailable = () => [main, newer];
+		await run("report", ctx);
+		const text = notified[0].replace(/\s+/g, " ");
+		expect(text).toContain("claude-opus-5-5 is newer than claude-opus-4-8");
+		expect(text).toContain("Switch with /model anthropic/claude-opus-5-5.");
+		expect(fake.sentUserMessages).toEqual([]);
+		fake.events.emit(MODEL_UNUSABLE_CHANNEL, { model: "anthropic/claude-opus-5-5", reason: "no access" });
+		await run("report", ctx);
+		expect(notified[1]).not.toContain("is newer than");
+	});
+
 	it("bare /doctor without a model falls back to the report and says why", async () => {
 		const { ctx, notified } = ctxFor(undefined);
 		await run("", ctx);
@@ -130,6 +151,12 @@ describe("/doctor wiring", () => {
 	});
 
 	it("lists the presets on request", async () => {
+		pinCatalog([
+			{ id: "anthropic/claude-opus-5", released: "2026-07-24", price: [5, 25] },
+			{ id: "anthropic/claude-sonnet-5", released: "2026-06-29", price: [3, 15] },
+			{ id: "anthropic/claude-fable-5", released: "2026-06-07", price: [10, 50] },
+			{ id: "anthropic/claude-haiku-4-5", released: "2025-10-15", price: [1, 5] },
+		]);
 		const { ctx, notified } = ctxFor(anthropic[1]);
 		await run("presets", ctx);
 		expect(notified[0]).toContain("economical: main claude-haiku-4-5");

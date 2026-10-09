@@ -3,14 +3,13 @@
  *
  * Claude Code's two-stage formula, reproduced (working-docs/decisions/auto-mode.md, P4):
  *   Stage 1 grades HARM ONLY (maxTokens 64). severity < 50 → allow, no stage 2.
- *   Stage 2 applies intent + ALLOW (maxTokens 8192, <thinking> CoT) → severity +
+ *   Stage 2 applies intent + ALLOW (maxTokens 4096, <thinking> CoT) → severity +
  *   <category> (+ our verified <intent>). Both stages share one system prompt and
- *   transcript byte-for-byte. Only the system prompt (the ~30k-token ruleset) is
- *   a cache hit across stages and calls: pi-ai marks a breakpoint on the last
- *   user block only, so the <transcript> is re-read uncached
- *   by stage 2 and by every gated call on Anthropic-style providers. Known,
- *   deferred — working-docs/decisions/caching.md "Classifier transcript" and
- *   working-docs/upstream_prs.md #16 (fixable locally via pi-ai's `onPayload`).
+ *   transcript byte-for-byte. On Anthropic Messages, onPayload splits the user
+ *   text at stable history-entry boundaries and moves the user cache marker
+ *   before the pending action and stage instruction (cache.ts). Both stages
+ *   and later gated calls can read that prefix; the system markers stay intact.
+ *   Other APIs keep the single string and their provider's prefix caching.
  *
  * A one-shot `completeSimple` per stage rather than an agent session: no tools,
  * no history beyond the transcript it is handed, nothing to be talked into. Every
@@ -19,11 +18,13 @@
  * has approved nothing.
  */
 
+import { appendFileSync } from "node:fs";
 import { isContextOverflow, type Model, type Api, type AssistantMessage, type ThinkingLevel } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { forcedReasoningLevel, isReasoningMandatoryError, reasoningRetryLevel } from "../lib/model-policy.ts";
 import type { AutoModeConfig } from "./config.ts";
+import { cacheClassifierHistory } from "./cache.ts";
 import {
 	buildPayload,
 	type ClassifyRequest,
@@ -48,6 +49,20 @@ import { actionLength, MAX_ACTION_CHARS } from "./transcript.ts";
 
 /** A slow classifier stalls every tool call, so the wait is capped per stage. */
 export const CLASSIFIER_TIMEOUT_MS = 30_000;
+
+/**
+ * Claude Code's default retry count for a rate limit or server error (its
+ * classifier's side query uses it). pi-ai's default is none, so one 429 left
+ * the call unjudged; the stage timeout above still bounds the retries.
+ */
+export const CLASSIFIER_MAX_RETRIES = 10;
+
+/**
+ * Output headroom for a model that cannot turn thinking off, added to both
+ * stages' caps as Claude Code pads its always-on-thinking models: the
+ * reasoning otherwise spends the budget before the verdict is written.
+ */
+export const FORCED_THINKING_PADDING = 2048;
 
 /**
  * A pinned model that times out this many calls in a row is unpinned, so a model
@@ -127,6 +142,8 @@ export interface ClassifierState {
 	 * proactively, without an error).
 	 */
 	forcedReasoning: Map<string, ThinkingLevel>;
+	/** Previous Anthropic history boundary, a cache lookup hint only (cache.ts). */
+	cacheHistoryEnd?: number;
 }
 
 export function createClassifierState(): ClassifierState {
@@ -139,6 +156,13 @@ export interface ClassifierDeps {
 	config: AutoModeConfig;
 	signal?: AbortSignal;
 	state: ClassifierState;
+	/**
+	 * A stable key for this session's classifier calls. pi-ai sends it as
+	 * OpenAI's prompt_cache_key (Codex and the OpenAI APIs), which routes the
+	 * calls to the cache that holds the previous call's prefix; without it
+	 * consecutive calls landed on different cache machines and missed.
+	 */
+	cacheKey?: string;
 	/** Tell the user something once — which model is in use, or that theirs is dead. */
 	onNotice?: (message: string, level: "info" | "warning", notice?: ClassifierNotice) => void;
 	/** Report each classifier reply's usage, for the all-in footer cost. Observer
@@ -231,7 +255,8 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 
 	// buildPayload builds the ~110KB ruleset once and returns the grounding index
 	// derived from it, so the ruleset is not rebuilt/re-parsed a second time here.
-	const { system, userPrefix, index } = buildPayload(request);
+	const { system, userPrefix, history, tail, index } = buildPayload(request);
+	const previousHistoryEnd = deps.state.cacheHistoryEnd;
 	const stage1Text = stage1User(userPrefix);
 	// A permission rule refused something this turn, so stage 2 gets the extra
 	// instruction that the user's intent does not excuse an equivalent-effect
@@ -239,6 +264,10 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 	// left byte-identical to CC's.
 	const afterRuleDenial = request.transcript.some((entry) => entry.kind === "denied");
 	const debug = process.env.CC_AUTO_MODE_DEBUG;
+	// Probe hook (test/e2e/cache-probe.sh): one JSON line per classifier reply with
+	// its text and pi-ai's normalized usage, whatever the transport (Codex runs
+	// over WebSocket, where a fetch wrapper sees nothing). Opt-in, never read back.
+	const usageLog = process.env.CC_AUTO_MODE_LOG;
 
 	// A model already pinned this session is tried first, so the classifier does
 	// not change under the session while the pin is healthy. The rest of the chain
@@ -311,7 +340,15 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 					env: auth.env,
 					signal: deps.signal ? AbortSignal.any([deps.signal, timeout]) : timeout,
 					maxTokens,
+					maxRetries: CLASSIFIER_MAX_RETRIES,
 					cacheRetention: "long",
+					...(deps.cacheKey ? { sessionId: deps.cacheKey } : {}),
+					...(model.api === "anthropic-messages" ? {
+						onPayload: (payload: unknown) => {
+							cacheClassifierHistory(payload, [...history, tail, userText.slice(userPrefix.length)], history.length - 1, previousHistoryEnd);
+							deps.state.cacheHistoryEnd = history.length - 1;
+						},
+					} : {}),
 					...(reasoning ? { reasoning } : {}),
 				},
 			);
@@ -320,9 +357,19 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 		// Turn one reply into text, or throw a StepError the loop knows how to route.
 		// `big` is the retry cap for a length-truncated reply; a still-truncated reply
 		// at `big` is its own outcome (not a candidate to step past).
+		const padding = reasoning ? FORCED_THINKING_PADDING : 0;
 		const call = async (userText: string, base: number, big: number, stage: number): Promise<string> => {
+			base += padding;
+			big += padding;
 			const inspect = (reply: AssistantMessage): string | "length" => {
 				deps.onUsage?.(reply.usage);
+				if (usageLog) {
+					try {
+						appendFileSync(usageLog, `${JSON.stringify({ model: key, api: model.api, stage, system, user: userText, usage: reply.usage, stopReason: reply.stopReason })}\n`);
+					} catch {
+						// A probe log that cannot be written must not fail the gate.
+					}
+				}
 				if (deps.signal?.aborted) throw new StepError("cancelled", "cancelled");
 				if (reply.stopReason === "error" || reply.stopReason === "aborted") {
 					const msg = reply.errorMessage ?? reply.stopReason ?? "provider error";
@@ -365,12 +412,13 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 			if (deps.reviewOnly) {
 				// A finished run has no harm floor to short-circuit — go straight to the
 				// full stage-2 evaluation, reframed to judge the whole sequence.
-				const text = await call(reviewUser(userPrefix), 1024, 4096, 2);
+				const text = await call(reviewUser(userPrefix), 4096, 8192, 2);
 				verdict = parseStage2(text, index, request.userMessages);
 				stageInfo = `review sev=${parseSeverity(text) ?? "?"}`;
 			} else {
 				// STAGE 1 — harm only. maxTokens 64 like CC; if the reply overruns 64
 				// without a readable severity, one retry with headroom recovers it.
+				// Stage 2's 4096 is CC's too, with one retry at 8192.
 				const s1 = await call(stage1Text, 64, 1024, 1);
 				const sev1 = parseSeverity(s1);
 				if (sev1 !== null && sev1 < SEVERITY_THRESHOLD) {
@@ -380,7 +428,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 					// sev1 >= 50, or unparseable → fall to the fuller stage-2 evaluation.
 					// stage2User is built here (not eagerly) so the common allow case
 					// does not concatenate the transcript prefix a second time.
-					const s2 = await call(stage2User(userPrefix, afterRuleDenial), 1024, 4096, 2);
+					const s2 = await call(stage2User(userPrefix, afterRuleDenial), 4096, 8192, 2);
 					verdict = parseStage2(s2, index, request.userMessages);
 					stageInfo = `s1=${sev1 ?? "?"} s2=${parseSeverity(s2) ?? "?"}`;
 					// Stage 1 flagged the call and stage 2 cleared it without quoting the

@@ -17,7 +17,7 @@
 
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { classifierCandidates } from "../auto-mode/model-select.ts";
-import { isPriorGeneration, lacksToolCalls } from "../lib/model-facts.ts";
+import { catalogModelFor } from "../lib/model-catalog.ts";
 import { isDatedDuplicate, modelsContainedToSession, modelSpec, pricedInput } from "../lib/model-policy.ts";
 import { intrinsicTier, type PromptTier } from "../lib/model-tier.ts";
 import { resolveSubagentModel } from "../subagents/model-select.ts";
@@ -34,7 +34,7 @@ export const PRESET_LABEL: Record<PresetName, string> = {
 };
 
 export const PRESET_INTENT: Record<PresetName, string> = {
-	economical: "lowest cost — one cheap model for everything",
+	economical: "lowest-cost main model, with subagents inheriting it",
 	balanced: "a capable main model, delegated work on the cheapest model at its floor",
 	quality: "the strongest model for the main session and its subagents",
 };
@@ -62,9 +62,14 @@ export type PresetsUnavailable = "no-model" | "no-priced-models";
  */
 export function presetPool(available: Model<Api>[], sessionModel: Model<Api>): Model<Api>[] {
 	const contained = modelsContainedToSession(available, sessionModel).filter(
-		// A preset recommends a MAIN model: never one a generation behind its family
-		// or one models.dev says cannot call tools (model-facts.ts), whatever its tier.
-		(m) => pricedInput(m) !== undefined && !isPriorGeneration(m) && !lacksToolCalls(m),
+		// A preset recommends a MAIN model: never one the catalogs mark superseded,
+		// legacy, deprecated or unable to call tools (model-catalog.ts), whatever its
+		// tier. A model no catalog knows stays, judged by its tier alone.
+		(m) => {
+			if (pricedInput(m) === undefined) return false;
+			const entry = catalogModelFor(m);
+			return !entry || (entry.tools && !entry.legacy && !entry.deprecated && !entry.supersededBy);
+		},
 	);
 	return contained.filter((m) => !isDatedDuplicate(m, contained));
 }
@@ -163,6 +168,10 @@ export function presetsSection(result: ReturnType<typeof computePresets>, sessio
 		lines.push({ text: "No priced models on this provider, so tiers cannot be told apart and no preset is offered.", level: "dim" });
 		return { title: "Presets", lines };
 	}
+	lines.push({
+		text: "Classifier previews use each preset's main model: the cheapest model in its tier or above, never dearer than the main model, else the main model itself.",
+		level: "dim",
+	});
 	const family = sessionModel ? sessionModel.provider : "";
 	for (const preset of result.presets) {
 		const sub = preset.subagents.setting === "inherit" ? "same" : shortId(preset.subagents.model);

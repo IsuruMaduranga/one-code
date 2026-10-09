@@ -72,6 +72,12 @@ export function writeSettings(path: string, file: Record<string, unknown>): void
 	writeJsonAtomic(path, file);
 }
 
+/** User-only upgrade advice, enabled unless explicitly disabled in One Code's settings. */
+export function readSuggestNewerModels(home: string, env: NodeJS.ProcessEnv = process.env): boolean {
+	const file = readJsonFile<{ suggestNewerModels?: unknown }>(oneCodeSettingsPath(home, env));
+	return file?.suggestNewerModels !== false;
+}
+
 /** Claude Code's `workflowSizeGuideline` values: under 5, 10 or 50 agents, or no guideline. */
 export type WorkflowSizeGuideline = "small" | "medium" | "large" | "unrestricted";
 

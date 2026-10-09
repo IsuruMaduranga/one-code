@@ -21,7 +21,7 @@ import {
 	STAGE2_INTENT_ADDENDUM,
 } from "./classifier-prompt.ts";
 import { buildCategoryIndex, groundCategory, normalizeName, type RuleIndex } from "./rules.ts";
-import { clip, renderTranscript, type TranscriptEntry } from "./transcript.ts";
+import { clip, transcriptBlocks, type TranscriptEntry } from "./transcript.ts";
 
 export interface ClassifyRequest {
 	/**
@@ -76,13 +76,14 @@ export interface ClassifyVerdict {
  * `classify()` does not rebuild and re-parse it a second time per call. The final
  * instruction is appended per stage by the caller (stage1User / stage2User).
  */
-export function buildPayload(request: ClassifyRequest): { system: string; userPrefix: string; index: RuleIndex } {
+export function buildPayload(request: ClassifyRequest): { system: string; userPrefix: string; history: string[]; tail: string; index: RuleIndex } {
 	const ruleset = buildRuleset(request.environment, request.ruleExtras);
 	const system = ruleset + renderSessionContext(request.username);
 	const framing = claudeMdFraming(request.claudeMd);
-	const transcript = renderTranscript(request.transcript);
-	const userPrefix = [framing, transcript].filter(Boolean).join("\n\n");
-	return { system, userPrefix, index: buildCategoryIndex(ruleset) };
+	const { history, tail } = transcriptBlocks(request.transcript);
+	if (framing) history[0] = `${framing}\n\n${history[0]}`;
+	const userPrefix = history.join("") + tail;
+	return { system, userPrefix, history, tail, index: buildCategoryIndex(ruleset) };
 }
 
 /** The stage-1 user message: shared prefix + the harm-only final instruction. */

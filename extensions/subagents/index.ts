@@ -58,6 +58,7 @@ import { watchMcpTools } from "../lib/mcp-share.ts";
 import { sessionModelTier } from "../lib/session-model-tier.ts";
 import { type DescriptionForm, followDescriptionForm, registerVariantTool } from "../lib/tool-variants.ts";
 import { agentDescription } from "./agent-description.ts";
+import { prepareAgentArguments } from "./agent-args.ts";
 import { projectConfigDirName } from "../lib/config-mode.ts";
 import { pendingClaimReminder } from "./pending-claim.ts";
 import { watchPermissionBridge } from "../permissions/subagent-gate.ts";
@@ -184,9 +185,7 @@ const SubagentParams = Type.Object({
 				'The agent to run — a name from the "Available agents" system reminder, or "fork" to clone this conversation. Required unless action:"list". To run several in parallel, issue multiple Agent tool calls in one turn.',
 		}),
 	),
-	task: Type.Optional(
-		Type.String({ description: "The task — a complete, self-contained instruction (the agent cannot ask follow-ups). Required with subagent_type." }),
-	),
+	task: Type.String({ description: "The task — a complete, self-contained instruction (the agent cannot ask follow-ups)." }),
 	// `prompt` is Claude Code's name for the task text and `description` its short
 	// title. A CC-trained model writes `{subagent_type, description, prompt}`; pi
 	// does not reject unknown keys, so without these the task silently became ""
@@ -1416,11 +1415,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			// CC-trained.
 			parameters: Type.Object({
 				subagent_type: Type.String({ description: "An agent name from the list in this tool's description" }),
-				task: Type.Optional(Type.String({ description: "The task — a complete, self-contained instruction" })),
+				task: Type.String({ description: "The task — a complete, self-contained instruction" }),
 				prompt: Type.Optional(Type.String({ description: "Alias of `task` (Claude Code's name for it)." })),
 				description: Type.Optional(Type.String({ description: "A short (3-5 word) description of the task." })),
 				name: Type.Optional(Type.String({ description: "Name for this run (default: <agent>-<n>)" })),
 			}) as never,
+			prepareArguments: prepareAgentArguments as never,
 			async execute(_toolCallId: string, params: unknown, signal?: AbortSignal) {
 				const ctx = lastCtx;
 				const p = (params ?? {}) as { subagent_type?: unknown; task?: unknown; prompt?: unknown; name?: unknown; description?: unknown };
@@ -1991,6 +1991,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		description: agentDescription("short", projectConfigDirName()),
 		promptSnippet: "Delegate scoped work to a specialist agent in its own context",
 		parameters: SubagentParams,
+		prepareArguments: prepareAgentArguments as (args: unknown) => Static<typeof SubagentParams>,
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			const agents = loadAgents(ctx.cwd);
 

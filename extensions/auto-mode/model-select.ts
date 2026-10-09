@@ -14,13 +14,13 @@
  * So: **never leave the session's provider or route.** Automatic selection uses
  * only contained models. It also requires a catalog context window at least as
  * large as the session's, because the classifier receives the full transcript;
- * if that cannot be proved, it screens on the session model instead.
+ * if that cannot be proved, it screens on the session model instead. And it
+ * never screens with a model in a lower tier than the session's, or a dearer one.
  */
 
 import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
-import { capabilityFloor } from "../lib/capability-index.ts";
 import { modelIdentity, modelSpec as spec, pricedInput } from "../lib/model-policy.ts";
-import { atLeastTier, automaticTierFloor, currentCapabilitySnapshot, economicalContainedCandidates, intrinsicTier } from "../lib/model-tier.ts";
+import { atLeastTier, economicalContainedCandidates, intrinsicTier } from "../lib/model-tier.ts";
 
 export interface Candidate {
 	model: Model<Api>;
@@ -53,9 +53,11 @@ export interface ClassifierNotice {
 
 /**
  * The ordered fallback chain for the permission classifier. Automatic entries
- * stay on the session provider/route, pass the shared capability floor, and
- * have a known catalog window at least as large as the session's. They are
- * ordered by numeric input cost; the session remains an availability fallback.
+ * stay on the session provider/route, sit in the session's tier or above
+ * (`model-tier.ts`, from the public catalogs), cost no more than the session
+ * model, are not experimental builds, and have a known catalog window at least
+ * as large as the session's. The cheapest qualifying model screens first, with
+ * the session retained as an availability fallback.
  */
 export function classifierCandidates({
 	available,
@@ -70,8 +72,8 @@ export function classifierCandidates({
 	};
 
 	// A classifier gets the whole user transcript. It must stay on the session's
-	// provider/route, meet the existing capability floor, and be able to receive
-	// every token the session catalog says the main model can receive. Catalog
+	// provider/route, sit in the session's tier, and be able to receive every
+	// token the session catalog says the main model can receive. Catalog
 	// omissions are unsafe to guess at: an unknown candidate window is ineligible.
 	if (!sessionModel) return { candidates, notices };
 	if (!hasCatalogContextWindow(sessionModel)) {
@@ -84,47 +86,42 @@ export function classifierCandidates({
 		return { candidates, notices, fallback };
 	}
 
-	const floor = automaticTierFloor(sessionModel);
-	const snapshot = currentCapabilitySnapshot();
-	const capable = (model: Model<Api>) => {
-		const measured = capabilityFloor(snapshot, model, sessionModel, "classifier").verdict;
-		return measured === "pass" || (measured === "unscored" && atLeastTier(intrinsicTier(model), floor));
-	};
-	// `economicalContainedCandidates` supplies the existing containment, variant,
-	// generation, tool-capability, price-known and never-tiny gates. Its own
-	// cheap/workhorse/frontier ordering is deliberately replaced below: this policy
-	// selects the numerically cheapest model that clears those gates.
-	const eligible = economicalContainedCandidates(available, sessionModel)
-		.filter(capable)
-		.filter((model) => hasCatalogContextWindow(model) && model.contextWindow >= sessionModel.contextWindow);
+	const sessionTier = intrinsicTier(sessionModel);
+	const sessionPrice = pricedInput(sessionModel);
+	const isSession = (model: Model<Api>) => model.provider === sessionModel.provider && model.id === sessionModel.id;
+	// Never weaker than the session: no point screening a model with a weaker one.
+	// Never dearer (the user, 2026-10-05: Qwen 3.8 27B drew a 2.4T model at five
+	// times its input price); an unpriced session cannot prove an alternate
+	// cheaper. Never an experimental build. A catalog window that contains the
+	// session's.
+	const screenable = (model: Model<Api>) =>
+		atLeastTier(intrinsicTier(model), sessionTier) &&
+		sessionPrice !== undefined &&
+		pricedInput(model)! <= sessionPrice &&
+		!EXPERIMENTAL_BUILD.test(model.id) &&
+		hasCatalogContextWindow(model) &&
+		model.contextWindow >= sessionModel.contextWindow;
+	// `economicalContainedCandidates` supplies the containment, variant, catalog
+	// (current, tool-calling, text), price-known and never-tiny gates. Its own
+	// cheap/workhorse/frontier ordering is replaced below: this policy selects the
+	// numerically cheapest model that clears those gates.
+	const eligible = economicalContainedCandidates(available, sessionModel).filter(screenable);
 	// A catalog normally includes the active model, but the active row is also a
-	// valid choice when it is absent from a stale catalog. Include it only when it
-	// meets the same automatic gates; a tiny session remains a terminal fallback.
-	if (
-		intrinsicTier(sessionModel) !== "tiny" &&
-		pricedInput(sessionModel) !== undefined &&
-		capable(sessionModel) &&
-		!eligible.some((model) => model.provider === sessionModel.provider && model.id === sessionModel.id)
-	) eligible.push(sessionModel);
+	// valid choice when it is absent from a stale catalog. A tiny or unpriced
+	// session remains only the terminal fallback.
+	if (sessionTier !== "tiny" && sessionPrice !== undefined && !eligible.some(isSession)) eligible.push(sessionModel);
 	eligible.sort((a, b) => pricedInput(a)! - pricedInput(b)!);
-	for (const model of eligible) {
-		push(model, model.provider === sessionModel.provider && model.id === sessionModel.id ? "session" : "economical");
-	}
+	for (const model of eligible) push(model, isSession(model) ? "session" : "economical");
+	const fallbackText = `Auto mode is screening calls with ${spec(sessionModel)}, this session's model, because no cheaper same-provider/route model in its ${sessionTier} tier or above contains its ${sessionModel.contextWindow}-token catalog context window.`;
 	if (candidates.length > 0) {
 		// The startup notice needs a reason even when the session was eligible in
 		// its own right: otherwise a renderer cannot distinguish "no alternate can
 		// contain the transcript" from "the session is simply the cheapest choice".
 		if (candidates[0].source === "session") {
-			const hasAlternate = candidates.some((candidate) => candidate.source === "economical");
-			const fallback: ClassifierFallback = hasAlternate
-				? {
-					reason: "session-is-cheapest-qualified",
-					text: `Auto mode is screening calls with ${spec(sessionModel)}, this session's model, because it is the cheapest same-provider/route model meeting the capability floor and this session's ${sessionModel.contextWindow}-token catalog context window.`,
-				}
-				: {
-					reason: "no-qualifying-model",
-					text: `Auto mode is screening calls with ${spec(sessionModel)}, this session's model, because no other same-provider/route model meets both the capability floor and this session's ${sessionModel.contextWindow}-token catalog context window.`,
-				};
+			const fallback: ClassifierFallback = {
+				reason: candidates.length > 1 ? "session-is-cheapest-qualified" : "no-qualifying-model",
+				text: fallbackText,
+			};
 			notices.push({ level: "info", text: fallback.text, fallbackReason: fallback.reason });
 			return { candidates, notices, fallback };
 		}
@@ -135,14 +132,19 @@ export function classifierCandidates({
 		return { candidates, notices };
 	}
 
-	const fallback: ClassifierFallback = {
-		reason: "no-qualifying-model",
-		text: `Auto mode is screening calls with ${spec(sessionModel)}, this session's model, because no same-provider/route model meets both the capability floor and this session's ${sessionModel.contextWindow}-token catalog context window.`,
-	};
+	const fallback: ClassifierFallback = { reason: "no-qualifying-model", text: fallbackText };
 	push(sessionModel, "session");
 	notices.push({ level: "info", text: fallback.text, fallbackReason: fallback.reason });
 	return { candidates, notices, fallback };
 }
+
+/**
+ * An experimental build (`deepseek-v4-flash-vision-exp`, `tev1-4b-experimental`):
+ * a research variant, not the release a permission gate should run on.
+ * `preview` is deliberately not matched: Google ships mainline Gemini models
+ * under it (`gemini-3-flash-preview`).
+ */
+const EXPERIMENTAL_BUILD = /-exp(?:$|[-:])|experimental/i;
 
 /** A positive finite catalog window is the only value safe for automatic routing. */
 function hasCatalogContextWindow(model: Model<Api>): model is Model<Api> & { contextWindow: number } {
@@ -184,7 +186,7 @@ export function describeCandidate(candidate: Candidate): string {
 	const where = modelIdentity(candidate.model).profile ?? candidate.model.provider;
 	switch (candidate.source) {
 		case "economical":
-			return `${name} (cheapest model within ${where} that meets the capability floor and contains the session catalog context window)`;
+			return `${name} (cheapest model within ${where} in the session's tier or above that contains the session catalog context window)`;
 		case "session":
 			return `${name} (this session's model)`;
 	}

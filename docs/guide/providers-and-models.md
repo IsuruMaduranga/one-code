@@ -85,56 +85,31 @@ affordable while the parent session stays on a frontier model.
 
 For its side roles, One Code chooses a model from the **same provider** as
 your session; automatic picks never send your data to another provider. The
-choice is the cheapest model that clears a capability floor:
+choice is the cheapest model in your session's tier (see the next section):
 
-- **Subagents and the classifier** share a capability floor: a Sonnet-class
-  model when your session runs a Sonnet-class or stronger model, and a
-  Haiku-class model otherwise. A subagent is never dearer than your main
-  model; if nothing cheaper qualifies, it runs on the main model.
-- **The classifier** additionally requires a known catalog context window at
-  least as large as your session model's. It chooses the cheapest qualifying
-  model automatically, re-evaluating when you switch models. If no model
-  qualifies, or the session window is unknown, it uses the session model.
-- **The reader** (web fetch answers, recaps) uses the cheapest capable
-  model.
+- **Subagents** run on the cheapest model in your session's tier or above
+  that's cheaper than your main model. An Opus session delegates to Sonnet
+  5.5, both frontier; a Haiku-tier session never gets upgraded. If nothing
+  cheaper qualifies, subagents use the main model.
+- **The classifier** uses the same rule, but a model priced the same as yours
+  is fine too. It's never a lower tier than your session, never dearer, and
+  never an experimental build (a `-exp` model). Whatever gets picked has to
+  fit your session's whole context window, and the pick is redone when you
+  switch models. If nothing qualifies, your own model screens its calls.
+- **The reader** (web fetch answers, recaps) uses the cheapest model that
+  isn't tiny.
 
 Claude Code's model aliases work everywhere: `sonnet`, `haiku`, `opus` and
 `fable` resolve to a model of that name when your provider has one, and
 otherwise to the matching class within your provider (`haiku` the cheapest
-capable model, `sonnet` the cheapest Sonnet-class model, `opus` and `fable`
-your main model). They never switch providers.
+non-tiny model, `sonnet` the cheapest workhorse-tier model, `opus` and
+`fable` your main model). They never switch providers.
 
-Capability is judged by tier (see the next section). One Code excludes
-models that can't call tools, have no price, or are a generation behind: a
-model released more than a year after its vendor's newest drops one tier,
-and one more than two years behind never gets picked automatically.
-Provider aliases such as `:free` or `:online` variants are skipped.
-
-### Measured selection with Artificial Analysis
-
-If you have an [Artificial Analysis](https://artificialanalysis.ai) API key,
-One Code uses measured coding ability instead of name-based tiers for these
-picks: a candidate must score at least the lower of your session model's
-coding index and a Sonnet 5 reference (the reader gets 10 percent
-tolerance; subagents and the classifier get none). The score can also move
-a model to a more scaffolded prompt: a model whose coding index is below 85
-percent of the Sonnet 5 reference gets at most the cheap register, and one
-below 60 percent at most the tiny register. A score never moves a model to
-a leaner register than its name class allows. Models sold under several
-providers share one release date for this purpose, so a Codex or Azure
-listing is scored like its OpenAI twin. Set `AA_API_KEY`, or add the key to `~/.onecode/settings.json`:
-
-```json
-{
-  "capabilityIndex": {
-    "artificialAnalysisApiKey": "…"
-  }
-}
-```
-
-The snapshot is cached under `~/.onecode/cache/` and refreshed at most once
-a day. Without a key, selection uses tiers alone. The measured index never
-changes the prompt tier itself.
+An automatic pick is always a model the public catalogs know and consider
+current. It skips a model that a newer one from the same vendor replaces at
+about the same price, one more than two years older than its vendor's newest
+release, and anything deprecated, unable to call tools, or unpriced.
+Provider aliases such as `:free` or `:online` variants are skipped too.
 
 `/doctor report` shows the model each role gets and why, and `/doctor
 presets` offers three coordinated presets; see
@@ -147,19 +122,58 @@ the system prompt to match:
 
 | Tier | Models | Prompt |
 |---|---|---|
-| Frontier | Opus and Fable, current generation, and OpenAI's GPT-6 Astra and Sol, served by OpenAI itself. | Claude Code's terse prompt. |
-| Workhorse | Sonnet-class models and comparable third-party models. | Claude Code's full prompt. |
-| Cheap | Haiku-class models and comparable "flash", "mini", or "small" models. | The verbose prompt Claude Code gives Haiku. |
-| Tiny | Sub-Haiku models. | The verbose prompt plus extra scaffolding and the `grep`, `find`, and `ls` tools. |
+| Frontier | Opus and Fable, current generation, Sonnet 5.5 and later, and OpenAI's GPT-6 Astra and Sol, served by Anthropic and OpenAI themselves. | Claude Code's terse prompt. |
+| Workhorse | A vendor's large current models. | Claude Code's full prompt. |
+| Cheap | A vendor's smaller models, and large ones a year or more behind its newest. | The verbose prompt Claude Code gives Haiku. |
+| Tiny | Small models: under 40 billion parameters. | The verbose prompt plus extra scaffolding and the `grep`, `find`, and `ls` tools. |
 
-The tier is derived from the model's name, release date, and price. You
-don't configure it; set `CC_PROMPT_TIER` to force one when you want to
-experiment. `/doctor report` shows the tier in use.
+Frontier follows Claude Code's own rule, by model version. Everything else
+comes from three public catalogs: [models.dev](https://models.dev) for
+release dates and prices, OpenRouter's model list, and Hugging Face for
+parameter counts. Each model is compared with its own vendor's current
+lineup, not with other vendors:
+
+- An open-weight model is workhorse when it has at least half the
+  parameters of the vendor's largest current model.
+- A model with no published size is workhorse when its price is at least
+  30 percent of the median price of the vendor's current models. The
+  median keeps a premium `-pro` or `-fast` model from setting the bar.
+- A vendor with fewer than three current priced models has nothing to
+  compare against, so its models count as cheap.
+- A workhorse model more than a year older than its vendor's newest one
+  drops to cheap. Age never makes a model tiny.
+
+A model no catalog knows is tiny when its name gives a small size (`27b`)
+or it has no price or runs on a custom provider, and cheap otherwise.
+
+One Code ships with a copy of all three catalogs and refreshes them once a
+day in the background from interactive sessions; a one-shot `-p` run only
+reads the copy on disk. A refresh changes the tier at your next session or
+model switch, never in the middle of one. Set `"refreshModelCatalog": false`
+in `~/.onecode/settings.json` (or `PI_OFFLINE=1`) to stay on the copy you
+have.
+
+If you disagree with a tier, set it yourself in `~/.onecode/settings.json`,
+by `provider/id` or by bare model id:
+
+```json
+{
+  "modelTiers": {
+    "openrouter/qwen/qwen3.8-max": "workhorse",
+    "glm-5.3-flash": "cheap"
+  }
+}
+```
+
+This setting is read from your user settings only, never from a project.
+`CC_PROMPT_TIER` forces one tier for the session's prompt when you want to
+experiment. `/doctor report` shows the tier in use and the rule that set it.
 
 The tier also decides which permission shortcuts apply in auto and
 accept-edits modes (see [What is approved without a classifier
 call](permissions-modes-and-auto-mode.md#what-is-approved-without-a-classifier-call)).
-`CC_PROMPT_TIER` never changes the permission checks.
+`CC_PROMPT_TIER` never changes the permission checks; `modelTiers` does,
+because it states what the model is.
 
 Like Claude Code, One Code gives frontier models and Sonnet 5 or later no
 task list: the `task_create` family is left out, along with the prompt line

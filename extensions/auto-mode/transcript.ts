@@ -117,6 +117,17 @@ export function isHistoricalRead(entry: TranscriptEntry): boolean {
  * than judging an action with silently missing history.
  */
 export function renderTranscript(entries: TranscriptEntry[]): string {
+	const { history, tail } = transcriptBlocks(entries);
+	return history.join("") + tail;
+}
+
+/** Stable entry boundaries; the pending action and its harness facts stay in the tail. */
+export function transcriptBlocks(entries: TranscriptEntry[]): { history: string[]; tail: string } {
 	const visible = entries.filter((entry, i) => i === entries.length - 1 || !isHistoricalRead(entry));
-	return `<transcript>\n${visible.map(renderEntry).join("\n")}\n</transcript>`;
+	let historyEnd = Math.max(0, visible.length - 1);
+	while (historyEnd > 0 && ["meta", "resolved-paths"].includes(visible[historyEnd - 1].kind)) historyEnd--;
+	return {
+		history: ["<transcript>", ...visible.slice(0, historyEnd).map((entry) => `\n${renderEntry(entry)}`)],
+		tail: `\n${visible.slice(historyEnd).map(renderEntry).join("\n")}\n</transcript>`,
+	};
 }

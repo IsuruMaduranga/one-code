@@ -462,12 +462,14 @@ const FIND_PRIMARIES: Record<string, 0 | 1> = Object.fromEntries([
 const FIND_FILE_PRIMARIES = new Set(["-newer", "-anewer", "-cnewer", "-Bnewer", "-samefile"]);
 
 /**
- * Parse a find command line. Returns its starting points and the file values
- * of `-newer`-style primaries, or the reason it is not read-only.
+ * Parse a find command line. Returns its starting points, the file values of
+ * `-newer`-style primaries and the indexes of the expression's primaries and
+ * operators (not their values), or the reason it is not read-only.
  */
-export function checkFind<W extends Word>(args: readonly W[]): { ok: true; paths: W[] } | { ok: false; reason: string } {
+export function checkFind<W extends Word>(args: readonly W[]): { ok: true; paths: W[]; expression: number[] } | { ok: false; reason: string } {
 	let i = 0;
 	const paths: W[] = [];
+	const expression: number[] = [];
 	// Leading options: clusters of the no-value letters, `-O<level>`, and
 	// `-D <debug>` / BSD's `-f <path>` as separate words. Anything else that
 	// starts with `-` is the expression (`-fprint` is not `-f print`).
@@ -496,13 +498,78 @@ export function checkFind<W extends Word>(args: readonly W[]): { ok: true; paths
 		const newer = /^-newer[aBcmt][aBcmt]$/.test(word);
 		const consumes = newer ? 1 : FIND_PRIMARIES[word];
 		if (consumes === undefined) return { ok: false, reason: `uses find ${word}, which is not a known read-only primary` };
+		expression.push(i);
 		if (consumes === 1) {
 			const value = args[i + 1];
 			if (value !== undefined && (FIND_FILE_PRIMARIES.has(word) || newer)) paths.push(value);
 			i++;
 		}
 	}
-	return { ok: true, paths };
+	return { ok: true, paths, expression };
+}
+
+/** find's tests whose operand is a name or path pattern. */
+export const FIND_PATTERN_TESTS: ReadonlySet<string> = new Set(["-name", "-iname", "-path", "-ipath", "-wholename", "-iwholename", "-regex", "-iregex", "-lname", "-ilname"]);
+
+/**
+ * A read-only find's negated pattern operands, by index into `args`, or
+ * undefined when the find is not read-only (an action, an unknown primary)
+ * and this does not read its expression. `excluding` holds those that can
+ * only exclude files: under exactly one `!`/`-not` at the top level of an
+ * expression with no top-level `-o`/`-or` and no `,`, alone
+ * (`-not -path './.git/*'`) or in a negated group of pattern tests joined by
+ * `-o` (`! ( -path a -o -path b )`). Every file the find selects fails such a
+ * pattern. `selecting` holds the rest, which can select the files they name
+ * (`-not -name x -o -print`, `! ! -name x`, `-not ( -name x -empty )`).
+ */
+export function findNegatedPatterns<W extends Word>(args: readonly W[]): { excluding: Set<number>; selecting: Set<number> } | undefined {
+	const find = checkFind(args);
+	if (!find.ok) return undefined;
+	const ops = find.expression;
+	const at = (k: number) => args[ops[k]]?.value;
+	const negation = (k: number) => at(k) === "!" || at(k) === "-not";
+	// Every pattern under any negation: those directly before it, and before each group around it.
+	const negated = new Set<number>();
+	const groupNegations: number[] = [];
+	let pending = 0;
+	for (let k = 0; k < ops.length; k++) {
+		const word = at(k);
+		if (negation(k)) {
+			pending++;
+			continue;
+		}
+		if (word === "(") groupNegations.push(pending);
+		else if (word === ")") groupNegations.pop();
+		else if (FIND_PATTERN_TESTS.has(word ?? "") && pending + groupNegations.reduce((sum, count) => sum + count, 0) > 0) negated.add(ops[k] + 1);
+		pending = 0;
+	}
+	const excluding = new Set<number>();
+	const result = () => ({ excluding, selecting: new Set([...negated].filter((index) => !excluding.has(index))) });
+	let depth = 0;
+	for (let k = 0; k < ops.length; k++) {
+		const word = at(k);
+		if (word === "(") depth++;
+		else if (word === ")" && --depth < 0) return result();
+		if (word === "," || (depth === 0 && (word === "-o" || word === "-or"))) return result();
+	}
+	if (depth !== 0) return result();
+	for (let k = 0; k < ops.length; k++) {
+		const word = at(k);
+		if (word === "(") depth++;
+		else if (word === ")") depth--;
+		if (depth !== 0 || !negation(k) || negation(k - 1) || negation(k + 1)) continue;
+		if (FIND_PATTERN_TESTS.has(at(k + 1) ?? "")) {
+			excluding.add(ops[k + 1] + 1);
+		} else if (at(k + 1) === "(") {
+			// The group's members, up to its `)`: pattern tests alternating with `-o`.
+			const members: number[] = [];
+			for (let m = k + 2; m < ops.length && at(m) !== ")"; m++) members.push(m);
+			const disjunction = members.length % 2 === 1 &&
+				members.every((member, n) => (n % 2 === 0 ? FIND_PATTERN_TESTS.has(at(member) ?? "") : at(member) === "-o" || at(member) === "-or"));
+			if (disjunction) for (let n = 0; n < members.length; n += 2) excluding.add(ops[members[n]] + 1);
+		}
+	}
+	return result();
 }
 
 // ---------------------------------------------------------------------------

@@ -32,6 +32,7 @@
 			"extensions/context-budget/index.ts",
 			"extensions/system-reminder/index.ts",
 			"extensions/claude-context/index.ts",
+			"extensions/tool-call-corruption/index.ts",
 			"extensions/hooks/index.ts",
 			"extensions/tool-search/index.ts",
 			"extensions/search-tools/index.ts",
@@ -51,6 +52,7 @@
 			"extensions/effort/index.ts",
 			"extensions/spinner/index.ts",
 			"extensions/model-default/index.ts",
+			"extensions/newer-model/index.ts",
 			"extensions/footer/index.ts",
 			"extensions/turn-duration/index.ts",
 			"extensions/interrupted/index.ts",
@@ -92,7 +94,7 @@
 	"scripts": {
 		"typecheck": "tsc --noEmit",
 		"test": "vitest run",
-		"gen:model-facts": "node scripts/gen-model-facts.mjs",
+		"gen:model-catalog": "node scripts/gen-model-catalog.mjs",
 		"sync:app-readme": "node scripts/app-readme.mjs"
 	},
 	"dependencies": {

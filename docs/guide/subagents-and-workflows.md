@@ -90,10 +90,9 @@ Two options change how a subagent runs:
 
 Subagents and workflow agents can run on a different model or provider
 from the main session. The default is chosen for you: the cheapest model on
-your provider that meets the same capability floor auto mode's classifier
-uses (a Sonnet-class model for a Sonnet-class or stronger session), never a
-dearer one than your main model. When an Artificial Analysis key is
-configured, measured coding ability is used for that floor; see
+your provider in your main model's tier or above, and cheaper than it. An
+Opus session delegates to Sonnet 5.5; if nothing cheaper is in your tier,
+subagents run on your main model. See
 [Automatic model selection](providers-and-models.md#automatic-model-selection).
 
 To set the default yourself:

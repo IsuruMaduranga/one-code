@@ -4,14 +4,14 @@
  * event bus. No module state is shared (each extension has its own jiti copy),
  * and an extension loaded in isolation still installs its own owner.
  *
- * Only session_start and model_select classify. A capability refresh can affect
+ * Only session_start and model_select classify. A catalog refresh can affect
  * automatic model selection immediately, but prompt text, tool descriptions,
  * and tier-dependent steering keep the same tier until the next boundary.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { type PromptTier, resolveModelTier } from "./model-tier.ts";
-import { invalidateCapabilitySnapshotCache } from "./capability-index.ts";
+import { invalidateCatalogCache } from "./model-catalog-data.ts";
 
 const SESSION_TIER_REQUEST_CHANNEL = "one-code:session-tier-request";
 
@@ -34,8 +34,8 @@ export function sessionModelTier(pi: Pick<ExtensionAPI, "events" | "on">): () =>
 		});
 		const resolve = (model: Parameters<typeof resolveModelTier>[0]) => {
 			// Doctor's jiti copy cannot clear our memo. Do not freeze a stale
-			// snapshot if the boundary lands inside the disk cache's stat throttle.
-			invalidateCapabilitySnapshotCache();
+			// catalog if the boundary lands inside the disk cache's stat throttle.
+			invalidateCatalogCache();
 			tier = resolveModelTier(model);
 		};
 		// Registered before the first consumer's hooks. Later consumers preserve

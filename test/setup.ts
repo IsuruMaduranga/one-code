@@ -1,19 +1,19 @@
 import { beforeEach } from "vitest";
-import { setCapabilitySnapshotForTest } from "../extensions/lib/capability-index.ts";
-import { setModelFactsForTest } from "../extensions/lib/model-facts.ts";
+import { emptyCatalogSources, setCatalogSourcesForTest } from "../extensions/lib/model-catalog-data.ts";
+import { setModelTierOverridesForTest } from "../extensions/lib/model-tier.ts";
 import { bashParserReady } from "../extensions/lib/bash-parser.ts";
 import { resetConfigModeForTest } from "../extensions/lib/config-mode.ts";
 
-// Hermetic by default: no bundled model facts (see vitest.config.ts). A test
-// that wants the real table calls `setModelFactsForTest(undefined)` itself and
-// gets reset before the next test.
-setModelFactsForTest({});
-beforeEach(() => setModelFactsForTest({}));
+// Hermetic by default: an empty model catalog (see vitest.config.ts), so every
+// model takes the no-catalog rules unless a test pins sources with
+// `setCatalogSourcesForTest` (test/unit/catalog-fixture.ts builds them); the
+// catalog-wide snapshot test reads the bundled copy. Reset before each test.
+setCatalogSourcesForTest(emptyCatalogSources());
+beforeEach(() => setCatalogSourcesForTest(emptyCatalogSources()));
 
-// Likewise no Artificial Analysis snapshot: every capability verdict is
-// "unscored" unless a test pins one with setCapabilitySnapshotForTest.
-setCapabilitySnapshotForTest(undefined);
-beforeEach(() => setCapabilitySnapshotForTest(undefined));
+// Likewise no `modelTiers` from the machine's ~/.onecode/settings.json.
+setModelTierOverridesForTest({});
+beforeEach(() => setModelTierOverridesForTest({}));
 
 // Claude-compatible mode regardless of the machine's ~/.onecode/settings.json;
 // a test of independent mode pins it with resetConfigModeForTest("independent").
