@@ -64,6 +64,15 @@ describe("worktree state announcements", () => {
 		expect(stateReminders.find((entry) => entry.text?.startsWith("Worktree session active"))).toMatchObject({ toolCallId: "e2" });
 	});
 
+	it("enters a listed worktree whatever its spelling (git lists C:/… on Windows)", async () => {
+		const spellings = [`${worktree}/`, join(".claude", "worktrees", "feature"), worktree.replace(/\\/g, "/")];
+		for (const [i, path] of spellings.entries()) {
+			const result = (await fake.tools.get("enter_worktree")!.execute(`p${i}`, { path }, undefined, undefined, createFakeCtx({ cwd: repo }))) as { isError?: boolean; content: { text: string }[] };
+			expect(result.isError, path).toBeUndefined();
+			expect(result.content[0]?.text).toContain(`Switched into existing worktree ${worktree}`);
+		}
+	});
+
 	it("announces a restored worktree that disappeared instead of silently clearing its sticky state", async () => {
 		const resumed = createFakePi();
 		const reminders: ReminderPayload[] = [];

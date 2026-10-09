@@ -21,6 +21,7 @@ import { Type } from "typebox";
 import { restoreLatestDetails } from "../lib/branch-restore.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
+import { absoluteFrom, comparablePath } from "../lib/paths.ts";
 import { WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
 import { namesGit, unlistedWorktreesReason, worktreeBashGuardReason } from "./guards.ts";
 import { worktreePowershellGuardReason } from "./powershell-guards.ts";
@@ -181,7 +182,10 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 
 			if (params.path) {
 				const known = await listWorktreePaths(ctx.cwd);
-				const target = known.find((p) => p === params.path);
+				// git lists `C:/…` on Windows, while the model passes the `C:\…` we showed it.
+				const wanted = comparablePath(absoluteFrom(ctx.cwd, params.path));
+				const listed = known.find((p) => comparablePath(p) === wanted);
+				const target = listed === undefined ? undefined : resolve(listed);
 				if (!target) return fail(`${params.path} is not a worktree of this repository. Known worktrees:\n${known.join("\n")}`);
 				// The branch is display-only here (footer, reminder): a detached HEAD
 				// leaves it unset silently, a failing git is reported in the result text.
