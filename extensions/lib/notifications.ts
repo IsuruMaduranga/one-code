@@ -30,6 +30,7 @@
  * (`createTaskNotifier`, further down) is unchanged by the frame shape.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
+import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { withKeepAlive } from "../lsp/keep-alive.ts";
 import { ONE_SHOT_COMMAND_FAILED_CHANNEL, RunOutcomeLatch } from "./interrupt.ts";
@@ -642,6 +643,8 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 		text: string;
 		details: Record<string, unknown>;
 		resent: boolean;
+		/** Unmerged arrivals so a held group can withdraw one task without losing its peers. */
+		items: Incoming[];
 	}
 	interface Incoming {
 		customType: string;
@@ -650,7 +653,10 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 	}
 	const coalesceMs = options.coalesceMs ?? DEFAULT_COALESCE_MS;
 	const pending = new Map<string, Pending>();
+	// Every notifier hears every message_end; simultaneous producers must not share an outbox id.
+	const producerId = randomUUID();
 	let seq = 0;
+	const nextId = () => `${producerId}-${++seq}`;
 	/** False once the session this notifier belongs to has shut down. */
 	let active = true;
 	/**
@@ -681,7 +687,7 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 		// exception: it opens its own turn.
 		if (interrupted && !busy && (entry.resent || !REINVOCATION_TYPES.has(entry.customType))) {
 			pending.delete(id);
-			held.push({ customType: entry.customType, text: entry.text, details: entry.details });
+			held.push(...entry.items);
 			return;
 		}
 		try {
@@ -715,7 +721,7 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 			: {
 					customType: group[0].customType,
 					text: mergeNotificationTexts(group.map((n) => n.text)),
-					// A held entry can itself be a merged one: keep the list flat.
+					// Keep any pre-batched metadata flat.
 					details: {
 						[NOTIFICATION_BATCH_KEY]: group.flatMap(
 							(n) => (n.details[NOTIFICATION_BATCH_KEY] as unknown[] | undefined) ?? [{ customType: n.customType, details: n.details }],
@@ -726,8 +732,8 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 	/** One outbox entry per group. */
 	const enqueue = (group: Incoming[]) => {
 		if (group.length === 0) return;
-		const id = `${++seq}-${Date.now().toString(36)}`;
-		const entry: Pending = { ...merge(group), resent: false };
+		const id = nextId();
+		const entry: Pending = { ...merge(group), resent: false, items: group };
 		pending.set(id, entry);
 		dispatch(id, entry);
 	};
@@ -786,7 +792,7 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 						customType: entry.customType,
 						content: [{ type: "text", text: frameForDelivery(entry.text, "with-user-prompt") }],
 						display: true,
-						details: { ...entry.details, [NOTIFICATION_ID_KEY]: `${++seq}-${Date.now().toString(36)}` },
+						details: { ...entry.details, [NOTIFICATION_ID_KEY]: nextId() },
 					},
 					{ deliverAs: "nextTurn" },
 				);

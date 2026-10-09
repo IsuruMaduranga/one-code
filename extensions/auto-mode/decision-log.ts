@@ -38,6 +38,8 @@ export interface DecisionEntry {
 	raw?: string;
 	/** `provider/id` of the model that produced a classifier verdict. */
 	model?: string;
+	/** The provider rejected the full classifier transcript as too long, not unsafe. */
+	transcriptTooLong?: true;
 }
 
 const SUBJECT_LIMIT = 300;

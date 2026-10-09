@@ -210,6 +210,11 @@ export function loadCapabilitySnapshot(stateDir: string): CapabilitySnapshot | u
 	return snapshot;
 }
 
+/** Forget this extension's disk memo so a lifecycle boundary sees other instances' refreshes. */
+export function invalidateCapabilitySnapshotCache(): void {
+	memo = undefined;
+}
+
 export function snapshotAgeMs(snapshot: CapabilitySnapshot, now: Date = new Date()): number {
 	return Math.max(0, now.getTime() - Date.parse(snapshot.fetchedAt));
 }

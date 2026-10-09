@@ -7,7 +7,7 @@
  *   <category> (+ our verified <intent>). Both stages share one system prompt and
  *   transcript byte-for-byte. Only the system prompt (the ~30k-token ruleset) is
  *   a cache hit across stages and calls: pi-ai marks a breakpoint on the last
- *   user block only, so the <transcript> (up to ~15k tokens) is re-read uncached
+ *   user block only, so the <transcript> is re-read uncached
  *   by stage 2 and by every gated call on Anthropic-style providers. Known,
  *   deferred — working-docs/decisions/caching.md "Classifier transcript" and
  *   working-docs/upstream_prs.md #16 (fixable locally via pi-ai's `onPayload`).
@@ -19,7 +19,7 @@
  * has approved nothing.
  */
 
-import type { Model, Api, AssistantMessage, ThinkingLevel } from "@earendil-works/pi-ai";
+import { isContextOverflow, type Model, type Api, type AssistantMessage, type ThinkingLevel } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { forcedReasoningLevel, isReasoningMandatoryError, reasoningRetryLevel } from "../lib/model-policy.ts";
@@ -81,6 +81,13 @@ export function isTransportFailure(message: string): boolean {
 	);
 }
 
+/** A provider rejected the input window, not the action's safety or output limit. */
+export function isClassifierTranscriptTooLong(message: string): boolean {
+	// Only pi-ai's error-pattern branch: no catalog window means this never
+	// infers overflow from an estimate or a model's reported usage.
+	return isContextOverflow({ stopReason: "error", errorMessage: message } as AssistantMessage);
+}
+
 /** Pause before retrying after a transport failure, so a brief network drop can clear. */
 export const TRANSPORT_RETRY_DELAY_MS = 1500;
 
@@ -102,10 +109,10 @@ export interface ClassifierState {
 	 */
 	timeoutStreak: number;
 	/**
-	 * The candidate chain cached for the current (session model, classifier config)
-	 * signature, so the O(catalog) ranking is not rebuilt on every gated tool call.
-	 * Invalidated only when the session model or the `classifierModel` setting
-	 * changes — catalog churn is deliberately ignored, matching the pin, which
+	 * The candidate chain cached for the current session-model/window signature,
+	 * so the O(catalog) ranking is not rebuilt on every gated tool call.
+	 * Invalidated when the session model or its catalog context window changes —
+	 * catalog churn is otherwise deliberately ignored, matching the pin, which
 	 * already commits the session to one classifier. The live `rejected` filter is
 	 * still applied to the cached chain per call, so a model that dies mid-session
 	 * is still stepped over without a rebuild.
@@ -133,7 +140,7 @@ export interface ClassifierDeps {
 	signal?: AbortSignal;
 	state: ClassifierState;
 	/** Tell the user something once — which model is in use, or that theirs is dead. */
-	onNotice?: (message: string, level: "info" | "warning") => void;
+	onNotice?: (message: string, level: "info" | "warning", notice?: ClassifierNotice) => void;
 	/** Report each classifier reply's usage, for the all-in footer cost. Observer
 	 * only — it never affects the payload sent or the verdict parsed. */
 	onUsage?: (usage: unknown) => void;
@@ -153,7 +160,7 @@ export interface ClassifierDeps {
 }
 
 /** How a single candidate's attempt failed, so the outer loop can react. */
-type StepKind = "timeout" | "cancelled" | "unavailable" | "error" | "truncated";
+type StepKind = "timeout" | "cancelled" | "unavailable" | "error" | "truncated" | "transcript-too-long";
 class StepError extends Error {
 	constructor(
 		readonly kind: StepKind,
@@ -165,8 +172,8 @@ class StepError extends Error {
 
 /** Signature that must stay equal for the cached chain to be reused (see ClassifierState.chainCache). */
 function selectionSignature(deps: ClassifierDeps): string {
-	const session = deps.sessionModel ? `${deps.sessionModel.provider}/${deps.sessionModel.id}` : "(none)";
-	return `${session}|${deps.config.classifierModel ?? ""}|${deps.config.classifierModelSetFor ?? ""}`;
+	const session = deps.sessionModel;
+	return session ? `${session.provider}/${session.id}|${session.contextWindow ?? "unknown"}` : "(none)";
 }
 
 /** The candidate chain (minus anything already unusable this session) and its notices. */
@@ -174,12 +181,7 @@ function remainingCandidates(deps: ClassifierDeps): { candidates: Candidate[]; n
 	const signature = selectionSignature(deps);
 	let cached = deps.state.chainCache;
 	if (!cached || cached.signature !== signature) {
-		const built = classifierCandidates({
-			available: deps.registry.getAvailable(),
-			sessionModel: deps.sessionModel,
-			configured: deps.config.classifierModel,
-			configuredSetForContainment: deps.config.classifierModelSetFor,
-		});
+		const built = classifierCandidates({ available: deps.registry.getAvailable(), sessionModel: deps.sessionModel });
 		cached = { signature, candidates: built.candidates, notices: built.notices };
 		// Don't poison the cache with an empty chain (e.g. a not-yet-populated
 		// registry) — that would permanently block the gate; recompute next call.
@@ -196,10 +198,10 @@ function remainingCandidates(deps: ClassifierDeps): { candidates: Candidate[]; n
 	return { candidates: session.length > 0 ? session : all.slice(-1), notices };
 }
 
-function notifyOnce(deps: ClassifierDeps, key: string, message: string, level: "info" | "warning") {
+function notifyOnce(deps: ClassifierDeps, key: string, message: string, level: "info" | "warning", notice?: ClassifierNotice) {
 	if (deps.state.notified.has(key)) return;
 	deps.state.notified.add(key);
-	deps.onNotice?.(message, level);
+	deps.onNotice?.(message, level, notice);
 }
 
 /**
@@ -212,10 +214,8 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 		return { decision: "block", reason: "No model is available to run the auto-mode classifier.", tier: "unmatched", noVerdict: true };
 	}
 
-	// Selection notices (a configured model unavailable or overridden as stale, a
-	// cross-provider setting honored) — surfaced once each at their own level, keyed
-	// by their text so an informational "honored" line is not shown as a warning.
-	for (const notice of notices) notifyOnce(deps, notice.text, notice.text, notice.level);
+	// Automatic-selection fallback explanations are surfaced once per distinct message.
+	for (const notice of notices) notifyOnce(deps, notice.text, notice.text, notice.level, notice);
 
 	// The action is sent whole (transcript.ts MAX_ACTION_CHARS); one too large for
 	// that is refused with its size, never judged from a prefix.
@@ -326,6 +326,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 				if (deps.signal?.aborted) throw new StepError("cancelled", "cancelled");
 				if (reply.stopReason === "error" || reply.stopReason === "aborted") {
 					const msg = reply.errorMessage ?? reply.stopReason ?? "provider error";
+					if (isContextOverflow(reply)) throw new StepError("transcript-too-long", msg);
 					if (isClassifierTimeout(msg) || isTransportFailure(msg)) throw new StepError("timeout", msg);
 					throw new StepError(isModelUnavailableError(msg) ? "unavailable" : "error", msg);
 				}
@@ -420,12 +421,23 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 			if (kind === "cancelled") {
 				return { decision: "block", reason: "Auto-mode classification was cancelled.", tier: "unmatched", noVerdict: true };
 			}
+			// The provider is authoritative about its token window. Do not clip the
+			// history or retry another model: the gate must offer manual approval
+			// interactively, or stop a headless run, rather than invent a verdict.
+			if (kind === "transcript-too-long" || (kind === "error" && isClassifierTranscriptTooLong(lastError))) {
+				return {
+					decision: "block",
+					reason: `Classifier transcript exceeded context window (${key}). The action was not judged. Compact the session (/compact) and continue.`,
+					tier: "unmatched",
+					noVerdict: true,
+					transcriptTooLong: true,
+				};
+			}
 			if (kind === "truncated") {
 				if (debug) process.stderr.write(`[auto-mode] ${key} ${request.toolName} → verdict truncated at maxTokens\n`);
 				return {
 					decision: "block",
-					reason:
-						"The approval classifier's reply was cut off by its output limit before the verdict completed. If this keeps happening, pin a stronger classifier model with /auto-mode model.",
+					reason: "The approval classifier's reply was cut off by its output limit before the verdict completed.",
 					tier: "unmatched",
 					noVerdict: true,
 				};
@@ -465,13 +477,10 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 			// unavailable: this model is not usable here — step over it and record it.
 			reject(key);
 			deps.onModelUnusable?.(key, lastError);
-			const isConfigured = candidate.source === "configured";
 			notifyOnce(
 				deps,
 				`rejected:${key}`,
-				isConfigured
-					? `Auto mode cannot use ${key} from autoMode.classifierModel (${lastError}). Set a different model in ~/.onecode/settings.json.`
-					: `Auto mode cannot use ${key} as its classifier (${lastError}); trying another model. Set autoMode.classifierModel in ~/.onecode/settings.json to choose one.`,
+				`Auto mode cannot use ${key} as its classifier (${lastError}); trying another eligible model.`,
 				"warning",
 			);
 		}
@@ -497,7 +506,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 	// Every candidate was unusable — say which knob fixes it.
 	return {
 		decision: "block",
-		reason: `No usable auto-mode classifier model (last error: ${lastError}). Set autoMode.classifierModel in ~/.onecode/settings.json.`,
+		reason: `No usable auto-mode classifier model (last error: ${lastError}).`,
 		tier: "unmatched",
 		noVerdict: true,
 	};

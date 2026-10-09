@@ -1,16 +1,14 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { persistClassifierModel } from "../../extensions/auto-mode/config.ts";
+import { describe, expect, it } from "vitest";
 import {
 	decodePickerKey,
 	filterEntries,
 	matchRank,
 	renderModelPicker,
 	windowStart,
-} from "../../extensions/auto-mode/model-picker.ts";
+} from "../../extensions/lib/model-picker.ts";
 import { visibleWidth } from "../../extensions/lib/text-width.ts";
+
+const header = { title: "Select the default subagent model", subtitle: "Sets which model subagent runs use." };
 
 const plain = (_color: string, text: string) => text;
 
@@ -79,7 +77,7 @@ describe("windowStart", () => {
 describe("renderModelPicker", () => {
 	it("marks the cursor row and the currently configured model", () => {
 		const lines = renderModelPicker(
-			{ entries, index: 1, query: "", total: entries.length, current: "anthropic/claude-sonnet-5" },
+			{ ...header, entries, index: 1, query: "", total: entries.length, current: "anthropic/claude-sonnet-5" },
 			plain,
 		).join("\n");
 		expect(lines).toContain("❯ anthropic/claude-sonnet-5");
@@ -87,14 +85,9 @@ describe("renderModelPicker", () => {
 		expect(lines).toContain("$0.25/M in");
 	});
 
-	it("warns the picker sends prompts to whichever provider is chosen", () => {
-		const lines = renderModelPicker({ entries, index: 0, query: "", total: entries.length }, plain).join("\n");
-		expect(lines).toContain("reads your prompts");
-	});
-
-	it("uses a caller-provided title and subtitle in place of the classifier copy", () => {
+	it("uses the caller-provided title and subtitle", () => {
 		const lines = renderModelPicker(
-			{ entries, index: 0, query: "", total: entries.length, title: "Select the default subagent model", subtitle: "Sets which model subagent runs use." },
+			{ ...header, entries, index: 0, query: "", total: entries.length, title: "Select the default subagent model", subtitle: "Sets which model subagent runs use." },
 			plain,
 		).join("\n");
 		expect(lines).toContain("Select the default subagent model");
@@ -103,76 +96,27 @@ describe("renderModelPicker", () => {
 	});
 
 	it("says so when nothing matches", () => {
-		const lines = renderModelPicker({ entries: [], index: 0, query: "zzz", total: 4 }, plain).join("\n");
+		const lines = renderModelPicker({ ...header, entries: [], index: 0, query: "zzz", total: 4 }, plain).join("\n");
 		expect(lines).toContain("no available model matches");
 	});
 
 	it("reports how many of the catalog match a filter", () => {
 		const lines = renderModelPicker(
-			{ entries: entries.slice(0, 1), index: 0, query: "haiku", total: entries.length },
+			{ ...header, entries: entries.slice(0, 1), index: 0, query: "haiku", total: entries.length },
 			plain,
 		).join("\n");
 		expect(lines).toContain("1 of 4 models match");
 	});
 
 	it("cuts every line to the requested width (TUI-REVIEW H2)", () => {
-		// The default classifier subtitle is 115 columns and once crashed pi in a
-		// regular-mode 80-column terminal; at width 60 nothing may exceed 60.
-		const lines = renderModelPicker({ entries, index: 0, query: "", total: entries.length }, plain, 60);
+		// At width 60 no row or caller-provided header may exceed 60 columns.
+		const lines = renderModelPicker({ ...header, entries, index: 0, query: "", total: entries.length }, plain, 60);
 		for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(60);
 	});
 
 	it("keeps the key hint on its own line", () => {
-		const lines = renderModelPicker({ entries, index: 0, query: "", total: entries.length }, plain, 60);
+		const lines = renderModelPicker({ ...header, entries, index: 0, query: "", total: entries.length }, plain, 60);
 		expect(lines.some((line) => line.includes("type to filter"))).toBe(true);
 	});
 });
 
-describe("persistClassifierModel", () => {
-	let home: string;
-
-	beforeEach(() => {
-		home = mkdtempSync(join(tmpdir(), "cc-picker-"));
-		mkdirSync(join(home, ".onecode"), { recursive: true });
-	});
-
-	afterEach(() => {
-		rmSync(home, { recursive: true, force: true });
-	});
-
-	// classifierModel is One Code's own key: persisted to ~/.onecode, never ~/.claude.
-	const settingsPath = () => join(home, ".onecode", "settings.json");
-	const readSettings = () => JSON.parse(readFileSync(settingsPath(), "utf-8"));
-
-	it("creates the settings file when there is none", () => {
-		rmSync(join(home, ".onecode"), { recursive: true, force: true });
-		persistClassifierModel("openai/gpt-5-mini", home);
-		expect(readSettings()).toEqual({ autoMode: { classifierModel: "openai/gpt-5-mini" } });
-	});
-
-	it("preserves unrelated keys, including other autoMode fields", () => {
-		writeFileSync(
-			settingsPath(),
-			JSON.stringify({ permissions: { allow: ["Bash(npm test:*)"] }, autoMode: { classifyAllShell: true } }),
-		);
-		persistClassifierModel("anthropic/claude-haiku-4-5", home);
-		expect(readSettings()).toEqual({
-			permissions: { allow: ["Bash(npm test:*)"] },
-			autoMode: { classifyAllShell: true, classifierModel: "anthropic/claude-haiku-4-5" },
-		});
-	});
-
-	it("removes the setting on clear, dropping an emptied autoMode block", () => {
-		writeFileSync(settingsPath(), JSON.stringify({ autoMode: { classifierModel: "openai/gpt-5-mini" } }));
-		persistClassifierModel(undefined, home);
-		expect(readSettings()).toEqual({});
-	});
-
-	it("refuses to clobber a malformed settings file", () => {
-		// A lenient read merely skips rules; a lenient write would replace the
-		// user's whole settings file with only ours.
-		writeFileSync(settingsPath(), "{not json");
-		expect(() => persistClassifierModel("openai/gpt-5-mini", home)).toThrow();
-		expect(readFileSync(settingsPath(), "utf-8")).toBe("{not json");
-	});
-});

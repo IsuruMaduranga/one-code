@@ -19,7 +19,7 @@ import { generateTaskId, TASK_REGISTER_CHANNEL } from "../background/registry.ts
 import { type BashFinishSummary, runBackgroundBashBlocking, startBackgroundBash, tailCap } from "../bash/background.ts";
 import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, shellSummary, type TaskStatus, taskNotification } from "./notifications.ts";
 import { commandToEvaluate, trackOriginalCommands } from "./original-command.ts";
-import { persistIfLarge, sessionResultsDir } from "./persisted-output.ts";
+import { persistedFilePreview, persistIfLarge, sessionResultsDir } from "./persisted-output.ts";
 import { withClaudeCodeShellText } from "./shell-result.ts";
 import type { ShellSpawn } from "./shell-spawn.ts";
 import { keepSpillReadable } from "./spill-file.ts";
@@ -120,7 +120,7 @@ export function oneShotDeadlineNote(timeoutMs: number, explicit: boolean): strin
 /** `<sessionDir>/bash/<taskId>/output.log` — one spool location for every shell tool (the shell panel reads it). */
 export function taskLogPath(ctx: ExtensionContext, taskId: string): string | undefined {
 	try {
-		const dir = join(ctx.sessionManager.getSessionDir(), "bash", taskId);
+		const dir = join(sessionResultsDir(ctx), "bash", taskId);
 		mkdirSync(dir, { recursive: true });
 		return join(dir, "output.log");
 	} catch {
@@ -227,19 +227,22 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 			// keeps having no deadline (findings §31).
 			if (!sessionOutlivesTurn(ctx.mode)) {
 				const summary = await runBackgroundBashBlocking({ id, command, description, cwd: ctx.cwd, timeoutSeconds, logPath, shell }, signal);
-				const output = persistIfLarge(summary.output, { dir: sessionResultsDir(ctx), id: `${spec.name}-${id}`, maxBytes: ONE_SHOT_OUTPUT_CAP });
+				const spool = summary.logPath && Buffer.byteLength(summary.output, "utf8") > ONE_SHOT_OUTPUT_CAP
+					? persistedFilePreview(summary.logPath)
+					: undefined;
+				const output = spool ?? persistIfLarge(summary.output, { dir: sessionResultsDir(ctx), id: `${spec.name}-${id}`, maxBytes: ONE_SHOT_OUTPUT_CAP });
 				const deadline = summary.timedOut ? ` ${oneShotDeadlineNote(timeoutSeconds * 1000, explicitTimeout)}` : "";
 				return {
 					content: [
 						{
 							type: "text" as const,
-							text: `${spec.ccLabel} task ${id} (${description}) ${finishLine(summary, timeoutSeconds)}. ${oneShotNote("command")}${deadline}${logPath ? ` Log: ${logPath}.` : ""}\n\n${output}`,
+							text: `${spec.ccLabel} task ${id} (${description}) ${finishLine(summary, timeoutSeconds)}. ${oneShotNote("command")}${deadline}${summary.logPath ? ` Log: ${summary.logPath}.` : ""}\n\n${output}`,
 						},
 					],
 					// No taskId: nothing was registered behind task_output/task_stop, and
 					// its presence is what renderResult reads as "running in the background".
-					details: { logPath },
-					isError: summary.exitCode !== 0 && !summary.stopped,
+					details: { logPath: summary.logPath },
+					isError: shellFinish(summary, timeoutSeconds).status === "failed",
 				};
 			}
 
@@ -266,12 +269,12 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 							kind: "shell",
 							taskId: id,
 							toolUseId: toolCallId,
-							outputFile: logPath,
+							outputFile: finishedTask.logPath,
 							status,
 							summary: shellSummary(description, status, summary.exitCode, detail),
-							result: logPath ? undefined : tailCap(summary.output, NOTIFY_OUTPUT_CAP).trim() || undefined,
+							result: finishedTask.logPath ? undefined : tailCap(summary.output, NOTIFY_OUTPUT_CAP).trim() || undefined,
 						}),
-						{ taskId: id, status: finishedTask.status, exitCode: summary.exitCode, logPath },
+						{ taskId: id, status: finishedTask.status, exitCode: summary.exitCode, logPath: finishedTask.logPath },
 					);
 				},
 			});

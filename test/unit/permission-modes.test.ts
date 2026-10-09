@@ -81,7 +81,7 @@ describe("modeBadge", () => {
 	it("names the classifier model beside auto mode", () => {
 		// The model reads the user's prompts and CLAUDE.md, so which one it is
 		// belongs on screen rather than buried in a command.
-		expect(modeBadge("auto", { classifierModel: "claude-haiku-4-5" })).toBe(`⏵⏵ auto mode on · haiku-4-5${HINT}`);
+		expect(modeBadge("auto", { classifier: "claude-haiku-4-5" })).toBe(`⏵⏵ auto mode on · haiku-4-5${HINT}`);
 	});
 
 	it("says nothing about the model before one is settled", () => {
@@ -89,7 +89,7 @@ describe("modeBadge", () => {
 	});
 
 	it("keeps the model visible while paused", () => {
-		expect(modeBadge("auto", { paused: true, classifierModel: "gpt-5-mini" })).toBe(`${P} auto mode paused · 5-mini${HINT}`);
+		expect(modeBadge("auto", { paused: true, classifier: "gpt-5-mini" })).toBe(`${P} auto mode paused · 5-mini${HINT}`);
 	});
 
 	it("appends the interrupt hint only while streaming (CC's mode line)", () => {

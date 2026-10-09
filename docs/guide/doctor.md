@@ -53,9 +53,9 @@ In the panel, press **f** to run the checkup on the report you're reading.
 
 ## Model presets
 
-A preset sets the main model, the subagent model, and the classifier model
-together, from the provider you're connected to. Only current-generation,
-priced models that support tool calls are considered.
+A preset sets the main model and subagent model from the provider you're
+connected to. The classifier remains automatic. Only current-generation, priced
+models that support tool calls are considered.
 
 | Preset | Main model | Subagents | Classifier |
 |---|---|---|---|
@@ -65,10 +65,9 @@ priced models that support tool calls are considered.
 
 `/doctor presets` shows what each preset would pick. `/doctor preset balanced`
 applies one; the aliases `economy`, `cheap`, `balance`, `max`, `maximum`,
-and `best` also work. Applying a preset writes the subagent and classifier
-choices to `~/.onecode/settings.json` and remembers the main model as pi's
-default. Undo any part with `/model`, `/subagent clear`, or
-`/auto-mode model clear`.
+and `best` also work. Applying a preset writes the subagent choice to
+`~/.onecode/settings.json` and remembers the main model as pi's
+default. Undo the changes with `/model` or `/subagent clear`.
 
 ## The command-line form
 

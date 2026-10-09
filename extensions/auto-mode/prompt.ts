@@ -25,16 +25,15 @@ import { clip, renderTranscript, type TranscriptEntry } from "./transcript.ts";
 
 export interface ClassifyRequest {
 	/**
-	 * The ordered transcript, user messages and tool inputs only (results
-	 * stripped). Its **last entry is the action under review** — the caller
-	 * appends the call being judged before handing it here.
+	 * The active transcript: user messages, compaction context, and tool inputs
+	 * (results stripped). Its **last entry is the action under review** — the
+	 * caller appends the call being judged before handing it here.
 	 */
 	transcript: TranscriptEntry[];
 	/**
-	 * Every user message this session, for intent-quote verification. Full, never
-	 * a rolling window: in a long unattended run the authorizing setup message
-	 * must still clear a later action (decision 2). Distinct from the transcript,
-	 * whose oldest lines may be dropped for length.
+	 * The user's own messages still in active context, for intent verification.
+	 * Kept separately from tool inputs and model-generated compaction summaries:
+	 * neither can manufacture a quote attributed to the user.
 	 */
 	userMessages: string[];
 	/** The user's CLAUDE.md, wrapped in the (untrusted) framing block. */
@@ -67,6 +66,8 @@ export interface ClassifyVerdict {
 	 * not offered for approval in `/permissions` (Claude Code's `noVerdict`).
 	 */
 	noVerdict?: true;
+	/** The provider could not fit the whole transcript; no safety verdict was reached. */
+	transcriptTooLong?: true;
 }
 
 /**
@@ -242,8 +243,8 @@ export function parseStage2(text: string, index: RuleIndex, userMessages: string
 		if (intent) {
 			// An allow resting on user intent is the one claim worth checking: it is
 			// what a prompt injection most wants to manufacture and what the model is
-			// most prone to stretch. Verified against the full user messages, so an
-			// early authorization still clears late (decision 2).
+			// most prone to stretch. Verified against the user's own active messages,
+			// never against a model-generated account of what the user requested.
 			if (!intentQuoted(intent, userMessages)) {
 				return {
 					decision: "block",

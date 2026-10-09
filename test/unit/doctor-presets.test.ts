@@ -116,7 +116,7 @@ describe("computePresets", () => {
 		expect(findPreset(presets, "nope")).toBeUndefined();
 	});
 
-	it("renders one row per preset marking the current main model, and spells the undo path", () => {
+	it("renders one row per preset marking the current main model and keeps the classifier automatic", () => {
 		const result = computePresets(anthropic, anthropic[1]);
 		const section = presetsSection(result, anthropic[1]);
 		expect(section.subtitle).toContain("within anthropic");
@@ -126,6 +126,7 @@ describe("computePresets", () => {
 		const changes = describePresetChanges(result.presets.find((p) => p.name === "quality")!);
 		expect(changes[0]).toContain("undo: /model");
 		expect(changes[1]).toContain("/subagent clear");
-		expect(changes[2]).toContain("/auto-mode model");
+		expect(changes[2]).toContain("classifier stays automatic");
+		expect(changes[2]).not.toContain("undo:");
 	});
 });

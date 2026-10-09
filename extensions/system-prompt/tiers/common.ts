@@ -21,6 +21,8 @@ export interface PromptBundle {
 	 * only when the tool is enabled). Absent when `lead` has no such bullet.
 	 */
 	leadWithoutTaskTools?: string[];
+	/** `lead` built for the session's tool set, when the text names a tool the set decides (tiny's shell tool). */
+	leadFor?: (session: { taskTools: boolean; tools: readonly string[] | undefined }) => string[];
 }
 
 export const IDENTITY = `You are One Code, an interactive agent that helps users with software engineering tasks, running on the pi agent harness.`;

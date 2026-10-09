@@ -10,19 +10,9 @@
  * and a preset is a bundle of those same choices. A user who wants another
  * provider switches with /model first and reruns /doctor presets there.
  *
- * Each preset pins ONE thing — the main model — and sets the two secondary
- * knobs to the shape that matches its intent:
- *   economical        main = cheapest capable (cheap tier, never tiny); subagents inherit it;
- *                     classifier automatic (lands on the same model)
- *   balanced          main = cheapest workhorse-tier model; subagents automatic (the
- *                     cheapest model at the main's floor — often the main itself,
- *                     since subagents share the classifier's workhorse floor);
- *                     classifier automatic (workhorse floor)
- *   maximum quality   main = the strongest (frontier, else priciest workhorse);
- *                     subagents inherit it; classifier automatic
- * so applying a preset is three settings writes the user can each undo by hand
- * (/model, /subagent, /auto-mode model). The rows display what the resolvers
- * would pick for that main model, computed with the resolvers themselves.
+ * Each preset pins the main model and sets the subagent default to the shape
+ * that matches its intent. The classifier remains automatic in every preset;
+ * the rows display what its resolver would pick for that main model.
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
@@ -193,9 +183,9 @@ export function presetsSection(result: ReturnType<typeof computePresets>, sessio
 }
 
 /**
- * The three settings writes a preset amounts to, one line each with its undo —
- * the text `/doctor preset` reports after applying. `mainSwitched` false means
- * the session already ran the preset's main model, so that line says so.
+ * The two settings changes a preset makes, each with its undo — the text
+ * `/doctor preset` reports after applying. `mainSwitched` false means the
+ * session already ran the preset's main model, so that line says so.
  */
 export function describePresetChanges(preset: PresetPlan, mainSwitched = true): string[] {
 	return [
@@ -203,6 +193,6 @@ export function describePresetChanges(preset: PresetPlan, mainSwitched = true): 
 		preset.subagents.setting === "inherit"
 			? "subagent default → inherit the main model (undo: /subagent clear)"
 			: `subagent default → automatic (picks ${modelSpec(preset.subagents.model)}; undo: /subagent)`,
-		`auto-mode classifier → automatic${preset.classifier ? ` (picks ${modelSpec(preset.classifier)})` : ""} (undo: /auto-mode model)`,
+		`auto-mode classifier stays automatic${preset.classifier ? ` (picks ${modelSpec(preset.classifier)})` : ""}`,
 	];
 }

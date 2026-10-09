@@ -16,13 +16,8 @@
  *
  * The CC-schema keys (`environment`, `hard_deny`/`soft_deny`/`allow`) are read
  * from `~/.claude` too, because Claude Code's own `/auto-mode-setup` writes them
- * there and reading them is the compatibility promise. But One Code's *own*
- * keys — `classifierModel` / `classifierModelSetFor`, which Claude Code does not
- * define — are read from `~/.onecode` and managed settings only, never from
- * `~/.claude`: One Code used to write them there, and a stale value (a model the
- * session cannot reach) must not keep biting. Every write goes to
- * `~/.onecode/settings.json`; One Code never mutates Claude Code's files. See
- * "Own state, borrowed config" in working-docs/decisions/memory-state.md.
+ * there and reading them is the compatibility promise. Every write goes to
+ * `~/.onecode/settings.json`; One Code never mutates Claude Code's files.
  *
  * ## The customization surface (CC 2.1.233's own)
  *
@@ -62,15 +57,6 @@ export interface AutoModeConfig {
 	allow: string[];
 	/** Suspend narrow Bash allow rules so every shell command reaches the classifier. */
 	classifyAllShell: boolean;
-	/** `provider/model-id` override for the classifier model. */
-	classifierModel?: string;
-	/**
-	 * Containment identity (`modelIdentity().containment`) the `classifierModel`
-	 * was stamped for when set via `/auto-mode model`. A cross-provider setting
-	 * whose stamp no longer matches the session is treated as stale and overridden
-	 * — see `classifierCandidates`. Undefined for a hand-edited setting.
-	 */
-	classifierModelSetFor?: string;
 	/** Append every gate decision to auto-mode-decisions.jsonl next to the session files. */
 	logDecisions: boolean;
 }
@@ -82,8 +68,6 @@ interface AutoModeSettingsFile {
 		soft_deny?: unknown;
 		allow?: unknown;
 		classifyAllShell?: unknown;
-		classifierModel?: unknown;
-		classifierModelSetFor?: unknown;
 		logDecisions?: unknown;
 		[key: string]: unknown;
 	};
@@ -93,11 +77,7 @@ interface AutoModeSettingsFile {
 const DEFAULTS_TOKEN = "$defaults";
 
 /**
- * The files `autoMode` is read from, lowest precedence first. One Code's own
- * auto-mode keys (`classifierModel`, `classifierModelSetFor`) are deliberately
- * NOT collected from the borrowed `claudeUserSettingsPath` — Claude Code does not
- * define them, and One Code once wrote them there, so a stale value must not
- * survive the move to `~/.onecode` (see the read guard in the loader).
+ * The files `autoMode` is read from, lowest precedence first.
  */
 export function autoModeSettingsPaths(home: string): string[] {
 	// Independent mode (lib/config-mode.ts) reads One Code's file alone; the
@@ -125,10 +105,11 @@ const KNOWN_AUTO_MODE_KEYS = new Set([
 	"soft_deny",
 	"allow",
 	"classifyAllShell",
-	"classifierModel",
-	"classifierModelSetFor",
 	"logDecisions",
 ]);
+
+/** Retired keys are silently accepted for backward-compatible reads, but never applied. */
+const RETIRED_AUTO_MODE_KEYS = new Set(["classifierModel", "classifierModelSetFor"]);
 
 /** Rule-extra keys, CC's spelling; appended to the matching embedded list. */
 const RULE_LIST_KEYS = ["hard_deny", "soft_deny", "allow"] as const;
@@ -171,7 +152,7 @@ function validateStringListKey(
 
 function validateAutoModeBlock(block: Record<string, unknown>, path: string, diagnostics: string[]): void {
 	for (const key of Object.keys(block)) {
-		if (!KNOWN_AUTO_MODE_KEYS.has(key)) {
+		if (!KNOWN_AUTO_MODE_KEYS.has(key) && !RETIRED_AUTO_MODE_KEYS.has(key)) {
 			diagnostics.push(`${path}: unknown autoMode key "${key}" is ignored`);
 		}
 	}
@@ -213,12 +194,6 @@ function validateAutoModeBlock(block: Record<string, unknown>, path: string, dia
 			diagnostics.push(`${path}: autoMode.${key} must be a boolean — ignored`);
 		}
 	}
-	if (
-		block.classifierModel !== undefined &&
-		(typeof block.classifierModel !== "string" || block.classifierModel.trim().length === 0)
-	) {
-		diagnostics.push(`${path}: autoMode.classifierModel must be a "provider/model-id" string — ignored`);
-	}
 }
 
 function stringArray(value: unknown): string[] | undefined {
@@ -254,12 +229,9 @@ export function loadAutoModeConfigWithDiagnostics(home: string): AutoModeConfigL
 		soft_deny?: string[];
 		allow?: string[];
 		classifyAllShell?: boolean;
-		classifierModel?: string;
-		classifierModelSetFor?: string;
 		logDecisions?: boolean;
 	} = {};
 
-	const claudeUser = claudeUserSettingsPath(home);
 	for (const path of autoModeSettingsPaths(home)) {
 		const file = readFile(path, diagnostics);
 		const block = file?.autoMode;
@@ -279,25 +251,7 @@ export function loadAutoModeConfigWithDiagnostics(home: string): AutoModeConfigL
 		}
 		if (typeof block.classifyAllShell === "boolean") collected.classifyAllShell = block.classifyAllShell;
 		if (typeof block.logDecisions === "boolean") collected.logDecisions = block.logDecisions;
-		// `classifierModel` is One Code's own key, not Claude Code's. It is read from
-		// `~/.onecode` and managed settings only — never from `~/.claude`, where an
-		// old One Code build may have left a stale value. A leftover in `~/.claude` is
-		// surfaced as a diagnostic so the user knows why it stopped applying.
-		if (typeof block.classifierModel === "string" && block.classifierModel.trim()) {
-			if (path === claudeUser) {
-				diagnostics.push(
-					`${path}: autoMode.classifierModel is ignored here — One Code reads it from ~/.onecode/settings.json (set it with /auto-mode model)`,
-				);
-			} else {
-				collected.classifierModel = block.classifierModel.trim();
-				// The stamp travels with the model from the same file, so a lower-precedence
-				// stamp cannot attach to a higher-precedence model.
-				collected.classifierModelSetFor =
-					typeof block.classifierModelSetFor === "string" && block.classifierModelSetFor.trim()
-						? block.classifierModelSetFor.trim()
-						: undefined;
-			}
-		}
+		// Legacy classifier overrides are intentionally ignored; automatic selection is the only policy.
 	}
 
 	// Rule lists are extras appended to the embedded built-ins, so "$defaults" is
@@ -313,8 +267,6 @@ export function loadAutoModeConfigWithDiagnostics(home: string): AutoModeConfigL
 			softDeny: ruleExtras(collected.soft_deny),
 			allow: ruleExtras(collected.allow),
 			classifyAllShell: collected.classifyAllShell ?? false,
-			classifierModel: collected.classifierModel,
-			classifierModelSetFor: collected.classifierModelSetFor,
 			logDecisions: collected.logDecisions ?? false,
 		},
 		diagnostics,
@@ -323,36 +275,6 @@ export function loadAutoModeConfigWithDiagnostics(home: string): AutoModeConfigL
 
 export function loadAutoModeConfig(home: string): AutoModeConfig {
 	return loadAutoModeConfigWithDiagnostics(home).config;
-}
-
-/**
- * Persist `autoMode.classifierModel` in One Code's own settings file
- * (`~/.onecode/settings.json`), preserving every other key. `undefined` removes
- * the setting. Never touches Claude Code's files — this is One Code's key, and
- * the knob that may move the classifier to another provider, so it lives in One
- * Code's own state (see the module comment).
- *
- * Unlike loading, this throws on a malformed file: a lenient read merely skips
- * rules, but a lenient write would replace the whole settings file with only ours.
- */
-export function persistClassifierModel(spec: string | undefined, home: string, setForContainment?: string): void {
-	const path = oneCodeSettingsPath(home);
-	const file = readSettingsForWrite(path);
-	const block = asRecord(file.autoMode) ?? {};
-	if (spec === undefined) {
-		delete block.classifierModel;
-		delete block.classifierModelSetFor;
-	} else {
-		block.classifierModel = spec;
-		// Stamp the containment the model was chosen on, so a later session on a
-		// different provider treats a cross-provider setting as stale (parity with
-		// subagentModelSetFor). No stamp for a hand-edited setting.
-		if (setForContainment) block.classifierModelSetFor = setForContainment;
-		else delete block.classifierModelSetFor;
-	}
-	if (Object.keys(block).length === 0) delete file.autoMode;
-	else file.autoMode = block;
-	writeSettings(path, file);
 }
 
 /** value as a plain object, or undefined — the repeated sub-block guard. */
@@ -366,7 +288,7 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
  * Persist a `/auto-mode setup` result to One Code's own settings file: replace
  * the wizard-owned keys (environment + the three rule lists — an undefined list
  * removes stale values, last-writer like CC's own wizard) while preserving every
- * other settings key and the non-wizard autoMode keys (classifierModel, …).
+ * other settings key and non-wizard autoMode keys.
  * Never touches Claude Code's files; throws on a malformed file rather than
  * replacing the settings with only ours.
  */

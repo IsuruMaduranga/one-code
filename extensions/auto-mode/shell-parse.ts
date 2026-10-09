@@ -160,6 +160,11 @@ export interface ParseResult {
 	 * backticks or `<(…)`), indexed by `Segment.substitution`.
 	 */
 	substitutions: string[];
+	/**
+	 * The member scopes (as in `Segment.scopes`) of each multi-command
+	 * pipeline, in order: which subshells feed which.
+	 */
+	pipelines: number[][];
 }
 
 const ANSI_C_SIMPLE: Record<string, string> = {
@@ -340,6 +345,7 @@ class Walker {
 	/** Set when a part parsed on its own (a heredoc's backtick body) did not parse. */
 	failed = false;
 	readonly substitutions: string[] = [];
+	readonly pipelines: number[][] = [];
 	private nextScope = 1;
 	private readonly source: string;
 
@@ -399,12 +405,15 @@ class Walker {
 			}
 			case "pipeline": {
 				const members = node.namedChildren.filter((child) => child.type !== "comment");
+				const memberScopes: number[] = [];
+				if (members.length > 1) this.pipelines.push(memberScopes);
 				for (const [index, child] of members.entries()) {
 					if (members.length === 1) {
 						this.statement(child, ctx);
 						continue;
 					}
 					const member = this.enter(ctx, node, true);
+					memberScopes.push(member.scopes[member.scopes.length - 1]);
 					// Only the last member can run in the current shell (`lastpipe`),
 					// and only when the pipeline is not itself inside a subshell.
 					const last = index === members.length - 1;
@@ -821,7 +830,7 @@ export const LOOPS = new Set(["for_statement", "c_style_for_statement", "while_s
  */
 export function parseCommand(command: string): ParseResult {
 	const tree = parseBash(command);
-	if (!tree) return { segments: [], parseFailed: true, unavailable: bashParserUnavailable(), background: false, substitutions: [] };
+	if (!tree) return { segments: [], parseFailed: true, unavailable: bashParserUnavailable(), background: false, substitutions: [], pipelines: [] };
 	try {
 		const walker = new Walker(command);
 		walker.statement(tree.rootNode, { enclosing: [], scopes: [] });
@@ -837,6 +846,7 @@ export function parseCommand(command: string): ParseResult {
 			unattributedExpansion: walker.unattributedExpansion,
 			background: walker.background,
 			substitutions: walker.substitutions,
+			pipelines: walker.pipelines,
 		};
 	} finally {
 		tree.delete();

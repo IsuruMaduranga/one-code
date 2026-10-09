@@ -368,7 +368,7 @@ const TRUTHY_ENV = new Set(["1", "true", "yes", "on"]);
 export function taskToolsEnabled(
 	model: Model<Api> | undefined,
 	env: NodeJS.ProcessEnv = process.env,
-	/** The model's tier when the caller already resolved it (the prompt hook does, every turn). */
+	/** Request-surface callers pass the session's frozen tier (session-model-tier.ts). */
 	tier?: PromptTier,
 ): boolean {
 	if (TRUTHY_ENV.has(env.CLAUDE_CODE_ENABLE_TODO_TOOLS?.trim().toLowerCase() ?? "")) return true;

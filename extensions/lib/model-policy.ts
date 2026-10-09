@@ -242,8 +242,8 @@ export function isAliasOrVariantId(id: string): boolean {
  * and OpenRouter's `~vendor/family-latest` redirect aliases ("always redirects to
  * the latest model in the family"): the model behind one moves without notice,
  * so it has no stable identity to tier, date or price — and the classifier is a
- * permission boundary. The alias stays available by hand (/model, an explicit
- * `subagentModel` / `classifierModel` setting).
+ * permission boundary. The alias stays available by hand through `/model` or
+ * an explicit `subagentModel` setting.
  */
 export function isSelectableVariant(model: Model<Api>): boolean {
 	return !UNSUITABLE_VARIANT.test(model.id) && !model.id.startsWith("~");

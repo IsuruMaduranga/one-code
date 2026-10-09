@@ -14,7 +14,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
  *                            doctor prompt, adapted (falls back to the report when no model can run)
  *   /doctor report           the measured report alone (a scrollable panel in the TUI, plain text elsewhere)
  *   /doctor presets          the three model presets for this provider
- *   /doctor preset <name>    apply one: main model, subagent default, classifier
+ *   /doctor preset <name>    apply one: main model and subagent default
  *
  * `onecode doctor` (the app's CLI subcommand) prints the same report without a
  * session — see cli.ts. Thin wiring: every check lives in the pure modules.
@@ -31,16 +31,17 @@ import {
 	SettingsManager,
 	VERSION as PI_VERSION,
 } from "@earendil-works/pi-coding-agent";
-import { loadAutoModeConfig, persistClassifierModel } from "../auto-mode/config.ts";
+import { loadAutoModeConfig } from "../auto-mode/config.ts";
 import { configuredCapabilityKey, loadCapabilitySnapshot, refreshCapabilitySnapshot, snapshotIsStale } from "../lib/capability-index.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../lib/model-unusable.ts";
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../lib/mcp-status.ts";
 import { notifyOrPrint } from "../lib/headless-output.ts";
 import { createUserMessageSender, sessionOutlivesTurn } from "../lib/notifications.ts";
 import { modelSpec } from "../lib/model-policy.ts";
+import { sessionModelTier } from "../lib/session-model-tier.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { oneCodeStateDir } from "../lib/paths.ts";
-import { CLASSIFIER_SETTING_CHANGED_CHANNEL, SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../lib/settings-channels.ts";
+import { SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../lib/settings-channels.ts";
 import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../permissions/modes.ts";
 import { persistSubagentModel } from "../subagents/default-model.ts";
@@ -59,6 +60,7 @@ import { configMode } from "../lib/config-mode.ts";
 export const DOCTOR_PANEL_MAX_HEIGHT = 40;
 
 export default function doctorExtension(pi: ExtensionAPI) {
+	const requestTier = sessionModelTier(pi);
 	const sendUserMessage = createUserMessageSender(pi);
 	// Models the account refused this session (lib/model-unusable.ts): the report
 	// and presets must not recommend a model the session has just learned to avoid.
@@ -90,6 +92,8 @@ export default function doctorExtension(pi: ExtensionAPI) {
 	// (lib/capability-index.ts): refreshed at most daily, only from a session
 	// that outlives the turn, never awaited in session_start (findings §15, §19),
 	// inert once the session is shutting down. A failure is logged once.
+	// Request surfaces keep their frozen tier until session_start/model_select;
+	// automatic model selection can use the refreshed scores immediately.
 	let shuttingDown = false;
 	let refreshWarned = false;
 	const refreshCapability = async (ctx: ExtensionContext, home: string): Promise<void> => {
@@ -154,6 +158,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 			},
 			session: {
 				model: ctx.model,
+				promptTier: requestTier(),
 				modelSource: ctx.model ? "session" : "none",
 				thinkingLevel: ctx.thinkingLevel,
 				permission: permission
@@ -237,7 +242,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 			return;
 		}
 		if (unavailable === "no-priced-models") {
-			notifyOrPrint(ctx, "No priced models on this provider, so tiers cannot be told apart and no preset can be applied. Pick models by hand with /model, /subagent and /auto-mode model.", "warning");
+			notifyOrPrint(ctx, "No priced models on this provider, so tiers cannot be told apart and no preset can be applied. Pick models by hand with /model or /subagent.", "warning");
 			return;
 		}
 		const preset = findPreset(presets, name);
@@ -253,14 +258,12 @@ export default function doctorExtension(pi: ExtensionAPI) {
 		}
 		try {
 			persistSubagentModel(preset.subagents.setting === "inherit" ? "inherit" : undefined, home);
-			persistClassifierModel(undefined, home);
 		} catch (error) {
 			const switched = mainSwitched ? ` The main model was already switched to ${modelSpec(preset.main)}; /model switches it back.` : "";
 			notifyOrPrint(ctx, `Could not save settings: ${error instanceof Error ? error.message : String(error)}.${switched}`, "error");
 			return;
 		}
 		pi.events.emit(SUBAGENT_DEFAULT_CHANGED_CHANNEL, {});
-		pi.events.emit(CLASSIFIER_SETTING_CHANGED_CHANNEL, {});
 		notifyOrPrint(
 			ctx,
 			[
@@ -276,8 +279,8 @@ export default function doctorExtension(pi: ExtensionAPI) {
 	const SUBCOMMANDS: Array<{ value: string; description: string }> = [
 		{ value: "report", description: "Show the measured setup report: providers, the model each role gets, imported Claude Code config, MCP servers, dependencies" },
 		{ value: "presets", description: "List the economical / balanced / maximum-quality model presets for this provider, with the models each would pick" },
-		{ value: "preset economical", description: "Apply: one cheap model for the main session, subagents and the classifier" },
-		{ value: "preset balanced", description: "Apply: a capable main model, cheaper automatic picks for subagents and the classifier" },
+		{ value: "preset economical", description: "Apply: one cheap model for the main session and subagents" },
+		{ value: "preset balanced", description: "Apply: a capable main model with automatic subagents" },
 		{ value: "preset quality", description: "Apply: the strongest model for the main session and its subagents" },
 	];
 

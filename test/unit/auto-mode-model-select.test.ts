@@ -1,336 +1,147 @@
 import { describe, expect, it } from "vitest";
-import { classifierCandidates, describeCandidate, findConfigured, isModelUnavailableError } from "../../extensions/auto-mode/model-select.ts";
-import { modelIdentity } from "../../extensions/lib/model-policy.ts";
-import { automaticTierFloor } from "../../extensions/lib/model-tier.ts";
+import { classifierCandidates, describeCandidate, isModelUnavailableError } from "../../extensions/auto-mode/model-select.ts";
 
-/** Minimal structural stand-in; only provider/id/cost are consulted. */
-const model = (provider: string, id: string, input?: number) =>
-	({ provider, id, name: id, cost: input === undefined ? undefined : { input, output: input * 4 } }) as any;
+/** Minimal structural stand-in; selection consults provider/id/cost/contextWindow. */
+const model = (provider: string, id: string, input?: number, contextWindow?: number) =>
+	({ provider, id, name: id, cost: input === undefined ? undefined : { input, output: input * 4 }, ...(contextWindow === undefined ? {} : { contextWindow }) }) as any;
 
-const pick = (available: any[], sessionModel: any, configured?: string, configuredSetForContainment?: string) =>
-	classifierCandidates({ available, sessionModel, configured, configuredSetForContainment }).candidates;
+const pickFull = (available: any[], sessionModel: any) => classifierCandidates({ available, sessionModel });
 
-const pickFull = (available: any[], sessionModel: any, configured?: string, configuredSetForContainment?: string) =>
-	classifierCandidates({ available, sessionModel, configured, configuredSetForContainment });
-
-describe("classifierCandidates: provider containment", () => {
-	it("screens with the cheapest same-provider model that meets the tier floor", () => {
-		// gpt-5.5 (workhorse) is the session, so the floor is workhorse: the cheaper
-		// codex variant screens; mini (cheap) and nano (tiny) are excluded.
+describe("classifierCandidates: session-contained capability and context floor", () => {
+	it("selects the cheapest same-route model meeting the existing capability and session context floors", () => {
+		// The workhorse floor drops mini/nano. The chosen Codex variant is also the
+		// cheapest remaining row with the session's 200k catalog window.
+		const session = model("openai", "gpt-5.5", 10, 200_000);
 		const available = [
-			model("openai", "gpt-5.5", 10),
-			model("openai", "gpt-5.5-codex", 5),
-			model("openai", "gpt-5-mini", 0.25),
-			model("openai", "gpt-5-nano", 0.05),
+			session,
+			model("openai", "gpt-5.5-codex", 5, 200_000),
+			model("openai", "gpt-5.5-large", 7, 400_000),
+			model("openai", "gpt-5-mini", 0.25, 400_000),
+			model("openai", "gpt-5-nano", 0.05, 400_000),
 		];
-		const chain = pick(available, available[0]);
-		expect(chain[0]).toMatchObject({ model: available[1], source: "economical" });
-		expect(chain.every((c) => !/mini|nano/.test(c.model.id))).toBe(true);
+		const result = pickFull(available, session);
+		expect(result.candidates[0]).toMatchObject({ model: available[1], source: "economical" });
+		expect(result.candidates.every((candidate) => candidate.model.contextWindow >= session.contextWindow)).toBe(true);
+		expect(result.candidates.every((candidate) => !/mini|nano/.test(candidate.model.id))).toBe(true);
+		expect(result.fallback).toBeUndefined();
 	});
 
-	it("never leaves the session's provider on its own initiative", () => {
-		// The bug this exists to prevent: an openai-codex session with an Anthropic
-		// key also configured used to send the user's prompts, CLAUDE.md, and command
-		// text to Anthropic through a component with no UI.
-		const available = [model("openai-codex", "gpt-5.5-codex", 10), model("anthropic", "claude-haiku-4-5", 1)];
-		const chain = pick(available, model("openai-codex", "gpt-5.5-codex", 10));
-		expect(chain.length).toBeGreaterThan(0);
-		for (const candidate of chain) {
-			expect(candidate.model.provider, candidate.model.id).toBe("openai-codex");
-		}
+	it("never leaves the session provider or gateway route", () => {
+		const session = model("openrouter", "openai/gpt-5.1", 5, 200_000);
+		const available = [
+			session,
+			model("openrouter", "openai/gpt-5.1-codex", 2, 200_000),
+			model("openrouter", "anthropic/claude-sonnet-5", 1, 1_000_000),
+		];
+		const result = pickFull(available, session);
+		expect(result.candidates[0].model.id).toBe("openai/gpt-5.1-codex");
+		for (const candidate of result.candidates) expect(candidate.model.id.startsWith("openai/")).toBe(true);
 	});
 
-	it("crosses providers only when the user names one for THIS session", () => {
-		// A cross-provider classifierModel is honored when it carries a stamp for the
-		// current session (set via /auto-mode model) — naming a provider is choosing it.
-		const session = model("ollama", "qwen3-coder");
-		const available = [session, model("anthropic", "claude-haiku-4-5", 1)];
-		const stamp = modelIdentity(session).containment;
-		const result = pickFull(available, session, "anthropic/claude-haiku-4-5", stamp);
-		expect(result.candidates[0].model.provider).toBe("anthropic");
-		expect(result.candidates[0].source).toBe("configured");
-		expect(result.notices.map((n) => n.text).join(" ")).toContain("honored");
+	it("makes an unknown candidate context window ineligible", () => {
+		const session = model("anthropic", "claude-opus-4-8", 15, 200_000);
+		const unknownWindow = model("anthropic", "claude-sonnet-5", 3);
+		const qualifying = model("anthropic", "claude-fable-5", 5, 200_000);
+		const result = pickFull([session, unknownWindow, qualifying], session);
+		expect(result.candidates[0].model).toBe(qualifying);
+		expect(result.candidates.map((candidate) => candidate.model)).not.toContain(unknownWindow);
 	});
 
-	it("overrides a stale cross-provider setting with a warning (subagent parity)", () => {
-		// A hand-edited (unstamped) cross-provider classifierModel, or one stamped for
-		// a since-left provider, is treated as stale: a same-provider model screens the
-		// calls instead, and the user is told how to re-set it.
-		const session = model("ollama", "qwen3-coder");
-		const available = [session, model("anthropic", "claude-haiku-4-5", 1)];
-		const result = pickFull(available, session, "anthropic/claude-haiku-4-5"); // no stamp
-		expect(result.candidates.every((c) => c.source !== "configured")).toBe(true);
-		expect(result.candidates[0].model.provider).toBe("ollama");
-		expect(result.notices.map((n) => n.text).join(" ")).toContain("set for a different provider");
+	it("uses the session itself when its catalog context window is unknown", () => {
+		const session = model("anthropic", "claude-opus-4-8", 15);
+		const result = pickFull([session, model("anthropic", "claude-sonnet-5", 3, 1_000_000)], session);
+		expect(result.candidates).toEqual([{ model: session, source: "session" }]);
+		expect(result.fallback).toMatchObject({ reason: "unknown-session-context-window" });
+		expect(result.notices).toContainEqual(expect.objectContaining({ fallbackReason: "unknown-session-context-window" }));
 	});
 
-	it("still ends the chain at the session model, so an explicit model failing is survivable", () => {
-		const session = model("ollama", "qwen3-coder");
-		const available = [session, model("anthropic", "claude-haiku-4-5", 1)];
-		const stamp = modelIdentity(session).containment;
-		const chain = pick(available, session, "anthropic/claude-haiku-4-5", stamp);
-		expect(chain[chain.length - 1].model.provider).toBe("ollama");
+	it("uses the session itself with a reason when no model meets both floors", () => {
+		const session = model("openai", "gpt-5-nano", 0.05, 1_000_000);
+		// Mini is capable but cannot contain this session's catalog window; the
+		// tiny session is terminal-only and cannot count as an automatic candidate.
+		const result = pickFull([session, model("openai", "gpt-5-mini", 0.25, 200_000)], session);
+		expect(result.candidates).toEqual([{ model: session, source: "session" }]);
+		expect(result.fallback).toMatchObject({ reason: "no-qualifying-model" });
+		expect(result.notices).toContainEqual(expect.objectContaining({ fallbackReason: "no-qualifying-model" }));
+	});
+
+	it("keeps qualified candidates ahead of the terminal session fallback", () => {
+		const session = model("openai", "gpt-5.5", 10, 200_000);
+		const qualified = model("openai", "gpt-5.5-codex", 5, 200_000);
+		const chain = pickFull([session, qualified], session).candidates;
+		expect(chain).toEqual([{ model: qualified, source: "economical" }, { model: session, source: "session" }]);
+	});
+
+	it("uses direct numeric cost, not the old cheap/workhorse/frontier tier preference", () => {
+		const session = model("anthropic", "claude-opus-4-8", 15, 200_000);
+		const workhorse = model("anthropic", "claude-sonnet-5", 10, 200_000);
+		const cheaperFrontier = model("anthropic", "claude-fable-5", 2, 200_000);
+		const result = pickFull([session, workhorse, cheaperFrontier], session);
+		expect(result.candidates[0]).toMatchObject({ model: cheaperFrontier, source: "economical" });
+	});
+
+	it("selects a capable larger-priced model instead of a tiny session fallback", () => {
+		const tinySession = model("openai", "gpt-5-nano", 0.05, 200_000);
+		const capable = model("openai", "gpt-5.5-codex", 5, 200_000);
+		const result = pickFull([tinySession, capable], tinySession);
+		expect(result.candidates[0]).toMatchObject({ model: capable, source: "economical" });
+	});
+
+	it("publishes a window reason when only the session can contain the session catalog", () => {
+		const session = model("openai-codex", "gpt-6-astra", 10, 1_000_000);
+		const sol = model("openai-codex", "gpt-6-sol", 5, 272_000);
+		const terra = model("openai-codex", "gpt-5.6-terra", 2, 272_000);
+		const result = pickFull([session, sol, terra], session);
+		expect(result.candidates).toEqual([{ model: session, source: "session" }]);
+		expect(result.fallback).toMatchObject({ reason: "no-qualifying-model" });
+		expect(result.fallback?.text).toMatch(/window|context/i);
+	});
+
+	it("publishes why the session was retained when it is the cheapest qualified model", () => {
+		const session = model("anthropic", "claude-sonnet-5", 1, 200_000);
+		const other = model("anthropic", "claude-fable-5", 2, 200_000);
+		const result = pickFull([session, other], session);
+		expect(result.candidates[0]).toMatchObject({ model: session, source: "session" });
+		expect(result.fallback).toMatchObject({ reason: "session-is-cheapest-qualified" });
+		expect(result.fallback?.text).toMatch(/cheapest.*context|context.*cheapest/i);
 	});
 });
 
-describe("classifierCandidates: gateway family containment", () => {
-	it("stays with the session's model-creator namespace on a gateway", () => {
-		// Same pi provider is not containment on a router: an openai/* session
-		// screened by anthropic/* keeps one API key but sends the user's prompts
-		// and CLAUDE.md to a vendor they did not pick.
+describe("classifierCandidates: cost and variants", () => {
+	it("does not auto-select tiny, unpriced, or unsuitable variants", () => {
+		const session = model("openrouter", "openai/gpt-5.1", 5, 200_000);
 		const available = [
-			model("openrouter", "openai/gpt-5.1", 1.25),
-			model("openrouter", "openai/gpt-5.1-codex", 1),
-			model("openrouter", "openai/gpt-5-mini", 0.25),
-			model("openrouter", "anthropic/claude-haiku-4.5", 1),
+			session,
+			model("openrouter", "openai/gpt-5-mini", 0.25, 200_000),
+			model("openrouter", "openai/gpt-5-nano", 0.05, 200_000),
+			model("openrouter", "openai/gpt-5.1:batch", 0.01, 200_000),
+			model("openrouter", "openai/gpt-5.1-free", undefined, 200_000),
+			model("openrouter", "openai/gpt-5.1-codex", 2, 200_000),
 		];
-		const chain = pick(available, model("openrouter", "openai/gpt-5.1", 1.25));
-		expect(chain[0].model.id).toBe("openai/gpt-5.1-codex");
-		for (const candidate of chain) {
-			expect(candidate.model.id.startsWith("openai/"), candidate.model.id).toBe(true);
+		const candidates = pickFull(available, session).candidates;
+		expect(candidates[0].model.id).toBe("openai/gpt-5.1-codex");
+		for (const candidate of candidates) {
+			expect(candidate.model.id).not.toContain("nano");
+			expect(candidate.model.id).not.toContain(":batch");
+			expect(candidate.model.id).not.toContain("-free");
 		}
-	});
-
-	it("screens with the session model when its vendor offers nothing cheaper and capable", () => {
-		const available = [
-			model("openrouter", "openai/gpt-5.1", 1.25),
-			model("openrouter", "anthropic/claude-haiku-4.5", 1),
-		];
-		const chain = pick(available, model("openrouter", "openai/gpt-5.1", 1.25));
-		expect(chain).toHaveLength(1);
-		expect(chain[0].model.id).toBe("openai/gpt-5.1");
-		expect(chain[0].source).toBe("session");
-	});
-
-	it("crosses vendors only on an explicit, stamped override", () => {
-		const session = model("openrouter", "z-ai/glm-4.6", 0.5);
-		const available = [session, model("openrouter", "openai/gpt-5-mini", 0.25)];
-		const stamp = modelIdentity(session).containment;
-		const chain = pick(available, session, "openrouter/openai/gpt-5-mini", stamp);
-		expect(chain[0].model.id).toBe("openai/gpt-5-mini");
-		expect(chain[0].source).toBe("configured");
-	});
-});
-
-describe("classifierCandidates: tier floor (workhorse-or-better sessions get a workhorse-or-better screener, never tiny)", () => {
-	const anthropic = [
-		model("anthropic", "claude-opus-4-8", 15), // frontier
-		model("anthropic", "claude-sonnet-5", 3), // workhorse
-		model("anthropic", "claude-haiku-4-5", 1), // cheap
-	];
-
-	it("screens an Opus session with Sonnet, never Haiku (Claude Code's min(main, sonnet))", () => {
-		// PERMISSIONS-REVIEW-2026-09-05 M6: the same rm -rf graded 62 on Sonnet and
-		// ~22 on Haiku; the cheapest model is not the boundary a Sonnet+ session gets.
-		const chain = pick(anthropic, anthropic[0]);
-		expect(chain[0]).toMatchObject({ model: anthropic[1], source: "economical" });
-		expect(chain.every((c) => c.model.id !== "claude-haiku-4-5")).toBe(true);
-	});
-
-	it("screens a Sonnet session with itself (nothing cheaper meets the workhorse floor)", () => {
-		const chain = pick(anthropic, anthropic[1]);
-		expect(chain).toHaveLength(1);
-		expect(chain[0]).toMatchObject({ model: anthropic[1], source: "session" });
-	});
-
-	it("floor is workhorse for workhorse and frontier sessions, cheap for cheap ones (shared with subagents)", () => {
-		expect(automaticTierFloor(anthropic[0])).toBe("workhorse");
-		expect(automaticTierFloor(anthropic[1])).toBe("workhorse");
-		expect(automaticTierFloor(anthropic[2])).toBe("cheap");
-	});
-
-	it("screens a Haiku session with itself (nothing cheaper and capable)", () => {
-		const chain = pick(anthropic, anthropic[2]);
-		expect(chain[0].model).toMatchObject({ id: "claude-haiku-4-5" });
-		expect(chain[0].source).toBe("session");
-	});
-
-	it("steps UP to workhorse when the provider has no cheap-tier model", () => {
-		// Opus session, only a workhorse Sonnet is cheaper — no cheap tier available.
-		const available = [model("anthropic", "claude-opus-4-8", 15), model("anthropic", "claude-sonnet-5", 3)];
-		const chain = pick(available, available[0]);
-		expect(chain[0]).toMatchObject({ model: available[1], source: "economical" });
-	});
-
-	it("never auto-selects a tiny-tier model — screens on the session model instead", () => {
-		// nano is the only thing cheaper than the session, and it is tiny: too weak a
-		// security boundary, so the session model screens rather than the tiny model.
-		const available = [model("openai", "gpt-5.5", 10), model("openai", "gpt-5-nano", 0.05)];
-		const chain = pick(available, available[0]);
-		expect(chain).toHaveLength(1);
-		expect(chain[0].source).toBe("session");
-		expect(chain.every((c) => c.model.id !== "gpt-5-nano")).toBe(true);
-	});
-
-	it("prefers a cheap-tier model over a cheaper tiny one (cheap session)", () => {
-		const available = [
-			model("openai", "gpt-5.1-mini", 1), // cheap session → cheap floor
-			model("openai", "gpt-5-mini", 0.25), // cheap
-			model("openai", "gpt-5-nano", 0.05), // tiny, cheaper
-		];
-		const chain = pick(available, available[0]);
-		expect(chain[0].model.id).toBe("gpt-5-mini");
-		expect(chain.every((c) => c.model.id !== "gpt-5-nano")).toBe(true);
-	});
-});
-
-describe("classifierCandidates: cost", () => {
-	it("never selects a model more expensive than the session's own", () => {
-		const available = [
-			model("anthropic", "claude-haiku-4-5", 1),
-			model("anthropic", "claude-sonnet-5", 3),
-			model("anthropic", "claude-fable-5", 15),
-			model("anthropic", "claude-opus-5", 30),
-		];
-		const chain = pick(available, model("anthropic", "claude-fable-5", 15));
-		for (const candidate of chain) {
-			expect(candidate.model.cost?.input ?? 0, candidate.model.id).toBeLessThanOrEqual(15);
-		}
-		expect(chain[0].model.id).toBe("claude-sonnet-5");
-	});
-
-	it("treats sentinel and zero prices as unpriced, not as cheap", () => {
-		// pi carries -1000000 for OpenRouter's router pseudo-models and 0 for
-		// free-tier entries; both would win a naive cheapest-first sort.
-		const available = [
-			model("openrouter", "openrouter/auto", -1000000),
-			model("openrouter", "anthropic/free-thing", 0),
-			model("openrouter", "anthropic/claude-haiku-4.5", 1),
-			model("openrouter", "anthropic/claude-fable-5", 15),
-		];
-		const chain = pick(available, model("openrouter", "anthropic/claude-fable-5", 15));
-		for (const candidate of chain) {
-			expect(candidate.model.id, candidate.model.id).not.toBe("openrouter/auto");
-			expect(candidate.model.id, candidate.model.id).not.toBe("anthropic/free-thing");
-		}
-	});
-
-	it("falls back to the session model when nothing in the provider is priced", () => {
-		// A local setup: no cost data anywhere.
-		const available = [model("ollama", "qwen3-coder"), model("ollama", "llama3")];
-		const chain = pick(available, model("ollama", "qwen3-coder"));
-		expect(chain).toHaveLength(1);
-		expect(chain[0].source).toBe("session");
-		expect(chain[0].model.id).toBe("qwen3-coder");
-	});
-});
-
-describe("classifierCandidates: unsuitable variants", () => {
-	it("never auto-selects a :batch model, however cheap", () => {
-		// Batch endpoints are asynchronous — a blocking gate would wait out its
-		// timeout — and they are systematically cheaper, so cost ranking prefers them.
-		const available = [
-			model("openrouter", "anthropic/claude-sonnet-4.6:batch", 1),
-			model("openrouter", "anthropic/claude-sonnet-4.6", 2),
-			model("openrouter", "anthropic/claude-fable-5", 3),
-		];
-		const chain = pick(available, model("openrouter", "anthropic/claude-fable-5", 3));
-		for (const candidate of chain) {
-			expect(candidate.model.id, candidate.model.id).not.toContain(":batch");
-		}
-		expect(chain[0].model.id).toBe("anthropic/claude-sonnet-4.6");
-	});
-
-	it("also skips :free, :online and :thinking variants", () => {
-		for (const suffix of [":free", ":online", ":thinking"]) {
-			const available = [
-				model("openrouter", `openai/gpt-5-mini${suffix}`, 0.01),
-				model("openrouter", "openai/gpt-5-mini", 0.25),
-				model("openrouter", "openai/gpt-5.1", 5),
-			];
-			const chain = pick(available, model("openrouter", "openai/gpt-5.1", 5));
-			for (const candidate of chain) {
-				expect(candidate.model.id, `${suffix}: ${candidate.model.id}`).not.toContain(suffix);
-			}
-		}
-	});
-
-	it("honours an explicitly configured variant — naming it is choosing it", () => {
-		const session = model("openrouter", "anthropic/claude-fable-5", 5);
-		const available = [model("openrouter", "anthropic/claude-haiku-4.5:batch", 0.5), session];
-		const stamp = modelIdentity(session).containment;
-		const chain = pick(available, session, "openrouter/anthropic/claude-haiku-4.5:batch", stamp);
-		expect(chain[0].source).toBe("configured");
-		expect(chain[0].model.id).toBe("anthropic/claude-haiku-4.5:batch");
-	});
-});
-
-describe("classifierCandidates: configured-model diagnostics", () => {
-	it("warns and falls back when the configured model is not available", () => {
-		const available = [model("anthropic", "claude-fable-5", 15), model("anthropic", "claude-haiku-4-5", 1)];
-		const result = pickFull(available, model("anthropic", "claude-fable-5", 15), "anthropic/claude-opus-5");
-		expect(result.candidates.every((c) => c.source !== "configured")).toBe(true);
-		expect(result.notices.map((n) => n.text).join(" ")).toContain("not an available model");
-	});
-
-	it("honours a same-provider configured model with no cross-provider warning", () => {
-		const available = [model("anthropic", "claude-fable-5", 15), model("anthropic", "claude-haiku-4-5", 1)];
-		const result = pickFull(available, model("anthropic", "claude-fable-5", 15), "anthropic/claude-haiku-4-5");
-		expect(result.candidates[0].source).toBe("configured");
-		expect(result.candidates[0].model.id).toBe("claude-haiku-4-5");
-		expect(result.notices).toHaveLength(0);
-	});
-});
-
-describe("findConfigured", () => {
-	const available = [model("anthropic", "claude-haiku-4-5-20251001", 1), model("openai", "gpt-5-mini", 0.25)];
-
-	it("accepts provider/id, a bare id, and a prefix", () => {
-		expect(findConfigured(available, "openai/gpt-5-mini")?.id).toBe("gpt-5-mini");
-		expect(findConfigured(available, "gpt-5-mini")?.id).toBe("gpt-5-mini");
-		expect(findConfigured(available, "anthropic/claude-haiku-4-5")?.id).toBe("claude-haiku-4-5-20251001");
-	});
-
-	it("returns undefined for something not available", () => {
-		expect(findConfigured(available, "anthropic/claude-opus-5")).toBeUndefined();
-		expect(findConfigured(available, "")).toBeUndefined();
 	});
 });
 
 describe("isModelUnavailableError", () => {
-	it("recognises errors that mean this model will never work here", () => {
-		for (const message of [
-			"404 model not found",
-			"403 Forbidden",
-			"401 unauthorized",
-			"The model `gpt-9` does not exist",
-			"you do not have access to this model",
-			"insufficient_quota",
-			"invalid_model",
-			// A plan/entitlement refusal, phrased as prose rather than a 403.
-			"The 'gpt-5.3-codex-spark' model is not supported when using Codex with a ChatGPT account.",
-		]) {
+	it("recognises permanent model failures but not transient or request-shape failures", () => {
+		for (const message of ["404 model not found", "403 Forbidden", "401 unauthorized", "you do not have access to this model", "insufficient_quota", "invalid_model", "The model is not supported when using Codex with a ChatGPT account."]) {
 			expect(isModelUnavailableError(message), message).toBe(true);
 		}
-	});
-
-	it("does not mistake a transient failure for an unusable model", () => {
-		// Switching models on these would paper over something about to clear.
-		for (const message of [
-			"socket hang up",
-			"500 internal server error",
-			"ETIMEDOUT",
-			"529 overloaded_error",
-			// Request-shape complaints, not "this account cannot use this model":
-			// switching models would hide a fixable parameter problem.
-			"streaming is not supported",
-			"response_format is not supported for this model",
-		]) {
+		for (const message of ["socket hang up", "500 internal server error", "ETIMEDOUT", "quota exceeded, retry in 60s", "response_format is not supported for this model"]) {
 			expect(isModelUnavailableError(message), message).toBe(false);
 		}
 	});
 });
 
 describe("describeCandidate", () => {
-	it("says where each choice came from", () => {
-		expect(describeCandidate({ model: model("openai", "gpt-5-mini", 0.25), source: "configured" })).toContain(
-			"autoMode.classifierModel",
-		);
-		expect(describeCandidate({ model: model("groq", "llama-3.3-70b-versatile", 0.6), source: "session" })).toContain(
-			"nothing cheaper within",
-		);
-		expect(describeCandidate({ model: model("openai", "gpt-5-mini", 0.25), source: "economical" })).toContain(
-			"cheapest model within",
-		);
+	it("includes automatic selection or session fallback metadata", () => {
+		expect(describeCandidate({ model: model("openai", "gpt-5-mini", 0.25, 200_000), source: "economical" })).toContain("cheapest model within");
+		expect(describeCandidate({ model: model("groq", "llama-3.3-70b-versatile", 0.6, 200_000), source: "session" })).toContain("this session's model");
 	});
 });

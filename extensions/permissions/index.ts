@@ -39,19 +39,17 @@ import {
 	loadAutoModeConfigWithDiagnostics,
 	oneCodePermissionAllow,
 	persistAutoModeSetup,
-	persistClassifierModel,
 	removeOneCodePermissionAllow,
 } from "../auto-mode/config.ts";
 import { auditPermissionAllow, renderProposal, settingsPatch } from "../auto-mode/setup.ts";
 import { draftSetup, gatherFacts } from "../auto-mode/setup-run.ts";
-import { modelPickerComponent, type PickerEntry, pickerSpec, toPickerEntries } from "../auto-mode/model-picker.ts";
 import { DEFAULT_ENVIRONMENT } from "../auto-mode/defaults.ts";
 import { buildRuleset } from "../auto-mode/classifier-prompt.ts";
 import type { TranscriptEntry } from "../auto-mode/transcript.ts";
+import { classifierHistory, CLASSIFIER_TOOL_META, CLASSIFIER_USER_INPUT, messageText } from "../auto-mode/history.ts";
 import { appendDecision, type DecisionEntry, decisionEntry } from "../auto-mode/decision-log.ts";
 import { loadProjectInstructions } from "../auto-mode/instructions.ts";
-import { classifierCandidates, describeCandidate, findConfigured } from "../auto-mode/model-select.ts";
-import { modelIdentity } from "../lib/model-policy.ts";
+import { classifierCandidates, describeCandidate } from "../auto-mode/model-select.ts";
 import { conflictingPathArguments, isWithin, resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
 import { DenialStore, denialInputKey, permissionGrantedMessage } from "../auto-mode/denials.ts";
 import { PauseTracker, unattendedPromptNotice, unattendedPromptTimeoutMs } from "../auto-mode/pause.ts";
@@ -108,7 +106,6 @@ import {
 	type SourcedRule,
 } from "./settings.ts";
 import { MODE_ENV, parsePowerShell, resolvedOrSelf, runtimeProtectedDirs, runtimeSecretPaths } from "../lib/permission-gate.ts";
-import { CLASSIFIER_SETTING_CHANGED_CHANNEL } from "../lib/settings-channels.ts";
 import { describeProjectAllow, persistProjectAllowApproval, projectAllowApproved, projectDirectoryConsentEntry, type TrustFiring } from "./project-trust.ts";
 import { parseAddDirFlag, tooBroadForWorkspace, validateWorkspaceDirectory } from "./workspace.ts";
 import { WORKSPACE_CHANNEL, type WorkspaceAnnouncement } from "../lib/workspace-channel.ts";
@@ -180,7 +177,7 @@ const BLOCKED_BY_TIMEOUT = (reason: string) =>
 	`${reason}\n\nThis was not a judgement that the call is unsafe. Wait a moment and try this action again. ` +
 	"If it keeps failing, continue with other tasks that do not require this action and come back to it later — " +
 	"reading files, searching code, and other read-only operations do not require the classifier and can still be used. " +
-	"Do not try to route around the gate; if this specific action is essential, tell the user what you were about to do so they can re-run interactively or pin a faster classifier with /auto-mode model.";
+	"Do not try to route around the gate; if this specific action is essential, tell the user what you were about to do so they can re-run interactively or switch the session model.";
 const DENIED_SAFETY_FLOOR = (reason: string) =>
 	`Auto mode blocked this call without consulting the classifier: ${reason}. Writes to the gate's own configuration are never auto-approved. Do not retry or route around this; ask the user to make the change themselves.`;
 // "Choose a different approach" is exactly what a literal reader does with a
@@ -404,8 +401,6 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const chain = classifierCandidates({
 			available: badgeCtx.modelRegistry.getAvailable(),
 			sessionModel: sessionModel ?? badgeCtx.model,
-			configured: autoConfig.classifierModel,
-			configuredSetForContainment: autoConfig.classifierModelSetFor,
 		}).candidates.filter((entry) => !classifierState.rejected.has(`${entry.model.provider}/${entry.model.id}`));
 		const first = chain[0];
 		return { classifier: first ? `${first.model.provider}/${first.model.id}` : undefined, pinned: false };
@@ -422,7 +417,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			[
 				modeBadge(mode, {
 					paused: pauseTracker.isPaused(),
-					classifierModel: classifierState.pinned?.id,
+					classifier: classifierState.pinned?.id,
 					streaming,
 				}),
 			],
@@ -452,15 +447,16 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		mode === "auto" ? (autoConfig ??= loadAutoModeConfig(os.homedir())).classifyAllShell : undefined;
 
 	// Drop the cached config and classifier selection state, then refresh the badge.
-	// Shared by the "set classifier model" and "clear" paths.
+	// A model switch must re-evaluate the capability and context-window requirements.
 	const resetClassifierChoice = (sessionModel?: Model<Api>) => {
-		autoConfig = undefined; // reloaded lazily, now carrying any new model
+		autoConfig = undefined; // reloaded lazily
 		classifierState.pinned = undefined;
 		classifierState.rejected.clear();
 		classifierState.notified.clear();
 		classifierState.timeoutStreak = 0;
 		classifierState.chainCache = undefined;
 		applyBadge(sessionModel);
+		announceClassifierChoice(sessionModel);
 	};
 	// Keyed by cwd: a worktree-isolated child classifies against ITS checkout's
 	// CLAUDE.md/AGENTS.md, and must not poison the cache the main agent's own
@@ -508,13 +504,24 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		}
 	};
 
+	/** Announce the automatic choice before any tool needs screening. */
+	const announceClassifierChoice = (sessionModel?: Model<Api>) => {
+		if (mode !== "auto" || !badgeCtx) return;
+		const choice = classifierCandidates({ available: badgeCtx.modelRegistry.getAvailable(), sessionModel: sessionModel ?? badgeCtx.model });
+		const first = choice.candidates.find((entry) => !classifierState.rejected.has(`${entry.model.provider}/${entry.model.id}`));
+		if (!first) return;
+		const key = `using:${first.model.provider}/${first.model.id}`;
+		if (classifierState.notified.has(key)) return;
+		classifierState.notified.add(key);
+		if (choice.fallback) classifierState.notified.add(choice.fallback.text);
+		badgeCtx.ui.notify(choice.fallback?.text ?? `Auto mode will screen calls with ${describeCandidate(first)}.`, "info");
+	};
+
 	/** What would be tried, in order, before anything has been pinned. */
 	const describeChain = (ctx: ExtensionContext): string => {
 		const { candidates } = classifierCandidates({
 			available: ctx.modelRegistry.getAvailable(),
 			sessionModel: ctx.model,
-			configured: autoConfig?.classifierModel,
-			configuredSetForContainment: autoConfig?.classifierModelSetFor,
 		});
 		return candidates.length > 0 ? candidates.map(describeCandidate).join(" → ") : "(no model available)";
 	};
@@ -528,19 +535,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		}
 	})();
 
-	/**
-	 * The classifier's `<transcript>`: user messages and tool inputs, in order,
-	 * results stripped (transcript.ts renders it). The last entry is always the
-	 * action under review — the tool_call handler appends the call being judged.
-	 */
-	const transcript: TranscriptEntry[] = [];
-	const capTranscript = () => {
-		// Bound memory on a long unattended run; the renderer also caps by chars,
-		// and intent verification reads userMessages, not this, so trimming old
-		// lines here never weakens that check. Trim down to a lower watermark so the
-		// O(n) splice is amortized over the next ~100 pushes on the tool_call path.
-		if (transcript.length > 500) transcript.splice(0, transcript.length - 400);
-	};
+	// Only a cursor into pi's live branch, not a separate classifier history.
+	// A parent assistant message can contain calls not yet executed when a child
+	// asks for approval; those later calls must not become creation evidence.
+	let currentMainToolCallId: string | undefined;
 
 	/**
 	 * Record a rule denial as its own `denied` transcript line, so the classifier
@@ -550,11 +548,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	 * user decision about a class of action, and each already has its own
 	 * model-facing text.
 	 */
-	const recordRuleDenial = (result: { cause?: string; rule?: { raw?: string } }, toolName: string, subject: string) => {
+	const recordRuleDenial = (result: { cause?: string; rule?: { raw?: string } }, toolCallId: string, subject: string) => {
 		if (mode !== "auto") return;
 		if (result.cause === "plan-mode" || result.cause === "protected-path" || result.cause === "working-dir" || result.cause === "mode") return;
-		transcript.push({ kind: "denied", tool: normalizeToolName(toolName), subject, rule: result.rule?.raw ?? "deny" });
-		capTranscript();
+		pi.appendEntry(CLASSIFIER_TOOL_META, { toolCallId, deniedSubject: subject, rule: result.rule?.raw ?? "deny" });
 	};
 
 	/**
@@ -577,26 +574,24 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		return { ...autoConfig, hardDeny: [...(autoConfig?.hardDeny ?? []), ...renderedDeny.lines] };
 	};
 
-	/**
-	 * The user's own messages, and only those — the classifier's "explicit intent"
-	 * tier must not be reachable from file contents or command output, or a prompt
-	 * injection could manufacture its own authorisation. pi's `input` event fires
-	 * for real user input, which is exactly that boundary. Carried in FULL (not a
-	 * rolling window): in a long unattended run the authorizing setup message must
-	 * still clear a later action (decision 2 in working-docs/decisions/auto-mode.md).
-	 */
-	const userMessages: string[] = [];
+	// Persist input provenance beside the user message, not another transcript.
+	// pi stores extension-generated user turns in the same role; without this
+	// marker a resume could promote a skill body into the user's own intent.
+	const pendingInputs: { text: string; user: boolean }[] = [];
 	pi.on("input", (event) => {
-		// Only what the user typed. A plugin command or skill body arrives as
-		// source "extension" and must not become "the user's own words" that an
-		// intent quote can cite (review P12; hooks make the same distinction).
-		if (event.source === "extension") return;
 		const text = event.text?.trim();
 		if (!text) return;
-		userMessages.push(text);
-		if (userMessages.length > 1000) userMessages.shift();
-		transcript.push({ kind: "user", text });
-		capTranscript();
+		pendingInputs.push({ text, user: event.source !== "extension" });
+		// Handled commands never produce a user message. Bound only this pending
+		// association queue; the active conversation itself is never truncated.
+		if (pendingInputs.length > 256) pendingInputs.shift();
+	});
+	pi.on("message_end", (event) => {
+		if (event.message.role !== "user") return;
+		const text = messageText(event.message.content);
+		const at = pendingInputs.findIndex((input) => text.trim() === input.text || text.trim().startsWith(`${input.text}\n`));
+		const input = at >= 0 ? pendingInputs.splice(at, 1)[0] : undefined;
+		pi.appendEntry(CLASSIFIER_USER_INPUT, { timestamp: event.message.timestamp, messageText: text, userText: input?.user ? input.text : null });
 	});
 
 	/**
@@ -625,7 +620,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		 * aborted). All default to the parent's own values, so the main path is
 		 * unchanged.
 		 */
-		opts?: { cwd?: string; appendEntry?: TranscriptEntry; signal?: AbortSignal; powershellParse?: PowerShellParse },
+		opts?: { cwd?: string; appendEntry?: TranscriptEntry; toolCallId?: string; signal?: AbortSignal; powershellParse?: PowerShellParse },
 	) => {
 		const cwd = opts?.cwd ?? ctx.cwd;
 		autoConfig ??= loadAutoModeConfig(os.homedir());
@@ -670,13 +665,21 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			}
 		}
 
-		// The current call was pushed onto `transcript` by the tool_call handler, so
-		// it is already the last entry — the action under review (a bridged child's
-		// is `appendEntry`). The pre-gate's evidence is not sent: CC's payload
-		// carries no separate static-analysis block. What is sent is where a path
-		// the action names lands when a symlink takes it out of the working
-		// directory, directly above the action (resolved-paths-meta.ts).
-		const [history, action] = opts?.appendEntry ? [transcript, opts.appendEntry] : [transcript.slice(0, -1), transcript.at(-1)];
+		// Project pi's active context on every call. Compaction, resume and /tree
+		// therefore change classifier context at the same boundary as the agent's.
+		const { transcript: history, userMessages } = classifierHistory(ctx.sessionManager.getBranch(), opts?.toolCallId
+			? { beforeToolCallId: opts.toolCallId }
+			: { throughToolCallId: currentMainToolCallId });
+		const action = opts?.appendEntry;
+		const shell = normalizeToolName(toolName) === "powershell" ? "powershell" : isShellTool(normalizeToolName(toolName)) || normalizeToolName(toolName) === "monitor" ? "bash" : undefined;
+		if (shell && subject && wantsGitStatusMeta(shell, subject)) {
+			const porcelain = await gitStatusOutput(cwd, gitStatusMetaArgs(reachesIgnoredFiles(shell, subject)));
+			const gitStatus = porcelain === undefined ? undefined : gitStatusMeta(porcelain);
+			if (gitStatus) {
+				history.push({ kind: "meta", gitStatus });
+				if (opts?.toolCallId) pi.appendEntry(CLASSIFIER_TOOL_META, { toolCallId: opts.toolCallId, gitStatus });
+			}
+		}
 		const resolvedPaths = actionResolvedPaths(normalizeToolName(toolName), subject, opts?.powershellParse, { cwd, home, roots: [cwd, ...workspaceDirs] });
 		const verdict = await classify(
 			{
@@ -716,6 +719,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			ruleId: verdict.ruleId,
 			reason: verdict.reason || undefined,
 			raw: verdict.raw,
+			transcriptTooLong: verdict.transcriptTooLong,
 			model: classifierState.pinned ? `${classifierState.pinned.provider}/${classifierState.pinned.id}` : undefined,
 		});
 		return verdict;
@@ -851,8 +855,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// Auto mode needs a model to run its classifier on; with none reachable it
 		// would block every call, so it stays out of the cycle instead — the same
 		// thing Claude Code does when auto mode's requirements aren't met. The
-		// candidate chain ends in an unconditional fallback to any available model
-		// (model-select.ts), so "a model exists" is exactly "a classifier exists".
+		// classifier stays on this session's provider, falling back to the session
+		// model when no capable window-compatible alternative is available.
 		autoInCycle = ctx.modelRegistry.getAvailable().length > 0;
 		// A mode that owns a standing reminder must be announced when the session
 		// STARTS in it, not only when the user switches into it. setMode is the
@@ -898,8 +902,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		if (event.reason !== "reload") {
 			autoNoteDecided = false;
 			sessionAllows.length = 0;
-			transcript.length = 0;
-			userMessages.length = 0;
+			currentMainToolCallId = undefined;
+			pendingInputs.length = 0;
 			pauseTracker.reset();
 			denials.reset();
 			sessionWorkspaceDirs.length = 0;
@@ -934,7 +938,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		pi.events.emit(CONTEXT_BASELINE_CHANNEL, { key: "permission-mode", value: mode });
 		// The system prompt lists the workspace as the session starts (lib/workspace-channel.ts).
 		pi.events.emit(WORKSPACE_CHANNEL, { dirs: workspacePaths } satisfies WorkspaceAnnouncement);
-		applyBadge();
+		resetClassifierChoice(ctx.model);
 		// Publish the subagent permission bridge (see subagent-gate.ts). The closure
 		// reads live parent state on each call, so emitting once at session start is
 		// enough; subagents captures it and threads it into child sessions.
@@ -981,10 +985,6 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	});
 
 	// Mode-change requests from other extensions (e.g. plan-mode tools).
-	// `autoMode.classifierModel` was rewritten by another extension (`/doctor
-	// preset`): forget the pinned classifier and the cached config, exactly as
-	// `/auto-mode model` does after its own write, so the next call re-plans.
-	pi.events.on(CLASSIFIER_SETTING_CHANGED_CHANNEL, () => resetClassifierChoice(badgeCtx?.model));
 	pi.events.on(MODE_CHANNEL, (data) => {
 		const request = data as { mode?: unknown; toolCallId?: unknown } | undefined;
 		const requested = normalizePermissionMode(request?.mode);
@@ -1030,6 +1030,33 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			() => {},
 		);
 		return run;
+	};
+
+	/** A context overflow judged nothing: ask once, or stop a headless turn. */
+	const transcriptOverflow = async (ctx: ExtensionContext, toolName: string, subject: string, signal = ctx.signal): Promise<ChildGateDecision> => {
+		if (!ctx.hasUI || ctx.mode === "print") {
+			const reason = "auto mode classifier transcript exceeded context window in headless mode";
+			ctx.ui.notify(`${reason}. Compact the session (/compact) and continue.`, "error");
+			ctx.abort();
+			return { block: true, reason };
+		}
+		const reason = "Auto mode classifier transcript exceeded context window — falling back to manual approval";
+		ctx.ui.notify(reason, "warning");
+		logDecision(ctx, { tool: toolName, subject, outcome: "prompt", source: "user", transcriptTooLong: true, reason });
+		const choice = await serializePrompt(() => signal?.aborted ? Promise.resolve(undefined) : ctx.ui.select(
+			`${reason}\n\n${askTitle(toolName, previewSubject(subject), "mode", false)}`,
+			askOptions(undefined), { signal },
+		));
+		const allowed = !signal?.aborted && choice === YES;
+		logDecision(ctx, { tool: toolName, subject, outcome: allowed ? "allow" : "block", source: "user", transcriptTooLong: true, reason });
+		if (allowed) return undefined;
+		if (!signal?.aborted && choice === NO) {
+			const feedback = await serializePrompt(() => signal?.aborted ? Promise.resolve(undefined) : ctx.ui.input(
+				"What should the agent do instead?", "Optional — press Esc to skip", { signal },
+			));
+			return { block: true, reason: userDenialText(feedback) };
+		}
+		return { block: true, reason: "Manual approval was not granted after the auto-mode classifier transcript exceeded its context window." };
 	};
 
 	/**
@@ -1134,28 +1161,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const callCwd = original?.cwd ?? ctx.cwd;
 		const powershellParse = await parsePowerShell(normalizedTool, matchSubject, mode);
 
-		// Record every tool call into the classifier transcript (inputs only). In
-		// auto mode this is the running <transcript> the classifier reads, and this
-		// call is now its last entry — the action under review. For bash, record the
-		// model's original command, not the worktree cd-wrapper that actually runs.
-		if (mode === "auto") {
-			const recordedInput =
-				original !== undefined ? { command: original.command } : (event.input as Record<string, unknown>);
-			// Before a command that can destroy uncommitted work, run `git status`
-			// and put the result directly above that command, so the classifier
-			// judges the tree's real state (git-status-meta.ts). It stays in the
-			// transcript above that call.
-			const recordedCommand = typeof recordedInput.command === "string" ? recordedInput.command : undefined;
-			// `monitor` runs a shell command exactly as `bash` does.
-			const shell = normalizedTool === "powershell" ? "powershell" : normalizedTool === "bash" || normalizedTool === "monitor" ? "bash" : undefined;
-			if (shell && recordedCommand && wantsGitStatusMeta(shell, recordedCommand)) {
-				const porcelain = await gitStatusOutput(callCwd, gitStatusMetaArgs(reachesIgnoredFiles(shell, recordedCommand)));
-				const gitStatus = porcelain === undefined ? undefined : gitStatusMeta(porcelain);
-				if (gitStatus) transcript.push({ kind: "meta", gitStatus });
-			}
-			transcript.push({ kind: "tool", tool: normalizedTool, input: recordedInput });
-			capTranscript();
-		}
+		currentMainToolCallId = event.toolCallId;
 
 		const decideWith = (allowRules: PermissionRule[], dirs: string[] = workspaceDirs) =>
 			decide({
@@ -1254,7 +1260,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 
 		// (dontAsk is the only mode that denies rather than allows unmatched calls.)
 		if (result.decision === "deny") {
-			recordRuleDenial(result, event.toolName, matchSubject);
+			recordRuleDenial(result, event.toolCallId, matchSubject);
 			return { block: true, reason: denyReason(result) };
 		}
 
@@ -1300,13 +1306,18 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 					result.cause !== "protected-path",
 					// A worktree-wrapped command is analysed as the model wrote it, in the
 					// worktree it runs in (the classifier transcript already holds it).
-					{ cwd: original?.cwd, powershellParse },
+					{
+						cwd: original?.cwd, powershellParse, toolCallId: event.toolCallId,
+						appendEntry: { kind: "tool", tool: normalizedTool, input: original !== undefined ? { command: original.command } : event.input as Record<string, unknown> },
+					},
 				);
 				if (outcome.decision === "allow") {
 					noteAllow();
 					denials.settle(inputKey);
 					return undefined;
 				}
+
+				if (outcome.transcriptTooLong) return transcriptOverflow(ctx, event.toolName, matchSubject);
 
 				// A timeout was not earned by looping against the gate, so it does not
 				// count toward the auto-pause. It is returned to the model as retryable
@@ -1526,6 +1537,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				powershellParse,
 			});
 			if (outcome.decision === "allow") return undefined;
+			if (outcome.transcriptTooLong) return transcriptOverflow(ctx, toolName, subject, call.signal);
 			if (outcome.tier === "timeout") return { block: true, reason: BLOCKED_BY_TIMEOUT(outcome.reason) };
 			return { block: true, reason: DENIED_BY_CLASSIFIER(outcome.reason) };
 		}
@@ -2033,6 +2045,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			const tool = normalizeToolName(action.toolName);
 			return { kind: "tool", tool, input: isShellTool(tool) ? { command: action.subject } : { subject: action.subject } };
 		});
+		const { transcript, userMessages } = classifierHistory(ctx.sessionManager.getBranch(), { throughToolCallId: currentMainToolCallId });
 		const verdict = await classify(
 			{
 				toolName: "subagent-review",
@@ -2062,11 +2075,16 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			subject,
 			outcome: verdict.decision,
 			source: "review",
+			transcriptTooLong: verdict.transcriptTooLong,
+			model: classifierState.pinned ? `${classifierState.pinned.provider}/${classifierState.pinned.id}` : undefined,
 			tier: verdict.tier,
 			ruleId: verdict.ruleId,
 			reason: verdict.reason || undefined,
 		});
 		if (verdict.decision === "allow") return undefined;
+		// A completed run cannot be approved retroactively. Surface a failed
+		// review without counting a context-limit failure as an unsafe action.
+		if (verdict.transcriptTooLong) return verdict.reason;
 		pauseTracker.recordBlock({
 			toolName: "Agent",
 			subject,
@@ -2125,80 +2143,6 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		if (!reason) return undefined;
 		return { content: [{ type: "text" as const, text: reviewFlagged(reason) }, ...event.content] };
 	});
-
-	/**
-	 * Apply a chosen classifier model: validate auth first (a persisted model
-	 * with no credentials would fail every call), persist to user scope, and
-	 * release the session pin so the choice takes effect on the next call
-	 * rather than after a restart.
-	 */
-	const applyClassifierChoice = async (spec: string, ctx: ExtensionContext): Promise<void> => {
-		const model = findConfigured(ctx.modelRegistry.getAvailable(), spec);
-		if (!model) {
-			ctx.ui.notify(`No available model matches "${spec}" — check /auto-mode config for the catalog name.`, "error");
-			return;
-		}
-		const resolved = `${model.provider}/${model.id}`;
-		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-		if (!auth.ok) {
-			ctx.ui.notify(`Cannot use ${resolved}: ${auth.error}. Not saved.`, "error");
-			return;
-		}
-		try {
-			// Stamp the session's containment so a later session on another provider
-			// treats this cross-provider setting as stale (parity with /subagent).
-			persistClassifierModel(resolved, os.homedir(), ctx.model ? modelIdentity(ctx.model).containment : undefined);
-		} catch (error) {
-			ctx.ui.notify(`Could not save classifier model: ${error instanceof Error ? error.message : String(error)}`, "error");
-			return;
-		}
-		resetClassifierChoice();
-		ctx.ui.notify(`Auto-mode classifier set to ${resolved} (saved to ~/.onecode/settings.json).`, "info");
-	};
-
-	/** `/auto-mode model` — show the picker, or apply a named model / `clear`. */
-	const handleModelSubcommand = async (remainder: string, ctx: ExtensionContext): Promise<void> => {
-		if (remainder === "clear") {
-			try {
-				persistClassifierModel(undefined, os.homedir());
-			} catch (error) {
-				ctx.ui.notify(`Could not update settings: ${error instanceof Error ? error.message : String(error)}`, "error");
-				return;
-			}
-			resetClassifierChoice();
-			ctx.ui.notify(`autoMode.classifierModel cleared. Auto mode will choose: ${describeChain(ctx)}`, "info");
-			return;
-		}
-		if (remainder) {
-			await applyClassifierChoice(remainder, ctx);
-			return;
-		}
-
-		const available = ctx.modelRegistry.getAvailable();
-		if (available.length === 0) {
-			ctx.ui.notify("No models are available — authenticate a provider first.", "warning");
-			return;
-		}
-		// The picker needs focus and a terminal; elsewhere say what to type.
-		if (!ctx.hasUI || ctx.mode !== "tui") {
-			autoConfig ??= loadAutoModeConfig(os.homedir());
-			ctx.ui.notify(
-				`classifierModel: ${autoConfig.classifierModel ?? "(not set)"}. Set one with /auto-mode model <provider/model-id>, or clear it with /auto-mode model clear.`,
-				"info",
-			);
-			return;
-		}
-
-		autoConfig ??= loadAutoModeConfig(os.homedir());
-		const current = autoConfig.classifierModel;
-		const entries = toPickerEntries(available);
-
-		const chosen = await ctx.ui.custom<PickerEntry | null>((tui, theme, _keybindings, done) =>
-			modelPickerComponent({ entries, current }, tui, theme, done),
-		);
-
-		if (chosen) await applyClassifierChoice(pickerSpec(chosen), ctx);
-	};
 
 	/**
 	 * `/auto-mode setup` — Claude Code's setup-wizard flow: ask how this
@@ -2317,21 +2261,16 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	};
 
 	registerLocalCommand(pi, "auto-mode", {
-		description: "Auto-mode classifier: /auto-mode [setup|defaults|config|model [provider/model-id|clear]]",
-		argumentHint: "[setup|defaults|config|model [provider/model-id|clear]]",
+		description: "Auto-mode classifier: /auto-mode [setup|defaults|config]",
+		argumentHint: "[setup|defaults|config]",
 		getArgumentCompletions: () =>
 			[
 				{ value: "setup", label: "analyze this environment and draft the config" },
 				{ value: "config", label: "effective environment" },
 				{ value: "defaults", label: "built-in environment" },
-				{ value: "model", label: "choose the classifier model" },
 			],
 		handler: async (args, ctx) => {
-			const [sub, ...rest] = args.trim().split(/\s+/).filter(Boolean);
-			if (sub === "model") {
-				await handleModelSubcommand(rest.join(" ").trim(), ctx);
-				return;
-			}
+			const [sub] = args.trim().split(/\s+/).filter(Boolean);
 			if (sub === "setup") {
 				await handleSetupSubcommand(ctx);
 				return;
@@ -2339,7 +2278,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			const which = sub ?? "config";
 			if (which !== "defaults" && which !== "config") {
 				ctx.ui.notify(
-					`Unknown subcommand "${which}". Use: /auto-mode setup | defaults | config | model [provider/model-id|clear]`,
+					`Unknown subcommand "${which}". Use: /auto-mode setup | defaults | config`,
 					"warning",
 				);
 				return;
@@ -2381,7 +2320,6 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 						? [
 								`classifyAllShell: ${shown.classifyAllShell}`,
 								`logDecisions: ${shown.logDecisions} (auto-mode-decisions.jsonl next to the session files)`,
-								`classifierModel: ${shown.classifierModel ?? "(not set — /auto-mode model chooses one)"}`,
 								// Which model actually screens calls, and why — this reads the
 								// user's prompts, so it should not take knowing the code to find out.
 								`classifier in use: ${

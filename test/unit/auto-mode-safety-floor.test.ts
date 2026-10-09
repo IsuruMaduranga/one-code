@@ -109,6 +109,18 @@ describe("safetyControlWrite: read-only words in escalated compound commands", (
 		`find src -regex '.*\\.orig' -delete`,
 		`find . -iregex '.*/node_modules/.*\\.LOG$' -delete`,
 		`find . -regex '.*/build/' -exec rm -rf {} +`,
+		// A pipeline of proven read-only commands runs no member's output (GPT-6.1 Sol, live).
+		`pwd; ls -la; git status --short; cat Makefile; find . -maxdepth 3 -type f -not -path './.git/*' | sort`,
+		`cat Makefile; find . -path './.git/*' | sort | head -n 5`,
+		`cat Makefile; cat .claude/settings.json | jq .permissions`,
+		// A read that names a credential or execution-primitive path escalates for the classifier but cannot write (DeepSeek V4.1 Flash, live).
+		`grep -rnIE "(sk_[A-Za-z0-9_]{8,}|-----BEGIN)" . 2>/dev/null | grep -v node_modules | head -30; echo "=== keys ==="; find . -not -path './.git/*' -not -path './node_modules/*' \\( -name "*.pem" -o -name "*.key" -o -name "*.env*" \\) 2>/dev/null`,
+		`find . -not -path './.git/*' -name '*.pem' && exit 0`,
+		`cat Makefile && find . -path './.git/*' -name Makefile`,
+		// A negated find pattern excludes files; it never selects one (Qwen 3.8 Flash, live).
+		`find . -type f -not -path './.git/*' | head -50 && echo '---' && wc -l $(find . -type f \\( -name '*.py' -o -name '*.ts' \\) -not -path './.git/*' -not -path './node_modules/*')`,
+		`find . ! -path './.git/*' -exec wc -l {} + && exit 0`,
+		`find . -not \\( -path './.git/*' -o -path './node_modules/*' \\) -name '*.py' -exec wc -l {} + && exit 0`,
 	])("does not floor proven read-only words: %s", (command) => {
 		expect(analyzeShellCommand({ command, cwd, home }).verdict).toBe("escalate");
 		expect(check("bash", { command })).toBeUndefined();
@@ -142,6 +154,18 @@ describe("safetyControlWrite: read-only words in escalated compound commands", (
 		`rg -g '!**/x/**' slugify . && sh -c 'cat .claude/settings.json'`,
 		`rg -g '!**/x/**' slugify . && echo "$(cat .claude/settings.json)"; exit 0`,
 		`echo 'cp x .claude/settings.json' | sh`,
+		`cat Makefile; find . -path './.git/*' | sh`,
+		`cat Makefile; find . -path './.git/*' | mystery`,
+		`cat Makefile; find . -path './.git/*' -delete | sort`,
+		`cat Makefile; find . -path './.git/*' | { sort; mystery; }`,
+		`cat Makefile; (find . -path './.git/*' | sort)`,
+		`cat Makefile; echo "$(find . -path './.git/*' | sort)"`,
+		`cat Makefile; find . -path "$(mystery)/*" | sort`,
+		`find . -path './.git/*' -name '*.key' -exec mystery {} + && exit 0`,
+		`find . -not -path './.git/*' -name 'settings*' -delete && exit 0`,
+		`find . -not \\( -path './x/*' \\) -name '*' -delete && exit 0`,
+		`find . -not -path './x/*' -o -name 'settings.json' -delete && exit 0`,
+		`rm $(find .claude -name 'settings*')`,
 		`sh <<'EOF'\ncp x .claude/settings.json\nEOF`,
 		`cat <<'EOF' | sh\ncp x .claude/settings.json\nEOF`,
 		`sh <<< 'cp x .claude/settings.json'`,

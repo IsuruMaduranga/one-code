@@ -18,7 +18,8 @@ import type { BuildSystemPromptOptions, ExtensionAPI, ExtensionContext } from "@
 import { environmentBlock, modelLine } from "../lib/environment-block.ts";
 import { GIT_SNAPSHOT_OWNER_CHANNEL } from "../lib/git-status.ts";
 import { oneShotSessionNote, sessionOutlivesTurn } from "../lib/notifications.ts";
-import { resolveModelTier, taskToolsEnabled } from "../lib/model-tier.ts";
+import { taskToolsEnabled } from "../lib/model-tier.ts";
+import { sessionModelTier } from "../lib/session-model-tier.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { privateSessionScratchpadDir } from "../lib/scratchpad.ts";
 import { collectEnvironment, type EnvironmentInfo } from "./environment.ts";
@@ -29,6 +30,7 @@ import { WORKSPACE_CHANNEL, type WorkspaceAnnouncement } from "../lib/workspace-
 import { PROMPT_OPTIONS_CHANNEL, type PromptOptionsAnnouncement, SYSTEM_PROMPT_REQUEST_CHANNEL, type SystemPromptRequest } from "../lib/prompt-options.ts";
 
 export default function systemPromptExtension(pi: ExtensionAPI) {
+	const requestTier = sessionModelTier(pi);
 	let cachedEnv: EnvironmentInfo | undefined;
 	let cachedKey = "";
 	let scratchpad: string | undefined;
@@ -68,8 +70,7 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 
 	const buildPrompt = (options: BuildSystemPromptOptions, ctx: ExtensionContext): string => {
 		const model = ctx.model;
-		// Re-resolved every turn: the model (and so the tier) can change mid-session.
-		const tier = resolveModelTier(model);
+		const tier = requestTier();
 		// The same constant the context-budget extension puts on every user message.
 		const totalTokensLine = process.env.CC_TOTAL_TOKENS === "0" ? null : totalTokensBlock(turnTokenBudget());
 		return buildClaudeCodeSystemPrompt(options, environment(ctx.cwd), tier, totalTokensLine, taskToolsEnabled(model, process.env, tier));

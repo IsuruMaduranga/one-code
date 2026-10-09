@@ -22,8 +22,8 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { whenAborted } from "../lib/abort.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
-import { PREVIEW_BYTES, persistedFileBlock, persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
-import { detachedSpawnOptions, KILL_GRACE_MS, stopProcessTree, waitForChildExit } from "../lib/process-tree.ts";
+import { persistedFilePreview, persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
+import { detachedSpawnOptions, KILL_GRACE_MS, rememberProcessGroup, stopProcessTree, waitForChildExit } from "../lib/process-tree.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { bashSpawn, spawnShellCommand } from "../lib/shell-spawn.ts";
 import { ccToolRenderers, customMessageText, formatFireTime, liveUiCtx, notificationComponent, notificationUserMarkdown, scheduledTaskComponent } from "../lib/tui-render.ts";
@@ -34,6 +34,7 @@ import {
 	generateTaskId,
 	TASK_REGISTER_CHANNEL,
 } from "./registry.ts";
+import { SWITCH_CANCEL, SWITCH_STOP, switchWarning, workWidgetLine } from "./switch-guard.ts";
 import {
 	AGED_OUT_RESULT,
 	DynamicLoop,
@@ -90,7 +91,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, formatNotOwner } from "../lib/agent-cron.ts";
 import { SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../lib/skill-body.ts";
 import { BUNDLED_SKILLS_DIR } from "../lib/skill-scan.ts";
-import { closeSync, createWriteStream, mkdirSync, openSync, readSync, statSync, type WriteStream } from "node:fs";
+import { createWriteStream, mkdirSync, type WriteStream } from "node:fs";
 import { join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { SESSION_WORK_CHANNEL, sessionBackgroundTask, sessionCron, type SessionWorkQuery } from "../lib/session-work.ts";
@@ -136,27 +137,6 @@ function monitorLogPath(ctx: ExtensionContext, taskId: string): string | undefin
 		return join(dir, "output.log");
 	} catch {
 		return undefined;
-	}
-}
-
-/**
- * A finished monitor's spool as a persisted-output block: the file itself is
- * the full output, so only its size and the first `PREVIEW_BYTES` are read.
- * Undefined when the file cannot be read.
- */
-function spoolBlock(path: string): string | undefined {
-	let fd: number | undefined;
-	try {
-		const { size } = statSync(path);
-		fd = openSync(path, "r");
-		const head = Buffer.alloc(Math.min(size, PREVIEW_BYTES));
-		const read = readSync(fd, head, 0, head.length, 0);
-		// The decoder holds back a character split at the preview's end.
-		return persistedFileBlock(path, size, new StringDecoder("utf8").write(head.subarray(0, read)));
-	} catch {
-		return undefined;
-	} finally {
-		if (fd !== undefined) closeSync(fd);
 	}
 }
 
@@ -231,7 +211,13 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	// prior one is still about to resume.
 	let agentBusy = false;
 
-	pi.events.on(TASK_REGISTER_CHANNEL, (task) => registry.register(task as BackgroundTask));
+	pi.events.on(TASK_REGISTER_CHANNEL, (data) => {
+		const task = data as BackgroundTask;
+		registry.register(task);
+		// Shells and subagent runs count toward the widget's warning line too.
+		updateWidget();
+		task.finished?.then(updateWidget, updateWidget);
+	});
 	// A subagent's cron tools (lib/agent-cron.ts): its jobs, its view, its deletes.
 	pi.events.on(AGENT_CRON_CHANNEL, (data) => {
 		const request = data as AgentCronRequest;
@@ -267,11 +253,10 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		// session_shutdown also drops lastCtx, so a late repaint is a no-op.
 		const live = liveUiCtx(lastCtx);
 		if (!live) return;
-		// A task whose producer gives it first-class panel UI (bash shells and
-		// subagent runs in the subagents panel) is excluded, or this line would
-		// stay permanently lit next to the panel already showing the same work.
-		const running = registry.running().filter((t) => !t.ownUI).length;
-		live.ui.setWidget("cc-background", running > 0 ? [` background tasks: ${running} running`] : undefined);
+		// Every running task and scheduled job, panel-owned ones included: the
+		// line is the warning that /clear or quitting stops them (switch-guard.ts).
+		const line = workWidgetLine(registry.running().length, cron.list().length);
+		live.ui.setWidget("cc-background", line ? [line] : undefined);
 	};
 
 	// The wire frames are model-facing; the transcript shows a compact headline
@@ -351,8 +336,12 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		if (cronTimer) clearTimeout(cronTimer);
 		cronTimer = undefined;
 		// A busy agent re-runs this at agent_settled; a dead session never does.
-		if (!alive() || agentBusy) return;
+		if (!alive() || agentBusy) {
+			updateWidget();
+			return;
+		}
 		for (const fire of cron.takeDue(Date.now())) fireCron(fire);
+		updateWidget();
 		const next = cron.nextFireAt();
 		if (next === undefined) return;
 		cronTimer = setTimeout(runCron, Math.min(Math.max(0, next - Date.now()), MAX_TIMER_MS));
@@ -475,49 +464,50 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 			const end = (finalStatus: BackgroundTask["status"], note?: string) => {
 				if (status !== "running") return;
 				status = finalStatus;
-				task.status = finalStatus;
-				task.finishedAt = Date.now();
 				if (flushTimer) clearTimeout(flushTimer);
-				if (log) {
-					// `finished` resolves once the spool is on disk, so a blocking
-					// task_output never names a log still being written. `close` follows
-					// a clean end and an error alike; the timer covers a stream that hangs.
-					if (log.closed) {
-						// A failed spool has already closed.
-						finish();
-					} else {
-						const fallback = setTimeout(finish, 1_000);
-						fallback.unref?.();
-						log.once("close", () => {
-							clearTimeout(fallback);
-							finish();
-						});
-						log.end();
-					}
-				} else {
+				const complete = () => {
+					if (task.status !== "running") return;
+					// Terminal status and its notification promise readable final output.
+					task.status = finalStatus;
+					task.finishedAt = Date.now();
 					finish();
+					// After shutdown or inside a one-shot run, report through `finished` alone.
+					if (!alive() || oneShot) return;
+					flush(true);
+					updateWidget();
+					// CC's monitor end: the recent tail rides <event> under the ended summary.
+					const ccStatus = taskStatusOf(finalStatus);
+					const recent = tail(stored, MONITOR_BATCH_MAX_CHARS).trim();
+					notify(
+						"task-notification",
+						taskNotification({
+							kind: "monitor",
+							taskId: id,
+							toolUseId: toolCallId,
+							status: ccStatus,
+							summary: monitorEndedSummary(params.description, ccStatus, eventCount > 0, note),
+							result: recent || undefined,
+						}),
+						{ taskId: id, status: finalStatus },
+					);
+				};
+				if (log && !log.closed) {
+					// `close` follows a clean end and an error alike. A stuck stream
+					// must not hold a blocking tool forever or advertise a partial file.
+					const fallback = setTimeout(() => {
+						spoolFailed = true;
+						task.logPath = undefined;
+						log?.destroy();
+						complete();
+					}, 1_000);
+					log.once("close", () => {
+						clearTimeout(fallback);
+						complete();
+					});
+					log.end();
+				} else {
+					complete();
 				}
-				// Past this point everything touches the session: a monitor ending
-				// after shutdown (H1) or inside a one-shot run reports through
-				// `finished` alone.
-				if (!alive() || oneShot) return;
-				flush(true);
-				updateWidget();
-				// CC's monitor end: the recent tail rides `<event>` under the ended summary.
-				const ccStatus = taskStatusOf(finalStatus);
-				const recent = tail(stored, MONITOR_BATCH_MAX_CHARS).trim();
-				notify(
-					"task-notification",
-					taskNotification({
-						kind: "monitor",
-						taskId: id,
-						toolUseId: toolCallId,
-						status: ccStatus,
-						summary: monitorEndedSummary(params.description, ccStatus, eventCount > 0, note),
-						result: recent || undefined,
-					}),
-					{ taskId: id, status: finalStatus },
-				);
 			};
 
 			let stop: () => void;
@@ -540,6 +530,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 					...detachedSpawnOptions(),
 					stdio: ["ignore", "pipe", "pipe"],
 				});
+				rememberProcessGroup(child);
 				const lines = new MonitorLineSplitter();
 				// Streaming decoders: a UTF-8 character split across reads stays whole.
 				const stdoutText = new StringDecoder("utf8");
@@ -632,7 +623,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				}
 				// Past the in-memory cap the spool holds every line: point at it rather
 				// than persist the tail. Without one, say what was lost.
-				const spooled = overflowed && task.logPath ? spoolBlock(task.logPath) : undefined;
+				const spooled = overflowed && task.logPath ? persistedFilePreview(task.logPath) : undefined;
 				const kept = overflowed && !spooled ? `${SPOOL_LOST_NOTE}${stored.trim()}` : stored.trim() || "(no events)";
 				const output = spooled ?? persistIfLarge(kept, { dir: sessionResultsDir(ctx), id: `monitor-${id}` });
 				const finalStatus = task.status;
@@ -692,17 +683,21 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 
 			if (params.block !== false && task.status === "running") {
 				const timeoutMs = Math.min(params.timeout ?? 30_000, MAX_BLOCK_TIMEOUT_MS);
-				await Promise.race([
-					task.finished,
-					new Promise<void>((resolve) => {
-						const timer = setTimeout(resolve, timeoutMs);
-						timer.unref?.();
-						signal?.addEventListener("abort", () => {
-							clearTimeout(timer);
-							resolve();
-						}, { once: true });
-					}),
-				]);
+				let timer: ReturnType<typeof setTimeout> | undefined;
+				let unhook = () => {};
+				try {
+					await Promise.race([
+						task.finished,
+						new Promise<void>((resolve) => {
+							// The tool awaits this deadline: keep it referenced in one-shot runs.
+							timer = setTimeout(resolve, timeoutMs);
+							unhook = whenAborted(signal, resolve);
+						}),
+					]);
+				} finally {
+					clearTimeout(timer);
+					unhook();
+				}
 			}
 
 			updateWidget();
@@ -751,7 +746,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 					{
 						type: "text",
 						text: wasResident
-							? `Terminated the resident agent behind ${task.id} (${task.description}); it can no longer be messaged live (send_message will resume it from its session file).`
+							? `Terminated the resident agent behind ${task.id} (${task.description}); it can no longer be messaged live (SendMessage will resume it from its session file).`
 							: `Stop requested for ${task.id} (${task.description}).`,
 					},
 				],
@@ -900,6 +895,24 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	pi.on("session_compact", () => {
 		loopDelivery.delete(MAIN_OWNER);
 	});
+
+	// A switch stops everything below, so ask first. pi can cancel a switch but
+	// not a quit; the widget line covers quitting (switch-guard.ts).
+	const confirmSwitch = async (ctx: ExtensionContext, action: string): Promise<{ cancel: true } | undefined> => {
+		if (!ctx.hasUI) return undefined;
+		const title = switchWarning(
+			registry.running().map((t) => ({ id: t.id, label: t.description })),
+			cron.list().map((j) => ({ id: j.id, label: describeCadence(j.cron) })),
+			action,
+		);
+		if (!title) return undefined;
+		const choice = await ctx.ui.select(title, [SWITCH_CANCEL, SWITCH_STOP]);
+		return choice === SWITCH_STOP ? undefined : { cancel: true };
+	};
+	pi.on("session_before_switch", (event, ctx) =>
+		confirmSwitch(ctx, event.reason === "resume" ? "Resuming another session" : "Starting a new session"),
+	);
+	pi.on("session_before_fork", (_event, ctx) => confirmSwitch(ctx, "Forking the session"));
 
 	pi.on("session_shutdown", (event) => {
 		// Fires on /clear, /new, /resume and /reload too (findings §8). Everything

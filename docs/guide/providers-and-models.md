@@ -74,8 +74,8 @@ run on different models:
   for routine work and a stronger one for the hard parts.
 - **A cheaper subagent tier.** Subagents, workflow agents, the auto-mode
   classifier, and the reader model behind web fetch and recaps all run on
-  their own model. By default One Code picks these for you; see the next
-  section. `/subagent` and `/auto-mode model` set them by hand.
+  their own model. One Code picks these automatically; see the next section.
+  `/subagent` can set the subagent default by hand.
 
 This matters most for `ultracode` workflows, which fan work out across many
 agents at once. Running those agents on a cheap tier keeps a large fan-out
@@ -87,12 +87,14 @@ For its side roles, One Code chooses a model from the **same provider** as
 your session; automatic picks never send your data to another provider. The
 choice is the cheapest model that clears a capability floor:
 
-- **Subagents and the classifier** share one rule: a Sonnet-class model when
-  your session runs a Sonnet-class or stronger model, and a Haiku-class model
-  otherwise. This is Claude Code's classifier rule, applied to delegated work
-  too, so on most providers both roles land on the same model. A subagent is
-  never dearer than your main model; if nothing cheaper qualifies, it runs on
-  the main model.
+- **Subagents and the classifier** share a capability floor: a Sonnet-class
+  model when your session runs a Sonnet-class or stronger model, and a
+  Haiku-class model otherwise. A subagent is never dearer than your main
+  model; if nothing cheaper qualifies, it runs on the main model.
+- **The classifier** additionally requires a known catalog context window at
+  least as large as your session model's. It chooses the cheapest qualifying
+  model automatically, re-evaluating when you switch models. If no model
+  qualifies, or the session window is unknown, it uses the session model.
 - **The reader** (web fetch answers, recaps) uses the cheapest capable
   model.
 

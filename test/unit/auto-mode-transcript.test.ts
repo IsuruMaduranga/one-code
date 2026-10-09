@@ -44,39 +44,38 @@ describe("renderTranscript", () => {
 		expect(out).not.toContain("result");
 	});
 
-	it("clips an oversized field of an earlier entry so one argument cannot dominate", () => {
+	it("preserves oversized earlier fields, which can contain creation evidence", () => {
 		const out = renderTranscript(
 			[
 				{ kind: "tool", tool: "bash", input: { command: "x".repeat(50_000) } },
 				{ kind: "tool", tool: "bash", input: { command: "ls" } },
 			],
-			{ maxField: 100 },
 		);
-		expect(out).toContain("truncated");
-		expect(out.length).toBeLessThan(1000);
+		expect(out).not.toContain("truncated");
+		expect(out).toContain("x".repeat(50_000));
 	});
 
 	// AUTO-MODE-SECURITY-REVIEW-2026-09-24 M1: the tool runs the whole input, so
 	// a suffix past the clip ran unseen by the classifier.
 	it("never clips the action under review", () => {
 		const command = `python3 -c "${"# pad\n".repeat(400)}print('HIDDEN_ACTION')"`;
-		const out = renderTranscript([{ kind: "tool", tool: "bash", input: { command } }], { maxField: 100 });
+		const out = renderTranscript([{ kind: "tool", tool: "bash", input: { command } }]);
 		expect(out).not.toContain("truncated");
 		expect(out).toContain("HIDDEN_ACTION");
 		expect(actionLength([{ kind: "tool", tool: "bash", input: { command } }])).toBeGreaterThan(MAX_ACTION_CHARS / 100);
 	});
 
-	it("drops oldest entries past the char budget but always keeps the action under review", () => {
+	it("keeps the earlier entries and the action under review without a rolling budget", () => {
 		const many: TranscriptEntry[] = Array.from({ length: 50 }, (_v, i) => ({
 			kind: "tool",
 			tool: "bash",
 			input: { command: `echo step-${i} ${"x".repeat(200)}` },
 		}));
 		many.push({ kind: "tool", tool: "bash", input: { command: "THE-ACTION-UNDER-REVIEW" } });
-		const out = renderTranscript(many, { maxChars: 2000 });
+		const out = renderTranscript(many);
 		expect(out).toContain("THE-ACTION-UNDER-REVIEW"); // last entry always kept
-		expect(out).toContain("omitted for length");
-		expect(out).not.toContain("step-0 ");
+		expect(out).not.toContain("omitted for length");
+		expect(out).toContain("step-0 ");
 	});
 });
 
@@ -93,15 +92,15 @@ describe("rule denials", () => {
 		expect(out).toContain('"tool":"Bash"');
 	});
 
-	it("clips a long denied subject like every other field", () => {
+	it("keeps the whole denied subject so an equivalent-effect retry cannot hide its suffix", () => {
 		const out = renderTranscript(
 			[
 				{ kind: "denied", tool: "bash", subject: "x".repeat(5000), rule: "Bash(rm:*)" },
 				{ kind: "tool", tool: "bash", input: { command: "ls" } },
 			],
-			{ maxField: 50 },
 		);
-		expect(out).toContain("truncated");
+		expect(out).not.toContain("truncated");
+		expect(out).toContain("x".repeat(5000));
 	});
 });
 

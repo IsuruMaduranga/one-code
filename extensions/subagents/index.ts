@@ -42,7 +42,7 @@ import {
 	subagentModelsReminder,
 	subagentStatusModel,
 } from "./model-select.ts";
-import { modelPickerComponent, pickerSpec, toPickerEntries, type PickerEntry } from "../auto-mode/model-picker.ts";
+import { modelPickerComponent, pickerSpec, toPickerEntries, type PickerEntry } from "../lib/model-picker.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
 import { guideDocs } from "../lib/guide-docs.ts";
 import { extensionVersion } from "../lib/package-version.ts";
@@ -55,7 +55,7 @@ import { requestSystemPrompt } from "../lib/prompt-options.ts";
 import { captureMatches, LAST_REQUEST_CHANNEL, type RequestCapture } from "../lib/request-replay.ts";
 import { BTW_FORK_CHANNEL, btwForkDescription, btwForkName, btwForkRecord, btwForkTaskId, type BtwForkRequest, type BtwForkResult } from "../lib/btw-fork.ts";
 import { watchMcpTools } from "../lib/mcp-share.ts";
-import { resolveModelTier } from "../lib/model-tier.ts";
+import { sessionModelTier } from "../lib/session-model-tier.ts";
 import { type DescriptionForm, followDescriptionForm, registerVariantTool } from "../lib/tool-variants.ts";
 import { agentDescription } from "./agent-description.ts";
 import { projectConfigDirName } from "../lib/config-mode.ts";
@@ -271,6 +271,7 @@ function residentPending(resident: Resident): boolean {
 }
 
 export default function subagentsExtension(pi: ExtensionAPI) {
+	const requestTier = sessionModelTier(pi);
 	const registry = new RunRegistry();
 	/**
 	 * The session's permission mode as the permissions extension last announced
@@ -435,9 +436,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			runtimePromise = undefined;
 			throw error;
 		}));
-	/** The runtime, or the build error as a message a failed run can report. */
+	/** The runtime, or the startup error as a message a failed run can report. */
 	const runtimeOrError = (ctx: ExtensionContext): Promise<SubagentRuntime | string> =>
-		getRuntime(ctx).catch((error: unknown) => `could not start the subagent runtime: ${error instanceof Error ? error.message : String(error)}`);
+		getRuntime(ctx)
+			.then((runtime) => shuttingDown ? "the session ended before the agent started" : runtime)
+			.catch((error: unknown) => `could not start the subagent runtime: ${error instanceof Error ? error.message : String(error)}`);
 
 	// The mcp extension answers a status request synchronously on the bus.
 	let mcpStatus: McpServerStatus[] | undefined;
@@ -668,8 +671,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		});
 	};
 
-	const emitDelegationSteer = (sessionModel = lastCtx?.model) => {
-		const text = resolveModelTier(sessionModel) === "tiny" ? DELEGATION_STEER : null;
+	const emitDelegationSteer = () => {
+		const text = requestTier() === "tiny" ? DELEGATION_STEER : null;
 		const plan = planSubagentAnnouncement({ restored: restoredSession, baseline: capabilityBaseline, capability: "delegation", text });
 		capabilityBaseline = plan.baseline;
 		if (plan.kind !== "none") publishCapabilityBaseline(capabilityBaseline);
@@ -688,8 +691,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	 * would get the reminder on every delegating turn for nothing, and the
 	 * trigger fires on correct behaviour as readily as on the failure.
 	 */
-	const backstopApplies = (ctx: ExtensionContext | undefined) => {
-		const tier = resolveModelTier(ctx?.model);
+	const backstopApplies = () => {
+		const tier = requestTier();
 		return tier === "cheap" || tier === "tiny";
 	};
 	pi.on("agent_start", () => {
@@ -700,12 +703,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	pi.on("agent_settled", () => {
 		parentBusy = false;
 	});
-	pi.on("agent_end", (_event, ctx) => {
+	pi.on("agent_end", () => {
 		const spawned = [...spawnedThisLoop];
 		spawnedThisLoop.clear();
 		// Tier check first: on a frontier session the backstop never fires, so the
 		// lookups below would be discarded work on every turn that delegated.
-		if (!backstopApplies(ctx)) return undefined;
+		if (!backstopApplies()) return undefined;
 		const pending = spawned
 			.filter((taskId) => {
 				const resident = residents.get(taskId);
@@ -741,12 +744,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		reconstructRuns(ctx);
 		emitModelStatus(ctx);
 		emitAgentCatalog(ctx);
-		emitDelegationSteer(ctx.model);
+		emitDelegationSteer();
 		registerPanelInputHook(ctx);
 	});
 	pi.on("model_select", (event, ctx) => {
 		emitModelStatus(ctx, event.model);
-		emitDelegationSteer(event.model);
+		emitDelegationSteer();
 	});
 	// Another extension wrote `subagentModel` on disk (`/doctor preset`): drop the
 	// cached automatic default and republish the reminder + banner status, the
@@ -1697,6 +1700,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		runtime: SubagentRuntime,
 		{ sessionFile, toolCallId, forkMessages }: { sessionFile?: string; toolCallId?: string; forkMessages?: Message[] },
 	): Promise<{ launched: boolean; line: string }> => {
+		const ended = () => {
+			registry.remove(p.record.taskId);
+			return { launched: false, line: `✗ ${p.record.name}: the session ended before the agent started.` };
+		};
+		if (shuttingDown) return ended();
 		// Captured as a string: onExit runs from a `.finally` long after this
 		// turn's ctx may be stale (review S5). The entered worktree, if any.
 		const parentCwd = workCwd(ctx);
@@ -1706,6 +1714,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				worktree = await isolateInWorktree(parentCwd, p.record, p.request.name);
 			} catch (error) {
 				return { launched: false, line: `✗ ${p.record.name}: could not create a worktree: ${(error as Error).message}` };
+			}
+			// Shutdown can begin while git creates the worktree: build no child
+			// after its sweep, and remove the worktree within its grace.
+			if (shuttingDown) {
+				await cleanupWorktree(parentCwd, worktree);
+				return ended();
 			}
 		}
 
@@ -1866,6 +1880,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		}
 		const handle = started;
 		resident.handle = handle;
+		// Construction can finish after shutdown's stop-all sweep. The handle
+		// was not registered then, so dispose it before sending any task now.
+		if (shuttingDown) {
+			await handle.kill();
+			return ended();
+		}
 		residents.set(p.record.taskId, resident);
 		liveHandles.set(p.record.taskId, handle);
 
@@ -2567,6 +2587,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			};
 		}
 
+		let settledOutput: string | undefined;
 		const task: BackgroundTask = {
 			id: taskId,
 			kind: "subagent",
@@ -2574,7 +2595,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			description: `message to ${record.name}${params.summary ? `: ${params.summary}` : ""}`,
 			status: "running",
 			startedAt: Date.now(),
-			output: () => handle.snapshot().text,
+			output: () => settledOutput ?? handle.snapshot().text,
 			stop: () => stopAgent(record.taskId, handle),
 			finished,
 		};
@@ -2590,6 +2611,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			// (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M2). The task settles after the
 			// review, so task_output never returns the reply ahead of its verdict.
 			const review = await awaitHandBackReview(pi.events, record, outcome.actions);
+			// The outcome includes SubagentHandback and startup/abort errors;
+			// the live snapshot only contains assistant text, not the final report.
+			settledOutput = `${relocationNote}${outcome.output}`;
 			task.status = stopped ? "stopped" : outcome.failed ? "failed" : "completed";
 			task.finishedAt = Date.now();
 			finish();
