@@ -135,9 +135,11 @@ export default function toolCallCorruptionExtension(pi: ExtensionAPI) {
 		if (event.message.role === "assistant") clearIdle();
 		if (alive() && isOpenRouter(ctx.model) && event.message.role === "assistant") {
 			responseId = event.message.responseId || responseId;
-			// A reply cut off at the token limit ends mid-call: the damage is the
-			// limit's, not the provider's.
-			if (event.message.stopReason === "length") flagged.clear();
+			// A reply cut off at the token limit ends mid-call: the damage to its
+			// last block is the limit's, not the provider's. A call completed
+			// before it was judged whole and stays blocked.
+			const last = event.message.stopReason === "length" ? event.message.content.at(-1) : undefined;
+			if (last?.type === "toolCall") flagged.delete(last.id);
 		}
 	});
 	pi.on("tool_call", (event, ctx) => {

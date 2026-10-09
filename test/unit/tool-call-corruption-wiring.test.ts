@@ -129,12 +129,21 @@ describe("OpenRouter tool-call corruption wiring", () => {
 
 	it("does not blame the provider for a reply cut off at the token limit", async () => {
 		await stream('{"command":"echo \\"');
-		await fake.fire("message_end", { message: { role: "assistant", responseId: "gen-123", stopReason: "length" } }, ctx);
+		await fake.fire("message_end", { message: { role: "assistant", responseId: "gen-123", stopReason: "length", content: [{ type: "toolCall", id: "bad", name: "bash" }] } }, ctx);
 		expect(await call()).toBeUndefined();
 		await end();
 		await flush();
 		expect(ctx.abort).not.toHaveBeenCalled();
 		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it("keeps a completed corrupt call blocked when a later call hits the token limit", async () => {
+		await stream(corrupt, "bash", "done", 0);
+		await stream('{"command":"echo \\"', "bash", "cut", 1);
+		const content = [{ type: "toolCall", id: "done", name: "bash" }, { type: "toolCall", id: "cut", name: "bash" }];
+		await fake.fire("message_end", { message: { role: "assistant", responseId: "gen-123", stopReason: "length", content } }, ctx);
+		expect(await call("done")).toMatchObject({ block: true, terminate: true });
+		expect(await call("cut")).toBeUndefined();
 	});
 
 	it("reads a response id supplied only on message_end", async () => {
