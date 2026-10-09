@@ -13,19 +13,22 @@
  * - **Classifier only, smaller context window:** the classifier receives the
  *   whole transcript, so once the session outgrows the chosen model's window
  *   each call goes unjudged and asks for approval until `/compact`.
+ * - **Classifier only, unstable model:** a moving `-latest` alias or an
+ *   experimental build can change what answers without notice, and with it the
+ *   permission boundary. Automatic selection never picks one as the classifier.
  *
  * working-docs/decisions/model-policy.md ("Warnings on a chosen model").
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { hasCatalogContextWindow, modelSpec as spec } from "./model-policy.ts";
+import { hasCatalogContextWindow, isExperimentalBuild, isMovingAlias, modelSpec as spec } from "./model-policy.ts";
 import { intrinsicTier, tiersBelow } from "./model-tier.ts";
 import { newerModelSuggestion } from "./newer-model.ts";
 
 export type ChosenModelRole = "subagent" | "classifier";
 
 export interface ChosenModelWarning {
-	kind: "newer" | "weaker" | "window";
+	kind: "newer" | "weaker" | "window" | "unstable";
 	text: string;
 	/** What to run instead, in the role's own command. */
 	fix: string;
@@ -57,6 +60,15 @@ export function chosenModelWarnings({
 	const label = LABEL[role];
 	const orAutomatic = `or ${command} clear for the automatic choice.`;
 	const isSession = !!sessionModel && sessionModel.provider === chosen.provider && sessionModel.id === chosen.id;
+
+	if (role === "classifier" && !isSession && (isMovingAlias(chosen.id) || isExperimentalBuild(chosen.id))) {
+		const what = isMovingAlias(chosen.id) ? "a moving alias: the model behind it can change without notice" : "an experimental build, which can change or be withdrawn without notice";
+		warnings.push({
+			kind: "unstable",
+			text: `The ${label} ${spec(chosen)} is ${what}, and the permission boundary changes with it.`,
+			fix: `Pick a fixed release with ${command}, ${orAutomatic}`,
+		});
+	}
 
 	if (sessionModel && !isSession) {
 		const chosenTier = intrinsicTier(chosen);

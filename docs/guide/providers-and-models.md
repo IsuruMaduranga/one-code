@@ -114,10 +114,13 @@ on):
 - **The classifier's context window is smaller than your session's.** It
   still screens, but once the conversation outgrows it, each call asks for
   your approval until you `/compact`.
+- **The classifier is a moving alias or an experimental build**, like a
+  `-latest` id. The model behind it can change without notice, and your
+  permission checks change with it. Automatic selection never picks one.
 
 `suggestNewerModels: false` in `~/.onecode/settings.json` turns off the
-newer-model notices; the other two can't be turned off. `/doctor report`
-lists all three under the model they apply to.
+newer-model notices; the others can't be turned off. `/doctor report`
+lists them all under the model they apply to.
 
 Claude Code's model aliases work everywhere: `sonnet`, `haiku`, `opus` and
 `fable` resolve to a model of that name when your provider has one, and
