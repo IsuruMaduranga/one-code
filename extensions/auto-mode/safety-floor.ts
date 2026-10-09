@@ -246,6 +246,14 @@ const CONTROL_FILE_TEXT =
 	/(^|[\s'"=/<>|;&(:])(\.claude\/settings(\.local)?\.json|\.onecode\/(projects\/[^\s'"/]+\/)?settings\.json|managed-settings\.json|\.claude\.json)(?=$|[\s'";|&)<>])/;
 
 /**
+ * `$_` (or `${_}`, `${#_}`, …) anywhere in the line: bash's last argument of
+ * the previous command, which carries a proven read-only command's words into
+ * a later one (`echo .claude/settings.json; rm "$_"`). Raw text, so heredoc
+ * bodies and quoted spellings count too; a false positive costs one stop.
+ */
+const LAST_ARGUMENT = /\$(?:_|\{[#!]?_)(?![A-Za-z0-9_])/;
+
+/**
  * The first word of a shell line that names a gate-control file, or
  * undefined. Every word not proven read-only counts, plus the value after an `=`
  * (`--output=…`, `of=…`) and the words of a nested `sh -c '…'` script; `cd`
@@ -273,7 +281,7 @@ export function shellNamesControlFile(
 	const canProveWords = depth === 0 && !parseFailed && !unknownQuoting && !unattributedExpansion && !segments.some((segment) =>
 		segment.enclosing.some((construct) => LOOPS.has(construct) || construct === "function_definition" || construct === "case_statement") ||
 		["eval", "source", ".", "alias", "enable", "trap"].includes(resolvePayload(segment.tokens).command),
-	);
+	) && !LAST_ARGUMENT.test(command);
 
 	// Decided before the walk: in a loop, a word read before the `cd` runs after it on the next pass.
 	const unknownDir =
@@ -319,6 +327,12 @@ export function shellNamesControlFile(
 		const readOnly = canProveWords && !shellChanged && !unknownDir && segment.scopes.length === 0 &&
 			segment.wordRanges?.length === segment.tokens.length && hasReadOnlyShellWords(segment, dir, home);
 		if (readOnly) ignoredRanges.push(...segment.wordRanges!);
+		// -regex/-iregex match the whole path in a regex dialect a file-name glob
+		// cannot model, so an unproven find that selects by one stops.
+		if (!readOnly && payload.command === "find") {
+			const at = payload.args.findIndex((token) => token.value === "-regex" || token.value === "-iregex");
+			if (at >= 0) return payload.args[at + 1]?.value ?? payload.args[at].value;
+		}
 		for (const word of [...(readOnly ? [] : segment.tokens.map((token) => token.value)), ...segment.redirects, ...segment.inputs.map((token) => token.value)]) {
 			if (depth < 3 && /\s/.test(word)) {
 				const nested = shellNamesControlFile(word, dir, home, oneCodeProjectSettings, depth + 1, forms);

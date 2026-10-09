@@ -159,6 +159,17 @@ describe("safetyControlWrite: read-only words in escalated compound commands", (
 		`case $((PATH=0)) in *) true;; esac; cat .claude/settings.json`,
 		`echo x > "${'${PATH:=./bin}'}"; cat .claude/settings.json`,
 		`cat <<< "${'${PATH:=./bin}'}"; cat .claude/settings.json`,
+		// A later command can reuse an earlier one's words through $_.
+		`echo .claude/settings.json; rm "$_"`,
+		`echo .claude/settings.json; sed -i 's/x/y/' "$_"`,
+		`ls ~/.claude/settings.json && cp /tmp/evil "$_"`,
+		`echo .claude/settings.json; rm "${'${_}'}"`,
+		`echo .claude/settings.json; rm "${'${_%.json}'}.json"`,
+		`echo .claude/settings.json; sh <<EOF\nrm "$_"\nEOF`,
+		// -regex/-iregex match the whole path, which a file-name glob cannot model.
+		`find . -regex '.*settings.json' -delete`,
+		`find . -iregex '.*SETTINGS.JSON' -delete`,
+		`find . -regex '.*/\\.claude/.*' -exec rm {} +`,
 	])("keeps writes and unproven commands on the floor: %s", (command) => {
 		expect(check("bash", { command })).toBeDefined();
 	});
