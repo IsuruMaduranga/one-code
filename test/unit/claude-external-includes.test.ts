@@ -10,6 +10,7 @@ import { buildClaudeMdBlock, discoverContextFiles, externalInstructionIncludes, 
 import { EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_TITLE, EXTERNAL_INCLUDES_YES, externalIncludesDialog, persistExternalIncludesApproval, readExternalIncludesApproval } from "../../extensions/lib/claude-external-includes.ts";
 import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
 import { oneCodeProjectSettingsPath } from "../../extensions/lib/one-code-settings.ts";
+import { forwardSlashes } from "../../extensions/lib/paths.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { safetyControlWrite } from "../../extensions/auto-mode/safety-floor.ts";
 import { startupConsentReady } from "../../extensions/lib/consent-dialogs.ts";
@@ -20,9 +21,12 @@ let root: string;
 let cwd: string;
 let home: string;
 const write = (path: string, text: string) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, text); return path; };
+// An absolute @import spelled with forward slashes: the reference parser reads a backslash as an escape.
+const ref = (path: string) => `@${forwardSlashes(path)}`;
 beforeEach(() => {
-	// Resolved: the probe reports real paths, and macOS TMPDIR sits behind a symlink.
-	root = realpathSync(mkdtempSync(join(tmpdir(), "external-includes-")));
+	// Resolved natively, as the probe reports: macOS TMPDIR sits behind a symlink,
+	// and Windows TEMP can be an 8.3 short name (RUNNER~1) the JS realpath keeps.
+	root = realpathSync.native(mkdtempSync(join(tmpdir(), "external-includes-")));
 	cwd = join(root, "project");
 	home = join(root, "home");
 	mkdirSync(cwd);
@@ -38,7 +42,7 @@ afterEach(() => {
 const opts = () => ({ cwd, home, homeClaudeDir: join(home, ".claude"), managedDir: join(root, "managed"), rule: "claude-md-and-agents-md" as const });
 const fixture = (name = "CLAUDE.md") => {
 	const outside = write(join(root, "shared.md"), "APPROVED EXTERNAL INSTRUCTION\n");
-	write(join(cwd, name), `Project instructions.\n@${outside}\n`);
+	write(join(cwd, name), `Project instructions.\n${ref(outside)}\n`);
 	return outside;
 };
 const start = async (choice: string | undefined, hasUI = true) => {
@@ -230,7 +234,7 @@ describe("external instruction include approval", () => {
 		expect(readExternalIncludesApproval(cwd, home).approved).toBe(true);
 		expect(texts).toHaveLength(startupCount);
 		const next = await fake.fireOne("context", { messages }, ctx);
-		expect(JSON.stringify((next as { messages: unknown[] }).messages[0])).toContain("@" + join(root, "shared.md"));
+		expect(JSON.stringify((next as { messages: unknown[] }).messages[0])).toContain(ref(join(root, "shared.md")));
 		expect(JSON.stringify(first)).not.toContain("APPROVED EXTERNAL INSTRUCTION");
 		expect(JSON.stringify(next)).not.toContain("APPROVED EXTERNAL INSTRUCTION");
 		write(join(cwd, "nested", "CLAUDE.md"), "@../../shared.md");
@@ -270,7 +274,7 @@ describe("startup probe and approved readers", () => {
 	});
 
 	it("does not prompt for global user imports, missing/empty/oversized/non-text targets, or code examples", () => {
-		write(join(home, ".claude", "CLAUDE.md"), `@${write(join(root, "global.md"), "User instruction")}`);
+		write(join(home, ".claude", "CLAUDE.md"), ref(write(join(root, "global.md"), "User instruction")));
 		write(join(root, "empty.md"), "  \n");
 		write(join(root, "huge.md"), "x".repeat(4_194_305));
 		write(join(root, "image.png"), "not a text instruction");
@@ -290,7 +294,7 @@ describe("startup probe and approved readers", () => {
 
 	it("excludes conditional rules from the startup warning; remembered consent covers them on read", () => {
 		const outside = fixture(".claude/rules/conditional.md");
-		write(join(cwd, ".claude/rules/conditional.md"), `---\npaths: '*.ts'\n---\n@${outside}`);
+		write(join(cwd, ".claude/rules/conditional.md"), `---\npaths: '*.ts'\n---\n${ref(outside)}`);
 		// The imported file needs the same condition, otherwise it is an unconditional startup record (CC).
 		write(outside, "---\npaths: '*.ts'\n---\nAPPROVED EXTERNAL INSTRUCTION");
 		expect(externalInstructionIncludes(opts())).toEqual([]);
@@ -309,14 +313,14 @@ describe("startup probe and approved readers", () => {
 		rmSync(join(cwd, ".claude"), { recursive: true });
 		symlinkSync(outside, join(cwd, "CLAUDE.md"));
 		expect(externalInstructionIncludes(opts())).toEqual([]);
-		write(join(root, "managed", "CLAUDE.md"), `@${outside}`);
+		write(join(root, "managed", "CLAUDE.md"), ref(outside));
 		expect(externalInstructionIncludes(opts())).toEqual([outside]);
 	});
 
 	it("retains independent-mode exclusions even after approval", () => {
 		resetConfigModeForTest("independent");
-		const outside = write(join(root, ".claude", "hidden.md"), `CLAUDE SECRET\n@${write(join(root, "transitive.md"), "HIDDEN TRANSITIVE RULE")}`);
-		write(join(cwd, "AGENTS.md"), `@${outside}`);
+		const outside = write(join(root, ".claude", "hidden.md"), `CLAUDE SECRET\n${ref(write(join(root, "transitive.md"), "HIDDEN TRANSITIVE RULE"))}`);
+		write(join(cwd, "AGENTS.md"), ref(outside));
 		expect(externalInstructionIncludes({ ...opts(), rule: "agents-md" })).toEqual([]);
 		expect(JSON.stringify(discoverContextFiles({ ...opts(), rule: "agents-md", includeExternal: true }))).not.toContain("CLAUDE SECRET");
 		expect(JSON.stringify(discoverContextFiles({ ...opts(), rule: "agents-md", includeExternal: true }))).not.toContain("HIDDEN TRANSITIVE RULE");

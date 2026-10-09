@@ -97,8 +97,10 @@ export function ruleMatches(globs: string[] | undefined, filePath: string, base:
 	if (!globs?.length) return false;
 	let candidate = isAbsolute(filePath) ? relative(base, filePath) : filePath;
 	if (isAbsolute(filePath) && !isRelativeInside(candidate)) {
+		// Both sides resolved: a cwd reached through a symlink (or a Windows 8.3
+		// short name) spells the base differently from the file's real directory.
 		const parent = tryRealpath(dirname(filePath));
-		if (parent) candidate = relative(base, join(parent, basename(filePath)));
+		if (parent) candidate = relative(tryRealpath(base) ?? base, join(parent, basename(filePath)));
 	}
 	if (!isRelativeInside(candidate)) return false;
 	const valid = globs.filter((glob) => {

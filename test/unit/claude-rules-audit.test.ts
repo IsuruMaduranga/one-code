@@ -12,7 +12,7 @@ function write(path: string, content: string): string {
 	return path;
 }
 beforeEach(() => {
-	root = realpathSync(mkdtempSync(join(tmpdir(), "rules-audit-")));
+	root = realpathSync.native(mkdtempSync(join(tmpdir(), "rules-audit-")));
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 

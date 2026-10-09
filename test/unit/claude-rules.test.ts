@@ -26,12 +26,14 @@ vi.mock("node:fs", async (load) => {
 	return { ...actual, existsSync: vi.fn(actual.existsSync) };
 });
 
-// Resolve the parent once so containment assertions use canonical paths.
-const scratch = realpathSync(tmpdir());
+// Resolve the parent once so containment assertions use canonical paths. Native,
+// as the code under test resolves: on Windows it expands an 8.3 short name
+// (C:\Users\RUNNER~1) that the JS realpath keeps.
+const scratch = realpathSync.native(tmpdir());
 let fixture = "";
 
 function makeFixture(name = "claude-rules-"): string {
-	return (fixture = realpathSync(mkdtempSync(join(scratch, name))));
+	return (fixture = realpathSync.native(mkdtempSync(join(scratch, name))));
 }
 
 function write(root: string, file: string, content: string): string {
@@ -242,7 +244,7 @@ describe("discoverRules", () => {
 		const cwd = join(fixture, "project");
 		const rules = join(cwd, ".claude", "rules");
 		const outside = write(fixture, "outside.md", "outside");
-		write(cwd, ".claude/rules/a-root.md", "---\npaths: **\n---\nroot @./child.md @" + outside + " @../../imports/f0.md\n");
+		write(cwd, ".claude/rules/a-root.md", "---\npaths: **\n---\nroot @./child.md @" + forwardSlashes(outside) + " @../../imports/f0.md\n");
 		write(cwd, ".claude/rules/child.md", "---\npaths: **\n---\nchild\n");
 		write(cwd, ".claude/rules/z-again.md", "again @./child.md\n");
 		// Keep the chain inside the project but outside rules/, so f5 cannot be
@@ -250,7 +252,7 @@ describe("discoverRules", () => {
 		for (let i = 0; i < 6; i++) write(cwd, `imports/f${i}.md`, i === 5 ? "too deep" : `f${i} @./f${i + 1}.md`);
 
 		const files = discoverRules({ rulesDir: rules, cwd, home: fixture, scope: "Project" });
-		expect(files.map((f) => f.content)).toEqual(expect.arrayContaining(["root @./child.md @" + outside + " @../../imports/f0.md\n", "child\n", "again @./child.md\n", "f0 @./f1.md", "f3 @./f4.md"]));
+		expect(files.map((f) => f.content)).toEqual(expect.arrayContaining(["root @./child.md @" + forwardSlashes(outside) + " @../../imports/f0.md\n", "child\n", "again @./child.md\n", "f0 @./f1.md", "f3 @./f4.md"]));
 		expect(files.map((f) => f.content)).not.toContain("outside");
 		expect(files.map((f) => f.content)).not.toContain("too deep");
 		expect(files.filter((f) => f.content === "child\n")).toHaveLength(1);
@@ -259,7 +261,7 @@ describe("discoverRules", () => {
 		const context = discoverContextFiles({ cwd, homeClaudeDir: join(fixture, "user"), home: fixture, rule: "claude-md" });
 		const importedContext = context.filter((file) => file.path.endsWith("a-root.md") || file.path.endsWith("child.md"));
 		expect(importedContext.map((file) => file.content)).toEqual([
-			"root @./child.md @" + outside + " @../../imports/f0.md",
+			"root @./child.md @" + forwardSlashes(outside) + " @../../imports/f0.md",
 			"child",
 		]);
 		const block = buildClaudeMdBlock({ contextFiles: importedContext }) ?? "";
@@ -328,6 +330,10 @@ describe("rules in Claude context discovery", () => {
 		const alias = join(fixture, "alias");
 		symlinkSync(join(cwd, "src"), alias);
 		expect(nestedInstructionFiles({ cwd, filePath: join(alias, "a.ts"), home: fixture, rule: "claude-md" }).map((file) => file.content)).toEqual(["Nested instructions", "Nested conditional"]);
+		// The same, from a cwd that is itself spelled through a symlink.
+		const linkedCwd = join(fixture, "linked-project");
+		symlinkSync(cwd, linkedCwd);
+		expect(nestedInstructionFiles({ cwd: linkedCwd, filePath: join(alias, "a.ts"), home: fixture, rule: "claude-md" }).map((file) => file.content)).toEqual(["Nested instructions", "Nested conditional"]);
 	});
 
 	it("reads .claude/CLAUDE.md with its own parsed includes and never lets rules alone suppress AGENTS fallback", () => {

@@ -131,8 +131,9 @@ describe("loadPermissionSettings", () => {
 		write(join(home, ".claude", "settings.json"), { permissions: { allow: ["Bash(ls:*)"] } });
 		mkdirSync(join(home, ".onecode"), { recursive: true });
 		write(join(home, ".onecode", "settings.json"), { permissions: { allow: ["Read"] } });
-		// The per-repo slug is taken from the resolved root (macOS TMPDIR sits behind a symlink).
-		const projectDir = join(home, ".onecode", "projects", realpathSync(cwd).replace(/[^A-Za-z0-9-]/g, "-"));
+		// The per-repo slug is taken from the natively resolved root (macOS TMPDIR sits behind a
+		// symlink; Windows TEMP can be an 8.3 short name).
+		const projectDir = join(home, ".onecode", "projects", realpathSync.native(cwd).replace(/[^A-Za-z0-9-]/g, "-"));
 		mkdirSync(projectDir, { recursive: true });
 		write(join(projectDir, "settings.json"), { permissions: { allow: ["Bash(npm test:*)"] } });
 
