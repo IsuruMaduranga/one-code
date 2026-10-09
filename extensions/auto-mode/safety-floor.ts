@@ -285,7 +285,7 @@ const VAR_REDIRECT = /\{[A-Za-z_][A-Za-z0-9_]*\}[<>]/;
  * lowercased, with `\\` turned to `/` and `/./`, `//` collapsed.
  */
 const CONTROL_FILE_TEXT =
-	/(^|[\s'"=/<>|;&(:])(\.claude\/settings(\.local)?\.json|\.onecode\/(projects\/[^\s'"/]+\/)?settings\.json|\.onecode\/cache\/model-catalog\/(models-dev|openrouter|huggingface)\.json|managed-settings\.json|\.claude\.json)(?=$|[\s'";|&)<>])/;
+	/(^|[\s'"=/<>|;&(:])(\.claude\/settings(\.local)?\.json|\.onecode\/(projects\/[^\s'"/]+\/)?settings\.json|\.onecode\/cache\/model-catalog\/(models-dev|openrouter|huggingface|refresh-failed)\.json|managed-settings\.json|\.claude\.json)(?=$|[\s'";|&)<>])/;
 
 /**
  * `$_` (or `${_}`, `${#_}`, …) anywhere in the line: bash's last argument of

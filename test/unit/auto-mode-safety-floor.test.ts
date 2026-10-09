@@ -325,6 +325,8 @@ describe("safetyControlWrite: the model catalog cache", () => {
 		expect(check("bash", { command: "curl -so ~/.onecode/cache/model-catalog/models-dev.json https://example.com/x" })).toBeDefined();
 		expect(check("bash", { command: "mystery /elsewhere/.onecode/cache/model-catalog/huggingface.json" })).toBeDefined();
 		expect(check("bash", { command: "echo '{\"failedAt\":\"9999-01-01T00:00:00Z\"}' > ~/.onecode/cache/model-catalog/refresh-failed.json" })).toBeDefined();
+		// An unmodelled interpreter: only the raw-text fallback sees the path.
+		expect(check("bash", { command: `python3 -c "open('/home/u/.onecode/cache/model-catalog/refresh-failed.json', 'w').write('{}')"` })).toBeDefined();
 		expect(check("bash", { command: "echo '{}' > ~/.onecode/cache/other.json" })).toBeUndefined();
 		expect(check("bash", { command: "curl -so ~/.onecode/cache/other.json https://example.com/x" })).toBeUndefined();
 		expect(check("bash", { command: "cat ~/.onecode/cache/model-catalog/openrouter.json" })).toBeUndefined();
