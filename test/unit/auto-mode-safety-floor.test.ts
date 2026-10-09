@@ -180,6 +180,11 @@ describe("safetyControlWrite: read-only words in escalated compound commands", (
 		`find . -regextype posix-extended -regex '.*\\.orig' -delete`,
 		`find . -regex "$pattern" -delete`,
 		`find . -regex '.*' -delete`,
+		`find . ! -regex '.*\\.orig' -delete`,
+		`find . -not -regex '.*\\.orig' -delete`,
+		`find . -regex '.*\\.orig' -o -delete`,
+		`find . \\( -regex '.*\\.orig' -or -name x \\) -delete`,
+		`find . -regex '.*\\.orig' , -delete`,
 	])("keeps writes and unproven commands on the floor: %s", (command) => {
 		expect(check("bash", { command })).toBeDefined();
 	});

@@ -354,13 +354,15 @@ export function shellNamesControlFile(
 		if (readOnly) ignoredRanges.push(...segment.wordRanges!);
 		// -regex/-iregex match the whole path, which the file-name glob check
 		// cannot model. An unproven find selecting by one stops unless the
-		// pattern's fixed tail rules out every control file's name.
+		// pattern's fixed tail rules out every control file's name, and only a
+		// plain conjunction can rely on that: `! -regex '.*\.orig'` or a `-o`
+		// branch selects everything the pattern does not.
 		if (!readOnly && payload.command === "find") {
-			const dialect = payload.args.some((token) => token.value === "-regextype");
+			const uncertain = payload.args.some((token) => ["-regextype", "!", "-not", "-o", "-or", ","].includes(token.value));
 			for (const [i, token] of payload.args.entries()) {
 				if (token.value !== "-regex" && token.value !== "-iregex") continue;
 				const pattern = payload.args[i + 1];
-				if (!pattern || pattern.dynamic || dialect) return pattern?.value ?? token.value;
+				if (!pattern || pattern.dynamic || uncertain) return pattern?.value ?? token.value;
 				const tail = regexLiteralTail(pattern.value)?.toLowerCase();
 				const name = tail?.slice(tail.lastIndexOf("/") + 1);
 				if (tail === undefined || name === undefined || [...controlNames].some((control) => tail.includes("/") ? control === name : control.endsWith(name))) return pattern.value;
