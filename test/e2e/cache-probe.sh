@@ -33,8 +33,8 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 MODEL="${1:-anthropic/claude-sonnet-5}"
 shift || true
-NODE_BIN=/Users/isuruWij/.nvm/versions/node/v26.3.1/bin
-[ -d "$NODE_BIN" ] && export PATH="$NODE_BIN:$PATH"
+# NODE_BIN puts a specific Node first on PATH (the probe needs Node >= 22.19).
+[ -n "${NODE_BIN:-}" ] && export PATH="$NODE_BIN:$PATH"
 PI_BIN="${PI_BIN:-$REPO/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js}"
 
 PROMPT='First call tool_search with query select:cron_list. Then call cron_list once. Then reply with exactly the word done.'

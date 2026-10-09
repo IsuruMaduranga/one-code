@@ -34,8 +34,8 @@ for argument in "$@"; do
 	esac
 done
 
-NODE_BIN=/Users/isuruWij/.nvm/versions/node/v26.3.1/bin
-[ -d "$NODE_BIN" ] && export PATH="$NODE_BIN:$PATH"
+# NODE_BIN puts a specific Node first on PATH (the probe needs Node >= 22.19).
+[ -n "${NODE_BIN:-}" ] && export PATH="$NODE_BIN:$PATH"
 PI_BIN="${PI_BIN:-$REPO/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js}"
 if [ -n "${CACHE_PROBE_WORK_DIR:-}" ]; then
 	WORK="$CACHE_PROBE_WORK_DIR"

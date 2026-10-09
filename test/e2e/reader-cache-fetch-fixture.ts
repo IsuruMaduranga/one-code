@@ -1,9 +1,11 @@
 /**
  * Test-only web response fixture for cache-probe-reader.sh.
  *
- * The URLs are loopback addresses so Anthropic's native server-side fetch path
- * deliberately declines them. This extension intercepts only these two exact
- * URLs; provider requests still use the real global fetch implementation.
+ * The host is a reserved example domain: a model refuses to fetch a localhost
+ * URL with no stated purpose, and Anthropic's native server-side fetch (an
+ * API-key session) cannot reach it, so the call falls through to the local
+ * reader. This extension intercepts only these two exact URLs; provider
+ * requests still use the real global fetch implementation.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 

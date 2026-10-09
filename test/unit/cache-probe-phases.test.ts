@@ -30,7 +30,8 @@ describe("cache-probe reader phase wiring (offline CLI)", () => {
 			if (skip) expect(result.stdout).not.toContain("--- reader phase");
 			else {
 				expect(result.stdout).toContain("--- reader phase");
-				expect(calls[1].log).toBe(join(root, "probe", "reader", "reader.jsonl"));
+				// The driver joins with "/", which Windows reads as a separator too.
+				expect(resolve(calls[1].log)).toBe(join(root, "probe", "reader", "reader.jsonl"));
 				expect(calls[1].args).toContain("anthropic/claude-sonnet-5");
 				expect(result.stdout).toContain("expected exactly 2 completed reader attempts, found 0");
 			}

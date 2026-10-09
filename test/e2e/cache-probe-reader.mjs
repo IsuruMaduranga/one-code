@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Reader side-call cache probe. The driver writes one CC_SIDE_CALL_LOG JSONL
  * row per completed reader attempt and the pi JSON event stream records the
