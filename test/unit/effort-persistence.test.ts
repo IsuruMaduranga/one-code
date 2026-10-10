@@ -123,11 +123,23 @@ describe("/effort persistence (Claude Code 2.1.296)", () => {
 	it("does not erase malformed settings and reports the save failure", async () => {
 		mkdirSync(agentDir, { recursive: true });
 		writeFileSync(settingsPath, "{ malformed");
-		const { command, notices } = mount();
+		const { command, notices, level } = mount();
 		await command("high");
 		expect(readFileSync(settingsPath, "utf8")).toBe("{ malformed");
 		expect(notices().join("\n")).toContain("Failed to set effort level:");
 		expect(notices().join("\n")).not.toContain("saved as your default");
+		// A failed save leaves the session where it was, so the message and the state agree.
+		expect(level()).toBe("medium");
+	});
+
+	it("leaves the session level alone when clearing the saved level fails", async () => {
+		mkdirSync(agentDir, { recursive: true });
+		writeFileSync(settingsPath, "{ malformed");
+		const { command, notices, level } = mount();
+		await command("max");
+		await command("auto");
+		expect(notices().at(-1)).toContain("Failed to set effort level:");
+		expect(level()).toBe("max");
 	});
 
 	it.each(["off", "minimal", "ultracode", "not-a-level"])("does not add persistence for %s", async (arg) => {

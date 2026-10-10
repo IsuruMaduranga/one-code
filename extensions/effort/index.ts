@@ -153,6 +153,7 @@ export default function effortExtension(pi: ExtensionAPI) {
 	/** Apply a chosen stop and report what actually took effect. */
 	const applyChoice = async (choice: EffortChoice, ctx: ExtensionContext, asDefault = true): Promise<string> => {
 		const wasUltracode = ultracodeActive;
+		const previous = pi.getThinkingLevel();
 		const wanted = thinkingLevelFor(choice);
 		pi.setThinkingLevel(wanted);
 		const actual = pi.getThinkingLevel();
@@ -174,7 +175,14 @@ export default function effortExtension(pi: ExtensionAPI) {
 		const saved = asDefault && canPersist(ctx) && isPersistedEffort(choice) && actual === wanted;
 		if (saved) {
 			const error = await persist(ctx, choice);
-			if (error) return report(ctx, error, true);
+			if (error) {
+				// Claude Code changes nothing when the save fails.
+				pi.setThinkingLevel(previous);
+				setUltracode(wasUltracode, previous);
+				applyStatus(ctx);
+				showEffortNote(ctx, previous);
+				return report(ctx, error, true);
+			}
 		}
 		if (isPersistedEffort(actual) || actual === "max") return report(ctx, `${effortSetMessage(actual, saved)}${wasUltracode ? " · Ultracode off" : ""}`);
 		return report(ctx, `Effort: ${actual}${note}`);
@@ -237,15 +245,16 @@ export default function effortExtension(pi: ExtensionAPI) {
 			const typed = args.trim();
 			if (typed) {
 				if (typed.toLowerCase() === "auto" || typed.toLowerCase() === "unset") {
-					pi.setThinkingLevel(pi.getSettings().defaultThinkingLevel ?? "medium");
-					setUltracode(false);
-					applyStatus(ctx);
-					showEffortNote(ctx, pi.getThinkingLevel());
+					// Clear the saved level first: a failed save changes nothing.
 					const saved = canPersist(ctx);
 					if (saved) {
 						const error = await persist(ctx, undefined);
 						if (error) return report(ctx, error, true);
 					}
+					pi.setThinkingLevel(pi.getSettings().defaultThinkingLevel ?? "medium");
+					setUltracode(false);
+					applyStatus(ctx);
+					showEffortNote(ctx, pi.getThinkingLevel());
 					return report(ctx, `Effort level set to auto${saved ? "" : " (this session only)"}`);
 				}
 				const parsed = parseEffortArg(typed);

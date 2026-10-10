@@ -985,7 +985,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 					? "No MCP servers configured. Run `claude doctor` if this is unexpected — it lists MCP config files that failed validation. Otherwise, run `claude mcp --help` or visit https://code.claude.com/docs/en/mcp to learn more."
 					: "No MCP servers configured. Add them to .pi/mcp.json or the agent dir's mcp.json.";
 				ctx.ui.notify(stdout, "info");
-				return claudeSourcesOn() ? stdout : undefined;
+				return stdout;
 			}
 			if (canShowCustomUi(ctx)) {
 				await openMcpPanel(ctx);

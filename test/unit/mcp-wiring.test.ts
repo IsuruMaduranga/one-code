@@ -24,6 +24,7 @@ import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../../extensions/lib/reminders.
 import { CONTEXT_BASELINE_CHANNEL, CONTEXT_RESTORE_CHANNEL } from "../../extensions/lib/context-stack.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { localCommandBlocks } from "../../extensions/lib/local-command.ts";
+import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
 
 interface Fixture {
 	tools?: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }>;
@@ -143,6 +144,20 @@ describe("mcp wiring", () => {
 		await fake.commands.get("mcp")!.handler("", ctx);
 		expect(blocks).toEqual(localCommandBlocks({ name: "mcp", stdout }));
 		expect(ctx._notified).toContainEqual({ message: stdout, type: "info" });
+	});
+
+	it("records the independent-mode empty-server notice as the local result too", async () => {
+		resetConfigModeForTest("independent");
+		await boot();
+		const blocks: string[] = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => {
+			const payload = data as { placement?: string; text?: string };
+			if (payload.placement === "user-prepend" && payload.text !== undefined) blocks.push(payload.text);
+		});
+		const ctx = createFakeCtx({ cwd, hasUI: true, mode: "tui" });
+		await fake.commands.get("mcp")!.handler("", ctx);
+		const stdout = "No MCP servers configured. Add them to .pi/mcp.json or the agent dir's mcp.json.";
+		expect(blocks).toEqual(localCommandBlocks({ name: "mcp", stdout }));
 	});
 
 	it("adoptConnection registers namespaced tools, publishes them, and files the instructions reminder", async () => {
