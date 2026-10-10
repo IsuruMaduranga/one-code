@@ -19,6 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import hooksExtension, { hookContextText } from "../../extensions/hooks/index.ts";
+import { PRECOMPACT_INSTRUCTIONS_CHANNEL, type PreCompactInstructions } from "../../extensions/hooks/compaction.ts";
 import { resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
 import { type HookBridge, SUBAGENT_HOOK_CHANNEL } from "../../extensions/hooks/subagent-bridge.ts";
 import { REMINDER_CHANNEL, wrapReminder } from "../../extensions/lib/reminders.ts";
@@ -424,6 +425,33 @@ describe("hooks wiring", () => {
 		await fake.fireOne("session_compact", { reason: "overflow", compactionEntry: { summary: "s" } }, ctx());
 		expect(existsSync(pre)).toBe(false);
 		expect(existsSync(post)).toBe(false);
+	});
+
+	it.each(["manual", "threshold", "overflow"])("passes successful PreCompact output to the %s summarizer, scoped to its signal", async (reason) => {
+		const first = script("compact-first.sh", `#!/bin/sh\ncat >/dev/null\necho 'Preserve the rollback steps.'\n`);
+		const second = script("compact-second.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"additionalContext":"Keep the test failures."}}'\n`);
+		writeUserHooks({ PreCompact: [{ hooks: [{ type: "command", command: first }, { type: "command", command: second }] }] });
+		const instructions: PreCompactInstructions[] = [];
+		fake.events.on(PRECOMPACT_INSTRUCTIONS_CHANNEL, (data) => instructions.push(data as PreCompactInstructions));
+		mount();
+		const signal = new AbortController().signal;
+		const event = { reason, signal, customInstructions: "Focus on migration." };
+		expect(await fake.fireOne("session_before_compact", event, ctx())).toBeUndefined();
+		expect(instructions).toEqual([{ signal, instructions: "Preserve the rollback steps.\nKeep the test failures." }]);
+		expect(instructions[0].signal).toBe(signal);
+		expect(event.customInstructions).toBe("Focus on migration.");
+		expect(await fake.fireOne("before_agent_start", { prompt: "next" }, ctx())).toBeUndefined();
+	});
+
+	it("a blocking PreCompact hook cancels without publishing preservation instructions", async () => {
+		const success = script("compact-success.sh", `#!/bin/sh\ncat >/dev/null\necho 'Do not publish after a block.'\n`);
+		const block = script("compact-block.sh", `#!/bin/sh\ncat >/dev/null\necho 'Wait for backup' >&2\nexit 2\n`);
+		writeUserHooks({ PreCompact: [{ hooks: [{ type: "command", command: success }, { type: "command", command: block }] }] });
+		const instructions: unknown[] = [];
+		fake.events.on(PRECOMPACT_INSTRUCTIONS_CHANNEL, (data) => instructions.push(data));
+		mount();
+		expect(await fake.fireOne("session_before_compact", { reason: "manual", signal: new AbortController().signal }, ctx())).toEqual({ cancel: true });
+		expect(instructions).toEqual([]);
 	});
 
 	it("an auto PreCompact sends custom_instructions as an empty string, like Claude Code", async () => {

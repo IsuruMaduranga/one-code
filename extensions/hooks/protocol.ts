@@ -122,7 +122,7 @@ const TIMEOUT_BLOCKS: ReadonlySet<CcHookEvent> = new Set(["PreToolUse", "UserPro
  * Events where CC's plain (non-JSON) stdout becomes model-visible context
  * rather than being discarded.
  */
-const STDOUT_IS_CONTEXT: ReadonlySet<CcHookEvent> = new Set(["UserPromptSubmit", "SessionStart"]);
+const STDOUT_IS_CONTEXT: ReadonlySet<CcHookEvent> = new Set(["UserPromptSubmit", "SessionStart", "PreCompact"]);
 
 export function interpretHookResult(event: CcHookEvent, run: FinishedRun): HookOutcome {
 	// Killed (timeout or otherwise): a null exit code must never read as a

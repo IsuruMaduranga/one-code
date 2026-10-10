@@ -46,6 +46,7 @@ import { claudeConfigDir } from "../lib/paths.ts";
 import { defaultDiscoverRoots } from "../lib/plugins.ts";
 import { appendHookLog, formatDebugLine, hooksDebugEnabled, hooksLogPath } from "./debug.ts";
 import { runHookCommand } from "./executor.ts";
+import { PRECOMPACT_INSTRUCTIONS_CHANNEL, type PreCompactInstructions } from "./compaction.ts";
 import { changedSince, FORMATTER_NOTICE, type FileSnapshot, fileToolTarget, snapshotFile } from "./formatter-notice.ts";
 import { matcherApplies, ccToolName, toolMatchCandidates, ccToolInput, nativeToolInput } from "./matcher.ts";
 import { loadPluginHooks } from "./plugin-hooks.ts";
@@ -624,6 +625,14 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		if (outcome.block) {
 			notify(ctx, `Compaction cancelled by PreCompact hook: ${outcome.block.reason}`);
 			return { cancel: true };
+		}
+		// These instructions belong to the summarizer, not the next user turn.
+		// The signal keeps them scoped to this attempt if compaction is cancelled.
+		if (outcome.additionalContext) {
+			pi.events.emit(PRECOMPACT_INSTRUCTIONS_CHANNEL, {
+				signal: event.signal,
+				instructions: outcome.additionalContext,
+			} satisfies PreCompactInstructions);
 		}
 		return undefined;
 	});

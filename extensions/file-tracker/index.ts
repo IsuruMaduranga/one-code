@@ -19,11 +19,12 @@
 import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../lib/child-writes.ts";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { createReadToolDefinition, type ExtensionAPI, type ExtensionContext, type SessionCompactEvent } from "@earendil-works/pi-coding-agent";
 import { pathArgument } from "../auto-mode/paths.ts";
 import { bashParserReady } from "../lib/bash-parser.ts";
-import { collectImportedPaths, discoverContextFilePaths, instructionRule } from "../lib/claude-context.ts";
+import { discoverContextFiles, instructionRule } from "../lib/claude-context.ts";
+import { readExternalIncludesApproval } from "../lib/claude-external-includes.ts";
 import { inContextEntries, latestCompaction } from "../lib/compaction-boundary.ts";
 import { projectMemoryDir } from "../lib/memory.ts";
 import { absoluteFrom, claudeConfigDir, comparablePath, expandTilde, isPathAtOrUnder, tryRealpath } from "../lib/paths.ts";
@@ -190,13 +191,13 @@ function pathOf(input: unknown, cwd: string): string | undefined {
  */
 function inContextFiles(ctx: ExtensionContext, branch: readonly { type: string; customType?: string; data?: unknown }[], kept: string[]): Set<string> {
 	const home = homedir();
-	const stack = discoverContextFilePaths({ cwd: ctx.cwd, homeClaudeDir: claudeConfigDir(), rule: instructionRule(home) }).map((file) => file.path);
-	const imported = stack.flatMap((path) => {
-		const content = readIfPresent(path);
-		return content === undefined ? [] : [...collectImportedPaths(content, dirname(path), { home })];
-	});
+	// Use the context loader's import confinement and approval: a literal
+	// unapproved @import is not evidence that its file is still in context.
+	const stack = discoverContextFiles({ cwd: ctx.cwd, home, homeClaudeDir: claudeConfigDir(), rule: instructionRule(home),
+		includeExternal: readExternalIncludesApproval(ctx.cwd, home).approved,
+	}).flatMap((file) => [file.path, ...(file.imported ?? [])]);
 	return new Set(
-		[...stack, ...imported, join(projectMemoryDir(ctx.cwd, home), "MEMORY.md"), planFileOnBranch(branch), ...kept.map((path) => resolveToolPath(path, ctx.cwd))]
+		[...stack, join(projectMemoryDir(ctx.cwd, home), "MEMORY.md"), planFileOnBranch(branch), ...kept.map((path) => resolveToolPath(path, ctx.cwd))]
 			.filter((path): path is string => typeof path === "string")
 			.map(comparablePath),
 	);
@@ -377,20 +378,22 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 	 * without a question (`restoreAllowed`).
 	 */
 	pi.on("session_compact", async (event: SessionCompactEvent, ctx) => {
-		if (process.env.CC_COMPACTION === "0") return;
 		const before = touched;
 		try {
 			const branch = ctx.sessionManager.getBranch();
 			const compaction = latestCompaction(branch);
 			const kept = compaction ? keptReadPaths(branch.slice(compaction.keptStart, compaction.index)) : [];
 			const inContext = inContextFiles(ctx, branch, kept);
-			const shown = (path: string) => inContext.has(comparablePath(path));
+			// The loader lists imports by real path; a tracked path may be spelled through a symlink.
+			const shown = (path: string) => inContext.has(comparablePath(path)) || inContext.has(comparablePath(tryRealpath(path) ?? path));
 			// A file the context still shows keeps its read state (what the model
 			// saw, not what is on disk now, so the stale-edit guard still holds)
 			// and its touch time, for the next compaction's restore.
 			for (const path of tracker.tracked) if (!shown(path)) tracker.forget(path);
 			touched = new Map([...before].filter(([path]) => shown(path)));
-			if (before.size === 0) return;
+			// Opting out of One Code's restore does not disable pi's compaction:
+			// reads discarded by either summarizer still need a fresh read.
+			if (process.env.CC_COMPACTION === "0" || before.size === 0) return;
 			const allowed = restoreAllowed(ctx);
 			const candidates = restoreCandidates(before, (path) => shown(path) || !allowed(path));
 			const read = createReadToolDefinition(ctx.cwd);
