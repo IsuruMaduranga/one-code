@@ -20,6 +20,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { recordUsage } from "../lib/usage-bus.ts";
 import { runSideCall } from "../lib/side-call-run.ts";
+import { runWithDeadline } from "../lib/operation-deadline.ts";
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { CrossHostRedirect, htmlToMarkdown, isSameHost, normalizeUrl, paginate, redirectMessage } from "./extract.ts";
@@ -30,6 +31,8 @@ import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 import { registerFormTool } from "../lib/tool-variants.ts";
 import { webFetchDescription } from "./description.ts";
+import { readResponseText } from "./response.ts";
+import { pageContent } from "./page-content.ts";
 
 
 const DEFAULT_MAX_CHARS = 30_000;
@@ -37,8 +40,6 @@ const CACHE_TTL_MS = 15 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 30_000;
 /** Same-host redirect hops followed before giving up (a redirect loop is otherwise unbounded recursion). */
 const MAX_REDIRECTS = 5;
-/** Response bytes read before the body is cut off — a multi-GB "page" must not be buffered whole. */
-const MAX_BODY_BYTES = 5_000_000;
 /** Cache entries kept; the oldest is evicted past this (the TTL alone never evicted). */
 const MAX_CACHE_ENTRIES = 50;
 /** Longer than the classifier's cap: the reader ingests whole pages. */
@@ -94,7 +95,13 @@ async function answerFromPage(
 	const reader = `${choice.model.provider}/${choice.model.id}`;
 
 	try {
-		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(choice.model);
+		// Registry auth takes no signal, so it gets the deadline here; runSideCall
+		// bounds each model attempt itself, and a late resolution starts nothing.
+		const auth = await runWithDeadline(() => ctx.modelRegistry.getApiKeyAndHeaders(choice.model), {
+			signal,
+			timeoutMs: READER_TIMEOUT_MS,
+			message: "The reader's credentials did not resolve within 60 seconds.",
+		});
 		if (!auth.ok) return { error: `${reader}: ${auth.error}` };
 		const messages = readerMessages({ prompt, markdown: entry.markdown, url, title: entry.title });
 		// Thinking off unless the model cannot disable it; withReasoningFallback sends
@@ -115,6 +122,9 @@ async function answerFromPage(
 			learnedReasoning,
 			onUsage: recordCall,
 		});
+		if (result.stopReason !== "stop" && result.stopReason !== "length") {
+			return { error: `${reader}: ${result.errorMessage || `the call stopped early (${result.stopReason})`}` };
+		}
 		const answer = result.content
 			.filter((block): block is { type: "text"; text: string } => block.type === "text")
 			.map((block) => block.text)
@@ -127,27 +137,6 @@ async function answerFromPage(
 	}
 }
 
-/** Read a response body as text, stopping after `cap` bytes (the stream is cancelled, not drained). */
-async function readBodyCapped(response: Response, cap: number): Promise<{ text: string; truncated: boolean }> {
-	const reader = response.body?.getReader();
-	if (!reader) return { text: await response.text(), truncated: false };
-	const decoder = new TextDecoder();
-	let text = "";
-	let bytes = 0;
-	while (true) {
-		const { done, value } = await reader.read();
-		if (done) break;
-		bytes += value.byteLength;
-		if (bytes > cap) {
-			text += decoder.decode(value.subarray(0, Math.max(0, value.byteLength - (bytes - cap))), { stream: true });
-			await reader.cancel().catch(() => {});
-			return { text: text + decoder.decode(), truncated: true };
-		}
-		text += decoder.decode(value, { stream: true });
-	}
-	return { text: text + decoder.decode(), truncated: false };
-}
-
 export default function webFetchExtension(pi: ExtensionAPI) {
 	// Same 15-minute window Claude Code documents, so repeated reads of one page
 	// during a task don't re-download it.
@@ -158,17 +147,18 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 	const learnedNativeThinking = new Map<string, ThinkingFields>();
 
 	const load = async (url: string, signal: AbortSignal | undefined, redirects = 0): Promise<CacheEntry> => {
+		signal?.throwIfAborted();
 		const cached = cache.get(url);
 		if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) return cached;
 
 		const controller = new AbortController();
 		const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-		timer.unref?.();
-		const onAbort = () => controller.abort();
+		const onAbort = () => controller.abort(signal?.reason);
 		signal?.addEventListener("abort", onAbort, { once: true });
+		let response: Response | undefined;
 
 		try {
-			const response = await fetch(url, {
+			response = await fetch(url, {
 				redirect: "manual",
 				signal: controller.signal,
 				headers: { "user-agent": USER_AGENT, accept: "text/html,text/plain,*/*" },
@@ -182,7 +172,9 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 					const target = new URL(location, url).toString();
 					if (isSameHost(target, url)) {
 						if (redirects >= MAX_REDIRECTS) throw new Error(`Too many redirects (${MAX_REDIRECTS}); last target ${target}`);
-						return await load(target, signal, redirects + 1);
+						void response.body?.cancel().catch(() => {});
+						// Each hop inherits the first request's deadline as well as caller cancellation.
+						return await load(target, controller.signal, redirects + 1);
 					}
 					throw new CrossHostRedirect(target, response.status);
 				}
@@ -192,8 +184,8 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 				throw new Error(`HTTP ${response.status} ${response.statusText}`);
 			}
 
-			const contentType = response.headers.get("content-type") ?? "";
-			const { text: body, truncated } = await readBodyCapped(response, MAX_BODY_BYTES);
+			const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
+			const body = await readResponseText(response, controller.signal);
 
 			let entry: CacheEntry;
 			if (contentType.includes("html")) {
@@ -210,7 +202,6 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 				entry = { markdown: body.trim(), fetchedAt: Date.now() };
 			}
 
-			if (truncated) entry.note = [entry.note, `The response was cut at ${MAX_BODY_BYTES / 1_000_000} MB.`].filter(Boolean).join(" ");
 			cache.set(url, entry);
 			while (cache.size > MAX_CACHE_ENTRIES) {
 				const oldest = cache.keys().next().value;
@@ -219,6 +210,7 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 			}
 			return entry;
 		} finally {
+			void response?.body?.cancel().catch(() => {});
 			clearTimeout(timer);
 			signal?.removeEventListener("abort", onAbort);
 		}
@@ -260,6 +252,10 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 				};
 			}
 
+			if (signal?.aborted) {
+				return { content: [{ type: "text", text: `Fetch of ${target} was cancelled.` }], details: { url: target }, isError: true };
+			}
+
 			// With `prompt` on a first-party Anthropic API-key session, Anthropic's
 			// server-side fetch answers it with dynamic filtering. Anything short of
 			// an answer from a successful fetch falls through to the local path,
@@ -288,7 +284,7 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 					]
 						.filter(Boolean)
 						.join("\n");
-					const text = persistIfLarge(`${header}\n\n${native.text}`, { dir: sessionResultsDir(ctx), id: toolCallId });
+					const text = persistIfLarge(`${header}\n\n${pageContent(native.text)}`, { dir: sessionResultsDir(ctx), id: toolCallId });
 					return { content: [{ type: "text", text }], details: { url: target, reader: native.spec, path: "native" } };
 				}
 				if (native.kind === "fell-back") {
@@ -306,22 +302,22 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 					const answered = await answerFromPage(ctx, params.prompt, entry, target, signal, learnedReasoning, (usage) =>
 						recordUsage(pi, "reader", usage),
 					);
+					signal?.throwIfAborted();
 					if (answered.answer !== undefined) {
 						const header = [
-							entry.title ? `# ${entry.title}` : undefined,
 							`Source: ${target}`,
 							normalizeNote,
 							nativeNote,
 							entry.note,
 							answered.truncated
-								? `Answered by ${answered.reader} from the first ${READER_MAX_CHARS} of the page's ${entry.markdown.length} chars; the rest was not read. Refetch without \`prompt\` (with \`offset\`) for the raw content.`
+								? `Answered by ${answered.reader} from the first ${READER_MAX_CHARS} characters of the page and title; the rest was not read. Refetch without \`prompt\` (with \`offset\`) for the raw content.`
 								: `Answered by ${answered.reader} from the full page (${entry.markdown.length} chars). Refetch without \`prompt\` for the raw content.`,
 							answered.cutOff ? "(The answer was cut off at the reader's output limit and may be incomplete.)" : undefined,
 						]
 							.filter(Boolean)
 							.join("\n");
 						return {
-							content: [{ type: "text", text: `${header}\n\n${answered.answer}` }],
+							content: [{ type: "text", text: persistIfLarge(`${header}\n\n${pageContent(answered.answer, entry.title)}`, { dir: sessionResultsDir(ctx), id: toolCallId }) }],
 							details: { url: target, totalChars: entry.markdown.length, reader: answered.reader, path: "local" },
 						};
 					}
@@ -331,7 +327,6 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 				const page = paginate(entry.markdown, params.offset ?? 0, params.max_chars ?? DEFAULT_MAX_CHARS);
 
 				const header = [
-					entry.title ? `# ${entry.title}` : undefined,
 					`Source: ${target}`,
 					normalizeNote,
 					nativeNote,
@@ -345,7 +340,7 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 					.join("\n");
 
 				return {
-					content: [{ type: "text", text: `${header}\n\n${page.text}` }],
+					content: [{ type: "text", text: persistIfLarge(`${header}\n\n${pageContent(page.text, entry.title)}`, { dir: sessionResultsDir(ctx), id: toolCallId }) }],
 					details: {
 						url: target,
 						totalChars: page.totalChars,
@@ -365,7 +360,7 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 				}
 				const err = error as Error & { cause?: unknown };
 				const aborted = err.name === "AbortError" || err.name === "TimeoutError";
-				if (aborted && signal?.aborted) {
+				if (signal?.aborted) {
 					return {
 						content: [{ type: "text", text: `Fetch of ${target} was cancelled.` }],
 						details: { url: target },

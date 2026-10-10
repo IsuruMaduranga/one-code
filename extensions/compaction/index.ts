@@ -52,6 +52,7 @@ import {
 	sessionRequestHeaders,
 	withClearThinking,
 } from "../context-management/index.ts";
+import { PRECOMPACT_INSTRUCTIONS_CHANNEL, type PreCompactInstructions } from "../hooks/compaction.ts";
 import { looksLikeAnthropicRequest } from "../lib/anthropic-payload.ts";
 import { forcedReasoningLevel } from "../lib/model-policy.ts";
 import { captureRequest, extendPayload, LAST_REQUEST_CHANNEL, LastExchange, lastCovered, type RequestCapture, replayOutputCap } from "../lib/request-replay.ts";
@@ -75,6 +76,11 @@ export const STANDALONE_SYSTEM_PROMPT =
 type Preparation = Pick<SessionBeforeCompactEvent["preparation"], "messagesToSummarize" | "turnPrefixMessages" | "isSplitTurn" | "previousSummary">;
 
 export default function compactionExtension(pi: ExtensionAPI) {
+	const hookInstructions = new WeakMap<AbortSignal, string>();
+	pi.events.on(PRECOMPACT_INSTRUCTIONS_CHANNEL, (data) => {
+		const { signal, instructions } = data as PreCompactInstructions;
+		hookInstructions.set(signal, instructions);
+	});
 	/**
 	 * The exact message array the session last handed the provider, captured
 	 * from the `context` event AFTER every extension has mutated it — most
@@ -127,7 +133,10 @@ export default function compactionExtension(pi: ExtensionAPI) {
 	pi.on("message_end", (event) => {
 		exchange.noteMessage(event.message as AgentMessage & { role: string });
 	});
-	pi.on("session_start", () => publish(undefined));
+	pi.on("session_start", () => {
+		captured = undefined;
+		publish(undefined);
+	});
 
 	// After a compaction the capture describes the pre-compaction request. A
 	// second /compact before any turn would otherwise re-summarize history the
@@ -147,6 +156,9 @@ export default function compactionExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_before_compact", async (event, ctx) => {
+		const instructions = hookInstructions.get(event.signal);
+		hookInstructions.delete(event.signal);
+		if (instructions) event = { ...event, customInstructions: [event.customInstructions, instructions].filter(Boolean).join("\n\n") };
 		if (process.env.CC_COMPACTION === "0") return undefined;
 
 		const model = ctx.model;
@@ -257,6 +269,10 @@ export default function compactionExtension(pi: ExtensionAPI) {
 				reasoning: ctx.thinkingLevel === "off" ? forcedReasoningLevel(model) : ctx.thinkingLevel,
 				onPayload,
 			});
+
+			// A failed or capped stream can carry partial text. Never replace the
+			// conversation with that incomplete checkpoint; let pi retry its summary.
+			if (result.stopReason === "error" || result.stopReason === "aborted" || result.stopReason === "length") return undefined;
 
 			const text = result.content
 				.filter((block): block is { type: "text"; text: string } => block.type === "text")

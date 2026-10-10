@@ -10,6 +10,7 @@
 import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
+import { domainToASCII } from "node:url";
 import { analyzeShellCommand, INLINE_SCRIPT_SHELLS, isUnknownTilde, leadTokens, movesDirectory, parseCommand, resolvePayload, type ShellEvidence } from "../auto-mode/shell-analysis.ts";
 import { pathArgument, resolveForContainment, toAbsolute, toAbsoluteBash } from "../auto-mode/paths.ts";
 import { isSensitivePath } from "../auto-mode/sensitive.ts";
@@ -112,12 +113,13 @@ export interface PermissionRule {
  * names may carry `-` and `.` — MCP tools keep their servers' hyphens
  * (`mcp__github__delete-repo`), and a rule naming one used to be dropped
  * silently (review P5) — and `:`, the plugin MCP namespace
- * (`mcp__plugin:name:server__tool`).
+ * (`mcp__plugin:name:server__tool`). MCP rules also accept the server-wide
+ * `mcp__server__*` spelling; no other tool-name wildcards are supported.
  */
 export function parseRule(raw: string): PermissionRule | undefined {
 	const trimmed = raw.trim();
 	if (!trimmed) return undefined;
-	const match = trimmed.match(/^([A-Za-z0-9_.:-]+)(?:\((.*)\))?$/s);
+	const match = trimmed.match(/^(mcp__[A-Za-z0-9_.:-]+__\*|[A-Za-z0-9_.:-]+)(?:\((.*)\))?$/s);
 	if (!match) return undefined;
 	const [, name, pattern] = match;
 	return { raw: trimmed, tool: normalizeToolName(name), pattern: pattern || undefined };
@@ -555,6 +557,8 @@ export function extractSubject(toolName: string, input: Record<string, unknown>)
 			return str("url") ?? "";
 		case "web_search":
 			return str("query") ?? "";
+		case "Agent":
+			return str("subagent_type") ?? "";
 		case "enter_worktree":
 			return str("name") ?? str("path") ?? "";
 		case "read_mcp_resource":
@@ -581,13 +585,34 @@ export function urlHost(url: string): string | undefined {
 	return undefined;
 }
 
+/** Match URL hostname canonicalization without discarding a malformed rule's path or query. */
+function normalizeDomain(domain: string): string {
+	if (/[/\\?#@\u0000-\u0020\u007f]/.test(domain)) return "";
+	return domainToASCII(domain).toLowerCase().replace(/(?<=[^*.])\.+(?=(:\d+)?$)/, "");
+}
+
 /**
- * URL rule match: Claude Code's `WebFetch(domain:example.com)` form compares
- * the URL's host exactly; any other pattern is a glob over the whole URL.
+ * Claude Code's domain wildcards stay within a label, except a leading `*.`
+ * which covers one or more subdomain labels (never the bare domain).
  */
+function matchesDomainPattern(pattern: string, host: string): boolean {
+	const domain = normalizeDomain(pattern);
+	const candidate = normalizeDomain(host);
+	if (!domain || !candidate) return false;
+	if (domain === candidate || domain === "*") return true;
+	const subdomains = domain.startsWith("*.");
+	const suffix = subdomains ? domain.slice(2) : domain;
+	const source = suffix.split("*").map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[^.:]*");
+	return new RegExp(`^${subdomains ? "(?:[^.:]+\\.)+" : ""}${source}$`).test(candidate);
+}
+
+/** Domain rules match normalized hosts; other patterns are globs over the whole URL. */
 function matchesUrlPattern(pattern: string, url: string): boolean {
-	const domain = pattern.match(/^domain:(.+)$/)?.[1]?.trim().toLowerCase();
-	if (domain) return urlHost(url) === domain;
+	const domain = pattern.match(/^domain:(.+)$/)?.[1]?.trim();
+	if (domain) {
+		const host = urlHost(url);
+		return host !== undefined && matchesDomainPattern(domain, host);
+	}
 	return globToRegex(pattern, false).test(url);
 }
 
@@ -655,15 +680,17 @@ export function ruleMatches(rule: PermissionRule, toolName: string, subject: str
 		case "url":
 			return matchesUrlPattern(rule.pattern, subject);
 		case "text":
-			return globToRegex(rule.pattern, false).test(subject);
+			// The agent catalog resolves names case-insensitively (Explore/explore).
+			return globToRegex(rule.pattern, false, normalizeToolName(toolName) === "Agent").test(subject);
 	}
 }
 
 /**
  * Whether a rule's tool covers a call's tool: the same name, or Claude Code's
- * server-wide MCP form — `mcp__github` covers every `mcp__github__*` tool, and
- * `mcp__plugin:x:server` the plugin-namespaced form. A rule naming a specific
- * tool (`mcp__github__delete_repo`, two `__` groups) stays exact. Until
+ * server-wide MCP forms — `mcp__github` and `mcp__github__*` cover every tool
+ * on that server, and `mcp__plugin:x:server` is the plugin-namespaced form.
+ * A rule naming a specific tool (`mcp__github__delete_repo`, two `__` groups)
+ * stays exact. Until
  * 2026-09-05 the server-wide spelling, the natural way to keep an agent off a
  * server, matched nothing (PERMISSIONS-REVIEW-2026-09-05 M3).
  */
@@ -671,8 +698,10 @@ export function ruleCoversTool(ruleTool: string, toolName: string): boolean {
 	const tool = normalizeToolName(toolName);
 	if (ruleTool === tool) return true;
 	if (!ruleTool.startsWith("mcp__")) return false;
-	const server = ruleTool.slice("mcp__".length);
-	return server.length > 0 && !server.includes("__") && tool.startsWith(`${ruleTool}__`);
+	const wildcard = ruleTool.endsWith("__*");
+	const prefix = wildcard ? ruleTool.slice(0, -3) : ruleTool;
+	const server = prefix.slice("mcp__".length);
+	return server.length > 0 && (wildcard || !server.includes("__")) && tool.startsWith(`${prefix}__`);
 }
 
 /** Risk tier drives the unmatched-rule default. */
@@ -1051,7 +1080,10 @@ export function decide(params: DecideInput): Decision {
 		// The PowerShell counterpart: read-only cmdlets on in-project paths,
 		// judged from PowerShell's own parse (powershell-tree.ts).
 		if (tool === "powershell" && subject && powershellReadOnly({ parse: params.powershellParse, cwd, home: homedir(), readableRoots }).readOnly) return { decision: "allow", cause: "plan-readonly" };
-		if (PLAN_READ_ONLY_TOOLS.has(tool)) return { decision: "allow", cause: "plan-readonly" };
+		if (PLAN_READ_ONLY_TOOLS.has(tool)) {
+			const askRule = ask.find((r) => ruleMatches(r, toolName, subject, cwd));
+			return askRule ? askOrDeny(askRule) : { decision: "allow", cause: "plan-readonly" };
+		}
 		return { decision: "deny", cause: "plan-mode" };
 	}
 

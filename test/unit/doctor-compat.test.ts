@@ -29,6 +29,24 @@ afterEach(() => {
 
 const input = () => ({ cwd, home, agentDir: join(home, ".onecode", "agent"), env: { HOME: home, PATH: "" } as NodeJS.ProcessEnv });
 
+describe("collectCompat: hooks", () => {
+	it("does not count plugin hooks that user settings turned off", () => {
+		const claudeDir = join(home, ".claude");
+		const installPath = join(claudeDir, "plugins", "cache", "market", "fixture", "1.0.0");
+		write(join(installPath, ".claude-plugin", "plugin.json"), { name: "fixture" });
+		write(join(installPath, "hooks", "hooks.json"), { hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "plugin-guard" }] }] } });
+		write(join(claudeDir, "plugins", "installed_plugins.json"), { version: 2, plugins: { "fixture@market": [{ scope: "user", installPath, version: "1.0.0" }] } });
+		write(join(claudeDir, "settings.json"), { enabledPlugins: { "fixture@market": true } });
+		expect(collectCompat(input()).hooks.commands).toBe(1);
+		write(join(claudeDir, "settings.json"), { disableAllHooks: true, enabledPlugins: { "fixture@market": true } });
+		resetHookSettingsCache();
+		invalidatePluginsCache();
+		const hooks = collectCompat(input()).hooks;
+		expect(hooks.commands).toBe(0);
+		expect(hooks.sources).toEqual([]);
+	});
+});
+
 describe("collectCompat: settings files", () => {
 	it("reports what each Claude Code file contributes and which keys One Code leaves alone", () => {
 		write(join(home, ".claude", "settings.json"), {

@@ -110,7 +110,7 @@ export function hashServerConfig(server: McpServer): string {
 	const material =
 		server.kind === "stdio"
 			? { kind: "stdio", command: server.command, args: server.args, env: server.env ?? {}, ...(server.cwd ? { cwd: server.cwd } : {}) }
-			: { kind: "http", url: server.url, headers: server.headers ?? {} };
+			: { kind: "http", url: server.url, headers: server.headers ?? {}, ...(server.transport ? { transport: server.transport } : {}) };
 	return createHash("sha256").update(JSON.stringify(canonicalize(material))).digest("hex");
 }
 

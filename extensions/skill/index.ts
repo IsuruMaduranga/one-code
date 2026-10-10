@@ -18,7 +18,7 @@ import os from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { getAgentDir, stripFrontmatter } from "@earendil-works/pi-coding-agent";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { canShowCustomUi, notifyOrPrint, notifyRpcReadOnly } from "../lib/headless-output.ts";
 import { pluginRoot } from "../lib/plugin-root.ts";
@@ -429,7 +429,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 
 			// Only the user may start a skill marked `disable-model-invocation`
 			// (a typed `/<name>` runs through deliverSkill, not this tool).
-			if (found.disableModelInvocation) {
+			if (found.disableModelInvocation || readModelInvocationDisabled(found.path)) {
 				return {
 					content: [{ type: "text", text: `Skill ${wanted} cannot be used with Skill tool due to disable-model-invocation` }],
 					details: { skill: found.name } as Record<string, unknown>,
@@ -503,7 +503,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 		if (!found || found.state === "off") return;
 		let fileBody: string;
 		try {
-			fileBody = stripFrontmatter(readFileSync(found.path, "utf-8")).trim();
+			fileBody = parseFrontmatterLoosely(readFileSync(found.path, "utf-8")).body.trim();
 		} catch {
 			return;
 		}
@@ -546,7 +546,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 		}
 		let fileBody: string;
 		try {
-			fileBody = stripFrontmatter(readFileSync(found.path, "utf-8")).trim();
+			fileBody = parseFrontmatterLoosely(readFileSync(found.path, "utf-8")).body.trim();
 		} catch {
 			return "unavailable";
 		}

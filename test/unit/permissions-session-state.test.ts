@@ -5,12 +5,14 @@
  * a fresh gate per session (L1), and worktree originals through the prompt
  * and the plan-mode pre-gate (L3).
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ORIGINAL_COMMAND_CHANNEL } from "../../extensions/lib/original-command.ts";
 import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
+import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
+import { shellQuote } from "../../extensions/lib/shell-quote.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
@@ -171,6 +173,94 @@ describe("permissions session state", () => {
 			expect(await call("monitor", { command: wrap("env rm -f README.md"), description: "watch" }, "m1")).toBeUndefined();
 			expect(prompts[0].title).toContain("env rm -f README.md");
 			expect(prompts[0].title).not.toContain("cd '");
+		});
+	});
+
+	describe("entered worktree permission anchor", () => {
+		beforeEach(async () => {
+			vi.stubEnv("CLAUDE_CONFIG_DIR", join(stateDir, "empty-config"));
+			await fake.fire("session_start", { reason: "startup" }, ctx);
+		});
+
+		it("treats an entered external worktree as the write working directory", async () => {
+			const worktree = join(stateDir, "wt");
+			mkdirSync(worktree);
+			fake.events.emit(WORKTREE_CHANNEL, { path: worktree, sharedRoot: cwd });
+			fake.events.emit(MODE_CHANNEL, { mode: "acceptEdits" });
+			expect(await call("write", { path: join(worktree, "a.ts") })).toBeUndefined();
+			expect(prompts).toHaveLength(0);
+		});
+
+		it("stops fast-pathing writes to the previous checkout after entry", async () => {
+			const worktree = join(stateDir, "wt");
+			mkdirSync(worktree);
+			fake.events.emit(WORKTREE_CHANNEL, { path: worktree, sharedRoot: cwd });
+			fake.events.emit(MODE_CHANNEL, { mode: "acceptEdits" });
+			expect(await call("write", { path: join(cwd, "a.ts") })).toBeUndefined();
+			expect(prompts).toHaveLength(1);
+		});
+
+		it("preserves a worktree restored before permissions session_start", async () => {
+			const worktree = join(stateDir, "restored-wt");
+			mkdirSync(worktree);
+			fake.events.emit(WORKTREE_CHANNEL, { path: worktree, sharedRoot: cwd });
+			await fake.fire("session_start", { reason: "startup" }, ctx);
+			fake.events.emit(MODE_CHANNEL, { mode: "acceptEdits" });
+			expect(await call("write", { path: join(worktree, "a.ts") })).toBeUndefined();
+			expect(prompts).toHaveLength(0);
+			expect(await call("write", { path: join(cwd, "a.ts") })).toBeUndefined();
+			expect(prompts).toHaveLength(1);
+		});
+
+		it.each(["exit", "new-session"])("restores the main scope after %s", async (action) => {
+			const worktree = join(stateDir, "wt");
+			mkdirSync(worktree);
+			fake.events.emit(WORKTREE_CHANNEL, { path: worktree, sharedRoot: cwd });
+			fake.events.emit(WORKTREE_CHANNEL, null);
+			if (action === "new-session") await fake.fire("session_start", { reason: "new" }, ctx);
+			fake.events.emit(MODE_CHANNEL, { mode: "acceptEdits" });
+			expect(await call("write", { path: join(cwd, "a.ts") })).toBeUndefined();
+			expect(prompts).toHaveLength(0);
+			expect(await call("write", { path: join(worktree, "a.ts") })).toBeUndefined();
+			expect(prompts).toHaveLength(1);
+		});
+
+		it("moves read scope on worktree switches and never falls back if one disappears", async () => {
+			const first = join(stateDir, "first-wt");
+			const second = join(stateDir, "second-wt");
+			mkdirSync(first);
+			mkdirSync(second);
+			fake.events.emit(MODE_CHANNEL, { mode: "dontAsk" });
+			fake.events.emit(WORKTREE_CHANNEL, { path: first, sharedRoot: cwd });
+			expect(await call("read", { path: join(first, "a.ts") })).toBeUndefined();
+			expect((await call("read", { path: join(cwd, "a.ts") }))?.block).toBe(true);
+			fake.events.emit(WORKTREE_CHANNEL, { path: second, sharedRoot: cwd });
+			expect(await call("read", { path: join(second, "a.ts") })).toBeUndefined();
+			expect((await call("read", { path: join(first, "a.ts") }))?.block).toBe(true);
+			rmSync(second, { recursive: true });
+			expect((await call("read", { path: join(cwd, "a.ts") }))?.block).toBe(true);
+		});
+
+		it("matches rules against trusted original commands without retaining the old resolved root", async () => {
+			const config = join(stateDir, "empty-config");
+			mkdirSync(config);
+			writeFileSync(join(config, "settings.json"), JSON.stringify({ permissions: {
+				allow: ["Bash(npm test)", "Bash(echo:*)"],
+				deny: ["Bash(npm run publish:*)"],
+			} }));
+			await fake.fire("session_start", { reason: "reload" }, ctx);
+			fake.events.emit(MODE_CHANNEL, { mode: "dontAsk" });
+			const worktree = join(stateDir, "wt");
+			mkdirSync(worktree);
+			fake.events.emit(WORKTREE_CHANNEL, { path: worktree, sharedRoot: cwd });
+			const wrapped = (command: string, toolCallId: string) => {
+				fake.events.emit(ORIGINAL_COMMAND_CHANNEL, { toolCallId, command, cwd: worktree });
+				return call("bash", { command: `cd ${shellQuote(worktree)} && (${command}\n)` }, toolCallId);
+			};
+			expect(await wrapped("npm test", "allow-original")).toBeUndefined();
+			expect((await wrapped("npm run publish", "deny-original"))?.reason).toContain("Bash(npm run publish:*)");
+			expect((await wrapped(`echo value > ${shellQuote(join(cwd, "a.ts"))}`, "outside-redirect"))?.block).toBe(true);
+			expect((await call("bash", { command: "npm run publish", __ccOriginalCommand: "npm test" }, "forged-original"))?.reason).toContain("Bash(npm run publish:*)");
 		});
 	});
 

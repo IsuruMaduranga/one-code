@@ -19,6 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import hooksExtension, { hookContextText } from "../../extensions/hooks/index.ts";
+import { PRECOMPACT_INSTRUCTIONS_CHANNEL, type PreCompactInstructions } from "../../extensions/hooks/compaction.ts";
 import { resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
 import { type HookBridge, SUBAGENT_HOOK_CHANNEL } from "../../extensions/hooks/subagent-bridge.ts";
 import { REMINDER_CHANNEL, wrapReminder } from "../../extensions/lib/reminders.ts";
@@ -80,7 +81,23 @@ describe("hooks wiring", () => {
 	};
 
 	const mount = () => hooksExtension(fake.pi as never);
-	const ctx = () => createFakeCtx({ cwd: projectDir });
+	const ctx = () => createFakeCtx({ cwd: projectDir, sessionManager: { getSessionId: () => "test", getSessionFile: () => undefined, getSessionDir: () => root } });
+
+	it("disableAllHooks skips installed plugin commands as well as settings hooks", async () => {
+		const installPath = join(claudeDir, "plugins", "cache", "market", "fixture", "1.0.0");
+		mkdirSync(join(installPath, ".claude-plugin"), { recursive: true });
+		mkdirSync(join(installPath, "hooks"));
+		writeFileSync(join(installPath, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "fixture" }));
+		writeFileSync(join(claudeDir, "plugins", "installed_plugins.json"), JSON.stringify({ version: 2, plugins: { "fixture@market": [{ scope: "user", installPath, version: "1.0.0" }] } }));
+		const marker = join(root, "disabled-plugin-ran");
+		const command = script("plugin-hook.sh", `cat >/dev/null\ntouch "${marker}"\necho 'disabled plugin' >&2\nexit 2\n`);
+		writeFileSync(join(installPath, "hooks", "hooks.json"), JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command }] }] } }));
+		writeFileSync(join(claudeDir, "settings.json"), JSON.stringify({ disableAllHooks: true, enabledPlugins: { "fixture@market": true } }));
+		mount();
+		const result = await fake.fireOne("tool_call", { toolName: "bash", toolCallId: "disabled", input: { command: "echo test" } }, ctx());
+		expect(existsSync(marker)).toBe(false);
+		expect(result).toBeUndefined();
+	});
 
 	it("merges several non-blocking PreToolUse hooks: one rewrites input, another adds context", async () => {
 		const hookA = script("hook-a.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"additionalContext":"extra context from hook A"}}'\n`);
@@ -218,6 +235,7 @@ describe("hooks wiring", () => {
 		});
 		await fake.fireOne("session_start", { reason: "startup" }, ctx());
 		expect(bridge).toBeDefined();
+		mkdirSync(join(projectDir, "wt"));
 
 		const outcome = await bridge!.preToolUse({
 			toolName: "bash",
@@ -257,14 +275,21 @@ describe("hooks wiring", () => {
 		const outcome = await bridge!.preToolUse({ toolName: "bash", input: { command: "rm -rf build" }, cwd: projectDir, sessionId: "bg" });
 		expect(outcome.block?.reason).toBe("denied");
 
-		// The parent's own call still short-circuits on its aborted run.
+		// The parent's own call on its aborted run is cancelled before its hooks run,
+		// and a cancelled PreToolUse blocks rather than letting the call through.
 		const parentInput: Record<string, unknown> = { command: "rm -rf build" };
 		const parent = await fake.fireOne<{ block?: boolean } | undefined>(
 			"tool_call",
 			{ toolName: "bash", toolCallId: "p1", input: parentInput },
 			createFakeCtx({ cwd: projectDir, signal: parentRun.signal }),
 		);
-		expect(parent).toBeUndefined();
+		expect(parent?.block).toBe(true);
+
+		// A child whose own run is already cancelled is blocked too, not waved past the deny hook.
+		const childRun = new AbortController();
+		childRun.abort();
+		const child = await bridge!.preToolUse({ toolName: "bash", input: { command: "rm -rf build" }, cwd: projectDir, sessionId: "bg", signal: childRun.signal });
+		expect(child.block).toBeDefined();
 	});
 
 	it("the bridge translates a child's updatedInput back to native names and frames its context like the parent's", async () => {
@@ -297,6 +322,40 @@ describe("hooks wiring", () => {
 			ctx(),
 		);
 		expect(result).toEqual({ block: true, reason: "PreToolUse hook: blocked by policy" });
+	});
+
+	it.each([
+		'{"systemMessage":42}',
+		'{"hookSpecificOutput":"invalid"}',
+	])("a malformed hook response cannot discard another hook's deny: %s", async (malformed) => {
+		const broken = script("hook-malformed.sh", `cat >/dev/null\nprintf '%s' '${malformed}'\n`);
+		const deny = script("hook-deny.sh", `cat >/dev/null\necho 'denied by policy' >&2\nexit 2\n`);
+		writeUserHooks({ PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: broken }, { type: "command", command: deny }] }] });
+		mount();
+		const result = await fake.fireOne("tool_call", { toolName: "bash", toolCallId: "bad-output", input: { command: "echo test" } }, ctx());
+		expect(result).toEqual({ block: true, reason: "PreToolUse hook: denied by policy" });
+	});
+
+	it("fails closed when an oversized stdout envelope would otherwise lose its denial", async () => {
+		const output = join(root, "large-output.json");
+		writeFileSync(output, JSON.stringify({ padding: "x".repeat(1_000_000), hookSpecificOutput: { permissionDecision: "deny" } }));
+		const hook = script("hook-large.sh", `cat >/dev/null\ncat "${output}"\n`);
+		writeUserHooks({ PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: hook }] }] });
+		mount();
+		const result = await fake.fireOne<{ block?: boolean; reason?: string }>("tool_call", { toolName: "bash", toolCallId: "large", input: { command: "echo test" } }, ctx());
+		expect(result?.block).toBe(true);
+		expect(result?.reason).toContain("output limit");
+	});
+
+	it("does not present truncated SessionStart stdout as complete context", async () => {
+		const output = join(root, "large-context.txt");
+		writeFileSync(output, "x".repeat(1_000_001));
+		const hook = script("hook-large-context.sh", `cat >/dev/null\ncat "${output}"\n`);
+		writeUserHooks({ SessionStart: [{ hooks: [{ type: "command", command: hook }] }] });
+		mount();
+		await fake.fireOne("session_start", { reason: "startup" }, ctx());
+		const result = await fake.fireOne("before_agent_start", { prompt: "hello" }, ctx());
+		expect(result).toBeUndefined();
 	});
 
 	it("a PostToolUse hook replaces the tool result content", async () => {
@@ -377,6 +436,61 @@ describe("hooks wiring", () => {
 		expect(flags()).toEqual([false, true, false]);
 	});
 
+	it("Stop continue:false ends the turn even when another hook requests a continuation", async () => {
+		const stop = script("stop-terminal.sh", `cat >/dev/null\necho '{"continue":false,"stopReason":"finished"}'\n`);
+		const block = script("stop-block.sh", `cat >/dev/null\necho '{"decision":"block","reason":"keep going"}'\n`);
+		writeUserHooks({ Stop: [{ hooks: [{ type: "command", command: block }, { type: "command", command: stop }] }] });
+		mount();
+		await fake.fireOne("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] }, ctx());
+		await fake.fireOne("agent_settled", {}, ctx());
+		expect(fake.sentMessages).toHaveLength(0);
+	});
+
+	it("stops after eight consecutive Stop blocks and resets the limit on the next user turn", async () => {
+		const block = script("stop-forever.sh", `cat >/dev/null\necho '{"decision":"block","reason":"keep going"}'\n`);
+		writeUserHooks({ Stop: [{ hooks: [{ type: "command", command: block }] }] });
+		mount();
+		const settle = async () => {
+			await fake.fireOne("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] }, ctx());
+			await fake.fireOne("agent_settled", {}, ctx());
+		};
+		for (let i = 0; i < 10; i++) await settle();
+		expect(fake.sentMessages).toHaveLength(8);
+		await fake.fireOne("before_agent_start", { prompt: "next turn" }, ctx());
+		await settle();
+		expect(fake.sentMessages).toHaveLength(9);
+	});
+
+	it("does not enqueue a Stop continuation into a replacement session", async () => {
+		const ready = join(root, "stop-ready");
+		const hook = script("stop-replaced.sh", `cat >/dev/null\ntouch "${ready}"\nsleep 0.4\necho '{"decision":"block","reason":"old session"}'\n`);
+		writeUserHooks({ Stop: [{ hooks: [{ type: "command", command: hook }] }] });
+		mount();
+		await fake.fireOne("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] }, ctx());
+		const settling = fake.fireOne("agent_settled", {}, ctx());
+		while (!existsSync(ready)) await new Promise((resolve) => setTimeout(resolve, 10));
+		await fake.fireOne("session_shutdown", { reason: "new" }, ctx());
+		await fake.fireOne("session_start", { reason: "new" }, ctx());
+		await settling;
+		expect(fake.sentMessages).toHaveLength(0);
+	});
+
+	it("cancels a SessionStart command when its session shuts down without a turn signal", async () => {
+		const ready = join(root, "start-ready");
+		const survived = join(root, "start-survived");
+		const hook = script("start-cancelled.sh", `cat >/dev/null\ntouch "${ready}"\nsleep 2\ntouch "${survived}"\necho 'old context'\n`);
+		writeUserHooks({ SessionStart: [{ hooks: [{ type: "command", command: hook }] }] });
+		mount();
+		await fake.fireOne("session_start", { reason: "startup" }, ctx());
+		const turning = fake.fireOne("before_agent_start", { prompt: "hello" }, ctx());
+		while (!existsSync(ready)) await new Promise((resolve) => setTimeout(resolve, 10));
+		const started = Date.now();
+		await fake.fireOne("session_shutdown", { reason: "quit" }, ctx());
+		expect(await turning).toBeUndefined();
+		expect(Date.now() - started).toBeLessThan(1000);
+		expect(existsSync(survived)).toBe(false);
+	});
+
 	it("drops UserPromptSubmit context from a hook that outlived a session_start", async () => {
 		const hookPrompt = script("hook-slow.sh", `#!/bin/sh\ncat >/dev/null\nsleep 0.4\necho '{"hookSpecificOutput":{"additionalContext":"stale"}}'\n`);
 		writeUserHooks({ UserPromptSubmit: [{ hooks: [{ type: "command", command: hookPrompt }] }] });
@@ -424,6 +538,33 @@ describe("hooks wiring", () => {
 		await fake.fireOne("session_compact", { reason: "overflow", compactionEntry: { summary: "s" } }, ctx());
 		expect(existsSync(pre)).toBe(false);
 		expect(existsSync(post)).toBe(false);
+	});
+
+	it.each(["manual", "threshold", "overflow"])("passes successful PreCompact output to the %s summarizer, scoped to its signal", async (reason) => {
+		const first = script("compact-first.sh", `#!/bin/sh\ncat >/dev/null\necho 'Preserve the rollback steps.'\n`);
+		const second = script("compact-second.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"additionalContext":"Keep the test failures."}}'\n`);
+		writeUserHooks({ PreCompact: [{ hooks: [{ type: "command", command: first }, { type: "command", command: second }] }] });
+		const instructions: PreCompactInstructions[] = [];
+		fake.events.on(PRECOMPACT_INSTRUCTIONS_CHANNEL, (data) => instructions.push(data as PreCompactInstructions));
+		mount();
+		const signal = new AbortController().signal;
+		const event = { reason, signal, customInstructions: "Focus on migration." };
+		expect(await fake.fireOne("session_before_compact", event, ctx())).toBeUndefined();
+		expect(instructions).toEqual([{ signal, instructions: "Preserve the rollback steps.\nKeep the test failures." }]);
+		expect(instructions[0].signal).toBe(signal);
+		expect(event.customInstructions).toBe("Focus on migration.");
+		expect(await fake.fireOne("before_agent_start", { prompt: "next" }, ctx())).toBeUndefined();
+	});
+
+	it("a blocking PreCompact hook cancels without publishing preservation instructions", async () => {
+		const success = script("compact-success.sh", `#!/bin/sh\ncat >/dev/null\necho 'Do not publish after a block.'\n`);
+		const block = script("compact-block.sh", `#!/bin/sh\ncat >/dev/null\necho 'Wait for backup' >&2\nexit 2\n`);
+		writeUserHooks({ PreCompact: [{ hooks: [{ type: "command", command: success }, { type: "command", command: block }] }] });
+		const instructions: unknown[] = [];
+		fake.events.on(PRECOMPACT_INSTRUCTIONS_CHANNEL, (data) => instructions.push(data));
+		mount();
+		expect(await fake.fireOne("session_before_compact", { reason: "manual", signal: new AbortController().signal }, ctx())).toEqual({ cancel: true });
+		expect(instructions).toEqual([]);
 	});
 
 	it("an auto PreCompact sends custom_instructions as an empty string, like Claude Code", async () => {

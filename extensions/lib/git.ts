@@ -16,8 +16,12 @@ export const HARNESS_GIT_CONFIG: readonly string[] = ["-c", "core.fsmonitor=fals
 
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
+import { devNull } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { comparablePath, tryRealpath } from "./paths.ts";
+
+/** Harness worktree bookkeeping must not execute repository hooks before the tool permission gate. */
+export const HARNESS_GIT_NO_HOOKS: readonly string[] = ["-c", `core.hooksPath=${devNull}`];
 
 /**
  * `git status` output for `cwd` with the given arguments, or undefined when

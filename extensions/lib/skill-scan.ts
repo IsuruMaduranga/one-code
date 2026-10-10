@@ -13,13 +13,14 @@
  * turn), so a root missing here is a skill with no `/name` command at startup.
  */
 
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { PluginSkill } from "./plugins.ts";
 import type { SkillScope } from "./skill-overrides.ts";
 import { claudeSourcesOn, projectConfigDir, userConfigDir } from "./config-mode.ts";
-import { claudeUserDir } from "./paths.ts";
+import { claudeUserDir, isPathAtOrUnder } from "./paths.ts";
+import { parseFrontmatterLoosely } from "./frontmatter.ts";
 
 /** The skill catalog shipped in this package: `<package>/skills` (Claude Code's self-contained built-in skills). */
 export const BUNDLED_SKILLS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "skills");
@@ -32,13 +33,13 @@ export interface ScannedSkill {
 
 /**
  * The one scope-classification rule for a skill path — user skills live under
- * `~/.claude/skills` AND `<agentDir>/skills`; everything else is project
+ * `~/.claude/skills`, `~/.agents/skills` and `<agentDir>/skills`; everything else is project
  * scope. Both the scanner and the skill extension classify through this, so a
  * skill never shows different scopes in /plugins vs the skill tool.
  */
 export function scopeForPath(path: string, home: string, agentDir: string): SkillScope {
-	if (path.startsWith(join(claudeUserDir(home), "skills")) || path.startsWith(join(agentDir, "skills"))) return "user";
-	return "project";
+	const roots = [join(claudeUserDir(home), "skills"), join(home, ".agents", "skills"), join(agentDir, "skills")];
+	return roots.some((root) => isPathAtOrUnder(path, root)) ? "user" : "project";
 }
 
 /**
@@ -74,9 +75,15 @@ function scanDir(dir: string, scope: SkillScope, into: Map<string, ScannedSkill>
 	for (const entry of entries) {
 		const skillFile = join(dir, entry, "SKILL.md");
 		// existsSync follows symlinked skill directories, which isDirectory() would miss.
-		if (existsSync(skillFile) && !into.has(`${scope}:${entry}`)) {
-			into.set(`${scope}:${entry}`, { name: entry, path: skillFile, scope });
+		if (!existsSync(skillFile)) continue;
+		let name = entry;
+		try {
+			const declared = parseFrontmatterLoosely(readFileSync(skillFile, "utf-8")).frontmatter.name;
+			if (typeof declared === "string" && declared) name = declared;
+		} catch {
+			continue;
 		}
+		if (!into.has(`${scope}:${name}`)) into.set(`${scope}:${name}`, { name, path: skillFile, scope });
 	}
 }
 

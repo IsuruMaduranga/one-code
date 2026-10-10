@@ -1,8 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanupWorktree, createWorktree, keptWorktreeNote, type Worktree } from "../../extensions/subagents/worktree.ts";
 import { releaseWorktreeIsolation, worktreeIsolationFor } from "../../extensions/lib/worktree-isolation.ts";
 
@@ -22,6 +22,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	vi.restoreAllMocks();
 	if (worktree) {
 		releaseWorktreeIsolation(worktree.path);
 		rmSync(join(worktree.path, ".."), { recursive: true, force: true });
@@ -73,6 +74,51 @@ describe("isolation worktree cleanup", () => {
 		writeFileSync(join(worktree.path, "a.txt"), "edited\n");
 		expect(await cleanupWorktree(repo, worktree)).toBe(false);
 		expect(existsSync(worktree.path)).toBe(true);
+	});
+
+	it("keeps untracked work even when repository status settings hide it", async () => {
+		git(repo, "config", "status.showUntrackedFiles", "no");
+		worktree = await createWorktree(repo, "agent");
+		writeFileSync(join(worktree.path, "new.txt"), "agent work\n");
+		expect(git(worktree.path, "status", "--porcelain")).toBe("");
+
+		expect(await cleanupWorktree(repo, worktree)).toBe(false);
+		expect(existsSync(join(worktree.path, "new.txt"))).toBe(true);
+	});
+
+	it("removes a worktree holding only ignored files, as Claude Code does (build output must not pile up)", async () => {
+		writeFileSync(join(repo, ".gitignore"), "output.txt\n");
+		git(repo, "add", ".gitignore");
+		git(repo, "commit", "-qm", "ignore output");
+		worktree = await createWorktree(repo, "agent");
+		writeFileSync(join(worktree.path, "output.txt"), "agent output\n");
+		expect(git(worktree.path, "status", "--porcelain")).toBe("");
+
+		expect(await cleanupWorktree(repo, worktree)).toBe(true);
+		expect(existsSync(worktree.path)).toBe(false);
+	});
+
+	it.each(["default", "configured"])("does not execute %s repository hooks while creating isolation", async (source) => {
+		const hooks = source === "default" ? join(repo, ".git", "hooks") : join(repo, "custom-hooks");
+		mkdirSync(hooks, { recursive: true });
+		writeFileSync(join(hooks, "post-checkout"), "#!/bin/sh\nprintf 'executed' > hook-ran.txt\n", { mode: 0o755 });
+		if (source === "configured") git(repo, "config", "core.hooksPath", hooks);
+
+		worktree = await createWorktree(repo, "agent");
+		expect(existsSync(join(worktree.path, "hook-ran.txt"))).toBe(false);
+	});
+
+	it("creates distinct branches for same-label agents started in the same millisecond", async () => {
+		vi.spyOn(Date, "now").mockReturnValue(1_780_000_000_000);
+		worktree = await createWorktree(repo, "agent");
+		const second = await createWorktree(repo, "agent");
+		try {
+			expect(second.branch).not.toBe(worktree.branch);
+			expect(await cleanupWorktree(repo, second)).toBe(true);
+		} finally {
+			releaseWorktreeIsolation(second.path);
+			rmSync(join(second.path, ".."), { recursive: true, force: true });
+		}
 	});
 
 	it("branches from an entered worktree's HEAD and guards the main checkout as shared", async () => {

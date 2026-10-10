@@ -22,7 +22,8 @@
  *   otherwise `close` never fires and the promise hangs past the timeout
  *   (Windows: `taskkill /T /F` on the leader's pid does the same)
  * - setEncoding("utf8") so multi-byte characters can't be split across chunks
- * - output capped at 1MB per stream
+ * - a hook exceeding 1MB per stream is killed and reported as an output-limit
+ *   failure, never parsed as a silently truncated JSON verdict
  * - stdin errors ignored (a hook that exits without reading stdin — `exit 2`
  *   — would otherwise EPIPE-crash the write)
  * - stdin JSON is newline-terminated: without a trailing "\n" a hook doing
@@ -48,6 +49,7 @@
 import type { ChildProcess } from "node:child_process";
 import { detachedSpawnOptions, killProcessTree, waitForChildExit } from "../lib/process-tree.ts";
 import { bashSpawn, POWERSHELL_UTF8_PREFIX, powerShellSpawn, type ShellSpawn, spawnShellCommand } from "../lib/shell-spawn.ts";
+import type { FinishedRun } from "./protocol.ts";
 import type { HookShell } from "./settings.ts";
 
 /**
@@ -76,29 +78,12 @@ export function hookShellSpawn(shell: HookShell | undefined): { spec?: ShellSpaw
 	return { spec: resolved.spawn, shell: want };
 }
 
-export interface HookRunResult {
-	/**
-	 * null when the process was killed (timeout) or never spawned. Normalized on
-	 * the timeout path rather than taken from `waitpid`: a group SIGKILL is not
-	 * atomic, so the shell can be scheduled after its foreground child is killed
-	 * and before its own signal lands, reap the child and exit(128+9) itself —
-	 * `close` then reports a normal exit of 137 instead of death by signal
-	 * (roughly 1% of timeouts under load, and never when the shell had exec'd
-	 * away, leaving no shell to reap; findings §10.20). Callers should still
-	 * prefer `timedOut`, which says what happened rather than what it looked
-	 * like, but they no longer have to.
-	 */
-	exitCode: number | null;
-	timedOut: boolean;
-	/** Set when the child could not be spawned at all. */
-	spawnError?: string;
-	stdout: string;
-	stderr: string;
-	durationMs: number;
-}
+/** A finished run (`protocol.ts FinishedRun`, field docs there) and how long it took. */
+export type HookRunResult = FinishedRun & { durationMs: number };
 
 export interface HookRunOptions {
 	cwd: string;
+	signal?: AbortSignal;
 	/** Seconds, Claude Code convention. Clamped to [1, MAX_TIMEOUT_S]. */
 	timeoutSeconds?: number;
 	/** Exposed to the hook as CLAUDE_PROJECT_DIR; defaults to cwd. */
@@ -129,6 +114,10 @@ export function runHookCommand(command: string, stdinJson: string, opts: HookRun
 	const started = Date.now();
 
 	return new Promise((resolve) => {
+		if (opts.signal?.aborted) {
+			resolve({ exitCode: null, timedOut: false, aborted: true, stdout: "", stderr: "", durationMs: Date.now() - started });
+			return;
+		}
 		let child: ChildProcess;
 		const failed = (spawnError: string) =>
 			resolve({ exitCode: null, timedOut: false, spawnError, stdout: "", stderr: "", durationMs: Date.now() - started });
@@ -175,14 +164,26 @@ export function runHookCommand(command: string, stdinJson: string, opts: HookRun
 		let stdout = "";
 		let stderr = "";
 		let timedOut = false;
+		let aborted = false;
+		let outputLimitExceeded = false;
+		const outputBytes = { stdout: 0, stderr: 0 };
 		let settled = false;
+		const onAbort = () => {
+			aborted = true;
+			killProcessTree(child, "SIGKILL");
+		};
+		opts.signal?.addEventListener("abort", onAbort, { once: true });
 
 		const capture = (sink: "stdout" | "stderr") => (chunk: string) => {
-			const current = sink === "stdout" ? stdout : stderr;
-			if (current.length >= MAX_OUTPUT_BYTES) return;
-			const next = current + chunk.slice(0, MAX_OUTPUT_BYTES - current.length);
-			if (sink === "stdout") stdout = next;
-			else stderr = next;
+			if (outputLimitExceeded) return;
+			outputBytes[sink] += Buffer.byteLength(chunk, "utf8");
+			if (outputBytes[sink] > MAX_OUTPUT_BYTES) {
+				outputLimitExceeded = true;
+				killProcessTree(child, "SIGKILL");
+				return;
+			}
+			if (sink === "stdout") stdout += chunk;
+			else stderr += chunk;
 		};
 		child.stdout?.setEncoding("utf8");
 		child.stderr?.setEncoding("utf8");
@@ -200,7 +201,8 @@ export function runHookCommand(command: string, stdinJson: string, opts: HookRun
 			if (settled) return;
 			settled = true;
 			clearTimeout(timer);
-			resolve({ ...result, durationMs: Date.now() - started });
+			opts.signal?.removeEventListener("abort", onAbort);
+			resolve({ ...result, ...(aborted ? { aborted: true } : {}), ...(outputLimitExceeded ? { outputLimitExceeded: true } : {}), durationMs: Date.now() - started });
 		};
 
 		// Settles on exit plus a short stdio grace, not on `close`: a grandchild
@@ -211,7 +213,7 @@ export function runHookCommand(command: string, stdinJson: string, opts: HookRun
 		// keeps "we killed it" from ever looking like an ordinary non-zero exit,
 		// which fails OPEN downstream.
 		waitForChildExit(child).then(
-			({ code }) => finish({ exitCode: timedOut ? null : code, timedOut, stdout, stderr }),
+			({ code }) => finish({ exitCode: timedOut || aborted || outputLimitExceeded ? null : code, timedOut, stdout, stderr }),
 			(error: Error) => finish({ exitCode: null, timedOut, spawnError: error.message, stdout, stderr }),
 		);
 

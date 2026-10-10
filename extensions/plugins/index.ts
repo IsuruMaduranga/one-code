@@ -17,7 +17,7 @@
  */
 
 import { readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readFavorites, toggleFavorite } from "../lib/favorites.ts";
@@ -64,7 +64,9 @@ import { decodePanelKey } from "./panel/keys.ts";
 import { type DiscoverDetail, renderPanel, type PanelPaint } from "./panel/render.ts";
 import { buildDiscoverRows, buildInstalledRows, buildMarketplaceRows, type DiscoverRow } from "./panel/rows.ts";
 import { applyPanelKey, initialPanelState, type PanelEffect, type PanelView } from "./panel/state.ts";
-import { expandTemplate } from "./shell-expand.ts";
+import { expandTemplate, runPlaceholderCommand } from "./shell-expand.ts";
+import { watchPermissionBridge } from "../permissions/subagent-gate.ts";
+import { followWorkCwd } from "../lib/worktree-channel.ts";
 import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
@@ -107,6 +109,8 @@ function safeDiscover(roots: ReturnType<typeof defaultDiscoverRoots>): Discovere
 
 export default function pluginsExtension(pi: ExtensionAPI) {
 	const sendUserMessage = createUserMessageSender(pi);
+	const getPermissionBridge = watchPermissionBridge(pi);
+	const workCwd = followWorkCwd(pi.events);
 	// False once the session is replaced: a panel action still awaiting then
 	// throws on its first pi.* call, which is expected and not an error to show.
 	const alive = sessionAlive(pi);
@@ -126,7 +130,7 @@ export default function pluginsExtension(pi: ExtensionAPI) {
 				plugins.plugins.find((p) => p.name === command.plugin);
 			if (!plugin) continue;
 			registeredCommands.add(command.name);
-			registerPluginCommand(pi, plugin, command.name, command.path, sendUserMessage);
+			registerPluginCommand(pi, plugin, command.name, command.path, sendUserMessage, getPermissionBridge, workCwd);
 		}
 	};
 
@@ -519,7 +523,7 @@ export default function pluginsExtension(pi: ExtensionAPI) {
 	});
 }
 
-function registerPluginCommand(pi: ExtensionAPI, plugin: Plugin, name: string, path: string, sendUserMessage: ReturnType<typeof createUserMessageSender>): void {
+function registerPluginCommand(pi: ExtensionAPI, plugin: Plugin, name: string, path: string, sendUserMessage: ReturnType<typeof createUserMessageSender>, getPermissionBridge: ReturnType<typeof watchPermissionBridge>, workCwd: (sessionCwd: string) => string): void {
 	let description = `Command from the ${plugin.name} plugin`;
 	let argumentHint: CommandHint | undefined;
 	try {
@@ -536,6 +540,19 @@ function registerPluginCommand(pi: ExtensionAPI, plugin: Plugin, name: string, p
 	pi.registerCommand(name, {
 		description: argumentHint?.hint ? `${description} (${argumentHint.hint})` : description,
 		handler: async (args, ctx) => {
+			// Registered commands cannot be removed from pi. Resolve their live
+			// owner and path on invocation, after toggles, updates or a cwd change.
+			const current = safeDiscover(defaultDiscoverRoots(getAgentDir(), ctx.cwd));
+			const command = current.commands.find((entry) => entry.name === name);
+			const plugin = command && current.enabledPlugins.find((entry) =>
+				entry.name === command.plugin && dirname(command.path) === join(entry.path, "commands"),
+			);
+			if (!command || !plugin) {
+				notifyOrPrint(ctx, `/${name} is unavailable in this project. Enable or reinstall its plugin in /plugins, then retry.`, "error");
+				if (!sessionOutlivesTurn(ctx.mode)) pi.events.emit(ONE_SHOT_COMMAND_FAILED_CHANNEL, {});
+				return;
+			}
+			const path = command.path;
 			let body: string;
 			try {
 				const parsed = parseFrontmatterLoosely(readFileSync(path, "utf-8")) as { body: string };
@@ -550,9 +567,24 @@ function registerPluginCommand(pi: ExtensionAPI, plugin: Plugin, name: string, p
 			// user turn: persist it past the cap so the model gets a preview plus
 			// the path, never a wall of text (review L3).
 			const dir = sessionResultsDir(ctx);
-			const expanded = await expandTemplate(body, args, ctx.cwd, {
-				persist: (text, index) => persistIfLarge(text, { dir, id: `plugin-cmd-${name}-${index}` }),
-			});
+			let expanded: string;
+			try {
+				// Placeholders run where the session works: an entered worktree, not the checkout it left.
+				expanded = await expandTemplate(body, args, workCwd(ctx.cwd), {
+					persist: (text, index) => persistIfLarge(text, { dir, id: `plugin-cmd-${name}-${index}` }),
+					run: async (command, cwd) => {
+						const decide = getPermissionBridge();
+						if (!decide) throw new Error("The permission gate is unavailable. Load the permissions extension before running shell placeholders.");
+						const decision = await decide({ toolName: "bash", input: { command }, cwd, model: ctx.model });
+						if (decision?.block) throw new Error(`Shell placeholder blocked: ${decision.reason}`);
+						return runPlaceholderCommand(command, cwd);
+					},
+				});
+			} catch (error) {
+				notifyOrPrint(ctx, `Could not expand /${name}: ${(error as Error).message}`, "error");
+				if (!sessionOutlivesTurn(ctx.mode)) pi.events.emit(ONE_SHOT_COMMAND_FAILED_CHANNEL, {});
+				return;
+			}
 			recordUsage(pluginRoot(getAgentDir()), "command", name);
 			// Deliver as a user turn, which is how Claude Code runs a command template.
 			await sendUserMessage(ctx, expanded);

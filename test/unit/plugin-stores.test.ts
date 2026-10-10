@@ -110,7 +110,7 @@ describe("skill scan", () => {
 			[bundled, "bundled-skill"],
 		] as const) {
 			mkdirSync(join(base, name), { recursive: true });
-			writeFileSync(join(base, name, "SKILL.md"), "---\nname: x\n---\nbody text here");
+			writeFileSync(join(base, name, "SKILL.md"), `---\nname: ${name}\n---\nbody text here`);
 		}
 		const skills = scanSkills(cwd, home, agentDir, [{ name: "demo:helper", plugin: "demo", path: "/p/SKILL.md" }], bundled);
 		expect(skills.map((s) => `${s.scope}:${s.name}`).sort()).toEqual([

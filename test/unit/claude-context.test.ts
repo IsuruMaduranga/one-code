@@ -18,7 +18,7 @@ import {
 	PROJECT_DESCRIPTOR,
 } from "../../extensions/lib/claude-context.ts";
 import { wrapReminder } from "../../extensions/lib/reminders.ts";
-import { truncateIndex } from "../../extensions/lib/memory.ts";
+import { truncateIndex } from "../../extensions/lib/memory-content.ts";
 
 // Ancestor instruction files on the host must not affect temporary fixtures,
 // including when TMPDIR is inside a checkout that carries its own CLAUDE.md.

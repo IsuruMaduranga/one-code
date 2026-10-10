@@ -5,10 +5,13 @@
 
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import { childProcessEnv } from "../lib/app-launch.mjs";
 import type { McpServer } from "./config.ts";
+import { collectPages } from "./discovery.ts";
+import { McpAuthenticationRequiredError } from "./oauth/provider.ts";
 
 /**
  * The MCP SDK costs ~70-80ms to load (findings §15), so it is imported on the
@@ -20,6 +23,7 @@ let sdkPromise:
 			Client: typeof import("@modelcontextprotocol/sdk/client/index.js").Client;
 			StdioClientTransport: typeof import("@modelcontextprotocol/sdk/client/stdio.js").StdioClientTransport;
 			StreamableHTTPClientTransport: typeof import("@modelcontextprotocol/sdk/client/streamableHttp.js").StreamableHTTPClientTransport;
+			SSEClientTransport: typeof import("@modelcontextprotocol/sdk/client/sse.js").SSEClientTransport;
 			UnauthorizedError: typeof import("@modelcontextprotocol/sdk/client/auth.js").UnauthorizedError;
 	  }>
 	| undefined;
@@ -28,6 +32,10 @@ let sdkPromise:
 // (the SDK's UnauthorizedError does not set `.name`, so a name/message check is
 // unreliable — a custom-message instance would be missed).
 let unauthorizedClass: typeof import("@modelcontextprotocol/sdk/client/auth.js").UnauthorizedError | undefined;
+let httpErrorClass: typeof import("@modelcontextprotocol/sdk/client/streamableHttp.js").StreamableHTTPError | undefined;
+let sseErrorClass: typeof import("@modelcontextprotocol/sdk/client/sse.js").SseError | undefined;
+
+type HttpTransport = StreamableHTTPClientTransport | SSEClientTransport;
 
 function loadSdk() {
 	sdkPromise ??= Promise.all([
@@ -35,12 +43,16 @@ function loadSdk() {
 		import("@modelcontextprotocol/sdk/client/stdio.js"),
 		import("@modelcontextprotocol/sdk/client/streamableHttp.js"),
 		import("@modelcontextprotocol/sdk/client/auth.js"),
-	]).then(([client, stdio, http, auth]) => {
+		import("@modelcontextprotocol/sdk/client/sse.js"),
+	]).then(([client, stdio, http, auth, sse]) => {
 		unauthorizedClass = auth.UnauthorizedError;
+		httpErrorClass = http.StreamableHTTPError;
+		sseErrorClass = sse.SseError;
 		return {
 			Client: client.Client,
 			StdioClientTransport: stdio.StdioClientTransport,
 			StreamableHTTPClientTransport: http.StreamableHTTPClientTransport,
+			SSEClientTransport: sse.SSEClientTransport,
 			UnauthorizedError: auth.UnauthorizedError,
 		};
 	});
@@ -63,11 +75,21 @@ export interface McpResource {
 	mimeType?: string;
 }
 
+export interface McpResourceTemplate {
+	uriTemplate: string;
+	name?: string;
+	description?: string;
+	mimeType?: string;
+}
+
 export interface Connection {
 	server: McpServer;
 	client: Client;
 	tools: McpTool[];
 	resources: McpResource[];
+	resourceTemplates?: McpResourceTemplate[];
+	/** Called after a tool-list refresh, or with its error while the last good list stays intact. */
+	onToolsChanged?: (error?: Error) => void;
 	/** The server's own usage instructions from its initialize result, if any. */
 	instructions?: string;
 	/** Non-fatal problems after a successful connect (e.g. listTools failed). */
@@ -127,8 +149,11 @@ function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<
 	});
 }
 
-/** True when the error is the SDK's "authorization required" signal (an HTTP 401). */
+/** True when the server requires authentication, including an expired stored grant. */
 export function isUnauthorized(error: unknown): boolean {
+	if (error instanceof McpAuthenticationRequiredError) return true;
+	if (httpErrorClass && error instanceof httpErrorClass && error.code === 401) return true;
+	if (sseErrorClass && error instanceof sseErrorClass && error.code === 401) return true;
 	// The class is captured on the first loadSdk(); every caller runs after a
 	// connect (which awaits it), so it is set. The message fallback only covers
 	// the impossible pre-load case.
@@ -141,6 +166,7 @@ function buildTransport(
 	server: McpServer,
 	sdk: Awaited<ReturnType<typeof loadSdk>>,
 	authProvider?: OAuthClientProvider,
+	keepOAuthOpen?: () => boolean,
 ): { transport: Transport; stderrTail: () => string } {
 	const tail = createTailBuffer();
 	if (server.kind === "stdio") {
@@ -156,48 +182,124 @@ function buildTransport(
 		transport.stderr?.on("data", (chunk: string | Uint8Array) => tail.push(chunk));
 		return { transport, stderrTail: tail.text };
 	}
-	const transport = new sdk.StreamableHTTPClientTransport(new URL(server.url), {
+	const lifetime = new AbortController();
+	const RemoteTransport = server.transport === "sse" ? sdk.SSEClientTransport : sdk.StreamableHTTPClientTransport;
+	const transport = new RemoteTransport(new URL(server.url), {
 		authProvider,
 		requestInit: server.headers ? { headers: server.headers } : undefined,
+		// The SDK's close signal covers MCP requests, but not the discovery and
+		// token fetches it starts during OAuth. Those must stop with the client too.
+		fetch: (input, init) => fetch(input, {
+			...init,
+			signal: init?.signal ? AbortSignal.any([lifetime.signal, init.signal]) : lifetime.signal,
+		}),
 	});
+	const closeTransport = transport.close.bind(transport);
+	transport.close = async () => {
+		if (!keepOAuthOpen?.()) lifetime.abort();
+		await closeTransport();
+	};
 	return { transport, stderrTail: tail.text };
 }
 
-/** List a connected client's tools and resources into a Connection. */
+/** Bound the complete list, not each page, and cancel its last request on timeout. */
+async function discoverPages<T>(
+	fetchPage: (cursor: string | undefined, signal: AbortSignal) => Promise<{ items: T[]; nextCursor?: string }>,
+	what: string,
+): Promise<T[]> {
+	const controller = new AbortController();
+	try {
+		return await withTimeout(collectPages((cursor) => fetchPage(cursor, controller.signal), controller.signal), CONNECT_TIMEOUT_MS, what);
+	} catch (error) {
+		controller.abort();
+		throw error;
+	}
+}
+
+/** A fresh, complete tool snapshot. */
+export function discoverTools(client: Client, serverName: string): Promise<McpTool[]> {
+	return discoverPages(async (cursor, signal) => {
+		const result = await client.listTools(cursor === undefined ? undefined : { cursor }, { signal });
+		return { items: result.tools, nextCursor: result.nextCursor };
+	}, `listing tools of "${serverName}"`);
+}
+
+/** List a connected client's tools, resources and URI templates into a Connection. */
 async function finalizeConnection(client: Client, server: McpServer, stderrTail: () => string = () => ""): Promise<Connection> {
 	const warnings: string[] = [];
 
-	// Each list call can take up to CONNECT_TIMEOUT_MS on a slow server; run
-	// them concurrently instead of stacking their worst-case latencies.
-	const [toolsResult, resourcesResult] = await Promise.allSettled([
-		withTimeout(client.listTools(), CONNECT_TIMEOUT_MS, `listing tools of "${server.name}"`),
-		withTimeout(client.listResources(), CONNECT_TIMEOUT_MS, `listing resources of "${server.name}"`),
+	// Each complete list has one deadline; run them concurrently instead of
+	// stacking their worst-case latencies or granting each page a fresh timeout.
+	const [toolsResult, resourcesResult, templatesResult] = await Promise.allSettled([
+		discoverTools(client, server.name),
+		discoverPages(async (cursor, signal) => {
+			const result = await client.listResources(cursor === undefined ? undefined : { cursor }, { signal });
+			return { items: result.resources, nextCursor: result.nextCursor };
+		}, `listing resources of "${server.name}"`),
+		discoverPages(async (cursor, signal) => {
+			const result = await client.listResourceTemplates(cursor === undefined ? undefined : { cursor }, { signal });
+			return { items: result.resourceTemplates, nextCursor: result.nextCursor };
+		}, `listing resource templates of "${server.name}"`),
 	]);
 
 	let tools: McpTool[] = [];
 	if (toolsResult.status === "fulfilled") {
-		tools = (toolsResult.value.tools ?? []) as McpTool[];
+		tools = toolsResult.value;
 	} else {
 		// A server that connects but fails listTools would otherwise register
 		// zero tools with no signal anywhere — surface it as a warning.
 		warnings.push(`connected, but listing tools failed: ${(toolsResult.reason as Error).message}`);
 	}
 
-	let resources: McpResource[] = [];
-	if (resourcesResult.status === "fulfilled") {
-		resources = (resourcesResult.value.resources ?? []) as McpResource[];
-	} else {
-		// Resources are optional in MCP; "method not found" is normal. Anything
-		// else (a timeout, a protocol error) is worth a warning.
-		const message = (resourcesResult.reason as Error).message;
-		if (!/method not found|-32601/i.test(message)) {
-			warnings.push(`connected, but listing resources failed: ${message}`);
-		}
-	}
-
+	// Resources and templates are optional in MCP; "method not found" is
+	// normal. A timeout or protocol error must still surface as a warning.
+	const optionalList = <T>(result: PromiseSettledResult<T[]>, label: string): T[] => {
+		if (result.status === "fulfilled") return result.value;
+		const message = (result.reason as Error).message;
+		if (!/method not found|-32601/i.test(message)) warnings.push(`connected, but listing ${label} failed: ${message}`);
+		return [];
+	};
+	const resources = optionalList(resourcesResult, "resources");
+	const resourceTemplates = optionalList(templatesResult, "resource templates");
 	const instructions = client.getInstructions()?.trim() || undefined;
 
-	return { server, client, tools, resources, instructions, warnings, stderrTail };
+	const connection: Connection = { server, client, tools, resources, resourceTemplates, instructions, warnings, stderrTail };
+	const { ToolListChangedNotificationSchema } = await import("@modelcontextprotocol/sdk/types.js");
+	let refreshing = false;
+	let pending = false;
+	client.setNotificationHandler(ToolListChangedNotificationSchema, async () => {
+		if (connection.closing) return;
+		pending = true;
+		if (refreshing) return;
+		refreshing = true;
+		try {
+			// A burst during an in-flight list gets one follow-up refresh, never
+			// concurrent snapshots that could overwrite a newer list with an old one.
+			while (pending && !connection.closing) {
+				pending = false;
+				let refreshed: McpTool[];
+				try {
+					refreshed = await discoverTools(client, server.name);
+				} catch (cause) {
+					if (connection.closing) return;
+					const error = cause instanceof Error ? cause : new Error(String(cause));
+					const warning = `connected, but refreshing tools failed: ${error.message}`;
+					if (!connection.warnings.includes(warning)) connection.warnings.push(warning);
+					connection.onToolsChanged?.(error);
+					continue;
+				}
+				if (connection.closing) return;
+				connection.tools = refreshed;
+				connection.onToolsChanged?.();
+			}
+		} finally {
+			refreshing = false;
+		}
+	});
+	// A server can exit after initialize but before discovery finishes. Its
+	// onclose already fired, before index.ts can adopt the connection.
+	if (!client.transport) throw new Error(withStderr(`connection to "${server.name}" closed during discovery`, stderrTail()));
+	return connection;
 }
 
 /**
@@ -211,10 +313,11 @@ async function finalizeConnection(client: Client, server: McpServer, stderrTail:
 async function openClient(
 	server: McpServer,
 	authProvider?: OAuthClientProvider,
+	keepOAuthOpen?: () => boolean,
 ): Promise<{ client: Client; transport: Transport; stderrTail: () => string }> {
 	const sdk = await loadSdk();
 	const client = new sdk.Client({ name: "one-code", version: "0.1.0" }, { capabilities: {} });
-	return { client, ...buildTransport(server, sdk, authProvider) };
+	return { client, ...buildTransport(server, sdk, authProvider, keepOAuthOpen) };
 }
 
 /**
@@ -257,20 +360,33 @@ export async function connect(server: McpServer, authProvider?: OAuthClientProvi
 export async function beginInteractiveAuth(
 	server: McpServer,
 	authProvider: OAuthClientProvider,
-): Promise<{ transport: StreamableHTTPClientTransport } | { connection: Connection }> {
+): Promise<{ transport: HttpTransport } | { connection: Connection }> {
 	if (server.kind !== "http") throw new Error(`OAuth is only available for http MCP servers; "${server.name}" is stdio.`);
-	const { client, transport: baseTransport, stderrTail } = await openClient(server, authProvider);
-	const transport = baseTransport as StreamableHTTPClientTransport;
+	// Client.connect closes the transport after the expected UnauthorizedError.
+	// Keep OAuth fetches usable until the redirect has been handed to the caller.
+	let awaitingRedirect = true;
+	const { client, transport: baseTransport, stderrTail } = await openClient(server, authProvider, () => awaitingRedirect);
+	const transport = baseTransport as HttpTransport;
 	try {
 		// Not connectOrClose: on a 401 the transport must stay open — it carries
 		// the OAuth flow state the caller finishes with finishAuth(code).
 		await withTimeout(client.connect(transport), CONNECT_TIMEOUT_MS, `connecting to "${server.name}"`);
 		return { connection: await finalizeConnection(client, server, stderrTail) };
 	} catch (error) {
-		if (isUnauthorized(error)) return { transport };
+		// Only the SDK's redirect signal means a browser callback is coming.
+		// A raw 401 after refreshing tokens is an auth failure, not a redirect.
+		if (unauthorizedClass && error instanceof unauthorizedClass) return { transport };
+		awaitingRedirect = false;
 		await transport.close().catch(() => {});
 		throw error;
+	} finally {
+		awaitingRedirect = false;
 	}
+}
+
+/** Bound the token exchange too; the callback deadline only covers waiting for the browser. */
+export async function finishInteractiveAuth(transport: HttpTransport, code: string): Promise<void> {
+	await withTimeout(transport.finishAuth(code), CONNECT_TIMEOUT_MS, "exchanging the authorization code");
 }
 
 const INSTRUCTIONS_CAP = 3000;
@@ -325,21 +441,15 @@ export async function callTool(
 	connection: Connection,
 	toolName: string,
 	args: Record<string, unknown>,
-): Promise<{ content?: unknown[]; isError?: boolean }> {
-	const result = await withTimeout(
-		connection.client.callTool({ name: toolName, arguments: args }),
-		CALL_TIMEOUT_MS,
-		`calling "${toolName}"`,
-	);
-	return result as { content?: unknown[]; isError?: boolean };
+	signal?: AbortSignal,
+): Promise<{ content?: unknown[]; isError?: boolean; structuredContent?: Record<string, unknown> }> {
+	return await connection.client.callTool({ name: toolName, arguments: args }, undefined, { signal, timeout: CALL_TIMEOUT_MS }) as {
+		content?: unknown[]; isError?: boolean; structuredContent?: Record<string, unknown>;
+	};
 }
 
-export async function readResource(connection: Connection, uri: string): Promise<{ contents?: unknown[] }> {
-	return (await withTimeout(
-		connection.client.readResource({ uri }),
-		CALL_TIMEOUT_MS,
-		`reading resource "${uri}"`,
-	)) as { contents?: unknown[] };
+export async function readResource(connection: Connection, uri: string, signal?: AbortSignal): Promise<{ contents?: unknown[] }> {
+	return await connection.client.readResource({ uri }, { signal, timeout: CALL_TIMEOUT_MS });
 }
 
 /**
@@ -348,13 +458,13 @@ export async function readResource(connection: Connection, uri: string): Promise
  * The SDK only calls `safeParse` on the result schema, and the response shape is
  * server-defined, so a passthrough schema beats pinning one the spec hasn't settled.
  */
-export async function readResourceDir(connection: Connection, uri: string): Promise<Record<string, unknown>> {
+export async function readResourceDir(connection: Connection, uri: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
 	const passthrough = { safeParse: (data: unknown) => ({ success: true as const, data }) };
-	return (await withTimeout(
-		connection.client.request({ method: "resources/directory/read", params: { uri } }, passthrough as never),
-		CALL_TIMEOUT_MS,
-		`listing directory "${uri}"`,
-	)) as Record<string, unknown>;
+	return await connection.client.request(
+		{ method: "resources/directory/read", params: { uri } },
+		passthrough as never,
+		{ signal, timeout: CALL_TIMEOUT_MS },
+	) as Record<string, unknown>;
 }
 
 export async function close(connection: Connection): Promise<void> {

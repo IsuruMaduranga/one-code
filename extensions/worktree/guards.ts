@@ -442,8 +442,9 @@ function guardScript(
 			const pathFlag = value === "-C" || value === "--git-dir" || value === "--work-tree";
 			const inlined = value.startsWith("--git-dir=") || value.startsWith("--work-tree=");
 			if (pathFlag || inlined) {
-				const raw = inlined ? value.slice(value.indexOf("=") + 1) : args[i + 1]?.value;
-				if (!raw || hasExpansion(raw)) {
+				const pathToken = inlined ? args[i] : args[i + 1];
+				const raw = inlined ? value.slice(value.indexOf("=") + 1) : pathToken?.value;
+				if (!raw || hasExpansion(raw) || pathToken?.dynamic || pathToken?.glob || isUnknownTilde(raw)) {
 					return isolated(
 						worktreePath,
 						`\`git ${value}\` computes its repository target at runtime, so it cannot be verified`,

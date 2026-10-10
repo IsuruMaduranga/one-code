@@ -20,14 +20,29 @@ describe("normalizeUrl", () => {
 		expect(() => normalizeUrl("file:///etc/passwd")).toThrow(/Unsupported URL scheme/);
 		expect(() => normalizeUrl("ftp://example.com")).toThrow(/Unsupported URL scheme/);
 		expect(() => normalizeUrl("not a url")).toThrow(/Not a valid URL/);
+		expect(() => normalizeUrl("data:text/plain,hello")).toThrow(/Unsupported URL scheme/);
+	});
+
+	it.each(["https://localhost/", "https://intranet/", "http://localhost:8080/"])("rejects dotless local hosts: %s", (url) => {
+		expect(() => normalizeUrl(url)).toThrow(/local|hostname|curl/i);
+	});
+
+	it.each(["https://user:password@example.com/", "https://user@example.com/"])("rejects embedded credentials: %s", (url) => {
+		expect(() => normalizeUrl(url)).toThrow(/credentials|username|password/i);
 	});
 });
 
 describe("isSameHost", () => {
-	it("compares hosts, ignoring path and scheme", () => {
+	it("compares hosts, ignoring paths", () => {
 		expect(isSameHost("https://a.com/x", "https://a.com/y")).toBe(true);
 		expect(isSameHost("https://a.com", "https://b.com")).toBe(false);
 		expect(isSameHost("https://a.com", "https://sub.a.com")).toBe(false);
+	});
+
+	it("does not silently follow a scheme change or embedded credentials", () => {
+		expect(isSameHost("https://a.com", "http://a.com")).toBe(false);
+		expect(isSameHost("https://a.com:444", "http://a.com:444")).toBe(false);
+		expect(isSameHost("https://user:password@a.com", "https://a.com")).toBe(false);
 	});
 
 	it("returns false for unparseable input", () => {
@@ -53,6 +68,17 @@ describe("htmlToMarkdown", () => {
 		expect(result.markdown).toMatch(/-\s+step one/);
 		expect(result.markdown).toMatch(/-\s+step two/);
 		expect(result.fallback).toBe(false);
+	});
+
+	it("resolves relative links against the fetched page URL", async () => {
+		const result = await htmlToMarkdown('<html><body><article><h1>Guide</h1><p>Read the <a href="../install">install guide</a> and <a href="/api">API reference</a>.</p></article></body></html>', "https://example.com/docs/start");
+		expect(result.markdown).toContain("[install guide](https://example.com/install)");
+		expect(result.markdown).toContain("[API reference](https://example.com/api)");
+	});
+
+	it("keeps readable content when a server returns an HTML fragment without body tags", async () => {
+		const result = await htmlToMarkdown('<h1>Release notes</h1><p>The current release is version 3.2.</p>', "https://example.com/release");
+		expect(result.markdown).toContain("The current release is version 3.2.");
 	});
 
 	it("keeps the document title", async () => {

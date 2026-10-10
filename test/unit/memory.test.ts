@@ -1,17 +1,19 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-	INDEX_MAX_CHARS,
-	INDEX_MAX_LINES,
-	indexLimitStatus,
-	loadableIndexContent,
 	memoryDir,
 	memoryIndexReminder,
 	memoryPromptSection,
 	projectSlug,
+} from "../../extensions/lib/memory.ts";
+import {
+	INDEX_MAX_CHARS,
+	INDEX_MAX_LINES,
+	indexLimitStatus,
+	loadableIndexContent,
 	stampFrontmatter,
 	truncateIndex,
-} from "../../extensions/lib/memory.ts";
+} from "../../extensions/lib/memory-content.ts";
 
 describe("projectSlug", () => {
 	it("matches Claude Code's slugging: non [A-Za-z0-9-] chars become dashes", () => {
@@ -164,11 +166,11 @@ The fact body.
 `);
 	});
 
-	it("re-stamping replaces the previous values instead of duplicating", () => {
+	it("re-stamping preserves the originating session and updates modified without duplicating", () => {
 		const once = stampFrontmatter(written, "sess-1", "2026-08-05T10:00:00.000Z");
 		const twice = stampFrontmatter(once, "sess-2", "2026-08-06T11:00:00.000Z");
 		expect(twice.match(/originSessionId/g)).toHaveLength(1);
-		expect(twice).toContain("originSessionId: sess-2");
+		expect(twice).toContain("originSessionId: sess-1");
 		expect(twice).toContain("modified: 2026-08-06");
 	});
 

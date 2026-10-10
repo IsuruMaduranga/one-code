@@ -1,8 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import os from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	describeIsolation,
 	registerWorktreeIsolation,
@@ -147,6 +147,80 @@ describe("worktreeWriteGuardReason", () => {
 		} finally {
 			releaseWorktreeIsolation(cwd);
 		}
+	});
+});
+
+describe("worktree isolation through symlinks", () => {
+	let root: string;
+	let worktree: string;
+	let shared: string;
+	let alias: string;
+
+	beforeEach(() => {
+		root = realpathSync.native(mkdtempSync(join(os.tmpdir(), "wt-symlinks-")));
+		worktree = join(root, "tree");
+		shared = join(root, "shared");
+		alias = join(root, "alias");
+		mkdirSync(worktree);
+		mkdirSync(shared);
+	});
+
+	afterEach(() => {
+		releaseWorktreeIsolation(worktree);
+		releaseWorktreeIsolation(alias);
+		rmSync(root, { recursive: true, force: true });
+	});
+
+	it("refuses a file write through a worktree symlink into the shared checkout", () => {
+		symlinkSync(shared, join(worktree, "shared-link"), "junction");
+		const reason = worktreeWriteGuardReason({
+			toolName: "write",
+			target: "shared-link/new.txt",
+			cwd: worktree,
+			isolation: describeIsolation(worktree, shared),
+		});
+		expect(reason).toContain("Refusing the write");
+		expect(reason).toContain(`there instead: ${join(worktree, "new.txt")}`);
+	});
+
+	it("refuses a shell write through a worktree symlink into the shared checkout", () => {
+		symlinkSync(shared, join(worktree, "shared-link"), "junction");
+		const reason = worktreeBashWriteGuardReason({
+			command: "echo work > shared-link/new.txt",
+			cwd: worktree,
+			isolation: describeIsolation(worktree, shared),
+		});
+		expect(reason).toContain("Refusing the write");
+	});
+
+	it("finds an isolation registered through a symlink when the child cwd is canonical", () => {
+		symlinkSync(worktree, alias, "junction");
+		registerWorktreeIsolation(alias, shared);
+		expect(worktreeIsolationFor(worktree)?.worktreePath).toBe(alias);
+	});
+
+	it("finds a canonical isolation when the child cwd uses a symlink", () => {
+		symlinkSync(worktree, alias, "junction");
+		registerWorktreeIsolation(worktree, shared);
+		expect(worktreeIsolationFor(alias)?.worktreePath).toBe(worktree);
+	});
+
+	it("keeps the inline guard active when the child's cwd uses a symlink", async () => {
+		symlinkSync(worktree, alias, "junction");
+		registerWorktreeIsolation(worktree, shared);
+		const handler = captureToolCallHandler(worktreeGuardFactory(alias));
+		expect((await handler({ toolName: "write", input: { path: join(shared, "new.txt") } }))?.block).toBe(true);
+	});
+
+	it("allows a symlink that stays inside the isolated worktree", () => {
+		mkdirSync(join(worktree, "src"));
+		symlinkSync(join(worktree, "src"), join(worktree, "src-link"), "junction");
+		expect(worktreeWriteGuardReason({
+			toolName: "write",
+			target: "src-link/new.txt",
+			cwd: worktree,
+			isolation: describeIsolation(worktree, shared),
+		})).toBeUndefined();
 	});
 });
 

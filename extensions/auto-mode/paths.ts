@@ -71,7 +71,7 @@ export function resolveForContainment(target: string): string | undefined {
  * {@link resolveForContainment} in the filesystem's own spelling (not
  * case-folded), for showing where a path lands.
  */
-export function resolveThroughLinks(target: string): string | undefined {
+export function resolveThroughLinks(target: string, hops = 0): string | undefined {
 	const absolute = resolve(target);
 
 	const direct = tryRealpath(absolute);
@@ -82,11 +82,13 @@ export function resolveThroughLinks(target: string): string | undefined {
 	// literal path (N9).
 	try {
 		const stats = lstatSync(absolute);
-		if (stats.isSymbolicLink()) {
+		// A link cycle (`a -> a`) stops at the kernel's usual 40 hops, then
+		// resolves like any other leaf, below, instead of overflowing the stack.
+		if (stats.isSymbolicLink() && hops < 40) {
 			const linkTarget = readlinkSync(absolute);
 			const resolvedTarget = isAbsolute(linkTarget) ? linkTarget : resolve(dirname(absolute), linkTarget);
 			// One hop is enough: the target's own realpath covers the rest of a chain.
-			return resolveThroughLinks(resolvedTarget) ?? resolvedTarget;
+			return resolveThroughLinks(resolvedTarget, hops + 1) ?? resolvedTarget;
 		}
 	} catch {
 		// Does not exist yet — fall through to ancestor resolution below.

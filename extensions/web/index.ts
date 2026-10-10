@@ -32,8 +32,7 @@ import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { homedir } from "node:os";
 import { Type } from "typebox";
 import webSearchPackage from "pi-web-search/src/index.ts";
-import { getProviderKind } from "pi-web-search/src/api.ts";
-import { webSearch as nativeWebSearch } from "pi-web-search/src/web_search.ts";
+import { callApiStream, getConfig, getProviderKind } from "pi-web-search/src/api.ts";
 import { getWebSearchModel } from "pi-web-search/src/utils.ts";
 import { tryNativeWeb } from "../lib/anthropic-server-call.ts";
 import { CUT_OFF_NOTE, nativeSearchBody, searchOutcome, searchSources, sourceLine, type ThinkingFields } from "../lib/anthropic-server-tools.ts";
@@ -45,6 +44,8 @@ import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 import { registerFormTool } from "../lib/tool-variants.ts";
 import { webSearchDescription } from "./description.ts";
+import { formatNativeSearchResult } from "./native-results.ts";
+import { runNativeSearch } from "./native-call.ts";
 import {
 	DEFAULT_MAX_RESULTS,
 	formatSearchResults,
@@ -144,41 +145,41 @@ export default function webExtension(pi: ExtensionAPI) {
 					nativeNote = `(Anthropic's server-side web search did not answer (${native.reason}); the results below come from the next search route.)`;
 				}
 			}
-			const withNativeNote = <T extends { type: string }>(content: T[]) =>
-				nativeNote ? [...content, { type: "text" as const, text: nativeNote }] : content;
+			const withNativeNote = (text: string) => nativeNote ? `${text}\n\n${nativeNote}` : text;
 
-			// 1. Provider-native search (pi-web-search) when the current model — or a
-			// web-search.json model — supports it. Its result text is passed through;
-			// it reports failures as "Failed: …" text with details.error and no
-			// isError, which a weak model can read as a successful search with odd
-			// content, so isError is stamped here.
+			// 1. Reuse pi-web-search's transport, not its tool wrapper: that wrapper
+			// truncates before we can persist the full answer and its sources.
 			const nativeModel = await getWebSearchModel(ctx);
 			if (nativeModel) {
-				const result = await nativeWebSearch(
-					toolCallId,
-					{ query: withSiteOperators(params.query, filters) },
-					signal ?? new AbortController().signal,
-					onUpdate,
-					ctx,
-				);
-				// pi-web-search exposes no domain parameters and returns a synthesized
-				// answer (nothing to post-filter), so the filters ride as `site:`
-				// operators only — say so, rather than let the model assume enforcement.
-				const hasFilters = Boolean(params.allowed_domains?.length || params.blocked_domains?.length);
-				const content = withNativeNote(
-					hasFilters && !result.details?.error
-						? [
-								...result.content,
-								{ type: "text" as const, text: "(Domain filters were applied as `site:` operators in the query — best-effort with provider-native search; verify the sources' hosts.)" },
-							]
-						: result.content,
-				);
-				return {
-					...result,
-					content,
-					details: { ...result.details, query: params.query, native: true, backend: `${nativeModel.provider}/${nativeModel.id}` } as SearchDetails,
-					isError: Boolean(result.isError) || Boolean(result.details?.error),
-				};
+				const backend = `${nativeModel.provider}/${nativeModel.id}`;
+				try {
+					const config = getConfig(nativeModel);
+					const response = await runNativeSearch((nativeSignal) => callApiStream(ctx, nativeModel, {
+						contents: [{ role: "user", parts: [{ text: withSiteOperators(params.query, filters) }] }],
+						...(config.kind === "google" ? { tools: [{ [config.searchTool!]: {} }] } : {}),
+					}, (update) => { if (!nativeSignal.aborted) onUpdate?.(update); }, nativeSignal), signal);
+					const result = formatNativeSearchResult(response);
+					// This route returns a synthesized answer, not rows we can filter.
+					const hasFilters = Boolean(params.allowed_domains?.length || params.blocked_domains?.length);
+					const text = withNativeNote([
+						result.text,
+						`(Searched with ${backend}.)`,
+						...(hasFilters ? ["(Domain filters were applied as `site:` operators in the query — best-effort with provider-native search; verify the sources' hosts.)"] : []),
+					].join("\n\n"));
+					return {
+						content: [{ type: "text", text: persistIfLarge(text, { dir: sessionResultsDir(ctx), id: toolCallId }) }],
+						details: { ...result.details, query: params.query, native: true, backend } as SearchDetails,
+					};
+				} catch (error) {
+					if (signal?.aborted) {
+						return {
+							content: [{ type: "text", text: `Search for "${params.query}" was cancelled.` }],
+							details: { query: params.query } as SearchDetails,
+							isError: true,
+						};
+					}
+					nativeNote = withNativeNote(`(Provider-native search on ${backend} failed (${error instanceof Error ? error.message : String(error)}); the next search route was tried.)`);
+				}
 			}
 
 			// 2. Third-party chain.
@@ -195,9 +196,9 @@ export default function webExtension(pi: ExtensionAPI) {
 				}
 				// Bounded by result count, but a provider's error body (quoted in
 				// "Fell back after") or long snippets can still be large: persist, never slice.
-				const text = persistIfLarge(formatSearchResults(params.query, outcome), { dir: sessionResultsDir(ctx), id: toolCallId });
+				const text = persistIfLarge(withNativeNote(formatSearchResults(params.query, outcome)), { dir: sessionResultsDir(ctx), id: toolCallId });
 				return {
-					content: withNativeNote([{ type: "text" as const, text }]),
+					content: [{ type: "text", text }],
 					details: {
 						query: params.query,
 						backend: outcome.backend.name,
@@ -209,11 +210,11 @@ export default function webExtension(pi: ExtensionAPI) {
 			} catch (error) {
 				const message = (error as Error).message;
 				const text = persistIfLarge(
-					`web_search failed on ${ctx.model?.provider}/${ctx.model?.id} (no native web search on this provider).\n${message}`,
+					withNativeNote(`web_search failed on ${ctx.model?.provider}/${ctx.model?.id}.\n${message}`),
 					{ dir: sessionResultsDir(ctx), id: toolCallId },
 				);
 				return {
-					content: withNativeNote([{ type: "text" as const, text }]),
+					content: [{ type: "text", text }],
 					details: { query: params.query, error: message } as SearchDetails,
 					isError: true,
 				};

@@ -4,15 +4,19 @@
  * replay reconstruction — as opposed to tracker.ts's pure state machine,
  * already covered by file-tracker.test.ts.
  */
-import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fileTrackerExtension from "../../extensions/file-tracker/index.ts";
 import { CHILD_WROTE_CHANNEL } from "../../extensions/lib/child-writes.ts";
+import { discoverContextFiles } from "../../extensions/lib/claude-context.ts";
+import { persistExternalIncludesApproval } from "../../extensions/lib/claude-external-includes.ts";
+import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { stubHome } from "./helpers/home.ts";
 
 describe("file-tracker wiring", () => {
 	let dir: string;
@@ -335,6 +339,34 @@ describe("file-tracker wiring", () => {
 		expect((await edit(big))?.block).toBe(true);
 	});
 
+	it("clears discarded reads when pi compacts with One Code's summarizer disabled", async () => {
+		vi.stubEnv("CC_COMPACTION", "0");
+		try {
+			const file = path("discarded.ts");
+			const kept = path("retained.ts");
+			for (const target of [file, kept]) {
+				writeFileSync(target, "read before pi compacted");
+				await fake.fireOne("tool_result", { toolName: "read", input: { path: target }, isError: false }, ctx());
+			}
+			const branch = [
+				{ type: "message", id: "a1", message: { role: "assistant", content: [{ type: "toolCall", id: "1", name: "read", arguments: { path: kept } }] } },
+				{ type: "message", id: "r1", message: { role: "toolResult", toolCallId: "1", isError: false } },
+				{ type: "compaction", id: "c", firstKeptEntryId: "a1" },
+			];
+			const emitted: unknown[] = [];
+			fake.events.on(REMINDER_CHANNEL, (data) => emitted.push(data));
+			await fake.fire("session_compact", { compactionEntry: branch[2], fromExtension: false, reason: "manual", willRetry: false },
+				createFakeCtx({ cwd: dir, sessionManager: { getBranch: () => branch } }));
+			const blocked = await fake.fireOne<{ block?: boolean; reason?: string }>("tool_call", { toolName: "write", input: { path: file } }, ctx());
+			expect(blocked?.block).toBe(true);
+			expect(blocked?.reason).toContain("has not been read");
+			expect(await fake.fireOne("tool_call", { toolName: "write", input: { path: kept } }, ctx())).toBeUndefined();
+			expect(emitted).toEqual([]);
+		} finally {
+			vi.unstubAllEnvs();
+		}
+	});
+
 	it("on resume counts only the reads still in context after the latest compaction", async () => {
 		const before = path("before.ts");
 		const kept = path("kept.ts");
@@ -385,6 +417,32 @@ describe("file-tracker wiring", () => {
 			expect(emitted.some((t) => t.includes(JSON.stringify({ path: outside })) || t.includes(outside) || t.includes("outside text"))).toBe(false);
 		} finally {
 			rmSync(outsideDir, { recursive: true, force: true });
+		}
+	});
+
+	it.each([false, true])("retains an external instruction import's read state only when its contents are in context (approved: %s)", async (approved) => {
+		const home = path("home");
+		const project = path("project");
+		mkdirSync(project);
+		stubHome(home);
+		vi.stubEnv("ONECODE_STATE_DIR", join(home, ".onecode"));
+		resetConfigModeForTest("claude-compatible");
+		try {
+			const imported = path("external.md");
+			writeFileSync(imported, "EXTERNAL IMPORT CONTENT\n");
+			writeFileSync(join(project, "CLAUDE.md"), "@../external.md\n");
+			persistExternalIncludesApproval(project, home, approved);
+			const shown = discoverContextFiles({ cwd: project, home, homeClaudeDir: join(home, ".claude"), rule: "claude-md", includeExternal: approved });
+			expect(shown.some((file) => file.content.includes("EXTERNAL IMPORT CONTENT"))).toBe(approved);
+			const branch = [{ type: "compaction", id: "c", firstKeptEntryId: "c" }];
+			const context = createFakeCtx({ cwd: project, sessionManager: { getBranch: () => branch } });
+			await fake.fireOne("tool_result", { toolName: "read", input: { path: imported }, isError: false }, context);
+			await fake.fire("session_compact", { compactionEntry: branch[0], fromExtension: true, reason: "manual", willRetry: false }, context);
+			const result = await fake.fireOne<{ block?: boolean }>("tool_call", { toolName: "write", input: { path: imported } }, context);
+			expect(result?.block === true).toBe(!approved);
+		} finally {
+			vi.unstubAllEnvs();
+			resetConfigModeForTest();
 		}
 	});
 

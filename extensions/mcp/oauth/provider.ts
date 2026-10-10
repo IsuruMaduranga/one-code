@@ -22,6 +22,8 @@ import { randomBytes } from "node:crypto";
 import type { OAuthClientProvider, OAuthDiscoveryState } from "@modelcontextprotocol/sdk/client/auth.js";
 import { type OAuthServer, readAuth, type StoredAuth, writeAuth } from "./store.ts";
 
+export class McpAuthenticationRequiredError extends Error {}
+
 export interface McpOAuthProviderOptions {
 	/** The server the credentials are bound to (name, URL and headers). */
 	server: OAuthServer;
@@ -66,7 +68,10 @@ export class McpOAuthProvider implements OAuthClientProvider {
 	}
 
 	get redirectUrl(): string | URL | undefined {
-		return this._redirectUrl;
+		// The SDK uses an absent redirect URI to select a non-interactive grant,
+		// which skips refresh tokens. Silent reconnects still use the registered
+		// authorization-code client; only opening a browser is disallowed.
+		return this._redirectUrl ?? this.load().clientMetadata?.redirect_uris[0];
 	}
 
 	get clientMetadata(): OAuthClientMetadata {
@@ -114,7 +119,7 @@ export class McpOAuthProvider implements OAuthClientProvider {
 
 	redirectToAuthorization(authorizationUrl: URL): void {
 		if (!this.openAuthorization) {
-			throw new Error(`MCP server "${this.server.name}" needs authentication; run /mcp and choose Authenticate.`);
+			throw new McpAuthenticationRequiredError(`MCP server "${this.server.name}" needs authentication; run /mcp and choose Authenticate.`);
 		}
 		this.openAuthorization(authorizationUrl);
 	}

@@ -25,7 +25,8 @@ import { claudeSourcesOn } from "../lib/config-mode.ts";
 import { claudeJsonPath, claudeUserDir, oneCodeStateDir } from "../lib/paths.ts";
 import { claudeUserSettingsPath, managedSettingsPaths, settingsPaths } from "../lib/claude-settings.ts";
 import { discoverContextFilePaths, instructionRule } from "../lib/claude-context.ts";
-import { CLAUDE_MD_CHAR_LIMIT, claudeMdLimitWarning, indexLimitStatus, projectMemoryDir } from "../lib/memory.ts";
+import { CLAUDE_MD_CHAR_LIMIT, claudeMdLimitWarning, projectMemoryDir } from "../lib/memory.ts";
+import { indexLimitStatus } from "../lib/memory-content.ts";
 import { readDisabledMcpServers } from "../lib/mcp-overrides.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
@@ -426,7 +427,8 @@ export function collectCompat(input: CompatInput): CompatReport {
 	const hookDiagnostics: string[] = [];
 	const hooksLoaded = loadHookSettings(claudeDir, cwd);
 	hookDiagnostics.push(...hooksLoaded.diagnostics);
-	const pluginHooks = discovered ? loadPluginHooks(defaultDiscoverRoots(agentDir, cwd, home), hookDiagnostics) : [];
+	// Runtime dispatch skips plugin hooks when settings disable hooks; report what runs.
+	const pluginHooks = discovered && !hooksLoaded.disabled ? loadPluginHooks(defaultDiscoverRoots(agentDir, cwd, home), hookDiagnostics) : [];
 	const hookSources = [...hooksLoaded.sources, ...pluginHooks];
 	const hookCommands = hookSources.reduce(
 		(n, source) => n + Object.values(source.config).reduce((m, groups) => m + (groups ?? []).reduce((k, g) => k + g.hooks.length, 0), 0),

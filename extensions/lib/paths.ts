@@ -171,7 +171,9 @@ export function foldsCase(): boolean {
  * the safety floor — so "under this directory" means one thing everywhere.
  */
 export function comparablePath(path: string): string {
-	const normalized = forwardSlashes(resolve(path)).replace(/\/+$/, "");
+	const absolute = resolve(path);
+	// Backslashes separate Windows paths, but name literal sibling files on POSIX.
+	const normalized = (process.platform === "win32" ? forwardSlashes(absolute) : absolute).replace(/\/+$/, "");
 	return foldsCase() ? normalized.toLowerCase() : normalized;
 }
 

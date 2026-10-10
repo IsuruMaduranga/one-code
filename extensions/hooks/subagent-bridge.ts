@@ -33,6 +33,8 @@ export interface ChildHookCall {
 	input: Record<string, unknown>;
 	/** The child's runtime cwd (a worktree, if isolated). */
 	cwd: string;
+	/** The child's turn signal; cancelling it must stop its hooks, not the parent's. */
+	signal?: AbortSignal;
 	/** The child session's id — becomes the payload's `session_id` and `agent_id`. */
 	sessionId?: string;
 	/** The child's session file, if persisted (payload `transcript_path`). */

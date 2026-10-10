@@ -187,6 +187,33 @@ describe("restored context-stack emitters", () => {
 		expect(reminders.find((reminder) => reminder.key === "permission-mode-change")?.text).toContain('now "default"');
 	});
 
+	it.each([
+		{ mode: "plan", retry: false }, { mode: "plan", retry: true },
+		{ mode: "auto", retry: false }, { mode: "auto", retry: true },
+	])("keeps $mode active exactly once after compaction and preserves the next request's prefix (retry: $retry)", async ({ mode, retry }) => {
+		const fake = createFakePi();
+		systemReminderExtension(fake.pi as never);
+		permissionsExtension(fake.pi as never);
+		planModeExtension(fake.pi as never);
+		fake.flags.set("permission-mode", mode);
+		const ctx = contextFor(root);
+		await fake.fire("session_start", {}, ctx);
+		const timestamp = Date.now() + 1;
+		await fake.fire("context", { messages: [user(timestamp)] }, ctx);
+		await fake.fire("session_compact", { reason: retry ? "overflow" : "manual", willRetry: retry }, ctx);
+		const after = [
+			{ role: "compactionSummary", summary: "work so far", tokensBefore: 100, timestamp: timestamp + 2 },
+			{ role: "assistant", content: [{ type: "text", text: "kept reply" }], timestamp: timestamp + 1 },
+			...(retry ? [] : [user(timestamp + 3)]),
+		];
+		const first = await fake.fireOne<{ messages: unknown[] }>("context", { messages: after }, ctx);
+		const marker = mode === "plan" ? "Plan mode is active." : "Auto mode is active:";
+		expect(JSON.stringify(first?.messages).split(marker)).toHaveLength(2);
+		const next = await fake.fireOne<{ messages: unknown[] }>("context", { messages: [...after, user(timestamp + 4)] }, ctx);
+		expect(next?.messages.slice(0, after.length)).toEqual(first?.messages);
+		expect(JSON.stringify(next?.messages.at(-1)).split(marker)).toHaveLength(2);
+	});
+
 	it("preserves a plan entry baseline and sticky anchor when its recorded path now exists", async () => {
 		const planPath = join(root, "plans", "saved-plan.md");
 		mkdirSync(join(root, "plans"), { recursive: true });

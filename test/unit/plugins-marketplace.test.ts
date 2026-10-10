@@ -1,10 +1,11 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchInstallCounts, formatInstallCount, readCachedCounts } from "../../extensions/plugins/counts.ts";
 import { installPlugin, uninstallPlugin } from "../../extensions/plugins/install/install.ts";
 import { gitClone, gitUpdate } from "../../extensions/plugins/marketplace/git.ts";
+import * as pluginGit from "../../extensions/plugins/marketplace/git.ts";
 import { addInstalledPlugin, installedEntry, removeInstalledPlugin, setInstalledEnabled } from "../../extensions/plugins/install/registry.ts";
 import { sanitizePathSegment } from "../../extensions/lib/plugin-root.ts";
 import { versionedCachePath, withinBase } from "../../extensions/plugins/install/paths.ts";
@@ -27,6 +28,7 @@ beforeEach(() => {
 afterEach(() => {
 	rmSync(root, { recursive: true, force: true });
 	vi.unstubAllGlobals();
+	vi.restoreAllMocks();
 });
 
 describe("parseMarketplaceInput", () => {
@@ -87,6 +89,13 @@ describe("parseMarketplaceManifest", () => {
 		});
 		expect(manifest?.plugins.map((p) => p.name)).toEqual(["good", "remote"]);
 		expect(errors).toHaveLength(2);
+	});
+
+	it("rejects plugin names that cannot be safe namespaces", () => {
+		const names = ["a/b", "a\\b", "a:b", "a@b", "a\tb", "a\u0000b", "a\u200bb", ".", "a..b"];
+		const { manifest, errors } = parseMarketplaceManifest({ name: "mp", plugins: names.map((name) => ({ name, source: "./plugin" })) });
+		expect(manifest?.plugins).toEqual([]);
+		expect(errors).toHaveLength(names.length);
 	});
 
 	it("rejects a manifest without name or plugins", () => {
@@ -250,6 +259,61 @@ describe("installPlugin (local sources)", () => {
 		await expect(
 			installPlugin(root, "mp", { name: "demo", source: { source: "npm", package: "x" } as never, raw: {} }, contentRoot),
 		).rejects.toThrow(/not supported/);
+	});
+
+	it("does not overwrite a different plugin whose cache name sanitizes to the same path", async () => {
+		const contentRoot = makeMarketplace();
+		const installed = await installPlugin(root, "mp", { name: "a-b", source: "./plugins/demo", raw: {} }, contentRoot);
+		writeFileSync(join(contentRoot, "plugins", "demo", "README.md"), "replacement contents");
+		await expect(installPlugin(root, "mp", { name: "a.b", source: "./plugins/demo", raw: {} }, contentRoot))
+			.rejects.toThrow(/cache path.*already.*a-b@mp/);
+		expect(readFileSync(join(installed.installPath, "README.md"), "utf-8")).toBe("hi");
+		expect(installedEntry(root, "a.b@mp")).toBeUndefined();
+		const updated = await installPlugin(root, "mp", { name: "a-b", source: "./plugins/demo", raw: {} }, contentRoot);
+		expect(updated.installPath).toBe(installed.installPath);
+		expect(readFileSync(join(updated.installPath, "README.md"), "utf-8")).toBe("replacement contents");
+	});
+
+	it("rejects an invalid plugin name even when installation bypasses manifest parsing", async () => {
+		const contentRoot = makeMarketplace();
+		await expect(installPlugin(root, "mp", { name: "a:b", source: "./plugins/demo", raw: {} }, contentRoot))
+			.rejects.toThrow(/invalid plugin name/);
+	});
+
+	it("rejects a source directory symlink that escapes the marketplace", async () => {
+		const contentRoot = makeMarketplace();
+		const outside = join(root, "private-files");
+		mkdirSync(outside);
+		writeFileSync(join(outside, "secret.txt"), "must not enter the plugin cache");
+		symlinkSync(outside, join(contentRoot, "plugins", "escape"), "junction");
+		await expect(installPlugin(root, "mp", { name: "escape", source: "./plugins/escape", raw: {} }, contentRoot))
+			.rejects.toThrow(/escapes the marketplace/);
+		expect(installedEntry(root, "escape@mp")).toBeUndefined();
+		expect(existsSync(join(root, "cache", "mp", "escape"))).toBe(false);
+	});
+
+	it("rejects a git-subdir source symlink that escapes the cloned repository", async () => {
+		const outside = join(root, "private-files");
+		mkdirSync(outside);
+		writeFileSync(join(outside, "secret.txt"), "must not enter the plugin cache");
+		vi.spyOn(pluginGit, "gitClone").mockImplementation(async (_url, dest) => {
+			mkdirSync(dest, { recursive: true });
+			symlinkSync(outside, join(dest, "escape"), "junction");
+		});
+		vi.spyOn(pluginGit, "gitHeadSha").mockResolvedValue("a".repeat(40));
+		await expect(installPlugin(root, "mp", {
+			name: "escape", source: { source: "git-subdir", url: "https://example.invalid/repository.git", path: "escape" }, raw: {},
+		}, undefined)).rejects.toThrow(/escapes the repository/);
+		expect(installedEntry(root, "escape@mp")).toBeUndefined();
+	});
+
+	it("accepts a marketplace root symlink and a contained source symlink with spaces", async () => {
+		const contentRoot = makeMarketplace();
+		const alias = join(root, "marketplace alias");
+		symlinkSync(contentRoot, alias, "junction");
+		symlinkSync(join(contentRoot, "plugins", "demo"), join(contentRoot, "plugin alias"), "junction");
+		const result = await installPlugin(root, "mp", { name: "demo", source: "./plugin alias", raw: {} }, alias);
+		expect(readFileSync(join(result.installPath, "README.md"), "utf-8")).toBe("hi");
 	});
 
 	it("uninstall removes the entry and cache dir, but never paths outside the cache", async () => {

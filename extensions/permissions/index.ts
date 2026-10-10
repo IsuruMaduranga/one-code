@@ -90,8 +90,9 @@ import {
 import { type SessionGrant, sessionGrant } from "./session-grant.ts";
 import { formatModel, modeBadge, nextMode, PERMISSION_STATUS_CHANNEL, type PermissionStatus, CYCLE_KEY } from "./modes.ts";
 import { intrinsicTier, usesClaudeCodeFastPaths } from "../lib/model-tier.ts";
-import { type ChildToolCall, type ChildGateDecision, SUBAGENT_GATE_CHANNEL } from "./subagent-gate.ts";
+import { type ChildToolCall, type ChildGateDecision, sessionPermissionBridge, SUBAGENT_GATE_CHANNEL } from "./subagent-gate.ts";
 import { trackOriginalCommands } from "../lib/original-command.ts";
+import { followWorkCwd } from "../lib/worktree-channel.ts";
 import { MODE_CHANNEL, PLAN_FILE_CHANNEL } from "../lib/plan-mode-channels.ts";
 import { isWritingTool } from "./protected-paths.ts";
 import { denyRuleLines } from "./rule-prose.ts";
@@ -301,6 +302,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	// Worktree-wrapped bash calls publish the model's original command here,
 	// keyed by pi's toolCallId (never read from `event.input` — model-writable).
 	const originalCommands = trackOriginalCommands(pi);
+	// Worktree restores publish before this extension's session_start. Keep
+	// that state until worktree publishes its next enter, exit or branch reset.
+	const workCwd = followWorkCwd(pi.events);
 	/** Whether bypassPermissions is a stop on the cycle — only when the session started with it (Claude Code semantics). */
 	let bypassInCycle = false;
 	/** Whether auto mode is a stop on the cycle — only when a classifier model is reachable. */
@@ -938,6 +942,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_start", (event, ctx) => {
+		childPermissionSession?.abort();
+		childPermissionSession = new AbortController();
 		badgeCtx = ctx;
 		lastReviewCtx = ctx;
 		sessionEpoch++;
@@ -993,10 +999,16 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// The system prompt lists the workspace as the session starts (lib/workspace-channel.ts).
 		pi.events.emit(WORKSPACE_CHANNEL, { dirs: workspacePaths } satisfies WorkspaceAnnouncement);
 		resetClassifierChoice(ctx.model, "batched");
-		// Publish the subagent permission bridge (see subagent-gate.ts). The closure
-		// reads live parent state on each call, so emitting once at session start is
-		// enough; subagents captures it and threads it into child sessions.
-		pi.events.emit(SUBAGENT_GATE_CHANNEL, { decide: evaluateChildToolCall });
+		// The bridge reads live mode/rules, but belongs to this parent session only.
+		pi.events.emit(SUBAGENT_GATE_CHANNEL, { decide: sessionPermissionBridge(evaluateChildToolCall, childPermissionSession.signal) });
+	});
+
+	// The published bridge stays: aborted, it denies every call a retained child
+	// makes, while a parent without this extension keeps the local gate.
+	pi.on("session_shutdown", () => {
+		childPermissionSession?.abort();
+		lastReviewCtx = undefined;
+		sessionEpoch++;
 	});
 
 	pi.on("model_select", (event, ctx) => {
@@ -1078,6 +1090,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	let lastReviewCtx: ExtensionContext | undefined;
 	/** Bumped per session_start: an async review that finishes after a /clear must not post into the new session. */
 	let sessionEpoch = 0;
+	let childPermissionSession: AbortController | undefined;
 
 	// Serialize interactive prompts: a background/resident subagent can hit an "ask"
 	// while the main turn (or another child) is already awaiting one, and driving
@@ -1153,18 +1166,19 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	 * and asks on the next. Queued behind other prompts, and re-checked once its
 	 * turn comes, so parallel outside reads ask once.
 	 */
-	const firstOutsideRead = (ctx: ExtensionContext, toolName: string, path: string): Promise<"allow" | "block" | "ask_again"> => {
+	const firstOutsideRead = (ctx: ExtensionContext, toolName: string, path: string, signal = ctx.signal): Promise<"allow" | "block" | "ask_again"> => {
 		const home = os.homedir();
 		const settled = () => (outsideReadSeen ??= outsideReadPromptSeen(oneCodeSettingsPath(home), claudeSourcesOn() ? claudeJsonPath(home) : undefined));
 		if (!ctx.hasUI) return Promise.resolve("allow");
 		// Settled while this call waited (a parallel read's Block included).
 		if (settled()) return Promise.resolve(blockOutsideReads ? "block" : "allow");
 		return serializePrompt(async () => {
+			if (signal?.aborted) return "ask_again";
 			if (settled()) return blockOutsideReads ? "block" : "allow";
 			const settingsFile = tildify(oneCodeSettingsPath(home), home);
 			const title = `${OUTSIDE_READ_TITLE}\n\n  ${toolName} ${path}\n\n${OUTSIDE_READ_QUESTION}\n\n${OUTSIDE_READ_EXPLAINER(settingsFile)}`;
-			const choice = await ctx.ui.select(title, Object.values(OUTSIDE_READ_ANSWERS), { signal: ctx.signal });
-			if (ctx.signal?.aborted || (choice !== OUTSIDE_READ_ANSWERS.allow && choice !== OUTSIDE_READ_ANSWERS.block)) return "ask_again";
+			const choice = await ctx.ui.select(title, Object.values(OUTSIDE_READ_ANSWERS), { signal });
+			if (signal?.aborted || (choice !== OUTSIDE_READ_ANSWERS.allow && choice !== OUTSIDE_READ_ANSWERS.block)) return "ask_again";
 			outsideReadSeen = true;
 			markOutsideReadPromptSeen(oneCodeSettingsPath(home));
 			if (choice === OUTSIDE_READ_ANSWERS.allow) return "allow";
@@ -1175,8 +1189,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	};
 
 	/** The block reason for a first-read prompt answered with Block or Ask again; undefined to run the read. */
-	const outsideReadRefusal = async (ctx: ExtensionContext, toolName: string, path: string): Promise<string | undefined> => {
-		const answer = await firstOutsideRead(ctx, toolName, path);
+	const outsideReadRefusal = async (ctx: ExtensionContext, toolName: string, path: string, signal = ctx.signal): Promise<string | undefined> => {
+		const answer = await firstOutsideRead(ctx, toolName, path, signal);
 		return answer === "allow" ? undefined : answer === "block" ? DENIED_CHOSE_BLOCK_OUTSIDE_READS : userDenialText();
 	};
 
@@ -1199,13 +1213,6 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const conflict = isPathSubjectTool(normalizedTool) ? conflictingPathArguments(event.input as Record<string, unknown>) : undefined;
 		if (conflict) return { block: true, reason: conflict };
 		const subject = extractSubject(normalizedTool, event.input as Record<string, unknown>);
-		// Resolved through symlinks so the protected-path and working-directory
-		// checks see where a write lands or a read comes from, not how the path
-		// is spelled. Path tools only: a bash subject is a command line.
-		const resolvedSubject =
-			isPathSubjectTool(normalizedTool) && subject
-				? resolveForContainment(toAbsolute(ctx.cwd, subject, os.homedir()))
-				: undefined;
 		// In a worktree session, worktree's tool_call handler (which runs before this
 		// one) cd-wraps bash commands for execution and publishes the model's
 		// original command — and the worktree it runs in — over the bus under this
@@ -1220,7 +1227,15 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// `monitor` is cd-wrapped the same way (worktree/rewrite.ts).
 		const original = isShellTool(normalizedTool) || normalizedTool === "monitor" ? originalCommands.get(event.toolCallId) : undefined;
 		const matchSubject = original?.command ?? subject;
-		const callCwd = original?.cwd ?? ctx.cwd;
+		const callCwd = original?.cwd ?? workCwd(ctx.cwd);
+		// File tools are rewritten to absolute worktree paths too. Both the
+		// lexical and resolved working roots must follow entry; keeping the
+		// main checkout's resolved root would still fast-path writes there.
+		const resolvedCallCwd = callCwd === ctx.cwd ? resolvedCwd : resolveForContainment(callCwd);
+		const resolvedSubject =
+			isPathSubjectTool(normalizedTool) && subject
+				? resolveForContainment(toAbsolute(callCwd, subject, os.homedir()))
+				: undefined;
 		const powershellParse = await parsePowerShell(normalizedTool, matchSubject, mode);
 
 		currentMainToolCallId = event.toolCallId;
@@ -1237,7 +1252,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				allow: allowRules,
 				classifyAllShell: classifyAllShell(),
 				resolvedSubject,
-				resolvedCwd,
+				resolvedCwd: resolvedCallCwd,
 				planFilePath,
 				memoryDirPath,
 				scratchpadDirPath,
@@ -1302,7 +1317,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				? safetyControlWrite({
 						toolName: normalizeToolName(event.toolName),
 						input: event.input as Record<string, unknown>,
-						cwd: ctx.cwd,
+						cwd: callCwd,
 						home: os.homedir(),
 						oneCodeProjectSettings: oneCodeProjectSettingsFile,
 					})
@@ -1370,7 +1385,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 					// A worktree-wrapped command is analysed as the model wrote it, in the
 					// worktree it runs in (the classifier transcript already holds it).
 					{
-						cwd: original?.cwd, powershellParse, toolCallId: event.toolCallId,
+						cwd: callCwd, powershellParse, toolCallId: event.toolCallId,
 						appendEntry: { kind: "tool", tool: normalizedTool, input: original !== undefined ? { command: original.command } : event.input as Record<string, unknown> },
 					},
 				);
@@ -1561,7 +1576,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// A child's first outside read raises the prompt on the parent's terminal;
 		// with no parent context there is no one to ask, as in a one-shot run.
 		if (result.decision === "allow" && result.cause === "outside-read" && ctx) {
-			const refusal = await outsideReadRefusal(ctx, normalizedTool, subject);
+			const refusal = await outsideReadRefusal(ctx, normalizedTool, subject, call.signal);
 			if (refusal) return { block: true, reason: refusal };
 		}
 		if (result.decision === "allow" && !floorReason) return undefined;

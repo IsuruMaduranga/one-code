@@ -1,7 +1,7 @@
 /**
  * Hook config discovery and merge (pure fs reads, no pi imports).
  *
- * Sources, lowest authority first: user ~/.claude/settings.json, managed
+ * Sources, in collection order: user ~/.claude/settings.json, managed
  * settings (Claude Code's platform paths), project .claude/settings.json,
  * project .claude/settings.local.json (independent mode: One Code's user and
  * per-repo settings, `hookSettingsPaths`). Project and local sources are
@@ -54,12 +54,14 @@ export interface HooksSource {
 
 export interface LoadedHooks {
 	sources: HooksSource[];
+	/** Configured sources are filtered; collectors must also suppress plugin hooks when set. */
+	disabled?: "all" | "unmanaged";
 	/** Malformed entries are skipped and reported, never fatal. */
 	diagnostics: string[];
 }
 
 /**
- * The settings files hooks are read from, lowest authority first. Independent
+ * The settings files hooks are read from, in collection order. Independent
  * mode (lib/config-mode.ts) reads One Code's user file and its per-repo file
  * under `~/.onecode/projects/<slug>/` instead; neither ships in a repository,
  * so both are user scope and need no project-trust prompt.
@@ -134,13 +136,14 @@ export function parseHooksBlock(raw: unknown, origin: string, diagnostics: strin
 interface CacheEntry {
 	mtimeMs: number;
 	config: HooksFileConfig;
+	disableAllHooks?: boolean;
 	diagnostics: string[];
 }
 
 const cache = new Map<string, CacheEntry>();
 
-/** Read one settings file's hooks block, via the mtime cache. */
-function readHooksFile(path: string, diagnostics: string[]): HooksFileConfig | undefined {
+/** Read one settings file's hooks and disabling flag, via the mtime cache. */
+function readHooksFile(path: string, diagnostics: string[]): CacheEntry | undefined {
 	let mtimeMs: number;
 	try {
 		mtimeMs = statSync(path).mtimeMs;
@@ -151,27 +154,51 @@ function readHooksFile(path: string, diagnostics: string[]): HooksFileConfig | u
 	const cached = cache.get(path);
 	if (cached && cached.mtimeMs === mtimeMs) {
 		diagnostics.push(...cached.diagnostics);
-		return cached.config;
+		return cached;
 	}
 	const fileDiagnostics: string[] = [];
 	let config: HooksFileConfig = {};
+	let disableAllHooks: boolean | undefined;
 	try {
-		const parsed = JSON.parse(readFileSync(path, "utf-8")) as { hooks?: unknown };
+		const parsed = JSON.parse(readFileSync(path, "utf-8")) as { hooks?: unknown; disableAllHooks?: unknown };
 		config = parseHooksBlock(parsed.hooks, path, fileDiagnostics);
+		if (typeof parsed.disableAllHooks === "boolean") disableAllHooks = parsed.disableAllHooks;
 	} catch (error) {
 		fileDiagnostics.push(`${path}: unreadable settings file skipped (${error instanceof Error ? error.message : error})`);
 	}
-	cache.set(path, { mtimeMs, config, diagnostics: fileDiagnostics });
+	const entry: CacheEntry = { mtimeMs, config, disableAllHooks, diagnostics: fileDiagnostics };
+	cache.set(path, entry);
 	diagnostics.push(...fileDiagnostics);
-	return config;
+	return entry;
 }
 
 export function loadHookSettings(claudeDir: string, cwd: string): LoadedHooks {
 	const diagnostics: string[] = [];
 	const sources: HooksSource[] = [];
+	let userDisableAllHooks: boolean | undefined;
+	let managedDisableAllHooks: boolean | undefined;
+	let repoDisableAllHooks: boolean | undefined;
 	for (const { scope, path } of hookSettingsPaths(claudeDir, cwd)) {
-		const config = readHooksFile(path, diagnostics);
-		if (config && Object.keys(config).length > 0) sources.push({ scope, path, config });
+		const entry = readHooksFile(path, diagnostics);
+		if (!entry) continue;
+		if (entry.disableAllHooks !== undefined) {
+			if (scope === "managed") managedDisableAllHooks = entry.disableAllHooks;
+			else if (scope === "user") userDisableAllHooks = entry.disableAllHooks;
+			else repoDisableAllHooks = entry.disableAllHooks;
+		}
+		if (Object.keys(entry.config).length > 0) sources.push({ scope, path, config: entry.config });
+	}
+	// Collection order stays stable, but managed booleans have highest precedence.
+	// A non-managed disable must not turn off organization-managed hooks.
+	if (managedDisableAllHooks === true) return { sources: [], diagnostics, disabled: "all" };
+	if ((managedDisableAllHooks ?? userDisableAllHooks) === true) {
+		return { sources: sources.filter((source) => source.scope === "managed"), diagnostics, disabled: "unmanaged" };
+	}
+	// A repository's flag reaches only its own hooks: a cloned repo must not
+	// switch off the user's guard hooks, as project settings never set autoMode.
+	if (managedDisableAllHooks === undefined && repoDisableAllHooks === true) {
+		diagnostics.push("disableAllHooks in project settings turns off only the project's own hooks");
+		return { sources: sources.filter((source) => source.scope === "user" || source.scope === "managed"), diagnostics };
 	}
 	return { sources, diagnostics };
 }

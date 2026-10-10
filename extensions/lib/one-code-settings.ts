@@ -53,9 +53,12 @@ export function oneCodeProjectSettingsPath(cwd: string, home: string, env: NodeJ
 	return oneCodeProjectSettingsPathFor(oneCodeProjectRoot(cwd), home, env);
 }
 
-/** `oneCodeProjectSettingsPath` for a root already resolved by `oneCodeProjectRoot`. */
+/** Resolve a project settings path without moving existing permission or trust state. */
 export function oneCodeProjectSettingsPathFor(root: string, home: string, env: NodeJS.ProcessEnv = process.env): string {
-	return join(oneCodeStateDir(env, home), "projects", projectSlug(root), "settings.json");
+	const projects = join(oneCodeStateDir(env, home), "projects");
+	const legacy = join(projects, root.replace(/[^A-Za-z0-9-]/g, "-"), "settings.json");
+	if (existsSync(legacy)) return legacy;
+	return join(projects, projectSlug(root), "settings.json");
 }
 
 /**

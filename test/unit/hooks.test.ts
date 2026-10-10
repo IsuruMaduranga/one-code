@@ -109,10 +109,20 @@ describe("protocol: interpretHookResult", () => {
 		expect(outcome.systemMessage).toBe("heads up");
 	});
 
-	it("treats plain stdout as context only for UserPromptSubmit and SessionStart", () => {
+	it("treats plain stdout as context for UserPromptSubmit and SessionStart, not PreToolUse", () => {
 		expect(interpretHookResult("UserPromptSubmit", ok("remember the milk")).additionalContext).toBe("remember the milk");
 		expect(interpretHookResult("SessionStart", ok("branch notes")).additionalContext).toBe("branch notes");
 		expect(interpretHookResult("PreToolUse", ok("chatter"))).toEqual({});
+	});
+
+	it("preserves successful PreCompact stdout as summarization instructions", () => {
+		expect(interpretHookResult("PreCompact", ok("  Preserve the database migration rollback steps.\n"))).toEqual({
+			additionalContext: "Preserve the database migration rollback steps.",
+		});
+		expect(interpretHookResult("PreCompact", { ...ok("do not use this failed output"), exitCode: 1 })).toEqual({});
+		expect(interpretHookResult("PreCompact", { ...ok("do not use this blocked output"), exitCode: 2, stderr: "wait for the backup" })).toEqual({
+			block: { reason: "wait for the backup" },
+		});
 	});
 
 	it("parseEnvelope tolerates non-JSON and non-object stdout", () => {

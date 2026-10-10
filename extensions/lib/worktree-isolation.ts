@@ -89,6 +89,12 @@ export function worktreeIsolationFor(cwd: string): WorktreeIsolation | undefined
 	for (const isolation of active.values()) {
 		if (isWithin(isolation.worktreePath, cwd)) return isolation;
 	}
+	if (active.size === 0) return undefined;
+	const resolved = resolveForContainment(cwd);
+	if (resolved === undefined) return undefined;
+	for (const isolation of active.values()) {
+		if (isWithin(isolation.resolvedWorktreePath, resolved)) return isolation;
+	}
 	return undefined;
 }
 
@@ -102,10 +108,8 @@ export function worktreeIsolationFor(cwd: string): WorktreeIsolation | undefined
 export function sharedCheckoutWriteTarget(target: string, cwd: string, isolation: WorktreeIsolation, home = homedir()): string | undefined {
 	const { worktreePath, sharedRoot, resolvedWorktreePath, resolvedSharedRoot } = isolation;
 	const absolute = toAbsolute(cwd, target, home);
-	// Fast path: spelled under the worktree as registered — the common case for
-	// every write the model does where it was told to (no syscall).
-	if (isWithin(worktreePath, absolute)) return undefined;
-	// Resolved so a write is judged by where it lands, not how it is spelled.
+	// Resolve even paths spelled under the worktree: a symlink there can point
+	// back into the shared checkout.
 	const resolved = resolveForContainment(absolute) ?? absolute;
 	if (isWithin(resolvedWorktreePath, resolved) || !isWithin(resolvedSharedRoot, resolved)) return undefined;
 	// The tail keeps the model's spelling when the path was written under the
