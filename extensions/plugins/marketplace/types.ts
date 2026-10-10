@@ -8,6 +8,8 @@
  * entry never blanks the rest of the marketplace.
  */
 
+import { validPluginName } from "../../lib/plugins.ts";
+
 export type MarketplaceSource =
 	| { source: "github"; repo: string; ref?: string }
 	| { source: "git"; url: string; ref?: string }
@@ -81,7 +83,7 @@ export function parseMarketplaceManifest(raw: unknown): { manifest?: Marketplace
 
 	const plugins: MarketplaceEntry[] = [];
 	for (const [index, entry] of raw.plugins.entries()) {
-		if (!isRecord(entry) || typeof entry.name !== "string" || entry.name.length === 0 || entry.name.includes(" ")) {
+		if (!isRecord(entry) || typeof entry.name !== "string" || validPluginName(entry.name) !== entry.name) {
 			errors.push(`plugins[${index}]: missing or invalid "name" — entry skipped`);
 			continue;
 		}

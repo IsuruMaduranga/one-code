@@ -18,6 +18,7 @@ import { gitClone, gitHeadSha } from "../marketplace/git.ts";
 import type { MarketplaceEntry } from "../marketplace/types.ts";
 import { addInstalledPlugin, installedEntry, removeInstalledPlugin } from "./registry.ts";
 import { pluginCacheDir, versionedCachePath, withinBase } from "./paths.ts";
+import { loadInstalledPlugins, validPluginName } from "../../lib/plugins.ts";
 
 export interface InstallResult {
 	id: string;
@@ -82,6 +83,7 @@ export async function installPlugin(
 	contentRoot: string | undefined,
 ): Promise<InstallResult> {
 	const id = `${entry.name}@${marketplaceName}`;
+	if (validPluginName(entry.name) !== entry.name) throw new Error(`${id}: invalid plugin name — refusing to install`);
 	const raw = entry.raw;
 	if (raw.dependencies !== undefined) {
 		throw new Error(`${id}: plugin dependencies are not supported yet — install the dependencies manually first`);
@@ -99,6 +101,9 @@ export async function installPlugin(
 		}
 		sourceDir = resolve(contentRoot, source);
 		if (!existsSync(sourceDir)) throw new Error(`${id}: source path "${source}" does not exist in the marketplace`);
+		if (!withinBase(realpathSync(contentRoot), realpathSync(sourceDir))) {
+			throw new Error(`${id}: source path "${source}" escapes the marketplace directory through a symlink — refusing to install`);
+		}
 	} else if (source.source === "github" || source.source === "url" || source.source === "git-subdir") {
 		if (source.sha) {
 			throw new Error(`${id}: commit-sha pinning is not supported yet — use a ref (branch/tag) instead`);
@@ -121,6 +126,10 @@ export async function installPlugin(
 			rmSync(temp, { recursive: true, force: true });
 			throw new Error(`${id}: "${source.source === "git-subdir" ? source.path : url}" has no content at the expected path`);
 		}
+		if (source.source === "git-subdir" && !withinBase(realpathSync(cloneDir), realpathSync(sourceDir))) {
+			rmSync(temp, { recursive: true, force: true });
+			throw new Error(`${id}: git-subdir path "${source.path}" escapes the repository through a symlink — refusing to install`);
+		}
 	} else {
 		throw new Error(`${id}: source kind "${(source as { source: string }).source}" is not supported`);
 	}
@@ -136,6 +145,13 @@ export async function installPlugin(
 		const pluginCacheBase = pluginCacheDir(root, marketplaceName, entry.name);
 		if (!withinBase(pluginCacheBase, installPath)) {
 			throw new Error(`${id}: computed install path "${installPath}" escapes the plugin cache directory — refusing to install`);
+		}
+		// Sanitization is lossy (a.b and a-b share a cache segment). Never
+		// replace files that another registered plugin still owns.
+		if (existsSync(installPath)) {
+			const target = realpathSync(installPath);
+			const owner = loadInstalledPlugins(root).find((plugin) => plugin.id !== id && realpathSync(plugin.path) === target);
+			if (owner) throw new Error(`${id}: cache path "${installPath}" is already owned by ${owner.id} — refusing to overwrite it`);
 		}
 		copyIntoCache(sourceDir, installPath);
 		const now = new Date().toISOString();

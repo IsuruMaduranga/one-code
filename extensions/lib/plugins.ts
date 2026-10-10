@@ -145,7 +145,12 @@ export function loadInstalledPlugins(pluginsDir: string, cwd?: string): Installe
 	const plugins: InstalledPlugin[] = [];
 	for (const [key, entries] of Object.entries(registry.plugins)) {
 		if (!Array.isArray(entries) || entries.length === 0) continue;
-		const entry = entries.find((e) => e.installPath && existsSync(e.installPath) && entryAppliesToCwd(e, cwd));
+		const entry = entries.find((e) =>
+			e && typeof e === "object" && !Array.isArray(e) &&
+			typeof e.installPath === "string" && e.installPath.length > 0 &&
+			(e.projectPath === undefined || typeof e.projectPath === "string") &&
+			existsSync(e.installPath) && entryAppliesToCwd(e, cwd),
+		);
 		if (!entry?.installPath) continue;
 
 		const { name, marketplace } = splitPluginKey(key);
@@ -159,7 +164,7 @@ export function loadInstalledPlugins(pluginsDir: string, cwd?: string): Installe
 			name: validPluginName(manifest?.name) ?? name,
 			marketplace,
 			path: entry.installPath,
-			version: entry.version,
+			version: typeof entry.version === "string" ? entry.version : undefined,
 			description: typeof manifest?.description === "string" ? manifest.description : undefined,
 			rawEnabled: typeof entry.enabled === "boolean" ? entry.enabled : undefined,
 		});
@@ -167,12 +172,12 @@ export function loadInstalledPlugins(pluginsDir: string, cwd?: string): Installe
 	return plugins.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** A manifest `name` usable as a namespace: a non-empty string free of path separators, colons and whitespace. */
+/** A manifest `name` usable as a namespace and plugin identifier. */
 export function validPluginName(value: unknown): string | undefined {
 	if (typeof value !== "string") return undefined;
 	const trimmed = value.trim();
-	if (trimmed.length === 0) return undefined;
-	if (/[/\\:\s]/.test(trimmed)) return undefined;
+	if (trimmed.length === 0 || trimmed === "." || trimmed.includes("..")) return undefined;
+	if (/[/\\:@\s\p{Cc}\p{Cf}]/u.test(trimmed)) return undefined;
 	return trimmed;
 }
 

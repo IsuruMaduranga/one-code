@@ -126,6 +126,16 @@ describe("plugin discovery", () => {
 		}
 	});
 
+	it("skips malformed registry entries without losing valid plugins", () => {
+		writeRegistry({
+			"broken@market": [null, 4, { installPath: {} }, { installPath, scope: "project", projectPath: {} }],
+			"demo@market": [null, { installPath, version: { hostile: true } }],
+		});
+		const plugins = loadInstalledPlugins(join(claudeDir, "plugins"), root);
+		expect(plugins.map((plugin) => plugin.id)).toEqual(["demo@market"]);
+		expect(plugins[0].version).toBeUndefined();
+	});
+
 	it("detects only the resource directories that exist", () => {
 		const plugin = { name: "demo", path: installPath };
 		expect(pluginResources(plugin)).toEqual({
