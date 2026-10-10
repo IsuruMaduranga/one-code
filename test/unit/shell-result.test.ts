@@ -24,8 +24,12 @@ describe("claudeCodeShellText", () => {
 	});
 
 	it("names the tool for an empty success", () => {
-		expect(claudeCodeShellText("(no output)", 0, "bash")).toBe("(bash completed with no output)");
-		expect(claudeCodeShellText("(no output)", 0, "powershell")).toBe("(powershell completed with no output)");
+		expect(claudeCodeShellText("(no output)", 0, "bash")).toBe("(Bash completed with no output)");
+		expect(claudeCodeShellText("(no output)", 0, "powershell")).toBe("(PowerShell completed with no output)");
+	});
+
+	it("marks a success whose output becomes empty after Claude Code's trimming", () => {
+		expect(claudeCodeShellText(" \n\t\n", 0, "bash")).toBe("(Bash completed with no output)");
 	});
 
 	it("keeps pi's text when the shape is not pi's", () => {
@@ -66,5 +70,20 @@ describe("registerShellTool: the foreground result reads as Claude Code's", () =
 	it("trims a success", async () => {
 		const run = mount({ content: [{ type: "text", text: "hi\n" }], details: {}, structuredContent: { output: "hi\n", truncated: false, exit_code: 0, wall_time_seconds: 0 } });
 		expect((await run("echo hi")).content[0].text).toBe("hi");
+	});
+
+	it.each(["grep absent file", "rg absent file", "egrep absent file", "fgrep absent file", "find file", "diff a b", "test -e file", "[ -e file ]", "git grep absent", "git -C root diff --quiet", "echo one | rg absent", "echo one; rg absent", "echo one || rg absent"])("marks a blank semantic-success exit 1 for %s", async (command) => {
+		const run = mount({ content: [{ type: "text", text: "(no output)\n\nCommand exited with code 1" }], structuredContent: { output: "", exit_code: 1 }, isError: true });
+		const result = await run(command);
+		expect(result.content[0].text).toBe("(Bash completed with no output)");
+		expect(result.isError).toBe(false);
+		expect(result.structuredContent).toEqual({ output: "", exit_code: 1 });
+	});
+
+	it.each(["false", "false && rg absent", "env rg absent", "/usr/bin/grep absent file", "git status", `rg ${"x".repeat(10_000)}`])("keeps an ordinary blank failure for %s", async (command) => {
+		const run = mount({ content: [{ type: "text", text: "(no output)\n\nCommand exited with code 1" }], structuredContent: { output: "", exit_code: 1 }, isError: true });
+		const result = await run(command);
+		expect(result.content[0].text).toBe("Exit code 1");
+		expect(result.isError).toBe(true);
 	});
 });

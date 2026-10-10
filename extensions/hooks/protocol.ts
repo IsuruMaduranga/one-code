@@ -6,6 +6,7 @@
  */
 
 import { isAppendedReminderText } from "../lib/reminders.ts";
+import { emptyToolResultContent } from "../lib/empty-tool-result.ts";
 import type { SessionBackgroundTask, SessionCron } from "../lib/session-work.ts";
 
 /** The contiguous run of reminder/countdown blocks at the tail of a tool result (review M3). */
@@ -225,6 +226,7 @@ interface TextBlock {
 export function applyPostToolUseOutcome<T extends { type: string }>(
 	content: readonly T[],
 	outcome: Pick<HookOutcome, "block" | "updatedToolResult" | "additionalContext">,
+	toolName?: string,
 ): Array<T | TextBlock> | undefined {
 	if (!outcome.block && outcome.updatedToolResult === undefined && !outcome.additionalContext) return undefined;
 	let result: Array<T | TextBlock> = [...content];
@@ -235,7 +237,8 @@ export function applyPostToolUseOutcome<T extends { type: string }>(
 		// tool_result hook before ours). Replacing the content must not drop
 		// them, so keep the trailing run of reminder blocks (review M3).
 		const reminderTail = trailingReminderBlocks(content);
-		result = [{ type: "text", text: typeof replacement === "string" ? replacement : JSON.stringify(replacement) }, ...reminderTail];
+		const body: TextBlock[] = [{ type: "text", text: typeof replacement === "string" ? replacement : JSON.stringify(replacement) }];
+		result = [...(toolName ? emptyToolResultContent(body, toolName) ?? body : body), ...reminderTail];
 	}
 	if (outcome.block) result = [{ type: "text", text: `PostToolUse hook: ${outcome.block.reason}` }, ...result];
 	if (outcome.additionalContext) result = [...result, { type: "text", text: outcome.additionalContext }];

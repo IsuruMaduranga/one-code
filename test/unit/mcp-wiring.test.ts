@@ -271,6 +271,62 @@ describe("mcp wiring", () => {
 		}
 	});
 
+	it.each([[], [{ type: "text", text: " \n" }]].map((content) => ({ content })))("marks empty MCP content $content with Claude Code's tool name", async ({ content }) => {
+		writeUserServers({ demo: { command: "demo-server" } });
+		state.fixtures.set("demo", { tools: [{ name: "foo" }] });
+		state.callToolResult = () => ({ content, isError: true });
+		await boot();
+		const result = await fake.tools.get("mcp__demo__foo")!.execute("empty", {}, undefined, undefined, createFakeCtx({ cwd })) as { content: unknown[]; isError: boolean };
+		expect(result.content).toEqual([{ type: "text", text: "(mcp__demo__foo completed with no output)" }]);
+		expect(result.isError).toBe(true);
+	});
+
+	it("does not add a no-output marker to an image-only MCP result", async () => {
+		writeUserServers({ demo: { command: "demo-server" } });
+		state.fixtures.set("demo", { tools: [{ name: "foo" }] });
+		const data = "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+		state.callToolResult = () => ({ content: [{ type: "image", data, mimeType: "image/gif" }] });
+		await boot();
+		const result = await fake.tools.get("mcp__demo__foo")!.execute("image", {}, undefined, undefined, createFakeCtx({ cwd })) as { content: unknown[] };
+		expect(result.content).toEqual([{ type: "image", data, mimeType: "image/gif" }]);
+	});
+
+	it("uses Claude Code's no-resources message when a connected server lists no resources", async () => {
+		writeUserServers({ demo: { command: "demo-server" } });
+		state.fixtures.set("demo", { resources: [{ uri: "demo://removed" }] });
+		await boot();
+		const live = await vi.mocked(mcpClient.connect).mock.results.at(-1)!.value;
+		live.resources = [];
+		const result = await fake.tools.get("list_mcp_resources")!.execute("empty-list", {}, undefined, undefined, createFakeCtx({ cwd })) as { content: unknown[] };
+		expect(result.content).toEqual([{ type: "text", text: "No resources found. MCP servers may still provide tools even if they have no resources." }]);
+	});
+
+	it("uses Claude Code's JSON result for an empty resource read", async () => {
+		writeUserServers({ demo: { command: "demo-server" } });
+		state.fixtures.set("demo", { resources: [{ uri: "demo://empty" }] });
+		await boot();
+		const read = vi.spyOn(mcpClient, "readResource").mockResolvedValue({ contents: [] });
+		try {
+			const result = await fake.tools.get("read_mcp_resource")!.execute("empty-resource", { server: "demo", uri: "demo://empty" }, undefined, undefined, createFakeCtx({ cwd })) as { content: unknown[] };
+			expect(result.content).toEqual([{ type: "text", text: '{"contents":[]}' }]);
+		} finally {
+			read.mockRestore();
+		}
+	});
+
+	it("uses Claude Code's directory message and JSON for an empty resource directory", async () => {
+		writeUserServers({ demo: { command: "demo-server" } });
+		state.fixtures.set("demo", { resources: [{ uri: "demo://empty" }] });
+		await boot();
+		const read = vi.spyOn(mcpClient, "readResourceDir").mockResolvedValue({ entries: [] });
+		try {
+			const result = await fake.tools.get("read_mcp_resource_dir")!.execute("empty-directory", { server: "demo", uri: "demo://empty" }, undefined, undefined, createFakeCtx({ cwd })) as { content: unknown[] };
+			expect(result.content).toEqual([{ type: "text", text: 'Directory is empty.\n{"resources":[]}' }]);
+		} finally {
+			read.mockRestore();
+		}
+	});
+
 	it("preserves structured-only MCP results instead of reporting no output", async () => {
 		writeUserServers({ demo: { command: "demo-server" } });
 		state.fixtures.set("demo", { tools: [{ name: "foo" }] });

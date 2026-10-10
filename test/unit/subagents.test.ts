@@ -254,8 +254,8 @@ describe("finishOutcome", () => {
 		expect(ok.failed).toBeUndefined();
 		expect(ok.output).toBe("all done");
 		const empty = finishOutcome("", undefined, 2, emptyUsage(), []);
-		expect(empty.failed).toBe(true);
-		expect(empty.output).toContain("Subagent produced no output.");
+		expect(empty.failed).toBeUndefined();
+		expect(empty.output).toBe("(Subagent completed but returned no output.)");
 	});
 
 	it("an abort reason wins over partial text and over a provider error (M3)", async () => {

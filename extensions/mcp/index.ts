@@ -22,6 +22,7 @@ import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { MCP_TOOLS_CHANNEL } from "../lib/mcp-share.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
+import { emptyToolResultContent } from "../lib/empty-tool-result.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 import {
 	callTool,
@@ -195,14 +196,12 @@ export default function mcpExtension(pi: ExtensionAPI) {
 						const { text: contentText, images } = describeContent(result.content as McpContentBlock[] | undefined, connection.server.name);
 						const structuredText = result.structuredContent !== undefined ? JSON.stringify(result.structuredContent, null, 2) : "";
 						const text = [contentText, structuredText].filter(Boolean).join("\n");
+						const content = [
+							...(text ? [{ type: "text" as const, text: persistIfLarge(text, { dir: resultsDir(ctx), id: toolCallId }) }] : []),
+							...images.map((image) => ({ type: "image" as const, data: image.data, mimeType: image.mimeType })),
+						];
 						return {
-							content: [
-								{
-									type: "text",
-									text: text ? persistIfLarge(text, { dir: resultsDir(ctx), id: toolCallId }) : "(no output)",
-								},
-								...images.map((image) => ({ type: "image" as const, data: image.data, mimeType: image.mimeType })),
-							],
+							content: emptyToolResultContent(content, name) ?? content,
 							details: { server: connection.server.name, tool: tool.name } as Record<string, unknown>,
 							isError: result.isError === true,
 						};
@@ -524,7 +523,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 					content: [
 						{
 							type: "text",
-							text: lines.length ? persistIfLarge(lines.join("\n"), { dir: resultsDir(ctx), id: toolCallId }) : "No MCP resources available.",
+							text: lines.length ? persistIfLarge(lines.join("\n"), { dir: resultsDir(ctx), id: toolCallId }) : "No resources found. MCP servers may still provide tools even if they have no resources.",
 						},
 					],
 					details: { count: lines.length },
@@ -546,12 +545,12 @@ export default function mcpExtension(pi: ExtensionAPI) {
 				if (!connection) return unknownServerError(params.server);
 				try {
 					const result = await readResource(connection, params.uri, signal);
-					const text = describeResourceContents(result.contents as McpResourceContents[] | undefined);
+					const text = describeResourceContents(result.contents as McpResourceContents[] | undefined) || JSON.stringify({ contents: result.contents ?? [] });
 					return {
 						content: [
 							{
 								type: "text",
-								text: text ? persistIfLarge(text, { dir: resultsDir(ctx), id: toolCallId }) : "(empty resource)",
+								text: persistIfLarge(text, { dir: resultsDir(ctx), id: toolCallId }),
 							},
 						],
 						details: { server: params.server, uri: params.uri },
@@ -587,7 +586,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 						content: [
 							{
 								type: "text",
-								text: lines.length ? persistIfLarge(lines.join("\n"), { dir: resultsDir(ctx), id: toolCallId }) : "(empty directory)",
+								text: lines.length ? persistIfLarge(lines.join("\n"), { dir: resultsDir(ctx), id: toolCallId }) : 'Directory is empty.\n{"resources":[]}',
 							},
 						],
 						details: { server: params.server, uri: params.uri },

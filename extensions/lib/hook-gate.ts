@@ -78,7 +78,7 @@ export function hookGateFactory(getBridge: () => HookBridge | undefined, options
 					});
 					// Same assembly as the parent's tool_result handler; the parent already
 					// framed additionalContext as a <system-reminder>.
-					const content = applyPostToolUseOutcome(event.content, outcome);
+					const content = applyPostToolUseOutcome(event.content, outcome, event.toolName);
 					if (!content) return undefined;
 					return { content, isError: event.isError };
 				} catch {
