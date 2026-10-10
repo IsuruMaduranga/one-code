@@ -183,7 +183,7 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 		// hook) rides this request's tail — and stays pinned there afterwards.
 		if (reminderQueue.hasPendingOneShots) {
 			const anchor = tailAnchor(messages);
-			if (anchor) reminderQueue.pin(anchor);
+			if (anchor) reminderQueue.pin(anchor, "last-append", messages);
 		}
 		// A local-command breadcrumb rides the prompt that opens a request, before
 		// the user's text (Claude Code's placement), and stays there. Mid-turn —

@@ -85,14 +85,20 @@ describe("claude-context: a read attaches nested instructions once", () => {
 		const fake = createFakePi();
 		claudeContextExtension(fake.pi as never);
 		const texts: string[] = [];
+		const bound: unknown[] = [];
 		fake.events.on(REMINDER_CHANNEL, (data) => {
-			const payload = data as { text?: string; placement?: string };
-			if (!payload.placement && payload.text) texts.push(payload.text);
+			const payload = data as { text?: string; placement?: string; toolCallId?: string };
+			if (!payload.placement && payload.text) {
+				texts.push(payload.text);
+				bound.push(payload.toolCallId);
+			}
 		});
 		const ctx = createFakeCtx({ cwd: root });
-		const read = (path: string) => fake.fire("tool_result", { toolName: "read", input: { path }, isError: false, content: [] }, ctx);
+		const read = (path: string) => fake.fire("tool_result", { toolName: "read", toolCallId: path.includes("deep") ? "deep" : "summary", input: { path }, isError: false, content: [] }, ctx);
 		await read("src/reports/summary.py");
 		await read("src/reports/deep/x.py");
+		// Bound to the read that found them, so a parallel batch cannot hand them to another result.
+		expect(bound).toEqual(["summary", "summary"]);
 		expect(texts).toEqual([`Contents of ${join(root, "src", "reports", "CLAUDE.md")}:\n\nAmounts are integer cents.\n`, `Contents of ${join(root, "src", "reports", "CLAUDE.local.md")}:\n\nlocal note\n`]);
 
 		// A branch switch forgets what the branch left behind carried: the next read attaches again.

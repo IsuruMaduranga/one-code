@@ -96,6 +96,19 @@ describe("ReminderQueue", () => {
 		expect(q.size).toBe(1);
 	});
 
+	// Battery round 7: in a parallel batch, a read's nested CLAUDE.md queued after
+	// that read's own tool_result hook landed on another file's result.
+	it("pins a one-shot bound to a call onto that call's result, never another's", () => {
+		const q = new ReminderQueue();
+		q.enqueue("nested rules for src/reports", { toolCallId: "r-summary" });
+		expect(q.takeOneShots("r-inventory")).toEqual([]);
+		const second = { ...toolResult(), toolCallId: "r-inventory" };
+		const first = { ...toolResult(), toolCallId: "r-summary" };
+		const messages = [user("go"), assistant(), first, second];
+		q.pin({ kind: "toolResult", toolCallId: "r-inventory" }, "last-append", messages);
+		expect(q.drain(messages)).toEqual([expect.objectContaining({ text: "nested rules for src/reports", pin: { kind: "toolResult", toolCallId: "r-summary" } })]);
+	});
+
 	it("drain drops only the pins whose anchor left the context; there is no count cap", () => {
 		const q = new ReminderQueue();
 		for (let i = 0; i < 1000; i++) {

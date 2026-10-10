@@ -463,9 +463,14 @@ export class ReminderQueue {
 	 * on a request that ends in a user-like message (`openingUserAnchor`) —
 	 * mid-turn, breadcrumbs stay queued.
 	 */
-	pin(anchor: PinAnchor, placement: "last-append" | "user-prepend" = "last-append"): void {
+	pin(anchor: PinAnchor, placement: "last-append" | "user-prepend" = "last-append", messages?: readonly AgentMessage[]): void {
 		const { matching, rest } = partition(this.nextTurn, (r) => r.placement === placement);
-		for (const entry of matching) this.pinned.push({ ...entry, pin: anchor });
+		for (const entry of matching) {
+			// A one-shot bound to a call whose result hook already ran (a read's nested
+			// instructions) rides that call's result, not whichever result ended the batch.
+			const own = entry.toolCallId !== undefined && messages?.some((m) => m.role === "toolResult" && m.toolCallId === entry.toolCallId);
+			this.pinned.push({ ...entry, pin: own ? { kind: "toolResult", toolCallId: entry.toolCallId! } : anchor });
+		}
 		this.nextTurn = rest;
 		if (matching.length > 0) this.changes++;
 	}

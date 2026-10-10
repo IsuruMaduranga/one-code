@@ -41,7 +41,7 @@ import {
 import { collectGitStatus, GIT_SNAPSHOT_OWNER_CHANNEL } from "../lib/git-status.ts";
 import { readMemoryIndex } from "../lib/memory-index.ts";
 import { claudeConfigDir, oneCodeStateDir, tryRealpath } from "../lib/paths.ts";
-import { CONTEXT_ORDER, REMINDER_CHANNEL, type ReminderEntry, tailAnchor } from "../lib/reminders.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, type ReminderEntry } from "../lib/reminders.ts";
 import { inContextEntries } from "../lib/compaction-boundary.ts";
 import { CONTEXT_BASELINE_CHANNEL, CONTEXT_FACTS_REFRESH_CHANNEL, contextStackOnBranch, restoredContext, type ContextStackSnapshot } from "../lib/context-stack.ts";
 import { compactionGitStatus, contextFactsBaseline, DATE_CHANGE_KEY, legacyResumeFactsNotice, RESUME_FACTS_KEY, resumeFactsNotice, storedFactsBaseline, type ContextFactsBaseline } from "../lib/context-facts.ts";
@@ -111,7 +111,6 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	let attachedNested = new Set<string>();
 	/** Where a nested instruction actually landed: a persisted result or a pinned request tail. */
 	const shownByResult = new Map<string, Set<string>>();
-	const pendingNested = new Set<string>();
 	const remember = (toolCallId: string | undefined, keys: Iterable<string>) => {
 		if (!toolCallId) return;
 		const shown = shownByResult.get(toolCallId) ?? new Set<string>();
@@ -327,7 +326,6 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		email = resolveEmail(ctx.cwd);
 		attachedNested = new Set(startupShown);
 		shownByResult.clear();
-		pendingNested.clear();
 		rule = instructionRule(os.homedir());
 		// /clear re-fires session_start: the next conversation takes its own snapshot.
 		gitStatus = undefined;
@@ -443,24 +441,12 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 			publishBaseline();
 		}
 		restoreAttachments(ctx);
-		pendingNested.clear();
-	});
-
-	// system-reminder runs first: any still-pending one-shots have just been pinned to this tail.
-	pi.on("context", (event) => {
-		const anchor = tailAnchor(event.messages);
-		if (anchor?.kind === "toolResult") remember(anchor.toolCallId, pendingNested);
-		pendingNested.clear();
 	});
 
 	// A successful read attaches nested instruction files and matching path rules
 	// once each. These are one-shots: never replace the frozen first-prepend block.
 	// lib/claude-context.ts owns traversal, matching and source ordering.
 	pi.on("tool_result", (event, ctx) => {
-		// A queued attachment from an earlier result was persisted into this one
-		// by system-reminder's earlier hook, even if this is not itself a read.
-		remember(event.toolCallId, pendingNested);
-		pendingNested.clear();
 		if (event.toolName !== "read" || event.isError) return;
 		const raw = pathArgument(event.input);
 		if (!raw) return;
@@ -477,15 +463,20 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 			attachedNested.add(readKey);
 			remember(event.toolCallId, [readKey]);
 		}
+		// Bound to this read: system-reminder's hook for it has already run, so the
+		// queue pins them to this result at the next request; unbound, the next result
+		// in a parallel batch took them, beside another file (battery round 7).
+		const shown: string[] = [];
 		for (const file of files) {
 			if (attachedNested.has(file.key)) continue;
 			attachedNested.add(file.key);
-			pendingNested.add(file.key);
+			shown.push(file.key);
 			for (const imported of file.imported) {
 				attachedNested.add(imported);
-				pendingNested.add(imported);
+				shown.push(imported);
 			}
-			pi.events.emit(REMINDER_CHANNEL, { text: nestedInstructionText(file) });
+			pi.events.emit(REMINDER_CHANNEL, { text: nestedInstructionText(file), toolCallId: event.toolCallId });
 		}
+		remember(event.toolCallId, shown);
 	});
 }
