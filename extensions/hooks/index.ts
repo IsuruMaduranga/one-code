@@ -215,7 +215,9 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		try {
 			const hooks = await collectHooks({ ...ctx, signal }, event, matchValue);
 			const payload = typeof payloadOrFactory === "function" ? await payloadOrFactory() : payloadOrFactory;
-			if (!payload || hooks.length === 0 || signal?.aborted) return merged;
+			if (!payload || hooks.length === 0) return merged;
+			// Cancelled before the hooks ran: the gating events block, as a mid-run cancel does.
+			if (signal?.aborted) return cancelledOutcome(event);
 			willRun?.();
 			const stdin = JSON.stringify(payload);
 			const outcomes = await Promise.allSettled(

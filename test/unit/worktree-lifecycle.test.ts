@@ -89,10 +89,28 @@ describe("worktree lifecycle safety", () => {
 		expect(location).toBeNull();
 	});
 
-	it.each(["ignored", "hidden untracked"])("refuses to remove %s files without discard consent", async (kind) => {
+	it("removes a worktree holding only ignored build output, as Claude Code does", async () => {
 		const path = await start();
-		const file = kind === "ignored" ? "output.txt" : "new.txt";
-		if (kind === "hidden untracked") git(repo, "config", "status.showUntrackedFiles", "no");
+		writeFileSync(join(path, "output.txt"), "build output\n");
+		const result = await exit({ action: "remove" });
+		expect(result.isError).toBeUndefined();
+		expect(existsSync(path)).toBe(false);
+	});
+
+	it("deletes the cleared branch even when the original checkout moved to a branch without its base", async () => {
+		const path = await start();
+		git(repo, "checkout", "-q", "--orphan", "elsewhere");
+		git(repo, "commit", "-qm", "unrelated root", "--allow-empty");
+		const result = await exit({ action: "remove" });
+		expect(result.isError).toBeUndefined();
+		expect(existsSync(path)).toBe(false);
+		expect(git(repo, "branch", "--list", "feature")).toBe("");
+	});
+
+	it("refuses to remove hidden untracked files without discard consent", async () => {
+		const path = await start();
+		const file = "new.txt";
+		git(repo, "config", "status.showUntrackedFiles", "no");
 		writeFileSync(join(path, file), "user work\n");
 		expect(git(path, "status", "--porcelain")).toBe("");
 		const result = await exit({ action: "remove" });

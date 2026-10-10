@@ -17,7 +17,13 @@ export async function readResponseText(response: Response, signal?: AbortSignal)
 		throw new Error(`Unsupported binary content type ${mime}; use bash to download the file, then read it with a tool that supports that format`);
 	}
 	const charset = /\bcharset\s*=\s*["']?([^\s;"']+)/i.exec(contentType)?.[1] ?? "utf-8";
-	const decoder = new TextDecoder(charset);
+	let decoder: TextDecoder;
+	try {
+		decoder = new TextDecoder(charset);
+	} catch {
+		// A label the WHATWG decoder does not know (`utf8mb4`): read it as UTF-8, as before.
+		decoder = new TextDecoder("utf-8");
+	}
 	const reader = response.body?.getReader();
 	if (!reader) return "";
 	const onAbort = () => { void reader.cancel(signal?.reason).catch(() => {}); };

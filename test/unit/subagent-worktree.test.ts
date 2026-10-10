@@ -86,7 +86,7 @@ describe("isolation worktree cleanup", () => {
 		expect(existsSync(join(worktree.path, "new.txt"))).toBe(true);
 	});
 
-	it("keeps ignored files rather than silently deleting the agent's output", async () => {
+	it("removes a worktree holding only ignored files, as Claude Code does (build output must not pile up)", async () => {
 		writeFileSync(join(repo, ".gitignore"), "output.txt\n");
 		git(repo, "add", ".gitignore");
 		git(repo, "commit", "-qm", "ignore output");
@@ -94,8 +94,8 @@ describe("isolation worktree cleanup", () => {
 		writeFileSync(join(worktree.path, "output.txt"), "agent output\n");
 		expect(git(worktree.path, "status", "--porcelain")).toBe("");
 
-		expect(await cleanupWorktree(repo, worktree)).toBe(false);
-		expect(existsSync(join(worktree.path, "output.txt"))).toBe(true);
+		expect(await cleanupWorktree(repo, worktree)).toBe(true);
+		expect(existsSync(worktree.path)).toBe(false);
 	});
 
 	it.each(["default", "configured"])("does not execute %s repository hooks while creating isolation", async (source) => {

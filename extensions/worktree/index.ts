@@ -322,8 +322,8 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 			if (!params.discard_changes) {
 				const blockers: string[] = [];
 				try {
-					const dirty = await git(["status", "--porcelain", "--untracked-files=all", "--ignored"], current.path);
-					if (dirty) blockers.push(`Uncommitted or ignored files:\n${dirty}`);
+					const dirty = await git(["status", "--porcelain", "--untracked-files=all"], current.path);
+					if (dirty) blockers.push(`Uncommitted files:\n${dirty}`);
 					if (current.baseCommit && current.branch) {
 						const ahead = await git(["rev-list", "--count", "HEAD", `refs/heads/${current.branch}`, `^${current.baseCommit}`], current.path);
 						if (ahead !== "0") blockers.push(`${ahead} commit(s) on HEAD or ${current.branch} not on the original branch.`);
@@ -359,7 +359,9 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 			applyState(undefined);
 			if (current.branch) {
 				try {
-					await git(["branch", params.discard_changes ? "-D" : "-d", current.branch], current.originalCwd);
+					// The commit check above (or discard consent) already cleared the branch;
+					// -d would also refuse a tip the original checkout's current HEAD lacks.
+					await git(["branch", "-D", current.branch], current.originalCwd);
 				} catch (error) {
 					return {
 						content: [{ type: "text", text: `Removed worktree ${current.path}; back in ${current.originalCwd}, but could not delete branch ${current.branch}: ${(error as Error).message}. Inspect the branch before removing it manually.` }],

@@ -275,14 +275,21 @@ describe("hooks wiring", () => {
 		const outcome = await bridge!.preToolUse({ toolName: "bash", input: { command: "rm -rf build" }, cwd: projectDir, sessionId: "bg" });
 		expect(outcome.block?.reason).toBe("denied");
 
-		// The parent's own call still short-circuits on its aborted run.
+		// The parent's own call on its aborted run is cancelled before its hooks run,
+		// and a cancelled PreToolUse blocks rather than letting the call through.
 		const parentInput: Record<string, unknown> = { command: "rm -rf build" };
 		const parent = await fake.fireOne<{ block?: boolean } | undefined>(
 			"tool_call",
 			{ toolName: "bash", toolCallId: "p1", input: parentInput },
 			createFakeCtx({ cwd: projectDir, signal: parentRun.signal }),
 		);
-		expect(parent).toBeUndefined();
+		expect(parent?.block).toBe(true);
+
+		// A child whose own run is already cancelled is blocked too, not waved past the deny hook.
+		const childRun = new AbortController();
+		childRun.abort();
+		const child = await bridge!.preToolUse({ toolName: "bash", input: { command: "rm -rf build" }, cwd: projectDir, sessionId: "bg", signal: childRun.signal });
+		expect(child.block).toBeDefined();
 	});
 
 	it("the bridge translates a child's updatedInput back to native names and frames its context like the parent's", async () => {

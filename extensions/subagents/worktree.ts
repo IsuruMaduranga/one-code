@@ -84,7 +84,7 @@ export async function createWorktree(cwd: string, label: string): Promise<Worktr
  */
 export async function worktreeHasChanges(worktree: Worktree): Promise<boolean> {
 	try {
-		const status = await git(["status", "--porcelain", "--untracked-files=all", "--ignored", "--ignore-submodules=none"], worktree.path);
+		const status = await git(["status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"], worktree.path);
 		if (status.length > 0) return true;
 		const ahead = await git(["rev-list", "--count", "HEAD", `refs/heads/${worktree.branch}`, `^${worktree.baseCommit}`], worktree.path);
 		return ahead !== "0";
