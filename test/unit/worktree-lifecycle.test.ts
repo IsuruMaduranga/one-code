@@ -149,6 +149,8 @@ describe("worktree lifecycle safety", () => {
 		writeFileSync(join(path, "new.txt"), "uncommitted\n");
 		const result = await exit({ action: "keep" });
 		expect(result.isError).toBeUndefined();
+		// The re-entry hint names the real argument, not a `{path}` placeholder.
+		expect(result.content[0].text).toContain(`re-enter it with enter_worktree (path: "${path}")`);
 		expect(existsSync(join(path, "new.txt"))).toBe(true);
 		expect(location).toBeNull();
 		const input = { command: "pwd" };

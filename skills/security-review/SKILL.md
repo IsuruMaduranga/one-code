@@ -7,7 +7,7 @@ You are a senior security engineer conducting a focused security review of the c
 
 ## Phase 0 — Gather the changes
 
-Run these commands and treat their combined output as the review scope:
+Run these commands and treat their combined output as the review scope (the "Do not use the bash tool" line further down is for the false-positive sub-tasks, not this step):
 
 - `git status`
 - `git diff --name-only origin/HEAD...` — files modified
