@@ -6,26 +6,20 @@ const CONTAINERS = new Set(["program", "list", "pipeline"]);
 const OPERATORS = new Set(["&&", "||", "|", ";", "&", "|&", "\n"]);
 const EXIT_ONE_SUCCESSES = new Set(["grep", "rg", "egrep", "fgrep", "find", "diff", "test", "["]);
 
-function commandsIn(node: BashNode, commands: string[]): void {
-	if (OPERATORS.has(node.type) || node.type === "comment") return;
-	if (node.type === "redirected_statement") {
-		for (const child of node.children) if (!child.type.endsWith("_redirect")) commandsIn(child, commands);
-	} else if (CONTAINERS.has(node.type)) {
-		for (const child of node.children) commandsIn(child, commands);
-	} else commands.push(node.text);
-}
-
-/** A failed earlier && command can explain the exit, not the final search. */
-function rightmostAndChain(root: BashNode): boolean {
-	if (root.type !== "program") return true;
+/**
+ * The rightmost command's text, or undefined when an `&&` precedes it: a failed
+ * earlier step can explain the exit, not the final search. Redirects and
+ * comments are skipped, as Claude Code's last-command walk does.
+ */
+function lastCommand(root: BashNode): string | undefined {
 	let node: BashNode | undefined = root;
 	while (node && (CONTAINERS.has(node.type) || node.type === "redirected_statement")) {
 		const children: BashNode[] = node.children;
 		const last = children.findLastIndex((child) => !OPERATORS.has(child.type) && child.type !== "comment" && !child.type.endsWith("_redirect"));
-		if (node.type === "list" && children[last - 1]?.type === "&&") return true;
+		if (node.type === "list" && children[last - 1]?.type === "&&") return undefined;
 		node = children[last];
 	}
-	return false;
+	return node?.text;
 }
 
 export function emptyBashExitOneIsSuccess(command: string): boolean {
@@ -33,10 +27,11 @@ export function emptyBashExitOneIsSuccess(command: string): boolean {
 	const tree = parseBash(command);
 	if (!tree) return false;
 	try {
-		if (rightmostAndChain(tree.rootNode)) return false;
-		const commands: string[] = [];
-		commandsIn(tree.rootNode, commands);
-		const words = (commands.at(-1) || command).trim().split(/\s+/);
+		if (tree.rootNode.type !== "program") return false;
+		const last = lastCommand(tree.rootNode);
+		if (last === undefined) return false;
+		// Claude Code matches the literal first word: no unwrapping of env, assignments or quotes.
+		const words = last.trim().split(/\s+/);
 		if (words[0] !== "git") return EXIT_ONE_SUCCESSES.has(words[0]);
 		for (let i = 1; i < words.length; i++) {
 			if (words[i].startsWith("-")) {

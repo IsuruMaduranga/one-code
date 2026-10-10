@@ -1,27 +1,10 @@
-/** Effort defaults and Claude Code 2.1.296's save contract (pure fs, no pi imports). */
-import { readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
+/** Which effort levels are saved, and the result text (pure, no pi imports). */
 
 const PERSISTED_LEVELS = ["low", "medium", "high", "xhigh"] as const;
 export type PersistedEffort = (typeof PERSISTED_LEVELS)[number];
 
 export function isPersistedEffort(level: string): level is PersistedEffort {
 	return (PERSISTED_LEVELS as readonly string[]).includes(level);
-}
-
-/** Use pi's native per-model key so its startup precedence and clamping still apply. */
-export function saveEffort(path: string, provider: string, modelId: string, level: PersistedEffort | undefined): void {
-	const file = readSettingsForWrite(path);
-	const previous = file.modelThinkingLevels;
-	if (previous !== undefined && (!previous || typeof previous !== "object" || Array.isArray(previous))) {
-		throw new Error(`${path}: modelThinkingLevels must be a JSON object`);
-	}
-	const levels = { ...(previous as Record<string, unknown> | undefined) };
-	const key = `${provider}/${modelId}`;
-	if (level === undefined) delete levels[key];
-	else levels[key] = level;
-	if (Object.keys(levels).length) file.modelThinkingLevels = levels;
-	else delete file.modelThinkingLevels;
-	writeSettings(path, file);
 }
 
 const DESCRIPTIONS: Record<string, string> = {

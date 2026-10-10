@@ -24,8 +24,8 @@
 import { join } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
-import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { effortSetMessage, isPersistedEffort, saveEffort, type PersistedEffort } from "./settings.ts";
+import { getAgentDir, SettingsManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { effortSetMessage, isPersistedEffort, type PersistedEffort } from "./settings.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { dimRightAlignedWidget, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import {
@@ -133,12 +133,17 @@ export default function effortExtension(pi: ExtensionAPI) {
 	};
 
 	const canPersist = (ctx: ExtensionContext) => ctx.hasUI && (ctx.mode === "tui" || ctx.mode === "rpc") && !!ctx.model;
-	const persist = (ctx: ExtensionContext, level: PersistedEffort | undefined): string | undefined => {
-		try {
-			saveEffort(join(getAgentDir(), "settings.json"), ctx.model!.provider, ctx.model!.id, level);
-		} catch (error) {
-			return `Failed to set effort level: ${(error as Error).message}`;
-		}
+	/** Through pi's own settings writer: its key format, file lock and merge of changed fields. */
+	const persist = async (ctx: ExtensionContext, level: PersistedEffort | undefined): Promise<string | undefined> => {
+		const settings = SettingsManager.create(ctx.cwd, getAgentDir());
+		const loadError = settings.drainErrors().find((entry) => entry.scope === "global");
+		// An unreadable file would be rewritten from empty settings; leave it for the user.
+		if (loadError) return `Failed to set effort level: ${loadError.error.message}`;
+		if (level === undefined) settings.removeModelThinkingLevel(ctx.model!.provider, ctx.model!.id);
+		else settings.setModelThinkingLevel(ctx.model!.provider, ctx.model!.id, level);
+		await settings.flush();
+		const writeError = settings.drainErrors()[0];
+		if (writeError) return `Failed to set effort level: ${writeError.error.message}`;
 	};
 	const report = (ctx: ExtensionContext, message: string, error = false) => {
 		ctx.ui.notify(message, error ? "error" : "info");
@@ -146,7 +151,7 @@ export default function effortExtension(pi: ExtensionAPI) {
 	};
 
 	/** Apply a chosen stop and report what actually took effect. */
-	const applyChoice = (choice: EffortChoice, ctx: ExtensionContext, asDefault = true): string => {
+	const applyChoice = async (choice: EffortChoice, ctx: ExtensionContext, asDefault = true): Promise<string> => {
 		const wasUltracode = ultracodeActive;
 		const wanted = thinkingLevelFor(choice);
 		pi.setThinkingLevel(wanted);
@@ -168,7 +173,7 @@ export default function effortExtension(pi: ExtensionAPI) {
 		}
 		const saved = asDefault && canPersist(ctx) && isPersistedEffort(choice) && actual === wanted;
 		if (saved) {
-			const error = persist(ctx, choice);
+			const error = await persist(ctx, choice);
 			if (error) return report(ctx, error, true);
 		}
 		if (isPersistedEffort(actual) || actual === "max") return report(ctx, `${effortSetMessage(actual, saved)}${wasUltracode ? " · Ultracode off" : ""}`);
@@ -238,7 +243,7 @@ export default function effortExtension(pi: ExtensionAPI) {
 					showEffortNote(ctx, pi.getThinkingLevel());
 					const saved = canPersist(ctx);
 					if (saved) {
-						const error = persist(ctx, undefined);
+						const error = await persist(ctx, undefined);
 						if (error) return report(ctx, error, true);
 					}
 					return report(ctx, `Effort level set to auto${saved ? "" : " (this session only)"}`);

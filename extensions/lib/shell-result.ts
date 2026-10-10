@@ -30,15 +30,16 @@ export function claudeCodeShellText(text: string, exitCode: unknown, toolName: s
 }
 
 /** A foreground result with its first text block in Claude Code's words; other results pass through. */
-export function withClaudeCodeShellText<R extends ShellResult>(result: R, toolName: string, command?: string): R {
+export function withClaudeCodeShellText<R extends ShellResult>(result: R, toolName: string, command: string): R {
 	const first = result?.content?.[0];
 	if (first?.type !== "text" || typeof first.text !== "string") return result;
-	const structured = result.structuredContent as { exit_code?: unknown; output?: unknown } | undefined;
-	const exitCode = structured?.exit_code;
-	let text = claudeCodeShellText(first.text, exitCode, toolName);
-	const semanticSuccess = toolName === "bash" && exitCode === 1 && text === "Exit code 1" &&
-		typeof structured?.output === "string" && structured.output.trim() === "" && command !== undefined && emptyBashExitOneIsSuccess(command);
-	if (semanticSuccess) text = emptyToolResultText(toolName);
-	if (text === undefined || (text === first.text && !semanticSuccess)) return result;
-	return { ...result, content: [{ ...first, text }, ...(result.content ?? []).slice(1)], ...(semanticSuccess ? { isError: false } : {}) };
+	const exitCode = (result.structuredContent as { exit_code?: unknown } | undefined)?.exit_code;
+	const text = claudeCodeShellText(first.text, exitCode, toolName);
+	const rest = (result.content ?? []).slice(1);
+	// "Exit code 1" alone means the command printed nothing.
+	if (toolName === "bash" && text === "Exit code 1" && emptyBashExitOneIsSuccess(command)) {
+		return { ...result, content: [{ ...first, text: emptyToolResultText(toolName) }, ...rest], isError: false };
+	}
+	if (text === undefined || text === first.text) return result;
+	return { ...result, content: [{ ...first, text }, ...rest] };
 }

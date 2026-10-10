@@ -201,7 +201,8 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 					() => spec.foreground(ctx.cwd).execute(toolCallId, { command: params.command, timeout: timeoutSeconds }, signal, onUpdate, ctx),
 					sessionResultsDir(ctx),
 				);
-				await bashParserReady();
+				// The no-match check parses the command; only bash results need the grammar.
+				if (spec.name === "bash") await bashParserReady();
 				return withClaudeCodeShellText(result, spec.name, originalCommand);
 			}
 

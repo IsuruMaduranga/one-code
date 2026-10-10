@@ -253,27 +253,24 @@ export default function doctorExtension(pi: ExtensionAPI) {
 		notifyOrPrint(ctx, stdout, type);
 	};
 
-	const applyPreset = async (name: string, args: string, ctx: ExtensionCommandContext): Promise<void> => {
+	/** The preset's result, for the caller to notify and report as the command's stdout. */
+	const applyPreset = async (name: string, ctx: ExtensionCommandContext): Promise<{ text: string; type: "info" | "warning" | "error" }> => {
 		const available = usableModels(ctx);
 		const { presets, unavailable } = computePresets(available, ctx.model);
 		if (unavailable === "no-model") {
-			notifyLocalResult(args, ctx, "No model is available — connect a provider with /login first.", "warning");
-			return;
+			return { text: "No model is available — connect a provider with /login first.", type: "warning" };
 		}
 		if (unavailable === "no-priced-models") {
-			notifyLocalResult(args, ctx, "No priced models on this provider, so tiers cannot be told apart and no preset can be applied. Pick models by hand with /model or /subagent.", "warning");
-			return;
+			return { text: "No priced models on this provider, so tiers cannot be told apart and no preset can be applied. Pick models by hand with /model or /subagent.", type: "warning" };
 		}
 		const preset = findPreset(presets, name);
 		if (!preset) {
-			notifyLocalResult(args, ctx, `Unknown preset "${name}". Choose one of: ${PRESET_NAMES.join(", ")} (see /doctor presets).`, "error");
-			return;
+			return { text: `Unknown preset "${name}". Choose one of: ${PRESET_NAMES.join(", ")} (see /doctor presets).`, type: "error" };
 		}
 		const home = os.homedir();
 		const mainSwitched = !ctx.model || modelSpec(ctx.model) !== modelSpec(preset.main);
 		if (mainSwitched && !(await pi.setModel(preset.main))) {
-			notifyLocalResult(args, ctx, `Could not switch the main model to ${modelSpec(preset.main)}; nothing was changed.`, "error");
-			return;
+			return { text: `Could not switch the main model to ${modelSpec(preset.main)}; nothing was changed.`, type: "error" };
 		}
 		try {
 			persistSubagentModel(preset.subagents.setting === "inherit" ? "inherit" : undefined, home);
@@ -281,21 +278,18 @@ export default function doctorExtension(pi: ExtensionAPI) {
 			persistClassifierModel(undefined, home);
 		} catch (error) {
 			const switched = mainSwitched ? ` The main model was already switched to ${modelSpec(preset.main)}; /model switches it back.` : "";
-			notifyLocalResult(args, ctx, `Could not save settings: ${error instanceof Error ? error.message : String(error)}.${switched}`, "error");
-			return;
+			return { text: `Could not save settings: ${error instanceof Error ? error.message : String(error)}.${switched}`, type: "error" };
 		}
 		pi.events.emit(SUBAGENT_DEFAULT_CHANGED_CHANNEL, {});
 		pi.events.emit(CLASSIFIER_SETTING_CHANGED_CHANNEL, {});
-		notifyLocalResult(
-			args,
-			ctx,
-			[
+		return {
+			text: [
 				`Applied the ${preset.label} preset:`,
 				...describePresetChanges(preset, mainSwitched).map((line) => `  ${line}`),
 				"Saved to ~/.onecode/settings.json; the main model is remembered as pi's default.",
 			].join("\n"),
-			"info",
-		);
+			type: "info",
+		};
 	};
 
 	/** The subcommands, with the one-line explanation the completion menu shows next to each. */
@@ -322,7 +316,8 @@ export default function doctorExtension(pi: ExtensionAPI) {
 					notifyLocalResult(args, ctx, `Which preset? /doctor preset <${PRESET_NAMES.join("|")}> — /doctor presets shows what each would pick.`, "warning");
 					return;
 				}
-				await applyPreset(rest.join(" "), args, ctx);
+				const result = await applyPreset(rest.join(" "), ctx);
+				notifyLocalResult(args, ctx, result.text, result.type);
 				return;
 			}
 			if (verb === "presets") {

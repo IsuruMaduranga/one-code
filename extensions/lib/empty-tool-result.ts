@@ -6,7 +6,7 @@ export function emptyToolResultText(toolName: string): string {
 }
 
 /** Images and other non-text blocks are results, even without accompanying text. */
-export function isEmptyToolResultContent(content: unknown): boolean {
+function isEmptyToolResultContent(content: unknown): boolean {
 	if (!content) return true;
 	if (typeof content === "string") return content.trim() === "";
 	if (!Array.isArray(content)) return false;
@@ -16,15 +16,12 @@ export function isEmptyToolResultContent(content: unknown): boolean {
 
 /** Replacement content, or undefined to retain the tool's own result verbatim. */
 export function emptyToolResultContent(content: unknown, toolName: string): Array<{ type: "text"; text: string }> | undefined {
+	const only = Array.isArray(content) && content.length === 1 && content[0]?.type === "text" && typeof content[0].text === "string" ? content[0] : undefined;
 	// pi Read returns raw file bytes, not Claude Code's numbered lines. Leave
 	// blank selections alone; file-tracker supplies the genuine empty-file warning.
-	if (toolName === "read" && Array.isArray(content) && content.length === 1 &&
-		content[0]?.type === "text" && typeof content[0].text === "string") return undefined;
+	if (toolName === "read" && only) return undefined;
 	if (isEmptyToolResultContent(content)) return [{ type: "text", text: emptyToolResultText(toolName) }];
 	// pi's find is Claude Code's Glob; Grep already uses Claude Code's no-match text.
-	if (toolName === "find" && Array.isArray(content) && content.length === 1 &&
-		content[0]?.type === "text" && content[0].text === "No files found matching pattern") {
-		return [{ ...content[0], text: "No files found" }];
-	}
+	if (toolName === "find" && only?.text === "No files found matching pattern") return [{ ...only, text: "No files found" }];
 	return undefined;
 }
