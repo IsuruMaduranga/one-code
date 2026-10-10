@@ -555,6 +555,8 @@ export function extractSubject(toolName: string, input: Record<string, unknown>)
 			return str("url") ?? "";
 		case "web_search":
 			return str("query") ?? "";
+		case "Agent":
+			return str("subagent_type") ?? "";
 		case "enter_worktree":
 			return str("name") ?? str("path") ?? "";
 		case "read_mcp_resource":
@@ -655,7 +657,8 @@ export function ruleMatches(rule: PermissionRule, toolName: string, subject: str
 		case "url":
 			return matchesUrlPattern(rule.pattern, subject);
 		case "text":
-			return globToRegex(rule.pattern, false).test(subject);
+			// The agent catalog resolves names case-insensitively (Explore/explore).
+			return globToRegex(rule.pattern, false, normalizeToolName(toolName) === "Agent").test(subject);
 	}
 }
 

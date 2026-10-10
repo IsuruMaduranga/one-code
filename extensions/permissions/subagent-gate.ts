@@ -61,6 +61,17 @@ export type ChildGateDecision = { block: true; reason: string } | undefined;
 /** The parent's decision closure, threaded into a child's permission gate. */
 export type PermissionBridge = (call: ChildToolCall) => Promise<ChildGateDecision>;
 
+/** Bind a bridge to one parent session; neither stopped children nor stale approvals may run. */
+export function sessionPermissionBridge(evaluate: PermissionBridge, parentSignal: AbortSignal): PermissionBridge {
+	return async (call) => {
+		const signal = call.signal ? AbortSignal.any([parentSignal, call.signal]) : parentSignal;
+		const stopped: ChildGateDecision = { block: true, reason: "The agent or its parent permission session has stopped; denied to fail safe." };
+		if (signal.aborted) return stopped;
+		const result = await evaluate({ ...call, signal });
+		return signal.aborted ? stopped : result;
+	};
+}
+
 export interface SubagentGatePayload {
 	decide: PermissionBridge;
 }
