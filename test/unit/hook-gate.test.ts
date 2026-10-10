@@ -21,6 +21,26 @@ const childCtx = () =>
 	createFakeCtx({ cwd: "/work/tree", sessionManager: { getSessionId: () => "child-9", getSessionFile: () => "/sessions/child-9.jsonl", getBranch: () => [] } });
 
 describe("hookGateFactory", () => {
+	it("forwards the child's live abort signal to both tool hook phases", async () => {
+		const signals: Array<AbortSignal | undefined> = [];
+		const bridge: HookBridge = {
+			async preToolUse(call) {
+				signals.push(call.signal);
+				return {};
+			},
+			async postToolUse(call) {
+				signals.push(call.signal);
+				return {};
+			},
+		};
+		const { fake } = mount(bridge);
+		const controller = new AbortController();
+		const ctx = createFakeCtx({ ...childCtx(), signal: controller.signal });
+		await fake.fireOne("tool_call", { toolName: "bash", toolCallId: "t1", input: {} }, ctx);
+		await fake.fireOne("tool_result", { toolName: "bash", toolCallId: "t1", input: {}, content: [], isError: false }, ctx);
+		expect(signals).toEqual([controller.signal, controller.signal]);
+	});
+
 	it("forwards a tool call with the child's identity and denies on a hook block", async () => {
 		const calls: ChildHookCall[] = [];
 		const bridge: HookBridge = {

@@ -39,12 +39,13 @@ export function hookGateFactory(getBridge: () => HookBridge | undefined, options
 		name: "agent-hook-gate",
 		hidden: true,
 		factory: (pi) => {
-			const describe = (toolName: string, input: unknown, ctx: { cwd?: string; sessionManager?: { getSessionId?: () => string; getSessionFile?: () => string | undefined } } | undefined, fallbackCwd: string): ChildHookCall => {
+			const describe = (toolName: string, input: unknown, ctx: { cwd?: string; signal?: AbortSignal; sessionManager?: { getSessionId?: () => string; getSessionFile?: () => string | undefined } } | undefined, fallbackCwd: string): ChildHookCall => {
 				const sessionId = ctx?.sessionManager?.getSessionId?.();
 				return {
 					toolName,
 					input: (input ?? {}) as Record<string, unknown>,
 					cwd: ctx?.cwd ?? fallbackCwd,
+					signal: ctx?.signal,
 					sessionId,
 					transcriptPath: ctx?.sessionManager?.getSessionFile?.() ?? undefined,
 					agentType: options.agentTypeOf?.(sessionId),

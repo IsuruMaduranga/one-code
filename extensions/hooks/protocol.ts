@@ -102,6 +102,8 @@ export function parseEnvelope(stdout: string): HookEnvelope | undefined {
 /** What one finished hook run asks One Code to do. */
 export interface HookOutcome {
 	block?: { reason: string };
+	/** Stop continue:false ends the turn rather than requesting another response. */
+	preventContinuation?: boolean;
 	updatedInput?: Record<string, unknown>;
 	updatedToolResult?: unknown;
 	additionalContext?: string;
@@ -111,6 +113,8 @@ export interface HookOutcome {
 export interface FinishedRun {
 	exitCode: number | null;
 	timedOut: boolean;
+	aborted?: boolean;
+	outputLimitExceeded?: boolean;
 	spawnError?: string;
 	stdout: string;
 	stderr: string;
@@ -125,6 +129,11 @@ const TIMEOUT_BLOCKS: ReadonlySet<CcHookEvent> = new Set(["PreToolUse", "UserPro
 const STDOUT_IS_CONTEXT: ReadonlySet<CcHookEvent> = new Set(["UserPromptSubmit", "SessionStart", "PreCompact"]);
 
 export function interpretHookResult(event: CcHookEvent, run: FinishedRun): HookOutcome {
+	if (run.aborted) return TIMEOUT_BLOCKS.has(event) ? { block: { reason: "Hook cancelled" } } : {};
+	if (run.outputLimitExceeded) {
+		const reason = "Hook exceeded its output limit; reduce stdout/stderr to at most 1,000,000 bytes per stream.";
+		return TIMEOUT_BLOCKS.has(event) ? { block: { reason } } : { systemMessage: reason };
+	}
 	// Killed (timeout or otherwise): a null exit code must never read as a
 	// clean allow. Closed for the two events that gate something; open for the
 	// rest — the side effect already happened, or blocking would wedge exit.
@@ -151,6 +160,7 @@ export function interpretHookResult(event: CcHookEvent, run: FinishedRun): HookO
 
 	if (envelope.continue === false) {
 		outcome.block = { reason: envelope.stopReason?.trim() || "Hook stopped continuation" };
+		if (event === "Stop") outcome.preventContinuation = true;
 	}
 	const decision = specific?.permissionDecision;
 	if (decision === "deny" || decision === "ask") {

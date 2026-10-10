@@ -71,12 +71,15 @@ describe.each(["hooks", "lsp"] as const)("%s trust in RPC", (kind) => {
 		const { run, ctx } = mount(kind, confirm, controller.signal);
 		const pending = run();
 		await vi.waitFor(() => expect(confirm).toHaveBeenCalledOnce());
+		expect(confirm.mock.calls[0][2]?.signal?.aborted).toBe(false);
 		controller.abort();
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		try {
 			const settled = await Promise.race([pending.then(() => "settled"), new Promise<string>((resolve) => { timer = setTimeout(() => resolve("still waiting for RPC reply"), 50); })]);
 			expect(settled).toBe("settled");
-			expect(confirm.mock.calls[0][2]?.signal).toBe(controller.signal);
+			// Hooks combine turn cancellation with session shutdown cancellation.
+			expect(confirm.mock.calls[0][2]?.signal?.aborted).toBe(true);
+			expect(confirm.mock.calls[0][2]?.signal?.reason).toBe(controller.signal.reason);
 			expect(existsSync(kind === "hooks" ? approvalStorePath() : lspTrustStorePath())).toBe(false);
 			expect(state.runHook).not.toHaveBeenCalled();
 			expect(state.startServer).not.toHaveBeenCalled();

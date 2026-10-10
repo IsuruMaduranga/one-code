@@ -126,7 +126,8 @@ export async function buildAgentLoader(options: AgentLoaderOptions): Promise<Def
 			// Order is load-bearing, mirroring the main session's extension order:
 			// hooks first (a hook's updatedInput must be what every guard judges),
 			// then the worktree git-isolation guard, then the permission gate.
-			...(options.getHookBridge ? [hookGateFactory(options.getHookBridge, { agentTypeOf: options.agentTypeOf, neverGate: options.neverGate })] : []),
+			// Permission-autoallowed orchestration tools still run the user's hooks.
+			...(options.getHookBridge ? [hookGateFactory(options.getHookBridge, { agentTypeOf: options.agentTypeOf })] : []),
 			worktreeGuardFactory(options.cwd),
 			permissionGateFactory(options.cwd, os.homedir(), options.neverGate, options.getPermissionBridge),
 			...(options.extraFactories ?? []),

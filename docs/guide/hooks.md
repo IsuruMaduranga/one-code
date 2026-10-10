@@ -24,6 +24,10 @@ stored in `~/.onecode/hooks/project-approvals.json` with a hash of the hook
 configuration, so any change asks again. Declining is remembered for the
 session only. User, managed, and plugin hooks never prompt.
 
+Set `disableAllHooks: true` in settings to skip user, project, and plugin
+hooks. Managed hooks still run unless managed settings also disable hooks.
+The most specific boolean setting wins, with managed settings taking precedence.
+
 Only command hooks are supported. Hook entries of type `http`, `prompt`, or
 `agent` are skipped with a diagnostic.
 
@@ -71,7 +75,10 @@ The hook's standard input is a JSON object with these fields:
 | `reason` | `SessionEnd` | `clear`, `logout`, `prompt_input_exit`, or `other`. |
 | `agent_id`, `agent_type` | Inside a subagent | Identify the subagent making the call. |
 
-The hook's environment also carries `CLAUDE_PROJECT_DIR`.
+The hook's environment also carries `CLAUDE_PROJECT_DIR`, the parent project
+root. A worktree-isolated child's hooks run in the child's working directory,
+while settings and project-hook approval still come from the parent project.
+Cancelling a turn stops its running hooks and their descendant processes.
 
 Hook matchers match on the tool name. Claude Code's PascalCase names work.
 
@@ -84,13 +91,14 @@ Hook matchers match on the tool name. Claude Code's PascalCase names work.
 | Exit code 2 | The action is blocked. Standard error is the reason. |
 | Any other exit code | The hook passes and its output is ignored. |
 | Timeout | `PreToolUse` and `UserPromptSubmit` block (fail closed). Other events pass. |
+| Output exceeds 1,000,000 bytes on either stream | The command stops. `PreToolUse` and `UserPromptSubmit` block; other events show a notice. Incomplete output is not used as a verdict or context. |
 | The command could not be started | The hook passes; this is an environment problem, not a verdict. |
 
 Envelope fields honored in a JSON result:
 
 | Field | Effect |
 |---|---|
-| `continue: false` | Blocks, with `stopReason` as the reason. |
+| `continue: false` | Blocks, with `stopReason` as the reason. For `Stop`, ends the turn without requesting another response. |
 | `decision: "block"` | Blocks, with `reason` as the reason. |
 | `hookSpecificOutput.permissionDecision` | `"deny"` and `"ask"` both block, with `permissionDecisionReason`. `"allow"` is read but never honored; a hook can't pre-approve an action, and the permission gate still runs. |
 | `hookSpecificOutput.updatedInput` | Replaces the tool's input (`PreToolUse`). |
@@ -99,7 +107,12 @@ Envelope fields honored in a JSON result:
 | `systemMessage` | Shown to you. |
 
 A `PreToolUse` block stops the call before the permission gate runs, so no
-approval prompt appears for a hook-blocked call.
+approval prompt appears for a hook-blocked call. A malformed response from one
+hook does not discard another hook's denial.
+
+A blocking `Stop` hook can request at most eight consecutive continuations per
+user turn. The ninth block ends the turn with a notice. Hooks still receive
+`stop_hook_active` so they can stop requesting continuations earlier.
 
 ## Debugging hooks
 

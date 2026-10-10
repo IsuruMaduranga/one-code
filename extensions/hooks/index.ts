@@ -109,7 +109,7 @@ interface HookDispatchCtx {
 }
 
 export default function hooksExtension(pi: ExtensionAPI) {
-	let stopHookActive = false;
+	let stopHookBlocks = 0;
 	/** Context from UserPromptSubmit / SessionStart / PostCompact hooks, delivered with the next prompt. */
 	let pendingPromptContext: Array<{ event: CcHookEvent; text: string }> = [];
 	/**
@@ -132,6 +132,8 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	let sessionStartPending: Promise<void> | undefined;
 	/** Bumped on every session_start; a superseded dispatch checks it before writing context. */
 	let sessionGen = 0;
+	/** Covers startup hooks and other dispatches that have no active turn signal. */
+	let sessionAbort = new AbortController();
 
 	const notify = (ctx: HookDispatchCtx, message: string) => {
 		if (ctx.sessionEnded) return; // session gone; nowhere to show it
@@ -147,7 +149,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	): Promise<MatchedHook[]> => {
 		const claudeDir = claudeConfigDir();
 		const loaded = loadHookSettings(claudeDir, ctx.cwd);
-		const pluginSources = loadPluginHooks(defaultDiscoverRoots(getAgentDir(), ctx.cwd), loaded.diagnostics);
+		const pluginSources = loaded.disabled ? [] : loadPluginHooks(defaultDiscoverRoots(getAgentDir(), ctx.cwd), loaded.diagnostics);
 		if (hooksDebugEnabled()) {
 			for (const diagnostic of loaded.diagnostics) process.stderr.write(`[hooks] ${diagnostic}\n`);
 		}
@@ -203,15 +205,19 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		willRun?: () => void,
 	): Promise<HookOutcome> => {
 		const merged: HookOutcome = {};
+		const signal = ctx.sessionEnded ? ctx.signal : ctx.signal ? AbortSignal.any([ctx.signal, sessionAbort.signal]) : sessionAbort.signal;
 		try {
-			const hooks = await collectHooks(ctx, event, matchValue);
-			if (hooks.length === 0 || ctx.signal?.aborted) return merged;
+			const hooks = await collectHooks({ ...ctx, signal }, event, matchValue);
+			if (hooks.length === 0 || signal?.aborted) return merged;
 			willRun?.();
 			const stdin = JSON.stringify(payload);
-			const outcomes = await Promise.all(
+			const outcomes = await Promise.allSettled(
 				hooks.map(async ({ source, hook }) => {
 					const run = await runHookCommand(hook.command, stdin, {
-						cwd: ctx.cwd,
+						// A child's hook executes in its worktree; settings, consent and
+						// CLAUDE_PROJECT_DIR still belong to the parent project.
+						cwd: payload.cwd,
+						signal,
 						timeoutSeconds: hook.timeout,
 						shell: hook.shell,
 						projectDir: ctx.cwd,
@@ -238,7 +244,16 @@ export default function hooksExtension(pi: ExtensionAPI) {
 					return outcome;
 				}),
 			);
-			for (const outcome of outcomes) {
+			if (signal?.aborted) return interpretHookResult(event, { exitCode: null, timedOut: false, aborted: true, stdout: "", stderr: "" });
+			for (const result of outcomes) {
+				// One broken response must not erase another hook's deny or let the
+				// tool run while the other hooks are still deciding.
+				if (result.status === "rejected") {
+					if (hooksDebugEnabled()) process.stderr.write(`[hooks] hook error (${event}): ${String(result.reason)}\n`);
+					continue;
+				}
+				const outcome = result.value;
+				if (outcome.preventContinuation) merged.preventContinuation = true;
 				// A block reason becomes model-facing text (the tool result, or a
 				// Stop follow-up), so it is bounded like the other hook texts —
 				// stderr on an exit-2 hook is easily a full stack trace (review M2).
@@ -358,14 +373,15 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		// (SessionStart context precedes UserPromptSubmit). before_agent_start is
 		// the backstop for turns with no input event (one-shot, programmatic).
 		await drainSessionStart();
+		if (gen !== sessionGen) return { action: "handled" as const };
 		const payload: HookStdinPayload = { ...basePayload(ctx, "UserPromptSubmit"), prompt: event.text };
 		const outcome = await dispatch(ctx, "UserPromptSubmit", { ignoreMatcher: true }, payload);
+		if (gen !== sessionGen) return { action: "handled" as const };
 		if (outcome.block) {
 			notify(ctx, `Prompt blocked by UserPromptSubmit hook: ${outcome.block.reason}`);
 			return { action: "handled" as const };
 		}
-		// A session_start during the hook (an RPC new_session) superseded it.
-		if (!outcome.additionalContext || gen !== sessionGen) return undefined;
+		if (!outcome.additionalContext) return undefined;
 		// A queued message's context waits for pi to deliver that message
 		// (message_start below), so it rides the same request.
 		if (queued) queuedPromptContext.hold(event.text, hookContextText("UserPromptSubmit", outcome.additionalContext));
@@ -377,6 +393,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	// one-shot emitted here is pinned to that message: after the prompt, as the
 	// before_agent_start message is for a prompt that opens a turn.
 	pi.on("message_start", async (event) => {
+		const gen = sessionGen;
 		const message = event.message;
 		const emit = (text: string) => pi.events.emit(REMINDER_CHANNEL, { text, placement: "last-append" });
 		if (message.role === "user") {
@@ -396,6 +413,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		const opensFirstTurn = !prompted && isNotificationDetails(message.details);
 		if (message.customType !== SKILL_INVOCATION_TYPE && !opensFirstTurn) return;
 		if (opensFirstTurn) await drainSessionStart();
+		if (gen !== sessionGen) return;
 		const input = (message.details as Partial<SkillInvocationDetails> | undefined)?.input;
 		const queued = typeof input === "string" ? queuedPromptContext.release(input) : undefined;
 		if (queued) emit(queued);
@@ -409,6 +427,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	// before_agent_start `message` return). An idle `sendMessage` from here
 	// landed it BEFORE the prompt (pi appends first, then adds the user message).
 	pi.on("before_agent_start", async (_event, ctx) => {
+		const gen = sessionGen;
 		lastCtx = ctx;
 		prompted = true;
 		// The SessionStart dispatch runs in the background from session_start; the
@@ -417,9 +436,10 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		// The `input` handler usually drained it already; this is the backstop for
 		// turns with no input event.
 		await drainSessionStart();
+		if (gen !== sessionGen) return;
 		// Every prompt that opens a turn lands here; a queued delivery and the
 		// Stop hook's own continuation (an idle sendMessage) do not.
-		stopHookActive = false;
+		stopHookBlocks = 0;
 		if (pendingPromptContext.length === 0) return;
 		const texts = pendingPromptContext;
 		pendingPromptContext = [];
@@ -445,12 +465,15 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	};
 
 	pi.on("session_start", (event, ctx) => {
+		sessionAbort.abort();
+		sessionAbort = new AbortController();
 		lastCtx = ctx;
 		const gen = ++sessionGen;
 		pendingPromptContext = [];
 		queuedPromptContext.clear();
 		sessionStartPending = undefined;
 		prompted = false;
+		stopHookBlocks = 0;
 		// Publish the child hook bridge (subagent-bridge.ts). The closures read
 		// live parent state per call, so once per session start is enough.
 		pi.events.emit(SUBAGENT_HOOK_CHANNEL, { bridge: childHookBridge } satisfies SubagentHookPayload);
@@ -480,20 +503,20 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		agent_type: call.agentType,
 	});
 	/**
-	 * The parent's context for a bridged child call, without the parent's run
-	 * signal. A background child outlives the parent's turn, so the parent
-	 * aborting (Esc) must not short-circuit the child's hooks: `dispatch` would
-	 * return no outcome, and the child's call would run past a deny hook.
+	 * The parent's settings/consent context with the CHILD's run signal. A
+	 * background child outlives the parent's turn, so Esc in the parent must
+	 * not skip a child's deny hook; stopping the child must cancel its hooks.
 	 */
-	const childDispatchCtx = (ctx: ExtensionContext): HookDispatchCtx => ({
+	const childDispatchCtx = (ctx: ExtensionContext, call: ChildHookCall): HookDispatchCtx => ({
 		cwd: ctx.cwd,
 		hasUI: ctx.hasUI,
 		sessionManager: ctx.sessionManager,
 		ui: ctx.ui,
+		signal: call.signal,
 	});
 	const childHookBridge: HookBridge = {
 		async preToolUse(call) {
-			const ctx = lastCtx && childDispatchCtx(lastCtx);
+			const ctx = lastCtx && childDispatchCtx(lastCtx, call);
 			if (!ctx) return {};
 			const outcome = await dispatch(ctx, "PreToolUse", { candidates: toolMatchCandidates(call.toolName) }, childPayload(call, "PreToolUse"));
 			return {
@@ -503,7 +526,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 			};
 		},
 		async postToolUse(result: ChildHookResult) {
-			const ctx = lastCtx && childDispatchCtx(lastCtx);
+			const ctx = lastCtx && childDispatchCtx(lastCtx, result);
 			if (!ctx) return {};
 			const payload: HookStdinPayload = {
 				...childPayload(result, "PostToolUse"),
@@ -530,6 +553,8 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	};
 
 	pi.on("session_shutdown", (event, ctx) => {
+		sessionGen += 1;
+		sessionAbort.abort();
 		// A reload re-runs the extensions but keeps the conversation (pi's
 		// AgentSession.reload): not a session end, Claude Code has no such event.
 		if (event.reason === "reload") return;
@@ -573,6 +598,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("agent_settled", async (_event, ctx) => {
+		const gen = sessionGen;
 		// A queued message pi never delivered as typed (expanded, or taken over by
 		// an extension) keeps no context for a later, unrelated prompt.
 		queuedPromptContext.clear();
@@ -587,13 +613,19 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		pi.events.emit(SESSION_WORK_CHANNEL, work);
 		const payload: HookStdinPayload = {
 			...basePayload(ctx, "Stop"),
-			stop_hook_active: stopHookActive,
+			stop_hook_active: stopHookBlocks > 0,
 			background_tasks: work.tasks,
 			session_crons: work.crons,
 		};
 		const outcome = await dispatch(ctx, "Stop", { ignoreMatcher: true }, payload);
-		if (!outcome.block) return;
-		stopHookActive = true;
+		if (gen !== sessionGen || outcome.preventContinuation || !outcome.block) return;
+		// Claude Code limits repeated Stop blocks to eight continuations. A hook
+		// that ignores stop_hook_active must not run up an unbounded model loop.
+		if (stopHookBlocks >= 8) {
+			notify(ctx, "Stop hook continuation limit reached (8); ending the turn.");
+			return;
+		}
+		stopHookBlocks += 1;
 		try {
 			pi.sendMessage(
 				{
@@ -638,6 +670,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_compact", async (event, ctx) => {
+		const gen = sessionGen;
 		const trigger = compactTrigger(event);
 		const payload: HookStdinPayload = {
 			...basePayload(ctx, "PostCompact"),
@@ -645,6 +678,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 			compact_summary: event.compactionEntry.summary,
 		};
 		const outcome = await dispatch(ctx, "PostCompact", { candidates: [trigger] }, payload);
+		if (gen !== sessionGen) return;
 		if (outcome.additionalContext) pendingPromptContext.push({ event: "PostCompact", text: outcome.additionalContext });
 		// CC fires SessionStart(source: "compact") after compaction. Awaited inline
 		// (not backgrounded), so the current generation is still in force.

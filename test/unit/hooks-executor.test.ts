@@ -98,6 +98,32 @@ describe("runHookCommand", () => {
 		expect(existsSync(marker)).toBe(false);
 	}, 10_000);
 
+	it("cancels a running hook and its descendants when the turn aborts", async () => {
+		const ready = join(dir, "abort-ready");
+		const survived = join(dir, "abort-survived");
+		const controller = new AbortController();
+		const pending = runHookCommand(`touch "${ready}"; (sleep 2; touch "${survived}") & wait`, "{}", {
+			cwd: dir,
+			...{ signal: controller.signal },
+		});
+		while (!existsSync(ready)) await new Promise((resolve) => setTimeout(resolve, 10));
+		const started = Date.now();
+		controller.abort();
+		const result = await pending;
+		expect(Date.now() - started).toBeLessThan(1000);
+		expect(result.exitCode).toBeNull();
+		expect(result.timedOut).toBe(false);
+		await new Promise((resolve) => setTimeout(resolve, 2100));
+		expect(existsSync(survived)).toBe(false);
+	}, 10_000);
+
+	it("does not spawn a hook whose signal is already aborted", async () => {
+		const marker = join(dir, "pre-aborted-ran");
+		const result = await runHookCommand(`touch "${marker}"`, "{}", { cwd: dir, ...{ signal: AbortSignal.abort() } });
+		expect(result.exitCode).toBeNull();
+		expect(existsSync(marker)).toBe(false);
+	});
+
 	it("exposes CLAUDE_PROJECT_DIR and runs in cwd", async () => {
 		// Git Bash reports `pwd` in its own /tmp mount; `pwd -W` gives the Windows
 		// path (forward-slashed), which is what `dir` is here.
