@@ -66,6 +66,7 @@ import { buildDiscoverRows, buildInstalledRows, buildMarketplaceRows, type Disco
 import { applyPanelKey, initialPanelState, type PanelEffect, type PanelView } from "./panel/state.ts";
 import { expandTemplate, runPlaceholderCommand } from "./shell-expand.ts";
 import { watchPermissionBridge } from "../permissions/subagent-gate.ts";
+import { followWorkCwd } from "../lib/worktree-channel.ts";
 import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
@@ -109,6 +110,7 @@ function safeDiscover(roots: ReturnType<typeof defaultDiscoverRoots>): Discovere
 export default function pluginsExtension(pi: ExtensionAPI) {
 	const sendUserMessage = createUserMessageSender(pi);
 	const getPermissionBridge = watchPermissionBridge(pi);
+	const workCwd = followWorkCwd(pi.events);
 	// False once the session is replaced: a panel action still awaiting then
 	// throws on its first pi.* call, which is expected and not an error to show.
 	const alive = sessionAlive(pi);
@@ -128,7 +130,7 @@ export default function pluginsExtension(pi: ExtensionAPI) {
 				plugins.plugins.find((p) => p.name === command.plugin);
 			if (!plugin) continue;
 			registeredCommands.add(command.name);
-			registerPluginCommand(pi, plugin, command.name, command.path, sendUserMessage, getPermissionBridge);
+			registerPluginCommand(pi, plugin, command.name, command.path, sendUserMessage, getPermissionBridge, workCwd);
 		}
 	};
 
@@ -521,7 +523,7 @@ export default function pluginsExtension(pi: ExtensionAPI) {
 	});
 }
 
-function registerPluginCommand(pi: ExtensionAPI, plugin: Plugin, name: string, path: string, sendUserMessage: ReturnType<typeof createUserMessageSender>, getPermissionBridge: ReturnType<typeof watchPermissionBridge>): void {
+function registerPluginCommand(pi: ExtensionAPI, plugin: Plugin, name: string, path: string, sendUserMessage: ReturnType<typeof createUserMessageSender>, getPermissionBridge: ReturnType<typeof watchPermissionBridge>, workCwd: (sessionCwd: string) => string): void {
 	let description = `Command from the ${plugin.name} plugin`;
 	let argumentHint: CommandHint | undefined;
 	try {
@@ -567,7 +569,8 @@ function registerPluginCommand(pi: ExtensionAPI, plugin: Plugin, name: string, p
 			const dir = sessionResultsDir(ctx);
 			let expanded: string;
 			try {
-				expanded = await expandTemplate(body, args, ctx.cwd, {
+				// Placeholders run where the session works: an entered worktree, not the checkout it left.
+				expanded = await expandTemplate(body, args, workCwd(ctx.cwd), {
 					persist: (text, index) => persistIfLarge(text, { dir, id: `plugin-cmd-${name}-${index}` }),
 					run: async (command, cwd) => {
 						const decide = getPermissionBridge();

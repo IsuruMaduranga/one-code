@@ -14,12 +14,12 @@
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { PluginSkill } from "./plugins.ts";
 import type { SkillScope } from "./skill-overrides.ts";
 import { claudeSourcesOn, projectConfigDir, userConfigDir } from "./config-mode.ts";
-import { claudeUserDir } from "./paths.ts";
+import { claudeUserDir, isPathAtOrUnder } from "./paths.ts";
 import { parseFrontmatterLoosely } from "./frontmatter.ts";
 
 /** The skill catalog shipped in this package: `<package>/skills` (Claude Code's self-contained built-in skills). */
@@ -38,9 +38,8 @@ export interface ScannedSkill {
  * skill never shows different scopes in /plugins vs the skill tool.
  */
 export function scopeForPath(path: string, home: string, agentDir: string): SkillScope {
-	const target = resolve(path);
 	const roots = [join(claudeUserDir(home), "skills"), join(home, ".agents", "skills"), join(agentDir, "skills")];
-	return roots.some((root) => target === resolve(root) || target.startsWith(resolve(root) + sep)) ? "user" : "project";
+	return roots.some((root) => isPathAtOrUnder(path, root)) ? "user" : "project";
 }
 
 /**

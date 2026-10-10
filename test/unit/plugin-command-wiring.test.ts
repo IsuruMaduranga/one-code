@@ -1,5 +1,5 @@
 import { ONE_SHOT_COMMAND_FAILED_CHANNEL } from "../../extensions/lib/interrupt.ts";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,6 +10,7 @@ import { stubHome } from "./helpers/home.ts";
 import { captureUserTurns } from "./helpers/user-turn.ts";
 import { SUBAGENT_GATE_CHANNEL } from "../../extensions/permissions/subagent-gate.ts";
 import { shellQuote } from "../../extensions/lib/shell-quote.ts";
+import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
 
 let home: string;
 let exitCode: typeof process.exitCode;
@@ -71,6 +72,20 @@ describe("plugin command user turns", () => {
 		await fake.commands.get("fixture:ping")!.handler("literal;value", createFakeCtx({ cwd: home, mode: "tui" }));
 		expect(decide).toHaveBeenCalledWith(expect.objectContaining({ input: { command: "printf '%s' 'literal;value'" } }));
 		expect(fake.sentUserMessages[0].content).toBe("Before literal;value after");
+	});
+
+	it("runs an approved placeholder, and asks the gate, in the entered worktree", async () => {
+		const worktree = join(home, "wt");
+		mkdirSync(worktree);
+		writeFileSync(join(home, "fixture", "commands", "ping.md"), "In !`pwd`");
+		const fake = createFakePi();
+		pluginsExtension(fake.pi as never);
+		const decide = vi.fn(async () => undefined);
+		fake.events.emit(SUBAGENT_GATE_CHANNEL, { decide });
+		fake.events.emit(WORKTREE_CHANNEL, { path: worktree, branch: "wt" });
+		await fake.commands.get("fixture:ping")!.handler("", createFakeCtx({ cwd: home, mode: "tui" }));
+		expect(decide).toHaveBeenCalledWith(expect.objectContaining({ cwd: worktree }));
+		expect(realpathSync(String(fake.sentUserMessages[0].content).slice(3).trim())).toBe(realpathSync(worktree));
 	});
 
 	it.each(["print", "json"])("reports a blocked shell placeholder as failure in %s without starting a turn", async (mode) => {

@@ -63,6 +63,10 @@ describe("skill runtime boundaries", () => {
 		expect(scopeForPath(join(agentDir, "skills-other", "demo", "SKILL.md"), root, agentDir)).toBe("project");
 	});
 
+	it.runIf(process.platform !== "linux")("matches a user skill directory spelled in another case on a case-folding filesystem", () => {
+		expect(scopeForPath(join(root, ".AGENTS", "Skills", "demo", "SKILL.md"), root, agentDir)).toBe("user");
+	});
+
 	it("uses the declared name and its off override before the first turn", async () => {
 		skill(join(cwd, ".claude", "skills", "folder"), "name: actual\ndescription: Demo");
 		setSkillState(pluginRoot(agentDir), "project:actual", "off");

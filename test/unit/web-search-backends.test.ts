@@ -92,6 +92,8 @@ describe("domain filters", () => {
 	it("treats a trailing DNS dot as the same blocked host", () => {
 		const dotted = [{ title: "blocked", url: "https://docs.example.com./page", snippet: "" }];
 		expect(filterByDomains(dotted, { blocked: ["example.com"] })).toEqual([]);
+		// As the permission matcher does (`domain:example.com` matches `example.com..`).
+		expect(filterByDomains([{ title: "blocked", url: "https://example.com../page", snippet: "" }], { blocked: ["example.com"] })).toEqual([]);
 		expect(filterByDomains(results, { blocked: ["example.com."] }).map((r) => r.title)).toEqual(["c"]);
 	});
 

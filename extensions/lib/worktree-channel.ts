@@ -32,3 +32,15 @@ export interface WorktreeLocation {
 export function sessionWorkCwd(entered: WorktreeLocation | null | undefined, sessionCwd: string): string {
 	return entered?.path || sessionCwd;
 }
+
+/**
+ * Subscribe once at load and get `sessionWorkCwd` for the latest announcement:
+ * `(ctx.cwd) => where this session's work happens now`.
+ */
+export function followWorkCwd(events: { on(channel: string, handler: (data: unknown) => void): unknown }): (sessionCwd: string) => string {
+	let entered: WorktreeLocation | null = null;
+	events.on(WORKTREE_CHANNEL, (data) => {
+		entered = data as WorktreeLocation | null;
+	});
+	return (sessionCwd) => sessionWorkCwd(entered, sessionCwd);
+}

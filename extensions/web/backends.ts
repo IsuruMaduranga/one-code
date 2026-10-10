@@ -140,7 +140,7 @@ export function resolveChain(
 
 function hostOf(url: string): string | undefined {
 	try {
-		return new URL(url).hostname.toLowerCase().replace(/\.$/, "");
+		return new URL(url).hostname.toLowerCase().replace(/\.+$/, "");
 	} catch {
 		return undefined;
 	}
