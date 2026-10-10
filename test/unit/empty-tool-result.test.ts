@@ -45,6 +45,10 @@ describe("Claude Code's empty tool-result marker", () => {
 		]);
 	});
 
+	it("marks a hook's empty replacement of a read result; the raw-read exception is for pi's own bytes", () => {
+		expect(applyPostToolUseOutcome([text("file body")], { updatedToolResult: "  " }, "read")).toEqual([text(marker("Read"))]);
+	});
+
 	it("adds the marker before queued reminders, and preserves structured content", async () => {
 		const structuredContent = { exit_code: 0, output: "" };
 		const result = await resultFor([], "bash", true, structuredContent);

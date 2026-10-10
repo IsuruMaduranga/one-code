@@ -59,6 +59,22 @@ describe("Claude Code 2.1.296 local-command results", () => {
 		expect(blocks).toEqual(localCommandBlocks({ name: "memory", stdout: `Opened ./CLAUDE.md\n${editorHint()}` }));
 	});
 
+	it("records the text-mode workflows result the user saw", async () => {
+		const { fake, blocks } = mount(workflowExtension);
+		const ctx = createFakeCtx({ cwd, hasUI: true, mode: "rpc" });
+		await fake.commands.get("workflows")!.handler("stop missing-run", ctx);
+		expect(blocks).toEqual(localCommandBlocks({ name: "workflows", args: "stop missing-run", stdout: "No running workflow missing-run" }));
+		await fake.fire("session_shutdown", {}, ctx);
+	});
+
+	it("records the text-mode skills result the user saw", async () => {
+		const { fake, blocks } = mount(skillExtension);
+		const ctx = createFakeCtx({ cwd, hasUI: true, mode: "rpc" });
+		await fake.commands.get("skills")!.handler("", ctx);
+		const shown = (ctx._notified as Array<{ message: string }>).at(-1)!.message;
+		expect(blocks).toEqual(localCommandBlocks({ name: "skills", stdout: shown }));
+	});
+
 	it("records the skills dismissal after the panel closes", async () => {
 		const { fake, ctx, blocks } = mount(skillExtension);
 		let close!: () => void;

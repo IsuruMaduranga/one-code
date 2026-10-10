@@ -251,7 +251,8 @@ export default function effortExtension(pi: ExtensionAPI) {
 						const error = await persist(ctx, undefined);
 						if (error) return report(ctx, error, true);
 					}
-					pi.setThinkingLevel(pi.getSettings().defaultThinkingLevel ?? "medium");
+					// getSettings arrived in pi 1.0.1; the package still admits older pi.
+					pi.setThinkingLevel(pi.getSettings?.().defaultThinkingLevel ?? "medium");
 					setUltracode(false);
 					applyStatus(ctx);
 					showEffortNote(ctx, pi.getThinkingLevel());

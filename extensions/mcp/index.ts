@@ -1007,6 +1007,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 				return `${status.padEnd(12)} ${server.name}${suffix} (${server.source})`;
 			});
 			ctx.ui.notify(lines.join("\n"), "info");
+			return lines.join("\n");
 		},
 	});
 }

@@ -821,7 +821,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 			const all = skillsOnly(ctx.cwd);
 			if (all.length === 0) {
 				ctx.ui.notify("No skills available.", "info");
-				return;
+				return "No skills available.";
 			}
 			const lines = all.map((skill) => {
 				const label = skill.source === "plugin" ? "plugin" : skill.state;
@@ -829,6 +829,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 				return `- ${skill.name} [${label}]${desc}`;
 			});
 			ctx.ui.notify(`Skills:\n${lines.join("\n")}`, "info");
+			return `Skills:\n${lines.join("\n")}`;
 		},
 	});
 }
