@@ -24,7 +24,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { type ChildAction, SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-mode/actions.ts";
 import { guideDocsDirs } from "../lib/guide-docs.ts";
 import { TURN_FAILED_CHANNEL, type TurnFailedEvent } from "../lib/interrupt.ts";
-import type { HandBackVerdict } from "../lib/notifications.ts";
+import { handBackWarning, type HandBackVerdict } from "../lib/notifications.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent } from "../lib/model-unusable.ts";
 
 import { classifierChain, classify, createClassifierState } from "../auto-mode/classifier.ts";
@@ -59,7 +59,7 @@ import { describeCandidate } from "../auto-mode/model-select.ts";
 import { conflictingPathArguments, isWithin, resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
 import { DenialStore, denialInputKey, permissionGrantedMessage } from "../auto-mode/denials.ts";
 import { PauseTracker, unattendedPromptNotice, unattendedPromptTimeoutMs } from "../auto-mode/pause.ts";
-import { safetyControlWrite } from "../auto-mode/safety-floor.ts";
+import { safetyControlWrite, safetyFloorBlockText } from "../auto-mode/safety-floor.ts";
 import { isExecutionPrimitivePath, isSensitivePath } from "../auto-mode/sensitive.ts";
 import { analyzeShellCommand } from "../auto-mode/shell-analysis.ts";
 import { bashParserReady, bashParserUnavailable } from "../lib/bash-parser.ts";
@@ -187,8 +187,6 @@ const BLOCKED_BY_TIMEOUT = (reason: string) =>
 	"If it keeps failing, continue with other tasks that do not require this action and come back to it later — " +
 	"reading files, searching code, and other read-only operations do not require the classifier and can still be used. " +
 	"Do not try to route around the gate; if this specific action is essential, tell the user what you were about to do so they can re-run interactively or switch the session model.";
-const DENIED_SAFETY_FLOOR = (reason: string) =>
-	`Auto mode blocked this call without consulting the classifier: ${reason}. Writes to the gate's own configuration are never auto-approved. Do not retry or route around this; ask the user to make the change themselves.`;
 // "Choose a different approach" is exactly what a literal reader does with a
 // second command of the same effect: a tiny-tier model met `Bash(rm:*)` and
 // deleted the file with `python3 -c "import os; os.remove(…)"` 3/3 times
@@ -1350,7 +1348,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			autoConfig ??= loadAutoModeConfig(os.homedir());
 			if (mode === "auto" || !ctx.hasUI) {
 				logDecision(ctx, { tool: event.toolName, subject, outcome: "block", source: "floor", reason: floorReason });
-				return { block: true, reason: DENIED_SAFETY_FLOOR(floorReason) };
+				return { block: true, reason: safetyFloorBlockText(floorReason) };
 			}
 			logDecision(ctx, { tool: event.toolName, subject, outcome: "prompt", source: "floor", reason: floorReason });
 		} else if (result.decision === "classify") {
@@ -1629,7 +1627,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// control the classifier itself can't be trusted to enforce.
 		if (floorReason) {
 			if (ctx) logDecision(ctx, { tool: toolName, subject, outcome: "block", source: "floor", reason: floorReason });
-			return { block: true, reason: DENIED_SAFETY_FLOOR(floorReason) };
+			return { block: true, reason: safetyFloorBlockText(floorReason) };
 		}
 
 		// ask: needs the user. Bubble it to the parent's terminal; no UI → fail closed.
@@ -2110,12 +2108,13 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	 * surfaces a warning rather than blocking it: the work has already happened, so
 	 * the useful move is to make sure the model and the user see it.
 	 */
-	const reviewFlagged = (reason: string) =>
-		`<system-reminder>\nAuto mode reviewed this subagent's actions after it finished and flagged a concern: ${reason}\n\nTreat its output as unverified, do not act on it without checking, and tell the user what it did.\n</system-reminder>`;
+	const reviewFlagged = (verdict: HandBackVerdict) => `<system-reminder>\n${handBackWarning(verdict)}\n</system-reminder>`;
 
-	// Classify a finished run's action sequence as a whole. Returns the concern to
+	// Classify a finished run's action sequence as a whole. Returns the verdict to
 	// surface, or undefined when the sequence is fine. Shared by the foreground
-	// (tool_result) and background (channel) paths.
+	// (tool_result) and background (channel) paths. A review that reached no
+	// verdict (an unreadable reply, a transcript past the limit, a timeout) is an
+	// unreviewed run, not a finding.
 	const reviewCompletedRun = async (
 		actions: ChildAction[],
 		ctx: ExtensionContext,
@@ -2123,7 +2122,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		signal: AbortSignal | undefined,
 		/** The main-session call that started the reviewed turn, when known. */
 		startedBy: string | undefined,
-	): Promise<string | undefined> => {
+	): Promise<HandBackVerdict | undefined> => {
 		autoConfig ??= loadAutoModeConfig(os.homedir());
 		// Present the child's actions as tool entries appended to the session
 		// transcript, so the reviewer judges the sequence with the parent's context
@@ -2173,7 +2172,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		if (verdict.decision === "allow") return undefined;
 		// A completed run cannot be approved retroactively. Surface a failed
 		// review without counting a context-limit failure as an unsafe action.
-		if (verdict.transcriptTooLong) return verdict.reason;
+		if (verdict.transcriptTooLong) return { kind: "unavailable", reason: verdict.reason };
 		pauseTracker.recordBlock({
 			toolName: "Agent",
 			subject,
@@ -2182,7 +2181,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			ruleId: verdict.ruleId,
 			raw: verdict.raw,
 		});
-		return verdict.reason;
+		return { kind: verdict.noVerdict || verdict.tier === "timeout" ? "unavailable" : "blocked", reason: verdict.reason };
 	};
 
 	const childActions = new Map<string, ChildAction[]>();
@@ -2218,7 +2217,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			if (epoch === sessionEpoch) respond(verdict);
 		};
 		reviewCompletedRun(payload.actions, ctx, label, new AbortController().signal, payload.startedBy)
-			.then((reason) => respondIfCurrent(reason ? { kind: "blocked", reason } : undefined))
+			.then((verdict) => respondIfCurrent(verdict))
 			.catch((error) => respondIfCurrent({ kind: "unavailable", reason: `the review itself failed (${(error as Error).message})` }));
 	});
 
@@ -2229,9 +2228,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// Reviewed while paused too, as the background path above is.
 		if (mode !== "auto" || !actions?.length) return undefined;
 		// The spawning call is this tool result's own: the run happened inside it.
-		const reason = await reviewCompletedRun(actions, ctx, "completed run", ctx.signal, event.toolCallId);
-		if (!reason) return undefined;
-		return { content: [{ type: "text" as const, text: reviewFlagged(reason) }, ...event.content] };
+		const verdict = await reviewCompletedRun(actions, ctx, "completed run", ctx.signal, event.toolCallId);
+		if (!verdict) return undefined;
+		return { content: [{ type: "text" as const, text: reviewFlagged(verdict) }, ...event.content] };
 	});
 
 	/**

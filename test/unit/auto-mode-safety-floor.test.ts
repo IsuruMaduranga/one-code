@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { isSafetyControlTarget, safetyControlWrite } from "../../extensions/auto-mode/safety-floor.ts";
+import { isSafetyControlTarget, safetyControlWrite, safetyFloorBlockText } from "../../extensions/auto-mode/safety-floor.ts";
 import { analyzeShellCommand } from "../../extensions/auto-mode/shell-analysis.ts";
 import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
 import { oneCodeProjectSettingsPath } from "../../extensions/lib/one-code-settings.ts";
@@ -383,5 +383,28 @@ describe.skipIf(process.platform !== "win32")("safetyControlWrite: Git Bash path
 	it("floors a settings write spelled /tmp/… (this home is under %TEMP%)", () => {
 		const underTemp = forwardSlashes(relative(tmpdir(), join(home, ".claude", "settings.json")));
 		expect(check("bash", { command: `echo '{}' > /tmp/${underTemp}` })).toBeDefined();
+	});
+});
+
+describe("safetyControlWrite: the reason for a pattern match", () => {
+	// Battery round 7: read-only searches were told they "write ./node_modules/*"
+	// and to ask the user, though a rewrite without the pattern passes.
+	it.each([
+		[`find . -type f -not -path "./node_modules/*" -exec grep -l slugify {} \;`, "./node_modules/*"],
+		[`find . -type f -not -path './.git/*' -name '*.py' -o -type f -name '*.ts' | xargs wc -l`, "./.git/*"],
+		// gpt-6.1-sol's verification line, verbatim.
+		["PYTHONDONTWRITEBYTECODE=1 make test; npx tsc --noEmit -p web; git diff --check; git diff --stat; git status --short; if rg --hidden --no-ignore -l --glob '!.git/**' --glob '!node_modules/**' --glob '!**/node_modules/**' 'slugify' .; then echo 'Old-name references remain in project files'; exit 1; else result=$?; if [ \"$result\" -ne 1 ]; then exit \"$result\"; fi; echo 'Verified: no old-name references in project files (excluding Git metadata and dependencies)'; fi", "!**/node_modules/**"],
+	])("words a wildcard or negated pattern as one that can select a control file: %s", (command, token) => {
+		const reason = check("bash", { command });
+		expect(reason).toBe(`its pattern ${token} can select a file that holds the permission rules and auto-mode configuration that contain this agent`);
+		expect(safetyFloorBlockText(reason!)).toContain("rewrite it without the wildcard or negated pattern");
+		expect(safetyFloorBlockText(reason!)).not.toContain("Do not retry");
+	});
+
+	it("still stops a negated find that deletes, and keeps the literal wording for a named file", () => {
+		expect(check("bash", { command: `find . -type f -not -path "./src/*" -delete` })).toMatch(/^its pattern \.\/src\/\* can select/);
+		const literal = check("write", { path: ".claude/settings.json", content: "{}" });
+		expect(literal).toMatch(/^it writes /);
+		expect(safetyFloorBlockText(literal!)).toContain("Do not retry or route around this; ask the user to make the change themselves.");
 	});
 });

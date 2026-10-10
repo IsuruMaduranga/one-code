@@ -17,6 +17,7 @@ import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../ext
 import { CONSECUTIVE_BLOCK_LIMIT } from "../../extensions/auto-mode/pause.ts";
 import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
 import type { HandBackVerdict } from "../../extensions/lib/notifications.ts";
+import { classify } from "../../extensions/auto-mode/classifier.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../extensions/permissions/modes.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
@@ -86,6 +87,21 @@ describe("hand-back review while auto mode is paused", () => {
 			{ toolCallId: "spawn-1", toolName: "Agent", content: [{ type: "text", text: "report" }] },
 			ctx,
 		);
-		expect(result?.content[0].text).toContain("flagged a concern: stub: sends a credential off the machine");
+		expect(result?.content[0].text).toContain("SECURITY WARNING: auto mode blocked this subagent's report. Reason: stub: sends a credential off the machine.");
+	});
+
+	// Battery round 7: an unreadable classifier reply was announced as "flagged a
+	// concern: The approval classifier's reply carried no severity", which reads as
+	// a finding. It is an unreviewed run, worded as the background path words it.
+	it("words a review that reached no verdict as unreviewed, not as a concern", async () => {
+		vi.mocked(classify).mockResolvedValueOnce({ decision: "block", reason: "The approval classifier's reply carried no severity, so the verdict could not be read.", tier: "unmatched", noVerdict: true });
+		fake.events.emit(SUBAGENT_ACTIONS_CHANNEL, { toolCallId: "spawn-2", actions } satisfies SubagentActionsPayload);
+		const result = await fake.fireOne<{ content: Array<{ text: string }> }>(
+			"tool_result",
+			{ toolCallId: "spawn-2", toolName: "Agent", content: [{ type: "text", text: "report" }] },
+			ctx,
+		);
+		expect(result?.content[0].text).toContain("This subagent's report is UNREVIEWED - The approval classifier's reply carried no severity, so the verdict could not be read");
+		expect(result?.content[0].text).not.toContain("blocked this subagent");
 	});
 });
