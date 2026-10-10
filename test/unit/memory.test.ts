@@ -1,17 +1,19 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-	INDEX_MAX_CHARS,
-	INDEX_MAX_LINES,
-	indexLimitStatus,
-	loadableIndexContent,
 	memoryDir,
 	memoryIndexReminder,
 	memoryPromptSection,
 	projectSlug,
+} from "../../extensions/lib/memory.ts";
+import {
+	INDEX_MAX_CHARS,
+	INDEX_MAX_LINES,
+	indexLimitStatus,
+	loadableIndexContent,
 	stampFrontmatter,
 	truncateIndex,
-} from "../../extensions/lib/memory.ts";
+} from "../../extensions/lib/memory-content.ts";
 
 describe("projectSlug", () => {
 	it("matches Claude Code's slugging: non [A-Za-z0-9-] chars become dashes", () => {

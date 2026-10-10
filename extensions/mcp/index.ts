@@ -132,6 +132,8 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	const resultsDir = (ctx: ExtensionContext | undefined): string => sessionResultsDir(ctx);
 
 	const registerToolsFor = (connection: Connection) => {
+		// Names other extensions own, read once per batch (getAllTools builds every definition).
+		let taken: Set<string> | undefined;
 		for (const tool of connection.tools) {
 			const name = namespacedToolName(connection.server.name, tool.name);
 			// Anthropic caps a tool name at 128 characters and rejects the whole
@@ -150,7 +152,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 			// An unchanged tool on reconnect keeps its exact definition and loaded
 			// state. Only a different raw server/tool pair is a name collision.
 			if (owner?.server === connection.server.name && owner.tool === tool.name) continue;
-			if (owner || pi.getAllTools().some((existing) => existing.name === name)) {
+			if (owner || (taken ??= new Set(pi.getAllTools().map((existing) => existing.name))).has(name)) {
 				// Two tools sanitise to one name (`a.b` and `a_b`, or a server
 				// reconnecting under a stale registration). Skipping silently would
 				// make the second tool unreachable with no trace; record it where

@@ -90,7 +90,8 @@ export function isClaudeLocation(path: string, userDir: string): boolean {
 	));
 }
 
-function readFileIfPresent(path: string): string | null {
+/** A regular file within the instruction size limit (never a FIFO, which would block), else null. */
+export function readFileIfPresent(path: string): string | null {
 	try {
 		if (!existsSync(path)) return null;
 		const stat = statSync(path);

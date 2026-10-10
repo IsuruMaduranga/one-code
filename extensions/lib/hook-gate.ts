@@ -30,11 +30,9 @@ const DEFAULT_INTERNAL_TOOLS = new Set(["structured_output", SUBAGENT_HANDBACK])
 export interface HookGateOptions {
 	/** The child's agent type for the payload's `agent_type`, resolved per session id by the runner. */
 	agentTypeOf?: (sessionId: string | undefined) => string | undefined;
-	neverGate?: Set<string>;
 }
 
 export function hookGateFactory(getBridge: () => HookBridge | undefined, options: HookGateOptions = {}): InlineExtension {
-	const neverGate = options.neverGate ?? DEFAULT_INTERNAL_TOOLS;
 	return {
 		name: "agent-hook-gate",
 		hidden: true,
@@ -53,7 +51,7 @@ export function hookGateFactory(getBridge: () => HookBridge | undefined, options
 			};
 
 			pi.on("tool_call", async (event, ctx) => {
-				if (neverGate.has(event.toolName)) return undefined;
+				if (DEFAULT_INTERNAL_TOOLS.has(event.toolName)) return undefined;
 				try {
 					const bridge = getBridge();
 					if (!bridge) return undefined;
@@ -69,7 +67,7 @@ export function hookGateFactory(getBridge: () => HookBridge | undefined, options
 			});
 
 			pi.on("tool_result", async (event, ctx) => {
-				if (neverGate.has(event.toolName)) return undefined;
+				if (DEFAULT_INTERNAL_TOOLS.has(event.toolName)) return undefined;
 				try {
 					const bridge = getBridge();
 					if (!bridge) return undefined;

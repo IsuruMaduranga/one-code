@@ -92,7 +92,7 @@ import { formatModel, modeBadge, nextMode, PERMISSION_STATUS_CHANNEL, type Permi
 import { intrinsicTier, usesClaudeCodeFastPaths } from "../lib/model-tier.ts";
 import { type ChildToolCall, type ChildGateDecision, sessionPermissionBridge, SUBAGENT_GATE_CHANNEL } from "./subagent-gate.ts";
 import { trackOriginalCommands } from "../lib/original-command.ts";
-import { sessionWorkCwd, WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
+import { followWorkCwd } from "../lib/worktree-channel.ts";
 import { MODE_CHANNEL, PLAN_FILE_CHANNEL } from "../lib/plan-mode-channels.ts";
 import { isWritingTool } from "./protected-paths.ts";
 import { denyRuleLines } from "./rule-prose.ts";
@@ -304,10 +304,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	const originalCommands = trackOriginalCommands(pi);
 	// Worktree restores publish before this extension's session_start. Keep
 	// that state until worktree publishes its next enter, exit or branch reset.
-	let enteredWorktree: WorktreeLocation | null = null;
-	pi.events.on(WORKTREE_CHANNEL, (data) => {
-		enteredWorktree = data as WorktreeLocation | null;
-	});
+	const workCwd = followWorkCwd(pi.events);
 	/** Whether bypassPermissions is a stop on the cycle — only when the session started with it (Claude Code semantics). */
 	let bypassInCycle = false;
 	/** Whether auto mode is a stop on the cycle — only when a classifier model is reachable. */
@@ -1230,7 +1227,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// `monitor` is cd-wrapped the same way (worktree/rewrite.ts).
 		const original = isShellTool(normalizedTool) || normalizedTool === "monitor" ? originalCommands.get(event.toolCallId) : undefined;
 		const matchSubject = original?.command ?? subject;
-		const callCwd = original?.cwd ?? sessionWorkCwd(enteredWorktree, ctx.cwd);
+		const callCwd = original?.cwd ?? workCwd(ctx.cwd);
 		// File tools are rewritten to absolute worktree paths too. Both the
 		// lexical and resolved working roots must follow entry; keeping the
 		// main checkout's resolved root would still fast-path writes there.

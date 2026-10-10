@@ -1,6 +1,6 @@
 import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
-import { stampFrontmatter } from "../../extensions/lib/memory.ts";
+import { stampFrontmatter } from "../../extensions/lib/memory-content.ts";
 
 const modified = "2026-10-10T00:00:00.000Z";
 const stamp = (content: string) => stampFrontmatter(content, "new-session", modified);

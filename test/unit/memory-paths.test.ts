@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import memoryExtension from "../../extensions/memory/index.ts";
 import { resolveThroughLinks } from "../../extensions/auto-mode/paths.ts";
 import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
-import { INDEX_OVER_LIMIT_ERROR, projectMemoryDir } from "../../extensions/lib/memory.ts";
+import { projectMemoryDir } from "../../extensions/lib/memory.ts";
+import { INDEX_OVER_LIMIT_ERROR } from "../../extensions/lib/memory-content.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 

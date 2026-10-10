@@ -24,15 +24,13 @@ import { mkdirSync, readFileSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { claudeMdLimitWarning, combinedLimitWarning, projectMemoryDir } from "../lib/memory.ts";
 import {
-	claudeMdLimitWarning,
-	combinedLimitWarning,
 	INDEX_NEAR_LIMIT_REMINDER,
 	INDEX_OVER_LIMIT_ERROR,
 	indexLimitStatus,
-	projectMemoryDir,
 	stampFrontmatter,
-} from "../lib/memory.ts";
+} from "../lib/memory-content.ts";
 import { type ConfigMode, CONFIG_MODE_KEY, claudeSourcesOn, configMode, configModeFromEnv, MODE_LABELS, savedConfigMode } from "../lib/config-mode.ts";
 import { isClaudeLocation } from "../lib/claude-context.ts";
 import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
@@ -50,12 +48,12 @@ import { canShowCustomUi } from "../lib/headless-output.ts";
 
 const MEMORY_PANEL_MAX_HEIGHT = 20;
 
-function inputPath(input: unknown, cwd: string, dir: string): string | undefined {
+/** `root` is the memory directory's real path, resolved once per session. */
+function inputPath(input: unknown, cwd: string, root: string): string | undefined {
 	const raw = (input as { path?: unknown })?.path;
 	if (typeof raw !== "string" || !raw.trim()) return undefined;
 	// Match the file pi touches, including aliases and not-yet-created leaves.
 	const path = resolveThroughLinks(resolveToolPath(raw, cwd));
-	const root = tryRealpath(dir) ?? dir;
 	return path && isPathAtOrUnder(path, root) && comparablePath(path) !== comparablePath(root) ? path : undefined;
 }
 
@@ -72,6 +70,7 @@ function memoryEntriesFor(cwd: string): MemoryEntry[] {
 
 export default function memoryExtension(pi: ExtensionAPI) {
 	let dir: string | undefined;
+	let dirReal = "";
 
 	pi.on("session_start", (_event, ctx) => {
 		dir = undefined;
@@ -115,6 +114,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 			return;
 		}
 		dir = candidate;
+		dirReal = tryRealpath(candidate) ?? candidate;
 
 		// The MEMORY.md index is injected by the claude-context extension, folded
 		// into the `# claudeMd` block exactly as Claude Code does — not as a
@@ -124,7 +124,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 
 	pi.on("tool_call", (event, ctx) => {
 		if (event.toolName !== "write" || !dir) return undefined;
-		const path = inputPath(event.input, ctx.cwd, dir);
+		const path = inputPath(event.input, ctx.cwd, dirReal);
 		if (!path) return undefined;
 		const input = event.input as { content?: unknown };
 		if (typeof input.content !== "string") return undefined;
@@ -135,7 +135,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 	pi.on("tool_result", (event, ctx) => {
 		if (event.isError || !dir) return undefined;
 		if (event.toolName !== "write" && event.toolName !== "edit") return undefined;
-		const path = inputPath(event.input, ctx.cwd, dir);
+		const path = inputPath(event.input, ctx.cwd, dirReal);
 		const indexPath = join(dir, "MEMORY.md");
 		if (!path || comparablePath(path) !== comparablePath(tryRealpath(indexPath) ?? indexPath)) return undefined;
 

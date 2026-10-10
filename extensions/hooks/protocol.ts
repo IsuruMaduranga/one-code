@@ -111,10 +111,24 @@ export interface HookOutcome {
 }
 
 export interface FinishedRun {
+	/**
+	 * null when the process was killed (timeout) or never spawned. Normalized on
+	 * the timeout path rather than taken from `waitpid`: a group SIGKILL is not
+	 * atomic, so the shell can be scheduled after its foreground child is killed
+	 * and before its own signal lands, reap the child and exit(128+9) itself —
+	 * `close` then reports a normal exit of 137 instead of death by signal
+	 * (roughly 1% of timeouts under load, and never when the shell had exec'd
+	 * away, leaving no shell to reap; findings §10.20). Callers should still
+	 * prefer `timedOut`, which says what happened rather than what it looked
+	 * like, but they no longer have to.
+	 */
 	exitCode: number | null;
 	timedOut: boolean;
+	/** The calling turn or child session was cancelled. */
 	aborted?: boolean;
+	/** Output is incomplete and must not be interpreted as a hook response. */
 	outputLimitExceeded?: boolean;
+	/** Set when the child could not be spawned at all. */
 	spawnError?: string;
 	stdout: string;
 	stderr: string;
@@ -128,8 +142,13 @@ const TIMEOUT_BLOCKS: ReadonlySet<CcHookEvent> = new Set(["PreToolUse", "UserPro
  */
 const STDOUT_IS_CONTEXT: ReadonlySet<CcHookEvent> = new Set(["UserPromptSubmit", "SessionStart", "PreCompact"]);
 
+/** A cancelled run: the gating events block, the rest pass. */
+export function cancelledOutcome(event: CcHookEvent): HookOutcome {
+	return TIMEOUT_BLOCKS.has(event) ? { block: { reason: "Hook cancelled" } } : {};
+}
+
 export function interpretHookResult(event: CcHookEvent, run: FinishedRun): HookOutcome {
-	if (run.aborted) return TIMEOUT_BLOCKS.has(event) ? { block: { reason: "Hook cancelled" } } : {};
+	if (run.aborted) return cancelledOutcome(event);
 	if (run.outputLimitExceeded) {
 		const reason = "Hook exceeded its output limit; reduce stdout/stderr to at most 1,000,000 bytes per stream.";
 		return TIMEOUT_BLOCKS.has(event) ? { block: { reason } } : { systemMessage: reason };

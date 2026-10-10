@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { indexLimitStatus, loadableIndexContent, truncateIndex } from "../../extensions/lib/memory.ts";
+import { indexLimitStatus, loadableIndexContent, truncateIndex } from "../../extensions/lib/memory-content.ts";
 
 describe("memory index parsing matches Claude Code's instruction parser", () => {
 	it.each(["\r\n", "\n"])("strips BOM-prefixed frontmatter with %j line endings before applying limits", (newline) => {

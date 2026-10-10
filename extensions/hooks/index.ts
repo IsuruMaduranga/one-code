@@ -55,6 +55,7 @@ import {
 	type CcHookEvent,
 	type HookOutcome,
 	type HookStdinPayload,
+	cancelledOutcome,
 	interpretHookResult,
 } from "./protocol.ts";
 import { type HookCommand, type HooksSource, loadHookSettings } from "./settings.ts";
@@ -66,7 +67,7 @@ import { QueuedDelivery } from "../lib/queued-delivery.ts";
 import { SKILL_INVOCATION_TYPE, type SkillInvocationDetails } from "../skill/invoke.ts";
 import { isNotificationDetails } from "../lib/notifications.ts";
 import { consentDialog } from "../lib/consent-dialogs.ts";
-import { sessionWorkCwd, WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
+import { followWorkCwd } from "../lib/worktree-channel.ts";
 
 /** Claude Code's `hook_additional_context` attachment text (utils/messages.ts). */
 export function hookContextText(event: CcHookEvent, text: string): string {
@@ -109,11 +110,11 @@ interface HookDispatchCtx {
 	sessionEnded?: true;
 }
 
+/** Claude Code's default cap on consecutive Stop-hook continuations in one user turn. */
+const MAX_STOP_CONTINUATIONS = 8;
+
 export default function hooksExtension(pi: ExtensionAPI) {
-	let enteredWorktree: WorktreeLocation | null = null;
-	pi.events.on(WORKTREE_CHANNEL, (data) => {
-		enteredWorktree = data as WorktreeLocation | null;
-	});
+	const workCwd = followWorkCwd(pi.events);
 	let stopHookBlocks = 0;
 	/** Context from UserPromptSubmit / SessionStart / PostCompact hooks, delivered with the next prompt. */
 	let pendingPromptContext: Array<{ event: CcHookEvent; text: string }> = [];
@@ -192,7 +193,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	const basePayload = (ctx: HookDispatchCtx, event: CcHookEvent): HookStdinPayload => ({
 		session_id: ctx.sessionManager.getSessionId(),
 		transcript_path: ctx.sessionManager.getSessionFile() ?? "",
-		cwd: sessionWorkCwd(enteredWorktree, ctx.cwd),
+		cwd: workCwd(ctx.cwd),
 		hook_event_name: event,
 	});
 
@@ -226,7 +227,6 @@ export default function hooksExtension(pi: ExtensionAPI) {
 						signal,
 						timeoutSeconds: hook.timeout,
 						shell: hook.shell,
-						// Config, consent and CLAUDE_PROJECT_DIR stay at the original project.
 						projectDir: ctx.cwd,
 						// SessionEnd is fire-and-forget at shutdown: it must not hold a
 						// one-shot process open. Every other hook is awaited work that
@@ -251,7 +251,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 					return outcome;
 				}),
 			);
-			if (signal?.aborted) return interpretHookResult(event, { exitCode: null, timedOut: false, aborted: true, stdout: "", stderr: "" });
+			if (signal?.aborted) return cancelledOutcome(event);
 			for (const result of outcomes) {
 				// One broken response must not erase another hook's deny or let the
 				// tool run while the other hooks are still deciding.
@@ -634,8 +634,8 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		if (gen !== sessionGen || outcome.preventContinuation || !outcome.block) return;
 		// Claude Code limits repeated Stop blocks to eight continuations. A hook
 		// that ignores stop_hook_active must not run up an unbounded model loop.
-		if (stopHookBlocks >= 8) {
-			notify(ctx, "Stop hook continuation limit reached (8); ending the turn.");
+		if (stopHookBlocks >= MAX_STOP_CONTINUATIONS) {
+			notify(ctx, `Stop hook continuation limit reached (${MAX_STOP_CONTINUATIONS}); ending the turn.`);
 			return;
 		}
 		stopHookBlocks += 1;

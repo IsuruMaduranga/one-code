@@ -49,6 +49,7 @@
 import type { ChildProcess } from "node:child_process";
 import { detachedSpawnOptions, killProcessTree, waitForChildExit } from "../lib/process-tree.ts";
 import { bashSpawn, POWERSHELL_UTF8_PREFIX, powerShellSpawn, type ShellSpawn, spawnShellCommand } from "../lib/shell-spawn.ts";
+import type { FinishedRun } from "./protocol.ts";
 import type { HookShell } from "./settings.ts";
 
 /**
@@ -77,30 +78,8 @@ export function hookShellSpawn(shell: HookShell | undefined): { spec?: ShellSpaw
 	return { spec: resolved.spawn, shell: want };
 }
 
-export interface HookRunResult {
-	/**
-	 * null when the process was killed (timeout) or never spawned. Normalized on
-	 * the timeout path rather than taken from `waitpid`: a group SIGKILL is not
-	 * atomic, so the shell can be scheduled after its foreground child is killed
-	 * and before its own signal lands, reap the child and exit(128+9) itself —
-	 * `close` then reports a normal exit of 137 instead of death by signal
-	 * (roughly 1% of timeouts under load, and never when the shell had exec'd
-	 * away, leaving no shell to reap; findings §10.20). Callers should still
-	 * prefer `timedOut`, which says what happened rather than what it looked
-	 * like, but they no longer have to.
-	 */
-	exitCode: number | null;
-	timedOut: boolean;
-	/** The calling turn or child session was cancelled. */
-	aborted?: boolean;
-	/** Output is incomplete and must not be interpreted as a hook response. */
-	outputLimitExceeded?: boolean;
-	/** Set when the child could not be spawned at all. */
-	spawnError?: string;
-	stdout: string;
-	stderr: string;
-	durationMs: number;
-}
+/** A finished run (`protocol.ts FinishedRun`, field docs there) and how long it took. */
+export type HookRunResult = FinishedRun & { durationMs: number };
 
 export interface HookRunOptions {
 	cwd: string;
@@ -194,7 +173,6 @@ export function runHookCommand(command: string, stdinJson: string, opts: HookRun
 			killProcessTree(child, "SIGKILL");
 		};
 		opts.signal?.addEventListener("abort", onAbort, { once: true });
-		if (opts.signal?.aborted) onAbort();
 
 		const capture = (sink: "stdout" | "stderr") => (chunk: string) => {
 			if (outputLimitExceeded) return;

@@ -95,41 +95,43 @@ async function answerFromPage(
 	const reader = `${choice.model.provider}/${choice.model.id}`;
 
 	try {
-		return await runWithDeadline(async (readerSignal) => {
-			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(choice.model);
-			// Registry auth cannot take a signal; a late resolution must not start a model call.
-			readerSignal.throwIfAborted();
-			if (!auth.ok) return { error: `${reader}: ${auth.error}` };
-			const messages = readerMessages({ prompt, markdown: entry.markdown, url, title: entry.title });
-			// Thinking off unless the model cannot disable it; withReasoningFallback sends
-			// a level up front for catalog-marked models and retries on the 400 for the
-			// rest, memoizing the result so repeated fetches don't re-pay the failure.
-			const result = await runSideCall({
-				kind: "reader",
-				model: choice.model,
-				auth,
-				sessionId: ctx.sessionManager.getSessionId(),
-				context: {
-					systemPrompt: messages.system,
-					messages: [{ role: "user" as const, content: messages.user, timestamp: Date.now() }],
-				},
-				signal: readerSignal,
-				timeoutMs: READER_TIMEOUT_MS,
-				maxTokens: READER_MAX_TOKENS,
-				learnedReasoning,
-				onUsage: recordCall,
-			});
-			if (result.stopReason !== "stop" && result.stopReason !== "length") {
-				return { error: `${reader}: ${result.errorMessage || `the call stopped early (${result.stopReason})`}` };
-			}
-			const answer = result.content
-				.filter((block): block is { type: "text"; text: string } => block.type === "text")
-				.map((block) => block.text)
-				.join("\n")
-				.trim();
-			if (!answer) return { error: `${reader} returned no text` };
-			return { answer, reader, truncated: messages.truncated, cutOff: result.stopReason === "length" };
-		}, { signal, timeoutMs: READER_TIMEOUT_MS, message: "The reader did not answer within 60 seconds." });
+		// Registry auth takes no signal, so it gets the deadline here; runSideCall
+		// bounds each model attempt itself, and a late resolution starts nothing.
+		const auth = await runWithDeadline(() => ctx.modelRegistry.getApiKeyAndHeaders(choice.model), {
+			signal,
+			timeoutMs: READER_TIMEOUT_MS,
+			message: "The reader's credentials did not resolve within 60 seconds.",
+		});
+		if (!auth.ok) return { error: `${reader}: ${auth.error}` };
+		const messages = readerMessages({ prompt, markdown: entry.markdown, url, title: entry.title });
+		// Thinking off unless the model cannot disable it; withReasoningFallback sends
+		// a level up front for catalog-marked models and retries on the 400 for the
+		// rest, memoizing the result so repeated fetches don't re-pay the failure.
+		const result = await runSideCall({
+			kind: "reader",
+			model: choice.model,
+			auth,
+			sessionId: ctx.sessionManager.getSessionId(),
+			context: {
+				systemPrompt: messages.system,
+				messages: [{ role: "user" as const, content: messages.user, timestamp: Date.now() }],
+			},
+			signal,
+			timeoutMs: READER_TIMEOUT_MS,
+			maxTokens: READER_MAX_TOKENS,
+			learnedReasoning,
+			onUsage: recordCall,
+		});
+		if (result.stopReason !== "stop" && result.stopReason !== "length") {
+			return { error: `${reader}: ${result.errorMessage || `the call stopped early (${result.stopReason})`}` };
+		}
+		const answer = result.content
+			.filter((block): block is { type: "text"; text: string } => block.type === "text")
+			.map((block) => block.text)
+			.join("\n")
+			.trim();
+		if (!answer) return { error: `${reader} returned no text` };
+		return { answer, reader, truncated: messages.truncated, cutOff: result.stopReason === "length" };
 	} catch (error) {
 		return { error: `${reader}: ${(error as Error).message}` };
 	}
