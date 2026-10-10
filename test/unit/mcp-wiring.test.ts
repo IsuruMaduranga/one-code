@@ -23,6 +23,7 @@ import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } f
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { CONTEXT_BASELINE_CHANNEL, CONTEXT_RESTORE_CHANNEL } from "../../extensions/lib/context-stack.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { localCommandBlocks } from "../../extensions/lib/local-command.ts";
 
 interface Fixture {
 	tools?: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }>;
@@ -110,6 +111,39 @@ describe("mcp wiring", () => {
 		mcpExtension(fake.pi as never);
 		await fake.fireOne("session_start", { reason: "startup" }, createFakeCtx({ cwd, hasUI: false }));
 	};
+
+	it("records MCP dialog dismissal after the panel closes", async () => {
+		writeUserServers({ demo: { command: "demo-server" } });
+		await boot();
+		const blocks: string[] = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => {
+			const payload = data as { placement?: string; text?: string };
+			if (payload.placement === "user-prepend" && payload.text !== undefined) blocks.push(payload.text);
+		});
+		const ctx = createFakeCtx({ cwd, hasUI: true, mode: "tui" });
+		let close!: () => void;
+		(ctx.ui as { custom: ReturnType<typeof vi.fn> }).custom.mockImplementation(() => new Promise<void>((resolve) => { close = resolve; }));
+		const pending = fake.commands.get("mcp")!.handler("", ctx);
+		expect(blocks).toEqual([]);
+		close();
+		await pending;
+		expect(blocks).toEqual(localCommandBlocks({ name: "mcp", stdout: "MCP dialog dismissed" }));
+		await fake.fire("session_shutdown", {}, ctx);
+	});
+
+	it("records Claude Code's empty-server guidance as the local result", async () => {
+		await boot();
+		const blocks: string[] = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => {
+			const payload = data as { placement?: string; text?: string };
+			if (payload.placement === "user-prepend" && payload.text !== undefined) blocks.push(payload.text);
+		});
+		const ctx = createFakeCtx({ cwd, hasUI: true, mode: "tui" });
+		const stdout = "No MCP servers configured. Run `claude doctor` if this is unexpected — it lists MCP config files that failed validation. Otherwise, run `claude mcp --help` or visit https://code.claude.com/docs/en/mcp to learn more.";
+		await fake.commands.get("mcp")!.handler("", ctx);
+		expect(blocks).toEqual(localCommandBlocks({ name: "mcp", stdout }));
+		expect(ctx._notified).toContainEqual({ message: stdout, type: "info" });
+	});
 
 	it("adoptConnection registers namespaced tools, publishes them, and files the instructions reminder", async () => {
 		writeUserServers({ demo: { command: "demo-server", args: [] } });

@@ -809,11 +809,12 @@ export default function skillExtension(pi: ExtensionAPI) {
 	};
 
 	registerLocalCommand(pi, "skills", {
+		reportsResult: true,
 		description: "View and manage skills (on / name-only / user-only / off)",
 		handler: async (args, ctx) => {
 			if (canShowCustomUi(ctx)) {
 				await openSkillsPanel(ctx);
-				return;
+				return "Skills dialog dismissed";
 			}
 			notifyRpcReadOnly(ctx, "/skills", "change skill states");
 			// Non-interactive fallback: a flat listing with each skill's state.

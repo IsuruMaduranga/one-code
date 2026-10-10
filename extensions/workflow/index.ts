@@ -349,6 +349,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 	};
 
 	registerLocalCommand(pi, "workflows", {
+		reportsResult: true,
 		description: "Open the workflow viewer; list, stop, or inspect runs",
 		argumentHint: "[list|log <run-id>|stop <run-id>]",
 		getArgumentCompletions: (prefix) => {
@@ -360,7 +361,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 			const [action, runId] = args.trim().split(/\s+/);
 			if (!action && canShowCustomUi(ctx)) {
 				await openViewer(ctx, { height: "full" });
-				return;
+				return "Dynamic workflows dialog dismissed";
 			}
 			if (action === "stop" && runId) {
 				const stopped = manager.abort(runId, "stopped via /workflows");

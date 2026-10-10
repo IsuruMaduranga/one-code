@@ -54,6 +54,7 @@ import { type DoctorReport, renderDoctorReport, renderDoctorText, renderSection 
 import { lookupLatestVersion } from "./update-lookup.ts";
 import { applyDoctorKey, decodeDoctorKey, renderDoctorViewer, visibleBodyRows } from "./viewer.ts";
 import { announceArgumentHint } from "../lib/argument-hints.ts";
+import { announceLocalCommand } from "../lib/local-command.ts";
 import { registeredMcpServers } from "../mcp/config.ts";
 import { configMode } from "../lib/config-mode.ts";
 
@@ -247,26 +248,31 @@ export default function doctorExtension(pi: ExtensionAPI) {
 		if (wantFix) await sendFix(ctx, report);
 	};
 
-	const applyPreset = async (name: string, ctx: ExtensionCommandContext): Promise<void> => {
+	const notifyLocalResult = (args: string, ctx: ExtensionCommandContext, stdout: string, type: "info" | "warning" | "error"): void => {
+		announceLocalCommand(pi, { name: "doctor", args, stdout });
+		notifyOrPrint(ctx, stdout, type);
+	};
+
+	const applyPreset = async (name: string, args: string, ctx: ExtensionCommandContext): Promise<void> => {
 		const available = usableModels(ctx);
 		const { presets, unavailable } = computePresets(available, ctx.model);
 		if (unavailable === "no-model") {
-			notifyOrPrint(ctx, "No model is available — connect a provider with /login first.", "warning");
+			notifyLocalResult(args, ctx, "No model is available — connect a provider with /login first.", "warning");
 			return;
 		}
 		if (unavailable === "no-priced-models") {
-			notifyOrPrint(ctx, "No priced models on this provider, so tiers cannot be told apart and no preset can be applied. Pick models by hand with /model or /subagent.", "warning");
+			notifyLocalResult(args, ctx, "No priced models on this provider, so tiers cannot be told apart and no preset can be applied. Pick models by hand with /model or /subagent.", "warning");
 			return;
 		}
 		const preset = findPreset(presets, name);
 		if (!preset) {
-			notifyOrPrint(ctx, `Unknown preset "${name}". Choose one of: ${PRESET_NAMES.join(", ")} (see /doctor presets).`, "error");
+			notifyLocalResult(args, ctx, `Unknown preset "${name}". Choose one of: ${PRESET_NAMES.join(", ")} (see /doctor presets).`, "error");
 			return;
 		}
 		const home = os.homedir();
 		const mainSwitched = !ctx.model || modelSpec(ctx.model) !== modelSpec(preset.main);
 		if (mainSwitched && !(await pi.setModel(preset.main))) {
-			notifyOrPrint(ctx, `Could not switch the main model to ${modelSpec(preset.main)}; nothing was changed.`, "error");
+			notifyLocalResult(args, ctx, `Could not switch the main model to ${modelSpec(preset.main)}; nothing was changed.`, "error");
 			return;
 		}
 		try {
@@ -275,12 +281,13 @@ export default function doctorExtension(pi: ExtensionAPI) {
 			persistClassifierModel(undefined, home);
 		} catch (error) {
 			const switched = mainSwitched ? ` The main model was already switched to ${modelSpec(preset.main)}; /model switches it back.` : "";
-			notifyOrPrint(ctx, `Could not save settings: ${error instanceof Error ? error.message : String(error)}.${switched}`, "error");
+			notifyLocalResult(args, ctx, `Could not save settings: ${error instanceof Error ? error.message : String(error)}.${switched}`, "error");
 			return;
 		}
 		pi.events.emit(SUBAGENT_DEFAULT_CHANGED_CHANNEL, {});
 		pi.events.emit(CLASSIFIER_SETTING_CHANGED_CHANNEL, {});
-		notifyOrPrint(
+		notifyLocalResult(
+			args,
 			ctx,
 			[
 				`Applied the ${preset.label} preset:`,
@@ -312,19 +319,19 @@ export default function doctorExtension(pi: ExtensionAPI) {
 			const [verb, ...rest] = args.trim().split(/\s+/).filter(Boolean);
 			if (verb === "preset") {
 				if (rest.length === 0) {
-					notifyOrPrint(ctx, `Which preset? /doctor preset <${PRESET_NAMES.join("|")}> — /doctor presets shows what each would pick.`, "warning");
+					notifyLocalResult(args, ctx, `Which preset? /doctor preset <${PRESET_NAMES.join("|")}> — /doctor presets shows what each would pick.`, "warning");
 					return;
 				}
-				await applyPreset(rest.join(" "), ctx);
+				await applyPreset(rest.join(" "), args, ctx);
 				return;
 			}
 			if (verb === "presets") {
 				const section = presetsSection(computePresets(usableModels(ctx), ctx.model), ctx.model);
-				notifyOrPrint(ctx, renderSection(section, { width: 100 }).join("\n"), "info");
+				notifyLocalResult(args, ctx, renderSection(section, { width: 100 }).join("\n"), "info");
 				return;
 			}
 			if (verb && verb !== "report") {
-				notifyOrPrint(ctx, `Unknown /doctor argument "${verb}". Use /doctor, /doctor report, /doctor presets, or /doctor preset <name>.`, "error");
+				notifyLocalResult(args, ctx, `Unknown /doctor argument "${verb}". Use /doctor, /doctor report, /doctor presets, or /doctor preset <name>.`, "error");
 				return;
 			}
 			// Bare `/doctor` is the checkup (Claude Code parity). Without a model it
@@ -336,12 +343,16 @@ export default function doctorExtension(pi: ExtensionAPI) {
 				await sendFix(ctx, report);
 				return;
 			}
-			if (checkup) notifyOrPrint(ctx, "No model is available, so the checkup cannot run; showing the setup report instead. Connect a provider with /login, then rerun /doctor.", "warning");
+			const warning = checkup ? "No model is available, so the checkup cannot run; showing the setup report instead. Connect a provider with /login, then rerun /doctor." : "";
+			const stdout = renderDoctorText(report, 100);
+			// The panel can submit the checkup prompt; queue its local result first.
+			announceLocalCommand(pi, { name: "doctor", args, stdout: warning ? `${warning}\n${stdout}` : stdout });
+			if (warning) notifyOrPrint(ctx, warning, "warning");
 			if (canShowCustomUi(ctx)) {
 				await showPanel(ctx, report);
 				return;
 			}
-			notifyOrPrint(ctx, renderDoctorText(report, 100), report.ready ? "info" : "warning");
+			notifyOrPrint(ctx, stdout, report.ready ? "info" : "warning");
 		},
 	});
 }

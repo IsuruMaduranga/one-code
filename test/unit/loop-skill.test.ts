@@ -1,7 +1,8 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
 import {
 	AUTONOMOUS_LOOP,
 	AUTONOMOUS_LOOP_DYNAMIC,
@@ -16,6 +17,7 @@ import { AUTONOMOUS_PREAMBLE, AUTONOMOUS_PREAMBLE_PERSISTENT } from "../../exten
 import { autonomousPreamble, loopSkillPrompt } from "../../extensions/background/loop-skill.ts";
 
 const dirs: string[] = [];
+afterEach(() => vi.unstubAllEnvs());
 afterAll(() => {
 	for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
 });
@@ -140,11 +142,47 @@ describe("resolveLoopFire (Claude Code's sentinel expansion)", () => {
 		}
 	});
 
-	it("finds ~/loop.md after the project's, and caps a long file at a line break with Claude Code's warning", () => {
+	it("finds ~/.claude/loop.md after the project's, and caps a long file at a line break with Claude Code's warning", () => {
 		const cwd = tempDir();
-		writeFileSync(join(home, "loop.md"), `${"a".repeat(LOOP_FILE_CAP - 5)}\n${"b".repeat(100)}`);
+		const home = tempDir();
+		mkdirSync(join(home, ".claude"));
+		const file = join(home, ".claude", "loop.md");
+		writeFileSync(file, `${"a".repeat(LOOP_FILE_CAP - 5)}\n${"b".repeat(100)}`);
 		const found = readLoopFile(cwd, home)!;
-		expect(found.path).toBe(join(home, "loop.md"));
+		expect(found.path).toBe(file);
 		expect(found.content).toBe(`${"a".repeat(LOOP_FILE_CAP - 5)}\n\n> WARNING: loop.md was truncated to ${LOOP_FILE_CAP} bytes. Keep the task list concise.`);
+	});
+
+	it("honors CLAUDE_CONFIG_DIR, preferring the project's file and falling back when it is empty", () => {
+		const cwd = tempDir();
+		const home = tempDir();
+		const config = tempDir();
+		vi.stubEnv("CLAUDE_CONFIG_DIR", config);
+		writeFileSync(join(config, "loop.md"), "user tasks");
+		writeFileSync(join(home, "loop.md"), "wrong home tasks");
+		mkdirSync(join(cwd, ".claude"));
+		const project = join(cwd, ".claude", "loop.md");
+		writeFileSync(project, "project tasks");
+		expect(readLoopFile(cwd, home)).toEqual({ path: project, content: "project tasks" });
+		writeFileSync(project, " \n");
+		expect(readLoopFile(cwd, home)).toEqual({ path: join(config, "loop.md"), content: "user tasks" });
+	});
+
+	it("does not read ~/loop.md", () => {
+		const home = tempDir();
+		writeFileSync(join(home, "loop.md"), "not a Claude Code loop file");
+		expect(readLoopFile(tempDir(), home)).toBeNull();
+	});
+
+	it.each([false, true])("uses One Code's user config in independent mode (redirected: %s)", (redirected) => {
+		resetConfigModeForTest("independent");
+		const cwd = tempDir();
+		const home = tempDir();
+		const config = redirected ? tempDir() : join(home, ".onecode");
+		if (!redirected) mkdirSync(config);
+		vi.stubEnv("ONECODE_STATE_DIR", redirected ? config : "");
+		vi.stubEnv("CLAUDE_CONFIG_DIR", tempDir());
+		writeFileSync(join(config, "loop.md"), "independent tasks");
+		expect(readLoopFile(cwd, home)).toEqual({ path: join(config, "loop.md"), content: "independent tasks" });
 	});
 });

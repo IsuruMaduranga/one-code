@@ -147,6 +147,7 @@ export default function effortExtension(pi: ExtensionAPI) {
 
 	/** Apply a chosen stop and report what actually took effect. */
 	const applyChoice = (choice: EffortChoice, ctx: ExtensionContext, asDefault = true): string => {
+		const wasUltracode = ultracodeActive;
 		const wanted = thinkingLevelFor(choice);
 		pi.setThinkingLevel(wanted);
 		const actual = pi.getThinkingLevel();
@@ -170,7 +171,7 @@ export default function effortExtension(pi: ExtensionAPI) {
 			const error = persist(ctx, choice);
 			if (error) return report(ctx, error, true);
 		}
-		if (isPersistedEffort(actual) || actual === "max") return report(ctx, effortSetMessage(actual, saved));
+		if (isPersistedEffort(actual) || actual === "max") return report(ctx, `${effortSetMessage(actual, saved)}${wasUltracode ? " · Ultracode off" : ""}`);
 		return report(ctx, `Effort: ${actual}${note}`);
 	};
 
@@ -215,7 +216,8 @@ export default function effortExtension(pi: ExtensionAPI) {
 			};
 		});
 
-		if (chosen) return applyChoice(chosen.choice, ctx, chosen.asDefault);
+		if (!chosen) return "Cancelled";
+		return applyChoice(chosen.choice, ctx, chosen.asDefault);
 	};
 
 	registerLocalCommand(pi, "effort", {

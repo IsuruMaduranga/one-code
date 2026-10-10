@@ -2022,7 +2022,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			);
 			return;
 		}
-		if (approved.length === 0 && changes.length === 0) return;
+		if (approved.length === 0 && changes.length === 0) {
+			if (command === "permissions") announceLocalCommand(pi, { name: command, args, stdout: "Permissions dialog dismissed" });
+			return;
+		}
 		const stdout = [...(approved.length > 0 ? [`Approved ${displays.join(", ")}`] : []), ...changes].join("\n");
 		announceLocalCommand(pi, { name: command, args, stdout });
 		// The grant message rides with the breadcrumb on the next prompt; no turn starts.
