@@ -16,6 +16,7 @@
  */
 
 import os from "node:os";
+import { isDeepStrictEqual } from "node:util";
 import { CONFIG_DIR_NAME, getAgentDir, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
@@ -89,7 +90,7 @@ const piMcpConfigs = (cwd: string) => piMcpConfigPaths(getAgentDir(), cwd, CONFI
 export default function mcpExtension(pi: ExtensionAPI) {
 	const connections = new Map<string, Connection>();
 	let failures: FailedConnection[] = [];
-	const registered = new Set<string>();
+	const registered = new Map<string, { server: string; tool: string }>();
 	let servers: McpServer[] = [];
 	// http servers that returned a 401 with no stored tokens — authNeeded via OAuth,
 	// distinct from a missing-env authNeeded (which Authenticate cannot fix).
@@ -145,8 +146,12 @@ export default function mcpExtension(pi: ExtensionAPI) {
 				});
 				continue;
 			}
-			if (registered.has(name)) {
-				// Two tools sanitise to one name (`a-b` and `a_b`, or a server
+			const owner = registered.get(name);
+			// An unchanged tool on reconnect keeps its exact definition and loaded
+			// state. Only a different raw server/tool pair is a name collision.
+			if (owner?.server === connection.server.name && owner.tool === tool.name) continue;
+			if (owner || pi.getAllTools().some((existing) => existing.name === name)) {
+				// Two tools sanitise to one name (`a.b` and `a_b`, or a server
 				// reconnecting under a stale registration). Skipping silently would
 				// make the second tool unreachable with no trace; record it where
 				// the connection summary reports it.
@@ -156,7 +161,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 				});
 				continue;
 			}
-			registered.add(name);
+			registered.set(name, { server: connection.server.name, tool: tool.name });
 
 			const def: ToolDefinition = {
 				name,
@@ -164,7 +169,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 				...ccToolRenderers(`${connection.server.name}: ${tool.name}`),
 				description: capDescription(tool.description) ?? `MCP tool "${tool.name}" from server "${connection.server.name}".`,
 				parameters: jsonSchemaToTypeBox(tool.inputSchema),
-				async execute(toolCallId, params, _signal, _onUpdate, ctx) {
+				async execute(toolCallId, params, signal, _onUpdate, ctx) {
 					const live = connections.get(connection.server.name);
 					if (!live) {
 						return {
@@ -173,9 +178,21 @@ export default function mcpExtension(pi: ExtensionAPI) {
 							isError: true,
 						};
 					}
+					const current = live.tools.find((candidate) => candidate.name === tool.name);
+					if (!current || !isDeepStrictEqual(current.inputSchema, tool.inputSchema)) {
+						return {
+							content: [{ type: "text", text: !current
+								? `MCP server "${connection.server.name}" no longer exposes tool "${tool.name}".`
+								: `MCP tool "${name}" changed its input schema. Run /reload to load the new definition; this call was not sent.` }],
+							details: {} as Record<string, unknown>,
+							isError: true,
+						};
+					}
 					try {
-						const result = await callTool(live, tool.name, (params ?? {}) as Record<string, unknown>);
-						const { text, images } = describeContent(result.content as McpContentBlock[] | undefined, connection.server.name);
+						const result = await callTool(live, tool.name, (params ?? {}) as Record<string, unknown>, signal);
+						const { text: contentText, images } = describeContent(result.content as McpContentBlock[] | undefined, connection.server.name);
+						const structuredText = result.structuredContent !== undefined ? JSON.stringify(result.structuredContent, null, 2) : "";
+						const text = [contentText, structuredText].filter(Boolean).join("\n");
 						return {
 							content: [
 								{
@@ -249,9 +266,29 @@ export default function mcpExtension(pi: ExtensionAPI) {
 			});
 			emitInstructions();
 		};
+		let previousTools = connection.tools;
+		connection.onToolsChanged = (error) => {
+			if (!alive() || connection.closing || connections.get(server.name) !== connection) return;
+			if (error) {
+				failures.push({ server, error: error.message });
+				pi.events.emit(REMINDER_CHANNEL, { text: `MCP server "${server.name}" could not refresh its tool list: ${error.message}` });
+				return;
+			}
+			const unavailable = previousTools.filter((old) => {
+				const current = connection.tools.find((tool) => tool.name === old.name);
+				return !current || !isDeepStrictEqual(current.inputSchema, old.inputSchema);
+			});
+			previousTools = connection.tools;
+			registerToolsFor(connection);
+			if (unavailable.length > 0) {
+				pi.events.emit(REMINDER_CHANNEL, {
+					text: `MCP server "${server.name}" removed or changed these tools: ${unavailable.map((tool) => namespacedToolName(server.name, tool.name)).join(", ")}. Their old definitions cannot be used. Run /reload to refresh changed schemas.`,
+				});
+			}
+		};
 		registerToolsFor(connection);
 		for (const warning of connection.warnings) failures.push({ server, error: warning });
-		if (connection.resources.length > 0) registerResourceTools();
+		if (connection.resources.length > 0 || connection.resourceTemplates?.length) registerResourceTools();
 	};
 
 	const connectOne = async (server: McpServer): Promise<void> => {
@@ -439,12 +476,17 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		if (resourceToolsRegistered) return;
 		resourceToolsRegistered = true;
 
-		pi.registerTool({
+		const registerResourceTool: ExtensionAPI["registerTool"] = (definition) => {
+			pi.registerTool(definition);
+			sharedTools.push(definition as ToolDefinition);
+		};
+
+		registerResourceTool({
 			name: "list_mcp_resources",
 			label: "MCP Resources",
 			...ccToolRenderers("MCP Resources"),
 			description:
-				"List resources exposed by connected MCP servers. Resources are readable documents or data the server offers, addressed by uri.",
+				"List resources and URI templates exposed by connected MCP servers. Resources are readable documents or data the server offers, addressed by uri. Substitute template variables to construct a resource uri.",
 			parameters: Type.Object({
 				server: Type.Optional(Type.String({ description: "Limit to one server by name" })),
 			}),
@@ -472,6 +514,9 @@ export default function mcpExtension(pi: ExtensionAPI) {
 							`${connection.server.name} ${resource.uri}${resource.name ? ` — ${resource.name}` : ""}${resource.description ? `: ${resource.description}` : ""}`,
 						);
 					}
+					for (const template of connection.resourceTemplates ?? []) {
+						lines.push(`${connection.server.name} ${template.uriTemplate} (URI template)${template.name ? ` — ${template.name}` : ""}${template.description ? `: ${template.description}` : ""}`);
+					}
 				}
 				return {
 					content: [
@@ -485,7 +530,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 			},
 		});
 
-		pi.registerTool({
+		registerResourceTool({
 			name: "read_mcp_resource",
 			label: "Read MCP Resource",
 			...ccToolRenderers("Read MCP Resource"),
@@ -494,11 +539,11 @@ export default function mcpExtension(pi: ExtensionAPI) {
 				server: Type.String({ description: "Server name that owns the resource" }),
 				uri: Type.String({ description: "Resource uri" }),
 			}),
-			async execute(toolCallId, params, _signal, _onUpdate, ctx) {
+			async execute(toolCallId, params, signal, _onUpdate, ctx) {
 				const connection = connections.get(params.server);
 				if (!connection) return unknownServerError(params.server);
 				try {
-					const result = await readResource(connection, params.uri);
+					const result = await readResource(connection, params.uri, signal);
 					const text = describeResourceContents(result.contents as McpResourceContents[] | undefined);
 					return {
 						content: [
@@ -519,7 +564,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 			},
 		});
 
-		pi.registerTool({
+		registerResourceTool({
 			name: "read_mcp_resource_dir",
 			label: "List MCP Resource Directory",
 			...ccToolRenderers("List MCP Resource Directory"),
@@ -529,11 +574,11 @@ export default function mcpExtension(pi: ExtensionAPI) {
 				server: Type.String({ description: "Server name that owns the directory" }),
 				uri: Type.String({ description: "The directory resource uri to list" }),
 			}),
-			async execute(toolCallId, params, _signal, _onUpdate, ctx) {
+			async execute(toolCallId, params, signal, _onUpdate, ctx) {
 				const connection = connections.get(params.server);
 				if (!connection) return unknownServerError(params.server);
 				try {
-					const result = await readResourceDir(connection, params.uri);
+					const result = await readResourceDir(connection, params.uri, signal);
 					const entries = (result.resources ?? result.entries ?? []) as Array<{ uri?: string; name?: string; mimeType?: string }>;
 					const lines = entries.map((e) => `${e.uri ?? "(no uri)"}${e.name ? ` — ${e.name}` : ""}${e.mimeType ? ` (${e.mimeType})` : ""}`);
 					return {
@@ -558,6 +603,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		for (const name of ["list_mcp_resources", "read_mcp_resource", "read_mcp_resource_dir"]) {
 			pi.events.emit(DEFER_CHANNEL, { name, keywords: ["mcp", "resource", "document", "uri", "directory"] });
 		}
+		pi.events.emit(MCP_TOOLS_CHANNEL, { tools: [...sharedTools] });
 	};
 
 	pi.on("session_start", async (_event, ctx) => {

@@ -11,7 +11,7 @@
  * own `.claude.json`, so results don't depend on the real developer machine's
  * MCP config or installed plugins.
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -210,6 +210,115 @@ describe("mcp wiring", () => {
 		};
 		expect(result.isError).toBe(false);
 		expect(result.content[0].text).toBe('demo/foo called with {"x":1}');
+	});
+
+	it("registers changed tool lists without rewriting existing definitions or message one", async () => {
+		writeUserServers({ demo: { command: "demo-server" } });
+		state.fixtures.set("demo", { tools: [{ name: "foo" }] });
+		const reminders: Array<{ key?: string; text?: string }> = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => reminders.push(data as typeof reminders[number]));
+		await boot();
+		await fake.fire("context", { messages: [] });
+		reminders.length = 0;
+		const original = fake.tools.get("mcp__demo__foo");
+		const live = await vi.mocked(mcpClient.connect).mock.results.at(-1)!.value;
+		live.tools = [{ name: "foo" }, { name: "late" }];
+		live.onToolsChanged?.();
+		expect(fake.tools.has("mcp__demo__late")).toBe(true);
+		expect(fake.tools.get("mcp__demo__foo")).toBe(original);
+		expect(reminders.some((notice) => notice.key)).toBe(false);
+		live.tools = [{ name: "late" }];
+		live.onToolsChanged?.();
+		const callsBefore = vi.mocked(mcpClient.callTool).mock.calls.length;
+		const result = await original!.execute("removed", {}, undefined, undefined, createFakeCtx({ cwd })) as { isError: boolean; content: Array<{ text: string }> };
+		expect(result.isError).toBe(true);
+		expect(result.content[0].text).toContain("no longer exposes");
+		expect(vi.mocked(mcpClient.callTool).mock.calls).toHaveLength(callsBefore);
+		expect(reminders.map((notice) => notice.text).join("\n")).toContain("foo");
+	});
+
+	it("refuses a changed input schema rather than executing a stale definition after reconnect", async () => {
+		writeUserServers({ demo: { command: "demo-server" } });
+		state.fixtures.set("demo", { tools: [{ name: "foo", inputSchema: { type: "object", properties: { old: { type: "string" } } } }] });
+		await boot();
+		const live = await vi.mocked(mcpClient.connect).mock.results.at(-1)!.value;
+		live.tools = [{ name: "foo", inputSchema: { type: "object", properties: { new: { type: "number" } } } }];
+		live.onToolsChanged?.();
+		const callsBefore = vi.mocked(mcpClient.callTool).mock.calls.length;
+		const result = await fake.tools.get("mcp__demo__foo")!.execute("changed", {}, undefined, undefined, createFakeCtx({ cwd })) as { isError: boolean; content: Array<{ text: string }> };
+		expect(result.isError).toBe(true);
+		expect(result.content[0].text).toContain("/reload");
+		expect(vi.mocked(mcpClient.callTool).mock.calls).toHaveLength(callsBefore);
+	});
+
+	it("forwards tool cancellation to the MCP client", async () => {
+		writeUserServers({ demo: { command: "demo-server" } });
+		state.fixtures.set("demo", { tools: [{ name: "foo" }], resources: [{ uri: "demo://readme" }] });
+		await boot();
+		const signal = new AbortController().signal;
+		await fake.tools.get("mcp__demo__foo")!.execute("abort-tool", {}, signal, undefined, createFakeCtx({ cwd }));
+		expect(vi.mocked(mcpClient.callTool).mock.calls.at(-1)?.[3]).toBe(signal);
+		const read = vi.spyOn(mcpClient, "readResource").mockResolvedValue({ contents: [] });
+		const directory = vi.spyOn(mcpClient, "readResourceDir").mockResolvedValue({ entries: [] });
+		try {
+			await fake.tools.get("read_mcp_resource")!.execute("abort-read", { server: "demo", uri: "demo://readme" }, signal, undefined, createFakeCtx({ cwd }));
+			await fake.tools.get("read_mcp_resource_dir")!.execute("abort-dir", { server: "demo", uri: "demo://" }, signal, undefined, createFakeCtx({ cwd }));
+			expect(read.mock.calls[0]?.[2]).toBe(signal);
+			expect(directory.mock.calls[0]?.[2]).toBe(signal);
+		} finally {
+			read.mockRestore();
+			directory.mockRestore();
+		}
+	});
+
+	it("preserves structured-only MCP results instead of reporting no output", async () => {
+		writeUserServers({ demo: { command: "demo-server" } });
+		state.fixtures.set("demo", { tools: [{ name: "foo" }] });
+		state.callToolResult = () => ({ content: [], structuredContent: { answer: 42, records: ["important"] }, isError: true });
+		await boot();
+		const result = await fake.tools.get("mcp__demo__foo")!.execute("structured", {}, undefined, undefined, createFakeCtx({ cwd })) as { content: Array<{ text: string }>; isError: boolean };
+		expect(JSON.parse(result.content[0].text)).toEqual({ answer: 42, records: ["important"] });
+		expect(result.isError).toBe(true);
+	});
+
+	it("preserves structured data alongside text and persists the entire large result", async () => {
+		writeUserServers({ demo: { command: "demo-server" } });
+		state.fixtures.set("demo", { tools: [{ name: "foo" }] });
+		const data = { records: "record\n".repeat(12000), final: "STRUCTURED-END" };
+		state.callToolResult = () => ({ content: [{ type: "text", text: "Summary only." }], structuredContent: data });
+		await boot();
+		const ctx = createFakeCtx({ cwd, sessionManager: { getSessionDir: () => cwd } });
+		const result = await fake.tools.get("mcp__demo__foo")!.execute("large-structured", {}, undefined, undefined, ctx) as { content: Array<{ text: string }> };
+		expect(result.content[0].text).toContain("<persisted-output>");
+		const saved = readFileSync(join(cwd, "tool-results", "large-structured.txt"), "utf8");
+		expect(saved).toContain("Summary only.");
+		expect(saved).toContain(JSON.stringify(data, null, 2));
+	});
+
+	it("shares resource helpers with child sessions, including servers with no tools", async () => {
+		writeUserServers({ demo: { command: "demo-server" } });
+		state.fixtures.set("demo", { resources: [{ uri: "demo://readme" }] });
+		const published: Array<{ tools: Array<{ name: string }>; settled?: boolean }> = [];
+		fake.events.on(MCP_TOOLS_CHANNEL, (data) => published.push(data as typeof published[number]));
+		await boot();
+		expect(published.at(-1)?.tools.map((tool) => tool.name)).toEqual(expect.arrayContaining([
+			"list_mcp_resources", "read_mcp_resource", "read_mcp_resource_dir",
+		]));
+	});
+
+	it("does not defer or share an MCP definition shadowed by another extension", async () => {
+		writeUserServers({ demo: { command: "demo-server" } });
+		state.fixtures.set("demo", { tools: [{ name: "foo" }] });
+		const original = { name: "mcp__demo__foo", execute: vi.fn(async () => ({ content: [] })) };
+		fake.tools.set(original.name, original);
+		fake.pi.getAllTools = () => [original];
+		const deferred: unknown[] = [];
+		const published: Array<{ tools: Array<{ name: string }> }> = [];
+		fake.events.on("one-code:defer-tool", (data) => deferred.push(data));
+		fake.events.on(MCP_TOOLS_CHANNEL, (data) => published.push(data as typeof published[number]));
+		await boot();
+		expect(deferred).toEqual([]);
+		expect(published.at(-1)?.tools).toEqual([]);
 	});
 
 	it("registers nullable arguments and passes explicit nulls through runtime validation to the server", async () => {

@@ -52,6 +52,8 @@ export interface StdioServer {
 
 export interface HttpServer {
 	kind: "http";
+	/** Legacy HTTP+SSE when explicitly configured; otherwise Streamable HTTP. */
+	transport?: "sse";
 	name: string;
 	url: string;
 	headers?: Record<string, string>;
@@ -162,6 +164,7 @@ export function parseServer(
 		const referenced = referencedEnvVars(raw.url, ...Object.values(headers ?? {}));
 		return {
 			kind: "http",
+			...(raw.type === "sse" ? { transport: "sse" as const } : {}),
 			name,
 			url: expandEnv(raw.url, env),
 			headers: headers
@@ -177,10 +180,12 @@ export function parseServer(
 		const args = Array.isArray(raw.args)
 			? raw.args.filter((a): a is string => typeof a === "string").map((a) => home(expandEnv(a, env)))
 			: [];
-		const cwd = pi && typeof raw.cwd === "string" && raw.cwd.trim() ? resolve(pi.cwd, home(expandEnv(raw.cwd, env))) : undefined;
+		const rawCwd = pi && typeof raw.cwd === "string" && raw.cwd.trim() ? raw.cwd : undefined;
+		const cwd = rawCwd && pi ? resolve(pi.cwd, home(expandEnv(rawCwd, env))) : undefined;
 		const rawEnv = asStringRecord(raw.env);
 		const missing = [
 			...missingEnvVars(raw.command, env),
+			...missingEnvVars(rawCwd ?? "", env),
 			...(Array.isArray(raw.args) ? raw.args : [])
 				.filter((a): a is string => typeof a === "string")
 				.flatMap((a) => missingEnvVars(a, env)),
@@ -188,6 +193,7 @@ export function parseServer(
 		];
 		const referenced = referencedEnvVars(
 			raw.command,
+			rawCwd ?? "",
 			...(Array.isArray(raw.args) ? raw.args.filter((a): a is string => typeof a === "string") : []),
 			...Object.values(rawEnv ?? {}),
 		);

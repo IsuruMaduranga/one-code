@@ -112,12 +112,13 @@ export interface PermissionRule {
  * names may carry `-` and `.` — MCP tools keep their servers' hyphens
  * (`mcp__github__delete-repo`), and a rule naming one used to be dropped
  * silently (review P5) — and `:`, the plugin MCP namespace
- * (`mcp__plugin:name:server__tool`).
+ * (`mcp__plugin:name:server__tool`). MCP rules also accept the server-wide
+ * `mcp__server__*` spelling; no other tool-name wildcards are supported.
  */
 export function parseRule(raw: string): PermissionRule | undefined {
 	const trimmed = raw.trim();
 	if (!trimmed) return undefined;
-	const match = trimmed.match(/^([A-Za-z0-9_.:-]+)(?:\((.*)\))?$/s);
+	const match = trimmed.match(/^(mcp__[A-Za-z0-9_.:-]+__\*|[A-Za-z0-9_.:-]+)(?:\((.*)\))?$/s);
 	if (!match) return undefined;
 	const [, name, pattern] = match;
 	return { raw: trimmed, tool: normalizeToolName(name), pattern: pattern || undefined };
@@ -664,9 +665,10 @@ export function ruleMatches(rule: PermissionRule, toolName: string, subject: str
 
 /**
  * Whether a rule's tool covers a call's tool: the same name, or Claude Code's
- * server-wide MCP form — `mcp__github` covers every `mcp__github__*` tool, and
- * `mcp__plugin:x:server` the plugin-namespaced form. A rule naming a specific
- * tool (`mcp__github__delete_repo`, two `__` groups) stays exact. Until
+ * server-wide MCP forms — `mcp__github` and `mcp__github__*` cover every tool
+ * on that server, and `mcp__plugin:x:server` is the plugin-namespaced form.
+ * A rule naming a specific tool (`mcp__github__delete_repo`, two `__` groups)
+ * stays exact. Until
  * 2026-09-05 the server-wide spelling, the natural way to keep an agent off a
  * server, matched nothing (PERMISSIONS-REVIEW-2026-09-05 M3).
  */
@@ -674,8 +676,10 @@ export function ruleCoversTool(ruleTool: string, toolName: string): boolean {
 	const tool = normalizeToolName(toolName);
 	if (ruleTool === tool) return true;
 	if (!ruleTool.startsWith("mcp__")) return false;
-	const server = ruleTool.slice("mcp__".length);
-	return server.length > 0 && !server.includes("__") && tool.startsWith(`${ruleTool}__`);
+	const wildcard = ruleTool.endsWith("__*");
+	const prefix = wildcard ? ruleTool.slice(0, -3) : ruleTool;
+	const server = prefix.slice("mcp__".length);
+	return server.length > 0 && (wildcard || !server.includes("__")) && tool.startsWith(`${prefix}__`);
 }
 
 /** Risk tier drives the unmatched-rule default. */
