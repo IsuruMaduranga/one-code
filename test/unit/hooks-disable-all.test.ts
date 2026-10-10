@@ -54,11 +54,19 @@ describe("hook settings: disableAllHooks", () => {
 		expect(loaded).not.toHaveProperty("disabled");
 	});
 
-	it.each(["user", "project", "local"] as const)("a %s disable preserves only managed hooks", (scope) => {
-		write(scope, true);
+	it("a user disable preserves only managed hooks", () => {
+		write("user", true);
 		const loaded = loadHookSettings(claudeDir, cwd);
 		expect(loaded.sources.map((source) => source.scope)).toEqual(["managed"]);
 		expect(loaded).toHaveProperty("disabled", "unmanaged");
+	});
+
+	// A cloned repository must not switch off the user's own guard hooks.
+	it.each(["project", "local"] as const)("a %s disable drops only the repository's own hooks", (scope) => {
+		write(scope, true);
+		const loaded = loadHookSettings(claudeDir, cwd);
+		expect(loaded.sources.map((source) => source.scope)).toEqual(["user", "managed"]);
+		expect(loaded).not.toHaveProperty("disabled");
 	});
 
 	it("managed true disables every configured source despite project and local false", () => {
@@ -78,20 +86,28 @@ describe("hook settings: disableAllHooks", () => {
 		expect(loaded).not.toHaveProperty("disabled");
 	});
 
-	it("project false overrides user true, and local true overrides project false", () => {
+	it("project false does not re-enable hooks a user disable turned off", () => {
 		write("user", true);
 		write("project", false);
-		expect(loadHookSettings(claudeDir, cwd)).not.toHaveProperty("disabled");
-		write("local", true);
-		resetHookSettingsCache();
+		write("local", false);
 		expect(loadHookSettings(claudeDir, cwd)).toHaveProperty("disabled", "unmanaged");
 	});
 
+	it("local true overrides project false for the repository's own hooks", () => {
+		write("project", false);
+		write("local", true);
+		expect(loadHookSettings(claudeDir, cwd).sources.map((source) => source.scope)).toEqual(["user", "managed"]);
+	});
+
 	it("reads disabling flags from settings files without a hooks block", () => {
-		write("local", true, false);
+		write("user", true, false);
 		const loaded = loadHookSettings(claudeDir, cwd);
 		expect(loaded.sources.map((source) => source.scope)).toEqual(["managed"]);
 		expect(loaded).toHaveProperty("disabled", "unmanaged");
+		write("user", undefined, false);
+		write("local", true, false);
+		resetHookSettingsCache();
+		expect(loadHookSettings(claudeDir, cwd).sources.map((source) => source.scope)).toEqual(["managed"]);
 	});
 
 	it("retains disabling flags across cached reads and reloads them after mtime changes", () => {

@@ -24,9 +24,11 @@ stored in `~/.onecode/hooks/project-approvals.json` with a hash of the hook
 configuration, so any change asks again. Declining is remembered for the
 session only. User, managed, and plugin hooks never prompt.
 
-Set `disableAllHooks: true` in settings to skip user, project, and plugin
-hooks. Managed hooks still run unless managed settings also disable hooks.
-The most specific boolean setting wins, with managed settings taking precedence.
+Set `disableAllHooks: true` in your user settings to skip user, project, and
+plugin hooks. Managed hooks still run unless managed settings also disable
+hooks, and a managed value always takes precedence. In a project's
+`.claude/settings.json` or `.claude/settings.local.json`, the setting skips only
+that project's own hooks, so a repository you clone can't switch off yours.
 
 Only command hooks are supported. Hook entries of type `http`, `prompt`, or
 `agent` are skipped with a diagnostic.

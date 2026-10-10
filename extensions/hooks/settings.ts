@@ -175,22 +175,30 @@ function readHooksFile(path: string, diagnostics: string[]): CacheEntry | undefi
 export function loadHookSettings(claudeDir: string, cwd: string): LoadedHooks {
 	const diagnostics: string[] = [];
 	const sources: HooksSource[] = [];
-	let unmanagedDisableAllHooks: boolean | undefined;
+	let userDisableAllHooks: boolean | undefined;
 	let managedDisableAllHooks: boolean | undefined;
+	let repoDisableAllHooks: boolean | undefined;
 	for (const { scope, path } of hookSettingsPaths(claudeDir, cwd)) {
 		const entry = readHooksFile(path, diagnostics);
 		if (!entry) continue;
 		if (entry.disableAllHooks !== undefined) {
 			if (scope === "managed") managedDisableAllHooks = entry.disableAllHooks;
-			else unmanagedDisableAllHooks = entry.disableAllHooks;
+			else if (scope === "user") userDisableAllHooks = entry.disableAllHooks;
+			else repoDisableAllHooks = entry.disableAllHooks;
 		}
 		if (Object.keys(entry.config).length > 0) sources.push({ scope, path, config: entry.config });
 	}
 	// Collection order stays stable, but managed booleans have highest precedence.
 	// A non-managed disable must not turn off organization-managed hooks.
 	if (managedDisableAllHooks === true) return { sources: [], diagnostics, disabled: "all" };
-	if ((managedDisableAllHooks ?? unmanagedDisableAllHooks) === true) {
+	if ((managedDisableAllHooks ?? userDisableAllHooks) === true) {
 		return { sources: sources.filter((source) => source.scope === "managed"), diagnostics, disabled: "unmanaged" };
+	}
+	// A repository's flag reaches only its own hooks: a cloned repo must not
+	// switch off the user's guard hooks, as project settings never set autoMode.
+	if (managedDisableAllHooks === undefined && repoDisableAllHooks === true) {
+		diagnostics.push("disableAllHooks in project settings turns off only the project's own hooks");
+		return { sources: sources.filter((source) => source.scope === "user" || source.scope === "managed"), diagnostics };
 	}
 	return { sources, diagnostics };
 }
