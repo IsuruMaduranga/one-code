@@ -146,6 +146,21 @@ describe("mcp wiring", () => {
 		expect(ctx._notified).toContainEqual({ message: stdout, type: "info" });
 	});
 
+	it("records the RPC read-only notice with the text-mode status listing", async () => {
+		writeUserServers({ demo: { command: "demo-server", args: [] } });
+		await boot();
+		const blocks: string[] = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => {
+			const payload = data as { placement?: string; text?: string };
+			if (payload.placement === "user-prepend" && payload.text !== undefined) blocks.push(payload.text);
+		});
+		const ctx = createFakeCtx({ cwd, hasUI: true, mode: "rpc" });
+		await fake.commands.get("mcp")!.handler("", ctx);
+		const shown = (ctx._notified as Array<{ message: string }>).map((n) => n.message);
+		expect(shown[0]).toContain("read-only");
+		expect(blocks).toEqual(localCommandBlocks({ name: "mcp", stdout: shown.join("\n") }));
+	});
+
 	it("records the independent-mode empty-server notice as the local result too", async () => {
 		resetConfigModeForTest("independent");
 		await boot();

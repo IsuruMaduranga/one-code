@@ -991,7 +991,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 				await openMcpPanel(ctx);
 				return "MCP dialog dismissed";
 			}
-			notifyRpcReadOnly(ctx, "/mcp", "reconnect, authenticate, enable or disable servers");
+			const readOnly = notifyRpcReadOnly(ctx, "/mcp", "reconnect, authenticate, enable or disable servers");
 			// Non-interactive fallback: a flat status listing, with tool/resource
 			// counts and any warning for connected servers.
 			const lines = servers.map((server) => {
@@ -1007,7 +1007,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 				return `${status.padEnd(12)} ${server.name}${suffix} (${server.source})`;
 			});
 			ctx.ui.notify(lines.join("\n"), "info");
-			return lines.join("\n");
+			return [readOnly, ...lines].filter(Boolean).join("\n");
 		},
 	});
 }

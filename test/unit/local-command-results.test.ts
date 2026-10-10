@@ -71,8 +71,10 @@ describe("Claude Code 2.1.296 local-command results", () => {
 		const { fake, blocks } = mount(skillExtension);
 		const ctx = createFakeCtx({ cwd, hasUI: true, mode: "rpc" });
 		await fake.commands.get("skills")!.handler("", ctx);
-		const shown = (ctx._notified as Array<{ message: string }>).at(-1)!.message;
-		expect(blocks).toEqual(localCommandBlocks({ name: "skills", stdout: shown }));
+		// The read-only notice and the listing: everything the user saw.
+		const shown = (ctx._notified as Array<{ message: string }>).map((n) => n.message);
+		expect(shown[0]).toContain("read-only");
+		expect(blocks).toEqual(localCommandBlocks({ name: "skills", stdout: shown.join("\n") }));
 	});
 
 	it("records the skills dismissal after the panel closes", async () => {

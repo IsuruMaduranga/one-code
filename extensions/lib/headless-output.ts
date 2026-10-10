@@ -31,8 +31,12 @@ export function rpcReadOnlyText(command: string, manage: string): string {
 }
 
 /** In RPC, say that a command whose panel cannot open shows a read-only listing instead. */
-export function notifyRpcReadOnly(ctx: Pick<ExtensionContext, "mode" | "ui">, command: string, manage: string): void {
-	if (ctx.mode === "rpc") ctx.ui.notify(rpcReadOnlyText(command, manage), "info");
+export function notifyRpcReadOnly(ctx: Pick<ExtensionContext, "mode" | "ui">, command: string, manage: string): string | undefined {
+	if (ctx.mode !== "rpc") return undefined;
+	const text = rpcReadOnlyText(command, manage);
+	ctx.ui.notify(text, "info");
+	// Returned so a command reporting its result can include it.
+	return text;
 }
 
 /** A command's answer in a one-shot run: stdout in print mode, stderr in json mode (stdout is the event stream there). */
