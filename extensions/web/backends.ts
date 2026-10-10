@@ -73,12 +73,12 @@ const KEYLESS_ADVICE =
  * these results are best-effort and what the user can configure instead.
  */
 export const KEYLESS_NOTE =
-	"Note: these results came from Exa's free keyless endpoint (rate-limited, best-effort) because no search API key is configured. " +
+	"Note: these results came from Exa's free keyless endpoint (rate-limited, best-effort). " +
 	`For reliable search the user can ${KEYLESS_ADVICE}`;
 
 /** User-facing one-time notice (TUI) the first time a session searches keyless. */
 export const KEYLESS_USER_NOTICE =
-	"web_search used Exa's free keyless endpoint (rate-limited, best-effort): this provider has no native web search and no search API key is configured. " +
+	"web_search used Exa's free keyless endpoint (rate-limited, best-effort). " +
 	`For reliable results ${KEYLESS_ADVICE}`;
 
 // ---------------------------------------------------------------------------
@@ -140,19 +140,16 @@ export function resolveChain(
 
 function hostOf(url: string): string | undefined {
 	try {
-		return new URL(url).hostname.toLowerCase();
+		return new URL(url).hostname.toLowerCase().replace(/\.$/, "");
 	} catch {
 		return undefined;
 	}
 }
 
 function normalizeDomain(domain: string): string {
-	return domain
-		.trim()
-		.toLowerCase()
-		.replace(/^https?:\/\//, "")
-		.replace(/^www\./, "")
-		.replace(/\/.*$/, "");
+	const value = domain.trim().toLowerCase();
+	const host = hostOf(/^https?:\/\//.test(value) ? value : `https://${value}`);
+	return (host ?? value).replace(/^www\./, "");
 }
 
 function hostMatches(host: string, domain: string): boolean {

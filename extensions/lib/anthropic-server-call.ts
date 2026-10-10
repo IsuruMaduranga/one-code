@@ -25,6 +25,7 @@ import {
 } from "./anthropic-server-tools.ts";
 
 import { modelSpec } from "./model-policy.ts";
+import { runWithDeadline } from "./operation-deadline.ts";
 
 /** Observed calls take 8 to 16 s; a stuck one gives way to the fallback. */
 const NATIVE_CALL_TIMEOUT_MS = 120_000;
@@ -125,10 +126,11 @@ type NativeWebTarget = { ok: true; model: Model<Api>; auth: ServerCallAuth } | {
  * which credentials. Not-eligible is the normal case on every other provider,
  * so callers use the reason only for diagnostics, never in a result.
  */
-async function resolveNativeWeb(ctx: { model?: Model<Api>; modelRegistry: RegistryLike }): Promise<NativeWebTarget> {
+async function resolveNativeWeb(ctx: { model?: Model<Api>; modelRegistry: RegistryLike }, signal: AbortSignal): Promise<NativeWebTarget> {
 	const session = ctx.model;
 	if (!session || session.provider !== "anthropic") return { ok: false, reason: "not an Anthropic session" };
 	const sessionAuth = await ctx.modelRegistry.getApiKeyAndHeaders(session);
+	signal.throwIfAborted();
 	if (!sessionAuth.ok) return { ok: false, reason: sessionAuth.error };
 	const eligible = nativeEligibility({ sessionModel: session, baseUrl: sessionAuth.baseUrl, apiKey: sessionAuth.apiKey });
 	if (!eligible.ok) return eligible;
@@ -137,6 +139,7 @@ async function resolveNativeWeb(ctx: { model?: Model<Api>; modelRegistry: Regist
 	// The pick is same-provider, but its credentials are resolved on their own
 	// and checked again: a per-model base URL or key must not slip past the gate.
 	const auth = model === session ? sessionAuth : await ctx.modelRegistry.getApiKeyAndHeaders(model);
+	signal.throwIfAborted();
 	if (!auth.ok || !auth.apiKey || !nativeEligibility({ sessionModel: model, baseUrl: auth.baseUrl, apiKey: auth.apiKey }).ok) {
 		return { ok: false, reason: `no usable credentials for ${model.provider}/${model.id}` };
 	}
@@ -169,11 +172,15 @@ export async function tryNativeWeb(
 		signal: AbortSignal | undefined;
 	},
 ): Promise<NativeAttempt> {
-	const native = await resolveNativeWeb(ctx);
-	if (!native.ok) return { kind: "skipped" };
-	const spec = modelSpec(native.model);
-	request.onStart?.(spec);
 	try {
+		const native = await runWithDeadline((signal) => resolveNativeWeb(ctx, signal), {
+			signal: request.signal,
+			timeoutMs: NATIVE_CALL_TIMEOUT_MS,
+			message: "Native web authentication did not answer within 120 seconds.",
+		});
+		if (!native.ok) return { kind: "skipped" };
+		const spec = modelSpec(native.model);
+		request.onStart?.(spec);
 		const reply = await runServerCall(native.model, native.auth, request.body(native.model.id), request.signal, request.learned);
 		request.onUsage(reply.usage);
 		const outcome = request.outcome(reply.result);

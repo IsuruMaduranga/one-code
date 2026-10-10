@@ -10,6 +10,7 @@
 import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
+import { domainToASCII } from "node:url";
 import { analyzeShellCommand, INLINE_SCRIPT_SHELLS, isUnknownTilde, leadTokens, movesDirectory, parseCommand, resolvePayload, type ShellEvidence } from "../auto-mode/shell-analysis.ts";
 import { pathArgument, resolveForContainment, toAbsolute, toAbsoluteBash } from "../auto-mode/paths.ts";
 import { isSensitivePath } from "../auto-mode/sensitive.ts";
@@ -584,13 +585,34 @@ export function urlHost(url: string): string | undefined {
 	return undefined;
 }
 
+/** Match URL hostname canonicalization without discarding a malformed rule's path or query. */
+function normalizeDomain(domain: string): string {
+	if (/[/\\?#@\u0000-\u0020\u007f]/.test(domain)) return "";
+	return domainToASCII(domain).toLowerCase().replace(/(?<=[^*.])\.+(?=(:\d+)?$)/, "");
+}
+
 /**
- * URL rule match: Claude Code's `WebFetch(domain:example.com)` form compares
- * the URL's host exactly; any other pattern is a glob over the whole URL.
+ * Claude Code's domain wildcards stay within a label, except a leading `*.`
+ * which covers one or more subdomain labels (never the bare domain).
  */
+function matchesDomainPattern(pattern: string, host: string): boolean {
+	const domain = normalizeDomain(pattern);
+	const candidate = normalizeDomain(host);
+	if (!domain || !candidate) return false;
+	if (domain === candidate || domain === "*") return true;
+	const subdomains = domain.startsWith("*.");
+	const suffix = subdomains ? domain.slice(2) : domain;
+	const source = suffix.split("*").map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[^.:]*");
+	return new RegExp(`^${subdomains ? "(?:[^.:]+\\.)+" : ""}${source}$`).test(candidate);
+}
+
+/** Domain rules match normalized hosts; other patterns are globs over the whole URL. */
 function matchesUrlPattern(pattern: string, url: string): boolean {
-	const domain = pattern.match(/^domain:(.+)$/)?.[1]?.trim().toLowerCase();
-	if (domain) return urlHost(url) === domain;
+	const domain = pattern.match(/^domain:(.+)$/)?.[1]?.trim();
+	if (domain) {
+		const host = urlHost(url);
+		return host !== undefined && matchesDomainPattern(domain, host);
+	}
 	return globToRegex(pattern, false).test(url);
 }
 
@@ -1058,7 +1080,10 @@ export function decide(params: DecideInput): Decision {
 		// The PowerShell counterpart: read-only cmdlets on in-project paths,
 		// judged from PowerShell's own parse (powershell-tree.ts).
 		if (tool === "powershell" && subject && powershellReadOnly({ parse: params.powershellParse, cwd, home: homedir(), readableRoots }).readOnly) return { decision: "allow", cause: "plan-readonly" };
-		if (PLAN_READ_ONLY_TOOLS.has(tool)) return { decision: "allow", cause: "plan-readonly" };
+		if (PLAN_READ_ONLY_TOOLS.has(tool)) {
+			const askRule = ask.find((r) => ruleMatches(r, toolName, subject, cwd));
+			return askRule ? askOrDeny(askRule) : { decision: "allow", cause: "plan-readonly" };
+		}
 		return { decision: "deny", cause: "plan-mode" };
 	}
 

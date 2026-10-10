@@ -5,7 +5,7 @@
  * `pi-web-search/src/*` subpath here, while jiti resolves the real module at
  * runtime.
  *
- * Only the exports `extensions/web/index.ts` uses are declared. Loosely typed
+ * Only the exports the web extension uses are declared. Loosely typed
  * on purpose (`any` for pi-web-search's own result/context shapes): the goal is
  * to keep the package out of our typecheck, not to re-type it.
  */
@@ -18,6 +18,31 @@ declare module "pi-web-search/src/index.ts" {
 }
 
 declare module "pi-web-search/src/api.ts" {
+	import type { AgentToolUpdateCallback, ExtensionContext } from "@earendil-works/pi-coding-agent";
+
+	export interface StreamResult {
+		text: string;
+		sources?: Array<{ title: string; url: string }>;
+		providerKind?: string;
+		nativeSearchUsed?: boolean;
+		nativeSearchEvents?: string[];
+		nativeSearchCalls?: unknown[];
+		searchQueries?: string[];
+		searchResults?: Array<{ title?: string; url?: string; [key: string]: unknown }>;
+		citations?: unknown[];
+		groundingMetadata?: any;
+	}
+
+	export function getConfig(model: { provider: string; api?: string }): { kind: ReturnType<typeof getProviderKind>; searchTool?: string };
+	export function callApiStream(
+		ctx: ExtensionContext,
+		model: { provider: string; id: string },
+		body: unknown,
+		onUpdate?: AgentToolUpdateCallback,
+		signal?: AbortSignal,
+	): Promise<StreamResult>;
+	export function applyCitations(text: string, groundingMetadata: unknown): { text: string; sources: Array<{ title: string; url: string }> };
+
 	// The real api.ts (loaded by jiti at runtime) maps a Google provider — by
 	// `provider` or `api` field — to "google", the only kind that supports
 	// url_context. Declared loosely so the extension can call it with a model

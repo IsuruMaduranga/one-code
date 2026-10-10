@@ -89,6 +89,18 @@ describe("domain filters", () => {
 		expect(filterByDomains([{ title: "e", url: "https://notexample.com/", snippet: "" }], { allowed: ["example.com"] })).toEqual([]);
 	});
 
+	it("treats a trailing DNS dot as the same blocked host", () => {
+		const dotted = [{ title: "blocked", url: "https://docs.example.com./page", snippet: "" }];
+		expect(filterByDomains(dotted, { blocked: ["example.com"] })).toEqual([]);
+		expect(filterByDomains(results, { blocked: ["example.com."] }).map((r) => r.title)).toEqual(["c"]);
+	});
+
+	it("normalizes international domain names in both filters and results", () => {
+		const idn = [{ title: "blocked", url: "https://xn--bcher-kva.de/page", snippet: "" }];
+		expect(filterByDomains(idn, { blocked: ["bücher.de"] })).toEqual([]);
+		expect(filterByDomains(idn, { allowed: ["bücher.de"] })).toEqual(idn);
+	});
+
 	it("renders site: operators", () => {
 		expect(withSiteOperators("node lts", {})).toBe("node lts");
 		expect(withSiteOperators("node lts", { allowed: ["nodejs.org"] })).toBe("node lts site:nodejs.org");
@@ -194,6 +206,16 @@ describe("runChain + formatSearchResults", () => {
 		expect(text).toContain(KEYLESS_NOTE);
 		expect(text).toContain("1. T\n   https://a.com/\n   S");
 		expect(text).toContain("Sources:");
+	});
+
+	it("does not claim a key is missing after a configured backend failed", async () => {
+		const outcome = await runChain([
+			backend("brave", false, async () => { throw new Error("HTTP 503"); }),
+			backend("exa-free", true, async () => ok),
+		], "q", {}, 10, undefined);
+		const text = formatSearchResults("q", outcome);
+		expect(text).toContain("free keyless endpoint");
+		expect(text).not.toContain("no search API key is configured");
 	});
 
 	it("does not add the keyless note for a keyed backend and reports no results", async () => {

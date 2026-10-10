@@ -47,19 +47,25 @@ export function normalizeUrl(input: string): NormalizedUrl {
 		throw new Error(`Not a valid URL: ${input}`);
 	}
 
+	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+		throw new Error(`Unsupported URL scheme "${parsed.protocol}" — only http and https are fetched.`);
+	}
+	if (parsed.username || parsed.password) throw new Error("URLs with embedded credentials are not supported.");
+	if (!parsed.hostname.replace(/\.+$/, "").includes(".")) {
+		throw new Error("web_fetch cannot fetch localhost or other hostnames without a dot. To reach a local server, use bash with curl instead.");
+	}
 	if (parsed.protocol === "http:") {
 		parsed.protocol = "https:";
 		return { url: parsed.toString(), note: "Upgraded http to https." };
-	}
-	if (parsed.protocol !== "https:") {
-		throw new Error(`Unsupported URL scheme "${parsed.protocol}" — only http and https are fetched.`);
 	}
 	return { url: parsed.toString() };
 }
 
 export function isSameHost(a: string, b: string): boolean {
 	try {
-		return new URL(a).host === new URL(b).host;
+		const target = new URL(a);
+		const source = new URL(b);
+		return target.host === source.host && target.protocol === source.protocol && !target.username && !target.password;
 	} catch {
 		return false;
 	}
@@ -88,11 +94,22 @@ export interface ExtractResult {
  * first (it strips navigation and boilerplate); if it finds no article — common
  * for API references and landing pages — the whole body is converted instead.
  */
-export async function htmlToMarkdown(html: string, _url: string): Promise<ExtractResult> {
+export async function htmlToMarkdown(html: string, url: string): Promise<ExtractResult> {
 	const { Readability, parseHTML, Turndown } = await loadLibs();
 	const { document } = parseHTML(html);
 	const turndown = createTurndown(Turndown);
+	// linkedom does not resolve relative attributes against the fetched URL.
+	let base = url;
+	try { base = new URL(document.querySelector("base[href]")?.getAttribute("href") ?? url, url).href; } catch { /* use the fetched URL */ }
+	for (const [selector, attribute] of [["a[href]", "href"], ["img[src]", "src"]]) {
+		for (const element of document.querySelectorAll(selector)) {
+			try { element.setAttribute(attribute, new URL(element.getAttribute(attribute)!, base).href); } catch { /* keep malformed links as written */ }
+		}
+	}
 
+	// Readability mutates the document, and linkedom can create an empty body
+	// for a fragment. Keep the original content for the whole-page fallback.
+	const body = document.querySelector("body")?.innerHTML ?? document.toString();
 	// linkedom's Document is structurally compatible with what Readability needs
 	// but is not the DOM lib's Document type, hence the cast.
 	let article: { title?: string | null; content?: string | null } | null = null;
@@ -110,7 +127,6 @@ export async function htmlToMarkdown(html: string, _url: string): Promise<Extrac
 		};
 	}
 
-	const body = document.body?.innerHTML ?? html;
 	return {
 		title: document.title || undefined,
 		markdown: turndown.turndown(body).trim(),
