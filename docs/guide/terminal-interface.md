@@ -142,7 +142,7 @@ and [Plan mode](permissions-modes-and-auto-mode.md#plan-mode).
 | `/mcp` | The MCP server manager. | **↑↓** navigate, **Enter** open a server or run an action, a digit picks a numbered action, **Esc** back or close. |
 | `/doctor report` | The setup report. | **↑↓** or **j**/**k** scroll, **Space**/**b** page, **g**/**G** top and end, **f** run the checkup, **Esc** or **q** close. |
 | `/memory` | The instruction and memory file picker. | **↑↓** move, **Enter** open, **Esc** close. |
-| `/effort` | The reasoning-effort slider. | **←→** or **h**/**l** adjust, **Enter** confirm, **Esc** cancel. |
+| `/effort` | The reasoning-effort slider. | **←→** or **h**/**l** adjust, **Enter** confirm, **s** this session only, **Esc** cancel. |
 
 **ctrl+c** closes any panel.
 

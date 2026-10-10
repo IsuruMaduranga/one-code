@@ -159,9 +159,11 @@ with the session. The new session lists what was stopped.
 **A resumed session is in a different permission mode.** Modes aren't
 saved with the session. Pass `--permission-mode` or set a default.
 
-**The `/effort` level reset after a restart.** `/effort` doesn't save the
-level. Open pi's `/thinking` picker and press **ctrl+s** to save a startup
-default, or pass `--thinking <level>` at launch.
+**The `/effort` level reset after a restart.** `/effort` saves `low`,
+`medium`, `high` and `xhigh` for the model you're on, so a level set on a
+different model, a `max` or `ultracode` level, or one picked with **s**
+(this session only) doesn't come back. Set it again on this model, or pass
+`--thinking <level>` at launch.
 
 ## Interface
 

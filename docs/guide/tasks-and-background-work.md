@@ -131,8 +131,8 @@ hands your input to the model, and the model sets up the loop itself.
 - **No prompt.** A bare `/loop` runs an autonomous check that keeps your
   current work moving (CI, review threads, unfinished steps), self-paced.
   `/loop 30m` runs the same check on a cron. If `.claude/loop.md` exists in
-  the project (or `~/loop.md`), its tasks replace the autonomous check, and
-  the model sees the file again whenever you edit it.
+  the project (or `~/.claude/loop.md`), its tasks replace the autonomous
+  check, and the model sees the file again whenever you edit it.
 
 When a self-paced tick finds nothing to do (the model reports `noop: true`),
 the next wake-up line counts the streak, for example `Resuming /loop wakeup

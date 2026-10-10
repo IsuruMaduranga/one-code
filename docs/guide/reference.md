@@ -26,7 +26,7 @@ that explains it.
 | `/workflows stop <runId>` | Stop a running workflow. | |
 | `/workflows log <runId>` | Print a run's recent events. | |
 | `/workflows list` | List this session's runs and the saved workflows. | |
-| `/effort [level]` | Set the reasoning effort (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultracode`), or open the slider. | [Reasoning effort](subagents-and-workflows.md#reasoning-effort) |
+| `/effort [level]` | Set the reasoning effort (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultracode`, or `auto` to clear the saved level), or open the slider. | [Reasoning effort](subagents-and-workflows.md#reasoning-effort) |
 | `/skills` | Manage which skills the model sees. | [Skills](skills-plugins-and-mcp.md#manage-skills) |
 | `/<skill-name> [args]` | Run a skill. | [Skills](skills-plugins-and-mcp.md#skills) |
 | `/skill:<name>`, `/skill:<plugin>:<name>` | Run a skill by its full name. | |
