@@ -150,9 +150,6 @@ every model. The content is the same; only the placement differs.
 - Running a skill in a one-shot run (`-p '/simplify'`) delivers the skill
   but starts no model turn, so the process exits without doing anything.
   Interactive sessions are unaffected.
-- The reasoning effort set with `/effort` doesn't persist across
-  restarts; the model chosen with `/model` does. To save a level, open
-  pi's `/thinking` picker and press **ctrl+s**, or pass `--thinking`.
 - A subagent spawn that is blocked before it starts can leave its requested
   run name reserved; a retry with the same name is renamed automatically.
 - Under pi's RPC transport, `SessionStart` hooks fire twice per `/clear`.

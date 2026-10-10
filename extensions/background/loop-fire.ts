@@ -7,11 +7,11 @@
  * (findings §21). The texts are Claude Code's, verbatim with our tool names;
  * the "tell the user" addenda are dropped (no counterpart tool here).
  *
- * Pure apart from reading loop.md (`<cwd>/.claude/loop.md`, then `~/loop.md`;
- * `.onecode/loop.md` in independent mode).
+ * Pure apart from reading loop.md (`<cwd>/.claude/loop.md`, then `~/.claude/loop.md`;
+ * the corresponding `.onecode` directories in independent mode).
  */
 
-import { projectConfigDir } from "../lib/config-mode.ts";
+import { projectConfigDir, userConfigDir } from "../lib/config-mode.ts";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -105,10 +105,11 @@ function readLoopFileAt(path: string): LoopFile | null {
 
 /**
  * The loop-tasks file: the project's `.claude/loop.md` (`.onecode/loop.md` in
- * independent mode, lib/config-mode.ts), else `~/loop.md`.
+ * independent mode, lib/config-mode.ts), else the user config directory's
+ * `loop.md` (Claude Code 2.1.296: `~/.claude/loop.md` or `CLAUDE_CONFIG_DIR`).
  */
 export function readLoopFile(cwd: string, home = homedir()): LoopFile | null {
-	return readLoopFileAt(join(projectConfigDir(cwd), "loop.md")) ?? readLoopFileAt(join(home, "loop.md"));
+	return readLoopFileAt(join(projectConfigDir(cwd), "loop.md")) ?? readLoopFileAt(join(userConfigDir(home), "loop.md"));
 }
 
 function resolveLoopFile(e: LoopDeliveryState, t: string, o: LoopFile | null, preamble: string): string {let n=t===LOOP_FILE_DYNAMIC_SENTINEL;if(o){let s=n?loopFileDynamicTick():loopFileCronTick();if(e.lastLoopFileDelivered===o.content)return s;return e.lastLoopFileDelivered=o.content,`# /loop tick \u2014 tasks from ${o.path}

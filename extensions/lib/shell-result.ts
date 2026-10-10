@@ -7,6 +7,9 @@
  * pi's truncation notes stay where they are, at the end of the output.
  */
 
+import { emptyToolResultText } from "./empty-tool-result.ts";
+import { emptyBashExitOneIsSuccess } from "./shell-empty-exit.ts";
+
 type Block = { type: string; text?: string };
 type ShellResult = { content?: Block[]; structuredContent?: unknown; isError?: boolean };
 
@@ -17,8 +20,8 @@ const PI_NO_OUTPUT = "(no output)";
 export function claudeCodeShellText(text: string, exitCode: unknown, toolName: string): string | undefined {
 	if (typeof exitCode !== "number") return undefined;
 	if (exitCode === 0) {
-		if (text === PI_NO_OUTPUT) return `(${toolName} completed with no output)`;
-		return text.replace(/^(\s*\n)+/, "").trimEnd();
+		if (text === PI_NO_OUTPUT) return emptyToolResultText(toolName);
+		return text.replace(/^(\s*\n)+/, "").trimEnd() || emptyToolResultText(toolName);
 	}
 	const status = `Command exited with code ${exitCode}`;
 	if (text !== status && !text.endsWith(`\n\n${status}`)) return undefined;
@@ -27,11 +30,16 @@ export function claudeCodeShellText(text: string, exitCode: unknown, toolName: s
 }
 
 /** A foreground result with its first text block in Claude Code's words; other results pass through. */
-export function withClaudeCodeShellText<R extends ShellResult>(result: R, toolName: string): R {
+export function withClaudeCodeShellText<R extends ShellResult>(result: R, toolName: string, command: string): R {
 	const first = result?.content?.[0];
 	if (first?.type !== "text" || typeof first.text !== "string") return result;
 	const exitCode = (result.structuredContent as { exit_code?: unknown } | undefined)?.exit_code;
 	const text = claudeCodeShellText(first.text, exitCode, toolName);
+	const rest = (result.content ?? []).slice(1);
+	// "Exit code 1" alone means the command printed nothing.
+	if (toolName === "bash" && text === "Exit code 1" && emptyBashExitOneIsSuccess(command)) {
+		return { ...result, content: [{ ...first, text: emptyToolResultText(toolName) }, ...rest], isError: false };
+	}
 	if (text === undefined || text === first.text) return result;
-	return { ...result, content: [{ ...first, text }, ...(result.content ?? []).slice(1)] };
+	return { ...result, content: [{ ...first, text }, ...rest] };
 }

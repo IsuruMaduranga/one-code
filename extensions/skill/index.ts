@@ -809,18 +809,20 @@ export default function skillExtension(pi: ExtensionAPI) {
 	};
 
 	registerLocalCommand(pi, "skills", {
+		reportsResult: true,
 		description: "View and manage skills (on / name-only / user-only / off)",
 		handler: async (args, ctx) => {
 			if (canShowCustomUi(ctx)) {
 				await openSkillsPanel(ctx);
-				return;
+				return "Skills dialog dismissed";
 			}
-			notifyRpcReadOnly(ctx, "/skills", "change skill states");
+			const readOnly = notifyRpcReadOnly(ctx, "/skills", "change skill states");
+			const withNotice = (text: string) => (readOnly ? `${readOnly}\n${text}` : text);
 			// Non-interactive fallback: a flat listing with each skill's state.
 			const all = skillsOnly(ctx.cwd);
 			if (all.length === 0) {
 				ctx.ui.notify("No skills available.", "info");
-				return;
+				return withNotice("No skills available.");
 			}
 			const lines = all.map((skill) => {
 				const label = skill.source === "plugin" ? "plugin" : skill.state;
@@ -828,6 +830,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 				return `- ${skill.name} [${label}]${desc}`;
 			});
 			ctx.ui.notify(`Skills:\n${lines.join("\n")}`, "info");
+			return withNotice(`Skills:\n${lines.join("\n")}`);
 		},
 	});
 }

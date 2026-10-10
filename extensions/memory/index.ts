@@ -189,7 +189,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 			}
 			const shown = memoryDisplayPath(chosen.path, ctx.cwd, os.homedir());
 			const result = await openPath(chosen.path, "file");
-			const stdout = result.ok ? `Opened ${shown}\n\n${editorHint()}` : `Couldn't open ${shown}: ${result.error}`;
+			const stdout = result.ok ? `Opened ${shown}\n${editorHint()}` : `Couldn't open ${shown}: ${result.error}`;
 			ctx.ui.notify(stdout, result.ok ? "info" : "error");
 			return `${modeLine}${stdout}`;
 		},

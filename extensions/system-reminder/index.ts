@@ -34,6 +34,7 @@ import {
 } from "../lib/context-stack.ts";
 import { CONTEXT_FACT_KEYS, DATE_CHANGE_KEY, RESUME_FACTS_KEY } from "../lib/context-facts.ts";
 import { claudeFamily } from "../lib/model-tier.ts";
+import { emptyToolResultContent } from "../lib/empty-tool-result.ts";
 import { instructionRole, messagesKey, type MovedBlock, systemRoleLayout, wireShape, withSystemRoleContext } from "../lib/system-role.ts";
 import { resolveCountdowns, withTurnBudgetMessages } from "../lib/turn-budget-layout.ts";
 
@@ -158,10 +159,16 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 	// the trailing reminder run when it applies a replacement (review M3,
 	// applyPostToolUseOutcome / isAppendedReminderText).
 	pi.on("tool_result", (event) => {
-		if (!reminderQueue.hasPendingOneShots) return;
-		const entries = reminderQueue.takeOneShots(event.toolCallId);
-		if (entries.length === 0) return;
-		return { content: appendReminderBlocks(event.content, entries) };
+		// Normalize the tool's result before reminders make an empty result look
+		// nonempty. Read's raw bytes stay for file-tracker's empty-file warning.
+		const replacement = emptyToolResultContent(event.content, event.toolName);
+		const entries = reminderQueue.hasPendingOneShots ? reminderQueue.takeOneShots(event.toolCallId) : [];
+		if (!replacement && entries.length === 0) return;
+		const content = replacement ?? event.content;
+		return {
+			content: entries.length ? appendReminderBlocks(content, entries) : content,
+			...(event.structuredContent !== undefined ? { structuredContent: event.structuredContent } : {}),
+		};
 	});
 
 	/** The request's messages with the queued reminders placed, or the input when nothing can be placed. */

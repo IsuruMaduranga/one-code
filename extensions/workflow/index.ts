@@ -349,6 +349,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 	};
 
 	registerLocalCommand(pi, "workflows", {
+		reportsResult: true,
 		description: "Open the workflow viewer; list, stop, or inspect runs",
 		argumentHint: "[list|log <run-id>|stop <run-id>]",
 		getArgumentCompletions: (prefix) => {
@@ -360,21 +361,23 @@ export default function workflowExtension(pi: ExtensionAPI) {
 			const [action, runId] = args.trim().split(/\s+/);
 			if (!action && canShowCustomUi(ctx)) {
 				await openViewer(ctx, { height: "full" });
-				return;
+				return "Dynamic workflows dialog dismissed";
 			}
 			if (action === "stop" && runId) {
 				const stopped = manager.abort(runId, "stopped via /workflows");
-				ctx.ui.notify(stopped ? `Stopping ${runId}…` : `No running workflow ${runId}`, stopped ? "info" : "error");
-				return;
+				const text = stopped ? `Stopping ${runId}…` : `No running workflow ${runId}`;
+				ctx.ui.notify(text, stopped ? "info" : "error");
+				return text;
 			}
 			if (action === "log" && runId) {
 				const handle = manager.get(runId);
 				if (!handle) {
 					ctx.ui.notify(`No workflow run ${runId} in this session`, "error");
-					return;
+					return `No workflow run ${runId} in this session`;
 				}
-				ctx.ui.notify(`${handle.meta.name} (${handle.status})\n${handle.recentEvents.join("\n") || "(no events)"}`, "info");
-				return;
+				const log = `${handle.meta.name} (${handle.status})\n${handle.recentEvents.join("\n") || "(no events)"}`;
+				ctx.ui.notify(log, "info");
+				return log;
 			}
 
 			const lines: string[] = [];
@@ -397,6 +400,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 			if (!action && ctx.mode === "rpc") lines.unshift("The interactive workflow viewer requires TUI mode; listing workflows instead.");
 			lines.push("Usage: /workflows [stop <runId> | log <runId>]");
 			ctx.ui.notify(lines.join("\n"), "info");
+			return lines.join("\n");
 		},
 	});
 

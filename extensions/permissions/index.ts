@@ -1990,7 +1990,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	 * Code (a row toggled on and off again grants nothing). `command` names the
 	 * breadcrumb (`permissions`, `add-dir`).
 	 */
-	const runPermissionsPanel = async (ctx: ExtensionContext, command: string, args: string, prepare?: (state: PanelState) => void) => {
+	/** `dismissed`: the command's stdout when the panel closes with nothing changed. */
+	const runPermissionsPanel = async (ctx: ExtensionContext, command: string, args: string, prepare?: (state: PanelState) => void, dismissed?: string) => {
 		const home = os.homedir();
 		const host = panelHost(ctx, home);
 		// The environment editor cannot open over the panel: close, edit, reopen.
@@ -2022,7 +2023,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			);
 			return;
 		}
-		if (approved.length === 0 && changes.length === 0) return;
+		if (approved.length === 0 && changes.length === 0) {
+			if (dismissed) announceLocalCommand(pi, { name: command, args, stdout: dismissed });
+			return;
+		}
 		const stdout = [...(approved.length > 0 ? [`Approved ${displays.join(", ")}`] : []), ...changes].join("\n");
 		announceLocalCommand(pi, { name: command, args, stdout });
 		// The grant message rides with the breadcrumb on the next prompt; no turn starts.
@@ -2048,7 +2052,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				ctx.ui.notify(`${limitation}${permissionsSummary()}`, "info");
 				return;
 			}
-			await runPermissionsPanel(ctx, "permissions", args);
+			await runPermissionsPanel(ctx, "permissions", args, undefined, "Permissions dialog dismissed");
 		},
 	});
 

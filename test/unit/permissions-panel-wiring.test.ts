@@ -112,6 +112,12 @@ describe("/permissions wiring", () => {
 	// a long subject. Never created; the classifier is stubbed.
 	const outside = () => "/outside-perm-panel/elsewhere";
 
+	it("records Claude Code's dismissal text when the permissions panel closes unchanged", async () => {
+		await openPanel();
+		expect(reminders).toContain("<local-command-stdout>Permissions dialog dismissed</local-command-stdout>\n");
+		expect(fake.sentMessages).toEqual([]);
+	});
+
 	it("an allowed call ends a consecutive-limit pause, so the next call is classified again", async () => {
 		for (let i = 0; i < 3; i++) {
 			blockOnce();

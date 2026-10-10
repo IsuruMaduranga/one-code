@@ -10,6 +10,8 @@ import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts
 import { createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { captureUserTurns } from "./helpers/user-turn.ts";
+import { localCommandBlocks } from "../../extensions/lib/local-command.ts";
+import { REMINDER_CHANNEL, type ReminderPayload } from "../../extensions/lib/reminders.ts";
 
 const model = (provider: string, id: string, input: number, api = "anthropic-messages") =>
 	({ provider, id, name: id, api, cost: { input, output: input * 5 }, contextWindow: 200_000 }) as any;
@@ -79,6 +81,75 @@ const run = async (args: string, ctx: unknown) => {
 };
 
 describe("/doctor wiring", () => {
+	it.each(["report", "presets", "preset quality", "preset turbo", "preset", "unknown"])("records the printed result of /doctor %s without starting a turn", async (args) => {
+		const blocks: string[] = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => {
+			const payload = data as ReminderPayload;
+			if (payload.placement === "user-prepend" && payload.text !== undefined) blocks.push(payload.text);
+		});
+		const { ctx, notified } = ctxFor(anthropic[1], "rpc");
+		await run(args, ctx);
+		expect(blocks).toEqual(localCommandBlocks({ name: "doctor", args, stdout: notified.join("\n") }));
+		expect(fake.sentUserMessages).toEqual([]);
+	});
+
+	it("records a failed preset switch instead of claiming it succeeded", async () => {
+		const blocks: string[] = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => {
+			const payload = data as ReminderPayload;
+			if (payload.placement === "user-prepend" && payload.text !== undefined) blocks.push(payload.text);
+		});
+		setModel.mockResolvedValueOnce(false);
+		const { ctx, notified } = ctxFor(anthropic[1], "rpc");
+		await run("preset economical", ctx);
+		expect(blocks).toEqual(localCommandBlocks({ name: "doctor", args: "preset economical", stdout: notified[0] }));
+		expect(blocks.at(-1)).toContain("nothing was changed");
+	});
+
+	it("does not announce bare /doctor when it sends the checkup prompt", async () => {
+		const blocks: string[] = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => {
+			const payload = data as ReminderPayload;
+			if (payload.placement === "user-prepend" && payload.text !== undefined) blocks.push(payload.text);
+		});
+		const { ctx } = ctxFor(anthropic[1], "rpc");
+		await run("", ctx);
+		expect(fake.sentUserMessages).toHaveLength(1);
+		expect(blocks).toEqual([]);
+	});
+
+	it("records the no-model fallback report and warning", async () => {
+		const blocks: string[] = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => {
+			const payload = data as ReminderPayload;
+			if (payload.placement === "user-prepend" && payload.text !== undefined) blocks.push(payload.text);
+		});
+		const { ctx, notified } = ctxFor(undefined, "rpc");
+		await run("", ctx);
+		expect(blocks).toEqual(localCommandBlocks({ name: "doctor", stdout: notified.join("\n") }));
+		expect(fake.sentUserMessages).toEqual([]);
+	});
+
+	it("queues the report result before the TUI panel can send a checkup prompt", async () => {
+		const blocks: string[] = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => {
+			const payload = data as ReminderPayload;
+			if (payload.placement === "user-prepend" && payload.text !== undefined) blocks.push(payload.text);
+		});
+		const { ctx } = ctxFor(anthropic[1], "tui");
+		const panel = vi.fn(async (factory) => {
+			expect(blocks).toHaveLength(3);
+			expect(blocks[2]).toContain("<local-command-stdout>One Code doctor");
+			const component = factory({ terminal: { rows: 40 }, requestRender: () => {} }, {}, {}, () => {});
+			component.handleInput("f");
+			return null;
+		});
+		await run("report", { ...ctx, ui: { ...ctx.ui, custom: panel } });
+		expect(panel).toHaveBeenCalledTimes(1);
+		expect(fake.sentUserMessages).toHaveLength(1);
+		expect(blocks).toHaveLength(3);
+	});
+
 	it("registers the command with argument completions", () => {
 		const command = fake.commands.get("doctor")!;
 		expect(command).toBeDefined();

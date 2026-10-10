@@ -21,6 +21,7 @@ import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, shellSummary, typ
 import { commandToEvaluate, trackOriginalCommands } from "./original-command.ts";
 import { persistedFilePreview, persistIfLarge, sessionResultsDir } from "./persisted-output.ts";
 import { withClaudeCodeShellText } from "./shell-result.ts";
+import { bashParserReady } from "./bash-parser.ts";
 import type { ShellSpawn } from "./shell-spawn.ts";
 import { keepSpillReadable } from "./spill-file.ts";
 import { ccWrapBuiltinRenderers, linesComponent, resultLines } from "./tui-render.ts";
@@ -200,7 +201,9 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 					() => spec.foreground(ctx.cwd).execute(toolCallId, { command: params.command, timeout: timeoutSeconds }, signal, onUpdate, ctx),
 					sessionResultsDir(ctx),
 				);
-				return withClaudeCodeShellText(result, spec.name);
+				// The no-match check parses the command; only bash results need the grammar.
+				if (spec.name === "bash") await bashParserReady();
+				return withClaudeCodeShellText(result, spec.name, originalCommand);
 			}
 
 			const shell = spec.backgroundShell();

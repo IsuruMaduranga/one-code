@@ -18,11 +18,11 @@ describe("protocol: applyPostToolUseOutcome", () => {
 	];
 
 	it("returns undefined when a hook changed nothing", () => {
-		expect(applyPostToolUseOutcome(own, {})).toBeUndefined();
+		expect(applyPostToolUseOutcome(own, {}, "bash")).toBeUndefined();
 	});
 
 	it("a replacement preserves the appended reminder/countdown blocks (review M3)", () => {
-		const result = applyPostToolUseOutcome(reminderTail, { updatedToolResult: "hi (formatted)" });
+		const result = applyPostToolUseOutcome(reminderTail, { updatedToolResult: "hi (formatted)" }, "bash");
 		expect(result).toEqual([
 			{ type: "text", text: "hi (formatted)" },
 			{ type: "text", text: "<system-reminder>\nPreToolUse hook additional context: note\n</system-reminder>" },
@@ -31,7 +31,7 @@ describe("protocol: applyPostToolUseOutcome", () => {
 	});
 
 	it("a replacement with no reminder tail just replaces", () => {
-		expect(applyPostToolUseOutcome(own, { updatedToolResult: "x" })).toEqual([{ type: "text", text: "x" }]);
+		expect(applyPostToolUseOutcome(own, { updatedToolResult: "x" }, "bash")).toEqual([{ type: "text", text: "x" }]);
 	});
 });
 

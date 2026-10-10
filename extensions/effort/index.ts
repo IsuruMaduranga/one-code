@@ -1,6 +1,10 @@
 /**
  * effort extension — Claude Code's `/effort`, including the `ultracode` stop.
  *
+ * Interactive low/medium/high/xhigh choices persist per model in pi's own
+ * settings (`modelThinkingLevels`); max and ultracode stay session-only. pi
+ * restores the saved level natively, so launch overrides and resume still win.
+ *
  * Reasoning effort is pi's thinking level under another name, and shift+tab
  * already cycles it. pi reserves that key (`app.thinking.cycle` is on its
  * RESERVED_KEYBINDINGS_FOR_EXTENSION_CONFLICTS list, so `registerShortcut` on
@@ -17,9 +21,11 @@
  * same shape the permissions extension uses for plan mode.
  */
 
+import { join } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, SettingsManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { effortSetMessage, isPersistedEffort, type PersistedEffort } from "./settings.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { dimRightAlignedWidget, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import {
@@ -126,8 +132,28 @@ export default function effortExtension(pi: ExtensionAPI) {
 		}
 	};
 
+	const canPersist = (ctx: ExtensionContext) => ctx.hasUI && (ctx.mode === "tui" || ctx.mode === "rpc") && !!ctx.model;
+	/** Through pi's own settings writer: its key format, file lock and merge of changed fields. */
+	const persist = async (ctx: ExtensionContext, level: PersistedEffort | undefined): Promise<string | undefined> => {
+		const settings = SettingsManager.create(ctx.cwd, getAgentDir());
+		const loadError = settings.drainErrors().find((entry) => entry.scope === "global");
+		// An unreadable file would be rewritten from empty settings; leave it for the user.
+		if (loadError) return `Failed to set effort level: ${loadError.error.message}`;
+		if (level === undefined) settings.removeModelThinkingLevel(ctx.model!.provider, ctx.model!.id);
+		else settings.setModelThinkingLevel(ctx.model!.provider, ctx.model!.id, level);
+		await settings.flush();
+		const writeError = settings.drainErrors()[0];
+		if (writeError) return `Failed to set effort level: ${writeError.error.message}`;
+	};
+	const report = (ctx: ExtensionContext, message: string, error = false) => {
+		ctx.ui.notify(message, error ? "error" : "info");
+		return message;
+	};
+
 	/** Apply a chosen stop and report what actually took effect. */
-	const applyChoice = (choice: EffortChoice, ctx: ExtensionContext) => {
+	const applyChoice = async (choice: EffortChoice, ctx: ExtensionContext, asDefault = true): Promise<string> => {
+		const wasUltracode = ultracodeActive;
+		const previous = pi.getThinkingLevel();
 		const wanted = thinkingLevelFor(choice);
 		pi.setThinkingLevel(wanted);
 		const actual = pi.getThinkingLevel();
@@ -144,13 +170,25 @@ export default function effortExtension(pi: ExtensionAPI) {
 		const cappedDown = ar >= 0 && wr >= 0 && ar < wr;
 		const note = cappedDown ? ` (${modelLabel(ctx)} tops out at ${actual})` : "";
 		if (choice === ULTRACODE) {
-			ctx.ui.notify(`Effort: ultracode — ${actual} reasoning, workflows armed every turn${note}`, "info");
-		} else {
-			ctx.ui.notify(`Effort: ${actual}${note}`, "info");
+			return report(ctx, `Effort: ultracode — ${actual} reasoning, workflows armed every turn${note}`);
 		}
+		const saved = asDefault && canPersist(ctx) && isPersistedEffort(choice) && actual === wanted;
+		if (saved) {
+			const error = await persist(ctx, choice);
+			if (error) {
+				// Claude Code changes nothing when the save fails.
+				pi.setThinkingLevel(previous);
+				setUltracode(wasUltracode, previous);
+				applyStatus(ctx);
+				showEffortNote(ctx, previous);
+				return report(ctx, error, true);
+			}
+		}
+		if (isPersistedEffort(actual) || actual === "max") return report(ctx, `${effortSetMessage(actual, saved)}${wasUltracode ? " · Ultracode off" : ""}`);
+		return report(ctx, `Effort: ${actual}${note}`);
 	};
 
-	const showSlider = async (ctx: ExtensionContext): Promise<void> => {
+	const showSlider = async (ctx: ExtensionContext): Promise<string | void> => {
 		const supported = supportedLevels(ctx);
 		if (!supported.some((level) => level !== "off")) {
 			ctx.ui.notify(`${modelLabel(ctx)} doesn't support reasoning effort.`, "info");
@@ -165,7 +203,7 @@ export default function effortExtension(pi: ExtensionAPI) {
 		index = nearestEnabled(index, enabled);
 
 		const label = modelLabel(ctx);
-		const chosen = await ctx.ui.custom<EffortChoice | null>((tui, theme, _keybindings, done) => {
+		const chosen = await ctx.ui.custom<{ choice: EffortChoice; asDefault: boolean } | null>((tui, theme, _keybindings, done) => {
 			const paint = safeThemePaint(theme);
 			return {
 				// The slider's own layout is column-safe for its ASCII labels, but this
@@ -180,8 +218,8 @@ export default function effortExtension(pi: ExtensionAPI) {
 						done(null);
 						return;
 					}
-					if (key === "confirm") {
-						done(EFFORT_CHOICES[index]);
+					if (key === "confirm" || key === "session") {
+						done({ choice: EFFORT_CHOICES[index], asDefault: key === "confirm" });
 						return;
 					}
 					index = moveIndex(index, key, enabled);
@@ -191,19 +229,35 @@ export default function effortExtension(pi: ExtensionAPI) {
 			};
 		});
 
-		if (chosen) applyChoice(chosen, ctx);
+		if (!chosen) return "Cancelled";
+		return applyChoice(chosen.choice, ctx, chosen.asDefault);
 	};
 
 	registerLocalCommand(pi, "effort", {
-		description: `Set reasoning effort (shift+tab cycles the plain levels): /effort [${EFFORT_CHOICES.join("|")}] — ultracode is ${ULTRACODE_LEVEL} + workflows`,
-		argumentHint: `[${EFFORT_CHOICES.join("|")}]`,
+		description: `Set reasoning effort (shift+tab cycles the plain levels): /effort [${EFFORT_CHOICES.join("|")}|auto] — ultracode is ${ULTRACODE_LEVEL} + workflows`,
+		argumentHint: `[${EFFORT_CHOICES.join("|")}|auto]`,
+		reportsResult: true,
 		getArgumentCompletions: (prefix) => {
-			const matches = acceptedEffortArgs().filter((value) => value.startsWith(prefix.trim().toLowerCase()));
+			const matches = [...acceptedEffortArgs(), "auto", "unset"].filter((value) => value.startsWith(prefix.trim().toLowerCase()));
 			return matches.length ? matches.map((value) => ({ value, label: value })) : null;
 		},
 		handler: async (args, ctx) => {
 			const typed = args.trim();
 			if (typed) {
+				if (typed.toLowerCase() === "auto" || typed.toLowerCase() === "unset") {
+					// Clear the saved level first: a failed save changes nothing.
+					const saved = canPersist(ctx);
+					if (saved) {
+						const error = await persist(ctx, undefined);
+						if (error) return report(ctx, error, true);
+					}
+					// getSettings arrived in pi 1.0.1; the package still admits older pi.
+					pi.setThinkingLevel(pi.getSettings?.().defaultThinkingLevel ?? "medium");
+					setUltracode(false);
+					applyStatus(ctx);
+					showEffortNote(ctx, pi.getThinkingLevel());
+					return report(ctx, `Effort level set to auto${saved ? "" : " (this session only)"}`);
+				}
 				const parsed = parseEffortArg(typed);
 				if (!parsed) {
 					ctx.ui.notify(`Unknown effort "${typed}". Use one of: ${acceptedEffortArgs().join(", ")}`, "error");
@@ -221,20 +275,19 @@ export default function effortExtension(pi: ExtensionAPI) {
 						return;
 					}
 				}
-				applyChoice(parsed, ctx);
-				return;
+				return applyChoice(parsed, ctx);
 			}
 
 			// The picker needs focus and a terminal; elsewhere say what to type.
 			if (!ctx.hasUI || ctx.mode !== "tui") {
 				ctx.ui.notify(
 					`Current effort: ${ultracodeActive ? `ultracode (${pi.getThinkingLevel()} + workflows)` : pi.getThinkingLevel()}. ` +
-						`Set one with /effort <${acceptedEffortArgs().join("|")}>.`,
+						`Set one with /effort <${acceptedEffortArgs().join("|")}|auto>.`,
 					"info",
 				);
 				return;
 			}
-			await showSlider(ctx);
+			return await showSlider(ctx);
 		},
 	});
 

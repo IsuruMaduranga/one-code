@@ -23,6 +23,8 @@ import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } f
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { CONTEXT_BASELINE_CHANNEL, CONTEXT_RESTORE_CHANNEL } from "../../extensions/lib/context-stack.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { localCommandBlocks } from "../../extensions/lib/local-command.ts";
+import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
 
 interface Fixture {
 	tools?: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }>;
@@ -110,6 +112,68 @@ describe("mcp wiring", () => {
 		mcpExtension(fake.pi as never);
 		await fake.fireOne("session_start", { reason: "startup" }, createFakeCtx({ cwd, hasUI: false }));
 	};
+
+	it("records MCP dialog dismissal after the panel closes", async () => {
+		writeUserServers({ demo: { command: "demo-server" } });
+		await boot();
+		const blocks: string[] = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => {
+			const payload = data as { placement?: string; text?: string };
+			if (payload.placement === "user-prepend" && payload.text !== undefined) blocks.push(payload.text);
+		});
+		const ctx = createFakeCtx({ cwd, hasUI: true, mode: "tui" });
+		let close!: () => void;
+		(ctx.ui as { custom: ReturnType<typeof vi.fn> }).custom.mockImplementation(() => new Promise<void>((resolve) => { close = resolve; }));
+		const pending = fake.commands.get("mcp")!.handler("", ctx);
+		expect(blocks).toEqual([]);
+		close();
+		await pending;
+		expect(blocks).toEqual(localCommandBlocks({ name: "mcp", stdout: "MCP dialog dismissed" }));
+		await fake.fire("session_shutdown", {}, ctx);
+	});
+
+	it("records Claude Code's empty-server guidance as the local result", async () => {
+		await boot();
+		const blocks: string[] = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => {
+			const payload = data as { placement?: string; text?: string };
+			if (payload.placement === "user-prepend" && payload.text !== undefined) blocks.push(payload.text);
+		});
+		const ctx = createFakeCtx({ cwd, hasUI: true, mode: "tui" });
+		const stdout = "No MCP servers configured. Run `claude doctor` if this is unexpected — it lists MCP config files that failed validation. Otherwise, run `claude mcp --help` or visit https://code.claude.com/docs/en/mcp to learn more.";
+		await fake.commands.get("mcp")!.handler("", ctx);
+		expect(blocks).toEqual(localCommandBlocks({ name: "mcp", stdout }));
+		expect(ctx._notified).toContainEqual({ message: stdout, type: "info" });
+	});
+
+	it("records the RPC read-only notice with the text-mode status listing", async () => {
+		writeUserServers({ demo: { command: "demo-server", args: [] } });
+		await boot();
+		const blocks: string[] = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => {
+			const payload = data as { placement?: string; text?: string };
+			if (payload.placement === "user-prepend" && payload.text !== undefined) blocks.push(payload.text);
+		});
+		const ctx = createFakeCtx({ cwd, hasUI: true, mode: "rpc" });
+		await fake.commands.get("mcp")!.handler("", ctx);
+		const shown = (ctx._notified as Array<{ message: string }>).map((n) => n.message);
+		expect(shown[0]).toContain("read-only");
+		expect(blocks).toEqual(localCommandBlocks({ name: "mcp", stdout: shown.join("\n") }));
+	});
+
+	it("records the independent-mode empty-server notice as the local result too", async () => {
+		resetConfigModeForTest("independent");
+		await boot();
+		const blocks: string[] = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => {
+			const payload = data as { placement?: string; text?: string };
+			if (payload.placement === "user-prepend" && payload.text !== undefined) blocks.push(payload.text);
+		});
+		const ctx = createFakeCtx({ cwd, hasUI: true, mode: "tui" });
+		await fake.commands.get("mcp")!.handler("", ctx);
+		const stdout = "No MCP servers configured. Add them to .pi/mcp.json or the agent dir's mcp.json.";
+		expect(blocks).toEqual(localCommandBlocks({ name: "mcp", stdout }));
+	});
 
 	it("adoptConnection registers namespaced tools, publishes them, and files the instructions reminder", async () => {
 		writeUserServers({ demo: { command: "demo-server", args: [] } });
@@ -268,6 +332,62 @@ describe("mcp wiring", () => {
 		} finally {
 			read.mockRestore();
 			directory.mockRestore();
+		}
+	});
+
+	it.each([[], [{ type: "text", text: " \n" }]].map((content) => ({ content })))("marks empty MCP content $content with Claude Code's tool name", async ({ content }) => {
+		writeUserServers({ demo: { command: "demo-server" } });
+		state.fixtures.set("demo", { tools: [{ name: "foo" }] });
+		state.callToolResult = () => ({ content, isError: true });
+		await boot();
+		const result = await fake.tools.get("mcp__demo__foo")!.execute("empty", {}, undefined, undefined, createFakeCtx({ cwd })) as { content: unknown[]; isError: boolean };
+		expect(result.content).toEqual([{ type: "text", text: "(mcp__demo__foo completed with no output)" }]);
+		expect(result.isError).toBe(true);
+	});
+
+	it("does not add a no-output marker to an image-only MCP result", async () => {
+		writeUserServers({ demo: { command: "demo-server" } });
+		state.fixtures.set("demo", { tools: [{ name: "foo" }] });
+		const data = "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+		state.callToolResult = () => ({ content: [{ type: "image", data, mimeType: "image/gif" }] });
+		await boot();
+		const result = await fake.tools.get("mcp__demo__foo")!.execute("image", {}, undefined, undefined, createFakeCtx({ cwd })) as { content: unknown[] };
+		expect(result.content).toEqual([{ type: "image", data, mimeType: "image/gif" }]);
+	});
+
+	it("uses Claude Code's no-resources message when a connected server lists no resources", async () => {
+		writeUserServers({ demo: { command: "demo-server" } });
+		state.fixtures.set("demo", { resources: [{ uri: "demo://removed" }] });
+		await boot();
+		const live = await vi.mocked(mcpClient.connect).mock.results.at(-1)!.value;
+		live.resources = [];
+		const result = await fake.tools.get("list_mcp_resources")!.execute("empty-list", {}, undefined, undefined, createFakeCtx({ cwd })) as { content: unknown[] };
+		expect(result.content).toEqual([{ type: "text", text: "No resources found. MCP servers may still provide tools even if they have no resources." }]);
+	});
+
+	it("uses Claude Code's JSON result for an empty resource read", async () => {
+		writeUserServers({ demo: { command: "demo-server" } });
+		state.fixtures.set("demo", { resources: [{ uri: "demo://empty" }] });
+		await boot();
+		const read = vi.spyOn(mcpClient, "readResource").mockResolvedValue({ contents: [] });
+		try {
+			const result = await fake.tools.get("read_mcp_resource")!.execute("empty-resource", { server: "demo", uri: "demo://empty" }, undefined, undefined, createFakeCtx({ cwd })) as { content: unknown[] };
+			expect(result.content).toEqual([{ type: "text", text: '{"contents":[]}' }]);
+		} finally {
+			read.mockRestore();
+		}
+	});
+
+	it("uses Claude Code's directory message and JSON for an empty resource directory", async () => {
+		writeUserServers({ demo: { command: "demo-server" } });
+		state.fixtures.set("demo", { resources: [{ uri: "demo://empty" }] });
+		await boot();
+		const read = vi.spyOn(mcpClient, "readResourceDir").mockResolvedValue({ entries: [] });
+		try {
+			const result = await fake.tools.get("read_mcp_resource_dir")!.execute("empty-directory", { server: "demo", uri: "demo://empty" }, undefined, undefined, createFakeCtx({ cwd })) as { content: unknown[] };
+			expect(result.content).toEqual([{ type: "text", text: 'Directory is empty.\n{"resources":[]}' }]);
+		} finally {
+			read.mockRestore();
 		}
 	});
 

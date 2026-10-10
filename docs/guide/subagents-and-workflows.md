@@ -246,12 +246,14 @@ the current run's script there.
 
 `/effort` sets how much reasoning the model spends: `off`, `minimal`,
 `low`, `medium`, `high`, `xhigh`, `max`, or `ultracode`. A bare `/effort`
-opens a slider (**←** and **→** or **h** and **l** move, **Enter** confirms).
+opens a slider (**←** and **→** or **h** and **l** move, **Enter** confirms,
+**s** applies the level to this session only).
 Levels the current model doesn't support are skipped. **shift+tab** cycles
 the plain levels; cycling away from `xhigh` while ultracode is armed turns
 ultracode off.
 
 Changing the effort re-caches the conversation, so the next request costs
-more than usual. `/effort` doesn't save the level across restarts; to
-save one, open pi's `/thinking` picker and press **ctrl+s**, or pass
-`--thinking <level>` at launch.
+more than usual. `low`, `medium`, `high` and `xhigh` are saved for the
+current model, so a new session on that model starts there; `max` and
+`ultracode` last for this session only. `/effort auto` clears the saved
+level, and `--thinking <level>` at launch overrides it.

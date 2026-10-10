@@ -346,7 +346,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 				[outcome.additionalContext && wrapReminder(hookContextText("PostToolUse", outcome.additionalContext)), formatterNotice]
 					.filter(Boolean)
 					.join("\n") || undefined,
-		});
+		}, event.toolName);
 		if (!content) return undefined;
 		return { content, isError: event.isError };
 	});

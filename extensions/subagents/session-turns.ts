@@ -158,5 +158,5 @@ export function finishOutcome(
 		};
 	}
 	if (output.trim()) return { output, toolCalls, usage, actions };
-	return { output: "Subagent produced no output.", toolCalls, usage, actions, failed: true };
+	return { output: "(Subagent completed but returned no output.)", toolCalls, usage, actions };
 }
