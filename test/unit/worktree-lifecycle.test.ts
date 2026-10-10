@@ -27,6 +27,8 @@ beforeEach(() => {
 	repo = join(root, "repo");
 	mkdirSync(repo);
 	git(repo, "init", "-q");
+	// Windows runners default core.autocrlf to true, which rewrites checkouts with CRLF.
+	git(repo, "config", "core.autocrlf", "false");
 	writeFileSync(join(repo, "a.txt"), "original\n");
 	writeFileSync(join(repo, ".gitignore"), "output.txt\n");
 	git(repo, "add", ".");

@@ -92,7 +92,7 @@ describe("memory file-tool paths", () => {
 		await expect(fake.fire("tool_call", { toolName: "write", input }, ctx)).resolves.toEqual([undefined]);
 		// Unbounded, the resolver overflowed the stack (seconds) before falling back.
 		expect(Date.now() - started).toBeLessThan(1_000);
-		expect(resolveThroughLinks(path)).toBe(join(realpathSync(dir), "cycle.md"));
+		expect(resolveThroughLinks(path)).toBe(join(realpathSync.native(dir), "cycle.md"));
 	});
 
 	it.each([".claude", "relocated-claude"])("does not create memory through an independent state alias into %s", async (name) => {

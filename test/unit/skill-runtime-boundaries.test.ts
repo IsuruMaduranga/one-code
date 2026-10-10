@@ -19,6 +19,8 @@ beforeEach(() => {
 	mkdirSync(cwd, { recursive: true });
 	mkdirSync(agentDir, { recursive: true });
 	vi.stubEnv("HOME", root);
+	// os.homedir() reads USERPROFILE on Windows, HOME elsewhere.
+	vi.stubEnv("USERPROFILE", root);
 	vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
 });
 afterEach(() => {

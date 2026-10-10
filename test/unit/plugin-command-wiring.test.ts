@@ -1,5 +1,5 @@
 import { ONE_SHOT_COMMAND_FAILED_CHANNEL } from "../../extensions/lib/interrupt.ts";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -77,7 +77,8 @@ describe("plugin command user turns", () => {
 	it("runs an approved placeholder, and asks the gate, in the entered worktree", async () => {
 		const worktree = join(home, "wt");
 		mkdirSync(worktree);
-		writeFileSync(join(home, "fixture", "commands", "ping.md"), "In !`pwd`");
+		// A marker file, not `pwd`: Git Bash on Windows prints an MSYS path.
+		writeFileSync(join(home, "fixture", "commands", "ping.md"), "In !`printf ran > here.txt`");
 		const fake = createFakePi();
 		pluginsExtension(fake.pi as never);
 		const decide = vi.fn(async () => undefined);
@@ -85,7 +86,8 @@ describe("plugin command user turns", () => {
 		fake.events.emit(WORKTREE_CHANNEL, { path: worktree, branch: "wt" });
 		await fake.commands.get("fixture:ping")!.handler("", createFakeCtx({ cwd: home, mode: "tui" }));
 		expect(decide).toHaveBeenCalledWith(expect.objectContaining({ cwd: worktree }));
-		expect(realpathSync(String(fake.sentUserMessages[0].content).slice(3).trim())).toBe(realpathSync(worktree));
+		expect(existsSync(join(worktree, "here.txt"))).toBe(true);
+		expect(existsSync(join(home, "here.txt"))).toBe(false);
 	});
 
 	it.each(["print", "json"])("reports a blocked shell placeholder as failure in %s without starting a turn", async (mode) => {
