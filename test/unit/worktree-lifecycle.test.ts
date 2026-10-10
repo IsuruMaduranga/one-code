@@ -184,7 +184,7 @@ describe("worktree lifecycle safety", () => {
 			expect(result?.reason).toContain("no longer exists");
 		}
 		expect((await exit({ action: "keep" })).details.worktreeState).toBeNull();
-	});
+	}, 20_000); // four gated tool calls plus git on a Windows runner take over 5 s
 
 	it("accepts an existing worktree through a symlinked repository path", async () => {
 		const path = await start();
