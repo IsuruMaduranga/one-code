@@ -43,10 +43,11 @@ const ctxFor = (mode: string) =>
 	});
 
 describe("sessionWorkCwd", () => {
-	it("is the entered worktree while it exists, else the session cwd", () => {
+	it("keeps the entered worktree as the target until the session explicitly leaves it", () => {
 		expect(sessionWorkCwd({ path: worktree }, dir)).toBe(worktree);
 		expect(sessionWorkCwd(null, dir)).toBe(dir);
-		expect(sessionWorkCwd({ path: join(dir, "gone") }, dir)).toBe(dir);
+		// A missing worktree must fail there, never redirect writes into the main checkout.
+		expect(sessionWorkCwd({ path: join(dir, "gone") }, dir)).toBe(join(dir, "gone"));
 	});
 });
 

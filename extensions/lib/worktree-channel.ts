@@ -11,8 +11,6 @@
  * restore.
  */
 
-import { existsSync } from "node:fs";
-
 export const WORKTREE_CHANNEL = "one-code:worktree";
 
 /** Payload: the active worktree, or null when the session left it. */
@@ -24,11 +22,13 @@ export interface WorktreeLocation {
 }
 
 /**
- * Where the session's work happens: the entered worktree while one is active
- * and still on disk, else the session's own cwd. pi fixes a session's cwd at
- * creation (handoff trap 10), so a child spawned from `ctx.cwd` would run in
- * the original checkout the user entered a worktree to protect.
+ * Where the session's work happens: the entered worktree while one is active,
+ * else the session's own cwd. A removed worktree must fail at that path, never
+ * silently redirect work into the original checkout. The worktree extension
+ * announces a missing path on restore and blocks calls until an active missing
+ * worktree is explicitly left. pi fixes a session's cwd at creation, so a child
+ * spawned from `ctx.cwd` would work in the checkout the user meant to protect.
  */
 export function sessionWorkCwd(entered: WorktreeLocation | null | undefined, sessionCwd: string): string {
-	return entered?.path && existsSync(entered.path) ? entered.path : sessionCwd;
+	return entered?.path || sessionCwd;
 }

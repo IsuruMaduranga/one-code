@@ -92,6 +92,7 @@ import { formatModel, modeBadge, nextMode, PERMISSION_STATUS_CHANNEL, type Permi
 import { intrinsicTier, usesClaudeCodeFastPaths } from "../lib/model-tier.ts";
 import { type ChildToolCall, type ChildGateDecision, sessionPermissionBridge, SUBAGENT_GATE_CHANNEL } from "./subagent-gate.ts";
 import { trackOriginalCommands } from "../lib/original-command.ts";
+import { sessionWorkCwd, WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
 import { MODE_CHANNEL, PLAN_FILE_CHANNEL } from "../lib/plan-mode-channels.ts";
 import { isWritingTool } from "./protected-paths.ts";
 import { denyRuleLines } from "./rule-prose.ts";
@@ -301,6 +302,12 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	// Worktree-wrapped bash calls publish the model's original command here,
 	// keyed by pi's toolCallId (never read from `event.input` — model-writable).
 	const originalCommands = trackOriginalCommands(pi);
+	// Worktree restores publish before this extension's session_start. Keep
+	// that state until worktree publishes its next enter, exit or branch reset.
+	let enteredWorktree: WorktreeLocation | null = null;
+	pi.events.on(WORKTREE_CHANNEL, (data) => {
+		enteredWorktree = data as WorktreeLocation | null;
+	});
 	/** Whether bypassPermissions is a stop on the cycle — only when the session started with it (Claude Code semantics). */
 	let bypassInCycle = false;
 	/** Whether auto mode is a stop on the cycle — only when a classifier model is reachable. */
@@ -1209,13 +1216,6 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const conflict = isPathSubjectTool(normalizedTool) ? conflictingPathArguments(event.input as Record<string, unknown>) : undefined;
 		if (conflict) return { block: true, reason: conflict };
 		const subject = extractSubject(normalizedTool, event.input as Record<string, unknown>);
-		// Resolved through symlinks so the protected-path and working-directory
-		// checks see where a write lands or a read comes from, not how the path
-		// is spelled. Path tools only: a bash subject is a command line.
-		const resolvedSubject =
-			isPathSubjectTool(normalizedTool) && subject
-				? resolveForContainment(toAbsolute(ctx.cwd, subject, os.homedir()))
-				: undefined;
 		// In a worktree session, worktree's tool_call handler (which runs before this
 		// one) cd-wraps bash commands for execution and publishes the model's
 		// original command — and the worktree it runs in — over the bus under this
@@ -1230,7 +1230,15 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// `monitor` is cd-wrapped the same way (worktree/rewrite.ts).
 		const original = isShellTool(normalizedTool) || normalizedTool === "monitor" ? originalCommands.get(event.toolCallId) : undefined;
 		const matchSubject = original?.command ?? subject;
-		const callCwd = original?.cwd ?? ctx.cwd;
+		const callCwd = original?.cwd ?? sessionWorkCwd(enteredWorktree, ctx.cwd);
+		// File tools are rewritten to absolute worktree paths too. Both the
+		// lexical and resolved working roots must follow entry; keeping the
+		// main checkout's resolved root would still fast-path writes there.
+		const resolvedCallCwd = callCwd === ctx.cwd ? resolvedCwd : resolveForContainment(callCwd);
+		const resolvedSubject =
+			isPathSubjectTool(normalizedTool) && subject
+				? resolveForContainment(toAbsolute(callCwd, subject, os.homedir()))
+				: undefined;
 		const powershellParse = await parsePowerShell(normalizedTool, matchSubject, mode);
 
 		currentMainToolCallId = event.toolCallId;
@@ -1247,7 +1255,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				allow: allowRules,
 				classifyAllShell: classifyAllShell(),
 				resolvedSubject,
-				resolvedCwd,
+				resolvedCwd: resolvedCallCwd,
 				planFilePath,
 				memoryDirPath,
 				scratchpadDirPath,
@@ -1312,7 +1320,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				? safetyControlWrite({
 						toolName: normalizeToolName(event.toolName),
 						input: event.input as Record<string, unknown>,
-						cwd: ctx.cwd,
+						cwd: callCwd,
 						home: os.homedir(),
 						oneCodeProjectSettings: oneCodeProjectSettingsFile,
 					})
@@ -1380,7 +1388,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 					// A worktree-wrapped command is analysed as the model wrote it, in the
 					// worktree it runs in (the classifier transcript already holds it).
 					{
-						cwd: original?.cwd, powershellParse, toolCallId: event.toolCallId,
+						cwd: callCwd, powershellParse, toolCallId: event.toolCallId,
 						appendEntry: { kind: "tool", tool: normalizedTool, input: original !== undefined ? { command: original.command } : event.input as Record<string, unknown> },
 					},
 				);

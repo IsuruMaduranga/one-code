@@ -30,11 +30,14 @@ const REPOSITORY_ENV = /\bGIT_(?:DIR|WORK_TREE|COMMON_DIR)\b/i;
 /** The words of one statement, quotes removed (`'…'` literal, `"…"` with doubled quotes). */
 function statementWords(statement: string): string[] {
 	const words: string[] = [];
-	const pattern = /'((?:[^']|'')*)'|"((?:[^"]|"")*)"|(\S+)/g;
+	const pattern = /'((?:[^']|'')*)'|"((?:[^"]|"")*)"|([^\s'"]+)/g;
+	let end = 0;
 	for (const match of statement.matchAll(pattern)) {
-		if (match[1] !== undefined) words.push(match[1].replace(/''/g, "'"));
-		else if (match[2] !== undefined) words.push(match[2].replace(/""/g, '"'));
-		else words.push(match[3]);
+		const value = match[1] !== undefined ? match[1].replace(/''/g, "'") : match[2] !== undefined ? match[2].replace(/""/g, '"') : match[3];
+		// Quotes can start mid-word: --git-dir="C:\\my repo\\.git" is one argument.
+		if (words.length > 0 && match.index === end) words[words.length - 1] += value;
+		else words.push(value);
+		end = match.index + match[0].length;
 	}
 	return words;
 }

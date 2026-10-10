@@ -10,11 +10,12 @@
 
 import { execFile } from "node:child_process";
 import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { basename, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { registerWorktreeIsolation, releaseWorktreeIsolation } from "../lib/worktree-isolation.ts";
-import { findProjectRoot, HARNESS_GIT_CONFIG } from "../lib/git.ts";
+import { findProjectRoot, HARNESS_GIT_CONFIG, HARNESS_GIT_NO_HOOKS } from "../lib/git.ts";
+import { checkoutGitRunsProgram } from "../auto-mode/git-checkout-programs.ts";
 
 const run = promisify(execFile);
 
@@ -26,7 +27,7 @@ export interface Worktree {
 }
 
 async function git(args: string[], cwd: string): Promise<string> {
-	const { stdout } = await run("git", [...HARNESS_GIT_CONFIG, ...args], { cwd, maxBuffer: 10 * 1024 * 1024 });
+	const { stdout } = await run("git", [...HARNESS_GIT_CONFIG, ...HARNESS_GIT_NO_HOOKS, ...args], { cwd, maxBuffer: 10 * 1024 * 1024 });
 	return stdout.trim();
 }
 
@@ -40,10 +41,14 @@ export async function isGitRepo(cwd: string): Promise<boolean> {
 
 /** Creates a worktree on a new throwaway branch at the current HEAD. */
 export async function createWorktree(cwd: string, label: string): Promise<Worktree> {
+	const program = checkoutGitRunsProgram(cwd, homedir(), []);
+	if (program) {
+		throw new Error(`Cannot create an isolation worktree: ${program}. Create the worktree with an explicitly approved git worktree add command, then start a session there without automatic isolation.`);
+	}
 	const safeLabel = label.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 24) || "agent";
 	const dir = mkdtempSync(join(tmpdir(), `cc-wt-${safeLabel}-`));
 	const path = join(dir, "tree");
-	const branch = `cc-subagent/${safeLabel}-${Date.now().toString(36)}`;
+	const branch = `cc-subagent/${basename(dir).slice("cc-wt-".length)}`;
 	await git(["worktree", "add", "-b", branch, path, "HEAD"], cwd);
 	// Register for the child permission gate's git-isolation guard. The shared
 	// checkout's ROOT, not cwd — the spawn may run from a subdirectory — and the
@@ -79,7 +84,7 @@ export async function createWorktree(cwd: string, label: string): Promise<Worktr
  */
 export async function worktreeHasChanges(worktree: Worktree): Promise<boolean> {
 	try {
-		const status = await git(["status", "--porcelain"], worktree.path);
+		const status = await git(["status", "--porcelain", "--untracked-files=all", "--ignored", "--ignore-submodules=none"], worktree.path);
 		if (status.length > 0) return true;
 		const ahead = await git(["rev-list", "--count", "HEAD", `refs/heads/${worktree.branch}`, `^${worktree.baseCommit}`], worktree.path);
 		return ahead !== "0";

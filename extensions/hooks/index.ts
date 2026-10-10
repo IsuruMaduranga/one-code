@@ -66,6 +66,7 @@ import { QueuedDelivery } from "../lib/queued-delivery.ts";
 import { SKILL_INVOCATION_TYPE, type SkillInvocationDetails } from "../skill/invoke.ts";
 import { isNotificationDetails } from "../lib/notifications.ts";
 import { consentDialog } from "../lib/consent-dialogs.ts";
+import { sessionWorkCwd, WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
 
 /** Claude Code's `hook_additional_context` attachment text (utils/messages.ts). */
 export function hookContextText(event: CcHookEvent, text: string): string {
@@ -109,6 +110,10 @@ interface HookDispatchCtx {
 }
 
 export default function hooksExtension(pi: ExtensionAPI) {
+	let enteredWorktree: WorktreeLocation | null = null;
+	pi.events.on(WORKTREE_CHANNEL, (data) => {
+		enteredWorktree = data as WorktreeLocation | null;
+	});
 	let stopHookBlocks = 0;
 	/** Context from UserPromptSubmit / SessionStart / PostCompact hooks, delivered with the next prompt. */
 	let pendingPromptContext: Array<{ event: CcHookEvent; text: string }> = [];
@@ -187,7 +192,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	const basePayload = (ctx: HookDispatchCtx, event: CcHookEvent): HookStdinPayload => ({
 		session_id: ctx.sessionManager.getSessionId(),
 		transcript_path: ctx.sessionManager.getSessionFile() ?? "",
-		cwd: ctx.cwd,
+		cwd: sessionWorkCwd(enteredWorktree, ctx.cwd),
 		hook_event_name: event,
 	});
 
@@ -200,7 +205,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		ctx: HookDispatchCtx,
 		event: CcHookEvent,
 		matchValue: { candidates?: string[]; ignoreMatcher?: boolean },
-		payload: HookStdinPayload,
+		payloadOrFactory: HookStdinPayload | (() => Promise<HookStdinPayload | undefined>),
 		/** Runs once, only when hooks will actually run — the point where a caller can snapshot state the hooks may change. */
 		willRun?: () => void,
 	): Promise<HookOutcome> => {
@@ -208,18 +213,20 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		const signal = ctx.sessionEnded ? ctx.signal : ctx.signal ? AbortSignal.any([ctx.signal, sessionAbort.signal]) : sessionAbort.signal;
 		try {
 			const hooks = await collectHooks({ ...ctx, signal }, event, matchValue);
-			if (hooks.length === 0 || signal?.aborted) return merged;
+			const payload = typeof payloadOrFactory === "function" ? await payloadOrFactory() : payloadOrFactory;
+			if (!payload || hooks.length === 0 || signal?.aborted) return merged;
 			willRun?.();
 			const stdin = JSON.stringify(payload);
 			const outcomes = await Promise.allSettled(
 				hooks.map(async ({ source, hook }) => {
 					const run = await runHookCommand(hook.command, stdin, {
-						// A child's hook executes in its worktree; settings, consent and
-						// CLAUDE_PROJECT_DIR still belong to the parent project.
+						// The calling session's worktree or child's directory; settings,
+						// consent and CLAUDE_PROJECT_DIR still belong to the parent project.
 						cwd: payload.cwd,
 						signal,
 						timeoutSeconds: hook.timeout,
 						shell: hook.shell,
+						// Config, consent and CLAUDE_PROJECT_DIR stay at the original project.
 						projectDir: ctx.cwd,
 						// SessionEnd is fire-and-forget at shutdown: it must not hold a
 						// one-shot process open. Every other hook is awaited work that
@@ -323,7 +330,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		// to it: this extension awaits the hook and loads before file-tracker, so
 		// the tracker records the hook's version as the model's own write
 		// (formatter-notice.ts, review M1). Snapshot only when hooks will run.
-		const target = event.isError ? undefined : fileToolTarget(event.toolName, event.input, ctx.cwd);
+		const target = event.isError ? undefined : fileToolTarget(event.toolName, event.input, payload.cwd);
 		let before: FileSnapshot | undefined;
 		const outcome = await dispatch(ctx, "PostToolUse", { candidates: toolMatchCandidates(event.toolName) }, payload, () => {
 			if (target) before = snapshotFile(target);
@@ -454,8 +461,13 @@ export default function hooksExtension(pi: ExtensionAPI) {
 
 	// ---- SessionStart / SessionEnd -----------------------------------------
 	const dispatchSessionStart = async (ctx: ExtensionContext, source: string, gen: number) => {
-		const payload: HookStdinPayload = { ...basePayload(ctx, "SessionStart"), source };
-		const outcome = await dispatch(ctx, "SessionStart", { candidates: [source] }, payload);
+		// Reserve project-hook consent synchronously, before MCP and external
+		// imports enqueue their dialogs. Only defer the payload: worktree's later
+		// synchronous session_start handler must restore cwd before we capture it.
+		const outcome = await dispatch(ctx, "SessionStart", { candidates: [source] }, async () => {
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			return gen === sessionGen ? { ...basePayload(ctx, "SessionStart"), source } : undefined;
+		});
 		// A later session_start (rapid /clear, resume) may have superseded this one
 		// while its hook ran; discard the stale result instead of pushing it into
 		// the new session's context (`pendingPromptContext` is shared and reset).
@@ -553,6 +565,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	};
 
 	pi.on("session_shutdown", (event, ctx) => {
+		// Also cancels a queued SessionStart before its deferred dispatch touches a disposed context.
 		sessionGen += 1;
 		sessionAbort.abort();
 		// A reload re-runs the extensions but keeps the conversation (pi's

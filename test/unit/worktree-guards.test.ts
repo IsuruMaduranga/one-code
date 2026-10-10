@@ -91,6 +91,14 @@ describe("worktree git-isolation guard", () => {
 		expect(guard("cd $BUILD_DIR && git status")).toContain("unverifiable");
 	});
 
+	it.each(["git -C /r*po status", "git -C /re?o status", "git -C ~someone/repo status", "git --work-tree /r*po status", "git --git-dir /r*po/.git status"])("refuses expanded repository targets: %s", (command) => {
+		expect(guard(command)).toContain("cannot be verified");
+	});
+
+	it("allows a quoted glob in a git path as a literal directory name", () => {
+		expect(guard("git -C '/r*po' status")).toBeUndefined();
+	});
+
 	it("sees a -C that follows --config-env", () => {
 		expect(guard("git --config-env foo=BAR -C /repo status")).toContain(`targets ${resolve("/repo")}`);
 	});

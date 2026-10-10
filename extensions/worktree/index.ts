@@ -13,15 +13,17 @@
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { restoreLatestDetails } from "../lib/branch-restore.ts";
+import { checkoutGitRunsProgram } from "../auto-mode/git-checkout-programs.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
-import { absoluteFrom, comparablePath } from "../lib/paths.ts";
+import { absoluteFrom, comparablePath, tryRealpath } from "../lib/paths.ts";
 import { WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
 import { namesGit, unlistedWorktreesReason, worktreeBashGuardReason } from "./guards.ts";
 import { worktreePowershellGuardReason } from "./powershell-guards.ts";
@@ -30,7 +32,7 @@ import { ORIGINAL_COMMAND_CHANNEL, type OriginalCommandRecord } from "../lib/ori
 import { enterWorktreeDescription, ENTER_WORKTREE_PARAMS, EXIT_WORKTREE_DESCRIPTION, EXIT_WORKTREE_PARAMS } from "./descriptions.ts";
 import { rewriteToolInput, validateWorktreeName } from "./rewrite.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
-import { HARNESS_GIT_CONFIG, repositoryWorktrees } from "../lib/git.ts";
+import { findProjectRoot, HARNESS_GIT_CONFIG, HARNESS_GIT_NO_HOOKS, repositoryWorktrees } from "../lib/git.ts";
 import { projectConfigDir, projectConfigDirName } from "../lib/config-mode.ts";
 
 const run = promisify(execFile);
@@ -43,7 +45,7 @@ interface WorktreeState {
 	baseCommit?: string;
 	createdByUs: boolean;
 	originalCwd: string;
-	/** Root of the shared checkout (`git rev-parse --show-toplevel` at entry). */
+	/** Root of the main checkout, even when the session started in a linked worktree. */
 	sharedRoot: string;
 }
 
@@ -53,7 +55,7 @@ interface WorktreeDetails {
 }
 
 async function git(args: string[], cwd: string): Promise<string> {
-	const { stdout } = await run("git", [...HARNESS_GIT_CONFIG, ...args], { cwd, maxBuffer: 10 * 1024 * 1024 });
+	const { stdout } = await run("git", [...HARNESS_GIT_CONFIG, ...HARNESS_GIT_NO_HOOKS, ...args], { cwd, maxBuffer: 10 * 1024 * 1024 });
 	return stdout.trim();
 }
 
@@ -133,7 +135,11 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 
 	pi.on("tool_call", async (event) => {
 		if (!state) return;
-		if (["enter_worktree", "exit_worktree", "Agent", "SendMessage", "workflow"].includes(event.toolName)) return;
+		if (WORKTREE_TOOLS.has(event.toolName)) return;
+		if (!existsSync(state.path)) {
+			return { block: true, reason: `The active worktree at ${state.path} no longer exists. Use exit_worktree with action: "keep" to return to ${state.originalCwd}, or enter_worktree with path to switch to an existing worktree. No tool has run in the original checkout.` };
+		}
+		if (["Agent", "SendMessage", "workflow"].includes(event.toolName)) return;
 		if (event.toolName === "bash" || event.toolName === "monitor") {
 			// Guard before rewriting (and before the permission prompt — this
 			// extension loads ahead of permissions): git must verifiably target
@@ -193,13 +199,16 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 				return fail("enter_worktree needs a git repository; this directory is not one.");
 			}
 
+			const sharedRoot = findProjectRoot(repoRoot) ?? repoRoot;
 			if (params.path) {
 				const known = await listWorktreePaths(ctx.cwd);
 				// git lists `C:/…` on Windows, while the model passes the `C:\…` we showed it.
-				const wanted = comparablePath(absoluteFrom(ctx.cwd, params.path));
-				const listed = known.find((p) => comparablePath(p) === wanted);
+				const requested = absoluteFrom(ctx.cwd, params.path);
+				const wanted = comparablePath(tryRealpath(requested) ?? requested);
+				const listed = known.find((p) => comparablePath(tryRealpath(p) ?? p) === wanted);
 				const target = listed === undefined ? undefined : resolve(listed);
 				if (!target) return fail(`${params.path} is not a worktree of this repository. Known worktrees:\n${known.join("\n")}`);
+				if (!existsSync(target)) return fail(`Worktree ${target} no longer exists. Choose an existing worktree from \`git worktree list\`.`);
 				// The branch is display-only here (footer, reminder): a detached HEAD
 				// leaves it unset silently, a failing git is reported in the result text.
 				let branch: string | undefined;
@@ -210,7 +219,7 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 				} catch (error) {
 					branchNote = ` Its branch could not be read (${(error as Error).message.split("\n")[0]}).`;
 				}
-				const next: WorktreeState = { path: target, branch, createdByUs: false, originalCwd: ctx.cwd, sharedRoot: repoRoot };
+				const next: WorktreeState = { path: target, branch, createdByUs: false, originalCwd: ctx.cwd, sharedRoot };
 				applyState(next, toolCallId);
 				return {
 					content: [{ type: "text", text: `Switched into existing worktree ${target}${branch ? ` (branch ${branch})` : ""}.${branchNote} All work now happens there; exit_worktree returns to ${ctx.cwd}. ${ISOLATION_NOTE}` }],
@@ -228,6 +237,11 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 			const name = params.name ?? `wt-${randomBytes(3).toString("hex")}`;
 			const nameError = validateWorktreeName(name);
 			if (nameError) return fail(`Invalid worktree name "${name}": ${nameError}`);
+
+			// Hooks are disabled by the git wrapper; checkout filters must go through
+			// the normal shell permission gate rather than execute implicitly here.
+			const program = checkoutGitRunsProgram(repoRoot, homedir(), []);
+			if (program) return fail(`Could not create worktree safely: ${program}. Create it with a permission-reviewed \`git worktree add\` command, then enter it with \`path\`.`);
 
 			// `.onecode/worktrees` in independent mode (lib/config-mode.ts).
 			const worktreesDir = join(projectConfigDir(repoRoot), "worktrees");
@@ -248,7 +262,7 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 				return fail(`Could not create worktree: ${(error as Error).message}`);
 			}
 
-			const next: WorktreeState = { path, branch, baseCommit, createdByUs: true, originalCwd: ctx.cwd, sharedRoot: repoRoot };
+			const next: WorktreeState = { path, branch, baseCommit, createdByUs: true, originalCwd: ctx.cwd, sharedRoot };
 			applyState(next, toolCallId);
 			return {
 				content: [
@@ -286,7 +300,9 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 					content: [
 						{
 							type: "text",
-							text: `Left worktree session; back in ${current.originalCwd}. The worktree remains at ${current.path}${current.branch ? ` (branch ${current.branch})` : ""} — re-enter it with enter_worktree {path}.`,
+							text: `Left worktree session; back in ${current.originalCwd}. ` + (existsSync(current.path)
+								? `The worktree remains at ${current.path}${current.branch ? ` (branch ${current.branch})` : ""} — re-enter it with enter_worktree {path}.`
+								: `The worktree at ${current.path} no longer exists. No branch was removed.`),
 						},
 					],
 					details: { worktreeState: null } satisfies WorktreeDetails,
@@ -306,11 +322,13 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 			if (!params.discard_changes) {
 				const blockers: string[] = [];
 				try {
-					const dirty = await git(["status", "--porcelain"], current.path);
-					if (dirty) blockers.push(`Uncommitted changes:\n${dirty}`);
+					const dirty = await git(["status", "--porcelain", "--untracked-files=all", "--ignored"], current.path);
+					if (dirty) blockers.push(`Uncommitted or ignored files:\n${dirty}`);
 					if (current.baseCommit && current.branch) {
-						const ahead = await git(["rev-list", "--count", `${current.baseCommit}..${current.branch}`], current.path);
-						if (ahead !== "0") blockers.push(`${ahead} commit(s) on ${current.branch} not on the original branch.`);
+						const ahead = await git(["rev-list", "--count", "HEAD", `refs/heads/${current.branch}`, `^${current.baseCommit}`], current.path);
+						if (ahead !== "0") blockers.push(`${ahead} commit(s) on HEAD or ${current.branch} not on the original branch.`);
+					} else {
+						blockers.push("Could not verify commits without the original branch and base commit.");
 					}
 				} catch {
 					blockers.push("Could not verify the worktree is clean.");
@@ -330,8 +348,7 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 			}
 
 			try {
-				await git(["worktree", "remove", "--force", current.path], current.originalCwd);
-				if (current.branch) await git(["branch", "-D", current.branch], current.originalCwd);
+				await git(["worktree", "remove", ...(params.discard_changes ? ["--force"] : []), current.path], current.originalCwd);
 			} catch (error) {
 				return {
 					content: [{ type: "text", text: `Could not remove the worktree: ${(error as Error).message}` }],
@@ -340,6 +357,17 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 				};
 			}
 			applyState(undefined);
+			if (current.branch) {
+				try {
+					await git(["branch", params.discard_changes ? "-D" : "-d", current.branch], current.originalCwd);
+				} catch (error) {
+					return {
+						content: [{ type: "text", text: `Removed worktree ${current.path}; back in ${current.originalCwd}, but could not delete branch ${current.branch}: ${(error as Error).message}. Inspect the branch before removing it manually.` }],
+						details: { worktreeState: null } satisfies WorktreeDetails,
+						isError: true,
+					};
+				}
+			}
 			return {
 				content: [{ type: "text", text: `Removed worktree ${current.path}${current.branch ? ` and branch ${current.branch}` : ""}; back in ${current.originalCwd}.` }],
 				details: { worktreeState: null } satisfies WorktreeDetails,

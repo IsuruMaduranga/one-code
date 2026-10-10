@@ -37,6 +37,24 @@ describe("worktree git-isolation guard for PowerShell", () => {
 		expect(guard("git -C ../wt2 log")).toContain(resolve("/repo/.claude/worktrees/wt2"));
 	});
 
+	it.each([
+		'git --git-dir="/repo/.git" status',
+		"git --work-tree='/repo' status",
+		'git -c core.worktree="/repo" status',
+		'git -C /"repo" status',
+		'Set-Location -LiteralPath:"/repo"; git status',
+	])("refuses quoted fragments in repository paths: %s", (command) => {
+		expect(guard(command)).toContain("shared checkout");
+	});
+
+	it("keeps spaces and escaped quotes inside quoted repository path fragments", () => {
+		const sharedRoot = resolve("/repo with space's");
+		const worktreePath = resolve(sharedRoot, ".claude/worktrees/own");
+		const command = `git --git-dir='${sharedRoot.replace(/'/g, "''")}/.git' status`;
+		expect(worktreePowershellGuardReason({ command, worktreePath, sharedRoot })).toContain("shared checkout");
+		expect(guard(`git --work-tree="${WT}" status`)).toBeUndefined();
+	});
+
 	it("leaves git against an unrelated repository alone", () => {
 		expect(guard("git -C /Users/x/other-repo pull")).toBeUndefined();
 		expect(guard("Set-Location /Users/x/other-repo; git pull")).toBeUndefined();
