@@ -8,9 +8,12 @@
  * is the final JSON body — where each <system-reminder> block landed, the
  * `defer_loading` definitions, tool schemas, message order. Codex SSE requests
  * are zstd-compressed by pi-ai: decode a copy for the dump, send the original
- * bytes untouched. For Codex, put transport: "sse" in a probe project's
- * .pi/settings.json and trust that fixture for the run with --approve (otherwise
- * pi ignores project settings). WebSocket continuation frames bypass fetch.
+ * bytes untouched. Codex's default WebSocket transport bypasses fetch, so
+ * `WebSocket.prototype.send` is wrapped too: each `response.create` frame is
+ * dumped without its `type` field. A continuation frame carries
+ * `previous_response_id` and only the new input items, so a WebSocket line is
+ * the delta the server received, not the whole conversation (put transport:
+ * "sse" in a trusted probe project's .pi/settings.json for full bodies).
  *
  *   WIRE_DUMP=/tmp/wire.jsonl pi -e test/e2e/dump-requests.ts --mode json -p "…"
  *
@@ -54,4 +57,21 @@ export default function dump(_pi: ExtensionAPI) {
 		return original(input, init);
 	};
 	globalThis.fetch = wrapped;
+
+	// pi-ai opens Codex sockets with Node's global WebSocket and sends each request as one JSON frame.
+	const socket = (globalThis as { WebSocket?: { prototype: { send(data: unknown): void } } }).WebSocket;
+	if (socket) {
+		const send = socket.prototype.send;
+		socket.prototype.send = function (this: unknown, data: unknown) {
+			if (typeof data === "string") {
+				try {
+					const { type, ...body } = JSON.parse(data) as { type?: string; input?: unknown };
+					if (type === "response.create" && Array.isArray(body.input)) appendFileSync(out, `${JSON.stringify(body)}\n`);
+				} catch {
+					// not JSON: not a model request
+				}
+			}
+			return send.call(this, data);
+		};
+	}
 }
