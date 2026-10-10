@@ -123,6 +123,22 @@ const WorkflowParams = Type.Object({
 	),
 });
 
+/**
+ * `args` as the script should see it. Weak models send a list or object as a
+ * JSON-encoded string despite the description (every Qwen 3.8 model, battery
+ * round 7), which breaks `args.map` and `pipeline(args, …)`; a string that
+ * parses to an array or object is decoded. Any other value passes verbatim.
+ */
+function decodedArgs(args: unknown): unknown {
+	if (typeof args !== "string" || !/^\s*[[{]/.test(args)) return args;
+	try {
+		const parsed: unknown = JSON.parse(args);
+		return parsed !== null && typeof parsed === "object" ? parsed : args;
+	} catch {
+		return args;
+	}
+}
+
 export default function workflowExtension(pi: ExtensionAPI) {
 	// Models the account refused this session (classifier/subagent reports, lib/model-unusable.ts):
 	// workflow agents share the subagent selector, so they resolve around them too.
@@ -249,7 +265,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 				const configuredDefault = applicableSubagentDefault(loadSubagentDefault(os.homedir()), ctx.model);
 				const handle = manager.start({
 					script,
-					args: params.args,
+					args: decodedArgs(params.args),
 					tokenBudget: params.tokenBudget ?? null,
 					resumeFromRunId: params.resumeFromRunId,
 					// Where the session works: the entered worktree, if any (pi keeps ctx.cwd at the original checkout).
@@ -296,7 +312,8 @@ export default function workflowExtension(pi: ExtensionAPI) {
 					}
 					const oneShotPrefix = forcedSync ? `${oneShotNote("workflow")}\n\n` : "";
 					return {
-						content: [{ type: "text", text: `${oneShotPrefix}${buildRunReport(handle)}` }],
+						// The script's path, as the background result gives it: a failed run is fixed by editing it and re-running with scriptPath.
+						content: [{ type: "text", text: `${oneShotPrefix}${buildRunReport(handle)}\nscript: ${handle.scriptPath}` }],
 						details: { runId: handle.runId, status: handle.status, scriptPath: handle.scriptPath },
 						isError: handle.status !== "completed",
 					};

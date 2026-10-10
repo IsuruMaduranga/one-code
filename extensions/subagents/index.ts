@@ -29,7 +29,7 @@ import type { Api, Message, Model } from "@earendil-works/pi-ai";
 import { type AgentToolResult, defineTool, getAgentDir, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-mode/actions.ts";
-import { type AgentDefinition, type AgentSource, agentDirs, discoverAgents } from "./agents.ts";
+import { type AgentDefinition, agentFileSources, BUNDLED_AGENTS_DIR, discoverAgents } from "./agents.ts";
 import { findConfigured, modelIdentity, modelSpec, supportsImageInput } from "../lib/model-policy.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../lib/model-unusable.ts";
 import { applicableSubagentDefault, loadSubagentDefault, persistSubagentModel, type SubagentDefault } from "./default-model.ts";
@@ -125,7 +125,6 @@ const MCP_STATUS_LABELS: Record<McpStatusKind, string | undefined> = {
 /** The catalog shipped in this package: <package>/agents. */
 /** This package's root (the `one-code-extension` directory). */
 const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const BUNDLED_AGENTS_DIR = join(PACKAGE_ROOT, "agents");
 
 interface RunRequest {
 	agent: string;
@@ -521,7 +520,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		// The code-defined guide ranks below every agent file, so one of the same
 		// name replaces it.
 		const plugins = discoverPlugins(defaultDiscoverRoots(getAgentDir(), cwd));
-		const fileSources: Array<string | AgentSource> = [BUNDLED_AGENTS_DIR, ...plugins.agentDirs, ...agentDirs(cwd, os.homedir())];
+		const fileSources = agentFileSources(cwd, os.homedir(), plugins.agentDirs);
 		// The prompt is built from the catalog it sits in, when a spawn reads it.
 		let catalog: AgentDefinition[] = [];
 		const guide = guideAgentDefinition(() => guideInput(cwd, catalog, plugins));
@@ -2057,7 +2056,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					content: [
 						{
 							type: "text",
-							text: `No \`subagent_type\` given, but you passed run options — this looks like a run that forgot to name its agent. Set \`subagent_type\` to one of the names below (or "fork" to clone this conversation). To only browse the catalog, call with action:"list".\n\nAvailable agents:\n${describeAgents(ctx.cwd)}`,
+							// The corrected call, with the model's own task: a tiny model repeated the bare call
+							// 30 times against the rule alone (battery round 7).
+							text: `No \`subagent_type\` given, but you passed run options — this looks like a run that forgot to name its agent. Set \`subagent_type\` to one of the names below (or "fork" to clone this conversation). For example: {"subagent_type": "general-purpose", "task": ${JSON.stringify(taskText ?? "<the task>")}}. To only browse the catalog, call with action:"list".\n\nAvailable agents:\n${describeAgents(ctx.cwd)}`,
 						},
 					],
 					details: {},

@@ -38,6 +38,14 @@ describe("Agent tool, Claude Code call shape (H1)", () => {
 		expect(text(result)).toMatch(/`task` is required/);
 	});
 
+	// Battery round 7: DeepSeek V3.2 repeated a run without `subagent_type` up to
+	// 30 times; the error now shows the corrected call, with its own task.
+	it("shows the corrected call when a run forgets to name its agent", async () => {
+		const result = (await run({ task: "Read the git history.", name: "historian" })) as { isError?: boolean };
+		expect(result.isError).toBe(true);
+		expect(text(result)).toContain('For example: {"subagent_type": "general-purpose", "task": "Read the git history."}');
+	});
+
 	it("rejects a blank task rather than spawning an empty child", async () => {
 		const result = (await run({ subagent_type: "general-purpose", prompt: "   " })) as { isError?: boolean };
 		expect(result.isError).toBe(true);

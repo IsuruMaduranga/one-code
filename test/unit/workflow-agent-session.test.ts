@@ -102,6 +102,14 @@ describe("workflow agent() sessions", () => {
 		expect(prompt).not.toHaveBeenCalled();
 	});
 
+	// Battery round 7: the workflow reference says agent types resolve from the
+	// Agent tool's registry, but only user and project agent files were loaded.
+	it.each(["general-purpose", "explore"])("resolves the bundled %s agent as the Agent tool does", async (agentType) => {
+		const { first, error } = await toolsOf({ agentType });
+		expect(error ?? "").not.toContain("is not defined");
+		expect(first).toBeDefined();
+	});
+
 	it("keeps structured_output for a schema'd agentType whose file has a tools list (H3)", async () => {
 		const { first } = await toolsOf({ agentType: "b4-reader", schema: { type: "object", properties: { answer: { type: "string" } } } });
 		expect(first.active).toContain("structured_output");

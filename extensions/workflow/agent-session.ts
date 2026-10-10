@@ -31,7 +31,8 @@ import type { PermissionBridge } from "../permissions/subagent-gate.ts";
 import { localGateMode, MODE_ENV } from "../lib/permission-gate.ts";
 import type { HookBridge } from "../hooks/subagent-bridge.ts";
 import { summarizeArgs } from "../lib/tui-render.ts";
-import { agentDirs, type AgentDefinition, agentToolOptions, discoverAgents, unusableAllowlistError } from "../subagents/agents.ts";
+import { type AgentDefinition, agentFileSources, agentToolOptions, discoverAgents, unusableAllowlistError } from "../subagents/agents.ts";
+import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
 import { CHILD_EXTENSION_PATHS } from "../lib/child-extensions.ts";
 import { oneTurnHandbackSlot, subagentHandbackExtension } from "../lib/subagent-handback.ts";
 import type { SubagentDefault } from "../subagents/default-model.ts";
@@ -213,7 +214,9 @@ export class AgentRunner {
 	static async create(options: AgentRunnerOptions): Promise<AgentRunner> {
 		const agentDir = getAgentDir();
 		const modelRuntime = await createSharedModelRuntime(agentDir);
-		const agentCatalog = discoverAgents(agentDirs(options.cwd, os.homedir()));
+		// The Agent tool's registry: bundled and plugin agents too, not only the user and project folders.
+		const plugins = discoverPlugins(defaultDiscoverRoots(agentDir, options.cwd));
+		const agentCatalog = discoverAgents(agentFileSources(options.cwd, os.homedir(), plugins.agentDirs));
 		const availableModels = [...(await modelRuntime.getAvailable())];
 		return new AgentRunner(options, modelRuntime, agentCatalog, availableModels);
 	}
