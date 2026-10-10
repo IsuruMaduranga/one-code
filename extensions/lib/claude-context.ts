@@ -81,7 +81,7 @@ const CONTEXT_FOOTER =
 	"It describes the user's own account and workspace, so they don't need it reported back.";
 
 /** Independent mode excludes Claude locations even when reached through aliases or imports. */
-function isClaudeLocation(path: string, userDir: string): boolean {
+export function isClaudeLocation(path: string, userDir: string): boolean {
 	return [path, tryRealpath(path)].some((candidate) => candidate !== undefined && (
 		/(?:^|[/\\])\.claude(?:[/\\]|$)/i.test(candidate) ||
 		/(?:^|[/\\])CLAUDE(?:\.local)?\.md$/i.test(candidate) ||

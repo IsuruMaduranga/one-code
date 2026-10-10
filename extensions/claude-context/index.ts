@@ -21,7 +21,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import os from "node:os";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
 	buildClaudeMdBlock,
@@ -39,7 +39,7 @@ import {
 	nestedInstructionText,
 } from "../lib/claude-context.ts";
 import { collectGitStatus, GIT_SNAPSHOT_OWNER_CHANNEL } from "../lib/git-status.ts";
-import { projectMemoryDir, truncateIndex } from "../lib/memory.ts";
+import { readMemoryIndex } from "../lib/memory-index.ts";
 import { claudeConfigDir, oneCodeStateDir, tryRealpath } from "../lib/paths.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, type ReminderEntry, tailAnchor } from "../lib/reminders.ts";
 import { inContextEntries } from "../lib/compaction-boundary.ts";
@@ -74,18 +74,6 @@ function readOrEmpty(path: string): string {
 		return readFileSync(path, "utf8");
 	} catch {
 		return "";
-	}
-}
-
-function readMemoryIndex(cwd: string): { path: string; content: string } | null {
-	const dir = projectMemoryDir(cwd, os.homedir());
-	const path = join(dir, "MEMORY.md");
-	try {
-		const raw = readFileSync(path, "utf8");
-		if (!raw.trim()) return null;
-		return { path, content: truncateIndex(raw) };
-	} catch {
-		return null;
 	}
 }
 

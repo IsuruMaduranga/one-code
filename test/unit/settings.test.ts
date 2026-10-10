@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { projectSlug } from "../../extensions/lib/memory.ts";
 import {
 	loadPermissionSettings,
 	markOutsideReadPromptSeen,
@@ -133,7 +134,7 @@ describe("loadPermissionSettings", () => {
 		write(join(home, ".onecode", "settings.json"), { permissions: { allow: ["Read"] } });
 		// The per-repo slug is taken from the natively resolved root (macOS TMPDIR sits behind a
 		// symlink; Windows TEMP can be an 8.3 short name).
-		const projectDir = join(home, ".onecode", "projects", realpathSync.native(cwd).replace(/[^A-Za-z0-9-]/g, "-"));
+		const projectDir = join(home, ".onecode", "projects", projectSlug(realpathSync.native(cwd)));
 		mkdirSync(projectDir, { recursive: true });
 		write(join(projectDir, "settings.json"), { permissions: { allow: ["Bash(npm test:*)"] } });
 

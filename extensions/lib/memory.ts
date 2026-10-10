@@ -18,12 +18,21 @@
 
 import os from "node:os";
 import { join } from "node:path";
+import { isMap, isScalar, parseDocument, visit } from "yaml";
 import { userConfigDir } from "./config-mode.ts";
+import { parseRule } from "./claude-rules.ts";
 import { findProjectRoot } from "./git.ts";
 
-/** Claude Code's project-directory slug: every char outside [A-Za-z0-9-] becomes "-". */
+/** Claude Code's project-directory slug: 200 sanitized characters, then a hash for longer paths. */
 export function projectSlug(projectRoot: string): string {
-	return projectRoot.replace(/[^A-Za-z0-9-]/g, "-");
+	const slug = projectRoot.replace(/[^A-Za-z0-9-]/g, "-");
+	if (slug.length <= 200) return slug;
+
+	let hash = 0;
+	for (let i = 0; i < projectRoot.length; i++) {
+		hash = ((hash << 5) - hash + projectRoot.charCodeAt(i)) | 0;
+	}
+	return `${slug.slice(0, 200)}-${Math.abs(hash).toString(36)}`;
 }
 
 /**
@@ -59,17 +68,9 @@ export function projectMemoryDir(cwd: string, home: string = os.homedir()): stri
 export const INDEX_MAX_LINES = 200;
 export const INDEX_MAX_CHARS = 25_000;
 
-/** The index content that loads: frontmatter and whole-line HTML comments removed. */
+/** The index uses Claude Code's instruction parser before applying its load limits. */
 export function loadableIndexContent(content: string): string {
-	let out = content;
-	if (out.startsWith("---\n")) {
-		const close = out.indexOf("\n---", 3);
-		if (close !== -1) {
-			const lineEnd = out.indexOf("\n", close + 1 + 3);
-			out = lineEnd === -1 ? "" : out.slice(lineEnd + 1);
-		}
-	}
-	return out.replace(/^[ \t]*<!--[\s\S]*?-->[ \t]*\n?/gm, "");
+	return parseRule(content).content;
 }
 
 /** Line and character counts of the index as the limits measure it. */
@@ -187,39 +188,41 @@ export function combinedLimitWarning(totalChars: number): string | null {
 }
 
 /**
- * Claude Code stamps bookkeeping fields into a memory file's frontmatter at
- * write time: node_type, the writing session's id, and a modified timestamp
- * (observed in real memory files; `modified` is also documented). A file
- * without frontmatter is left untouched — Claude Code never adds frontmatter
- * to one, which also keeps MEMORY.md unstamped. Line-based on the template's
- * `metadata:` mapping; a re-stamp replaces the previous values.
+ * Stamp safe YAML memory headers, retaining the originating session on updates.
+ * Claude Code's ue/Mt preserve originSessionId; Dn declines unsafe rewrites.
+ * Keep comments, flow mappings, BOM/CRLF and the body; leave malformed headers,
+ * aliases and non-mapping metadata untouched rather than losing user content.
  */
 export function stampFrontmatter(content: string, sessionId: string, modifiedIso: string): string {
-	if (!content.startsWith("---\n")) return content;
-	const close = content.indexOf("\n---", 3);
-	if (close === -1) return content;
+	if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/.test(content)) return content;
+	const match = content.match(/^(\uFEFF?---[ \t]*\r?\n)([\s\S]*?)(\r?\n---[ \t]*(?:\r?\n|$))/);
+	if (!match) return content;
 
-	const body = content.slice(4, close);
-	const rest = content.slice(close);
-	const lines = body.split("\n").filter((l) => !/^\s{2}(node_type|originSessionId|modified):/.test(l));
+	// Claude Code checks its permissive parser against strict delimiters before
+	// rewriting: a quoted value containing "---" can make the header ambiguous.
+	const parsedBoundary = content.replace(/^\uFEFF/, "").match(/^---\s*\n([\s\S]*?)---\s*\n?/);
+	if (parsedBoundary?.[1].trim() !== match[2].trim()) return content;
 
-	const metaIndex = lines.findIndex((l) => /^metadata:\s*$/.test(l));
-	const tail = [`  originSessionId: ${sessionId}`, `  modified: ${modifiedIso}`];
-	let out: string[];
-	if (metaIndex === -1) {
-		out = [...lines, "metadata:", "  node_type: memory", ...tail];
-	} else {
-		let childEnd = metaIndex + 1;
-		while (childEnd < lines.length && /^\s+\S/.test(lines[childEnd])) childEnd++;
-		out = [
-			...lines.slice(0, metaIndex + 1),
-			"  node_type: memory",
-			...lines.slice(metaIndex + 1, childEnd),
-			...tail,
-			...lines.slice(childEnd),
-		];
-	}
-	return `---\n${out.join("\n")}${rest}`;
+	const document = parseDocument(match[2]);
+	if (document.errors.length || document.warnings.length || !isMap(document.contents)) return content;
+	let hasAlias = false;
+	visit(document, { Alias: () => { hasAlias = true; } });
+	if (hasAlias) return content;
+
+	if (document.get("metadata") == null) document.set("metadata", document.createNode({}));
+	const metadata = document.get("metadata", true);
+	if (!isMap(metadata)) return content;
+
+	metadata.set("node_type", "memory");
+	const nodeIndex = metadata.items.findIndex((pair) => isScalar(pair.key) && pair.key.value === "node_type");
+	metadata.items.unshift(...metadata.items.splice(nodeIndex, 1));
+	const origin = metadata.get("originSessionId");
+	if (typeof origin !== "string" || !origin) metadata.set("originSessionId", sessionId);
+	metadata.set("modified", modifiedIso);
+
+	let yaml = document.toString().replace(/\n$/, "");
+	if (match[1].endsWith("\r\n")) yaml = yaml.replaceAll("\n", "\r\n");
+	return match[1] + yaml + match[3] + content.slice(match[0].length);
 }
 
 /**

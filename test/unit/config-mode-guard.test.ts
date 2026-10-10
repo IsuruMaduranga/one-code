@@ -20,6 +20,7 @@ const CHECKED: Record<string, string> = {
 	"lib/config-mode.ts": "the mode itself",
 	"lib/claude-settings.ts": "readers gate on claudeSourcesOn; managed paths are shared",
 	"lib/claude-context.ts": "the instruction rule drops every Claude Code file under agents-md",
+	"lib/memory-index.ts": "independent memory indexes cannot resolve into Claude Code locations",
 	"lib/skill-scan.ts": "Claude Code skill folders only in compatible mode; commands via the config dirs",
 	"lib/plugins.ts": "readClaudePlugins is false in independent mode",
 	"lib/permission-gate.ts": "protection: ~/.claude stays protected and its secrets stay secret in both modes",

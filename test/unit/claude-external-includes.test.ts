@@ -437,11 +437,15 @@ describe("durable approval and dialog fidelity", () => {
 		mkdirSync(dashed);
 		mkdirSync(underscored);
 		const path = oneCodeProjectSettingsPath(dashed, home);
-		expect(oneCodeProjectSettingsPath(underscored, home)).toBe(path);
+		const otherPath = oneCodeProjectSettingsPath(underscored, home);
 		persistExternalIncludesApproval(dashed, home, true);
 		expect(readExternalIncludesApproval(dashed, home)).toEqual({ approved: true, warningShown: true });
+		// Long paths have distinct hashed slugs. Copy the other project's settings
+		// explicitly so the identity guard is tested even without a slug collision.
+		write(otherPath, readFileSync(path, "utf8"));
 		expect(readExternalIncludesApproval(underscored, home)).toEqual({ approved: false, warningShown: false });
 		persistExternalIncludesApproval(underscored, home, false);
+		write(path, readFileSync(otherPath, "utf8"));
 		expect(readExternalIncludesApproval(dashed, home)).toEqual({ approved: false, warningShown: false });
 		// An answer recorded without its root cannot say which project gave it: ask again.
 		write(path, JSON.stringify({ hasClaudeMdExternalIncludesApproved: true, hasClaudeMdExternalIncludesWarningShown: true }));
