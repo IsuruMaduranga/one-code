@@ -7,7 +7,7 @@ import systemReminderExtension from "../../extensions/system-reminder/index.ts";
 import hooksExtension from "../../extensions/hooks/index.ts";
 import mcpExtension from "../../extensions/mcp/index.ts";
 import { buildClaudeMdBlock, discoverContextFiles, discoverOneCodeFiles, externalInstructionIncludes, nestedInstructionFiles } from "../../extensions/lib/claude-context.ts";
-import { EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_TITLE, EXTERNAL_INCLUDES_YES, externalIncludesDialog, persistExternalIncludesApproval, readExternalIncludesApproval } from "../../extensions/lib/claude-external-includes.ts";
+import { EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_NONE, EXTERNAL_INCLUDES_TITLE, EXTERNAL_INCLUDES_YES, externalIncludesDialog, persistExternalIncludesApproval, readExternalIncludesApproval } from "../../extensions/lib/claude-external-includes.ts";
 import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
 import { oneCodeProjectSettingsPath } from "../../extensions/lib/one-code-settings.ts";
 import { forwardSlashes } from "../../extensions/lib/paths.ts";
@@ -233,6 +233,20 @@ describe("external instruction include approval", () => {
 		await fake.fire("session_shutdown", {}, ctx);
 		await command;
 		expect(select).toHaveBeenCalledTimes(1);
+	});
+
+	it("config with no external includes names where the other settings live", async () => {
+		write(join(cwd, "CLAUDE.md"), "Project instructions only.\n");
+		const fake = createFakePi();
+		claudeContextExtension(fake.pi as never);
+		const select = vi.fn(async (): Promise<string | undefined> => undefined);
+		const notify = vi.fn();
+		const ctx = createFakeCtx({ cwd, hasUI: true, mode: "rpc", ui: { select, notify } });
+		await fake.fire("session_start", {}, ctx);
+		await fake.commands.get("config")!.handler("", ctx as never);
+		expect(select).not.toHaveBeenCalled();
+		expect(notify).toHaveBeenCalledWith(EXTERNAL_INCLUDES_NONE, "info");
+		expect(EXTERNAL_INCLUDES_NONE).toContain("/settings");
 	});
 
 	it("config can enable after a no without rewriting a sent prefix, and disable without a new approval", async () => {
