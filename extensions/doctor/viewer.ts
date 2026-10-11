@@ -4,11 +4,13 @@
  * an undiscoverable key). The wiring owns repaint and the fix/close effects.
  */
 
-import { panelTopRule } from "../lib/tui-render.ts";
+import { panelTopRule, wrapHints } from "../lib/tui-render.ts";
 import { keyId, keyText } from "../lib/key-input.ts";
 
 export interface DoctorViewerState {
 	offset: number;
+	/** Body rows the last render showed (the hint row can wrap); the keys page by it. */
+	visibleRows?: number;
 }
 
 export type DoctorViewerKey =
@@ -108,7 +110,7 @@ export interface DoctorViewerInput {
 	canFix: boolean;
 }
 
-/** Rows taken by the top rule and the footer hint. */
+/** Rows taken by the top rule, the blank above the hints and a one-line hint row. */
 export const VIEWER_CHROME_ROWS = 3;
 
 export function visibleBodyRows(height: number): number {
@@ -117,14 +119,28 @@ export function visibleBodyRows(height: number): number {
 
 export function renderDoctorViewer(input: DoctorViewerInput, paint: (color: string, text: string) => string): string[] {
 	const { lines, state, width, height } = input;
-	const visible = visibleBodyRows(height);
+	// PageUp/PageDown are pi-tui's own scrollback keys in fullscreen mode and never
+	// reach a component, so the hint names keys that do. On a narrow terminal the
+	// hints wrap at their separators (so "esc close" is never the part cut off)
+	// and the body gives up the rows; the position text depends on the body
+	// height, so the layout settles in a second pass.
+	const hintLines = (visible: number): string[] => {
+		const max = Math.max(0, lines.length - visible);
+		const offset = Math.min(state.offset, max);
+		const position = lines.length > visible ? ` · ${offset + 1}-${Math.min(lines.length, offset + visible)} of ${lines.length}` : "";
+		const hints = [`↑/↓ scroll · space/b page · g/G top/end${position}`, ...(input.canFix ? ["f run the checkup (the model fixes the findings)"] : []), "esc close"].join(" · ");
+		return wrapHints(hints, Math.max(1, width - 1));
+	};
+	let visible = visibleBodyRows(height);
+	let footer = hintLines(visible);
+	if (footer.length > 1) {
+		visible = Math.max(1, visible - (footer.length - 1));
+		footer = hintLines(visible);
+	}
+	state.visibleRows = visible;
 	const max = Math.max(0, lines.length - visible);
 	if (state.offset > max) state.offset = max;
 	const window = lines.slice(state.offset, state.offset + visible);
 	while (window.length < visible) window.push("");
-	const position = lines.length > visible ? ` · ${state.offset + 1}-${Math.min(lines.length, state.offset + visible)} of ${lines.length}` : "";
-	// PageUp/PageDown are pi-tui's own scrollback keys in fullscreen mode and never
-	// reach a component, so the hint names keys that do.
-	const hints = [`↑/↓ scroll · space/b page · g/G top/end${position}`, ...(input.canFix ? ["f run the checkup (the model fixes the findings)"] : []), "esc close"].join(" · ");
-	return [panelTopRule(paint, width), ...window, "", paint("dim", ` ${hints}`)];
+	return [panelTopRule(paint, width), ...window, "", ...footer.map((line) => paint("dim", ` ${line}`))];
 }

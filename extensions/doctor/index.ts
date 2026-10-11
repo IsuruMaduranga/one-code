@@ -52,7 +52,7 @@ import { doctorFixPrompt } from "./fix-prompt.ts";
 import { computePresets, describePresetChanges, findPreset, PRESET_NAMES, presetsSection } from "./presets.ts";
 import { type DoctorReport, renderDoctorReport, renderDoctorText, renderSection } from "./report.ts";
 import { lookupLatestVersion } from "./update-lookup.ts";
-import { applyDoctorKey, decodeDoctorKey, renderDoctorViewer, visibleBodyRows } from "./viewer.ts";
+import { applyDoctorKey, decodeDoctorKey, type DoctorViewerState, renderDoctorViewer, visibleBodyRows } from "./viewer.ts";
 import { announceArgumentHint, extendingCompletions } from "../lib/argument-hints.ts";
 import { announceLocalCommand } from "../lib/local-command.ts";
 import { registeredMcpServers } from "../mcp/config.ts";
@@ -211,7 +211,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 		await panelUi(pi.events, ctx.ui).custom<null>((tui, theme, _keybindings, done) => {
 			const paint = safeThemePaint(theme);
 			const bold = safeThemeBold(theme);
-			const state = { offset: 0 };
+			const state: DoctorViewerState = { offset: 0 };
 			let cache: { width: number; lines: string[] } | undefined;
 			const body = (width: number) => {
 				if (cache?.width === width) return cache;
@@ -229,7 +229,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 					const key = decodeDoctorKey(data);
 					if (!key) return;
 					const termRows = (tui as { terminal?: { rows?: number } }).terminal?.rows ?? DOCTOR_PANEL_MAX_HEIGHT;
-					const visible = visibleBodyRows(boundedDockHeight(termRows, DOCTOR_PANEL_MAX_HEIGHT));
+					const visible = state.visibleRows ?? visibleBodyRows(boundedDockHeight(termRows, DOCTOR_PANEL_MAX_HEIGHT));
 					const effect = applyDoctorKey(state, key, cache?.lines.length ?? 0, visible);
 					if (effect?.kind === "fix") {
 						wantFix = true;
