@@ -201,6 +201,6 @@ export default function recapExtension(pi: ExtensionAPI) {
 	pi.on("session_shutdown", (_event, ctx) => {
 		scheduler.reset();
 		abortInFlight();
-		releaseSideCalls(ctx.sessionManager.getSessionId(), ["recap"]);
+		releaseSideCalls(ctx.sessionManager.getSessionId());
 	});
 }

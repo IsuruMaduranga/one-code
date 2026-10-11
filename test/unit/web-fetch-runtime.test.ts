@@ -8,7 +8,7 @@ import webFetchExtension from "../../extensions/web-fetch/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
-vi.mock("../../extensions/lib/side-call-usage.ts", () => ({ logSideCallUsage: vi.fn() }));
+vi.mock("../../extensions/lib/side-call-usage.ts", () => ({ logSideCallUsage: vi.fn(), SIDE_CALL_KINDS: ["reader", "btw", "recap"] }));
 
 const complete = vi.mocked(completeSimple);
 const url = "https://example.test/page";

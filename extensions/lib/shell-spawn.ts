@@ -63,7 +63,8 @@ export const POWERSHELL_UTF8_PREFIX = "try { [Console]::OutputEncoding=[System.T
  * `\x1b[32;1m` escapes.
  */
 export const POWERSHELL_TOOL_PREFIX =
-	`${POWERSHELL_UTF8_PREFIX}try { $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8' } catch {}; ` +
+	// One line, so an error's "At line:N" stays one off the command's own line, as with pi's prefix alone.
+	`${POWERSHELL_UTF8_PREFIX.trimEnd()}; try { $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8' } catch {}; ` +
 	"if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') { try { $OutputEncoding = [System.Text.UTF8Encoding]::new() } catch {}; " +
 	"if ($null -ne $PSStyle) { try { $PSStyle.OutputRendering = 'PlainText' } catch {} } };\n";
 

@@ -186,11 +186,12 @@ export async function openChildSession(options: OpenChildSessionOptions): Promis
 
 /**
  * Dispose a child opened by openChildSession. `dispose()` never emits
- * `session_shutdown`, so the child's web_fetch reader key, which that event
- * releases in a main session, is released here (lib/side-call-run.ts).
+ * `session_shutdown`, so the child's side-call keys (its web_fetch reader),
+ * which that event releases in a main session, are released here
+ * (lib/side-call-run.ts).
  */
 export function disposeChildSession(session: AgentSession): void {
 	const sessionId = session.sessionManager.getSessionId();
 	session.dispose();
-	releaseSideCalls(sessionId, ["reader"]);
+	releaseSideCalls(sessionId);
 }

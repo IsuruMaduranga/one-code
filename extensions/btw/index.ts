@@ -124,7 +124,7 @@ export default function btwExtension(pi: ExtensionAPI) {
 		sessionEpoch++;
 		inFlight?.abort();
 		inFlight = undefined;
-		releaseSideCalls(ctx.sessionManager.getSessionId(), ["btw"]);
+		releaseSideCalls(ctx.sessionManager.getSessionId());
 	});
 
 	// The answer renders as Markdown, like the transcript; plain wrapped text

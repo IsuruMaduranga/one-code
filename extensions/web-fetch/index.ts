@@ -145,8 +145,8 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 	const learnedReasoning = new Map<string, ThinkingLevel>();
 	// Per-session: the thinking-off fields a native-call model turned out to need.
 	const learnedNativeThinking = new Map<string, ThinkingFields>();
-	// A child is disposed without this event; disposeChildSession releases its reader.
-	pi.on("session_shutdown", (_event, ctx) => releaseSideCalls(ctx.sessionManager.getSessionId(), ["reader"]));
+	// A child is disposed without this event; disposeChildSession releases its keys.
+	pi.on("session_shutdown", (_event, ctx) => releaseSideCalls(ctx.sessionManager.getSessionId()));
 
 	const load = async (url: string, signal: AbortSignal | undefined, redirects = 0): Promise<CacheEntry> => {
 		signal?.throwIfAborted();
