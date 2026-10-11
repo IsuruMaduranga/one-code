@@ -73,6 +73,7 @@ import { sessionWorkCwd } from "../lib/worktree-channel.ts";
 import { followEnteredWorktree } from "../lib/worktree-isolation.ts";
 import { isKeyRelease, keyId } from "../lib/key-input.ts";
 import { projectConfigDirName } from "../lib/config-mode.ts";
+import { panelUi } from "../lib/panel-focus.ts";
 
 /**
  * Claude Code's own arming reminder, verbatim in intent: the keyword is a
@@ -150,7 +151,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 		if (viewerOpen) return;
 		viewerOpen = true;
 		try {
-			await openWorkflowViewer(ctx, manager, opts);
+			await openWorkflowViewer(pi.events, ctx, manager, opts);
 		} finally {
 			viewerOpen = false;
 		}
@@ -534,11 +535,12 @@ export default function workflowExtension(pi: ExtensionAPI) {
  * lookup (findings §15).
  */
 async function openWorkflowViewer(
+	events: ExtensionAPI["events"],
 	ctx: ExtensionContext,
 	manager: WorkflowRunManager,
 	opts?: { height?: "full" | "half"; runIndex?: number },
 ): Promise<void> {
-	await ctx.ui.custom<null>((tui, theme, _keybindings, done) => {
+	await panelUi(events, ctx.ui).custom<null>((tui, theme, _keybindings, done) => {
 		const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme) };
 
 		// Newest run first, so the viewer opens on the latest.

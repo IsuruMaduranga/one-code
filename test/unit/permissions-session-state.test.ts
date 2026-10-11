@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ORIGINAL_COMMAND_CHANNEL } from "../../extensions/lib/original-command.ts";
+import { PANEL_FOCUS_CHANNEL } from "../../extensions/lib/panel-focus.ts";
 import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
 import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
 import { shellQuote } from "../../extensions/lib/shell-quote.ts";
@@ -116,6 +117,47 @@ describe("permissions session state", () => {
 			expect(result?.reason).toContain("use make clean instead");
 			expect(ctx.abort).not.toHaveBeenCalled();
 			expect(result?.terminate).toBe(false);
+		});
+	});
+
+	// pi would show the prompt in the panel's place: the panel would not come
+	// back and an Enter meant for it would answer the prompt.
+	describe("a prompt while a panel holds the keyboard", () => {
+		const settle = () => new Promise((resolve) => setTimeout(resolve, 5));
+
+		it("waits for the panel to close, says so, then asks", async () => {
+			const panel = {};
+			fake.events.emit(PANEL_FOCUS_CHANNEL, { id: panel, focused: true });
+			let done = false;
+			const pending = call("bash", { command: "rm -rf build" }, "panel-1").then((result) => {
+				done = true;
+				return result;
+			});
+			await settle();
+			expect(prompts).toHaveLength(0);
+			expect(done).toBe(false);
+			expect((ctx.ui as { notify: unknown }).notify).toHaveBeenCalledWith(expect.stringContaining("Close this panel"), "info");
+			fake.events.emit(PANEL_FOCUS_CHANNEL, { id: panel, focused: false });
+			expect(await pending).toBeUndefined();
+			expect(prompts).toHaveLength(1);
+		});
+
+		it("does not wait once the turn is stopped", async () => {
+			const controller = new AbortController();
+			ctx = { ...ctx, signal: controller.signal };
+			fake.events.emit(PANEL_FOCUS_CHANNEL, { id: {}, focused: true });
+			const pending = call("bash", { command: "rm -rf build" }, "panel-2");
+			await settle();
+			controller.abort();
+			expect((await pending)?.block).toBe(true);
+		});
+
+		it("forgets panels with a new session", async () => {
+			fake.events.emit(PANEL_FOCUS_CHANNEL, { id: {}, focused: true });
+			await fake.fire("session_start", { reason: "new" }, ctx);
+			fake.events.emit(MODE_CHANNEL, { mode: "default" });
+			expect(await call("bash", { command: "rm -rf build" }, "panel-3")).toBeUndefined();
+			expect(prompts).toHaveLength(1);
 		});
 	});
 

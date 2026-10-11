@@ -49,6 +49,7 @@ import {
 	ULTRACODE_STATUS_KEY,
 } from "./slider.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
+import { panelUi } from "../lib/panel-focus.ts";
 
 /** The levels pi says the active model can reach; the full ladder when unknown. */
 function supportedLevels(ctx: ExtensionContext): ThinkingLevel[] {
@@ -203,7 +204,7 @@ export default function effortExtension(pi: ExtensionAPI) {
 		index = nearestEnabled(index, enabled);
 
 		const label = modelLabel(ctx);
-		const chosen = await ctx.ui.custom<{ choice: EffortChoice; asDefault: boolean } | null>((tui, theme, _keybindings, done) => {
+		const chosen = await panelUi(pi.events, ctx.ui).custom<{ choice: EffortChoice; asDefault: boolean } | null>((tui, theme, _keybindings, done) => {
 			const paint = safeThemePaint(theme);
 			return {
 				// The slider's own layout is column-safe for its ASCII labels, but this

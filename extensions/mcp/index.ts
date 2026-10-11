@@ -72,6 +72,7 @@ import { canShowCustomUi, notifyRpcReadOnly } from "../lib/headless-output.ts";
 import { claudeSourcesOn } from "../lib/config-mode.ts";
 import { claudeJsonPath } from "../lib/paths.ts";
 import { consentDialog, startupConsentReady } from "../lib/consent-dialogs.ts";
+import { panelUi } from "../lib/panel-focus.ts";
 
 /** Anthropic's hard limit on a tool name; a longer one fails the whole request. */
 const MAX_TOOL_NAME_LENGTH = 128;
@@ -772,7 +773,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	const MCP_PANEL_MAX_HEIGHT = 22;
 
 	const openMcpPanel = async (ctx: ExtensionContext): Promise<void> => {
-		await ctx.ui.custom<null>((tui, theme, _keybindings, done) => {
+		await panelUi(pi.events, ctx.ui).custom<null>((tui, theme, _keybindings, done) => {
 			const paint: McpPaint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme) };
 			const state = initialMcpState();
 			let notices: string[] = [];

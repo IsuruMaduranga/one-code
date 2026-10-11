@@ -45,6 +45,7 @@ import { editorHint, memoryDisplayPath, openPath } from "./open-external.ts";
 import { applyMemoryKey, decodeMemoryKey, initialMemoryState, type ModeView, renderMemoryPanel } from "./panel.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 import { canShowCustomUi } from "../lib/headless-output.ts";
+import { panelUi } from "../lib/panel-focus.ts";
 
 const MEMORY_PANEL_MAX_HEIGHT = 20;
 
@@ -177,7 +178,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 			}
 			const mode: ModeView = { running: configMode(), saved: savedConfigMode(), fromEnv: configModeFromEnv() !== undefined };
 			const savedBefore = mode.saved;
-			const chosen = await openMemoryPanel(ctx, entries, mode);
+			const chosen = await openMemoryPanel(pi.events, ctx, entries, mode);
 			// The mode row is One Code's own; its line leads CC's result when it changed.
 			const modeLine =
 				mode.saved === savedBefore
@@ -210,8 +211,8 @@ function saveConfigMode(next: ConfigMode): void {
  * null. Enter on the config-sources row saves the other mode into `mode.saved`
  * and keeps the panel up.
  */
-function openMemoryPanel(ctx: ExtensionContext, entries: MemoryEntry[], mode: ModeView): Promise<MemoryEntry | null> {
-	return ctx.ui.custom<MemoryEntry | null>((tui, theme, _keybindings, done) => {
+function openMemoryPanel(events: ExtensionAPI["events"], ctx: ExtensionContext, entries: MemoryEntry[], mode: ModeView): Promise<MemoryEntry | null> {
+	return panelUi(events, ctx.ui).custom<MemoryEntry | null>((tui, theme, _keybindings, done) => {
 		const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme) };
 		const state = initialMemoryState();
 		let cache: { width: number; lines: string[] } | undefined;

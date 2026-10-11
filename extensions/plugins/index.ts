@@ -71,6 +71,7 @@ import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 import { promptCommandText } from "../skill/invoke.ts";
+import { panelUi } from "../lib/panel-focus.ts";
 
 
 // The panel is a bounded dock like Claude Code's /plugins, NOT a full-screen
@@ -159,7 +160,7 @@ export default function pluginsExtension(pi: ExtensionAPI) {
 		panelOpen = true;
 		let restartNotice = false;
 		try {
-			await ctx.ui.custom<null>((tui, theme, _keybindings, done) => {
+			await panelUi(pi.events, ctx.ui).custom<null>((tui, theme, _keybindings, done) => {
 				const paint: PanelPaint = {
 					fg: safeThemePaint(theme),
 					bold: safeThemeBold(theme),

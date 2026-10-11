@@ -125,6 +125,7 @@ import { announceLocalCommand, registerLocalCommand } from "../lib/local-command
 import { claudeSourcesOn } from "../lib/config-mode.ts";
 import { claudeJsonPath, tildify, tryRealpath } from "../lib/paths.ts";
 import { openPermissionsPanel, type PermissionsPanelHost } from "./panel/host.ts";
+import { PANEL_FOCUS_CHANNEL, PanelFocus, panelFactory } from "../lib/panel-focus.ts";
 import {
 	AUTO_SECTION_LABELS,
 	AUTO_SECTIONS,
@@ -141,6 +142,10 @@ import { builtinRuleCounts } from "../auto-mode/rules.ts";
 import { autoModeSystemNote } from "../auto-mode/system-note.ts";
 import { announceArgumentHint } from "../lib/argument-hints.ts";
 import { userDenialText } from "../lib/user-denial.ts";
+import { liveUiCtx } from "../lib/tui-render.ts";
+
+/** Shown when a permission prompt is held behind an open panel (serializePrompt). */
+const PROMPT_WAITS_FOR_PANEL = "A permission request is waiting. Close this panel to answer it.";
 
 const DENIED_NON_INTERACTIVE =
 	"Permission required but this session is non-interactive, so the user cannot approve the call. It was blocked. Only pre-approved tools can run here; work within those, or ask the user to re-run interactively or with an allow rule / --dangerously-skip-permissions.";
@@ -953,6 +958,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		badgeCtx = ctx;
 		lastReviewCtx = ctx;
 		sessionEpoch++;
+		panels.reset();
 		gateFastPaths = usesClaudeCodeFastPaths(ctx.model);
 		// Not awaited: the grammar loads in a few milliseconds, and the gate
 		// awaits it per call. Only a failed load is worth telling the user about.
@@ -1104,11 +1110,24 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	// Serialize interactive prompts: a background/resident subagent can hit an "ask"
 	// while the main turn (or another child) is already awaiting one, and driving
 	// ctx.ui.select concurrently on one terminal is unverified. This chains them.
+	// A prompt also waits while a panel holds the keyboard (/permissions, the
+	// agent view, a picker): pi would put the prompt in the panel's place, the
+	// panel would not come back, and an Enter meant for the panel would answer
+	// the prompt. Claude Code holds its permission dialog the same way.
 	let promptChain: Promise<unknown> = Promise.resolve();
 	/** Calls the user rejected without a reason: the turn stops once pi records their result. */
 	const abortAfterResult = new Set<string>();
-	const serializePrompt = <T>(fn: () => Promise<T>): Promise<T> => {
-		const run = promptChain.then(fn, fn);
+	const panels = new PanelFocus();
+	pi.events.on(PANEL_FOCUS_CHANNEL, (data) => panels.note(data));
+	const serializePrompt = <T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> => {
+		const show = async () => {
+			if (panels.busy && !signal?.aborted) {
+				liveUiCtx(lastReviewCtx)?.ui.notify(PROMPT_WAITS_FOR_PANEL, "info");
+				await panels.whenClear(signal);
+			}
+			return fn();
+		};
+		const run = promptChain.then(show, show);
 		promptChain = run.then(
 			() => {},
 			() => {},
@@ -1132,14 +1151,14 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const choice = await serializePrompt(() => signal?.aborted ? Promise.resolve(undefined) : ctx.ui.select(
 			`${reason}\n\n${askTitle(toolName, previewSubject(subject), "mode", false)}`,
 			askOptions(undefined), { signal },
-		));
+		), signal);
 		const allowed = !signal?.aborted && choice === YES;
 		logDecision(ctx, { tool: toolName, subject, outcome: allowed ? "allow" : "block", source: "user", transcriptTooLong: true, reason });
 		if (allowed) return undefined;
 		if (!signal?.aborted && choice === NO) {
 			const feedback = await serializePrompt(() => signal?.aborted ? Promise.resolve(undefined) : ctx.ui.input(
 				"What should the agent do instead?", "Optional — press Esc to skip", { signal },
-			));
+			), signal);
 			return { block: true, reason: userDenialText(feedback) };
 		}
 		return { block: true, reason: "Manual approval was not granted after the auto-mode classifier transcript exceeded its context window." };
@@ -1196,7 +1215,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			persistBlockOutsideReads(oneCodeSettingsPath(home));
 			blockOutsideReads = true;
 			return "block";
-		});
+		}, signal);
 	};
 
 	/** The block reason for a first-read prompt answered with Block or Ask again; undefined to run the read. */
@@ -1286,7 +1305,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const trustProject = async (withProject: typeof result, firing: TrustFiring) => {
 			const repoDirs = repoWorkspaceDirs().map((dir) => dir.raw);
 			const { title, message } = describeProjectAllow(projectAllowRaw, firing, repoDirs);
-			const approved = (await serializePrompt(() => ctx.ui.confirm(title, message, { signal: ctx.signal }))) === true;
+			const approved = (await serializePrompt(() => ctx.ui.confirm(title, message, { signal: ctx.signal }), ctx.signal)) === true;
 			if (ctx.signal?.aborted) return;
 			if (approved) {
 				projectAllowTrusted = true;
@@ -1475,7 +1494,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			floor: floorReason !== undefined,
 			home: os.homedir(),
 		});
-		const { choice, unanswered } = await askMaybeTimed(pausedResume, title, serializePrompt, (text, timeout) =>
+		const { choice, unanswered } = await askMaybeTimed(pausedResume, title, (show) => serializePrompt(show, ctx.signal), (text, timeout) =>
 			ctx.ui.select(text, askOptions(grant), { signal: ctx.signal, timeout }),
 		);
 		if (ctx.signal?.aborted) return { block: true, reason: "The turn was stopped while waiting for the user's approval." };
@@ -1515,7 +1534,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const feedback =
 			choice === undefined
 				? undefined
-				: await serializePrompt(() => ctx.ui.input("What should the agent do instead?", "Optional — press Esc to skip", { signal: ctx.signal }));
+				: await serializePrompt(() => ctx.ui.input("What should the agent do instead?", "Optional — press Esc to skip", { signal: ctx.signal }), ctx.signal);
 		// Claude Code's cancelAndAbort: a rejection without the user's words stops
 		// the turn and waits for them; with words, the model acts on them. pi reads
 		// an abort before the block (the result would say "Operation aborted"), so
@@ -1674,7 +1693,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// its turn in the chain comes is skipped outright. Otherwise a dead agent's
 		// dialog stays on screen and every later prompt waits behind it (M5).
 		const childPrompt = <T>(show: () => Promise<T>): Promise<T | undefined> =>
-			serializePrompt(() => (call.signal?.aborted ? Promise.resolve(undefined) : show()));
+			serializePrompt(() => (call.signal?.aborted ? Promise.resolve(undefined) : show()), call.signal);
 		const grant = sessionGrant({ toolName: normalizedTool, subject, cwd, mode, cause: result.cause, home: os.homedir() });
 		const { choice, unanswered } = await askMaybeTimed(pausedResume, title, childPrompt, (text, timeout) =>
 			ctx.ui.select(text, askOptions(grant), { signal: call.signal, timeout }),
@@ -2022,7 +2041,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const home = os.homedir();
 		const host = panelHost(ctx, home);
 		// The environment editor cannot open over the panel: close, edit, reopen.
-		let session = await openPermissionsPanel(ctx, host, undefined, prepare);
+		let session = await openPermissionsPanel(ctx, pi.events, host, undefined, prepare);
 		while (session.editEnvironment) {
 			session.editEnvironment = false;
 			try {
@@ -2031,7 +2050,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			} catch (error) {
 				session.state.notice = `Could not save the environment: ${(error as Error).message}`;
 			}
-			session = await openPermissionsPanel(ctx, host, session);
+			session = await openPermissionsPanel(ctx, pi.events, host, session);
 		}
 		const { state, changes } = session;
 
@@ -2435,7 +2454,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			);
 			return;
 		}
-		const chosen = await ctx.ui.custom<PickerEntry | null>((tui, theme, _keybindings, done) =>
+		const chosen = await ctx.ui.custom<PickerEntry | null>(panelFactory(pi.events, (tui, theme, _keybindings, done) =>
 			modelPickerComponent(
 				{
 					entries: toPickerEntries(available),
@@ -2447,7 +2466,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				theme,
 				done,
 			),
-		);
+		));
 		if (chosen) await applyClassifierChoice(pickerSpec(chosen), ctx);
 	};
 

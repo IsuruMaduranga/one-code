@@ -58,6 +58,7 @@ import { announceLocalCommand } from "../lib/local-command.ts";
 import { registeredMcpServers } from "../mcp/config.ts";
 import { configMode } from "../lib/config-mode.ts";
 import { promptCommandText } from "../skill/invoke.ts";
+import { panelUi } from "../lib/panel-focus.ts";
 
 /** Rows the panel may take; the terminal's own height caps it (boundedDockHeight). */
 export const DOCTOR_PANEL_MAX_HEIGHT = 40;
@@ -207,7 +208,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 
 	const showPanel = async (ctx: ExtensionCommandContext, report: DoctorReport): Promise<void> => {
 		let wantFix = false;
-		await ctx.ui.custom<null>((tui, theme, _keybindings, done) => {
+		await panelUi(pi.events, ctx.ui).custom<null>((tui, theme, _keybindings, done) => {
 			const paint = safeThemePaint(theme);
 			const bold = safeThemeBold(theme);
 			const state = { offset: 0 };

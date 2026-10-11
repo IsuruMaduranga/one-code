@@ -112,6 +112,7 @@ import { createMarkdownProse } from "./prose.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 import { CONTEXT_BASELINE_CHANNEL, restoredContext } from "../lib/context-stack.ts";
 import { emptySubagentBaseline, planSubagentAnnouncement, subagentBaseline, subagentBaselineFromStack, type SubagentBaseline } from "./announce.ts";
+import { panelUi } from "../lib/panel-focus.ts";
 
 /** How the guide's setup list names a server that is not connected. */
 const MCP_STATUS_LABELS: Record<McpStatusKind, string | undefined> = {
@@ -935,7 +936,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		void (async () => {
 			const prose = await getProse(ctx);
 			if (closed) return;
-			await ctx.ui.custom<null>(
+			await panelUi(pi.events, ctx.ui).custom<null>(
 				(tui, theme, _keybindings, done) => {
 					doneFn = done;
 					// close() raced ahead of the factory — dissolve as soon as we exist.
@@ -2777,7 +2778,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				// A dead process's stop() throwing must not break the dialog.
 			}
 		};
-		const chosen = await ctx.ui.custom<string | null>((tui, theme, _keybindings, done) => {
+		const chosen = await panelUi(pi.events, ctx.ui).custom<string | null>((tui, theme, _keybindings, done) => {
 			const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme) };
 			const refresh = () => {
 				snapshot = build();
@@ -3070,7 +3071,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			const current = configured && configured.spec.includes("/") ? configured.spec : undefined;
 			const entries = toPickerEntries(available);
 
-			const chosen = await ctx.ui.custom<PickerEntry | null>((tui, theme, _keybindings, done) =>
+			const chosen = await panelUi(pi.events, ctx.ui).custom<PickerEntry | null>((tui, theme, _keybindings, done) =>
 				modelPickerComponent(
 					{
 						entries,

@@ -11,7 +11,8 @@
  * and change list, so approvals and the tab survive the round trip.
  */
 
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { panelFactory } from "../../lib/panel-focus.ts";
 import { boundedDockHeight, safeThemeBold, safeThemeInverse, safeThemePaint } from "../../lib/tui-render.ts";
 import { decodePanelKey } from "./keys.ts";
 import { type PanelPaint, renderPanel } from "./render.ts";
@@ -52,6 +53,7 @@ export interface PermissionsPanelSession {
  */
 export async function openPermissionsPanel(
 	ctx: ExtensionContext,
+	events: ExtensionAPI["events"],
 	host: PermissionsPanelHost,
 	previous?: PermissionsPanelSession,
 	prepare?: (state: PanelState) => void,
@@ -61,7 +63,8 @@ export async function openPermissionsPanel(
 	if (!previous) prepare?.(session.state);
 	const { state, changes } = session;
 
-	await ctx.ui.custom<null>((tui, theme, _keybindings, done) => {
+	// Reports its focus, so a permission prompt waits for it to close (lib/panel-focus.ts).
+	await ctx.ui.custom<null>(panelFactory(events, (tui, theme, _keybindings, done) => {
 		const paint: PanelPaint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme), inverse: safeThemeInverse(theme) };
 		// Rendered lines are cached per width and cleared on every key; the view
 		// is rebuilt only when an effect changed the rules underneath it.
@@ -121,7 +124,7 @@ export async function openPermissionsPanel(
 				cache = undefined;
 			},
 		};
-	});
+	}));
 
 	return session;
 }

@@ -20,6 +20,7 @@ import { ASK_PARAMS, askDescription } from "./description.ts";
 import { askThroughDialogs } from "./dialogs.ts";
 import { type Answer, answerPairs, formatAnswers, formatDecline, type Question } from "./questions.ts";
 import { applyWidgetKey, createWidgetState, decodeWidgetKey, renderWidget, type WidgetResult } from "./widget.ts";
+import { panelUi } from "../lib/panel-focus.ts";
 
 const NON_INTERACTIVE =
 	"This session has no interactive UI, so the user cannot be shown a dialog. Ask your question in your reply instead and stop, or proceed under a stated assumption.";
@@ -63,7 +64,7 @@ export default function askUserExtension(pi: ExtensionAPI) {
 			const questions = params.questions as Question[];
 			// RPC has no custom UI (its custom() resolves undefined); ask through the
 			// select/input requests it forwards to the client instead (dialogs.ts).
-			const outcome = !canShowCustomUi(ctx) ? await askThroughDialogs(questions, ctx.ui, signal) : await ctx.ui.custom<WidgetResult>((tui, theme, _keybindings, done) => {
+			const outcome = !canShowCustomUi(ctx) ? await askThroughDialogs(questions, ctx.ui, signal) : await panelUi(pi.events, ctx.ui).custom<WidgetResult>((tui, theme, _keybindings, done) => {
 				const style = {
 					paint: safeThemePaint(theme),
 					bold: safeThemeBold(theme),
