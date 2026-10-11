@@ -12,7 +12,7 @@ import { stubHome } from "./helpers/home.ts";
 import { captureUserTurns } from "./helpers/user-turn.ts";
 import { localCommandBlocks } from "../../extensions/lib/local-command.ts";
 import { REMINDER_CHANNEL, type ReminderPayload } from "../../extensions/lib/reminders.ts";
-import { commandBreadcrumb, commandDisplayLine } from "../../extensions/skill/invoke.ts";
+import { commandDisplayLine, promptCommandText } from "../../extensions/skill/invoke.ts";
 
 const model = (provider: string, id: string, input: number, api = "anthropic-messages") =>
 	({ provider, id, name: id, api, cost: { input, output: input * 5 }, contextWindow: 200_000 }) as any;
@@ -310,7 +310,7 @@ describe("/doctor wiring", () => {
 		const content = fake.sentUserMessages[0].content as string;
 		// Led by the command breadcrumb, so the transcript shows `/doctor`, not the prompt.
 		expect(commandDisplayLine(content)).toBe("/doctor");
-		expect(content.startsWith(`${commandBreadcrumb("doctor", "")}\n# One Code Doctor`)).toBe(true);
+		expect(content.startsWith(promptCommandText("doctor", "", "# One Code Doctor").slice(0, -1))).toBe(true);
 		expect(content).toContain("Main: anthropic/claude-sonnet-5");
 		expect(content).toContain("One Code never writes Claude Code's files");
 		expect(fake.sentUserMessages[0].options).toEqual({ deliverAs: "followUp" });

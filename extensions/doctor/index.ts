@@ -57,7 +57,7 @@ import { announceArgumentHint } from "../lib/argument-hints.ts";
 import { announceLocalCommand } from "../lib/local-command.ts";
 import { registeredMcpServers } from "../mcp/config.ts";
 import { configMode } from "../lib/config-mode.ts";
-import { commandBreadcrumb } from "../skill/invoke.ts";
+import { promptCommandText } from "../skill/invoke.ts";
 
 /** Rows the panel may take; the terminal's own height caps it (boundedDockHeight). */
 export const DOCTOR_PANEL_MAX_HEIGHT = 40;
@@ -201,9 +201,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 			decisionLogEnabled: loadAutoModeConfig(home).logDecisions,
 			independent: configMode() === "independent",
 		});
-		// Led by Claude Code's command breadcrumb, which also shows the turn as
-		// `/doctor` in the transcript (skill/index.ts) rather than the whole prompt.
-		await sendUserMessage(ctx, `${commandBreadcrumb("doctor", "")}\n${prompt}`, { deliverAs: "followUp" });
+		await sendUserMessage(ctx, promptCommandText("doctor", "", prompt), { deliverAs: "followUp" });
 		return true;
 	};
 

@@ -54,8 +54,8 @@ export function bashTool(pi: ExtensionAPI, { announce }: { announce: boolean }) 
 	const bash = bashSpawn();
 	const shellPath = bash.spawn?.commandTransport === "stdin" ? undefined : bash.spawn?.shell;
 	let warned = false;
-	pi.on("session_start", (_event, ctx) => {
-		if (!announce || warned || !bash.warning) return;
+	if (announce) pi.on("session_start", (_event, ctx) => {
+		if (warned || !bash.warning) return;
 		warned = true;
 		if (ctx.hasUI) ctx.ui.notify(bash.warning, "warning");
 		else process.stderr.write(`${bash.warning}\n`);

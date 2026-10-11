@@ -271,28 +271,27 @@ export function wrapProse(text: string, width: number): string[] {
 		const indent = lead.replace(/\t/g, "  ");
 		const hang = visibleWidth(indent) * 2 < columns ? indent : "";
 		const room = columns - visibleWidth(hang);
-		const lines: string[] = [];
+		const push = (part: string) => out.push(`${hang}${part}`);
 		let line = "";
 		for (const word of raw.slice(lead.length).split(" ")) {
 			if (visibleWidth(word) > room) {
 				// A word wider than the screen (path, hash): flush, then hard-break it.
 				// The last chunk becomes the running line so later words can join it.
-				if (line) lines.push(line);
+				if (line) push(line);
 				const chunks = hardWrapColumns(word, room);
 				line = chunks.pop() ?? "";
-				lines.push(...chunks);
+				for (const chunk of chunks) push(chunk);
 				continue;
 			}
 			const candidate = line ? `${line} ${word}` : word;
 			if (visibleWidth(candidate) > room) {
-				lines.push(line);
+				push(line);
 				line = word;
 			} else {
 				line = candidate;
 			}
 		}
-		lines.push(line);
-		out.push(...lines.map((part) => `${hang}${part}`));
+		push(line);
 	}
 	return out;
 }

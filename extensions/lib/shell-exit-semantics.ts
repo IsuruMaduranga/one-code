@@ -27,6 +27,15 @@ function lastCommand(root: BashNode): string | undefined {
 	return node?.text;
 }
 
+/** git's subcommand among the words after `git`: the first that is no option (`-C` and `-c` take a value). */
+function gitSubcommandOf(args: readonly string[]): string | undefined {
+	for (let i = 0; i < args.length; i++) {
+		if (!args[i].startsWith("-")) return args[i];
+		if (args[i] === "-C" || args[i] === "-c") i++;
+	}
+	return undefined;
+}
+
 /** Bash: exit 1 from a final grep, rg, egrep, fgrep, find, diff, test, `[` or git grep/diff. */
 export function bashExitOneIsSuccess(command: string): boolean {
 	if (command.length > 10_000) return false;
@@ -37,16 +46,10 @@ export function bashExitOneIsSuccess(command: string): boolean {
 		const last = lastCommand(tree.rootNode);
 		if (last === undefined) return false;
 		// Claude Code matches the literal first word: no unwrapping of env, assignments or quotes.
-		const words = last.trim().split(/\s+/);
-		if (words[0] !== "git") return EXIT_ONE_SUCCESSES.has(words[0]);
-		for (let i = 1; i < words.length; i++) {
-			if (words[i].startsWith("-")) {
-				if (words[i] === "-C" || words[i] === "-c") i++;
-				continue;
-			}
-			return words[i] === "grep" || words[i] === "diff";
-		}
-		return false;
+		const [head, ...args] = last.trim().split(/\s+/);
+		if (head !== "git") return EXIT_ONE_SUCCESSES.has(head);
+		const sub = gitSubcommandOf(args);
+		return sub === "grep" || sub === "diff";
 	} finally {
 		tree.delete();
 	}
@@ -114,30 +117,20 @@ function lastSegment(command: string): Segment {
 	return segments.findLast((segment) => segment.text.trim()) ?? { text: command, andGated: false };
 }
 
-/** The command's file name, lowercased, without a native .exe/.cmd/.bat extension. */
-function baseCommand(segment: string): { base: string; nativeExt: string | undefined } {
+/** A segment's first word, unquoted, and the text after it; a leading `&` or `.` call operator is dropped. */
+function splitFirstWord(segment: string): { word: string; rest: string } {
 	const line = segment.trim().replace(/^[&.]\s+/, "");
 	const quoted = /^"([^"]*)"|^'([^']*)'/.exec(line);
-	const word = quoted?.[1] ?? quoted?.[2] ?? (line.split(/\s+/)[0] || "").replace(/^["']|["']$/g, "");
+	if (quoted) return { word: quoted[1] ?? quoted[2], rest: line.slice(quoted[0].length) };
+	const raw = line.split(/\s+/)[0] ?? "";
+	return { word: raw.replace(/^["']|["']$/g, ""), rest: line.slice(raw.length) };
+}
+
+/** The command's file name, lowercased, without a native .exe/.cmd/.bat extension. */
+function baseCommand(word: string): { base: string; nativeExt: string | undefined } {
 	const file = (word.split(/[\\/]/).pop() || word).toLowerCase();
 	const nativeExt = ["exe", "cmd", "bat"].find((ext) => file.endsWith(`.${ext}`));
 	return { base: nativeExt ? file.slice(0, -(nativeExt.length + 1)) : file, nativeExt };
-}
-
-function gitSubcommand(segment: string): string | undefined {
-	let line = segment.trim().replace(/^[&.]\s+/, "");
-	const first = /^"[^"]*"|^'[^']*'/.exec(line)?.[0] ?? line.split(/\s+/)[0] ?? "";
-	if (baseCommand(first).base !== "git") return undefined;
-	line = line.slice(first.length);
-	const words = ["git", ...line.trim().split(/\s+/).filter(Boolean)];
-	for (let i = 1; i < words.length; i++) {
-		if (words[i].startsWith("-")) {
-			if (words[i] === "-C" || words[i] === "-c") i++;
-			continue;
-		}
-		return words[i];
-	}
-	return undefined;
 }
 
 const exitOneOk = (code: number) => code === 0 || code === 1;
@@ -161,8 +154,9 @@ const NOT_RECOGNIZED = /is not recognized as (a name of a cmdlet|the name of a c
 export function powershellExitIsSuccess(command: string, exitCode: number, output: string): boolean {
 	if (exitCode === 0) return true;
 	const { text, andGated } = lastSegment(command);
-	const { base, nativeExt } = baseCommand(text);
-	const sub = base === "git" ? gitSubcommand(text) : undefined;
+	const { word, rest } = splitFirstWord(text);
+	const { base, nativeExt } = baseCommand(word);
+	const sub = base === "git" ? gitSubcommandOf(rest.trim().split(/\s+/).filter(Boolean)) : undefined;
 	const ok =
 		sub === "grep" || sub === "diff"
 			? exitOneOk

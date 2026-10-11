@@ -70,6 +70,7 @@ import { followWorkCwd } from "../lib/worktree-channel.ts";
 import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
+import { promptCommandText } from "../skill/invoke.ts";
 
 
 // The panel is a bounded dock like Claude Code's /plugins, NOT a full-screen
@@ -587,7 +588,7 @@ function registerPluginCommand(pi: ExtensionAPI, plugin: Plugin, name: string, p
 			}
 			recordUsage(pluginRoot(getAgentDir()), "command", name);
 			// Deliver as a user turn, which is how Claude Code runs a command template.
-			await sendUserMessage(ctx, expanded);
+			await sendUserMessage(ctx, promptCommandText(name, args.trim(), expanded));
 		},
 	});
 }

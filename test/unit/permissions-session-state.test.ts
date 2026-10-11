@@ -115,7 +115,7 @@ describe("permissions session state", () => {
 			const result = await rejected("no-2");
 			expect(result?.reason).toContain("use make clean instead");
 			expect(ctx.abort).not.toHaveBeenCalled();
-			expect(result?.terminate).toBeUndefined();
+			expect(result?.terminate).toBe(false);
 		});
 	});
 

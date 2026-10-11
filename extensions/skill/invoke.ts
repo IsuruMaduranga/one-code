@@ -113,6 +113,16 @@ export function typedSkillContent(name: string, typedArgs: string, promptText: s
 	return [commandBreadcrumb(name, typedArgs), promptText.endsWith("\n") ? promptText : `${promptText}\n`];
 }
 
+/**
+ * A prompt command (`/init`, `/doctor`, a plugin command) as one user message,
+ * in a typed skill's exact bytes: Claude Code sends every prompt command led by
+ * its breadcrumb, and the transcript shows it as its command line
+ * (commandDisplayLine).
+ */
+export function promptCommandText(name: string, args: string, prompt: string): string {
+	return typedSkillContent(name, args, prompt).join("\n");
+}
+
 /** Claude Code's result for a model's skill call; the skill's text follows it as a second block. */
 export const launchingSkill = (name: string): string => `Launching skill: ${name}`;
 

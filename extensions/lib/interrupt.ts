@@ -72,11 +72,8 @@ export function runOutcome(messages: ReadonlyArray<RunMessage> | undefined, sign
 		const message = messages[i];
 		if (message.role !== "assistant") continue;
 		if (message.stopReason === "aborted") return "aborted";
-		if (message.stopReason === "error" || message.stopReason === "toolUse") {
-			if (signalAborted) return "aborted";
-			return message.stopReason === "error" ? "error" : "ok";
-		}
-		return "ok";
+		if (signalAborted && (message.stopReason === "error" || message.stopReason === "toolUse")) return "aborted";
+		return message.stopReason === "error" ? "error" : "ok";
 	}
 	return "ok";
 }

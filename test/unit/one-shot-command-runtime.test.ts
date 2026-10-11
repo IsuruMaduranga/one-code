@@ -11,7 +11,7 @@ import { createUserMessageSender } from "../../extensions/lib/notifications.ts";
 import { ONE_SHOT_COMMAND_FAILED_CHANNEL } from "../../extensions/lib/interrupt.ts";
 import doctorExtension from "../../extensions/doctor/index.ts";
 import { INIT_PROMPT } from "../../extensions/init/prompt.ts";
-import { commandBreadcrumb } from "../../extensions/skill/invoke.ts";
+import { promptCommandText } from "../../extensions/skill/invoke.ts";
 
 function deferred() {
 	let resolve!: () => void;
@@ -141,7 +141,7 @@ describe("one-shot commands against pi's runtime", () => {
 		const h = await setup(undefined, mode, [path]);
 		await h.session.prompt("/init");
 		await h.session.prompt("/init");
-		const sent = `${commandBreadcrumb("init", "")}\n${INIT_PROMPT}`;
+		const sent = promptCommandText("init", "", INIT_PROMPT);
 		expect(h.requests).toEqual([sent, sent]);
 		expect(h.errors).toEqual([]);
 	});

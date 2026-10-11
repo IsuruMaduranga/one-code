@@ -109,6 +109,11 @@ function versionOf(path: string): string | undefined {
 	}
 }
 
+/** The files a shell command may have printed, on this machine's home and disk. */
+function localShellReadPaths(command: string, cwd: string): string[] {
+	return shellReadPaths(command, cwd, homedir(), (dir) => readdirSync(dir));
+}
+
 /**
  * The files a shell command may print, with each one's version as the command
  * starts (`shell-reads.ts` paths, resolved as the shell resolves them, from
@@ -121,7 +126,7 @@ function versionOf(path: string): string | undefined {
 function shellReadSnapshot(command: string, cwd: string): Map<string, string> {
 	const snapshot = new Map<string, string>();
 	if (!command) return snapshot;
-	for (const path of shellReadPaths(command, cwd, homedir(), (dir) => readdirSync(dir))) {
+	for (const path of localShellReadPaths(command, cwd)) {
 		// Regular files only: a device or FIFO (`head -c 1 /dev/zero`) reports size 0
 		// and a read of it never ends (found by a GPT-6 Astra review).
 		if (!isRegularFile(path)) continue;
@@ -383,7 +388,7 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 			// The kept shell reads, recognized as the live path recognizes them.
 			await bashParserReady();
 			const workCwd = sessionWorkCwd(entered, ctx.cwd);
-			const keptShell = keptShellReadPaths(keptTurns, (command) => shellReadPaths(command, workCwd, homedir(), (dir) => readdirSync(dir)), (path) => tracker.lastSeen(path));
+			const keptShell = keptShellReadPaths(keptTurns, (command) => localShellReadPaths(command, workCwd), (path) => tracker.lastSeen(path));
 			const inContext = inContextFiles(ctx, branch, keptReadPaths(keptTurns), keptShell);
 			// The loader lists imports by real path; a tracked path may be spelled through a symlink.
 			const shown = (path: string) => inContext.has(comparablePath(path)) || inContext.has(comparablePath(tryRealpath(path) ?? path));

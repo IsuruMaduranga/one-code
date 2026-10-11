@@ -8,6 +8,7 @@ import { setInstalledEnabled } from "../../extensions/plugins/install/registry.t
 import { ONE_SHOT_COMMAND_FAILED_CHANNEL } from "../../extensions/lib/interrupt.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
+import { promptCommandText } from "../../extensions/skill/invoke.ts";
 
 let home: string;
 let root: string;
@@ -58,7 +59,7 @@ describe("plugin command lifecycle", () => {
 		writeFileSync(join(updated, "commands", "ping.md"), "Updated command $ARGUMENTS");
 		writeRegistry(updated);
 		await fake.commands.get("fixture:ping")!.handler("ARGS", createFakeCtx({ cwd: home, mode: "tui" }));
-		expect(fake.sentUserMessages).toEqual([{ content: "Updated command ARGS", options: undefined }]);
+		expect(fake.sentUserMessages).toEqual([{ content: promptCommandText("fixture:ping", "ARGS", "Updated command ARGS"), options: undefined }]);
 	});
 
 	it("rejects a load-time command outside its project in the actual session cwd", async () => {

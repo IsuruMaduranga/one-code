@@ -1517,11 +1517,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// "Error: This operation was aborted" above the Interrupted line.
 		const stop = !feedback?.trim();
 		if (stop) abortAfterResult.add(event.toolCallId);
-		return {
-			block: true,
-			reason: userDenialText(feedback),
-			...(stop ? { terminate: true } : {}),
-		};
+		return { block: true, reason: userDenialText(feedback), terminate: stop };
 	});
 
 	pi.on("tool_execution_end", (event, ctx) => {

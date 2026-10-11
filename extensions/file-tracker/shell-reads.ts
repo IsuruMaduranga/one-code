@@ -41,17 +41,19 @@ export interface ShellReadCandidate {
 export function shellReadCandidates(command: string, cwd: string, home: string): ShellReadCandidate[] {
 	const parsed = parseCommand(command);
 	if (parsed.parseFailed) return [];
+	const readers = parsed.segments.flatMap((segment, index) => {
+		const first = segment.tokens.findIndex((token) => !ASSIGNMENT.test(token.value));
+		if (first === -1) return [];
+		const [head, ...args] = segment.tokens.slice(first);
+		return head && !head.dynamic && READERS.has(head.value.split("/").pop() ?? "") ? [{ segment, index, args }] : [];
+	});
+	// Most commands run no reader: skip the directory walk for them.
+	if (readers.length === 0) return [];
 	const dirs = segmentDirectories(parsed, cwd, home);
 	const candidates = new Map<string, ShellReadCandidate>();
 	const add = (word: string, dir: string) => candidates.set(`${dir}\0${word}`, { word, dir });
 	const readerDirs = new Set<string>();
-	let reads = false;
-	for (const [index, segment] of parsed.segments.entries()) {
-		const first = segment.tokens.findIndex((token) => !ASSIGNMENT.test(token.value));
-		if (first === -1) continue;
-		const [head, ...args] = segment.tokens.slice(first);
-		if (!head || head.dynamic || !READERS.has(head.value.split("/").pop() ?? "")) continue;
-		reads = true;
+	for (const { segment, index, args } of readers) {
 		const dir = dirs[index];
 		if (dir === undefined) continue;
 		readerDirs.add(dir);
@@ -62,7 +64,7 @@ export function shellReadCandidates(command: string, cwd: string, home: string):
 	// names its files elsewhere in the line. Every plain path-like word is a
 	// candidate then, in each directory a reader ran in: the full-content
 	// check, not the parse, decides.
-	if (reads) {
+	if (readerDirs.size > 0) {
 		const words = new Set<string>();
 		for (const word of [...(command.match(PATH_WORD) ?? []), ...(command.match(GLOB_WORD) ?? [])]) if (words.size < MAX_CANDIDATES) words.add(word);
 		for (const dir of [...readerDirs].slice(0, MAX_READER_DIRS)) for (const word of words) add(word, dir);
@@ -74,22 +76,16 @@ export function shellReadCandidates(command: string, cwd: string, home: string):
  * The absolute paths `command` may have printed: its candidates
  * ({@link shellReadCandidates}) resolved as the shell resolves them, from
  * the directory each one's reader runs in, with a glob expanded through
- * `readdir` (given an absolute directory).
+ * `readdir` (given an absolute directory). The shell's own resolution
+ * (`toAbsoluteBash`), not the file tools' (`resolveToolPath` strips a leading
+ * `@`, which `cat @x` keeps): `~/` and the shell's directory only.
  */
 export function shellReadPaths(command: string, cwd: string, home: string, readdir: (dir: string) => string[]): string[] {
 	const paths = new Set<string>();
 	for (const { word, dir } of shellReadCandidates(command, cwd, home)) {
-		for (const name of expandCandidate(word, (sub) => readdir(shellPath(dir, sub, home)))) paths.add(shellPath(dir, name, home));
+		for (const name of expandCandidate(word, (sub) => readdir(toAbsoluteBash(dir, sub, home)))) paths.add(toAbsoluteBash(dir, name, home));
 	}
 	return [...paths];
-}
-
-/**
- * The shell's own resolution of a word, not the file tools' (`resolveToolPath`
- * strips a leading `@`, which `cat @x` keeps): `~/` and the shell's directory only.
- */
-function shellPath(dir: string, word: string, home: string): string {
-	return toAbsoluteBash(dir, word, home);
 }
 
 /**
@@ -115,15 +111,16 @@ function segmentDirectories(parsed: ParseResult, cwd: string, home: string): (st
 	/** Where a `cd` that may not have run moved the later members of its `&&` list, by list. */
 	const listDirs = new Map<number, string | undefined>();
 	const inLoop = (segment: Segment) => segment.enclosing.some((construct) => LOOPS.has(construct));
-	const loopMoves = segments.some((segment) => inLoop(segment) && mayMove(segment));
-	return segments.map((segment) => {
+	const moves = segments.map(mayMove);
+	const loopMoves = segments.some((segment, index) => moves[index] && inLoop(segment));
+	return segments.map((segment, index) => {
 		const inList = segment.andList !== undefined && listDirs.has(segment.andList);
 		const dir = loopMoves && inLoop(segment) ? undefined : inList ? listDirs.get(segment.andList!) : dirs.get(segment);
-		if (!mayMove(segment)) return dir;
+		if (!moves[index]) return dir;
 		const certain = !parsed.background && !parsed.definesFunction && !segment.pipelineShell && !segment.enclosing.includes("negated_command");
 		const target = certain ? literalCdTarget(segment) : undefined;
 		// A relative target from an unknown directory stays unknown; an absolute one re-anchors.
-		const next = target === undefined ? undefined : dir === undefined && !isAbsoluteTarget(target) ? undefined : shellPath(dir ?? cwd, target, home);
+		const next = target === undefined ? undefined : dir === undefined && !isAbsoluteTarget(target) ? undefined : toAbsoluteBash(dir ?? cwd, target, home);
 		if (segment.pipelineShell) dirs.set({ scopes: segment.pipelineShell }, undefined);
 		if (segment.conditional) {
 			dirs.set(segment, undefined);

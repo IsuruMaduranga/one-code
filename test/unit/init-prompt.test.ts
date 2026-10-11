@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import initExtension from "../../extensions/init/index.ts";
 import { INIT_PROMPT } from "../../extensions/init/prompt.ts";
-import { commandBreadcrumb, commandDisplayLine } from "../../extensions/skill/invoke.ts";
+import { commandDisplayLine, promptCommandText } from "../../extensions/skill/invoke.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { captureUserTurns } from "./helpers/user-turn.ts";
 
@@ -63,7 +63,7 @@ describe("/init prompt", () => {
 		const fake = createFakePi();
 		initExtension(fake.pi as never);
 		await fake.commands.get("init")!.handler("", createFakeCtx({ mode: "tui" }));
-		const content = `${commandBreadcrumb("init", "")}\n${INIT_PROMPT}`;
+		const content = promptCommandText("init", "", INIT_PROMPT);
 		expect(fake.sentUserMessages).toEqual([{ content, options: { deliverAs: "followUp" } }]);
 		expect(commandDisplayLine(content)).toBe("/init");
 	});
