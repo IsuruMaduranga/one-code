@@ -25,7 +25,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { createPowerShellToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { perCwd } from "../lib/per-cwd.ts";
-import { bashSpawn, createPowerShellOperations, POWERSHELL_UTF8_PREFIX, powerShellEdition, powerShellSpawn } from "../lib/shell-spawn.ts";
+import { bashSpawn, createPowerShellOperations, POWERSHELL_TOOL_PREFIX, powerShellEdition, powerShellSpawn } from "../lib/shell-spawn.ts";
 import { registerShellTool } from "../lib/shell-tool.ts";
 import { powerShellToolDescription } from "./description.ts";
 import { powershellGuardReason } from "./guards.ts";
@@ -71,8 +71,8 @@ export function powershellTool(pi: ExtensionAPI, { announce }: { announce: boole
 		foreground: perCwd((cwd: string) => createPowerShellToolDefinition(cwd, { operations })),
 		guard: powershellGuardReason,
 		backgroundShell: () => spec,
-		// The foreground path prepends pi's UTF-8 prefix inside the operations; the background spawn needs it too.
-		wrapBackgroundCommand: (command) => `${POWERSHELL_UTF8_PREFIX}${command}`,
+		// The foreground path prepends the tool's prefix inside the operations; the background spawn needs it too.
+		wrapBackgroundCommand: (command) => `${POWERSHELL_TOOL_PREFIX}${command}`,
 	});
 
 	let noticesShown = false;
