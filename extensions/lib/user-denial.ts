@@ -13,9 +13,26 @@ const REJECTED =
 const MEMORY_NOTE =
 	"Note: The user's next message may contain a correction or preference. Pay close attention — if they explain what went wrong or how they'd prefer you to work, consider saving that to memory for future sessions.";
 
+const STOP = "STOP what you are doing and wait for the user to tell you how to proceed.";
+const USER_SAID = "To tell you how to proceed, the user said:\n";
+
 /** Claude Code's rejection text, with the user's reason when they typed one. */
 export function userDenialText(feedback?: string): string {
 	const said = feedback?.trim();
-	const next = said ? `To tell you how to proceed, the user said:\n${said}` : "STOP what you are doing and wait for the user to tell you how to proceed.";
+	const next = said ? `${USER_SAID}${said}` : STOP;
 	return `${REJECTED} ${next}\n\n${MEMORY_NOTE}`;
+}
+
+/**
+ * Whether a tool result is the user's rejection, for the transcript: `stop`
+ * when they rejected without a reason, `reason` when they gave one, undefined
+ * for anything else. The transcript shows a short line for either (Claude
+ * Code's); the model still reads the whole text.
+ */
+export function userDenialKind(text: string): "stop" | "reason" | undefined {
+	if (!text.startsWith(`${REJECTED} `)) return undefined;
+	const next = text.slice(REJECTED.length + 1);
+	if (next.startsWith(STOP)) return "stop";
+	if (next.startsWith(USER_SAID)) return "reason";
+	return undefined;
 }

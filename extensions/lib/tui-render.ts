@@ -15,9 +15,11 @@
  * every line goes through `truncateLine` — never skip it.
  */
 
+import { isAbsolute, relative } from "node:path";
 import { framesToText, notificationBody, parseNotificationFrames } from "./notifications.ts";
 import { fitPainted, hardWrapColumns, sliceColumns, visibleWidth } from "./text-width.ts";
 import { sanitizeDisplayText } from "./terminal-text.ts";
+import { userDenialKind } from "./user-denial.ts";
 export { notificationBody };
 export { visibleWidth } from "./text-width.ts";
 
@@ -527,6 +529,44 @@ export function textContent(result: { content?: Array<{ type: string; text?: str
 		.trim();
 }
 
+/** The file operation a rejected file tool names: "User rejected write to …", "User rejected update to …". */
+export type RejectedFileOp = "write" | "update";
+
+/** Claude Code's transcript line for a call the user rejected with a reason, or for a tool with no line of its own. */
+export const TOOL_USE_REJECTED = "Tool use rejected";
+
+/**
+ * A file tool's `path` for the transcript, as Claude Code shows it: relative to
+ * the working directory when it is absolute, as the model wrote it otherwise.
+ */
+export function displayToolPath(raw: string, cwd: string | undefined): string {
+	if (!cwd || !isAbsolute(raw)) return raw;
+	return relative(cwd, raw) || raw;
+}
+
+/**
+ * The result line for a call the user rejected, or undefined when the result
+ * is not a rejection. The model reads the whole rejection text; the transcript
+ * shows Claude Code's short line instead: "User rejected write to <path>" for a
+ * file tool rejected without a reason, "Tool use rejected" otherwise. A
+ * rejection without a reason also stops the turn, and the turn's own
+ * "Interrupted" line follows it.
+ */
+export function rejectionLine(
+	theme: ThemeLike,
+	result: { content?: Array<{ type: string; text?: string }> },
+	isError: boolean,
+	file?: { op: RejectedFileOp; path: string | undefined },
+): string | undefined {
+	if (!isError) return undefined;
+	const kind = userDenialKind(textContent(result));
+	if (!kind) return undefined;
+	if (kind === "stop" && file?.path) {
+		return `  ⎿  ${theme.fg("dim", `User rejected ${file.op} to `)}${theme.bold(theme.fg("dim", sanitizeDisplayText(file.path)))}`;
+	}
+	return `  ⎿  ${theme.fg("dim", TOOL_USE_REJECTED)}`;
+}
+
 export interface CcRenderSpec<TArgs = unknown, TDetails = unknown> {
 	/** One-line arg summary shown in parentheses. Default: `summarizeArgs`. */
 	title?: (args: TArgs | undefined) => string | undefined;
@@ -586,6 +626,8 @@ export function ccToolRenderers<TArgs = any, TDetails = any>(
 			theme: ThemeLike,
 			context: { args?: TArgs; isError: boolean },
 		) {
+			const rejected = rejectionLine(theme, stripReminderBlocks(result), context.isError);
+			if (rejected) return linesComponent(() => [rejected]);
 			let text: string | undefined;
 			try {
 				text = spec.result?.(result, context.args, context.isError);
@@ -635,6 +677,8 @@ export interface CcWrapOptions<TArgs = any> {
 	 * content below the header (edit's diff preview, shown before approval).
 	 */
 	keepBaseCall?: boolean;
+	/** A file tool: a rejection without a reason reads "User rejected <op> to <path>" (the path from `title`). */
+	rejectedAs?: RejectedFileOp;
 }
 
 /**
@@ -709,14 +753,16 @@ export function ccWrapBuiltinRenderers<TArgs = any>(
 	renderCall: (args: TArgs, theme: any, context: any) => TuiComponent;
 	renderResult: (result: any, options: { expanded: boolean; isPartial: boolean }, theme: any, context: any) => TuiComponent;
 } {
-	const titleOf = (args: TArgs | undefined): string => {
+	const rawTitle = (args: TArgs | undefined): string | undefined => {
 		try {
-			const custom = opts.title?.(args);
-			if (custom !== undefined) return summarizeArgs(custom);
+			return opts.title?.(args);
 		} catch {
-			// fall through to the generic summary
+			return undefined;
 		}
-		return summarizeArgs(args);
+	};
+	const titleOf = (args: TArgs | undefined): string => {
+		const custom = rawTitle(args);
+		return summarizeArgs(custom !== undefined ? custom : args);
 	};
 
 	return {
@@ -760,6 +806,12 @@ export function ccWrapBuiltinRenderers<TArgs = any>(
 		},
 		renderResult(rawResult: any, options: { expanded: boolean; isPartial: boolean }, theme: ThemeLike, context: any) {
 			const result = stripReminderBlocks(rawResult);
+			const path = rawTitle(context.args);
+			const rejected = rejectionLine(theme, result, context.isError, opts.rejectedAs && {
+				op: opts.rejectedAs,
+				path: path ? displayToolPath(path, context.cwd) : undefined,
+			});
+			if (rejected) return linesComponent(() => [rejected]);
 			let inner: any;
 			try {
 				inner = base.renderResult?.(result, options, theme, { ...context, lastComponent: context.state.ccInnerResult });

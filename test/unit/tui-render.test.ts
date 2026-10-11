@@ -417,6 +417,39 @@ describe("linesComponent memoization", () => {
 	});
 });
 
+describe("a call the user rejected", () => {
+	const plainTheme: ThemeLike = { fg: (_c, t) => t, bold: (t) => t, italic: (t) => t };
+	const rejection = (text: string) => ({ content: [{ type: "text", text }] });
+	const opts = { expanded: true, isPartial: false };
+
+	it("shows Claude Code's short line, never the model-facing text", async () => {
+		const { ccToolRenderers, ccWrapBuiltinRenderers } = await import("../../extensions/lib/tui-render.ts");
+		const { userDenialText } = await import("../../extensions/lib/user-denial.ts");
+		const base = { renderResult: () => ({ render: () => ["BASE"], invalidate() {} }) };
+		const bash = ccWrapBuiltinRenderers<{ command?: string }>("Bash", base, { title: (a) => a?.command });
+		const edit = ccWrapBuiltinRenderers<{ path?: string }>("Update", base, { title: (a) => a?.path, rejectedAs: "update" });
+		const task = ccToolRenderers("Task Output");
+		const ctx = (args: unknown) => ({ args, isError: true, cwd: "/w", state: {} });
+
+		for (const text of [userDenialText(), userDenialText("try npm ci")]) {
+			const lines = bash.renderResult(rejection(text), opts, plainTheme, ctx({ command: "rm -rf x" })).render(120);
+			expect(lines).toEqual(["  ⎿  Tool use rejected"]);
+			expect(task.renderResult(rejection(text), opts, plainTheme, ctx({})).render(120)).toEqual(["  ⎿  Tool use rejected"]);
+		}
+		expect(edit.renderResult(rejection(userDenialText()), opts, plainTheme, ctx({ path: "/w/src/x.ts" })).render(120)).toEqual(["  ⎿  User rejected update to src/x.ts"]);
+		expect(edit.renderResult(rejection(userDenialText("no")), opts, plainTheme, ctx({ path: "src/x.ts" })).render(120)).toEqual(["  ⎿  Tool use rejected"]);
+	});
+
+	it("leaves other errors, and a success that quotes the text, to the normal view", async () => {
+		const { ccWrapBuiltinRenderers } = await import("../../extensions/lib/tui-render.ts");
+		const { userDenialText } = await import("../../extensions/lib/user-denial.ts");
+		const base = { renderResult: () => ({ render: () => ["BASE"], invalidate() {} }) };
+		const bash = ccWrapBuiltinRenderers("Bash", base);
+		expect(bash.renderResult(rejection("exit 1"), opts, plainTheme, { args: {}, isError: true, state: {} }).render(120)).toEqual(["  ⎿  BASE"]);
+		expect(bash.renderResult(rejection(userDenialText()), opts, plainTheme, { args: {}, isError: false, state: {} }).render(120)).toEqual(["  ⎿  BASE"]);
+	});
+});
+
 describe("elbowIndent / ccWrapBuiltinRenderers", () => {
 	it("indents under the elbow and strips leading blank lines", async () => {
 		const { elbowIndent } = await import("../../extensions/lib/tui-render.ts");
