@@ -215,7 +215,7 @@ describe("the per-turn budget line", () => {
 			expect(withTasks.split("\n").length - without.split("\n").length, tier).toBe(1);
 		}
 		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "workhorse")).toContain(
-			"\n - Use task_create to plan and track work. Mark each task completed as soon as it's done; don't batch.\n",
+			"\n - Use task_create (deferred — load it with `tool_search select:task_create,task_update`) to plan and track work. Mark each task completed as soon as it's done; don't batch.\n",
 		);
 		// Frontier has no task line either way.
 		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", null, false)).toBe(
