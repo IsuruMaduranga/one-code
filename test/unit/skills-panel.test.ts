@@ -13,7 +13,7 @@ import {
 	skillStateFor,
 } from "../../extensions/lib/skill-overrides.ts";
 import { decodeSkillsKey } from "../../extensions/skill/panel/keys.ts";
-import { applySkillsKey, initialSkillsState, type SkillsRow, visibleRows } from "../../extensions/skill/panel/state.ts";
+import { applySkillsKey, followRow, initialSkillsState, type SkillsRow, visibleRows } from "../../extensions/skill/panel/state.ts";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "skills-"));
 
@@ -106,6 +106,25 @@ describe("/skills panel state machine", () => {
 		expect(state.searching).toBe(false);
 		expect(state.search).toBe("");
 		expect(applySkillsKey(state, { kind: "back" }, rows)).toEqual({ kind: "close" });
+	});
+
+	// TUI round (2026-10-11): sorted by state, a cycle moved the skill and the
+	// next Enter cycled the skill that slid into the cursor's row.
+	it("keeps the cursor on a skill whose new state moved it in the state sort", () => {
+		const state = { ...initialSkillsState(), sort: "state" as const };
+		let current = rows;
+		expect(visibleRows(current, state)[state.cursor].name).toBe("zeta"); // on, first
+		const effect = applySkillsKey(state, { kind: "enter" }, visibleRows(current, state));
+		expect(effect?.kind).toBe("cycle");
+		current = current.map((row) => (row.key === "user:zeta" ? { ...row, state: "name-only" as const } : row));
+		followRow(state, visibleRows(current, state), "user:zeta");
+		expect(visibleRows(current, state)[state.cursor].name).toBe("zeta");
+	});
+
+	it("leaves the cursor alone when the skill is gone from the view", () => {
+		const state = { ...initialSkillsState(), cursor: 1, search: "alp" };
+		followRow(state, visibleRows(rows, state), "user:zeta");
+		expect(state.cursor).toBe(1);
 	});
 
 	it("t toggles the sort mode", () => {
