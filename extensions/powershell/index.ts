@@ -40,6 +40,11 @@ const PowerShellParams = Type.Object({
 });
 
 export default function powershellExtension(pi: ExtensionAPI) {
+	powershellTool(pi, { announce: true });
+}
+
+/** The tool itself; `announce: false` is the in-process child's shape (powershell/child.ts), which prints no notices. */
+export function powershellTool(pi: ExtensionAPI, { announce }: { announce: boolean }) {
 	const spec = powerShellSpawn();
 	const operations = createPowerShellOperations(() => spec);
 	const base = createPowerShellToolDefinition(process.cwd(), { operations });
@@ -76,7 +81,7 @@ export default function powershellExtension(pi: ExtensionAPI) {
 		const active = pi.getActiveTools();
 		const next = withShellTools(active, current);
 		if (next.join(" ") !== active.join(" ")) pi.setActiveTools(next);
-		if (noticesShown || current.notices.length === 0) return;
+		if (!announce || noticesShown || current.notices.length === 0) return;
 		noticesShown = true;
 		for (const notice of current.notices) {
 			if (ctx?.hasUI) ctx.ui.notify(notice, "warning");

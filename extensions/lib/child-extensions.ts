@@ -27,10 +27,15 @@ const EXTENSIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 // A name with a slash is a child-specific entry file: `tool-call-corruption/child`
 // blocks damaged OpenRouter calls like the main session's, before the hook and
-// permission gates (which load after these paths), but prints nothing.
+// permission gates (which load after these paths), but prints nothing. The
+// shell tools are One Code's, as in the main session: without them a child ran
+// pi's built-in bash (timeout in seconds, no default) while a fork advertised
+// ours (milliseconds), and had no PowerShell tool. A child binds without a UI
+// (mode "print"), so `run_in_background` runs blocking there and nothing a
+// child starts outlives it (Claude Code kills an agent's shells as it exits).
 export const CHILD_EXTENSIONS = [
 	"system-reminder", "tool-search", "claude-context", "tool-call-corruption/child",
-	"file-tracker", "search-tools", "skill", "web", "web-fetch", "notebook",
+	"file-tracker", "search-tools", "skill", "bash/child", "powershell/child", "web", "web-fetch", "notebook",
 ];
 
 export const CHILD_EXTENSION_PATHS = CHILD_EXTENSIONS.map((name) =>
