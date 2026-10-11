@@ -53,10 +53,24 @@ describe("buildFooterLines", () => {
 		expect(line.length).toBeLessThanOrEqual(120);
 	});
 
+	it("keeps the usage field after a compaction, with the tokens unknown", () => {
+		const [line] = buildFooterLines({ ...base, contextTokens: null, contextPercent: null }, 120, plain);
+		expect(line).toContain("usage: ?/1.0M");
+		expect(line).not.toContain("%)");
+	});
+
+	it("cuts the model name with an ellipsis and keeps the effort when even the core overflows", () => {
+		const data: FooterData = { ...base, model: "gpt-6.1-sol", effort: "medium", contextTokens: 12_000, contextWindow: 400_000, contextPercent: 3, cost: 0.123 };
+		const [line] = buildFooterLines(data, 54, plain);
+		expect(line.length).toBeLessThanOrEqual(54);
+		expect(line).toContain(" · gpt-6.… · ");
+		expect(line.endsWith("medium")).toBe(true);
+	});
+
 	it("keeps the branch but drops its PR when the two together will not fit", () => {
 		// A width where "⎇ master" fits after the metrics but "⎇ master ← PR #123"
 		// does not: the PR is dropped, the branch survives.
-		const data: FooterData = { ...base, cacheHitPercent: undefined, contextTokens: undefined };
+		const data: FooterData = { ...base, cacheHitPercent: undefined, contextTokens: undefined, contextWindow: undefined };
 		const [line] = buildFooterLines(data, 46, plain);
 		expect(line.length).toBeLessThanOrEqual(46);
 		expect(line).toContain("⎇ master");
