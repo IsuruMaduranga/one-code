@@ -253,9 +253,11 @@ export function wrapPlainText(text: string, width: number): string[] {
 }
 
 /**
- * Word-aware wrap for prose (task text, assistant text, the dim transcript lines): breaks at spaces,
- * hard-breaking only words longer than the width; preserves blank lines. Plain
- * text in, plain lines out — painting happens after, per line.
+ * Word-aware wrap for prose (task text, assistant text, the dim transcript lines, a plan): breaks at spaces,
+ * hard-breaking only words longer than the width; preserves blank lines. A
+ * line's leading indent stays and its continuation lines hang under it (a
+ * nested list, an indented code line), unless the indent takes half the width.
+ * Plain text in, plain lines out — painting happens after, per line.
  */
 export function wrapProse(text: string, width: number): string[] {
 	const columns = Math.max(1, width);
@@ -265,26 +267,31 @@ export function wrapProse(text: string, width: number): string[] {
 			out.push("");
 			continue;
 		}
+		const lead = /^[ \t]*/.exec(raw)![0];
+		const indent = lead.replace(/\t/g, "  ");
+		const hang = visibleWidth(indent) * 2 < columns ? indent : "";
+		const room = columns - visibleWidth(hang);
+		const push = (part: string) => out.push(`${hang}${part}`);
 		let line = "";
-		for (const word of raw.split(" ")) {
-			if (visibleWidth(word) > columns) {
+		for (const word of raw.slice(lead.length).split(" ")) {
+			if (visibleWidth(word) > room) {
 				// A word wider than the screen (path, hash): flush, then hard-break it.
 				// The last chunk becomes the running line so later words can join it.
-				if (line) out.push(line);
-				const chunks = hardWrapColumns(word, columns);
+				if (line) push(line);
+				const chunks = hardWrapColumns(word, room);
 				line = chunks.pop() ?? "";
-				out.push(...chunks);
+				for (const chunk of chunks) push(chunk);
 				continue;
 			}
 			const candidate = line ? `${line} ${word}` : word;
-			if (visibleWidth(candidate) > columns) {
-				out.push(line);
+			if (visibleWidth(candidate) > room) {
+				push(line);
 				line = word;
 			} else {
 				line = candidate;
 			}
 		}
-		out.push(line);
+		push(line);
 	}
 	return out;
 }

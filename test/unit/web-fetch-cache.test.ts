@@ -7,7 +7,7 @@ import { logSideCallUsage } from "../../extensions/lib/side-call-usage.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
-vi.mock("../../extensions/lib/side-call-usage.ts", () => ({ logSideCallUsage: vi.fn() }));
+vi.mock("../../extensions/lib/side-call-usage.ts", () => ({ logSideCallUsage: vi.fn(), SIDE_CALL_KINDS: ["reader", "btw", "recap"] }));
 
 const complete = vi.mocked(completeSimple);
 const reply = (stopReason = "stop", errorMessage?: string) => ({

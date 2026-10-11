@@ -100,6 +100,12 @@ describe("plan viewer", () => {
 		expect(lines).toEqual(["a".repeat(10), "a".repeat(10), "a".repeat(5), "", "short"]);
 	});
 
+	// The dialog broke words at the edge ("repo" / "rt") at any width.
+	it("breaks at word boundaries and keeps an indent under its line", () => {
+		expect(wrapPlanText("verify with make test and report", 16)).toEqual(["verify with make", "test and report"]);
+		expect(wrapPlanText("  - nested item that wraps", 16)).toEqual(["  - nested item", "  that wraps"]);
+	});
+
 	it("clamps the scroll offset to the content", () => {
 		expect(clampOffset(-3, 20, 10)).toBe(0);
 		expect(clampOffset(99, 20, 10)).toBe(10);

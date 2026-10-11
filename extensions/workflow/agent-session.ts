@@ -23,7 +23,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { whenAborted } from "../lib/abort.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
-import { createSharedModelRuntime, finalAssistantText, openChildSession } from "../lib/agent-loader.ts";
+import { createSharedModelRuntime, disposeChildSession, finalAssistantText, openChildSession } from "../lib/agent-loader.ts";
 import { modelSpec as modelSpecOf, supportsImageInput } from "../lib/model-policy.ts";
 import { isModelUnavailableError } from "../auto-mode/model-select.ts";
 import { agentPromptIdentity, PrefixWarmGate, prefixWarmKey } from "../lib/prefix-warm-gate.ts";
@@ -415,7 +415,7 @@ export class AgentRunner {
 			releasePrefix(false);
 			unsubscribe?.();
 			unhookAbort();
-			session.dispose();
+			disposeChildSession(session);
 			// A failed or aborted agent can still have edited or committed in its
 			// worktree: settled after the session is gone, before the error reaches
 			// the caller, so the kept path rides on it.

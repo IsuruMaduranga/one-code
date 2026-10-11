@@ -140,9 +140,14 @@ export class RunRegistry {
 		this.reserved.clear();
 	}
 
-	/** Hold a name until its record is added. A spawn that fails validation leaves it held: never offered as a recipient (SendMessage lists `list()`), only skipped by the next free-name pick. */
+	/** Hold a name until its record is added. */
 	reserve(name: string): void {
 		this.reserved.add(name);
+	}
+
+	/** Free a held name whose spawn failed validation, so a corrected retry gets it. */
+	release(name: string): void {
+		this.reserved.delete(name);
 	}
 
 	/** Latest wins per name, matching Claude Code's semantics. */

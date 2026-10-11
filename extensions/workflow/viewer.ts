@@ -11,7 +11,7 @@
  * before painting so ANSI escapes never enter the width accounting.
  */
 
-import { cutPlainText as cut, formatDuration, padPlainText, splitCell, splitRow, visibleWidth, wrapPlainText } from "../lib/tui-render.ts";
+import { cutPlainText as cut, formatDuration, padPlainText, splitCell, splitRow, visibleWidth, wrapPlainText, wrapProse } from "../lib/tui-render.ts";
 import { formatTokenCount } from "../subagents/usage.ts";
 import type { AgentRecord, RunStatus } from "./types.ts";
 import { keyId, keyText } from "../lib/key-input.ts";
@@ -352,7 +352,7 @@ export function buildDetail(
 	if (record.status === "failed") {
 		section("Error", wrapPlainText(record.error ?? "unknown", width - 2), "error");
 	} else {
-		section("Outcome", record.outcome ? wrapPlainText(record.outcome, width - 2) : ["Still running…"], record.outcome ? undefined : "dim");
+		section("Outcome", record.outcome ? wrapProse(record.outcome, width - 2) : ["Still running…"], record.outcome ? undefined : "dim");
 	}
 	if (record.worktree) {
 		const { path, branch } = record.worktree;

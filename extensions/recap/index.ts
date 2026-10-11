@@ -33,7 +33,7 @@ import { followLastExchange, replaySideCall } from "../lib/replay-call.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 import { pickEconomicalContainedModel } from "../lib/model-tier.ts";
 import { CONVERSATION_CACHE_PLACEMENT } from "../lib/side-call-cache.ts";
-import { runSideCall } from "../lib/side-call-run.ts";
+import { releaseSideCalls, runSideCall } from "../lib/side-call-run.ts";
 import { answerText, stripImageBlocks, toolStubs, withoutSystemMessages } from "../lib/side-call.ts";
 import { unrefTimers } from "../lib/timer-ops.ts";
 import { dimMarkedLine } from "../lib/tui-render.ts";
@@ -198,8 +198,9 @@ export default function recapExtension(pi: ExtensionAPI) {
 		scheduler.turnEnded();
 	});
 
-	pi.on("session_shutdown", () => {
+	pi.on("session_shutdown", (_event, ctx) => {
 		scheduler.reset();
 		abortInFlight();
+		releaseSideCalls(ctx.sessionManager.getSessionId());
 	});
 }

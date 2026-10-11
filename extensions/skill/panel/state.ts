@@ -64,6 +64,16 @@ export function clampSkillsCursor(state: SkillsPanelState, visible: SkillsRow[])
 }
 
 /**
+ * Keep the cursor on the skill `key` after the list reordered (a sort toggle,
+ * or a state change under the state sort), so the next key acts on the skill
+ * the user was looking at, not the one that slid into its row.
+ */
+export function followRow(state: SkillsPanelState, visible: SkillsRow[], key: string): void {
+	const index = visible.findIndex((row) => row.key === key);
+	if (index >= 0) state.cursor = index;
+}
+
+/**
  * Fold a key into the state, returning an effect the wiring must act on. The
  * caller passes the already-filtered/sorted rows so "the selected row" matches
  * what the renderer drew.

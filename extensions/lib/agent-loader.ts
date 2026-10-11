@@ -31,6 +31,7 @@ import type { PermissionBridge } from "../permissions/subagent-gate.ts";
 import { withShortCacheRetention } from "./cache-retention.ts";
 import { hookGateFactory } from "./hook-gate.ts";
 import { permissionGateFactory } from "./permission-gate.ts";
+import { releaseSideCalls } from "./side-call-run.ts";
 import { worktreeGuardFactory } from "./worktree-isolation.ts";
 
 /** The last assistant message's text (the value an agent run returns). */
@@ -181,4 +182,16 @@ export async function openChildSession(options: OpenChildSessionOptions): Promis
 	});
 	await session.bindExtensions({ onError: options.onError });
 	return session;
+}
+
+/**
+ * Dispose a child opened by openChildSession. `dispose()` never emits
+ * `session_shutdown`, so the child's side-call keys (its web_fetch reader),
+ * which that event releases in a main session, are released here
+ * (lib/side-call-run.ts).
+ */
+export function disposeChildSession(session: AgentSession): void {
+	const sessionId = session.sessionManager.getSessionId();
+	session.dispose();
+	releaseSideCalls(sessionId);
 }

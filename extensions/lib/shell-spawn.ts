@@ -54,6 +54,20 @@ export const POWERSHELL_ARGS = ["-NoProfile", "-NonInteractive", "-ExecutionPoli
 /** pi's UTF-8 output prefix for PowerShell (core/tools/powershell.ts), so Windows PowerShell 5.1 does not emit UTF-16. */
 export const POWERSHELL_UTF8_PREFIX = "try { [Console]::OutputEncoding=[System.Text.Encoding]::UTF8 } catch {}\n";
 
+/**
+ * What the PowerShell tool prepends to every command, foreground and
+ * background: pi's UTF-8 line, then UTF-8 for `Out-File` and `$OutputEncoding`
+ * and plain-text rendering, as Claude Code's PowerShell tool runs commands.
+ * `$PSStyle.OutputRendering = 'PlainText'` keeps pwsh 7's formatter from
+ * colouring table headers, which otherwise reached the model as raw
+ * `\x1b[32;1m` escapes.
+ */
+export const POWERSHELL_TOOL_PREFIX =
+	// One line, so an error's "At line:N" stays one off the command's own line, as with pi's prefix alone.
+	`${POWERSHELL_UTF8_PREFIX.trimEnd()}; try { $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8' } catch {}; ` +
+	"if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') { try { $OutputEncoding = [System.Text.UTF8Encoding]::new() } catch {}; " +
+	"if ($null -ne $PSStyle) { try { $PSStyle.OutputRendering = 'PlainText' } catch {} } };\n";
+
 export const GIT_BASH_PATH_VAR = "CLAUDE_CODE_GIT_BASH_PATH";
 
 // ---------------------------------------------------------------------------
@@ -313,7 +327,7 @@ export function createPowerShellOperations(resolve: () => ShellSpawn | undefined
 			} catch {
 				throw new Error(`Working directory does not exist: ${cwd}\nCannot execute PowerShell commands.`);
 			}
-			const child = spawnShellCommand(spec, `${POWERSHELL_UTF8_PREFIX}${command}`, {
+			const child = spawnShellCommand(spec, `${POWERSHELL_TOOL_PREFIX}${command}`, {
 				cwd,
 				...detachedSpawnOptions(),
 				env: env ?? process.env,

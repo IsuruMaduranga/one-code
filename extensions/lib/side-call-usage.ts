@@ -1,8 +1,11 @@
 /** Opt-in side-call cache evidence, independent of the provider's transport. */
 import { appendFileSync } from "node:fs";
 
+/** Every side-call kind; releaseSideCalls closes each one's pi-ai key. */
+export const SIDE_CALL_KINDS = ["reader", "btw", "recap"] as const;
+
 export interface SideCallLogContext {
-	kind: "reader" | "btw" | "recap";
+	kind: (typeof SIDE_CALL_KINDS)[number];
 	model: { provider: string; id: string; api: string };
 	sessionId: string;
 	system: string;

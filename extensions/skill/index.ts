@@ -41,6 +41,7 @@ import { readUsage, recordUsage, usageKey } from "../lib/usage-tracker.ts";
 import { boundedDockHeight, ccToolRenderers, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import {
 	bareSkillMatches,
+	commandDisplayLine,
 	launchingSkill,
 	missingArgumentsNote,
 	parseSkillCommand,
@@ -57,7 +58,7 @@ import { codeReviewBody } from "./code-review.ts";
 import { decodeSkillsKey } from "./panel/keys.ts";
 import { frontmatterFlag, readableSkillListing, skillListingBudget, skillListingText, usageScore, withoutPiSkillsBlock } from "./listing.ts";
 import { renderSkillsPanel, type SkillsPaint } from "./panel/render.ts";
-import { applySkillsKey, initialSkillsState, type SkillsRow, visibleRows } from "./panel/state.ts";
+import { applySkillsKey, followRow, initialSkillsState, type SkillsRow, visibleRows } from "./panel/state.ts";
 import { announceArgumentHint, type CommandHint, frontmatterCommandHint } from "../lib/argument-hints.ts";
 import { parseSlashCommand, SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../lib/skill-body.ts";
 import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
@@ -99,6 +100,11 @@ const CODE_REVIEW_CELLS = join(BUNDLED_ROOT, "code-review", "cells");
 
 export default function skillExtension(pi: ExtensionAPI) {
 	const requestTier = sessionModelTier(pi);
+	// pi draws a user message as markdown, so a typed skill, `/init` and
+	// `/doctor` showed their whole expanded prompt; show the command line.
+	pi.registerMarkdownTransformer((markdown, context) =>
+		context.messageType === "user" ? (commandDisplayLine(markdown) ?? markdown) : markdown,
+	);
 	/** pi resolves skills per turn; cache the latest list for the tool to use. */
 	let piSkills: IndexedSkill[] = [];
 	/** Session cwd, so project-level enabledPlugins settings apply to plugin skills. */
@@ -776,7 +782,6 @@ export default function skillExtension(pi: ExtensionAPI) {
 					if (!key) return;
 					const before = visibleRows(rows, state);
 					const anchorKey = before[state.cursor]?.key;
-					const sortBefore = state.sort;
 					const effect = applySkillsKey(state, key, before);
 					notice = undefined;
 					if (effect?.kind === "close") {
@@ -792,13 +797,8 @@ export default function skillExtension(pi: ExtensionAPI) {
 					} else if (effect?.kind === "locked") {
 						notice = `${effect.row.name} is a plugin skill — manage it from /plugins.`;
 					}
-					// A sort toggle reorders the list; keep the same skill selected so a
-					// following Space acts on the row the user was looking at, not the one
-					// that slid into its index.
-					if (state.sort !== sortBefore && anchorKey) {
-						const idx = visibleRows(rows, state).findIndex((row) => row.key === anchorKey);
-						if (idx >= 0) state.cursor = idx;
-					}
+					// A sort toggle or a cycle under the state sort reorders the list.
+					if ((key.kind === "text" || effect?.kind === "cycle") && anchorKey) followRow(state, visibleRows(rows, state), anchorKey);
 					repaint();
 				},
 				invalidate: () => {

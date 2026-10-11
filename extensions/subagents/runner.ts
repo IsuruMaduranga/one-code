@@ -18,7 +18,7 @@ import { existsSync } from "node:fs";
 import { type AgentSession, type ExtensionError, getAgentDir, SessionManager, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Api, Message, Model } from "@earendil-works/pi-ai";
 import { whenAborted } from "../lib/abort.ts";
-import { type AgentLoaderOptions, buildAgentLoader, createSharedModelRuntime, openChildSession } from "../lib/agent-loader.ts";
+import { type AgentLoaderOptions, buildAgentLoader, createSharedModelRuntime, disposeChildSession, openChildSession } from "../lib/agent-loader.ts";
 import { agentPromptIdentity, PrefixWarmGate, prefixWarmKey, type Release } from "../lib/prefix-warm-gate.ts";
 import type { PermissionBridge } from "../permissions/subagent-gate.ts";
 import type { HookBridge } from "../hooks/subagent-bridge.ts";
@@ -447,7 +447,7 @@ export class SubagentRuntime {
 		this.runNames.delete(session.sessionManager.getSessionId());
 		this.agentTypes.delete(session.sessionManager.getSessionId());
 		this.mainToolCalls.delete(session.sessionManager.getSessionId());
-		session.dispose();
+		disposeChildSession(session);
 	}
 
 	/**

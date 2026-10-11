@@ -12,6 +12,7 @@
  */
 
 import { pathArgument } from "../auto-mode/paths.ts";
+import { shownInFull } from "./shell-reads.ts";
 
 const READ_TOOLS = new Set(["read", "notebook_edit"]);
 const WRITE_TOOLS = new Set(["edit", "write", "notebook_edit"]);
@@ -83,11 +84,32 @@ export function keptReadPaths(kept: readonly unknown[]): string[] {
 }
 
 /**
+ * The tracked files that a bash call in the kept turns showed in full: those
+ * the call certified when it ran (`readsOf`, by call id: the directory it ran
+ * in decided, never today's) whose content as the tracker last saw it (`seen`)
+ * is still all in its kept output. Like a kept `read`, they are in context
+ * still, so they stay read; a file changed since is then stale, not unread. A
+ * call needs its result in the kept turns too, and one with no record
+ * certifies nothing (a miss costs one re-read).
+ */
+export function keptShellReadPaths(kept: readonly unknown[], readsOf: (callId: string) => readonly string[] | undefined, seen: (path: string) => string | undefined): string[] {
+	const shown = new Set<string>();
+	for (const { id, output } of shellCallsOnBranch(kept)) {
+		for (const path of readsOf(id) ?? []) {
+			if (shown.has(path)) continue;
+			const content = seen(path);
+			if (content !== undefined && shownInFull(output, content)) shown.add(path);
+		}
+	}
+	return [...shown];
+}
+
+/**
  * Every bash call on the branch with its command and the text of its result,
  * in result order: a resumed session re-checks which files those outputs
  * showed in full (`shell-reads.ts`), against the files' current content.
  */
-export function* shellCallsOnBranch(entries: readonly unknown[]): Generator<{ command: string; output: string }> {
+export function* shellCallsOnBranch(entries: readonly unknown[]): Generator<{ id: string; command: string; output: string }> {
 	const commands = new Map<string, string>();
 	for (const entry of entries) {
 		const e = entry as { type?: string; message?: BranchMessage };
@@ -104,7 +126,7 @@ export function* shellCallsOnBranch(entries: readonly unknown[]): Generator<{ co
 			const output = (m.content as { type?: string; text?: string }[])
 				.map((block) => (block?.type === "text" ? (block.text ?? "") : ""))
 				.join("\n");
-			yield { command, output };
+			yield { id: m.toolCallId, command, output };
 		}
 	}
 }

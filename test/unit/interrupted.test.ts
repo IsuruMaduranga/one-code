@@ -76,13 +76,18 @@ describe("runOutcome", () => {
 		expect(latch.take()).toBe("aborted");
 	});
 
+	// A rejection without a reason blocks with `terminate` and aborts once the
+	// result is recorded: the run ends on the tool call, which the user stopped.
+	it("reads a run that ended on a tool call with its signal aborted as aborted", () => {
+		expect(runOutcome([{ role: "assistant", stopReason: "toolUse" }, { role: "toolResult" }], true)).toBe("aborted");
+	});
+
 	it("leaves a provider error on a live run, and a completed run whose signal aborted late, alone", () => {
 		expect(runOutcome([{ role: "assistant", stopReason: "error" }], false)).toBe("error");
 		expect(runOutcome([{ role: "assistant", stopReason: "error" }])).toBe("error");
-		// The signal only reclassifies an error stop: a turn that finished before
-		// the abort landed was not interrupted.
+		// A turn that finished before the abort landed was not interrupted.
 		expect(runOutcome([{ role: "assistant", stopReason: "stop" }], true)).toBe("ok");
-		expect(runOutcome([{ role: "assistant", stopReason: "toolUse" }], true)).toBe("ok");
+		expect(runOutcome([{ role: "assistant", stopReason: "toolUse" }], false)).toBe("ok");
 	});
 });
 

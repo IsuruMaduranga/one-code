@@ -13,8 +13,8 @@
 import { cutPlainText } from "../lib/tui-render.ts";
 import { keyId } from "../lib/key-input.ts";
 
-/** Hard-wrap plain text to `width` columns, preserving blank lines. */
-export { wrapPlainText as wrapPlanText } from "../lib/tui-render.ts";
+/** Wrap a plan to `width` columns at word boundaries, keeping indents and blank lines. */
+export { wrapProse as wrapPlanText } from "../lib/tui-render.ts";
 
 /** What the dialog resolves to; index into the choices list, or null for cancel. */
 export type PlanChoice = number;

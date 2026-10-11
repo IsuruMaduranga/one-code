@@ -11,6 +11,7 @@ import { captureUserTurns } from "./helpers/user-turn.ts";
 import { SUBAGENT_GATE_CHANNEL } from "../../extensions/permissions/subagent-gate.ts";
 import { shellQuote } from "../../extensions/lib/shell-quote.ts";
 import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
+import { promptCommandText } from "../../extensions/skill/invoke.ts";
 
 let home: string;
 let exitCode: typeof process.exitCode;
@@ -71,7 +72,7 @@ describe("plugin command user turns", () => {
 		fake.events.emit(SUBAGENT_GATE_CHANNEL, { decide });
 		await fake.commands.get("fixture:ping")!.handler("literal;value", createFakeCtx({ cwd: home, mode: "tui" }));
 		expect(decide).toHaveBeenCalledWith(expect.objectContaining({ input: { command: "printf '%s' 'literal;value'" } }));
-		expect(fake.sentUserMessages[0].content).toBe("Before literal;value after");
+		expect(fake.sentUserMessages[0].content).toBe(promptCommandText("fixture:ping", "literal;value", "Before literal;value after"));
 	});
 
 	it("runs an approved placeholder, and asks the gate, in the entered worktree", async () => {
@@ -131,7 +132,7 @@ describe("plugin command user turns", () => {
 		})).then(() => { returned = true; });
 		try {
 			await vi.waitFor(() => expect(fake.sentUserMessages).toHaveLength(1));
-			expect(fake.sentUserMessages[0].content).toBe("Reply with PLUGIN_OK");
+			expect(fake.sentUserMessages[0].content).toContain("Reply with PLUGIN_OK");
 			expect(returned).toBe(false);
 			expect(waitForIdle).not.toHaveBeenCalled();
 			await startTurn();

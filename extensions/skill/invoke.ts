@@ -53,6 +53,21 @@ export function commandBreadcrumb(name: string, args: string): string {
 	return `<command-message>${name}</command-message>\n<command-name>/${name}</command-name>${args ? `\n<command-args>${args}</command-args>` : ""}\n`;
 }
 
+// commandBreadcrumb's shape at the start of a message; the arguments may span lines.
+const BREADCRUMB = /^<command-message>[^<\n]*<\/command-message>\n<command-name>(\/[^<\n]*)<\/command-name>(?:\n<command-args>([\s\S]*?)<\/command-args>)?\n/;
+
+/**
+ * What a user message that opens with commandBreadcrumb shows in the
+ * transcript: the command as typed, `/name args`. Claude Code shows a prompt
+ * command (a skill, `/init`, `/doctor`) by its command line and keeps the
+ * expanded text out of the transcript. `undefined` for any other message.
+ */
+export function commandDisplayLine(text: string): string | undefined {
+	const match = BREADCRUMB.exec(text);
+	if (!match) return undefined;
+	return match[2] ? `${match[1]} ${match[2]}` : match[1];
+}
+
 /**
  * Claude Code's argument substitution in a skill's text: `$ARGUMENTS`,
  * `$ARGUMENTS[n]` and `$n` (both counted from 0) take the arguments, and a
@@ -96,6 +111,16 @@ export function skillPromptText(body: string, args: string, baseDir: string | un
  */
 export function typedSkillContent(name: string, typedArgs: string, promptText: string): [string, string] {
 	return [commandBreadcrumb(name, typedArgs), promptText.endsWith("\n") ? promptText : `${promptText}\n`];
+}
+
+/**
+ * A prompt command (`/init`, `/doctor`, a plugin command) as one user message,
+ * in a typed skill's exact bytes: Claude Code sends every prompt command led by
+ * its breadcrumb, and the transcript shows it as its command line
+ * (commandDisplayLine).
+ */
+export function promptCommandText(name: string, args: string, prompt: string): string {
+	return typedSkillContent(name, args, prompt).join("\n");
 }
 
 /** Claude Code's result for a model's skill call; the skill's text follows it as a second block. */

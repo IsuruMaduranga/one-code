@@ -1363,6 +1363,19 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			// The run still works; only a later resume loses the prompt (and says so).
 		}
 	};
+	/**
+	 * A fork's inputs from this conversation (its system prompt and the parent's
+	 * last request, for the cache), saved beside its session so a SendMessage
+	 * can resume it later. Undefined for a named agent.
+	 */
+	const forkInputs = (request: RunRequest, record: AgentRunRecord, ctx: ExtensionContext) => {
+		if (!request.fork) return { parentSystemPrompt: undefined, parentRequest: undefined };
+		const parentSystemPrompt = forkSystemPrompt(ctx);
+		persistForkPrompt(record, parentSystemPrompt);
+		const parentRequest = forkRequest(ctx);
+		if (parentRequest) persistForkRequest(record, parentRequest);
+		return { parentSystemPrompt, parentRequest };
+	};
 	const readForkPrompt = (record: AgentRunRecord): string | undefined => {
 		if (!record.sessionSearchDir) return undefined;
 		try {
@@ -1646,14 +1659,15 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 		runningIds.add(record.taskId);
 		const live = trackLiveRun(record, request, parent);
+		const { parentSystemPrompt: forkPrompt, parentRequest } = forkInputs(request, record, ctx);
 		const handle = runtime.run({
 			name: request.name,
 			agent: agentDef,
 			task: frameTask(request, worktree, base),
 			cwd: record.cwd,
 			forkFrom: request.fork ? forkFrom : undefined,
-			parentSystemPrompt: request.fork ? forkSystemPrompt(ctx) : undefined,
-			parentRequest: request.fork ? forkRequest(ctx) : undefined,
+			parentSystemPrompt: forkPrompt,
+			parentRequest,
 			sessionDir: record.sessionSearchDir || undefined,
 			model: request.model,
 			fallbackModel: request.fallbackModel,
@@ -1815,10 +1829,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			}, RESIDENT_IDLE_MS);
 			reaper.unref?.();
 		};
-		const forkPrompt = p.request.fork ? forkSystemPrompt(ctx) : undefined;
-		if (forkPrompt !== undefined) persistForkPrompt(p.record, forkPrompt);
-		const parentRequest = p.request.fork ? forkRequest(ctx) : undefined;
-		if (parentRequest) persistForkRequest(p.record, parentRequest);
+		const { parentSystemPrompt: forkPrompt, parentRequest } = forkInputs(p.request, p.record, ctx);
 		// No `signal` here on purpose: a resident outlives the spawning turn and
 		// is stopped through task_stop / the panel, not by the turn ending (S15).
 		const started = await runtime.runResident({
@@ -2089,87 +2100,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				};
 			});
 
-			// A fork continues this conversation; running it on a different model or
-			// reasoning effort is how the fork-confabulation incident happened (a
-			// minimal-thinking fork resumed the inherited topic instead of its task).
-			// Claude Code silently ignores `model` for forks; we fail loud instead.
-			if (requested.some((r) => r.fork) && (params.model || params.thinking)) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: '`model`/`thinking` overrides are not applied to fork runs — a fork continues this conversation and keeps its exact model and reasoning settings. Drop the override, or use a named agent (e.g. "general-purpose") to run the task with different settings.',
-						},
-					],
-					details: {},
-					isError: true,
-				};
-			}
-
 			const sessionFile = ctx.sessionManager.getSessionFile();
-			if (requested.some((r) => r.fork) && !sessionFile) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: "Cannot fork: this session is not persisted (started with --no-session), so there is no transcript to clone. Use a named agent instead.",
-						},
-					],
-					details: {},
-					isError: true,
-				};
-			}
-
-			const unknown = requested.filter((r) => !r.fork && !agents.some((a) => a.name === r.agent));
-			if (unknown.length > 0) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: `Unknown agent(s): ${unknown.map((u) => u.agent).join(", ")}\n\nAvailable agents:\n${describeAgents(ctx.cwd)}`,
-						},
-					],
-					details: {},
-					isError: true,
-				};
-			}
-
-			if (requested.some((r) => r.worktree) && !(await isGitRepo(workCwd(ctx)))) {
-				return {
-					content: [{ type: "text", text: 'isolation: "worktree" needs a git repository; this directory is not one.' }],
-					details: {},
-					isError: true,
-				};
-			}
-
-			const prepared: PreparedRun[] = requested.map((request) => {
-				const taskId = generateTaskId();
-				return {
-					request,
-					agentDef: request.fork ? undefined : agents.find((a) => a.name === request.agent),
-					record: {
-						name: request.name,
-						agent: request.agent,
-						taskId,
-						sessionSearchDir: runSessionDir(ctx, taskId) ?? "",
-						cwd: workCwd(ctx),
-						model: request.model,
-						thinking: request.thinking,
-						depth: 0,
-						...(request.description ? { description: request.description } : {}),
-					},
-				};
-			});
-
-			/**
-			 * Model resolution happens here, in the parent, against the real
-			 * registry — never in the child, whose `--model` fuzzy-matches across
-			 * every configured provider. The child is spawned with a concrete
-			 * `provider/id`; anything surprising (a fallback, a provider crossing)
-			 * is said out loud rather than happening silently.
-			 */
-			const available = usableModels(ctx);
-			const configuredDefault = applicableSubagentDefault(loadSubagentDefault(os.homedir()), ctx.model);
+			let prepared: PreparedRun[] = [];
 			/**
 			 * What the model is told about its own model choice: the same sentences
 			 * the user gets, plus the model each child actually runs on. Deduped —
@@ -2177,94 +2109,182 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			 * once. See `subagentModelNotes` for why the model needs this.
 			 */
 			const modelNotes = new Set<string>();
-			for (const p of prepared) {
-				// A fork inherits the parent transcript, so it must continue on THIS
-				// conversation's exact model — never a configured default or the
-				// automatic same-provider pick, which would move the inherited context
-				// onto a different (often weaker) model. Leaving model undefined makes
-				// the forked session restore its own model. (Per-call `model` on a fork
-				// is already rejected above.)
-				if (p.request.fork) continue;
-				// No per-call or agent-frontmatter override → the automatic default,
-				// which is stable for the session, so reuse the cached resolution
-				// instead of re-ranking the catalog per spawn. An override varies per
-				// call and always resolves fresh.
-				const resolution =
-					p.request.model || p.agentDef?.model
-						? resolveSubagentModel({
-								requested: p.request.model,
-								agentModel: p.agentDef?.model,
-								configuredDefault: configuredDefault,
-								sessionModel: ctx.model,
-								available,
-								requireImageInput: supportsImageInput(ctx.model),
-							})
-						: resolveAutoDefault(ctx.model, available, configuredDefault);
-				if (resolution.unresolved) {
-					// The main model chose this string; the menu lets it retry.
-					const fallback = resolveSubagentModel({
-						configuredDefault: configuredDefault,
-						sessionModel: ctx.model,
-						available,
-						requireImageInput: supportsImageInput(ctx.model),
-					});
+			// Every check before the records land: a rejection, or a throw on the way,
+			// frees the spawn's names for the retry.
+			let landed = false;
+			try {
+				// A fork continues this conversation; running it on a different model or
+				// reasoning effort is how the fork-confabulation incident happened (a
+				// minimal-thinking fork resumed the inherited topic instead of its task).
+				// Claude Code silently ignores `model` for forks; we fail loud instead.
+				if (requested.some((r) => r.fork) && (params.model || params.thinking)) {
 					return {
 						content: [
 							{
 								type: "text",
-								text:
-									`${resolution.unresolvedReason ?? `Unknown model "${resolution.unresolved}" — no available model matches it.`}\n\n` +
-									subagentModelsReminder({
-										available,
-										sessionModel: ctx.model,
-										defaultModel: fallback.model,
-										defaultSource: fallback.source,
-										requireImageInput: supportsImageInput(ctx.model),
-									}),
+								text: '`model`/`thinking` overrides are not applied to fork runs — a fork continues this conversation and keeps its exact model and reasoning settings. Drop the override, or use a named agent (e.g. "general-purpose") to run the task with different settings.',
 							},
 						],
 						details: {},
 						isError: true,
 					};
 				}
-				const gate = expensiveModelGate(resolution, ctx.model, params.allow_expensive);
-				if (gate) {
-					const fallback = resolveSubagentModel({
-						configuredDefault: configuredDefault,
-						sessionModel: ctx.model,
-						available,
-						requireImageInput: supportsImageInput(ctx.model),
-					});
-					return {
-						content: [
-							{
-								type: "text",
-								text:
-									`${gate}\n` +
-									"If the user explicitly asked for this model, retry with allow_expensive: true; " +
-									"otherwise pick a cheaper model or omit the field.\n\n" +
-									subagentModelsReminder({
-										available,
-										sessionModel: ctx.model,
-										defaultModel: fallback.model,
-										defaultSource: fallback.source,
-										requireImageInput: supportsImageInput(ctx.model),
-									}),
-							},
-						],
-						details: {},
-						isError: true,
-					};
-				}
-				for (const notice of resolution.notices) notifyModelOnce(ctx, notice);
-				for (const note of subagentModelNotes(resolution)) modelNotes.add(note);
-				const resolved = resolution.model ? modelSpec(resolution.model) : undefined;
-				p.request.model = resolved;
-				p.request.fallbackModel = spawnFallbackModel(resolved, resolution.source, ctx.model);
-				p.record.model = resolved;
-			}
 
-			for (const p of prepared) registry.add(p.record);
+				if (requested.some((r) => r.fork) && !sessionFile) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: "Cannot fork: this session is not persisted (started with --no-session), so there is no transcript to clone. Use a named agent instead.",
+							},
+						],
+						details: {},
+						isError: true,
+					};
+				}
+
+				const unknown = requested.filter((r) => !r.fork && !agents.some((a) => a.name === r.agent));
+				if (unknown.length > 0) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Unknown agent(s): ${unknown.map((u) => u.agent).join(", ")}\n\nAvailable agents:\n${describeAgents(ctx.cwd)}`,
+							},
+						],
+						details: {},
+						isError: true,
+					};
+				}
+
+				if (requested.some((r) => r.worktree) && !(await isGitRepo(workCwd(ctx)))) {
+					return {
+						content: [{ type: "text", text: 'isolation: "worktree" needs a git repository; this directory is not one.' }],
+						details: {},
+						isError: true,
+					};
+				}
+
+				prepared = requested.map((request) => {
+					const taskId = generateTaskId();
+					return {
+						request,
+						agentDef: request.fork ? undefined : agents.find((a) => a.name === request.agent),
+						record: {
+							name: request.name,
+							agent: request.agent,
+							taskId,
+							sessionSearchDir: runSessionDir(ctx, taskId) ?? "",
+							cwd: workCwd(ctx),
+							model: request.model,
+							thinking: request.thinking,
+							depth: 0,
+							...(request.description ? { description: request.description } : {}),
+						},
+					};
+				});
+
+				/**
+				 * Model resolution happens here, in the parent, against the real
+				 * registry — never in the child, whose `--model` fuzzy-matches across
+				 * every configured provider. The child is spawned with a concrete
+				 * `provider/id`; anything surprising (a fallback, a provider crossing)
+				 * is said out loud rather than happening silently.
+				 */
+				const available = usableModels(ctx);
+				const configuredDefault = applicableSubagentDefault(loadSubagentDefault(os.homedir()), ctx.model);
+				for (const p of prepared) {
+					// A fork inherits the parent transcript, so it must continue on THIS
+					// conversation's exact model — never a configured default or the
+					// automatic same-provider pick, which would move the inherited context
+					// onto a different (often weaker) model. Leaving model undefined makes
+					// the forked session restore its own model. (Per-call `model` on a fork
+					// is already rejected above.)
+					if (p.request.fork) continue;
+					// No per-call or agent-frontmatter override → the automatic default,
+					// which is stable for the session, so reuse the cached resolution
+					// instead of re-ranking the catalog per spawn. An override varies per
+					// call and always resolves fresh.
+					const resolution =
+						p.request.model || p.agentDef?.model
+							? resolveSubagentModel({
+									requested: p.request.model,
+									agentModel: p.agentDef?.model,
+									configuredDefault: configuredDefault,
+									sessionModel: ctx.model,
+									available,
+									requireImageInput: supportsImageInput(ctx.model),
+								})
+							: resolveAutoDefault(ctx.model, available, configuredDefault);
+					if (resolution.unresolved) {
+						// The main model chose this string; the menu lets it retry.
+						const fallback = resolveSubagentModel({
+							configuredDefault: configuredDefault,
+							sessionModel: ctx.model,
+							available,
+							requireImageInput: supportsImageInput(ctx.model),
+						});
+						return {
+							content: [
+								{
+									type: "text",
+									text:
+										`${resolution.unresolvedReason ?? `Unknown model "${resolution.unresolved}" — no available model matches it.`}\n\n` +
+										subagentModelsReminder({
+											available,
+											sessionModel: ctx.model,
+											defaultModel: fallback.model,
+											defaultSource: fallback.source,
+											requireImageInput: supportsImageInput(ctx.model),
+										}),
+								},
+							],
+							details: {},
+							isError: true,
+						};
+					}
+					const gate = expensiveModelGate(resolution, ctx.model, params.allow_expensive);
+					if (gate) {
+						const fallback = resolveSubagentModel({
+							configuredDefault: configuredDefault,
+							sessionModel: ctx.model,
+							available,
+							requireImageInput: supportsImageInput(ctx.model),
+						});
+						return {
+							content: [
+								{
+									type: "text",
+									text:
+										`${gate}\n` +
+										"If the user explicitly asked for this model, retry with allow_expensive: true; " +
+										"otherwise pick a cheaper model or omit the field.\n\n" +
+										subagentModelsReminder({
+											available,
+											sessionModel: ctx.model,
+											defaultModel: fallback.model,
+											defaultSource: fallback.source,
+											requireImageInput: supportsImageInput(ctx.model),
+										}),
+								},
+							],
+							details: {},
+							isError: true,
+						};
+					}
+					for (const notice of resolution.notices) notifyModelOnce(ctx, notice);
+					for (const note of subagentModelNotes(resolution)) modelNotes.add(note);
+					const resolved = resolution.model ? modelSpec(resolution.model) : undefined;
+					p.request.model = resolved;
+					p.request.fallbackModel = spawnFallbackModel(resolved, resolution.source, ctx.model);
+					p.record.model = resolved;
+				}
+
+				for (const p of prepared) registry.add(p.record);
+				landed = true;
+			} finally {
+				if (!landed) for (const request of requested) registry.release(request.name);
+			}
 			const records = prepared.map((p) => p.record);
 
 			// One-shot modes (`-p` / `--mode json`) exit when the turn settles, so

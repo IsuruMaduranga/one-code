@@ -27,17 +27,17 @@ import { discoverContextFiles, instructionRule } from "../lib/claude-context.ts"
 import { readExternalIncludesApproval } from "../lib/claude-external-includes.ts";
 import { inContextEntries, latestCompaction } from "../lib/compaction-boundary.ts";
 import { projectMemoryDir } from "../lib/memory.ts";
-import { absoluteFrom, claudeConfigDir, comparablePath, expandTilde, isPathAtOrUnder, tryRealpath } from "../lib/paths.ts";
+import { claudeConfigDir, comparablePath, isPathAtOrUnder, tryRealpath } from "../lib/paths.ts";
 import { estimateTextTokens } from "../lib/pi-ai-estimate.ts";
 import { planFileOnBranch } from "../lib/plan-mode-channels.ts";
 import { REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
 import { resolveToolPath } from "../lib/tool-path.ts";
 import { parseRules, ruleMatches } from "../permissions/matcher.ts";
 import { loadPermissionSettings } from "../permissions/settings.ts";
-import { keptReadPaths, lastTouchesOnBranch, pathsReadOnBranch, shellCallsOnBranch } from "./replay.ts";
+import { keptReadPaths, keptShellReadPaths, lastTouchesOnBranch, pathsReadOnBranch, shellCallsOnBranch } from "./replay.ts";
 import { type RestoredRead, restoreBlocks, restoreCandidates } from "./restore.ts";
 import { fileToolResultContent } from "./results.ts";
-import { expandCandidate, shellReadCandidates, shownInFull } from "./shell-reads.ts";
+import { shellReadPaths, shownInFull } from "./shell-reads.ts";
 import { sessionWorkCwd, WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
 import {
 	describeChanges,
@@ -111,21 +111,17 @@ function versionOf(path: string): string | undefined {
 
 /**
  * The files a shell command may print, with each one's version as the command
- * starts (`shell-reads.ts` candidates, resolved as the shell resolves them).
- * Taken before the command runs, so a file the command itself rewrites
- * (`cat x; cp y x`) is not certified with its new content (found by a GPT-6
- * Sol review, 2026-10-04). Metadata only: this runs before the permission
- * gate decides the call, so a file the user then denies is never opened.
+ * starts (`shell-reads.ts` paths, resolved as the shell resolves them, from
+ * the directory a literal `cd` earlier in the command moved to). Taken before
+ * the command runs, so a file the command itself rewrites (`cat x; cp y x`)
+ * is not certified with its new content (found by a GPT-6 Sol review,
+ * 2026-10-04). Metadata only: this runs before the permission gate decides
+ * the call, so a file the user then denies is never opened.
  */
 function shellReadSnapshot(command: string, cwd: string): Map<string, string> {
 	const snapshot = new Map<string, string>();
 	if (!command) return snapshot;
-	// The shell's own resolution, not the file tools' (`resolveToolPath` strips
-	// a leading `@`, which `cat @x` keeps): `~/` and the shell's directory only.
-	const shellPath = (word: string) => absoluteFrom(cwd, expandTilde(word, homedir()));
-	const words = shellReadCandidates(command).flatMap((word) => expandCandidate(word, (dir) => readdirSync(shellPath(dir))));
-	for (const raw of new Set(words)) {
-		const path = shellPath(raw);
+	for (const path of shellReadPaths(command, cwd, homedir(), (dir) => readdirSync(dir))) {
 		// Regular files only: a device or FIFO (`head -c 1 /dev/zero`) reports size 0
 		// and a read of it never ends (found by a GPT-6 Astra review).
 		if (!isRegularFile(path)) continue;
@@ -185,11 +181,12 @@ function pathOf(input: unknown, cwd: string): string | undefined {
 /**
  * The files the context still shows after a compaction, as comparable paths:
  * the context stack (the CLAUDE.md family as claude-context discovers it, what
- * they `@`-import, and the auto-memory index), the plan file, and the files a
- * `read` in the kept turns returned. Claude Code's restore skips them; they
- * stay read.
+ * they `@`-import, and the auto-memory index), the plan file, the files a
+ * `read` in the kept turns returned (`kept`, as written) and the files a kept
+ * bash call showed in full (`keptShell`, absolute). Claude Code's restore
+ * skips them; they stay read.
  */
-function inContextFiles(ctx: ExtensionContext, branch: readonly { type: string; customType?: string; data?: unknown }[], kept: string[]): Set<string> {
+function inContextFiles(ctx: ExtensionContext, branch: readonly { type: string; customType?: string; data?: unknown }[], kept: string[], keptShell: string[]): Set<string> {
 	const home = homedir();
 	// Use the context loader's import confinement and approval: a literal
 	// unapproved @import is not evidence that its file is still in context.
@@ -197,7 +194,7 @@ function inContextFiles(ctx: ExtensionContext, branch: readonly { type: string; 
 		includeExternal: readExternalIncludesApproval(ctx.cwd, home).approved,
 	}).flatMap((file) => [file.path, ...(file.imported ?? [])]);
 	return new Set(
-		[...stack, join(projectMemoryDir(ctx.cwd, home), "MEMORY.md"), planFileOnBranch(branch), ...kept.map((path) => resolveToolPath(path, ctx.cwd))]
+		[...stack, join(projectMemoryDir(ctx.cwd, home), "MEMORY.md"), planFileOnBranch(branch), ...kept.map((path) => resolveToolPath(path, ctx.cwd)), ...keptShell]
 			.filter((path): path is string => typeof path === "string")
 			.map(comparablePath),
 	);
@@ -239,6 +236,15 @@ async function readAgain(read: ReturnType<typeof createReadToolDefinition>, path
 
 export default function fileTrackerExtension(pi: ExtensionAPI) {
 	let tracker = new FileTracker();
+	/**
+	 * The files each bash call showed in full, by call id, decided where the
+	 * call ran: a compaction keeps the reads of the calls it keeps from this,
+	 * since re-parsing a command later resolves it from today's directory.
+	 */
+	const shellReadsByCall = new Map<string, string[]>();
+	const recordShellReads = (callId: string, paths: string[]) => {
+		if (paths.length > 0) shellReadsByCall.set(callId, paths);
+	};
 	/** The entered worktree, where the shell runs while one is active (lib/worktree-channel.ts). */
 	let entered: WorktreeLocation | undefined;
 	pi.events.on(WORKTREE_CHANNEL, (data) => {
@@ -293,11 +299,13 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 		}
 		// Shell reads need the bash grammar, which may still be loading this early.
 		const target = tracker;
+		shellReadsByCall.clear();
 		const shellCalls = [...shellCallsOnBranch(entries)];
 		if (shellCalls.length > 0) {
 			void bashParserReady().then(() => {
+				if (target !== tracker) return;
 				// A replayed result has no before-state: the files as they are now stand in for it.
-				for (const call of shellCalls) observeShellReads(target, shellReadSnapshot(call.command, sessionWorkCwd(entered, ctx.cwd)), call.output);
+				for (const call of shellCalls) recordShellReads(call.id, observeShellReads(target, shellReadSnapshot(call.command, sessionWorkCwd(entered, ctx.cwd)), call.output));
 			});
 		}
 		touched = new Map([...lastTouchesOnBranch(entries)].map(([raw, at]) => [resolveToolPath(raw, ctx.cwd), at]));
@@ -340,7 +348,11 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 		if (event.toolName === "bash") {
 			const before = shellSnapshots.get(event.toolCallId);
 			shellSnapshots.delete(event.toolCallId);
-			if (before) for (const path of observeShellReads(tracker, before, textOf(event.content))) childWrites.delete(path);
+			if (before) {
+				const observed = observeShellReads(tracker, before, textOf(event.content));
+				recordShellReads(event.toolCallId, observed);
+				for (const path of observed) childWrites.delete(path);
+			}
 			return undefined;
 		}
 		if (!READ_TOOLS.has(event.toolName) && !GUARDED_TOOLS.has(event.toolName)) return undefined;
@@ -371,19 +383,24 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 	 *
 	 * Like Claude Code, the compaction also clears what the session has read:
 	 * the summary no longer holds those files, so an edit needs a fresh read.
-	 * A file the context still shows stays read (a kept turn's read, the
-	 * context stack, the plan file), and a restored file counts as read and as
-	 * touched for the next compaction's restore; a note never marks its file
-	 * read. Contents come back only for a file the gate would let through
-	 * without a question (`restoreAllowed`).
+	 * A file the context still shows stays read (a kept turn's read or whole-file
+	 * shell read, the context stack, the plan file), and a restored file counts
+	 * as read and as touched for the next compaction's restore; a note never
+	 * marks its file read. Contents come back only for a file the gate would
+	 * let through without a question (`restoreAllowed`).
 	 */
 	pi.on("session_compact", async (event: SessionCompactEvent, ctx) => {
 		const before = touched;
 		try {
 			const branch = ctx.sessionManager.getBranch();
 			const compaction = latestCompaction(branch);
-			const kept = compaction ? keptReadPaths(branch.slice(compaction.keptStart, compaction.index)) : [];
-			const inContext = inContextFiles(ctx, branch, kept);
+			const keptTurns = compaction ? branch.slice(compaction.keptStart, compaction.index) : [];
+			// The kept shell reads: what each kept bash call certified as it ran.
+			const keptShell = keptShellReadPaths(keptTurns, (id) => shellReadsByCall.get(id), (path) => tracker.lastSeen(path));
+			// A call the summary took never comes back: only the kept ones need their record.
+			const keptCalls = new Set([...shellCallsOnBranch(keptTurns)].map((call) => call.id));
+			for (const id of shellReadsByCall.keys()) if (!keptCalls.has(id)) shellReadsByCall.delete(id);
+			const inContext = inContextFiles(ctx, branch, keptReadPaths(keptTurns), keptShell);
 			// The loader lists imports by real path; a tracked path may be spelled through a symlink.
 			const shown = (path: string) => inContext.has(comparablePath(path)) || inContext.has(comparablePath(tryRealpath(path) ?? path));
 			// A file the context still shows keeps its read state (what the model
@@ -406,6 +423,7 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 			// The restore is best effort: nothing comes back, and an edit needs a fresh read.
 			tracker = new FileTracker();
 			touched = new Map();
+			shellReadsByCall.clear();
 		}
 	});
 

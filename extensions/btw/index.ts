@@ -46,7 +46,7 @@ import { followLastExchange, replaySideCall } from "../lib/replay-call.ts";
 import { answerText, stripImageBlocks, toolStubs, trimToTurnBoundary, withoutSystemMessages } from "../lib/side-call.ts";
 import { boundedDockHeight, linesComponent, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { CONVERSATION_CACHE_PLACEMENT } from "../lib/side-call-cache.ts";
-import { runSideCall } from "../lib/side-call-run.ts";
+import { releaseSideCalls, runSideCall } from "../lib/side-call-run.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 import type { ProseRenderer } from "../subagents/panel-render.ts";
 import { createMarkdownProse } from "../subagents/prose.ts";
@@ -120,10 +120,11 @@ export default function btwExtension(pi: ExtensionAPI) {
 		inFlight?.abort();
 		inFlight = undefined;
 	});
-	pi.on("session_shutdown", () => {
+	pi.on("session_shutdown", (_event, ctx) => {
 		sessionEpoch++;
 		inFlight?.abort();
 		inFlight = undefined;
+		releaseSideCalls(ctx.sessionManager.getSessionId());
 	});
 
 	// The answer renders as Markdown, like the transcript; plain wrapped text

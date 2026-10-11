@@ -40,12 +40,21 @@ const BashParams = Type.Object({
 });
 
 export default function bashExtension(pi: ExtensionAPI) {
+	bashTool(pi, { announce: true });
+}
+
+/**
+ * The tool itself. `announce: false` is the in-process child's shape
+ * (bash/child.ts): the same tool, but a child has no terminal of its own
+ * (stderr is the parent's TUI), so it prints nothing.
+ */
+export function bashTool(pi: ExtensionAPI, { announce }: { announce: boolean }) {
 	// The session's bash, resolved once (lib/shell-spawn.ts). An ignored
 	// CLAUDE_CODE_GIT_BASH_PATH is reported once, at the first session start.
 	const bash = bashSpawn();
 	const shellPath = bash.spawn?.commandTransport === "stdin" ? undefined : bash.spawn?.shell;
 	let warned = false;
-	pi.on("session_start", (_event, ctx) => {
+	if (announce) pi.on("session_start", (_event, ctx) => {
 		if (warned || !bash.warning) return;
 		warned = true;
 		if (ctx.hasUI) ctx.ui.notify(bash.warning, "warning");

@@ -194,6 +194,12 @@ describe.skipIf(!pwsh)("createPowerShellOperations (real pwsh)", { timeout: 30_0
 		await expect(ops.exec("Write-Output x", "/definitely/not/here", { onData: () => {} })).rejects.toThrow(/Working directory does not exist/);
 	});
 
+	it("formats tables without ANSI colour, as Claude Code's prefix makes it", async () => {
+		const { output } = await run("[pscustomobject]@{ Name = 'a' } | Format-Table");
+		expect(output).toContain("Name");
+		expect(output).not.toContain("\x1b[");
+	});
+
 	it("emits UTF-8 (the prefix pi prepends)", async () => {
 		const { output } = await run("Write-Output 'héllo — ✓'");
 		expect(output).toContain("héllo — ✓");

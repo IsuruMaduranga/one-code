@@ -1,9 +1,36 @@
 import { describe, expect, it } from "vitest";
-import { pathsReadOnBranch } from "../../extensions/file-tracker/replay.ts";
+import { keptShellReadPaths, pathsReadOnBranch } from "../../extensions/file-tracker/replay.ts";
 
 const call = (id: string, name: string, args: Record<string, unknown>) => ({ type: "toolCall", id, name, arguments: args });
 const assistant = (...blocks: unknown[]) => ({ type: "message", message: { role: "assistant", content: blocks } });
 const result = (toolCallId: string, isError = false) => ({ type: "message", message: { role: "toolResult", toolCallId, isError } });
+const textResult = (toolCallId: string, text: string) => ({ type: "message", message: { role: "toolResult", toolCallId, content: [{ type: "text", text }] } });
+
+describe("keptShellReadPaths", () => {
+	const SEEN = "the content the model saw\nline two\n";
+	const seen = (path: string) => (path === "/w/a.txt" ? SEEN : undefined);
+	// What each call certified as it ran, by call id.
+	const pathsOf = (id: string) => (id === "1" ? ["/w/a.txt"] : undefined);
+
+	it("names a tracked file a kept bash call showed in full, as the tracker last saw it", () => {
+		const kept = [assistant(call("1", "bash", { command: "cat a.txt" })), textResult("1", SEEN.trimEnd())];
+		expect(keptShellReadPaths(kept, pathsOf, seen)).toEqual(["/w/a.txt"]);
+	});
+
+	// Re-parsing the command at compaction resolved it from today's directory
+	// (after entering a worktree, a different file): only the record decides.
+	it("names nothing for a kept call that certified no read when it ran", () => {
+		const kept = [assistant(call("2", "bash", { command: "cat a.txt" })), textResult("2", SEEN.trimEnd())];
+		expect(keptShellReadPaths(kept, pathsOf, seen)).toEqual([]);
+	});
+
+	it("names nothing for a partial output, a call without its result, or an untracked file", () => {
+		expect(keptShellReadPaths([assistant(call("1", "bash", { command: "head -1 a.txt" })), textResult("1", "the content the model saw")], pathsOf, seen)).toEqual([]);
+		expect(keptShellReadPaths([assistant(call("1", "bash", { command: "cat a.txt" }))], pathsOf, seen)).toEqual([]);
+		expect(keptShellReadPaths([textResult("1", SEEN)], pathsOf, seen)).toEqual([]);
+		expect(keptShellReadPaths([assistant(call("1", "bash", { command: "cat a.txt" })), textResult("1", SEEN)], pathsOf, () => undefined)).toEqual([]);
+	});
+});
 
 describe("pathsReadOnBranch (T9)", () => {
 	it("collects paths of successful reads and writes, in order, once", () => {

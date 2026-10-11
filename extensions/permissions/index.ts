@@ -27,7 +27,7 @@ import { TURN_FAILED_CHANNEL, type TurnFailedEvent } from "../lib/interrupt.ts";
 import { handBackWarning, type HandBackVerdict } from "../lib/notifications.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent } from "../lib/model-unusable.ts";
 
-import { classifierChain, classify, createClassifierState } from "../auto-mode/classifier.ts";
+import { classifierCacheKey, classifierChain, classify, createClassifierState, releaseClassifierResources } from "../auto-mode/classifier.ts";
 import {
 	type AutoModeConfig,
 	autoModeSettingsPaths,
@@ -741,7 +741,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				config: autoConfig,
 				signal: opts?.signal ?? ctx.signal,
 				state: classifierState,
-				cacheKey: `${ctx.sessionManager.getSessionId()}:auto-mode`,
+				cacheKey: classifierCacheKey(ctx.sessionManager.getSessionId()),
 				onUsage: onClassifierUsage,
 				onModelUnusable: onClassifierModelUnusable,
 				onNotice: (message, level) => {
@@ -1003,10 +1003,13 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 
 	// The published bridge stays: aborted, it denies every call a retained child
 	// makes, while a parent without this extension keeps the local gate.
-	pi.on("session_shutdown", () => {
+	pi.on("session_shutdown", (_event, ctx) => {
 		childPermissionSession?.abort();
 		lastReviewCtx = undefined;
 		sessionEpoch++;
+		// Children screen through this session's key too (evaluateChildToolCall
+		// uses lastReviewCtx), so one release covers their calls.
+		releaseClassifierResources(ctx.sessionManager.getSessionId());
 	});
 
 	pi.on("model_select", (event, ctx) => {
@@ -1094,6 +1097,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	// while the main turn (or another child) is already awaiting one, and driving
 	// ctx.ui.select concurrently on one terminal is unverified. This chains them.
 	let promptChain: Promise<unknown> = Promise.resolve();
+	/** Calls the user rejected without a reason: the turn stops once pi records their result. */
+	const abortAfterResult = new Set<string>();
 	const serializePrompt = <T>(fn: () => Promise<T>): Promise<T> => {
 		const run = promptChain.then(fn, fn);
 		promptChain = run.then(
@@ -1496,12 +1501,27 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		}
 
 		// The "tell the agent what to do differently" option has to actually carry
-		// the user's words, or the model is left guessing why it was stopped.
-		const feedback = await serializePrompt(() => ctx.ui.input("What should the agent do instead?", "Optional — press Esc to skip", { signal: ctx.signal }));
-		return {
-			block: true,
-			reason: userDenialText(feedback),
-		};
+		// the user's words, or the model is left guessing why it was stopped. Esc
+		// on the prompt (no choice) rejects without asking.
+		const feedback =
+			choice === undefined
+				? undefined
+				: await serializePrompt(() => ctx.ui.input("What should the agent do instead?", "Optional — press Esc to skip", { signal: ctx.signal }));
+		// Claude Code's cancelAndAbort: a rejection without the user's words stops
+		// the turn and waits for them; with words, the model acts on them. pi reads
+		// an abort before the block (the result would say "Operation aborted"), so
+		// the abort waits for the recorded result; the run then ends as an abort,
+		// which every reader of the run's outcome treats as the user's interrupt.
+		// `terminate` ends pi's loop after the batch: otherwise it sent one more
+		// request on the aborted signal, which came back as an error and printed
+		// "Error: This operation was aborted" above the Interrupted line.
+		const stop = !feedback?.trim();
+		if (stop) abortAfterResult.add(event.toolCallId);
+		return { block: true, reason: userDenialText(feedback), terminate: stop };
+	});
+
+	pi.on("tool_execution_end", (event, ctx) => {
+		if (abortAfterResult.delete(event.toolCallId)) ctx.abort();
 	});
 
 	/**
@@ -2151,7 +2171,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				config: autoConfig,
 				signal,
 				state: classifierState,
-				cacheKey: `${ctx.sessionManager.getSessionId()}:auto-mode`,
+				cacheKey: classifierCacheKey(ctx.sessionManager.getSessionId()),
 				onNotice: (message, level) => ctx.ui.notify(message, level),
 				onUsage: onClassifierUsage,
 				onModelUnusable: onClassifierModelUnusable,
