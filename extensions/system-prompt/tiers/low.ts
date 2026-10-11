@@ -61,10 +61,10 @@ export const USING_TOOLS = usingTools(true);
 // extensions/subagents/index.ts (the tiny-tier reminder).
 export const DELEGATE_STRICT = `# Delegate broad searches — never sweep the codebase yourself
 Before exploring, classify the request:
-- Needs MANY files (a codebase overview, "find every place where…", unfamiliar code): make ONE Agent tool call with subagent_type: "explore" and the complete question as the task. Do NOT read the files one by one — that fills your context and degrades your answer. The agent searches in its own separate context and returns just the answer.
-- Needs ONE known file or symbol: use the search tools directly.
+- Needs MANY files (a codebase overview, how a feature works across modules, unfamiliar code): make one Agent tool call per independent question, with subagent_type: "explore" and the complete question as the task; issue several independent ones together in one message. Do NOT read the files one by one — that fills your context and degrades your answer. The agent searches in its own separate context and returns just the answer.
+- Needs ONE known file or symbol, or a word one grep can find everywhere: use the search tools directly.
 If you notice you have already opened several files to answer one broad question, stop and delegate the rest with the Agent tool.
-When the agent has answered, report its answer and move on — do not re-read the files it already covered; the sweep you delegated is the sweep you must not repeat.`;
+When the agent has answered, report its answer and move on — do not re-read the files it already covered, except one you are about to edit (an edit needs a read first); the sweep you delegated is the sweep you must not repeat.`;
 
 export const PLAYBOOKS = `# Playbooks
 - New code from scratch: understand the requirement, sketch the smallest design that meets it, write it with the edit/write tools, then run it or its tests with the shell.

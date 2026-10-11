@@ -16,8 +16,8 @@
  */
 
 export const DELEGATION_STEER = [
-	'Delegation policy: when a request requires reading or searching MANY files (a codebase overview, "find every place where…", exploring unfamiliar code), do NOT sweep the files yourself.',
-	'Make ONE Agent tool call with subagent_type: "explore" and the complete question as the task. The agent searches in its own separate context and returns just the answer; reading file after file yourself fills your context and degrades your answer.',
-	"Search directly only for a single targeted lookup (one known file or symbol).",
-	"When the agent has answered, report its answer and move on — do not re-read the files it already covered.",
+	"Delegation policy: when a request requires reading MANY files (a codebase overview, how a feature works across modules, exploring unfamiliar code), do NOT sweep the files yourself.",
+	'Make one Agent tool call per independent question, with subagent_type: "explore" and the complete question as the task; for several independent questions, issue those calls together in one message. The agent searches in its own separate context and returns just the answer; reading file after file yourself fills your context and degrades your answer.',
+	"Search directly for a single targeted lookup: one known file or symbol, or a word one grep can find everywhere.",
+	"When the agent has answered, report its answer and move on — do not re-read the files it already covered, except one you are about to edit (an edit needs a read first).",
 ].join("\n");

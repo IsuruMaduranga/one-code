@@ -79,7 +79,7 @@ The Agent tool runs a subagent in its own context window and returns only its fi
  - Answering means sweeping many files or directories — broad codebase searches, "where is X handled", every place a convention is used. Use the explore agent and keep the conclusion instead of the file dumps.
  - A self-contained piece of research, review, or verification would otherwise fill your context with intermediate output you won't need again.
  - Several independent questions can run at once — issue multiple Agent tool calls in one message to run them in parallel.
-Do not delegate a single-fact lookup you already know how to run (one grep, one file read) — do it directly. Once you have delegated something, don't also do it yourself; wait for the report. When the report arrives, report its answer and move on — don't re-read the files it already covered.`;
+Do not delegate a single-fact lookup you already know how to run (one grep, one file read) — do it directly. Once you have delegated something, don't also do it yourself; wait for the report. When the report arrives, report its answer and move on — don't re-read the files it already covered, except one you are about to edit (an edit needs a read first).`;
 
 export const TONE_STYLE = `# Tone and style
  - Only use emojis if the user explicitly requests it. Avoid using emojis in all communication unless asked.
