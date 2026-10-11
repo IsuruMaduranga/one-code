@@ -5,9 +5,16 @@
  * It rides only that system message (`systemRoleOnly`), never a user message,
  * and only when the conversation opens in auto mode: the permission-mode
  * reminder carries every later change (decisions/tools.md).
+ *
+ * Only on the tiers that take Claude Code's fast paths (frontier and
+ * workhorse). Claude Code has no auto mode below its Sonnet class, the cheap
+ * and tiny tool texts tell the model to read with the read tool, and their
+ * stricter gate screens shell edits, so the note there contradicted the tool
+ * texts and steered weak models into more classifier calls.
  */
 
-import { claudeFamily } from "../lib/model-tier.ts";
+import type { Api, Model } from "@earendil-works/pi-ai";
+import { claudeFamily, usesClaudeCodeFastPaths } from "../lib/model-tier.ts";
 
 const OPUS_NOTE =
 	"While auto mode is active:\n\n" +
@@ -19,6 +26,8 @@ const FABLE_NOTE =
 	"Do your work through the bash tool wherever it can accomplish the job: read files with cat, head, or sed -n, search with grep and find, and make file changes with sed, heredocs, or short scripts, rather than using the dedicated read, edit, or write tools. " +
 	"Fall back to a dedicated tool only when bash genuinely cannot do the job.";
 
-export function autoModeSystemNote(modelId: string): string {
-	return claudeFamily(modelId) === "fable" ? FABLE_NOTE : OPUS_NOTE;
+/** The note for a session opening in auto mode on `model`, or undefined on a cheap or tiny model. */
+export function autoModeSystemNote(model: Model<Api>): string | undefined {
+	if (!usesClaudeCodeFastPaths(model)) return undefined;
+	return claudeFamily(model.id) === "fable" ? FABLE_NOTE : OPUS_NOTE;
 }

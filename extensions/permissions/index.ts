@@ -916,9 +916,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	pi.on("turn_start", (_event, ctx) => {
 		if (autoNoteDecided) return;
 		autoNoteDecided = true;
-		if (mode !== "auto" || !ctx.model) return;
+		const note = mode === "auto" && ctx.model ? autoModeSystemNote(ctx.model) : undefined;
+		if (!note) return;
 		pi.events.emit(REMINDER_CHANNEL, {
-			text: autoModeSystemNote(ctx.model.id),
+			text: note,
 			scope: "every-turn",
 			key: "auto-mode-note",
 			placement: "first-prepend",
