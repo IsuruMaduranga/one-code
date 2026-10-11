@@ -71,6 +71,50 @@ describe("permissions session state", () => {
 		rmSync(stateDir, { recursive: true, force: true });
 	});
 
+	// Claude Code's cancelAndAbort: a rejection without feedback in the main
+	// session stops the turn; one with feedback lets the model act on it. Esc on
+	// the prompt is a rejection without feedback, not a request to type one.
+	describe("a rejected prompt", () => {
+		const ui = () => ctx.ui as { select: ReturnType<typeof vi.fn>; input: ReturnType<typeof vi.fn> };
+		const rejectWith = (choice: "esc" | "no", feedback?: string) => {
+			ui().select.mockImplementationOnce(async (_title: string, options: string[]) => (choice === "esc" ? undefined : options.at(-1)));
+			ui().input.mockImplementationOnce(async () => feedback);
+		};
+
+		// pi checks the signal before the block, so an abort inside the hook would
+		// replace the rejection text with "Operation aborted": the abort follows
+		// once pi has recorded the result.
+		const rejected = async (toolCallId: string) => {
+			const result = await call("bash", { command: "rm -rf build" }, toolCallId);
+			expect(ctx.abort).not.toHaveBeenCalled();
+			await fake.fire("tool_execution_end", { toolCallId, toolName: "bash", result: {}, isError: true }, ctx);
+			return result;
+		};
+
+		it("stops the turn on Esc without asking for a reason", async () => {
+			rejectWith("esc");
+			const result = await rejected("esc-1");
+			expect(result?.block).toBe(true);
+			expect(result?.reason).toContain("STOP what you are doing");
+			expect(ui().input).not.toHaveBeenCalled();
+			expect(ctx.abort).toHaveBeenCalledTimes(1);
+		});
+
+		it("stops the turn on No with no reason given", async () => {
+			rejectWith("no", "  ");
+			const result = await rejected("no-1");
+			expect(result?.block).toBe(true);
+			expect(ctx.abort).toHaveBeenCalledTimes(1);
+		});
+
+		it("lets the turn go on with the user's reason", async () => {
+			rejectWith("no", "use make clean instead");
+			const result = await rejected("no-2");
+			expect(result?.reason).toContain("use make clean instead");
+			expect(ctx.abort).not.toHaveBeenCalled();
+		});
+	});
+
 	describe("M2: scoped session grants", () => {
 		it("offers a working-directory-scoped grant for an in-project write and honours it for that tool only", async () => {
 			answerWith = 1; // the grant
