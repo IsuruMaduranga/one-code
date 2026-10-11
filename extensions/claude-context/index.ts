@@ -111,6 +111,8 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	let attachedNested = new Set<string>();
 	/** Where a nested instruction actually landed: a persisted result or a pinned request tail. */
 	const shownByResult = new Map<string, Set<string>>();
+	/** Nested files queued on a read's result, not yet sent in a request. */
+	const pendingNested = new Map<string, string[]>();
 	const remember = (toolCallId: string | undefined, keys: Iterable<string>) => {
 		if (!toolCallId) return;
 		const shown = shownByResult.get(toolCallId) ?? new Set<string>();
@@ -326,6 +328,7 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		email = resolveEmail(ctx.cwd);
 		attachedNested = new Set(startupShown);
 		shownByResult.clear();
+		pendingNested.clear();
 		rule = instructionRule(os.homedir());
 		// /clear re-fires session_start: the next conversation takes its own snapshot.
 		gitStatus = undefined;
@@ -441,6 +444,7 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 			publishBaseline();
 		}
 		restoreAttachments(ctx);
+		pendingNested.clear();
 	});
 
 	// A successful read attaches nested instruction files and matching path rules
@@ -458,15 +462,15 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		// A partial read is not evidence that the entire instruction file is shown.
 		const input = event.input as { offset?: number; limit?: number };
 		const truncated = (event.details as { truncation?: { truncated?: boolean } } | undefined)?.truncation?.truncated;
-		const shown: string[] = [];
 		if ((input.offset ?? 1) <= 1 && input.limit == null && !truncated) {
 			const readKey = tryRealpath(filePath) ?? filePath;
 			attachedNested.add(readKey);
-			shown.push(readKey);
+			remember(event.toolCallId, [readKey]);
 		}
 		// Bound to this read: system-reminder's hook for it has already run, so the
 		// queue pins them to this result at the next request; unbound, the next result
 		// in a parallel batch took them, beside another file (battery round 7).
+		const shown: string[] = [];
 		for (const file of files) {
 			if (attachedNested.has(file.key)) continue;
 			attachedNested.add(file.key);
@@ -477,6 +481,16 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 			}
 			pi.events.emit(REMINDER_CHANNEL, { text: nestedInstructionText(file), toolCallId: event.toolCallId });
 		}
-		remember(event.toolCallId, shown);
+		if (shown.length > 0) pendingNested.set(event.toolCallId, shown);
+	});
+
+	// Recorded once the request carrying the read's result goes out, so a reload
+	// before then (the queued text is not persisted) leaves them unshown.
+	pi.on("context", (event) => {
+		for (const [toolCallId, keys] of pendingNested) {
+			if (!event.messages.some((m) => m.role === "toolResult" && m.toolCallId === toolCallId)) continue;
+			remember(toolCallId, keys);
+			pendingNested.delete(toolCallId);
+		}
 	});
 }

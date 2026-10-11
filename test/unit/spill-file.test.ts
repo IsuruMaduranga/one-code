@@ -113,6 +113,12 @@ describe("keepSpillReadable with Claude Code's cut", () => {
 		expect(text.endsWith("</persisted-output>\n\nCommand exited with code 3")).toBe(true);
 	});
 
+	it("keeps a successful command's status-shaped last line in the saved output", async () => {
+		const text = (await cut("for i in $(seq 1 1000); do echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; done; printf '\\nCommand exited with code 3'")).content[0].text ?? "";
+		expect(text.endsWith("</persisted-output>")).toBe(true);
+		expect(readFileSync(savedPath(text)!, "utf8").endsWith("Command exited with code 3")).toBe(true);
+	});
+
 	it("persists an output pi did not spill once it passes the cap", async () => {
 		// 1,000 lines of 44 bytes: under pi's limits, over the cap.
 		const text = (await cut("for i in $(seq 1 1000); do echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; done")).content[0].text ?? "";

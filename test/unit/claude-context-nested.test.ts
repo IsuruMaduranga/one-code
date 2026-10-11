@@ -125,6 +125,8 @@ describe("claude-context: nested instructions after a resume or branch switch", 
 		await read("src/a.py", "r2");
 		expect(texts).toHaveLength(2);
 		const result = (toolCallId: string) => ({ type: "message", message: { role: "toolResult", toolCallId, toolName: "read", content: [], isError: false, timestamp: 1 } });
+		// The request carrying r1's result goes out, recording what it carried.
+		await fake.fire("context", { messages: [result("r1").message, result("r2").message] }, ctx);
 		branch = [result("r1"), result("r2"), ...fake.appendedEntries.map((entry) => ({ type: "custom", ...entry }))];
 		await fake.fire("session_tree", {}, ctx);
 		await read("src/reports/deep/x.py", "r3");
@@ -133,6 +135,30 @@ describe("claude-context: nested instructions after a resume or branch switch", 
 		branch = [];
 		await fake.fire("session_tree", {}, ctx);
 		await read("src/reports/deep/x.py", "r4");
+		expect(texts).toHaveLength(4);
+	});
+});
+
+describe("claude-context: nested instructions not yet sent", () => {
+	// The queued reminder text is not persisted, so a reload before the request
+	// that carries it must leave the files unshown.
+	it("attaches again after a reload that came before the request went out", async () => {
+		const fake = createFakePi();
+		claudeContextExtension(fake.pi as never);
+		const texts: string[] = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => {
+			const payload = data as { text?: string; placement?: string };
+			if (!payload.placement && payload.text) texts.push(payload.text);
+		});
+		let branch: unknown[] = [];
+		const ctx = createFakeCtx({ cwd: root, sessionManager: { getBranch: () => branch } });
+		const read = (path: string, toolCallId: string) => fake.fire("tool_result", { toolName: "read", toolCallId, input: { path }, isError: false, content: [] }, ctx);
+		await read("src/reports/summary.py", "r1");
+		expect(texts).toHaveLength(2);
+		const result = { type: "message", message: { role: "toolResult", toolCallId: "r1", toolName: "read", content: [], isError: false, timestamp: 1 } };
+		branch = [result, ...fake.appendedEntries.map((entry) => ({ type: "custom", ...entry }))];
+		await fake.fire("session_tree", {}, ctx);
+		await read("src/reports/deep/x.py", "r2");
 		expect(texts).toHaveLength(4);
 	});
 });

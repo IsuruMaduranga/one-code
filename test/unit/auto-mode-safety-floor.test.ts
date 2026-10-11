@@ -390,7 +390,7 @@ describe("safetyControlWrite: the reason for a pattern match", () => {
 	// Battery round 7: read-only searches were told they "write ./node_modules/*"
 	// and to ask the user, though a rewrite without the pattern passes.
 	it.each([
-		[`find . -type f -not -path "./node_modules/*" -exec grep -l slugify {} \;`, "./node_modules/*"],
+		[`find . -type f -not -path "./node_modules/*" -exec grep -l slugify {} \\;`, "./node_modules/*"],
 		[`find . -type f -not -path './.git/*' -name '*.py' -o -type f -name '*.ts' | xargs wc -l`, "./.git/*"],
 		// gpt-6.1-sol's verification line, verbatim.
 		["PYTHONDONTWRITEBYTECODE=1 make test; npx tsc --noEmit -p web; git diff --check; git diff --stat; git status --short; if rg --hidden --no-ignore -l --glob '!.git/**' --glob '!node_modules/**' --glob '!**/node_modules/**' 'slugify' .; then echo 'Old-name references remain in project files'; exit 1; else result=$?; if [ \"$result\" -ne 1 ]; then exit \"$result\"; fi; echo 'Verified: no old-name references in project files (excluding Git metadata and dependencies)'; fi", "!**/node_modules/**"],

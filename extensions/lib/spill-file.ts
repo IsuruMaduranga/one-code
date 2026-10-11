@@ -77,8 +77,10 @@ function moveInto(from: string, dir: string): string | undefined {
  * one that cannot be read, or a text not in pi's shape, keeps pi's text with
  * only the path rewritten.
  */
-export function boundSpillIn(text: string, resultsDir: string, bound: OutputBound, tmp: string = tmpdir()): string {
-	const status = PI_STATUS.exec(text);
+export function boundSpillIn(text: string, resultsDir: string, bound: OutputBound, failed = true, tmp: string = tmpdir()): string {
+	// pi appends a status only to a run that did not exit 0; a successful
+	// command's own last line can look like one.
+	const status = failed ? PI_STATUS.exec(text) : null;
 	const end = status ? status.index : text.length;
 	const output = text.slice(0, end);
 	const from = piSpillPath(output, tmp);
@@ -108,13 +110,13 @@ type TextResult = { content: Array<{ type: string; text?: string }>; details?: u
  * Claude Code's way (`bound`).
  */
 export async function keepSpillReadable<R extends TextResult>(run: () => Promise<R>, resultsDir: string, bound: OutputBound): Promise<R> {
-	const rewrite = (text: string) => boundSpillIn(text, resultsDir, bound);
+	const rewrite = (text: string, failed: boolean) => boundSpillIn(text, resultsDir, bound, failed);
 	let result: R;
 	try {
 		result = await run();
 	} catch (error) {
 		if (error instanceof Error) {
-			const message = rewrite(error.message);
+			const message = rewrite(error.message, true);
 			if (message !== error.message) {
 				const moved = new Error(message);
 				moved.stack = error.stack;
@@ -126,7 +128,7 @@ export async function keepSpillReadable<R extends TextResult>(run: () => Promise
 	const details = result.details as { fullOutputPath?: unknown } | undefined;
 	const text = result.content.find((block) => block.type === "text" && typeof block.text === "string");
 	if (!text?.text) return result;
-	const rewritten = rewrite(text.text);
+	const rewritten = rewrite(text.text, (result as { isError?: boolean }).isError === true);
 	if (rewritten === text.text) return result;
 	const from = piSpillPath(text.text);
 	const to = from ? join(resultsDir, basename(from)) : undefined;
