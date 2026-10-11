@@ -267,6 +267,13 @@ describe("notificationComponent: agent messages, Claude Code's transcript look",
 		expect(lines[0]).not.toContain("finished");
 	});
 
+	it("names the agent instead of its task id when the name is known", () => {
+		const name = (from: string) => (from === "a94a90cbdda8038c4" ? "explore-2" : undefined);
+		expect(notificationComponent(theme, wire, false, name).render(200)[0]).toContain("› Message from @explore-2");
+		expect(notificationComponent(theme, wire, true, name).render(400)[0]).toContain("› Message from explore-2");
+		expect(notificationComponent(theme, wire, false, () => undefined).render(200)[0]).toContain("› Message from @a94a90cbdda8038c4");
+	});
+
 	it("expands to the header, the preamble and the indented report, guard and pointer hidden", () => {
 		const lines = notificationComponent(theme, wire, true).render(400);
 		expect(lines[0]).toContain("› Message from a94a90cbdda8038c4");

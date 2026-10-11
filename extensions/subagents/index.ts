@@ -1174,10 +1174,16 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 	// Compact transcript rendering for the notifications this extension injects
 	// (full body on ctrl+o); the verbose framing stays model-only.
+	// A message is addressed from the agent's task id; its headline names the
+	// agent, from the live registry or the message's own details (a resumed
+	// session has no live runs).
 	for (const customType of ["subagent-message", "subagent-result"]) {
-		pi.registerMessageRenderer(customType, (message, { expanded }, theme) =>
-			notificationComponent(theme, customMessageText(message.content), expanded),
-		);
+		pi.registerMessageRenderer(customType, (message, { expanded }, theme) => {
+			const details = (message as { details?: { taskId?: unknown; name?: unknown } }).details;
+			const agentName = (from: string): string | undefined =>
+				liveRuns.get(from)?.name ?? (details?.taskId === from && typeof details.name === "string" ? details.name : undefined);
+			return notificationComponent(theme, customMessageText(message.content), expanded, agentName);
+		});
 	}
 
 	// A hand-back the model already read through task_output (block: true on the

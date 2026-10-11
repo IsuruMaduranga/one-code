@@ -949,7 +949,12 @@ export function notificationUserMarkdown(text: string): string | undefined {
 		.join("\n\n");
 }
 
-export function notificationComponent(theme: ThemeLike, text: string, expanded: boolean): TuiComponent {
+/**
+ * `agentName` names the agent a message comes from (its task id is the
+ * wire address): the headline reads `› Message from @<name>`, falling back to
+ * the address when the name is unknown.
+ */
+export function notificationComponent(theme: ThemeLike, text: string, expanded: boolean, agentName?: (from: string) => string | undefined): TuiComponent {
 	// An agent's completion pointer says nothing the message above it does not;
 	// CC's transcript shows the message alone. Bodies carry shell output and
 	// agent replies, so control characters are removed before parsing.
@@ -971,8 +976,9 @@ export function notificationComponent(theme: ThemeLike, text: string, expanded: 
 				// the header, then the body as delivered (preamble, indented report),
 				// indented under it, when expanded. The guard is never shown.
 				const bodyLines = frame.body.split("\n");
-				if (expanded) out.push(dim(`› Message from ${frame.from}`), ...body(bodyLines));
-				else out.push(dim(`› Message from @${frame.from}`) + hint(bodyLines));
+				const sender = agentName?.(frame.from) ?? frame.from;
+				if (expanded) out.push(dim(`› Message from ${sender}`), ...body(bodyLines));
+				else out.push(dim(`› Message from @${sender}`) + hint(bodyLines));
 				continue;
 			}
 			if (frame.kind === "task" && isAgentCompletion(frame.summary)) {
