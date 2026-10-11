@@ -3,23 +3,20 @@
  * keys: arrows select, Enter views the selected agent (or `main`), PageUp and
  * PageDown scroll an open view, `x` stops, the `ctrl+x ctrl+k` chord stops
  * all, esc hands focus back to the editor (index.ts owns what each does; an
- * open view stays open while the editor addresses its agent). `left` and
- * `space` serve the shell-panel stages (back, close); the agents branch treats
- * them like typing. Raw terminal bytes in, intents out — no side effects,
- * fully unit-testable. Keys are named through `lib/key-input.ts`, so the
- * legacy, kitty and modifyOtherKeys encodings decode alike, and a kitty key
- * release (sent after every press) is never mistaken for typing.
+ * open view stays open while the editor addresses its agent). Raw terminal
+ * bytes in, intents out — no side effects, fully unit-testable. Keys are named
+ * through `lib/key-input.ts`, so the legacy, kitty and modifyOtherKeys
+ * encodings decode alike, and a kitty key release (sent after every press) is
+ * never mistaken for typing.
  */
 
 import { isKeyRelease, keyId, keyText } from "../lib/key-input.ts";
 
-export type StripKey = "up" | "down" | "left" | "space" | "open" | "leave" | "stop" | "stopAll" | "pageUp" | "pageDown";
+export type StripKey = "up" | "down" | "open" | "leave" | "stop" | "stopAll" | "pageUp" | "pageDown";
 
 const STRIP_KEYS: Record<string, StripKey> = {
 	up: "up",
 	down: "down",
-	left: "left",
-	space: "space",
 	enter: "open",
 	escape: "leave",
 	pageUp: "pageUp",
