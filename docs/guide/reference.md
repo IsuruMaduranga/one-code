@@ -42,7 +42,7 @@ that explains it.
 | `/auto-mode setup` | Draft and save an auto-mode configuration for this environment. | |
 | `/auto-mode defaults` | Show the built-in environment description. | |
 | `/auto-mode model [provider/model-id\|clear]` | Choose the classifier model, or go back to the automatic pick. | [The classifier model](permissions-modes-and-auto-mode.md#the-classifier-model) |
-| `/memory` | Open an instruction file or the memory folder, or switch config sources. | [Memory](sessions-and-context.md#memory) |
+| `/memory` | Open an instruction file or the memory folder, turn auto-memory on or off, or switch config sources. | [Memory](sessions-and-context.md#memory) |
 | `/config` | Change this project's external instruction import approval. | [External instruction imports](sessions-and-context.md#external-instruction-imports) |
 | `/artifacts` | Pick a saved artifact to open, save to `~/Downloads`, or delete, or open the gallery. | [Artifacts](tools.md#artifacts) |
 | `/tasks` | List background shells, running agents and the agents you've viewed; open or stop one. | [Talk to an agent](subagents-and-workflows.md#talk-to-an-agent) |
