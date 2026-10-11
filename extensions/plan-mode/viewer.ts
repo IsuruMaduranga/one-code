@@ -144,7 +144,7 @@ export function renderPlanViewer(view: PlanViewerView, paint: Paint, width: numb
 	const out: string[] = [];
 	out.push("");
 	out.push(paint("accent", cut("Approve this plan?")));
-	out.push(paint("dim", cut(`↑/↓ scroll · ←/→ switch choice · ${pickHint}enter confirm · esc keep planning`)));
+	out.push(paint("dim", cut(`↑/↓ scroll · ←/→ switch choice · ${pickHint}enter confirm · esc cancel`)));
 	out.push(rule);
 
 	// Plan lines may arrive painted (Markdown), so the guard cut is ANSI-aware.
@@ -166,4 +166,33 @@ export function renderPlanViewer(view: PlanViewerView, paint: Paint, width: numb
 	}
 	out.push("");
 	return out;
+}
+
+/** The question the keep-planning choice asks (Claude Code's placeholder, naming the agent). */
+export const KEEP_PLANNING_QUESTION = "Tell the agent what to change";
+
+/** How the approval ended: an approving choice, or a rejection carrying the user's words when they gave some. */
+export type PlanDecision = { kind: "approve"; index: PlanChoice } | { kind: "reject"; feedback?: string };
+
+/**
+ * The approval flow, as in Claude Code: keeping planning asks what to change,
+ * and those words go back to the model, which keeps planning. A blank answer
+ * returns to the dialog (Claude Code ignores Enter on an empty "keep planning"
+ * input). Esc on the dialog or on the question rejects without words, which
+ * stops the turn. The option without a mode is the keep-planning one.
+ */
+export async function runPlanApproval(
+	options: readonly { mode?: string }[],
+	showDialog: () => Promise<PlanChoice | null>,
+	askFeedback: () => Promise<string | undefined>,
+	signal?: AbortSignal,
+): Promise<PlanDecision> {
+	for (;;) {
+		const choice = await showDialog();
+		if (choice == null || signal?.aborted) return { kind: "reject" };
+		if (options[choice]?.mode) return { kind: "approve", index: choice };
+		const feedback = await askFeedback();
+		if (feedback === undefined || signal?.aborted) return { kind: "reject" };
+		if (feedback.trim()) return { kind: "reject", feedback: feedback.trim() };
+	}
 }

@@ -45,7 +45,17 @@ import {
 } from "./texts.ts";
 import { createMarkdownProse } from "../subagents/prose.ts";
 import type { ProseRenderer } from "../subagents/panel-render.ts";
-import { clampOffset, decodeViewerKey, initialPlanChoice, type PlanChoice, planLines, renderPlanViewer, selectPlanChoice } from "./viewer.ts";
+import {
+	clampOffset,
+	decodeViewerKey,
+	initialPlanChoice,
+	KEEP_PLANNING_QUESTION,
+	type PlanChoice,
+	planLines,
+	renderPlanViewer,
+	runPlanApproval,
+	selectPlanChoice,
+} from "./viewer.ts";
 
 import { MODE_CHANNEL, PLAN_FILE_CHANNEL, PLAN_FILE_ENTRY, planFileOnBranch } from "../lib/plan-mode-channels.ts";
 export { MODE_CHANNEL, PLAN_FILE_CHANNEL };
@@ -125,6 +135,12 @@ export default function planModeExtension(pi: ExtensionAPI) {
 			markdownLoad = undefined;
 			return undefined;
 		}));
+
+	/** Plan approvals the user dismissed without words: the turn stops once pi records their result. */
+	const abortAfterResult = new Set<string>();
+	pi.on("tool_execution_end", (event, ctx) => {
+		if (abortAfterResult.delete(event.toolCallId)) ctx.abort();
+	});
 
 	/** The last context seen, for a refresh triggered off the bus (no ctx of its own). */
 	let lastCtx: ExtensionContext | undefined;
@@ -273,11 +289,13 @@ export default function planModeExtension(pi: ExtensionAPI) {
 			const planRef = {};
 			const markdown = prose ? (text: string, width: number) => prose(planRef, text, width) : undefined;
 
-			const choice = !canShowCustomUi(ctx) ? await selectPlanChoice(ctx.ui, plan, path, choices, signal) : await ctx.ui.custom<PlanChoice | null>((tui, theme, _keybindings, done) => {
+			// The scroll position and the highlighted choice outlive one showing: a
+			// blank keep-planning answer reopens the dialog where the user left it.
+			const maxVisible = 12;
+			let offset = 0;
+			let selected: PlanChoice = initialPlanChoice(options);
+			const showDialog = (): Promise<PlanChoice | null> => !canShowCustomUi(ctx) ? selectPlanChoice(ctx.ui, plan, path, choices, signal) : ctx.ui.custom<PlanChoice | null>((tui, theme, _keybindings, done) => {
 				const paint = safeThemePaint(theme);
-				const maxVisible = 12;
-				let offset = 0;
-				let selected: PlanChoice = initialPlanChoice(options);
 				let lineCount = 0;
 				// The dialog stays open while exit_plan_mode runs, so pi's working
 				// spinner drives ~8 frames a second — and re-wrapping the whole plan
@@ -321,8 +339,14 @@ export default function planModeExtension(pi: ExtensionAPI) {
 					},
 				};
 			});
+			const decision = await runPlanApproval(
+				options,
+				showDialog,
+				() => ctx.ui.input(KEEP_PLANNING_QUESTION, undefined, { signal }),
+				signal,
+			);
 
-			const picked = choice != null ? options[choice] : undefined;
+			const picked = decision.kind === "approve" ? options[decision.index] : undefined;
 			if (picked?.mode) {
 				pi.events.emit(MODE_CHANNEL, { mode: picked.mode, toolCallId });
 				// Claude Code's exit reminder, queued from execute so it is written
@@ -334,12 +358,19 @@ export default function planModeExtension(pi: ExtensionAPI) {
 				};
 			}
 
-			// Kept planning or dismissed: Claude Code's rejection, which stops the
-			// model until the user says how to proceed.
+			// Rejected: Claude Code's rejection text. With the user's words the model
+			// acts on them and keeps planning; without (Esc) the turn stops, as a
+			// reasonless permission rejection does (permissions/index.ts): `terminate`
+			// ends pi's loop after the batch, and the abort waits for the recorded
+			// result so the run ends as the user's interrupt.
+			const feedback = decision.kind === "reject" ? decision.feedback : undefined;
+			const stop = !feedback;
+			if (stop) abortAfterResult.add(toolCallId);
 			return {
-				content: [{ type: "text", text: userDenialText() }],
-				details: { plan, approved: false },
+				content: [{ type: "text", text: userDenialText(feedback) }],
+				details: { plan, approved: false, ...(feedback ? { feedback } : {}) },
 				isError: true,
+				...(stop ? { terminate: true } : {}),
 			};
 		},
 	});

@@ -394,12 +394,14 @@ shows the plan. Nothing runs until you choose. The choices are:
 2. **Approve into auto mode**, when a classifier model is available.
 3. **Approve into accept-edits mode.**
 4. **Approve into manual mode.**
-5. **Keep planning.** No mode change; the model refines the plan file.
+5. **Keep planning.** You're asked what to change, and the model gets your
+   answer and refines the plan file. No mode change.
 
 The initial highlight is the option that restores your previous mode, or
 manual mode when that isn't offered. It never lands on a more permissive
-option by default. Press the number of a choice to pick it directly, or
-**Esc** to keep planning.
+option by default. Press the number of a choice to pick it directly. **Esc**
+rejects the plan and stops the turn; the session stays in plan mode until you
+tell the model how to go on.
 
 In a non-interactive run there's no one to approve, so `exit_plan_mode`
 refuses and the session stays in plan mode with the plan on disk.

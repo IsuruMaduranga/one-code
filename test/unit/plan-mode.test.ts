@@ -2,7 +2,16 @@ import { describe, expect, it } from "vitest";
 import { visibleWidth } from "../../extensions/lib/text-width.ts";
 import { buildPlanModeReminder } from "../../extensions/plan-mode/reminder.ts";
 import { randomSlug } from "../../extensions/plan-mode/slug.ts";
-import { clampOffset, decodeViewerKey, initialPlanChoice, planLines, renderPlanViewer, selectPlanChoice, wrapPlanText } from "../../extensions/plan-mode/viewer.ts";
+import {
+	clampOffset,
+	decodeViewerKey,
+	initialPlanChoice,
+	planLines,
+	renderPlanViewer,
+	runPlanApproval,
+	selectPlanChoice,
+	wrapPlanText,
+} from "../../extensions/plan-mode/viewer.ts";
 
 /** The dialog's default choice list when auto mode is available (auto mode leads). */
 const CHOICES = [
@@ -199,6 +208,43 @@ describe("initialPlanChoice", () => {
 
 	it("falls back to the first option when no manual choice exists", () => {
 		expect(initialPlanChoice([{ mode: "acceptEdits" }, {}])).toBe(0);
+	});
+});
+
+describe("runPlanApproval", () => {
+	const OPTIONS = [{ mode: "acceptEdits" }, { mode: "default" }, {}];
+	/** A dialog that answers each showing from `replies` in turn, counting the showings. */
+	const dialog = (...replies: Array<number | null>) => {
+		const shown = { count: 0 };
+		return { shown, show: async () => replies[shown.count++] ?? null };
+	};
+
+	it("approves with the picked option without asking anything", async () => {
+		const d = dialog(1);
+		const ask = async () => "unused";
+		expect(await runPlanApproval(OPTIONS, d.show, ask)).toEqual({ kind: "approve", index: 1 });
+	});
+
+	// Claude Code's "No, keep planning" is a text input: the words go back to the model.
+	it("asks what to change on keep planning and carries the trimmed answer", async () => {
+		expect(await runPlanApproval(OPTIONS, dialog(2).show, async () => "  name it greet.txt  ")).toEqual({ kind: "reject", feedback: "name it greet.txt" });
+	});
+
+	it("reopens the dialog on a blank answer, as Claude Code ignores Enter on an empty input", async () => {
+		const d = dialog(2, 0);
+		expect(await runPlanApproval(OPTIONS, d.show, async () => "   ")).toEqual({ kind: "approve", index: 0 });
+		expect(d.shown.count).toBe(2);
+	});
+
+	it("rejects without words on Esc, on the dialog or on the question", async () => {
+		expect(await runPlanApproval(OPTIONS, dialog(null).show, async () => "unused")).toEqual({ kind: "reject" });
+		expect(await runPlanApproval(OPTIONS, dialog(2).show, async () => undefined)).toEqual({ kind: "reject" });
+	});
+
+	it("rejects without words when the turn is stopped mid-question", async () => {
+		const abort = new AbortController();
+		const ask = async () => (abort.abort(), "typed before the stop");
+		expect(await runPlanApproval(OPTIONS, dialog(2).show, ask, abort.signal)).toEqual({ kind: "reject" });
 	});
 });
 
