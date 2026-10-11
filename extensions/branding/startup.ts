@@ -17,7 +17,7 @@ import { basename, join, relative } from "node:path";
 import os from "node:os";
 import { projectInstructionFiles } from "../lib/claude-context.ts";
 import { projectConfigDir, userConfigDir } from "../lib/config-mode.ts";
-import { scanSkills } from "../lib/skill-scan.ts";
+import { BUNDLED_SKILLS_DIR, scanSkills } from "../lib/skill-scan.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
 import { oneCodeStateDir } from "../lib/paths.ts";
 
@@ -38,12 +38,13 @@ export function contextFileNames(cwd: string, home: string = os.homedir()): stri
 
 /**
  * Skills across the same sources our extensions feed to pi (lib/skill-scan.ts
- * scanSkills: the mode's skill folders, pi's own user dir, installed plugins),
- * each name once.
+ * scanSkills: pi's own user dir, the mode's skill folders, the bundled
+ * catalog, installed plugins), each name once: the set `/skills` lists and
+ * `/doctor` counts.
  */
-export function skillNames(cwd: string, home: string, agentDir: string): string[] {
+export function skillNames(cwd: string, home: string, agentDir: string, bundledDir: string = BUNDLED_SKILLS_DIR): string[] {
 	const plugins = discoverPlugins(defaultDiscoverRoots(agentDir, cwd, home)).skills;
-	return [...new Set(scanSkills(cwd, home, agentDir, plugins).map((skill) => skill.name))].sort((a, b) => a.localeCompare(b));
+	return [...new Set(scanSkills(cwd, home, agentDir, plugins, bundledDir).map((skill) => skill.name))].sort((a, b) => a.localeCompare(b));
 }
 
 /** Saved workflow names from the mode's workflow dirs (project shadows user). */
@@ -117,10 +118,10 @@ export function quietStartupEnabled(value: unknown): boolean {
 	return value === true || value === "header";
 }
 
-export function collectStartupSections(cwd: string, home: string, packageThemesDir: string, agentDir: string): StartupSection[] {
+export function collectStartupSections(cwd: string, home: string, packageThemesDir: string, agentDir: string, bundledSkillsDir: string = BUNDLED_SKILLS_DIR): StartupSection[] {
 	const sections: StartupSection[] = [
 		{ label: "context", items: contextFileNames(cwd, home) },
-		{ label: "skills", items: skillNames(cwd, home, agentDir) },
+		{ label: "skills", items: skillNames(cwd, home, agentDir, bundledSkillsDir) },
 		{ label: "workflows", items: workflowNames(cwd, home) },
 		{ label: "themes", items: themeNames(packageThemesDir) },
 	];

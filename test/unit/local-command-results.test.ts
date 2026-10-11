@@ -77,6 +77,20 @@ describe("Claude Code 2.1.296 local-command results", () => {
 		expect(blocks).toEqual(localCommandBlocks({ name: "skills", stdout: shown.join("\n") }));
 	});
 
+	it("labels the bundled catalog's skills bundled in the /skills panel", async () => {
+		const { fake, ctx } = mount(skillExtension);
+		let lines: string[] = [];
+		(ctx.ui as { custom: ReturnType<typeof vi.fn> }).custom.mockImplementation(async (factory: (...args: unknown[]) => { render(width: number): string[] }) => {
+			const component = factory({ terminal: { rows: 60, columns: 160 }, requestRender: () => {} }, undefined, {}, () => {});
+			lines = component.render(160);
+		});
+		await fake.commands.get("skills")!.handler("", ctx);
+		const strip = (line: string) => line.replace(/\x1b\[[0-9;]*m/g, "");
+		const simplify = lines.map(strip).find((line) => /\bsimplify\b/.test(line));
+		expect(simplify).toContain("· bundled ·");
+		expect(lines.map(strip).some((line) => line.includes("· project ·"))).toBe(false);
+	});
+
 	it("records the skills dismissal after the panel closes", async () => {
 		const { fake, ctx, blocks } = mount(skillExtension);
 		let close!: () => void;

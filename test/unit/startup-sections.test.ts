@@ -92,7 +92,22 @@ describe("skillNames", () => {
 			writeFileSync(join(base, name, "SKILL.md"), "s");
 		}
 		mkdirSync(join(home, ".claude", "skills", "not-a-skill"), { recursive: true });
-		expect(skillNames(cwd, home, join(home, ".pi", "agent"))).toEqual(["alpha", "beta"]);
+		expect(skillNames(cwd, home, join(home, ".pi", "agent"), join(home, "no-bundled"))).toEqual(["alpha", "beta"]);
+	});
+
+	it("counts the bundled catalog too, a shadowed bundled name once", () => {
+		const cwd = scratch();
+		const home = scratch();
+		const bundled = join(home, "bundled");
+		for (const [base, name] of [
+			[join(home, ".agents", "skills"), "simplify"],
+			[bundled, "simplify"],
+			[bundled, "loop"],
+		] as const) {
+			mkdirSync(join(base, name), { recursive: true });
+			writeFileSync(join(base, name, "SKILL.md"), "s");
+		}
+		expect(skillNames(cwd, home, join(home, ".pi", "agent"), bundled)).toEqual(["loop", "simplify"]);
 	});
 });
 
@@ -139,6 +154,6 @@ describe("collectStartupSections", () => {
 		const home = scratch();
 		const themes = scratch();
 		writeFileSync(join(themes, "one-code.json"), "{}");
-		expect(collectStartupSections(cwd, home, themes, join(home, ".pi", "agent"))).toEqual([{ label: "themes", items: ["one-code"] }]);
+		expect(collectStartupSections(cwd, home, themes, join(home, ".pi", "agent"), join(home, "no-bundled"))).toEqual([{ label: "themes", items: ["one-code"] }]);
 	});
 });

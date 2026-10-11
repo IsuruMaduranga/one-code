@@ -745,7 +745,8 @@ export default function skillExtension(pi: ExtensionAPI) {
 		skillsOnly(cwd).map((skill) => ({
 			key: skillOverrideKey(skill.scope, skill.name),
 			name: skill.name,
-			scope: skill.scope,
+			// The override key keeps the path's scope; the row names the catalog.
+			scope: isBundled(skill.path) ? ("bundled" as const) : skill.scope,
 			tokens: estimateSkillTokens(skill.path),
 			state: skill.state,
 			locked: skill.source === "plugin",

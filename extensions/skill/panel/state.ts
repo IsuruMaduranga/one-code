@@ -14,7 +14,8 @@ export interface SkillsRow {
 	/** Override-store key, `<scope>:<name>`. */
 	key: string;
 	name: string;
-	scope: SkillScope;
+	/** Shown in the row: where the skill comes from; "bundled" is One Code's own catalog. */
+	scope: SkillScope | "bundled";
 	tokens: number;
 	/** Current state; for locked (plugin) rows this is the effective on/off. */
 	state: SkillState;
