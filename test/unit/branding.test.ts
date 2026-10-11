@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { modeCycleKey } from "../../extensions/lib/keys.ts";
-import { WORDMARK, WORDMARK_WIDTH, bannerLines, sectionSummary, truncateLine } from "../../extensions/branding/index.ts";
+import { WORDMARK, WORDMARK_WIDTH, bannerLines, bannerModeLabel, sectionSummary, truncateLine } from "../../extensions/branding/index.ts";
 import { shouldDefaultFlushOutputPad, shouldDefaultHideThinking } from "../../extensions/branding/startup.ts";
 
 // Identity paint keeps assertions about layout free of colour codes.
@@ -46,6 +46,13 @@ describe("bannerLines", () => {
 		const context = contextLine(lines);
 		expect(context).toContain("model gpt-5.5");
 		expect(context).toContain("mode acceptEdits");
+	});
+
+	it("names the mode as the mode line does", () => {
+		expect(bannerModeLabel("default")).toBe("manual");
+		expect(bannerModeLabel("acceptEdits")).toBe("accept edits");
+		expect(bannerModeLabel("plan")).toBe("plan");
+		expect(bannerModeLabel("auto · classifier gpt-5-mini")).toBe("auto · classifier gpt-5-mini");
 	});
 
 	it("omits the model line content when no model is resolved", () => {

@@ -145,6 +145,19 @@ export function sectionSummary(sections: StartupSection[], paint: (color: string
 		.join(paint("muted", " · "));
 }
 
+/** The mode line's words for each permission mode, so the banner never says "default" beside "manual mode on". */
+const MODE_WORDS: Record<string, string> = {
+	default: "manual",
+	acceptEdits: "accept edits",
+	bypassPermissions: "bypass permissions",
+	dontAsk: "don't ask",
+};
+
+/** The banner's mode field: the permission display with the mode named as the mode line names it. */
+export function bannerModeLabel(display: string): string {
+	return MODE_WORDS[display] ?? display;
+}
+
 /**
  * Banner layout: the wordmark block, then a one-space-indented text column
  * (tagline + version, context, hints, sections). Kept pure so the layout is
@@ -498,7 +511,7 @@ export default function brandingExtension(pi: ExtensionAPI) {
 							version,
 							model: modelLabel ?? "none",
 							cwd: ctx.cwd,
-							mode: permissionModeDisplay(permissionStatus ?? { mode: "default", paused: false }),
+							mode: bannerModeLabel(permissionModeDisplay(permissionStatus ?? { mode: "default", paused: false })),
 							subagents:
 								modelLabel === undefined
 									? "none"
