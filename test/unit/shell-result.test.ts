@@ -39,11 +39,11 @@ describe("claudeCodeShellText", () => {
 });
 
 describe("registerShellTool: the foreground result reads as Claude Code's", () => {
-	const mount = (result: unknown) => {
+	const mount = (result: unknown, name: "bash" | "powershell" = "bash") => {
 		const fake = createFakePi();
 		registerShellTool(fake.pi as never, {
-			name: "bash",
-			ccLabel: "Bash",
+			name,
+			ccLabel: name === "bash" ? "Bash" : "PowerShell",
 			description: "",
 			parameters: Type.Object({ command: Type.String() }),
 			base: { label: "Bash" },
@@ -51,7 +51,7 @@ describe("registerShellTool: the foreground result reads as Claude Code's", () =
 			guard: () => undefined,
 			backgroundShell: () => undefined,
 		});
-		return (command: string) => fake.tools.get("bash")!.execute("c1", { command }, undefined, undefined, createFakeCtx({ mode: "tui" })) as Promise<{
+		return (command: string) => fake.tools.get(name)!.execute("c1", { command }, undefined, undefined, createFakeCtx({ mode: "tui" })) as Promise<{
 			content: Array<{ text: string }>;
 			isError?: boolean;
 			structuredContent?: unknown;
@@ -92,6 +92,79 @@ describe("registerShellTool: the foreground result reads as Claude Code's", () =
 		const run = mount({ content: [{ type: "text", text: "(no output)\n\nCommand exited with code 1" }], structuredContent: { output: "", exit_code: 1 }, isError: true });
 		const result = await run(command);
 		expect(result.content[0].text).toBe("Exit code 1");
+		expect(result.isError).toBe(true);
+	});
+
+	// As in Claude Code: `diff a.txt b.txt` that prints a change and exits 1
+	// is a plain, non-error result with no exit line.
+	it.each([
+		["diff a.txt b.txt", "1c1\n< hello\n---\n> hellO"],
+		["grep -c absent README.md", "0"],
+		["git diff --stat main", " a.txt | 2 +-"],
+	])("reads a semantic-success exit 1 with output as plain output for %s", async (command, output) => {
+		const run = mount({ content: [{ type: "text", text: `${output}\n\n\nCommand exited with code 1` }], structuredContent: { output: `${output}\n`, exit_code: 1 }, isError: true });
+		const result = await run(command);
+		expect(result.content[0].text).toBe(output);
+		expect(result.isError).toBe(false);
+	});
+
+	it.each([
+		["diff a.txt b.txt", 2],
+		["false && diff a.txt b.txt", 1],
+		["cat a.txt", 1],
+	])("keeps a failure with output for %s exiting %i", async (command, code) => {
+		const run = mount({ content: [{ type: "text", text: `boom\n\n\nCommand exited with code ${code}` }], structuredContent: { output: "boom\n", exit_code: code }, isError: true });
+		const result = await run(command);
+		expect(result.content[0].text).toBe(`Exit code ${code}\nboom`);
+		expect(result.isError).toBe(true);
+	});
+});
+
+describe("registerShellTool: PowerShell's semantic exit codes, as Claude Code's", () => {
+	const mount = (text: string, code: number) => {
+		const fake = createFakePi();
+		registerShellTool(fake.pi as never, {
+			name: "powershell",
+			ccLabel: "PowerShell",
+			description: "",
+			parameters: Type.Object({ command: Type.String() }),
+			base: { label: "PowerShell" },
+			foreground: () => ({ execute: vi.fn(async () => ({ content: [{ type: "text", text: text ? `${text}\n\n\nCommand exited with code ${code}` : `(no output)\n\nCommand exited with code ${code}` }], structuredContent: { output: text, exit_code: code }, isError: true })) }),
+			guard: () => undefined,
+			backgroundShell: () => undefined,
+		});
+		return (command: string) => fake.tools.get("powershell")!.execute("c1", { command }, undefined, undefined, createFakeCtx({ mode: "tui" })) as Promise<{ content: Array<{ text: string }>; isError?: boolean }>;
+	};
+
+	it.each([
+		["findstr absent notes.txt", "", 1, "(PowerShell completed with no output)"],
+		["rg absent", "", 1, "(PowerShell completed with no output)"],
+		["& 'C:\\Tools\\rg.exe' absent", "", 1, "(PowerShell completed with no output)"],
+		["robocopy src dst /E", "  Files : 3", 3, "  Files : 3"],
+		["robocopy src dst /E", "  Files : 3", 7, "  Files : 3"],
+		["where.exe node", "INFO: Could not find files for the given pattern(s).", 1, "INFO: Could not find files for the given pattern(s)."],
+		["fc.exe a.txt b.txt", "***** a.txt", 1, "***** a.txt"],
+		["git -C repo diff --quiet", "", 1, "(PowerShell completed with no output)"],
+		["Get-ChildItem; grep absent notes.txt", "a.txt", 1, "a.txt"],
+	])("reads %s (output %j, exit %i) as a success", async (command, output, code, expected) => {
+		const result = await mount(output, code)(command);
+		expect(result.content[0].text).toBe(expected);
+		expect(result.isError).toBe(false);
+	});
+
+	it.each([
+		["robocopy src dst /E", "ERROR 5", 8],
+		["rg absent", "", 2],
+		["where node", "x", 1],
+		["where.exe node", "", 1],
+		["fc a.txt b.txt", "***** a.txt", 1],
+		["Test-Path x && rg absent", "", 1],
+		["rg absent", "rg : The term 'rg' is not recognized as a name of a cmdlet", 1],
+		["findstr absent notes.txt", "FINDSTR: Cannot open notes.txt", 1],
+		["Remove-Item x", "", 1],
+	])("keeps %s (output %j, exit %i) an error", async (command, output, code) => {
+		const result = await mount(output, code)(command);
+		expect(result.content[0].text.startsWith(`Exit code ${code}`)).toBe(true);
 		expect(result.isError).toBe(true);
 	});
 });
