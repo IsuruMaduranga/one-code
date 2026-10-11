@@ -16,7 +16,13 @@
  * large as the session's, because the classifier receives the full transcript;
  * if that cannot be proved, it screens on the session model instead. And it
  * never screens with a model in a lower tier than the session's, or one that is
- * not strictly cheaper (a tie keeps the session).
+ * not strictly cheaper per classifier call (a tie keeps the session).
+ *
+ * "Cheaper" is judged on what a classifier call costs, not on list input
+ * price: a call is mostly cached input (`CLASSIFIER_CALL_TOKENS`), so the
+ * cache-read price dominates. By input price DeepSeek V3.2 screened its own
+ * sessions and timed out (findings §61); per call V4.1 Flash is cheaper and
+ * answers in seconds.
  *
  * An explicit `autoMode.classifierModel` may name any provider, because naming
  * it is choosing it: it leads the chain, with notices for a cross-provider
@@ -34,8 +40,44 @@ import {
 	isStaleContainmentStamp,
 	modelIdentity,
 	modelSpec as spec,
+	pricedInput,
 } from "../lib/model-policy.ts";
-import { intrinsicTier, sameTierContainedCandidates } from "../lib/model-tier.ts";
+import { atLeastTier, economicalContainedCandidates, intrinsicTier } from "../lib/model-tier.ts";
+
+/** A classifier call's measured shape: the cached ruleset and transcript, the new turn, the verdict. */
+export const CLASSIFIER_CALL_TOKENS = { cachedInput: 28_000, freshInput: 2_000, output: 700 } as const;
+
+/**
+ * One classifier call's estimated cost in dollars at `CLASSIFIER_CALL_TOKENS`,
+ * or undefined for a model with no input price. A model without a cache-read
+ * price pays its input price for the cached part, and one without an output
+ * price its input price for the verdict: both overstate, never understate.
+ */
+export function classifierCallCost(model: Model<Api>): number | undefined {
+	const input = pricedInput(model);
+	if (input === undefined) return undefined;
+	const priced = (value: number | undefined) => (typeof value === "number" && value > 0 ? value : input);
+	const { cachedInput, freshInput, output } = CLASSIFIER_CALL_TOKENS;
+	return (priced(model.cost?.cacheRead) * cachedInput + input * freshInput + priced(model.cost?.output) * output) / 1_000_000;
+}
+
+/**
+ * The contained models in the session's tier or above that cost strictly less
+ * per classifier call than the session model, cheapest first. An unpriced
+ * session cannot prove an alternate cheaper, so it gets none.
+ */
+function cheaperPerCall(available: Model<Api>[], sessionModel: Model<Api>): Model<Api>[] {
+	const sessionCost = classifierCallCost(sessionModel);
+	if (sessionCost === undefined) return [];
+	const floor = intrinsicTier(sessionModel);
+	const sessionSpec = spec(sessionModel);
+	return economicalContainedCandidates(available, sessionModel)
+		.filter((model) => spec(model) !== sessionSpec && atLeastTier(intrinsicTier(model), floor))
+		.map((model) => ({ model, cost: classifierCallCost(model) }))
+		.filter((entry): entry is { model: Model<Api>; cost: number } => entry.cost !== undefined && entry.cost < sessionCost)
+		.sort((a, b) => a.cost - b.cost)
+		.map((entry) => entry.model);
+}
 
 export interface Candidate {
 	model: Model<Api>;
@@ -159,13 +201,13 @@ function automaticClassifierCandidates(available: Model<Api>[], sessionModel: Mo
 			text: `Auto mode is screening calls with ${spec(sessionModel)}, this session's model, because its catalog context window is unknown and no alternate classifier can be verified to contain it.`,
 		});
 	}
-	// Never weaker than the session, strictly cheaper (the user, 2026-10-05:
-	// Qwen 3.8 27B drew a 2.4T model at five times its input price; 2026-10-07:
-	// a same-price older model saves nothing), and an unpriced session cannot
-	// prove an alternate cheaper: `sameTierContainedCandidates`, the subagent
-	// default's rule. The classifier adds a window that contains the session's
-	// and never an experimental build or a moving alias.
-	const cheaper = sameTierContainedCandidates(available, sessionModel).filter(
+	// Never weaker than the session, strictly cheaper per call (the user,
+	// 2026-10-05: Qwen 3.8 27B drew a 2.4T model at five times its input price;
+	// 2026-10-07: a same-price older model saves nothing; 2026-10-12: judged on
+	// a call's own cost shape), and an unpriced session cannot prove an
+	// alternate cheaper. The classifier adds a window that contains the
+	// session's and never an experimental build or a moving alias.
+	const cheaper = cheaperPerCall(available, sessionModel).filter(
 		(model) =>
 			!isExperimentalBuild(model.id) && !isMovingAlias(model.id) && hasCatalogContextWindow(model) && model.contextWindow >= sessionModel.contextWindow,
 	);

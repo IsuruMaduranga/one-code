@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { classifierCandidates, describeCandidate, isModelUnavailableError } from "../../extensions/auto-mode/model-select.ts";
+import { CLASSIFIER_CALL_TOKENS, classifierCallCost, classifierCandidates, describeCandidate, isModelUnavailableError } from "../../extensions/auto-mode/model-select.ts";
 import { intrinsicTier } from "../../extensions/lib/model-tier.ts";
 import { type FixtureModel, pinCatalog } from "./catalog-fixture.ts";
 
@@ -108,6 +108,28 @@ describe("classifierCandidates: containment, tier and context floors", () => {
 		expect(intrinsicTier(session)).toBe("tiny");
 		expect(pickFull([session, huge], session).candidates).toEqual([{ model: session, source: "session" }]);
 		expect(pickFull([session, huge, flash], session).candidates).toEqual([{ model: flash, source: "economical" }, { model: session, source: "session" }]);
+	});
+
+	// A classifier call is mostly cached input, so a model dearer by list input
+	// price can be the cheaper screener (DeepSeek V3.2 against V4.1 Flash).
+	it("judges cheaper per classifier call, where cache reads dominate", () => {
+		const priced = (id: string, cost: { input: number; cacheRead?: number; output: number }) => ({ ...model("openrouter", id, cost.input, 1_000_000), cost }) as any;
+		const session = priced("qwen/qwen3.8-27b", { input: 0.3, output: 1.2 });
+		const cachedMax = priced("qwen/qwen3.8-max", { input: 1.2, cacheRead: 0.06, output: 6 });
+		expect(classifierCallCost(cachedMax)!).toBeLessThan(classifierCallCost(session)!);
+		expect(pickFull([session, cachedMax], session).candidates).toEqual([{ model: cachedMax, source: "economical" }, { model: session, source: "session" }]);
+		// Without a cheap cache read the same list prices stay dearer per call.
+		const uncachedMax = priced("qwen/qwen3.8-max", { input: 1.2, output: 6 });
+		expect(pickFull([session, uncachedMax], session).candidates).toEqual([{ model: session, source: "session" }]);
+	});
+
+	it("prices a call at the measured shape, overstating a missing cache-read or output price", () => {
+		const { cachedInput, freshInput, output } = CLASSIFIER_CALL_TOKENS;
+		const full = { ...model("openai", "gpt-x-small", 1), cost: { input: 1, cacheRead: 0.1, output: 4 } } as any;
+		expect(classifierCallCost(full)).toBeCloseTo((0.1 * cachedInput + 1 * freshInput + 4 * output) / 1e6, 12);
+		const bare = { ...model("openai", "gpt-x-small", 1), cost: { input: 1 } } as any;
+		expect(classifierCallCost(bare)).toBeCloseTo((cachedInput + freshInput + output) / 1e6, 12);
+		expect(classifierCallCost(model("openai", "gpt-x-small"))).toBeUndefined();
 	});
 
 	it("never screens with a superseded or uncatalogued model", () => {
