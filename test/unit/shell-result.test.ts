@@ -80,7 +80,7 @@ describe("registerShellTool: the foreground result reads as Claude Code's", () =
 		expect((await run("echo hi")).content[0].text).toBe("hi");
 	});
 
-	it.each(["grep absent file", "rg absent file", "egrep absent file", "fgrep absent file", "find file", "diff a b", "test -e file", "[ -e file ]", "git grep absent", "git -C root diff --quiet", "echo one | rg absent", "echo one; rg absent", "echo one || rg absent"])("marks a blank semantic-success exit 1 for %s", async (command) => {
+	it.each(["grep absent file", "rg absent file", "egrep absent file", "fgrep absent file", "find file", "diff a b", "test -e file", "[ -e file ]", "git grep absent", "git -C root diff --quiet", "git --git-dir .git --work-tree . diff --quiet", "echo one | rg absent", "echo one; rg absent", "echo one || rg absent"])("marks a blank semantic-success exit 1 for %s", async (command) => {
 		const run = mount({ content: [{ type: "text", text: "(no output)\n\nCommand exited with code 1" }], structuredContent: { output: "", exit_code: 1 }, isError: true });
 		const result = await run(command);
 		expect(result.content[0].text).toBe("(Bash completed with no output)");
@@ -145,6 +145,7 @@ describe("registerShellTool: PowerShell's semantic exit codes, as Claude Code's"
 		["where.exe node", "INFO: Could not find files for the given pattern(s).", 1, "INFO: Could not find files for the given pattern(s)."],
 		["fc.exe a.txt b.txt", "***** a.txt", 1, "***** a.txt"],
 		["git -C repo diff --quiet", "", 1, "(PowerShell completed with no output)"],
+		["git --git-dir .git --work-tree . diff --quiet", "", 1, "(PowerShell completed with no output)"],
 		["Get-ChildItem; grep absent notes.txt", "a.txt", 1, "a.txt"],
 	])("reads %s (output %j, exit %i) as a success", async (command, output, code, expected) => {
 		const result = await mount(output, code)(command);

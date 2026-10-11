@@ -27,11 +27,14 @@ function lastCommand(root: BashNode): string | undefined {
 	return node?.text;
 }
 
-/** git's subcommand among the words after `git`: the first that is no option (`-C` and `-c` take a value). */
+/** git's global options that take their value as the next word (`--git-dir=x` is one word). */
+const GIT_VALUE_OPTIONS = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix", "--config-env", "--attr-source"]);
+
+/** git's subcommand among the words after `git`: the first that is no option or an option's value. */
 function gitSubcommandOf(args: readonly string[]): string | undefined {
 	for (let i = 0; i < args.length; i++) {
 		if (!args[i].startsWith("-")) return args[i];
-		if (args[i] === "-C" || args[i] === "-c") i++;
+		if (GIT_VALUE_OPTIONS.has(args[i])) i++;
 	}
 	return undefined;
 }
