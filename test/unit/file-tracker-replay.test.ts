@@ -9,11 +9,19 @@ const textResult = (toolCallId: string, text: string) => ({ type: "message", mes
 describe("keptShellReadPaths", () => {
 	const SEEN = "the content the model saw\nline two\n";
 	const seen = (path: string) => (path === "/w/a.txt" ? SEEN : undefined);
-	const pathsOf = (command: string) => (command.includes("a.txt") ? ["/w/a.txt"] : []);
+	// What each call certified as it ran, by call id.
+	const pathsOf = (id: string) => (id === "1" ? ["/w/a.txt"] : undefined);
 
 	it("names a tracked file a kept bash call showed in full, as the tracker last saw it", () => {
 		const kept = [assistant(call("1", "bash", { command: "cat a.txt" })), textResult("1", SEEN.trimEnd())];
 		expect(keptShellReadPaths(kept, pathsOf, seen)).toEqual(["/w/a.txt"]);
+	});
+
+	// Re-parsing the command at compaction resolved it from today's directory
+	// (after entering a worktree, a different file): only the record decides.
+	it("names nothing for a kept call that certified no read when it ran", () => {
+		const kept = [assistant(call("2", "bash", { command: "cat a.txt" })), textResult("2", SEEN.trimEnd())];
+		expect(keptShellReadPaths(kept, pathsOf, seen)).toEqual([]);
 	});
 
 	it("names nothing for a partial output, a call without its result, or an untracked file", () => {

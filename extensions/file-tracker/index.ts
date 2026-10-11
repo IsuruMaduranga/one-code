@@ -109,11 +109,6 @@ function versionOf(path: string): string | undefined {
 	}
 }
 
-/** The files a shell command may have printed, on this machine's home and disk. */
-function localShellReadPaths(command: string, cwd: string): string[] {
-	return shellReadPaths(command, cwd, homedir(), (dir) => readdirSync(dir));
-}
-
 /**
  * The files a shell command may print, with each one's version as the command
  * starts (`shell-reads.ts` paths, resolved as the shell resolves them, from
@@ -126,7 +121,7 @@ function localShellReadPaths(command: string, cwd: string): string[] {
 function shellReadSnapshot(command: string, cwd: string): Map<string, string> {
 	const snapshot = new Map<string, string>();
 	if (!command) return snapshot;
-	for (const path of localShellReadPaths(command, cwd)) {
+	for (const path of shellReadPaths(command, cwd, homedir(), (dir) => readdirSync(dir))) {
 		// Regular files only: a device or FIFO (`head -c 1 /dev/zero`) reports size 0
 		// and a read of it never ends (found by a GPT-6 Astra review).
 		if (!isRegularFile(path)) continue;
@@ -241,6 +236,15 @@ async function readAgain(read: ReturnType<typeof createReadToolDefinition>, path
 
 export default function fileTrackerExtension(pi: ExtensionAPI) {
 	let tracker = new FileTracker();
+	/**
+	 * The files each bash call showed in full, by call id, decided where the
+	 * call ran: a compaction keeps the reads of the calls it keeps from this,
+	 * since re-parsing a command later resolves it from today's directory.
+	 */
+	const shellReadsByCall = new Map<string, string[]>();
+	const recordShellReads = (callId: string, paths: string[]) => {
+		if (paths.length > 0) shellReadsByCall.set(callId, paths);
+	};
 	/** The entered worktree, where the shell runs while one is active (lib/worktree-channel.ts). */
 	let entered: WorktreeLocation | undefined;
 	pi.events.on(WORKTREE_CHANNEL, (data) => {
@@ -295,11 +299,13 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 		}
 		// Shell reads need the bash grammar, which may still be loading this early.
 		const target = tracker;
+		shellReadsByCall.clear();
 		const shellCalls = [...shellCallsOnBranch(entries)];
 		if (shellCalls.length > 0) {
 			void bashParserReady().then(() => {
+				if (target !== tracker) return;
 				// A replayed result has no before-state: the files as they are now stand in for it.
-				for (const call of shellCalls) observeShellReads(target, shellReadSnapshot(call.command, sessionWorkCwd(entered, ctx.cwd)), call.output);
+				for (const call of shellCalls) recordShellReads(call.id, observeShellReads(target, shellReadSnapshot(call.command, sessionWorkCwd(entered, ctx.cwd)), call.output));
 			});
 		}
 		touched = new Map([...lastTouchesOnBranch(entries)].map(([raw, at]) => [resolveToolPath(raw, ctx.cwd), at]));
@@ -342,7 +348,11 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 		if (event.toolName === "bash") {
 			const before = shellSnapshots.get(event.toolCallId);
 			shellSnapshots.delete(event.toolCallId);
-			if (before) for (const path of observeShellReads(tracker, before, textOf(event.content))) childWrites.delete(path);
+			if (before) {
+				const observed = observeShellReads(tracker, before, textOf(event.content));
+				recordShellReads(event.toolCallId, observed);
+				for (const path of observed) childWrites.delete(path);
+			}
 			return undefined;
 		}
 		if (!READ_TOOLS.has(event.toolName) && !GUARDED_TOOLS.has(event.toolName)) return undefined;
@@ -385,10 +395,11 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 			const branch = ctx.sessionManager.getBranch();
 			const compaction = latestCompaction(branch);
 			const keptTurns = compaction ? branch.slice(compaction.keptStart, compaction.index) : [];
-			// The kept shell reads, recognized as the live path recognizes them.
-			await bashParserReady();
-			const workCwd = sessionWorkCwd(entered, ctx.cwd);
-			const keptShell = keptShellReadPaths(keptTurns, (command) => localShellReadPaths(command, workCwd), (path) => tracker.lastSeen(path));
+			// The kept shell reads: what each kept bash call certified as it ran.
+			const keptShell = keptShellReadPaths(keptTurns, (id) => shellReadsByCall.get(id), (path) => tracker.lastSeen(path));
+			// A call the summary took never comes back: only the kept ones need their record.
+			const keptCalls = new Set([...shellCallsOnBranch(keptTurns)].map((call) => call.id));
+			for (const id of shellReadsByCall.keys()) if (!keptCalls.has(id)) shellReadsByCall.delete(id);
 			const inContext = inContextFiles(ctx, branch, keptReadPaths(keptTurns), keptShell);
 			// The loader lists imports by real path; a tracked path may be spelled through a symlink.
 			const shown = (path: string) => inContext.has(comparablePath(path)) || inContext.has(comparablePath(tryRealpath(path) ?? path));
@@ -412,6 +423,7 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 			// The restore is best effort: nothing comes back, and an edit needs a fresh read.
 			tracker = new FileTracker();
 			touched = new Map();
+			shellReadsByCall.clear();
 		}
 	});
 

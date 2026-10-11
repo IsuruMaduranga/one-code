@@ -348,11 +348,14 @@ describe("file-tracker: a bash result counts as a read", () => {
 			fake.fire("session_compact", { compactionEntry: branch[branch.length - 1], fromExtension: true, reason: "manual", willRetry: false },
 				createFakeCtx({ cwd: dir, sessionManager: { getSessionId: () => "same-session", getBranch: () => branch } }));
 
+		/** The id the last live `bash` call ran under, which the branch stores. */
+		const lastCall = () => `b${callId}`;
+
 		it("keeps a shell read whose call and complete result stay in the kept tail", async () => {
 			writeFileSync(join(dir, "kept.txt"), KEPT);
 			await bash("cat kept.txt", KEPT.trimEnd());
 			expect(await edit("kept.txt")).toBeUndefined();
-			await compact([...shellTurn("1", "cat kept.txt", KEPT.trimEnd()), { type: "compaction", id: "c", firstKeptEntryId: "a1" }]);
+			await compact([...shellTurn(lastCall(), "cat kept.txt", KEPT.trimEnd()), { type: "compaction", id: "c", firstKeptEntryId: `a${lastCall()}` }]);
 			expect(await edit("kept.txt")).toBeUndefined();
 		});
 
@@ -360,8 +363,21 @@ describe("file-tracker: a bash result counts as a read", () => {
 			mkdirSync(join(dir, "src"));
 			writeFileSync(join(dir, "src", "kept.txt"), KEPT);
 			await bash("cd src && cat kept.txt", KEPT.trimEnd());
-			await compact([...shellTurn("1", "cd src && cat kept.txt", KEPT.trimEnd()), { type: "compaction", id: "c", firstKeptEntryId: "a1" }]);
+			await compact([...shellTurn(lastCall(), "cd src && cat kept.txt", KEPT.trimEnd()), { type: "compaction", id: "c", firstKeptEntryId: `a${lastCall()}` }]);
 			expect(await edit(join("src", "kept.txt"))).toBeUndefined();
+		});
+
+		// Re-parsing the kept command at compaction resolved it from the worktree
+		// entered since, which named a different file and dropped the real read.
+		it("keeps the file a kept shell call read, after the session entered a worktree", async () => {
+			writeFileSync(join(dir, "kept.txt"), KEPT);
+			await bash("cat kept.txt", KEPT.trimEnd());
+			const wt = join(dir, "wt");
+			mkdirSync(wt);
+			fake.events.emit(WORKTREE_CHANNEL, { path: wt });
+			await compact([...shellTurn(lastCall(), "cat kept.txt", KEPT.trimEnd()), { type: "compaction", id: "c", firstKeptEntryId: `a${lastCall()}` }]);
+			expect(await edit(join(dir, "kept.txt"))).toBeUndefined();
+			fake.events.emit(WORKTREE_CHANNEL, null);
 		});
 
 		it("forgets a shell read the compaction summarized away", async () => {
@@ -385,7 +401,7 @@ describe("file-tracker: a bash result counts as a read", () => {
 			writeFileSync(join(dir, "kept.txt"), KEPT);
 			await bash("cat kept.txt", KEPT.trimEnd());
 			writeFileSync(join(dir, "kept.txt"), `${KEPT}a line someone else added\n`);
-			await compact([...shellTurn("1", "cat kept.txt", KEPT.trimEnd()), { type: "compaction", id: "c", firstKeptEntryId: "a1" }]);
+			await compact([...shellTurn(lastCall(), "cat kept.txt", KEPT.trimEnd()), { type: "compaction", id: "c", firstKeptEntryId: `a${lastCall()}` }]);
 			expect((await edit("kept.txt"))?.reason).toContain("has changed on disk");
 		});
 	});
