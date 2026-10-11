@@ -20,6 +20,7 @@ import {
 	createClassifierState,
 	isClassifierTimeout,
 	isTransportFailure,
+	providerErrorSummary,
 	ROTATE_AFTER_TIMEOUTS,
 } from "../../extensions/auto-mode/classifier.ts";
 import { loadAutoModeConfig } from "../../extensions/auto-mode/config.ts";
@@ -186,7 +187,7 @@ describe("classify: pinning and fallback", () => {
 		completeMock.mockResolvedValueOnce(errorReply("500 internal server error"));
 		const verdict = await classify(request, deps);
 		expect(verdict.decision).toBe("block");
-		expect(verdict.reason).toContain("could not be reached");
+		expect(verdict.reason).toContain("returned no verdict");
 		// The same model is tried again next call: switching would paper over
 		// something about to clear.
 		expect(deps.state.pinned?.id).toBe("gpt-5-mini");
@@ -351,8 +352,8 @@ describe("classify: timeout handling", () => {
 		// so the model knows what was blocked and that it can wait/retry.
 		expect(verdict.reason).toContain("bash");
 		expect(verdict.reason).toContain("temporarily unavailable");
-		// A timeout must never look like a substantive "could not be reached" error.
-		expect(verdict.reason).not.toContain("could not be reached");
+		// A timeout must never look like a substantive "returned no verdict" error.
+		expect(verdict.reason).not.toContain("returned no verdict");
 		expect(deps.state.rejected.size).toBe(0);
 	});
 
@@ -388,7 +389,7 @@ describe("classify: timeout handling", () => {
 		expect(verdict.tier).toBe("timeout");
 		expect(verdict.noVerdict).toBe(true);
 		expect(verdict.reason).toContain("temporarily unavailable (network error: fetch failed)");
-		expect(verdict.reason).not.toContain("could not be reached");
+		expect(verdict.reason).not.toContain("returned no verdict");
 		expect(deps.state.rejected.size).toBe(0);
 	});
 
@@ -421,7 +422,7 @@ describe("isClassifierTimeout", () => {
 
 describe("isTransportFailure", () => {
 	it("matches failures below HTTP", () => {
-		for (const message of ["fetch failed", "TypeError: fetch failed", "read ECONNRESET", "connect ECONNREFUSED 127.0.0.1:443", "getaddrinfo ENOTFOUND api.openai.com", "getaddrinfo EAI_AGAIN chatgpt.com", "socket hang up", "other side closed", "UND_ERR_SOCKET"]) {
+		for (const message of ["fetch failed", "TypeError: fetch failed", "read ECONNRESET", "connect ECONNREFUSED 127.0.0.1:443", "getaddrinfo ENOTFOUND api.openai.com", "getaddrinfo EAI_AGAIN chatgpt.com", "socket hang up", "other side closed", "UND_ERR_SOCKET", "WebSocket closed 1000", "WebSocket error"]) {
 			expect(isTransportFailure(message)).toBe(true);
 		}
 	});
@@ -430,6 +431,22 @@ describe("isTransportFailure", () => {
 		for (const message of ["500 internal server error", "429 rate limit", "invalid_model", "401 unauthorized"]) {
 			expect(isTransportFailure(message)).toBe(false);
 		}
+	});
+});
+
+// A provider's advice to rephrase, handed to the model in a block, invites
+// rephrasing the call past the gate.
+describe("providerErrorSummary", () => {
+	it("keeps the provider's finding and drops its advice and links", () => {
+		expect(
+			providerErrorSummary(
+				"Codex error: Invalid prompt: your prompt was flagged as potentially violating our usage policy. Please try again with a different prompt: https://platform.openai.com/docs/guides/reasoning#advice-on-prompting",
+			),
+		).toBe("Codex error: Invalid prompt: your prompt was flagged as potentially violating our usage policy.");
+		expect(providerErrorSummary("Codex error: This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing your request.")).toBe(
+			"Codex error: This content was flagged for possible cybersecurity risk.",
+		);
+		expect(providerErrorSummary("500 internal server error")).toBe("500 internal server error");
 	});
 });
 
