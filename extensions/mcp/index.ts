@@ -56,7 +56,7 @@ import { type McpEntry, type McpEntryStatus } from "./panel/model.ts";
 import { renderMcpPanel, type McpPaint } from "./panel/render.ts";
 import { applyMcpKey, initialMcpState, type McpEffect } from "./panel/state.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
-import { loadServers, type McpServer, piMcpConfigPaths, registeredMcpServers } from "./config.ts";
+import { loadServers, type McpServer, noMcpServersMessage, piMcpConfigPaths, registeredMcpServers } from "./config.ts";
 import { approveMcpServers, type McpTrustDeps, persistApproval, projectRootOf, reconnectRefusal } from "./trust.ts";
 import {
 	capDescription,
@@ -982,9 +982,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		description: "Manage MCP servers (status, reconnect, authenticate, enable/disable)",
 		handler: async (args, ctx) => {
 			if (servers.length === 0) {
-				const stdout = claudeSourcesOn()
-					? "No MCP servers configured. Run `claude doctor` if this is unexpected — it lists MCP config files that failed validation. Otherwise, run `claude mcp --help` or visit https://code.claude.com/docs/en/mcp to learn more."
-					: "No MCP servers configured. Add them to .pi/mcp.json or the agent dir's mcp.json.";
+				const stdout = noMcpServersMessage(claudeSourcesOn());
 				ctx.ui.notify(stdout, "info");
 				return stdout;
 			}
