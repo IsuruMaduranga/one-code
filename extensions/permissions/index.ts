@@ -2170,18 +2170,11 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			reason: verdict.reason || undefined,
 		});
 		if (verdict.decision === "allow") return undefined;
-		// A completed run cannot be approved retroactively. Surface a failed
-		// review without counting a context-limit failure as an unsafe action.
-		if (verdict.transcriptTooLong) return { kind: "unavailable", reason: verdict.reason };
-		pauseTracker.recordBlock({
-			toolName: "Agent",
-			subject,
-			reason: verdict.reason,
-			tier: verdict.tier,
-			ruleId: verdict.ruleId,
-			raw: verdict.raw,
-		});
-		return { kind: verdict.noVerdict || verdict.tier === "timeout" ? "unavailable" : "blocked", reason: verdict.reason };
+		// A completed run cannot be approved retroactively, so a review only warns.
+		// It never counts toward the auto-mode pause: as in Claude Code, denials
+		// are counted on the main permission path alone.
+		const unavailable = verdict.transcriptTooLong || verdict.noVerdict || verdict.tier === "timeout";
+		return { kind: unavailable ? "unavailable" : "blocked", reason: verdict.reason };
 	};
 
 	const childActions = new Map<string, ChildAction[]>();
