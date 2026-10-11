@@ -43,7 +43,9 @@ import {
 	EXIT_PLAN_MODE_DESCRIPTION,
 	exitedPlanModeText,
 } from "./texts.ts";
-import { clampOffset, decodeViewerKey, initialPlanChoice, type PlanChoice, renderPlanViewer, selectPlanChoice, wrapPlanText } from "./viewer.ts";
+import { createMarkdownProse } from "../subagents/prose.ts";
+import type { ProseRenderer } from "../subagents/panel-render.ts";
+import { clampOffset, decodeViewerKey, initialPlanChoice, type PlanChoice, planLines, renderPlanViewer, selectPlanChoice } from "./viewer.ts";
 
 import { MODE_CHANNEL, PLAN_FILE_CHANNEL, PLAN_FILE_ENTRY, planFileOnBranch } from "../lib/plan-mode-channels.ts";
 export { MODE_CHANNEL, PLAN_FILE_CHANNEL };
@@ -111,6 +113,18 @@ export default function planModeExtension(pi: ExtensionAPI) {
 			toolCallId,
 		});
 	};
+
+	/**
+	 * pi-tui's Markdown renderer for the approval dialog, loaded on first use.
+	 * A failed load is not cached (the theme may not be ready yet); the dialog
+	 * then wraps the plan as plain text.
+	 */
+	let markdownLoad: Promise<ProseRenderer | undefined> | undefined;
+	const planMarkdown = (): Promise<ProseRenderer | undefined> =>
+		(markdownLoad ??= createMarkdownProse().catch(() => {
+			markdownLoad = undefined;
+			return undefined;
+		}));
 
 	/** The last context seen, for a refresh triggered off the bus (no ctx of its own). */
 	let lastCtx: ExtensionContext | undefined;
@@ -254,6 +268,11 @@ export default function planModeExtension(pi: ExtensionAPI) {
 			];
 			const choices = options.map((o) => o.label);
 
+			// The plan renders as Markdown, like assistant text in the transcript.
+			const prose = canShowCustomUi(ctx) ? await planMarkdown() : undefined;
+			const planRef = {};
+			const markdown = prose ? (text: string, width: number) => prose(planRef, text, width) : undefined;
+
 			const choice = !canShowCustomUi(ctx) ? await selectPlanChoice(ctx.ui, plan, path, choices, signal) : await ctx.ui.custom<PlanChoice | null>((tui, theme, _keybindings, done) => {
 				const paint = safeThemePaint(theme);
 				const maxVisible = 12;
@@ -271,7 +290,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 				let wrapped: { width: number; lines: string[] } | undefined;
 				let frame: { key: string; lines: string[] } | undefined;
 				const wrapAt = (wrapWidth: number): string[] => {
-					if (wrapped?.width !== wrapWidth) wrapped = { width: wrapWidth, lines: wrapPlanText(plan, wrapWidth) };
+					if (wrapped?.width !== wrapWidth) wrapped = { width: wrapWidth, lines: planLines(plan, wrapWidth, markdown) };
 					return wrapped.lines;
 				};
 				return {

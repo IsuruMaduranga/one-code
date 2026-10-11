@@ -6,15 +6,36 @@
  *
  * Every rendered line must stay within the width given: pi-tui crashes the
  * whole app on an overwide line. Content is wrapped (not truncated — a plan
- * must stay readable in full), and chrome lines are cut plain-text *before*
- * painting so ANSI escapes never confuse the width accounting.
+ * must stay readable in full) and then cut ANSI-aware as a guard, and chrome
+ * lines are cut plain-text *before* painting so ANSI escapes never confuse
+ * the width accounting.
  */
 
-import { cutPlainText } from "../lib/tui-render.ts";
+import { cutPlainText, truncateLine, wrapProse } from "../lib/tui-render.ts";
 import { keyId } from "../lib/key-input.ts";
 
 /** Wrap a plan to `width` columns at word boundaries, keeping indents and blank lines. */
 export { wrapProse as wrapPlanText } from "../lib/tui-render.ts";
+
+/** Renders Markdown to painted lines at a width (pi-tui's Markdown, which the transcript uses). */
+export type PlanMarkdown = (text: string, width: number) => string[];
+
+/**
+ * The plan's lines at `width`: Markdown rendered the way the transcript renders
+ * assistant text when a renderer is available, else plain text wrapped at word
+ * boundaries. A renderer that throws falls back to the plain wrap, so a
+ * Markdown failure never costs the user the plan.
+ */
+export function planLines(plan: string, width: number, markdown?: PlanMarkdown): string[] {
+	if (markdown) {
+		try {
+			return markdown(plan, width);
+		} catch {
+			// fall through to the plain wrap
+		}
+	}
+	return wrapProse(plan, width);
+}
 
 /** What the dialog resolves to; index into the choices list, or null for cancel. */
 export type PlanChoice = number;
@@ -104,7 +125,7 @@ export function initialPlanChoice(options: readonly { mode?: string; restore?: b
 export type Paint = (color: string, text: string) => string;
 
 export interface PlanViewerView {
-	/** Pre-wrapped plain-text plan lines (wrapPlanText output for this width). */
+	/** The plan's lines for this width (planLines output: painted Markdown or plain wrapped text). */
 	lines: string[];
 	offset: number;
 	choice: PlanChoice;
@@ -117,7 +138,7 @@ export function renderPlanViewer(view: PlanViewerView, paint: Paint, width: numb
 	const maxVisible = view.maxVisible ?? 12;
 	// Cut plain text before painting so escapes never enter the width math.
 	const cut = (line: string) => cutPlainText(line, width);
-	const rule = paint("dim", "─".repeat(Math.max(0, Math.min(width, 72))));
+	const rule = paint("dim", "─".repeat(Math.max(0, width)));
 	const pickHint = view.choices.length > 1 ? `1-${view.choices.length} pick · ` : "";
 
 	const out: string[] = [];
@@ -126,9 +147,10 @@ export function renderPlanViewer(view: PlanViewerView, paint: Paint, width: numb
 	out.push(paint("dim", cut(`↑/↓ scroll · ←/→ switch choice · ${pickHint}enter confirm · esc keep planning`)));
 	out.push(rule);
 
+	// Plan lines may arrive painted (Markdown), so the guard cut is ANSI-aware.
 	const offset = clampOffset(view.offset, view.lines.length, maxVisible);
 	for (const line of view.lines.slice(offset, offset + maxVisible)) {
-		out.push(cut(line));
+		out.push(truncateLine(line, width));
 	}
 	if (view.lines.length > maxVisible) {
 		const last = Math.min(view.lines.length, offset + maxVisible);

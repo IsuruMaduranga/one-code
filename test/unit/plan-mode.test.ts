@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { visibleWidth } from "../../extensions/lib/text-width.ts";
 import { buildPlanModeReminder } from "../../extensions/plan-mode/reminder.ts";
 import { randomSlug } from "../../extensions/plan-mode/slug.ts";
-import { clampOffset, decodeViewerKey, initialPlanChoice, renderPlanViewer, selectPlanChoice, wrapPlanText } from "../../extensions/plan-mode/viewer.ts";
+import { clampOffset, decodeViewerKey, initialPlanChoice, planLines, renderPlanViewer, selectPlanChoice, wrapPlanText } from "../../extensions/plan-mode/viewer.ts";
 
 /** The dialog's default choice list when auto mode is available (auto mode leads). */
 const CHOICES = [
@@ -129,6 +130,37 @@ describe("plan viewer", () => {
 		for (const line of lines) {
 			expect([...line].length, JSON.stringify(line)).toBeLessThanOrEqual(width);
 		}
+	});
+
+	// The divider was a fixed 72 columns on a 160-column screen.
+	it("sizes both dividers to the width", () => {
+		for (const width of [40, 160]) {
+			const out = renderPlanViewer({ lines: ["plan"], offset: 0, choice: 0, choices: CHOICES }, plain, width);
+			const rules = out.filter((line) => /^─+$/.test(line));
+			expect(rules).toEqual(["─".repeat(width), "─".repeat(width)]);
+		}
+	});
+
+	// Markdown output is painted: an overwide painted line is cut ANSI-aware, never past the width.
+	it("keeps painted plan lines within the width", () => {
+		const painted = `\x1b[1m${"bold ".repeat(20)}\x1b[22m`;
+		const out = renderPlanViewer({ lines: [painted], offset: 0, choice: 0, choices: CHOICES }, plain, 30);
+		for (const line of out) expect(visibleWidth(line), JSON.stringify(line)).toBeLessThanOrEqual(30);
+	});
+
+	it("renders the plan through the Markdown renderer when there is one, else wraps it plain", () => {
+		const seen: Array<[string, number]> = [];
+		const markdown = (text: string, width: number) => (seen.push([text, width]), ["\x1b[1mContext:\x1b[22m it"]);
+		expect(planLines("**Context:** it", 40, markdown)).toEqual(["\x1b[1mContext:\x1b[22m it"]);
+		expect(seen).toEqual([["**Context:** it", 40]]);
+		expect(planLines("verify with make test and report", 16)).toEqual(["verify with make", "test and report"]);
+	});
+
+	it("falls back to the plain wrap when the Markdown renderer throws", () => {
+		const broken = () => {
+			throw new Error("Theme not initialized");
+		};
+		expect(planLines("  - nested item that wraps", 16, broken)).toEqual(["  - nested item", "  that wraps"]);
 	});
 
 	it("windows the content and reports the scroll position", () => {
