@@ -2217,7 +2217,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			if (epoch === sessionEpoch) respond(verdict);
 		};
 		reviewCompletedRun(payload.actions, ctx, label, new AbortController().signal, payload.startedBy)
-			.then((verdict) => respondIfCurrent(verdict))
+			.then(respondIfCurrent)
 			.catch((error) => respondIfCurrent({ kind: "unavailable", reason: `the review itself failed (${(error as Error).message})` }));
 	});
 

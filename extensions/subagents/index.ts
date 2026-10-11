@@ -122,7 +122,6 @@ const MCP_STATUS_LABELS: Record<McpStatusKind, string | undefined> = {
 	disabled: "disabled",
 };
 
-/** The catalog shipped in this package: <package>/agents. */
 /** This package's root (the `one-code-extension` directory). */
 const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 

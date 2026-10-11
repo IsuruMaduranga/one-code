@@ -113,7 +113,8 @@ describe("workflow wiring: one-shot modes (LIFECYCLE-REVIEW-2026-09-06 M1)", () 
 		const fake = createFakePi();
 		workflowExtension(fake.pi as never);
 		const probe = "export const meta = { name: 'args-probe', description: 'reports args' }\nreturn Array.isArray(args) ? `array:${args.length}` : typeof args === 'string' ? `string:${args}` : `files:${args.files.length}`";
-		const result = (await fake.tools.get("workflow")!.execute("c1", { script: probe, args }, undefined, undefined, ctxFor("json"))) as { content: Array<{ text: string }> };
+		const tool = fake.tools.get("workflow")! as unknown as { prepareArguments: (a: unknown) => unknown; execute: (...a: unknown[]) => Promise<unknown> };
+		const result = (await tool.execute("c1", tool.prepareArguments({ script: probe, args }), undefined, undefined, ctxFor("json"))) as { content: Array<{ text: string }> };
 		expect(result.content[0].text).toContain(expected);
 	});
 

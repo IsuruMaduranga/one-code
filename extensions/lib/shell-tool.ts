@@ -198,11 +198,10 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 				// move it where the model's read of it is a working-space read, and
 				// cut the output Claude Code's way (its head, not pi's tail). Then
 				// Claude Code's result text (`Exit code N` first, trimmed output).
-				const resultsDir = sessionResultsDir(ctx);
 				const result = await keepSpillReadable(
 					() => spec.foreground(ctx.cwd).execute(toolCallId, { command: params.command, timeout: timeoutSeconds }, signal, onUpdate, ctx),
-					resultsDir,
-					{ inlineMax: INLINE_OUTPUT_CAP, persist: (output) => persistIfLarge(output, { dir: resultsDir, id: `${spec.name}-${toolCallId}`, maxBytes: INLINE_OUTPUT_CAP }) },
+					sessionResultsDir(ctx),
+					{ inlineMax: INLINE_OUTPUT_CAP, id: `${spec.name}-${toolCallId}` },
 				);
 				// The no-match check parses the command; only bash results need the grammar.
 				if (spec.name === "bash") await bashParserReady();

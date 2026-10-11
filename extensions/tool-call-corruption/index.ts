@@ -41,6 +41,10 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 	const alive = sessionAlive(pi);
 	const rawCalls = new Map<number, { raw: string; markup: number; contentMarkup: number; next: number }>();
 	const flagged = new Map<string, ToolCallDamage>();
+	// Any provider: a call streaming blank padding without end never reaches
+	// toolcall_end, and nothing else stops it (gpt-6.1-sol, battery round 7:
+	// 26 MB of tabs and newlines over 25 minutes in a one-shot run).
+	const padding = new Map<number, TrailingPadding>();
 	const pending = new Map<AbortController, Promise<void>>();
 	let responseId: string | undefined;
 	// OpenRouter names the serving provider on every chunk; a cancelled
@@ -60,6 +64,7 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 	const resetMessage = () => {
 		rawCalls.clear();
 		flagged.clear();
+		padding.clear();
 		responseId = undefined;
 		streamProvider = undefined;
 		contentStarted = false;
@@ -142,23 +147,14 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 		if (idleTimer) armIdle(ctx);
 	});
 
-	// Any provider: a call streaming blank padding without end never reaches
-	// toolcall_end, and nothing else stops it (gpt-6.1-sol, battery round 7:
-	// 26 MB of tabs and newlines over 25 minutes in a one-shot run).
-	const padding = new Map<number, TrailingPadding>();
-	let runawayStopped = false;
-	pi.on("message_start", () => padding.clear());
-	pi.on("agent_start", () => {
-		padding.clear();
-		runawayStopped = false;
-	});
 	pi.on("message_update", (event, ctx) => {
 		const update = event.assistantMessageEvent;
-		if (!alive() || runawayStopped || update.type !== "toolcall_delta") return;
+		if (!alive() || stopped || update.type !== "toolcall_delta") return;
 		const state = trailingPadding(padding.get(update.contentIndex), update.delta);
 		padding.set(update.contentIndex, state);
 		if (!state.structural || state.run < RUNAWAY_PADDING_LIMIT) return;
-		runawayStopped = true;
+		stopped = true;
+		clearIdle();
 		const reason = `The model streamed over ${RUNAWAY_PADDING_LIMIT.toLocaleString("en-US")} characters of blank space into a tool call's arguments without finishing it, so the turn was stopped.`;
 		pi.events.emit(TURN_FAILED_CHANNEL, { reason } satisfies TurnFailedEvent);
 		ctx.abort();

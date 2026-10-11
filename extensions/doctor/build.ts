@@ -7,8 +7,6 @@
  * MCP servers reachable, what external programs are missing — then the issues.
  */
 
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { extensionVersion } from "../lib/package-version.ts";
 import { piVersionWarning, TESTED_PI_MAX_EXCLUSIVE, TESTED_PI_MIN } from "../lib/pi-version.ts";
@@ -40,8 +38,7 @@ import {
 	shortenHome,
 } from "./report.ts";
 import { MODE_LABELS } from "../lib/config-mode.ts";
-
-export const BUNDLED_AGENTS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "agents");
+import { BUNDLED_AGENTS_DIR } from "../subagents/agents.ts";
 
 /** The environment variables a first-time user is most likely to already have; hinted when nothing is configured. */
 export const COMMON_KEY_ENV_VARS = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "OPENCODE_API_KEY"];

@@ -458,15 +458,15 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		// A partial read is not evidence that the entire instruction file is shown.
 		const input = event.input as { offset?: number; limit?: number };
 		const truncated = (event.details as { truncation?: { truncated?: boolean } } | undefined)?.truncation?.truncated;
+		const shown: string[] = [];
 		if ((input.offset ?? 1) <= 1 && input.limit == null && !truncated) {
 			const readKey = tryRealpath(filePath) ?? filePath;
 			attachedNested.add(readKey);
-			remember(event.toolCallId, [readKey]);
+			shown.push(readKey);
 		}
 		// Bound to this read: system-reminder's hook for it has already run, so the
 		// queue pins them to this result at the next request; unbound, the next result
 		// in a parallel batch took them, beside another file (battery round 7).
-		const shown: string[] = [];
 		for (const file of files) {
 			if (attachedNested.has(file.key)) continue;
 			attachedNested.add(file.key);

@@ -124,11 +124,18 @@ const WorkflowParams = Type.Object({
 });
 
 /**
- * `args` as the script should see it. Weak models send a list or object as a
- * JSON-encoded string despite the description (every Qwen 3.8 model, battery
- * round 7), which breaks `args.map` and `pipeline(args, …)`; a string that
- * parses to an array or object is decoded. Any other value passes verbatim.
+ * The call's arguments with `args` as the script should see it, decoded before
+ * the gate, hooks and the stored call see them. Weak models send a list or
+ * object as a JSON-encoded string despite the description (every Qwen 3.8
+ * model, battery round 7), which breaks `args.map` and `pipeline(args, …)`; a
+ * string that parses to an array or object is decoded. Any other value passes
+ * verbatim.
  */
+function prepareWorkflowArguments(raw: unknown): unknown {
+	if (!raw || typeof raw !== "object" || !("args" in raw)) return raw;
+	return { ...raw, args: decodedArgs((raw as { args: unknown }).args) };
+}
+
 function decodedArgs(args: unknown): unknown {
 	if (typeof args !== "string" || !/^\s*[[{]/.test(args)) return args;
 	try {
@@ -220,6 +227,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 					: undefined,
 		}),
 		description: workflowDescription("medium", false),
+		prepareArguments: prepareWorkflowArguments as never,
 		promptSnippet: "Run a script that orchestrates many subagents (opt-in ultracode mode)",
 		parameters: WorkflowParams,
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
@@ -265,7 +273,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 				const configuredDefault = applicableSubagentDefault(loadSubagentDefault(os.homedir()), ctx.model);
 				const handle = manager.start({
 					script,
-					args: decodedArgs(params.args),
+					args: params.args,
 					tokenBudget: params.tokenBudget ?? null,
 					resumeFromRunId: params.resumeFromRunId,
 					// Where the session works: the entered worktree, if any (pi keeps ctx.cwd at the original checkout).
