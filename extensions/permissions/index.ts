@@ -1512,10 +1512,15 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// an abort before the block (the result would say "Operation aborted"), so
 		// the abort waits for the recorded result; the run then ends as an abort,
 		// which every reader of the run's outcome treats as the user's interrupt.
-		if (!feedback?.trim()) abortAfterResult.add(event.toolCallId);
+		// `terminate` ends pi's loop after the batch: otherwise it sent one more
+		// request on the aborted signal, which came back as an error and printed
+		// "Error: This operation was aborted" above the Interrupted line.
+		const stop = !feedback?.trim();
+		if (stop) abortAfterResult.add(event.toolCallId);
 		return {
 			block: true,
 			reason: userDenialText(feedback),
+			...(stop ? { terminate: true } : {}),
 		};
 	});
 

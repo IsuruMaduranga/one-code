@@ -61,7 +61,10 @@ export interface RunMessage {
  * "ok". `signalAborted` is the run's abort signal at `agent_end`
  * (`ctx.signal?.aborted`): it turns an `error` stop into "aborted" (see the
  * header) and leaves a completed stop alone — a signal aborted after the final
- * message landed did not interrupt anything.
+ * message landed did not interrupt anything. A run ends on a tool call only
+ * when its batch terminates the loop; with the signal aborted that is a turn
+ * the user stopped before the model replied (a rejection without a reason,
+ * permissions/index.ts), so it is "aborted" too.
  */
 export function runOutcome(messages: ReadonlyArray<RunMessage> | undefined, signalAborted = false): RunOutcome {
 	if (!messages) return "ok";
@@ -69,7 +72,10 @@ export function runOutcome(messages: ReadonlyArray<RunMessage> | undefined, sign
 		const message = messages[i];
 		if (message.role !== "assistant") continue;
 		if (message.stopReason === "aborted") return "aborted";
-		if (message.stopReason === "error") return signalAborted ? "aborted" : "error";
+		if (message.stopReason === "error" || message.stopReason === "toolUse") {
+			if (signalAborted) return "aborted";
+			return message.stopReason === "error" ? "error" : "ok";
+		}
 		return "ok";
 	}
 	return "ok";

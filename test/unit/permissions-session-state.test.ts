@@ -18,7 +18,7 @@ import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
 type Prompt = { title: string; options: string[] };
-type GateResult = { block?: boolean; reason?: string } | undefined;
+type GateResult = { block?: boolean; reason?: string; terminate?: boolean } | undefined;
 
 describe("permissions session state", () => {
 	let fake: FakePi;
@@ -98,6 +98,9 @@ describe("permissions session state", () => {
 			expect(result?.reason).toContain("STOP what you are doing");
 			expect(ui().input).not.toHaveBeenCalled();
 			expect(ctx.abort).toHaveBeenCalledTimes(1);
+			// pi ends the loop after the batch instead of sending one more request
+			// on the aborted signal (which printed "Error: This operation was aborted").
+			expect(result?.terminate).toBe(true);
 		});
 
 		it("stops the turn on No with no reason given", async () => {
@@ -112,6 +115,7 @@ describe("permissions session state", () => {
 			const result = await rejected("no-2");
 			expect(result?.reason).toContain("use make clean instead");
 			expect(ctx.abort).not.toHaveBeenCalled();
+			expect(result?.terminate).toBeUndefined();
 		});
 	});
 
