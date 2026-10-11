@@ -23,6 +23,18 @@ function tiers() {
 }
 
 describe("chosenModelWarnings", () => {
+	it("warns when a chosen classifier costs more per call than the session model, naming how much", () => {
+		tiers();
+		const pricey = model("openai", "gpt-x-pricey", 20, 1_000_000);
+		setModelTierOverridesForTest({ "openai/gpt-x-big": "workhorse", "openai/gpt-x-pricey": "workhorse" });
+		const [warning] = chosenModelWarnings({ available: [session, pricey], sessionModel: session, chosen: pricey, role: "classifier" });
+		expect(warning?.kind).toBe("costlier");
+		expect(warning?.text).toContain("costs about 4 times as much per call as this session's openai/gpt-x-big");
+		expect(warning?.fix).toMatch(/\/auto-mode model/);
+		expect(chosenModelWarnings({ available: [session, pricey], sessionModel: session, chosen: pricey, role: "subagent" })).toEqual([]);
+		expect(chosenModelWarnings({ available: [session, mid], sessionModel: session, chosen: mid, role: "classifier" }).map((w) => w.kind)).not.toContain("costlier");
+	});
+
 	it("warns when the chosen model is two or more tiers below the session's, not one", () => {
 		tiers();
 		const kinds = (chosen: Model<Api>) => chosenModelWarnings({ available: [session, mid, small], sessionModel: session, chosen, role: "subagent" }).map((w) => w.kind);

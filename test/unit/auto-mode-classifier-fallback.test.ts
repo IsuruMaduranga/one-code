@@ -19,6 +19,7 @@ import {
 	classify,
 	createClassifierState,
 	isClassifierTimeout,
+	isPromptPolicyRefusal,
 	isTransportFailure,
 	providerErrorSummary,
 	ROTATE_AFTER_TIMEOUTS,
@@ -495,5 +496,80 @@ describe("the action under review reaches the classifier whole", () => {
 		expect(verdict.decision).toBe("block");
 		expect(verdict.reason).toMatch(/characters.*Split it/);
 		expect(completeMock).not.toHaveBeenCalled();
+	});
+});
+
+describe("classify: a provider that refuses the classifier's prompt", () => {
+	const refusal = () =>
+		errorReply(
+			"Codex error: Invalid prompt: your prompt was flagged as potentially violating our usage policy. Please try again with a different prompt: https://platform.openai.com/docs/guides/reasoning#advice-on-prompting",
+		);
+
+	it("matches the usage-policy refusal, not the cybersecurity flag or an ordinary 400", () => {
+		expect(isPromptPolicyRefusal(refusal().errorMessage)).toBe(true);
+		expect(isPromptPolicyRefusal("This content was flagged for possible cybersecurity risk.")).toBe(false);
+		expect(isPromptPolicyRefusal("Invalid prompt: messages must not be empty.")).toBe(false);
+	});
+
+	it("retries a refused call once on the same model and keeps it", async () => {
+		completeMock.mockResolvedValueOnce(refusal()).mockResolvedValue(allowReply());
+		const { deps, notices } = makeDeps();
+		expect((await classify(request, deps)).decision).toBe("allow");
+		expect(completeMock.mock.calls.map((call) => call[0])).toEqual([miniModel, miniModel]);
+		expect(deps.state.pinned?.id).toBe(miniModel.id);
+		expect(deps.state.rejected.size).toBe(0);
+		expect(notices.some((notice) => notice.includes("usage-policy"))).toBe(false);
+	});
+
+	it("drops a model that refuses twice for the session and pins the next, naming it and its cost", async () => {
+		completeMock.mockImplementation(async (m: any) => (m.id === miniModel.id ? refusal() : allowReply()));
+		const unusable: string[] = [];
+		const { deps, notices } = makeDeps({ onModelUnusable: (model: string) => unusable.push(model) });
+		expect((await classify(request, deps)).decision).toBe("allow");
+		expect(completeMock.mock.calls.map((call) => call[0])).toEqual([miniModel, miniModel, sessionModel]);
+		expect(deps.state.pinned?.id).toBe(sessionModel.id);
+		expect(deps.state.refused).toEqual(new Set(["openai/gpt-5-mini"]));
+		// About the prompt, not the account: the subagent selector is not told.
+		expect(unusable).toEqual([]);
+		const warning = notices.find((notice) => notice.startsWith("openai/gpt-5-mini refused"));
+		expect(warning).toContain("screens calls with openai/gpt-5.1-mini for the rest of this session, at about 40 times the cost per call");
+
+		// The next call goes straight to the pinned model.
+		completeMock.mockClear();
+		expect((await classify(request, deps)).decision).toBe("allow");
+		expect(completeMock.mock.calls.map((call) => call[0])).toEqual([sessionModel]);
+	});
+
+	it("stops with no verdict when no other model can screen, and does not ask the refusing model again", async () => {
+		const { deps, notices } = makeDeps({
+			registry: {
+				getAvailable: () => [sessionModel],
+				getApiKeyAndHeaders: async () => ({ ok: true as const, apiKey: "key" }),
+			} as any,
+		});
+		completeMock.mockResolvedValue(refusal());
+		const verdict = await classify(request, deps);
+		expect(verdict).toMatchObject({ decision: "block", noVerdict: true });
+		expect(verdict.reason).toBe("Auto mode has no classifier: openai/gpt-5.1-mini refused the classifier's prompt as a possible usage-policy violation.");
+		// The provider's advice to rephrase never reaches the model.
+		expect(verdict.reason).not.toMatch(/try again|different prompt/i);
+		expect(completeMock).toHaveBeenCalledTimes(2);
+		expect(notices.filter((notice) => notice.startsWith("Auto mode has no classifier left"))).toHaveLength(1);
+		expect(notices.find((notice) => notice.startsWith("Auto mode has no classifier left"))).toMatch(/manual approval .*\/auto-mode model/);
+
+		completeMock.mockClear();
+		expect(await classify(request, deps)).toMatchObject({ decision: "block", noVerdict: true });
+		expect(completeMock).not.toHaveBeenCalled();
+		expect(notices.filter((notice) => notice.startsWith("Auto mode has no classifier left"))).toHaveLength(1);
+	});
+
+	it("stops when the models after a refusal cannot be used either", async () => {
+		completeMock.mockImplementation(async (m: any) =>
+			m.id === miniModel.id ? refusal() : errorReply("The 'gpt-5.1-mini' model is not supported when using Codex with a ChatGPT account."),
+		);
+		const { deps } = makeDeps();
+		const verdict = await classify(request, deps);
+		expect(verdict).toMatchObject({ decision: "block", noVerdict: true });
+		expect(verdict.reason).toMatch(/^Auto mode has no classifier: openai\/gpt-5-mini refused/);
 	});
 });

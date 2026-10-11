@@ -13,6 +13,10 @@
  * - **Classifier only, smaller context window:** the classifier receives the
  *   whole transcript, so once the session outgrows the chosen model's window
  *   each call goes unjudged and asks for approval until `/compact`.
+ * - **Classifier only, costlier than the session:** the classifier runs on
+ *   nearly every gated call, so a model that costs more per call than the
+ *   session model can cost more than the session itself. Automatic selection
+ *   only picks a strictly cheaper one.
  * - **Classifier only, unstable model:** a moving `-latest` alias or an
  *   experimental build can change what answers without notice, and with it the
  *   permission boundary. Automatic selection never picks one as the classifier.
@@ -21,14 +25,14 @@
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { hasCatalogContextWindow, isExperimentalBuild, isMovingAlias, modelSpec as spec } from "./model-policy.ts";
+import { classifierCallCost, hasCatalogContextWindow, isExperimentalBuild, isMovingAlias, modelSpec as spec } from "./model-policy.ts";
 import { intrinsicTier, tiersBelow } from "./model-tier.ts";
 import { newerModelSuggestion } from "./newer-model.ts";
 
 export type ChosenModelRole = "subagent" | "classifier";
 
 export interface ChosenModelWarning {
-	kind: "newer" | "weaker" | "window" | "unstable";
+	kind: "newer" | "weaker" | "window" | "unstable" | "costlier";
 	text: string;
 	/** What to run instead, in the role's own command. */
 	fix: string;
@@ -36,6 +40,14 @@ export interface ChosenModelWarning {
 
 /** Tiers below the session at which a chosen model is "far weaker" (the text says "two or more"). */
 const WEAKER_TIER_GAP = 2;
+
+/**
+ * How many times another price `ratio` is, for a warning: "1.4 times", "21 times".
+ * One decimal under ten, whole numbers above.
+ */
+export function costRatioText(ratio: number): string {
+	return `${ratio < 10 ? Math.round(ratio * 10) / 10 : Math.round(ratio)} times`;
+}
 
 const COMMAND: Record<ChosenModelRole, string> = { subagent: "/subagent", classifier: "/auto-mode model" };
 const LABEL: Record<ChosenModelRole, string> = { subagent: "subagent default", classifier: "auto-mode classifier" };
@@ -93,6 +105,19 @@ export function chosenModelWarnings({
 					"calls are not judged and each asks for your approval (a headless run stops) until you /compact.",
 				fix: `Pick a model with a larger window with ${command}, ${orAutomatic}`,
 			});
+		}
+		if (role === "classifier") {
+			const chosenCost = classifierCallCost(chosen);
+			const sessionCost = classifierCallCost(sessionModel);
+			if (chosenCost !== undefined && sessionCost !== undefined && chosenCost > sessionCost) {
+				warnings.push({
+					kind: "costlier",
+					text:
+						`The ${label} ${spec(chosen)} costs about ${costRatioText(chosenCost / sessionCost)} as much per call as this session's ${spec(sessionModel)}. ` +
+						"It screens nearly every gated call, so it can cost more than the session itself.",
+					fix: `Pick a cheaper one with ${command}, ${orAutomatic}`,
+				});
+			}
 		}
 	}
 

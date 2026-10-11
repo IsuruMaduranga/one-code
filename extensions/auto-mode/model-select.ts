@@ -40,26 +40,11 @@ import {
 	isStaleContainmentStamp,
 	modelIdentity,
 	modelSpec as spec,
-	pricedInput,
+	classifierCallCost,
 } from "../lib/model-policy.ts";
 import { atLeastTier, economicalContainedCandidates, intrinsicTier } from "../lib/model-tier.ts";
 
-/** A classifier call's measured shape: the cached ruleset and transcript, the new turn, the verdict. */
-export const CLASSIFIER_CALL_TOKENS = { cachedInput: 28_000, freshInput: 2_000, output: 700 } as const;
-
-/**
- * One classifier call's estimated cost in dollars at `CLASSIFIER_CALL_TOKENS`,
- * or undefined for a model with no input price. A model without a cache-read
- * price pays its input price for the cached part, and one without an output
- * price its input price for the verdict: both overstate, never understate.
- */
-export function classifierCallCost(model: Model<Api>): number | undefined {
-	const input = pricedInput(model);
-	if (input === undefined) return undefined;
-	const priced = (value: number | undefined) => (typeof value === "number" && value > 0 ? value : input);
-	const { cachedInput, freshInput, output } = CLASSIFIER_CALL_TOKENS;
-	return (priced(model.cost?.cacheRead) * cachedInput + input * freshInput + priced(model.cost?.output) * output) / 1_000_000;
-}
+export { CLASSIFIER_CALL_TOKENS, classifierCallCost } from "../lib/model-policy.ts";
 
 /**
  * The contained models in the session's tier or above that cost strictly less
