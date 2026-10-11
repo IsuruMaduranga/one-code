@@ -13,6 +13,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { sessionModelTier } from "../lib/session-model-tier.ts";
+import { mergeGrepWindows } from "./grep-merge.ts";
 import { withSearchTools } from "./tools.ts";
 
 export default function searchToolsExtension(pi: ExtensionAPI) {
@@ -26,4 +27,13 @@ export default function searchToolsExtension(pi: ExtensionAPI) {
 
 	pi.on("session_start", apply);
 	pi.on("model_select", apply);
+
+	// Overlapping context windows repeat lines (grep-merge.ts).
+	pi.on("tool_result", (event) => {
+		if (event.toolName !== "grep" || event.isError) return undefined;
+		const first = event.content?.[0];
+		if (first?.type !== "text" || typeof first.text !== "string") return undefined;
+		const text = mergeGrepWindows(first.text);
+		return text === first.text ? undefined : { content: [{ ...first, text }, ...event.content.slice(1)] };
+	});
 }
