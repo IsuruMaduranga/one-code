@@ -53,6 +53,21 @@ export function commandBreadcrumb(name: string, args: string): string {
 	return `<command-message>${name}</command-message>\n<command-name>/${name}</command-name>${args ? `\n<command-args>${args}</command-args>` : ""}\n`;
 }
 
+// commandBreadcrumb's shape at the start of a message; the arguments may span lines.
+const BREADCRUMB = /^<command-message>[^<\n]*<\/command-message>\n<command-name>(\/[^<\n]*)<\/command-name>(?:\n<command-args>([\s\S]*?)<\/command-args>)?\n/;
+
+/**
+ * What a user message that opens with commandBreadcrumb shows in the
+ * transcript: the command as typed, `/name args`. Claude Code shows a prompt
+ * command (a skill, `/init`, `/doctor`) by its command line and keeps the
+ * expanded text out of the transcript. `undefined` for any other message.
+ */
+export function commandDisplayLine(text: string): string | undefined {
+	const match = BREADCRUMB.exec(text);
+	if (!match) return undefined;
+	return match[2] ? `${match[1]} ${match[2]}` : match[1];
+}
+
 /**
  * Claude Code's argument substitution in a skill's text: `$ARGUMENTS`,
  * `$ARGUMENTS[n]` and `$n` (both counted from 0) take the arguments, and a

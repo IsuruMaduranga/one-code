@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	PI_BUILTIN_COMMANDS,
 	commandBreadcrumb,
+	commandDisplayLine,
 	isBareCommandName,
 	launchingSkill,
 	offSkillNotice,
@@ -98,6 +99,20 @@ describe("Claude Code's skill message", () => {
 
 	it("answers a model's call with Claude Code's launch line", () => {
 		expect(launchingSkill("workflow-authoring")).toBe("Launching skill: workflow-authoring");
+	});
+});
+
+// pi draws a user message as markdown: a typed skill showed its whole text.
+describe("commandDisplayLine", () => {
+	it("shows a typed command as its command line, with or without arguments", () => {
+		const [breadcrumb, text] = typedSkillContent("simplify", "", "Review the diff.");
+		expect(commandDisplayLine(`${breadcrumb}\n${text}`)).toBe("/simplify");
+		expect(commandDisplayLine(`${commandBreadcrumb("review", "PR 12\nfocus on auth")}\nbody`)).toBe("/review PR 12\nfocus on auth");
+	});
+
+	it("leaves every other message alone", () => {
+		expect(commandDisplayLine("Please run /simplify on this")).toBeUndefined();
+		expect(commandDisplayLine("<command-name>/model</command-name>\n")).toBeUndefined();
 	});
 });
 

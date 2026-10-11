@@ -13,6 +13,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createUserMessageSender } from "../lib/notifications.ts";
+import { commandBreadcrumb } from "../skill/invoke.ts";
 import { INIT_PROMPT } from "./prompt.ts";
 
 export default function initExtension(pi: ExtensionAPI) {
@@ -20,7 +21,9 @@ export default function initExtension(pi: ExtensionAPI) {
 	pi.registerCommand("init", {
 		description: "Initialize a new CLAUDE.md file with codebase documentation",
 		handler: async (_args, ctx) => {
-			await sendUserMessage(ctx, INIT_PROMPT, { deliverAs: "followUp" });
+			// Led by Claude Code's command breadcrumb, which also shows the turn as
+			// `/init` in the transcript (skill/index.ts) rather than the whole prompt.
+			await sendUserMessage(ctx, `${commandBreadcrumb("init", "")}\n${INIT_PROMPT}`, { deliverAs: "followUp" });
 		},
 	});
 }
