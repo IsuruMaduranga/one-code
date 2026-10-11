@@ -183,7 +183,7 @@ const SubagentParams = Type.Object({
 	subagent_type: Type.Optional(
 		Type.String({
 			description:
-				'The agent to run — a name from the "Available agents" system reminder, or "fork" to clone this conversation (default: general-purpose). To run several in parallel, issue multiple Agent tool calls in one turn.',
+				'The agent to run — a name from the "Available agents" system reminder (general-purpose when omitted), or "fork" to clone this conversation. To run several in parallel, issue multiple Agent tool calls in one turn.',
 		}),
 	),
 	task: Type.String({ description: "The task — a complete, self-contained instruction (the agent cannot ask follow-ups)." }),
