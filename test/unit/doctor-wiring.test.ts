@@ -160,6 +160,9 @@ describe("/doctor wiring", () => {
 		const all = (command.getArgumentCompletions as (p: string) => Array<{ value: string; description?: string }>)("");
 		expect(all.map((c) => c.value)).toEqual(["report", "presets", "preset economical", "preset balanced", "preset quality"]);
 		expect(all.every((c) => (c.description ?? "").length > 20)).toBe(true);
+		// A subcommand typed in full closes the menu, so one Enter runs it.
+		expect((command.getArgumentCompletions as (p: string) => unknown)("report")).toBeNull();
+		expect((command.getArgumentCompletions as (p: string) => Array<{ value: string }>)("presets")).toBeNull();
 	});
 
 	it.each(["print", "rpc"] as const)("`report` prints the report as a notification in %s, marking a missing provider", async (mode) => {

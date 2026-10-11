@@ -53,7 +53,7 @@ import { computePresets, describePresetChanges, findPreset, PRESET_NAMES, preset
 import { type DoctorReport, renderDoctorReport, renderDoctorText, renderSection } from "./report.ts";
 import { lookupLatestVersion } from "./update-lookup.ts";
 import { applyDoctorKey, decodeDoctorKey, renderDoctorViewer, visibleBodyRows } from "./viewer.ts";
-import { announceArgumentHint } from "../lib/argument-hints.ts";
+import { announceArgumentHint, extendingCompletions } from "../lib/argument-hints.ts";
 import { announceLocalCommand } from "../lib/local-command.ts";
 import { registeredMcpServers } from "../mcp/config.ts";
 import { configMode } from "../lib/config-mode.ts";
@@ -307,10 +307,8 @@ export default function doctorExtension(pi: ExtensionAPI) {
 	pi.registerCommand("doctor", {
 		description:
 			"Health-check your setup and fix what's wrong (Claude Code's checkup, run by the model). Subcommands: report (the measured report only), presets, preset <economical|balanced|quality>",
-		getArgumentCompletions: (prefix) => {
-			const typed = prefix.trim().toLowerCase();
-			return SUBCOMMANDS.filter((option) => option.value.startsWith(typed)).map((option) => ({ value: option.value, label: option.value, description: option.description }));
-		},
+		getArgumentCompletions: (prefix) =>
+			extendingCompletions(prefix, SUBCOMMANDS.map((option) => ({ value: option.value, label: option.value, description: option.description }))),
 		handler: async (args, ctx) => {
 			const [verb, ...rest] = args.trim().split(/\s+/).filter(Boolean);
 			if (verb === "preset") {

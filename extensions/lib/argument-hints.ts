@@ -132,3 +132,23 @@ export function applyArgumentHint(lines: string[], placeholder: string): string[
 	out[1] = line.slice(0, at + END_CURSOR.length) + placeholder + tail.slice(width);
 	return out;
 }
+
+/** One argument completion, as pi's `getArgumentCompletions` returns them. */
+export interface ArgumentCompletion {
+	value: string;
+	label: string;
+	description?: string;
+}
+
+/**
+ * The completions that extend what was typed, or null to close the menu. pi's
+ * editor answers Enter on an open argument menu by applying the selection,
+ * not by submitting, so offering the value already typed in full (`/doctor
+ * report`) took a second Enter to run the command; an exact match is left
+ * out, and with nothing longer the menu stays shut and Enter submits.
+ */
+export function extendingCompletions(prefix: string, options: readonly ArgumentCompletion[]): ArgumentCompletion[] | null {
+	const typed = prefix.trim().toLowerCase();
+	const matches = options.filter((option) => option.value.startsWith(typed) && option.value.trim() !== typed);
+	return matches.length ? matches : null;
+}

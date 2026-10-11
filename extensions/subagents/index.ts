@@ -111,6 +111,7 @@ import { trackShellTasks } from "../lib/shell-tasks.ts";
 import { createMarkdownProse } from "./prose.ts";
 import { asScrollableViewport, ViewportMirror } from "./viewport-mirror.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
+import { extendingCompletions } from "../lib/argument-hints.ts";
 import { CONTEXT_BASELINE_CHANNEL, restoredContext } from "../lib/context-stack.ts";
 import { emptySubagentBaseline, planSubagentAnnouncement, subagentBaseline, subagentBaselineFromStack, type SubagentBaseline } from "./announce.ts";
 import { panelUi } from "../lib/panel-focus.ts";
@@ -3041,10 +3042,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	registerLocalCommand(pi, "subagent", {
 		description: "Set the default model for subagent/workflow runs: /subagent [provider/model-id|inherit|status|clear]",
 		argumentHint: "[provider/model-id|inherit|status|clear]",
-		getArgumentCompletions: (prefix) =>
-			["inherit", "status", "clear"]
-				.filter((value) => value.startsWith(prefix.trim().toLowerCase()))
-				.map((value) => ({ value, label: value })),
+		getArgumentCompletions: (prefix) => extendingCompletions(prefix, ["inherit", "status", "clear"].map((value) => ({ value, label: value }))),
 		handler: async (args, ctx) => {
 			const typed = args.trim();
 			if (typed === "clear") {
