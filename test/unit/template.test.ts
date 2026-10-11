@@ -70,6 +70,13 @@ describe("buildClaudeCodeSystemPrompt", () => {
 		expect(prompt).toContain("/home/u/.claude/projects/-tmp-project/memory/");
 	});
 
+	it.each(TIERS)("drops the memory section while auto-memory is off (%s)", (tier) => {
+		const prompt = buildClaudeCodeSystemPrompt(baseOptions, { ...env, memoryDir: undefined }, tier);
+		expect(prompt).not.toContain("/memory/");
+		expect(prompt).not.toMatch(/^# (auto memory|Memory)$/m);
+		expect(prompt).toContain("Current working directory: /tmp/project");
+	});
+
 	it("lists tools that have snippets and appends guidelines", () => {
 		const prompt = buildClaudeCodeSystemPrompt(
 			{

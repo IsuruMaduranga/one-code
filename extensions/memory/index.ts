@@ -31,7 +31,7 @@ import {
 	indexLimitStatus,
 	stampFrontmatter,
 } from "../lib/memory-content.ts";
-import { type ConfigMode, CONFIG_MODE_KEY, claudeSourcesOn, configMode, configModeFromEnv, MODE_LABELS, savedConfigMode } from "../lib/config-mode.ts";
+import { type ConfigMode, CONFIG_MODE_KEY, claudeSourcesOn, configMode, configModeFromEnv, savedConfigMode } from "../lib/config-mode.ts";
 import { isClaudeLocation } from "../lib/claude-context.ts";
 import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
 import { claudeConfigDir, comparablePath, isPathAtOrUnder, oneCodeStateDir, tryRealpath } from "../lib/paths.ts";
@@ -42,7 +42,8 @@ import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { buildMemoryEntries, entryName, type MemoryEntry } from "./entries.ts";
 import { editorHint, memoryDisplayPath, openPath } from "./open-external.ts";
-import { applyMemoryKey, decodeMemoryKey, initialMemoryState, type ModeView, renderMemoryPanel } from "./panel.ts";
+import { applyMemoryKey, type AutoMemoryView, decodeMemoryKey, initialMemoryState, type ModeView, renderMemoryPanel, settingChanges } from "./panel.ts";
+import { AUTO_MEMORY_KEY, autoMemoryEnabled, autoMemoryFromEnv, savedAutoMemory } from "../lib/auto-memory.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 import { canShowCustomUi } from "../lib/headless-output.ts";
 import { panelUi } from "../lib/panel-focus.ts";
@@ -65,7 +66,7 @@ function memoryEntriesFor(cwd: string): MemoryEntry[] {
 		home: os.homedir(),
 		homeClaudeDir: claudeConfigDir(),
 		homeOneCodeDir: oneCodeStateDir(),
-		memoryDir: projectMemoryDir(cwd),
+		memoryDir: autoMemoryEnabled(cwd) ? projectMemoryDir(cwd) : undefined,
 	});
 }
 
@@ -104,6 +105,9 @@ export default function memoryExtension(pi: ExtensionAPI) {
 				if (combined) ctx.ui.notify(combined, "warning");
 			}
 		}
+
+		// Auto-memory off (lib/auto-memory.ts): no folder, no stamping.
+		if (!autoMemoryEnabled(ctx.cwd)) return;
 
 		// Like Claude Code: one memory dir per git repo (shared by worktrees and
 		// subdirectories); outside a repo, per cwd.
@@ -177,16 +181,20 @@ export default function memoryExtension(pi: ExtensionAPI) {
 				return ctx.mode === "rpc" ? limitation.trim() : undefined;
 			}
 			const mode: ModeView = { running: configMode(), saved: savedConfigMode(), fromEnv: configModeFromEnv() !== undefined };
-			const savedBefore = mode.saved;
-			const chosen = await openMemoryPanel(pi.events, ctx, entries, mode);
-			// The mode row is One Code's own; its line leads CC's result when it changed.
-			const modeLine =
-				mode.saved === savedBefore
-					? ""
-					: `Set config sources to ${MODE_LABELS[mode.saved]}${mode.saved === mode.running ? "" : "; applies from the next start"}\n\n`;
+			const autoMemory: AutoMemoryView = {
+				running: autoMemoryEnabled(ctx.cwd),
+				saved: savedAutoMemory(ctx.cwd),
+				fromEnv: autoMemoryFromEnv() !== undefined,
+			};
+			const before = { mode: mode.saved, autoMemory: autoMemory.saved };
+			const chosen = await openMemoryPanel(pi.events, ctx, entries, mode, autoMemory);
+			// A toggle's line leads CC's result when it changed something.
+			const changes = settingChanges(before, mode, autoMemory);
+			const modeLine = changes ? `${changes}\n\n` : "";
 			if (!chosen) {
-				ctx.ui.notify(CANCELLED, "info");
-				return `${modeLine}${CANCELLED}`;
+				// Closing after a change reports the change, not a cancel.
+				ctx.ui.notify(changes || CANCELLED, "info");
+				return changes || CANCELLED;
 			}
 			const shown = memoryDisplayPath(chosen.path, ctx.cwd, os.homedir());
 			const result = await openPath(chosen.path, "file");
@@ -200,18 +208,24 @@ export default function memoryExtension(pi: ExtensionAPI) {
 /** Claude Code's `/memory` result when the panel closes without a pick. */
 const CANCELLED = "Cancelled memory editing";
 
-/** Save `configMode` to One Code's user settings; the running process keeps its mode. */
-function saveConfigMode(next: ConfigMode): void {
+/** Save one key to One Code's user settings; the running process keeps its value. */
+function saveUserSetting(key: string, value: unknown): void {
 	const path = oneCodeSettingsPath(os.homedir());
-	writeSettings(path, { ...readSettingsForWrite(path), [CONFIG_MODE_KEY]: next });
+	writeSettings(path, { ...readSettingsForWrite(path), [key]: value });
 }
 
 /**
  * Show the Memory panel as a focused overlay; resolve to the chosen entry or
- * null. Enter on the config-sources row saves the other mode into `mode.saved`
- * and keeps the panel up.
+ * null. The toggle rows save into `autoMemory.saved` and `mode.saved` (the
+ * config-sources row after a confirming second Enter) and keep the panel up.
  */
-function openMemoryPanel(events: ExtensionAPI["events"], ctx: ExtensionContext, entries: MemoryEntry[], mode: ModeView): Promise<MemoryEntry | null> {
+function openMemoryPanel(
+	events: ExtensionAPI["events"],
+	ctx: ExtensionContext,
+	entries: MemoryEntry[],
+	mode: ModeView,
+	autoMemory: AutoMemoryView,
+): Promise<MemoryEntry | null> {
 	return panelUi(events, ctx.ui).custom<MemoryEntry | null>((tui, theme, _keybindings, done) => {
 		const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme) };
 		const state = initialMemoryState();
@@ -225,7 +239,7 @@ function openMemoryPanel(events: ExtensionAPI["events"], ctx: ExtensionContext, 
 				if (cache?.width === width) return cache.lines;
 				const termRows = (tui as { terminal: { rows: number } }).terminal.rows;
 				const height = boundedDockHeight(termRows, MEMORY_PANEL_MAX_HEIGHT);
-				const lines = renderMemoryPanel({ state, entries, width, height, mode }, paint).map((line) =>
+				const lines = renderMemoryPanel({ state, entries, width, height, mode, autoMemory }, paint).map((line) =>
 					truncateLine(line, width),
 				);
 				cache = { width, lines };
@@ -235,15 +249,32 @@ function openMemoryPanel(events: ExtensionAPI["events"], ctx: ExtensionContext, 
 				const key = decodeMemoryKey(data);
 				if (!key) return;
 				const effect = applyMemoryKey(state, key, entries);
-				if (effect?.kind === "toggle-mode" && mode.fromEnv) {
+				if (effect?.kind === "confirm-mode" && mode.fromEnv) {
 					// The variable outranks the saved setting, so a write here would never apply.
+					state.confirmingMode = false;
 					ctx.ui.notify("Config sources are set by ONECODE_CONFIG_MODE. Unset it to switch here.", "info");
+					repaint();
+					return;
+				}
+				if (effect?.kind === "toggle-auto-memory") {
+					if (autoMemory.fromEnv) {
+						ctx.ui.notify("Auto-memory is set by CLAUDE_CODE_DISABLE_AUTO_MEMORY. Unset it to switch here.", "info");
+						return;
+					}
+					try {
+						saveUserSetting(AUTO_MEMORY_KEY, !autoMemory.saved);
+						// Re-read the ladder: a project or managed file can still outrank the user file.
+						autoMemory.saved = savedAutoMemory(ctx.cwd);
+					} catch (error) {
+						ctx.ui.notify(`Couldn't save the auto-memory setting: ${error instanceof Error ? error.message : error}`, "error");
+					}
+					repaint();
 					return;
 				}
 				if (effect?.kind === "toggle-mode") {
 					const next: ConfigMode = mode.saved === "independent" ? "claude-compatible" : "independent";
 					try {
-						saveConfigMode(next);
+						saveUserSetting(CONFIG_MODE_KEY, next);
 						mode.saved = next;
 					} catch (error) {
 						ctx.ui.notify(`Couldn't save the config sources setting: ${error instanceof Error ? error.message : error}`, "error");

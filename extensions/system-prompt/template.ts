@@ -75,8 +75,9 @@ export function buildClaudeCodeSystemPrompt(
 	const sections = [
 		...lead,
 		buildToolsSection(options),
-		// Workhorse, cheap and tiny use the long memory spec.
-		memoryPromptSection(env.memoryDir, bundle.verboseMemory),
+		// Workhorse, cheap and tiny use the long memory spec. No section while
+		// auto-memory is off, as in Claude Code.
+		...(env.memoryDir ? [memoryPromptSection(env.memoryDir, bundle.verboseMemory)] : []),
 		...bundle.tail,
 	];
 

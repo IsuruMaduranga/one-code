@@ -11,12 +11,17 @@
 import os from "node:os";
 import type { EnvironmentFacts } from "../lib/environment-block.ts";
 import { findGitRoot } from "../lib/git.ts";
+import { autoMemoryEnabled } from "../lib/auto-memory.ts";
 import { projectMemoryDir } from "../lib/memory.ts";
 
 /** The facts the environment block shows, plus the memory directory the system prompt names. */
 export interface EnvironmentInfo extends Omit<EnvironmentFacts, "scratchpadDir" | "workspaceDirs"> {
-	/** Per-project auto-memory directory; the memory extension guarantees it exists. */
-	memoryDir: string;
+	/**
+	 * Per-project auto-memory directory; the memory extension guarantees it
+	 * exists. Undefined while auto-memory is off (lib/auto-memory.ts): the
+	 * prompt then has no memory section.
+	 */
+	memoryDir: string | undefined;
 }
 
 /**
@@ -40,6 +45,6 @@ export function collectEnvironment(cwd: string): EnvironmentInfo {
 		platform: process.platform,
 		osVersion: `${os.type()} ${os.release()}`,
 		shell: shellName(),
-		memoryDir: projectMemoryDir(cwd, os.homedir()),
+		memoryDir: autoMemoryEnabled(cwd) ? projectMemoryDir(cwd, os.homedir()) : undefined,
 	};
 }

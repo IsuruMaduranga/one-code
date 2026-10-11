@@ -8,7 +8,9 @@ import {
 	decodeMemoryKey,
 	initialMemoryState,
 	MEMORY_DOCS_URL,
+	modeConfirmQuestion,
 	renderMemoryPanel,
+	settingChanges,
 	type PanelPaint,
 } from "../../extensions/memory/panel.ts";
 
@@ -79,8 +81,11 @@ describe("memory panel navigation", () => {
 	it("clamps the cursor and opens the selected entry", () => {
 		const state = initialMemoryState();
 		applyMemoryKey(state, { kind: "up" }, entries);
+		applyMemoryKey(state, { kind: "up" }, entries);
 		expect(applyMemoryKey(state, { kind: "up" }, entries)).toBeUndefined();
-		expect(state.cursor).toBe(-1); // clamped at the config-sources row
+		expect(state.cursor).toBe(-2); // clamped at the auto-memory row
+		applyMemoryKey(state, { kind: "down" }, entries);
+		applyMemoryKey(state, { kind: "down" }, entries);
 		applyMemoryKey(state, { kind: "down" }, entries);
 		applyMemoryKey(state, { kind: "down" }, entries);
 		applyMemoryKey(state, { kind: "down" }, entries);
@@ -92,21 +97,46 @@ describe("memory panel navigation", () => {
 });
 
 describe("config-sources row", () => {
-	it("is reached by ↑ from the first entry, toggles on Enter, and ↓ returns to the list", () => {
+	it("is reached by ↑ from the first entry, switches on a confirming second Enter, and ↓ returns to the list", () => {
 		const state = initialMemoryState();
 		applyMemoryKey(state, { kind: "up" }, entries);
 		expect(state.cursor).toBe(-1);
+		expect(applyMemoryKey(state, { kind: "enter" }, entries)).toEqual({ kind: "confirm-mode" });
+		expect(state.confirmingMode).toBe(true);
 		expect(applyMemoryKey(state, { kind: "enter" }, entries)).toEqual({ kind: "toggle-mode" });
+		expect(state.confirmingMode).toBe(false);
 		applyMemoryKey(state, { kind: "down" }, entries);
 		expect(state.cursor).toBe(0);
 		expect(applyMemoryKey(state, { kind: "enter" }, entries)).toEqual({ kind: "open", entry: entries[0] });
+	});
+
+	it("keeps the mode and the panel when Esc or a move answers the confirmation", () => {
+		const state = initialMemoryState();
+		state.cursor = -1;
+		applyMemoryKey(state, { kind: "enter" }, entries);
+		expect(applyMemoryKey(state, { kind: "close" }, entries)).toBeUndefined();
+		expect(state.confirmingMode).toBe(false);
+		applyMemoryKey(state, { kind: "enter" }, entries);
+		applyMemoryKey(state, { kind: "up" }, entries);
+		expect(state.confirmingMode).toBe(false);
+		expect(applyMemoryKey(state, { kind: "close" }, entries)).toEqual({ kind: "close" });
+	});
+
+	it("asks the question and names both answers while confirming", () => {
+		const state = initialMemoryState();
+		state.cursor = -1;
+		state.confirmingMode = true;
+		const lines = renderMemoryPanel({ state, entries, width: 200, height: 20, mode: MODE }, plainPaint);
+		expect(modeConfirmQuestion(MODE)).toContain("Switch config sources to Independent?");
+		expect(lines.join("\n")).toContain(modeConfirmQuestion(MODE));
+		expect(lines.join("\n")).toContain("Enter to switch · Esc to keep Claude-compatible");
 	});
 
 	it("renders the saved mode, marks a pending change, and names the key", () => {
 		const state = initialMemoryState();
 		const same = renderMemoryPanel({ state, entries, width: 100, height: 20, mode: { running: "claude-compatible", saved: "claude-compatible" } }, plainPaint);
 		expect(same.some((l) => l.startsWith("  Config sources: Claude-compatible") && l.includes("~/.claude, CLAUDE.md"))).toBe(true);
-		expect(same.join("\n")).toContain("↑ for config sources");
+		expect(same.join("\n")).toContain("↑ for auto-memory and config sources");
 		state.cursor = -1;
 		const pending = renderMemoryPanel({ state, entries, width: 100, height: 20, mode: { running: "claude-compatible", saved: "independent" } }, plainPaint);
 		expect(pending.some((l) => l.startsWith("❯ Config sources: Independent (from next start)"))).toBe(true);
@@ -116,6 +146,32 @@ describe("config-sources row", () => {
 	it("shows the running mode and its source when ONECODE_CONFIG_MODE sets it", () => {
 		const lines = renderMemoryPanel({ state: initialMemoryState(), entries, width: 100, height: 20, mode: { running: "independent", saved: "claude-compatible", fromEnv: true } }, plainPaint);
 		expect(lines.some((l) => l.startsWith("  Config sources: Independent (set by ONECODE_CONFIG_MODE)"))).toBe(true);
+	});
+});
+
+describe("auto-memory row", () => {
+	it("sits above config sources and toggles at once on Enter", () => {
+		const state = initialMemoryState();
+		state.cursor = -2;
+		expect(applyMemoryKey(state, { kind: "enter" }, entries)).toEqual({ kind: "toggle-auto-memory" });
+		expect(state.confirmingMode).toBe(false);
+	});
+
+	it("renders the saved value with the pending and env notes", () => {
+		const state = initialMemoryState();
+		state.cursor = -2;
+		const pending = renderMemoryPanel({ state, entries, width: 100, height: 20, mode: MODE, autoMemory: { running: true, saved: false } }, plainPaint);
+		expect(pending).toContain("❯ Auto-memory: off (from next start)");
+		const env = renderMemoryPanel({ state: initialMemoryState(), entries, width: 100, height: 20, mode: MODE, autoMemory: { running: false, saved: true, fromEnv: true } }, plainPaint);
+		expect(env).toContain("  Auto-memory: off (set by CLAUDE_CODE_DISABLE_AUTO_MEMORY)");
+	});
+
+	it("reports each changed toggle, and nothing when none changed", () => {
+		const before = { mode: "claude-compatible", autoMemory: true } as const;
+		expect(settingChanges(before, { ...MODE }, { running: true, saved: true })).toBe("");
+		expect(settingChanges(before, { running: "claude-compatible", saved: "independent" }, { running: true, saved: false })).toBe(
+			"Turned auto-memory off; applies from the next start\nSet config sources to Independent; applies from the next start",
+		);
 	});
 });
 
@@ -129,7 +185,7 @@ describe("renderMemoryPanel", () => {
 		expect(text).toContain("Saved in ~/.claude/CLAUDE.md");
 		expect(text).toContain("3. Open auto-memory folder");
 		expect(text).toContain(`Learn more: ${MEMORY_DOCS_URL}`);
-		expect(text).toContain("Enter to open or switch · ↑ for config sources · Esc to close");
+		expect(text).toContain("Enter to open or toggle · ↑ for auto-memory and config sources · Esc to close");
 	});
 
 	it("marks the selected row with the ❯ cursor", () => {
