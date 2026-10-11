@@ -27,7 +27,7 @@ import { TURN_FAILED_CHANNEL, type TurnFailedEvent } from "../lib/interrupt.ts";
 import { handBackWarning, type HandBackVerdict } from "../lib/notifications.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent } from "../lib/model-unusable.ts";
 
-import { classifierChain, classify, createClassifierState } from "../auto-mode/classifier.ts";
+import { classifierCacheKey, classifierChain, classify, createClassifierState, releaseClassifierResources } from "../auto-mode/classifier.ts";
 import {
 	type AutoModeConfig,
 	autoModeSettingsPaths,
@@ -741,7 +741,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				config: autoConfig,
 				signal: opts?.signal ?? ctx.signal,
 				state: classifierState,
-				cacheKey: `${ctx.sessionManager.getSessionId()}:auto-mode`,
+				cacheKey: classifierCacheKey(ctx.sessionManager.getSessionId()),
 				onUsage: onClassifierUsage,
 				onModelUnusable: onClassifierModelUnusable,
 				onNotice: (message, level) => {
@@ -1003,10 +1003,13 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 
 	// The published bridge stays: aborted, it denies every call a retained child
 	// makes, while a parent without this extension keeps the local gate.
-	pi.on("session_shutdown", () => {
+	pi.on("session_shutdown", (_event, ctx) => {
 		childPermissionSession?.abort();
 		lastReviewCtx = undefined;
 		sessionEpoch++;
+		// Children screen through this session's key too (evaluateChildToolCall
+		// uses lastReviewCtx), so one release covers their calls.
+		releaseClassifierResources(ctx.sessionManager.getSessionId());
 	});
 
 	pi.on("model_select", (event, ctx) => {
@@ -2167,7 +2170,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				config: autoConfig,
 				signal,
 				state: classifierState,
-				cacheKey: `${ctx.sessionManager.getSessionId()}:auto-mode`,
+				cacheKey: classifierCacheKey(ctx.sessionManager.getSessionId()),
 				onNotice: (message, level) => ctx.ui.notify(message, level),
 				onUsage: onClassifierUsage,
 				onModelUnusable: onClassifierModelUnusable,

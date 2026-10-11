@@ -1,0 +1,18 @@
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@earendil-works/pi-ai", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@earendil-works/pi-ai")>()),
+	cleanupSessionResources: vi.fn(),
+}));
+import { cleanupSessionResources } from "@earendil-works/pi-ai";
+import { classifierCacheKey, releaseClassifierResources } from "../../extensions/auto-mode/classifier.ts";
+
+// On openai-codex the classifier's key is pi-ai's sessionId, which keeps a
+// WebSocket and a 5-minute idle timer alive past the session (findings §59).
+describe("releaseClassifierResources", () => {
+	it("closes what pi-ai holds under the session's classifier key", () => {
+		releaseClassifierResources("s1");
+		expect(cleanupSessionResources).toHaveBeenCalledWith("s1:auto-mode");
+		expect(classifierCacheKey("s1")).toBe("s1:auto-mode");
+	});
+});

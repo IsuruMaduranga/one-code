@@ -21,7 +21,7 @@
  */
 
 import { appendFileSync } from "node:fs";
-import { isContextOverflow, type Model, type Api, type AssistantMessage, type ThinkingLevel } from "@earendil-works/pi-ai";
+import { cleanupSessionResources, isContextOverflow, type Model, type Api, type AssistantMessage, type ThinkingLevel } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { forcedReasoningLevel, isReasoningMandatoryError, reasoningRetryLevel } from "../lib/model-policy.ts";
@@ -151,6 +151,22 @@ export interface ClassifierState {
 
 export function createClassifierState(): ClassifierState {
 	return { rejected: new Set(), notified: new Set(), timeoutStreak: 0, forcedReasoning: new Map() };
+}
+
+/** The `cacheKey` a session's classifier calls pass (`ClassifierDeps.cacheKey`). */
+export function classifierCacheKey(sessionId: string): string {
+	return `${sessionId}:auto-mode`;
+}
+
+/**
+ * Close what pi-ai holds open under the session's classifier key. The key
+ * doubles as pi-ai's `sessionId`, and on openai-codex that keeps one WebSocket
+ * per id with a 5-minute idle timer holding the process; pi's own dispose
+ * closes only the session's id, so without this a `pi -p` run waits out the
+ * timer after its answer (findings §59).
+ */
+export function releaseClassifierResources(sessionId: string): void {
+	cleanupSessionResources(classifierCacheKey(sessionId));
 }
 
 export interface ClassifierDeps {
