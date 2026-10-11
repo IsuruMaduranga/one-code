@@ -522,6 +522,12 @@ describe("searchBoxLines", () => {
 		expect(plain(typed)).toContain("⌕ git");
 	});
 
+	it("keeps the box width when the icon is left out", () => {
+		const lines = searchBoxLines("rule", "Enter…", paint, 40, "").map(plain);
+		expect(lines[1]).not.toContain("⌕");
+		expect([...lines[1]].length).toBe([...lines[0]].length);
+	});
+
 	it("truncates a long query to fit the box", () => {
 		const line = plain(searchBoxLines("x".repeat(200), "Search…", paint, 30)[1]);
 		expect([...line].length).toBe([...plain(searchBoxLines("", "Search…", paint, 30)[0])].length);

@@ -173,17 +173,19 @@ export function panelTopRule(paint: (color: string, text: string) => string, wid
  * A rounded, bordered single-line search input, Claude Code style. Returns three
  * lines (top border, the input row, bottom border), already indented one column.
  * The placeholder shows dim until the user types. `paint` colors the border with
- * the "border" token; the query text stays in the default foreground.
+ * the "border" token; the query text stays in the default foreground. `icon`
+ * leads the text (a plain text input passes ""); the box keeps its width.
  */
 export function searchBoxLines(
 	query: string,
 	placeholder: string,
 	paint: (color: string, text: string) => string,
 	width: number,
+	icon = "⌕ ",
 ): string[] {
 	const boxWidth = Math.max(12, width - 2); // one column of margin each side
 	const inner = boxWidth - 2; // space between the vertical borders
-	const label = query ? `⌕ ${query}` : `⌕ ${placeholder}`;
+	const label = `${icon}${query || placeholder}`;
 	const cut = cutPlainText(label, inner - 2); // one space padding each side
 	const content = ` ${cut}${" ".repeat(Math.max(0, inner - 2 - visibleWidth(cut)))} `;
 	const v = paint("border", "│");
