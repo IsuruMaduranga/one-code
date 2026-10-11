@@ -109,6 +109,7 @@ import { moveTasksSelection, renderShellDetail, renderTasksDialog, settleTasksVi
 import { reduceShellKey } from "./shell-panel.ts";
 import { trackShellTasks } from "../lib/shell-tasks.ts";
 import { createMarkdownProse } from "./prose.ts";
+import { asScrollableViewport, ViewportMirror } from "./viewport-mirror.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 import { CONTEXT_BASELINE_CHANNEL, restoredContext } from "../lib/context-stack.ts";
 import { emptySubagentBaseline, planSubagentAnnouncement, subagentBaseline, subagentBaselineFromStack, type SubagentBaseline } from "./announce.ts";
@@ -908,11 +909,14 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		let closed = false;
 		let repaintFn: (() => void) | undefined;
 		let doneFn: ((result: null) => void) | undefined;
+		/** Fullscreen only: turns pi's own viewport scrolling into view scrolling. */
+		let mirror: ViewportMirror | undefined;
 		const entry = {
 			retarget(id: string) {
 				if (currentId === id) return;
 				currentId = id;
 				scroll = 0;
+				mirror?.park(0);
 				panel.setView(id);
 				announceView(id);
 				repaintFn?.();
@@ -925,6 +929,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				if (closed) return;
 				closed = true;
 				if (view === entry) view = undefined;
+				mirror?.restore();
+				mirror = undefined;
 				panel.setView(undefined);
 				announceView(undefined);
 				doneFn?.(null);
@@ -952,8 +958,19 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					);
 					repaintFn = live.repaint;
 					const height = () => Math.max(8, tui.terminal.rows - viewReserve());
+					const viewport = asScrollableViewport(tui);
+					if (viewport && !closed) mirror = new ViewportMirror(viewport);
 					return {
 						render: (width: number) => {
+							// The page keys and the wheel scroll pi's main viewport, under
+							// this overlay; take the move as ours and park main again.
+							if (mirror) {
+								const next = mirror.absorb(scroll, maxScroll);
+								if (next !== scroll) {
+									scroll = next;
+									cache = undefined;
+								}
+							}
 							if (cache?.width === width) return cache.lines;
 							const run = liveRuns.get(currentId);
 							let lines: string[];
