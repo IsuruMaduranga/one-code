@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { validateToolArguments } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 import { prepareAgentArguments } from "../../extensions/subagents/agent-args.ts";
@@ -39,11 +42,15 @@ describe("Agent tool, Claude Code call shape (H1)", () => {
 	});
 
 	// Battery round 7: DeepSeek V3.2 repeated a run without `subagent_type` up to
-	// 30 times; the error now shows the corrected call, with its own task.
-	it("shows the corrected call when a run forgets to name its agent", async () => {
-		const result = (await run({ task: "Read the git history.", name: "historian" })) as { isError?: boolean };
-		expect(result.isError).toBe(true);
-		expect(text(result)).toContain('For example: {"subagent_type": "general-purpose", "task": "Read the git history."}');
+	// 30 times against an error naming the fix. Claude Code starts
+	// general-purpose; so does One Code.
+	it("starts general-purpose when a run names no agent", async () => {
+		// The worktree check comes after the agent lookup, so reaching it proves
+		// the run found its agent.
+		const cwd = mkdtempSync(join(tmpdir(), "agent-default-"));
+		const result = await agentTool().execute("call-1", { task: "Read the git history.", isolation: "worktree" }, undefined, undefined, createFakeCtx({ cwd }));
+		rmSync(cwd, { recursive: true, force: true });
+		expect(text(result)).toBe('isolation: "worktree" needs a git repository; this directory is not one.');
 	});
 
 	it("rejects a blank task rather than spawning an empty child", async () => {

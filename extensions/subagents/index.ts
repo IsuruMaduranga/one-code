@@ -70,7 +70,7 @@ import { CONTEXT_ORDER, REMINDER_CHANNEL, type ReminderPayload } from "../lib/re
 import { type BackgroundTask, generateTaskId, TASK_REGISTER_CHANNEL } from "../background/registry.ts";
 import { type ChildAction } from "../auto-mode/actions.ts";
 import { type ChildOutcome, forkTaskMessage, OUTPUT_CAP, type RpcChildHandle } from "./outcome.ts";
-import { type AgentRunRecord, FORK_AGENT, freeRunName, resolveRunName, RunRegistry } from "./runs.ts";
+import { type AgentRunRecord, DEFAULT_AGENT, FORK_AGENT, freeRunName, resolveRunName, RunRegistry } from "./runs.ts";
 import { SubagentRuntime } from "./runner.ts";
 import { emptyUsage, formatStats, type UsageTotals } from "./usage.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, keptWorktreeNote, type Worktree } from "./worktree.ts";
@@ -184,7 +184,7 @@ const SubagentParams = Type.Object({
 	subagent_type: Type.Optional(
 		Type.String({
 			description:
-				'The agent to run — a name from the "Available agents" system reminder, or "fork" to clone this conversation. Required unless action:"list". To run several in parallel, issue multiple Agent tool calls in one turn.',
+				'The agent to run — a name from the "Available agents" system reminder, or "fork" to clone this conversation (default: general-purpose). To run several in parallel, issue multiple Agent tool calls in one turn.',
 		}),
 	),
 	task: Type.String({ description: "The task — a complete, self-contained instruction (the agent cannot ask follow-ups)." }),
@@ -1440,7 +1440,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			// matched case-insensitively — a nested subagent is just as likely to be
 			// CC-trained.
 			parameters: Type.Object({
-				subagent_type: Type.String({ description: "An agent name from the list in this tool's description" }),
+				subagent_type: Type.Optional(Type.String({ description: "An agent name from the list in this tool's description (default: general-purpose)" })),
 				task: Type.String({ description: "The task — a complete, self-contained instruction" }),
 				prompt: Type.Optional(Type.String({ description: "Alias of `task` (Claude Code's name for it)." })),
 				description: Type.Optional(Type.String({ description: "A short (3-5 word) description of the task." })),
@@ -1451,7 +1451,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				const ctx = lastCtx;
 				const p = (params ?? {}) as { subagent_type?: unknown; task?: unknown; prompt?: unknown; name?: unknown; description?: unknown };
 				const description = typeof p.description === "string" && p.description.trim() ? p.description.trim() : undefined;
-				const agentName = typeof p.subagent_type === "string" ? p.subagent_type : "";
+				const agentName = typeof p.subagent_type === "string" && p.subagent_type ? p.subagent_type : DEFAULT_AGENT;
 				const taskInput = typeof p.task === "string" ? p.task : typeof p.prompt === "string" ? p.prompt : "";
 				const task = taskInput.trim();
 				const err = (text: string) => ({ content: [{ type: "text" as const, text }], details: {}, isError: true });
@@ -1461,7 +1461,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				const agentDef = agents.find((a) => a.name.toLowerCase() === agentName.toLowerCase());
 				if (!agentDef) {
 					const catalog = agents.map((a) => `- ${a.name}: ${a.description || "(no description)"}${toolsClause(a)}`).join("\n");
-					return err(`${agentName ? `Unknown agent "${agentName}"` : "`subagent_type` is required"}. Available agents:\n${catalog}`);
+					return err(`Unknown agent "${agentName}". Available agents:\n${catalog}`);
 				}
 				if (!task) return err("`task` is required: a complete, self-contained instruction for the agent (Claude Code names this parameter `prompt` — either is accepted).");
 
@@ -2031,11 +2031,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			const taskText = params.task ?? params.prompt;
 
 			// A call carrying run options (a task, a name, a model/thinking/isolation
-			// override, or action:"run") but no `subagent_type` is a run that forgot
-			// to name its agent. Fail loudly with a diagnostic rather than silently
-			// returning the catalog: a weaker model reads the catalog as a
-			// non-sequitur and invents wrong reasons for it, instead of learning it
-			// omitted `subagent_type`.
+			// override, or action:"run") is a run; one that names no agent starts
+			// general-purpose, as in Claude Code. A tiny model repeated such a call
+			// 30 times against an error naming the fix (battery round 7). A call
+			// with neither lists the catalog.
 			const wantsRun =
 				params.action === "run" ||
 				taskText != null ||
@@ -2048,21 +2047,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				return {
 					content: [{ type: "text", text: `Available agents:\n${describeAgents(ctx.cwd)}` }],
 					details: { agents: agents.map((a) => a.name) },
-				};
-			}
-
-			if (!params.subagent_type) {
-				return {
-					content: [
-						{
-							type: "text",
-							// The corrected call, with the model's own task: a tiny model repeated the bare call
-							// 30 times against the rule alone (battery round 7).
-							text: `No \`subagent_type\` given, but you passed run options — this looks like a run that forgot to name its agent. Set \`subagent_type\` to one of the names below (or "fork" to clone this conversation). For example: {"subagent_type": "general-purpose", "task": ${JSON.stringify(taskText ?? "<the task>")}}. To only browse the catalog, call with action:"list".\n\nAvailable agents:\n${describeAgents(ctx.cwd)}`,
-						},
-					],
-					details: {},
-					isError: true,
 				};
 			}
 
@@ -2083,7 +2067,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			// `Explore`/`Plan` where our bundled agents are `explore`/`plan` (H1).
 			// "Fork" is canonicalized the same way so downstream fork detection
 			// (entry.agent === FORK_AGENT) is case-insensitive too.
-			const requestedType = params.subagent_type!;
+			const requestedType = params.subagent_type || DEFAULT_AGENT;
 			const canonicalType =
 				requestedType.toLowerCase() === FORK_AGENT
 					? FORK_AGENT

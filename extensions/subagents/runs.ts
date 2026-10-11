@@ -12,6 +12,8 @@ import { join } from "node:path";
 
 /** The synthetic agent type of a run that clones the calling conversation. */
 export const FORK_AGENT = "fork";
+/** The agent a run that names none starts, as in Claude Code. */
+export const DEFAULT_AGENT = "general-purpose";
 
 export interface AgentRunRecord {
 	name: string;
