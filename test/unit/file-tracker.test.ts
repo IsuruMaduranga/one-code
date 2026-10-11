@@ -70,6 +70,8 @@ describe("UNREAD_REASON", () => {
 		const text = UNREAD_REASON("/p/a.ts", "edit");
 		expect(text).toContain("a plain `cat`");
 		expect(text).toContain("output cut off at the size limit");
+		// A committed version printed by git is not the file on disk.
+		expect(text).toContain("git show HEAD:<file>");
 	});
 });
 

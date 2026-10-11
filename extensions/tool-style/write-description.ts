@@ -36,5 +36,5 @@ export function writeDescription(form: DescriptionForm): string {
  * and met the refusal first (2026-10-04 Codex self-test: 16 refused edits).
  */
 export function editDescription(base: string): string {
-	return `${base} The file must have been read in this conversation, with the read tool or a shell command whose output showed the whole file, or the edit is refused; if it changed on disk since, read it again first.`;
+	return `${base} The file must have been read in this conversation, with the read tool or a shell command that printed the whole file as it is on disk (such as cat), or the edit is refused; if it changed on disk since, read it again first.`;
 }

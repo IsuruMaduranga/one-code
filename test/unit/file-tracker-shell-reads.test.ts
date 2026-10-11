@@ -271,7 +271,7 @@ describe("file-tracker: a bash result counts as a read", () => {
 		await bash("cat big.py | head -1", "alpha = 1");
 		const result = await edit("big.py");
 		expect(result?.block).toBe(true);
-		expect(result?.reason).toContain("A shell read counts only when its output showed the whole file");
+		expect(result?.reason).toContain("A shell read counts only when it printed the whole file as it is on disk");
 	});
 
 	it("keeps the stale guard: a change after the shell read blocks the edit", async () => {
