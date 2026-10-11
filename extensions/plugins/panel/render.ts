@@ -7,7 +7,7 @@
  */
 
 import { formatInstallCount } from "../counts.ts";
-import { cutPlainText, panelTopRule, type RenderBlock as Block, searchBoxLines, windowBlocks } from "../../lib/tui-render.ts";
+import { cutPlainText, panelTopRule, type RenderBlock as Block, searchBoxLines, windowBlocks, wrapHints } from "../../lib/tui-render.ts";
 import type { DiscoverRow, InstalledRow } from "./rows.ts";
 import { clampPanelState, type PanelState, type PanelView, resolveDetail, selectableRows, TABS, type Tab } from "./state.ts";
 
@@ -176,7 +176,7 @@ function detailLines(input: PanelRenderInput, paint: PanelPaint): { lines: strin
 		const discover = row as DiscoverRow;
 		const detail = input.discoverDetails.get(discover.id);
 		push(`${discover.name} · ${discover.marketplace}`, paint.bold);
-		if (discover.description) push(discover.description);
+		if (discover.description) for (const line of wrapNote(discover.description, width - 4)) push(line);
 		push("");
 		if (detail?.version) push(`Version: ${detail.version}`, (t) => paint.fg("dim", t));
 		if (detail?.author) push(`Author: ${detail.author}`, (t) => paint.fg("dim", t));
@@ -250,6 +250,11 @@ const FOOTERS: Record<Tab, string[]> = {
 /** Installed search hints while the `/` box is open (Esc leaves it). */
 const INSTALLED_SEARCH_FOOTER = ["Type to search · Enter/Space to toggle · Esc to leave search"];
 
+/** Footer hint lines wrapped at their separators to the panel's width (one leading space), so no key is cut off. */
+function fitFooter(lines: string[], width: number): string[] {
+	return lines.flatMap((line) => wrapHints(line, Math.max(1, width - 2)));
+}
+
 export function renderPanel(input: PanelRenderInput, paint: PanelPaint): string[] {
 	const { state, view, width, height } = input;
 	clampPanelState(state, view);
@@ -293,7 +298,7 @@ export function renderPanel(input: PanelRenderInput, paint: PanelPaint): string[
 				break;
 			}
 		}
-		footer = state.tab === "installed" && state.installedSearching ? INSTALLED_SEARCH_FOOTER : FOOTERS[state.tab];
+		footer = fitFooter(state.tab === "installed" && state.installedSearching ? INSTALLED_SEARCH_FOOTER : FOOTERS[state.tab], width);
 		const budget = Math.max(3, height - out.length - 2 - footer.length);
 		const windowed = windowBlocks(blocks, state.cursor[state.tab], budget);
 		out.push(...windowed.lines);
@@ -310,6 +315,6 @@ export function renderPanel(input: PanelRenderInput, paint: PanelPaint): string[
 			),
 		);
 	}
-	out.push("", ...footer.map((line) => paint.fg("dim", cutPlainText(` ${line}`, width - 1))));
+	out.push("", ...fitFooter(footer, width).map((line) => paint.fg("dim", cutPlainText(` ${line}`, width - 1))));
 	return out;
 }

@@ -13,6 +13,7 @@ import {
 	skillStateFor,
 } from "../../extensions/lib/skill-overrides.ts";
 import { decodeSkillsKey } from "../../extensions/skill/panel/keys.ts";
+import { renderSkillsPanel } from "../../extensions/skill/panel/render.ts";
 import { applySkillsKey, followRow, initialSkillsState, type SkillsRow, visibleRows } from "../../extensions/skill/panel/state.ts";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "skills-"));
@@ -138,5 +139,15 @@ describe("/skills panel state machine", () => {
 		expect(decodeSkillsKey(" ")).toEqual({ kind: "space" });
 		expect(decodeSkillsKey("\r")).toEqual({ kind: "enter" });
 		expect(decodeSkillsKey("q")).toEqual({ kind: "text", text: "q" });
+	});
+
+	it("wraps the key hints at 60 columns and labels bundled rows", () => {
+		const paint = { fg: (_c: string, t: string) => t, bold: (t: string) => t };
+		const withBundled: SkillsRow[] = [...rows, { key: "project:loop", name: "loop", scope: "bundled", tokens: 40, state: "on", locked: false }];
+		const lines = renderSkillsPanel({ state: initialSkillsState(), rows: withBundled, width: 60, height: 24 }, paint);
+		expect(lines.every((line) => line.length <= 60)).toBe(true);
+		expect(lines.join("\n")).toContain("Esc to close");
+		expect(lines.some((line) => line.includes("loop") && line.includes("· bundled ·"))).toBe(true);
+		expect(lines.length).toBeLessThanOrEqual(24);
 	});
 });

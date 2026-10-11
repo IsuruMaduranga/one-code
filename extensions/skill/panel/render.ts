@@ -9,7 +9,7 @@
  * under-measure and risk pi's overwide-line crash.
  */
 
-import { cutPlainText, padPlainText, panelTopRule, searchBoxLines, visibleWidth } from "../../lib/tui-render.ts";
+import { cutPlainText, padPlainText, panelTopRule, searchBoxLines, visibleWidth, wrapHints } from "../../lib/tui-render.ts";
 import type { SkillState } from "../../lib/skill-overrides.ts";
 import { clampSkillsCursor, type SkillsPanelState, type SkillsRow, visibleRows } from "./state.ts";
 
@@ -64,7 +64,10 @@ export function renderSkillsPanel(input: SkillsRenderInput, paint: SkillsPaint):
 	const out: string[] = [panelTopRule(paint.fg, width)];
 	out.push(` ${paint.bold("Skills")}`);
 	const sortNote = state.sort === "state" ? "sorted by state" : "sorted by name";
-	out.push(paint.fg("dim", cutPlainText(` ${rows.length} skill${rows.length === 1 ? "" : "s"} · ${sortNote} · enter/space to cycle, / to search, t to sort, Esc to close`, width - 1)));
+	// Wraps at the separators on a narrow terminal, so no key is cut off; the
+	// list budget below is taken after it.
+	const hints = `${rows.length} skill${rows.length === 1 ? "" : "s"} · ${sortNote} · enter/space to cycle · / to search · t to sort · Esc to close`;
+	for (const line of wrapHints(hints, Math.max(1, width - 2))) out.push(paint.fg("dim", ` ${line}`));
 	out.push("");
 	out.push(...searchBoxLines(state.search, "Search skills…", paint.fg, width));
 	out.push("");
