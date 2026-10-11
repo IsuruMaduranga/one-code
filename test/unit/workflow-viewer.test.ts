@@ -55,6 +55,9 @@ describe("decodeViewerKey", () => {
 		expect(decodeViewerKey("\x1b[A")).toEqual({ kind: "up" });
 		expect(decodeViewerKey("\x1bOB")).toEqual({ kind: "down" });
 		expect(decodeViewerKey("\x1b[5~")).toEqual({ kind: "pageUp" });
+		// Space and b page too: pi's fullscreen mode keeps the page keys.
+		expect(decodeViewerKey(" ")).toEqual({ kind: "pageDown" });
+		expect(decodeViewerKey("b")).toEqual({ kind: "pageUp" });
 		expect(decodeViewerKey("\t")).toEqual({ kind: "nextRun" });
 		expect(decodeViewerKey("\r")).toEqual({ kind: "enter" });
 		expect(decodeViewerKey("\x1b")).toEqual({ kind: "back" });
@@ -417,7 +420,7 @@ describe("renderViewer", () => {
 		const lines = renderViewer({ runs: [running], state, width: 60, height: 20, now: 5000 }, paint).map(strip);
 		expect(lines).toHaveLength(20);
 		const footer = lines.slice(-2).join(" · ");
-		for (const key of ["↑↓ agent", "⏎ prompt", "pgup/pgdn scroll", "x stop workflow", "s save", "esc back"]) {
+		for (const key of ["↑↓ agent", "⏎ prompt", "space/b scroll", "x stop workflow", "s save", "esc back"]) {
 			expect(footer).toContain(key);
 		}
 		expect(lines.every((l) => !l.includes("…") || !l.includes("esc"))).toBe(true);

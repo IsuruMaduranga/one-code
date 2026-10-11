@@ -86,6 +86,9 @@ export function decodeViewerKey(data: string): ViewerKey | undefined {
 		case "pageUp":
 			return { kind: "pageUp" };
 		case "pageDown":
+		// pi's fullscreen mode keeps PageUp/PageDown for its own scrollback, so
+		// space and b page too (findings §10).
+		case "space":
 			return { kind: "pageDown" };
 		case "tab":
 			return { kind: "nextRun" };
@@ -107,6 +110,8 @@ export function decodeViewerKey(data: string): ViewerKey | undefined {
 			return { kind: "save" };
 		case "q":
 			return { kind: "close" };
+		case "b":
+			return { kind: "pageUp" };
 		default:
 			return undefined;
 	}
@@ -435,7 +440,7 @@ export function renderViewer(input: ViewerInput, paint: ViewerPaint): string[] {
 	const stopHint = run.status === "running" ? "x stop workflow · " : "";
 	const hints = !atAgents
 		? `↑↓ select · ⏎ open · ${runs.length > 1 ? "tab run · " : ""}${stopHint}s save · esc close`
-		: `↑↓ agent · ⏎ prompt · pgup/pgdn scroll · ${stopHint}s save · esc back`;
+		: `↑↓ agent · ⏎ prompt · space/b scroll · ${stopHint}s save · esc back`;
 	const footer = state.notice ? [cut(state.notice, width)] : wrapHints(hints, width);
 
 	// Body: two boxed panes, side by side (or stacked when narrow).
