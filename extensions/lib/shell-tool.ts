@@ -31,8 +31,8 @@ import { registerVariantTool } from "./tool-variants.ts";
 // plus only a short tail: a finished build used to push 30 KB (~8k tokens) into
 // context unasked (review T7). The full tail stays behind task_output / the log.
 export const NOTIFY_OUTPUT_CAP = 2_000;
-/** One-shot modes return the whole output in the result; past this it is persisted (file + preview), never cut. */
-export const ONE_SHOT_OUTPUT_CAP = 30_000;
+/** Claude Code's inline cap for a shell's output; past it the output is persisted (file + head preview), never cut. */
+export const INLINE_OUTPUT_CAP = 30_000;
 /** Claude Code's cap; the tools' `timeout` is milliseconds, as CC's is. */
 export const MAX_TIMEOUT_MS = 600_000;
 /**
@@ -195,11 +195,14 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 
 			if (!params.run_in_background) {
 				// pi spills a long output to os.tmpdir(), outside every readable root;
-				// move it where the model's read of it is a working-space read.
-				// Then Claude Code's result text (`Exit code N` first, trimmed output).
+				// move it where the model's read of it is a working-space read, and
+				// cut the output Claude Code's way (its head, not pi's tail). Then
+				// Claude Code's result text (`Exit code N` first, trimmed output).
+				const resultsDir = sessionResultsDir(ctx);
 				const result = await keepSpillReadable(
 					() => spec.foreground(ctx.cwd).execute(toolCallId, { command: params.command, timeout: timeoutSeconds }, signal, onUpdate, ctx),
-					sessionResultsDir(ctx),
+					resultsDir,
+					{ inlineMax: INLINE_OUTPUT_CAP, persist: (output) => persistIfLarge(output, { dir: resultsDir, id: `${spec.name}-${toolCallId}`, maxBytes: INLINE_OUTPUT_CAP }) },
 				);
 				// The no-match check parses the command; only bash results need the grammar.
 				if (spec.name === "bash") await bashParserReady();
@@ -230,10 +233,10 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 			// keeps having no deadline (findings §31).
 			if (!sessionOutlivesTurn(ctx.mode)) {
 				const summary = await runBackgroundBashBlocking({ id, command, description, cwd: ctx.cwd, timeoutSeconds, logPath, shell }, signal);
-				const spool = summary.logPath && Buffer.byteLength(summary.output, "utf8") > ONE_SHOT_OUTPUT_CAP
+				const spool = summary.logPath && Buffer.byteLength(summary.output, "utf8") > INLINE_OUTPUT_CAP
 					? persistedFilePreview(summary.logPath)
 					: undefined;
-				const output = spool ?? persistIfLarge(summary.output, { dir: sessionResultsDir(ctx), id: `${spec.name}-${id}`, maxBytes: ONE_SHOT_OUTPUT_CAP });
+				const output = spool ?? persistIfLarge(summary.output, { dir: sessionResultsDir(ctx), id: `${spec.name}-${id}`, maxBytes: INLINE_OUTPUT_CAP });
 				const deadline = summary.timedOut ? ` ${oneShotDeadlineNote(timeoutSeconds * 1000, explicitTimeout)}` : "";
 				return {
 					content: [

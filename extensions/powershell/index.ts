@@ -6,8 +6,8 @@
  * exactly as `extensions/bash` overrides `bash`, and the shared body in
  * lib/shell-tool.ts supplies the `run_in_background` orchestration for both.
  * The foreground path delegates to pi's real definition
- * (`createPowerShellToolDefinition`) so schema, cwd handling, truncation and
- * streaming stay upstream's — with One Code's own `operations`
+ * (`createPowerShellToolDefinition`) so schema, cwd handling and streaming
+ * stay upstream's (a long output is cut Claude Code's way, as for bash) — with One Code's own `operations`
  * (lib/shell-spawn.ts), because pi's local operations throw off Windows and
  * this tool is developed against a `pwsh` on this Mac. The description is
  * Claude Code's captured text (description.ts); the guards are the PowerShell

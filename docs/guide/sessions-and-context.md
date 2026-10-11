@@ -166,10 +166,11 @@ Each session gets a scratchpad directory under the system temp directory,
 named by project and session. The model is told to use it for temporary
 files instead of `/tmp`; writes there need no approval.
 
-Tool output larger than 50 KB isn't truncated. It's written to a file
-under the session directory, and the model receives the path, the size,
-and a 2 KB preview in a `<persisted-output>` block, so it can read the part
-it needs.
+Tool output larger than 50 KB (30,000 characters for a shell command)
+isn't truncated. It's written to a file under the session directory, and
+the model receives the path, the size, and a 2 KB preview from the start
+of the output in a `<persisted-output>` block, so it can read the part it
+needs.
 
 ## While you are away
 

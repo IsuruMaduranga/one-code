@@ -14,14 +14,32 @@
  * Only a file pi produced is moved: the path must sit directly in the temp
  * dir and carry pi's name shape, so a command that prints a look-alike line
  * cannot make the harness move some other file.
+ *
+ * Given a bound, the output is also cut Claude Code's way instead of pi's. pi
+ * keeps the last 2,000 lines or 50 KB and drops the head, so a batched
+ * command lost its first commands' output. Claude Code keeps the head: the
+ * whole output up to its inline cap, past it the persisted block naming the
+ * file, with the first 2 KB as the preview. pi's spill file holds the whole
+ * output, so the block names it and nothing is copied.
  */
 
-import { copyFileSync, mkdirSync, renameSync, unlinkSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { persistedFilePreview } from "./persisted-output.ts";
 
 const MARKER = "Full output: ";
 const PI_SPILL_NAME = /^pi-[a-z]+-[0-9a-f]{16}\.log$/;
+/** The note pi ends a cut output with: `\n\n[Showing lines …` or `\n\n[Showing last …`. */
+const PI_NOTE = "\n\n[Showing ";
+/** pi's status after the output of a run that did not exit 0. */
+const PI_STATUS = /(?:^|\n\n)Command (?:exited with code -?\d+|timed out after \S+ seconds|aborted|terminated without an exit code)$/;
+
+/** How a shell's output is cut: whole up to `inlineMax` bytes; `persist` bounds an output pi did not spill. */
+export interface OutputBound {
+	inlineMax: number;
+	persist: (output: string) => string;
+}
 
 /** The spill path pi named at the end of `text`, when it is one pi produced in `tmp`. Pure. */
 export function piSpillPath(text: string, tmp: string = tmpdir()): string | undefined {
@@ -61,20 +79,46 @@ export function relocateSpillIn(text: string, resultsDir: string, tmp: string = 
 	return to ? text.split(from).join(to) : text;
 }
 
+/**
+ * `text` with its spill file moved and pi's tail cut replaced by Claude
+ * Code's head-first one. A spill file that cannot be moved, or a text not in
+ * pi's shape, keeps pi's text with only the path rewritten.
+ */
+export function boundSpillIn(text: string, resultsDir: string, bound: OutputBound, tmp: string = tmpdir()): string {
+	const status = PI_STATUS.exec(text);
+	const end = status ? status.index : text.length;
+	const output = text.slice(0, end);
+	const from = piSpillPath(output, tmp);
+	if (!from) return bound.persist(output) + text.slice(end);
+	const to = moveInto(from, resultsDir);
+	if (!to) return text;
+	// pi's note ends the output; anything else keeps pi's text.
+	if (!output.includes(PI_NOTE) || !output.endsWith(`${from}]`)) return text.split(from).join(to);
+	let whole: string | undefined;
+	try {
+		whole = statSync(to).size <= bound.inlineMax ? readFileSync(to, "utf8") : persistedFilePreview(to);
+	} catch {
+		// Unreadable after the move: pi's cut, pointing at the moved file.
+	}
+	return whole === undefined ? text.split(from).join(to) : whole + text.slice(end);
+}
+
 type TextResult = { content: Array<{ type: string; text?: string }>; details?: unknown };
 
 /**
  * Run a foreground shell execute and keep its spill file readable: on a
  * returned result the text and `details.fullOutputPath` are rewritten, and a
- * thrown error is rethrown with its message rewritten.
+ * thrown error is rethrown with its message rewritten. With `bound`, the
+ * output is cut Claude Code's way too.
  */
-export async function keepSpillReadable<R extends TextResult>(run: () => Promise<R>, resultsDir: string): Promise<R> {
+export async function keepSpillReadable<R extends TextResult>(run: () => Promise<R>, resultsDir: string, bound?: OutputBound): Promise<R> {
+	const rewrite = (text: string) => (bound ? boundSpillIn(text, resultsDir, bound) : relocateSpillIn(text, resultsDir));
 	let result: R;
 	try {
 		result = await run();
 	} catch (error) {
 		if (error instanceof Error) {
-			const message = relocateSpillIn(error.message, resultsDir);
+			const message = rewrite(error.message);
 			if (message !== error.message) {
 				const moved = new Error(message);
 				moved.stack = error.stack;
@@ -86,7 +130,7 @@ export async function keepSpillReadable<R extends TextResult>(run: () => Promise
 	const details = result.details as { fullOutputPath?: unknown } | undefined;
 	const text = result.content.find((block) => block.type === "text" && typeof block.text === "string");
 	if (!text?.text) return result;
-	const rewritten = relocateSpillIn(text.text, resultsDir);
+	const rewritten = rewrite(text.text);
 	if (rewritten === text.text) return result;
 	const from = piSpillPath(text.text);
 	const to = from ? join(resultsDir, basename(from)) : undefined;
