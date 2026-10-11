@@ -12,6 +12,7 @@
  */
 
 import { pathArgument } from "../auto-mode/paths.ts";
+import { shownInFull } from "./shell-reads.ts";
 
 const READ_TOOLS = new Set(["read", "notebook_edit"]);
 const WRITE_TOOLS = new Set(["edit", "write", "notebook_edit"]);
@@ -80,6 +81,25 @@ export function lastTouchesOnBranch(entries: readonly unknown[]): Map<string, nu
  */
 export function keptReadPaths(kept: readonly unknown[]): string[] {
 	return [...successfulPathCalls(kept)].filter((call) => call.name === "read").map((call) => call.path);
+}
+
+/**
+ * The tracked files that a bash call in the kept turns showed in full: those
+ * whose content as the tracker last saw it (`seen`) is all in the kept output
+ * of a call whose candidates (`pathsOf`, the live path's `shellReadPaths`)
+ * name them. Like a kept `read`, they are in context still, so they stay read;
+ * a file changed since is then stale, not unread. A call needs its result in
+ * the kept turns too.
+ */
+export function keptShellReadPaths(kept: readonly unknown[], pathsOf: (command: string) => string[], seen: (path: string) => string | undefined): string[] {
+	const shown = new Set<string>();
+	for (const { command, output } of shellCallsOnBranch(kept)) {
+		for (const path of pathsOf(command)) {
+			const content = seen(path);
+			if (content !== undefined && shownInFull(output, content)) shown.add(path);
+		}
+	}
+	return [...shown];
 }
 
 /**

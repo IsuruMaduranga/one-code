@@ -27,6 +27,22 @@ describe("parseCommand on tree-sitter-bash", () => {
 		expect(conditional("echo $(a && b)")).toEqual([false, false, true]);
 	});
 
+	it("numbers the direct members of each &&-only list", () => {
+		const lists = (command: string) => parseCommand(command).segments.map((segment) => segment.andList);
+		const [first, , , fourth] = lists("a && b && c; d && e");
+		expect(lists("a && b && c; d && e")).toEqual([first, first, first, fourth, fourth]);
+		expect(first).not.toBe(fourth);
+		// A list with || in it, or a pipeline member: none. A subshell or substitution numbers its own.
+		expect(lists("a && b || c")).toEqual([undefined, undefined, undefined]);
+		expect(lists("a | b && c")).toEqual([undefined, undefined, expect.any(Number)]);
+		const [outer, inner, innerToo] = lists("a && (b && c)");
+		expect(inner).toBe(innerToo);
+		expect(outer).not.toBe(inner);
+		const [echo, a, b] = lists("echo $(a && b)");
+		expect(echo).toBeUndefined();
+		expect(a).toBe(b);
+	});
+
 	it("gives the words after a redirect target back to the command", () => {
 		// The grammar hangs `arg` on the redirect; bash passes it to `cmd`.
 		const [segment] = parseCommand("cmd 2>/dev/null arg").segments;

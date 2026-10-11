@@ -116,6 +116,13 @@ export interface Segment {
 	 * function body. A `cd` here may or may not move the commands after it.
 	 */
 	conditional?: boolean;
+	/**
+	 * Set for a simple command that is itself a member of an `&&` list with no
+	 * `||` (`a && b && c`): the list's number, unique within the parse. A member
+	 * runs only once every earlier member ran and succeeded, so a `cd` earlier
+	 * in the same list surely moved it, `conditional` or not.
+	 */
+	andList?: number;
 	/** True when a redirect target's value is only known when bash runs it (`> "$f"`, `< $(ls)`). */
 	unknownTarget?: boolean;
 	/**
@@ -334,6 +341,8 @@ interface Context {
 	pipelineShell?: number[];
 	/** Inside something that may not run (`Segment.conditional`). */
 	conditional?: boolean;
+	/** A direct member of an `&&`-only list (`Segment.andList`); `enter` drops it. */
+	andList?: number;
 	/**
 	 * Inside a context bash always runs in a subshell (`( … )`, a substitution,
 	 * a pipeline member other than the last): nothing here, a later pipeline's
@@ -354,6 +363,7 @@ class Walker {
 	readonly substitutions: string[] = [];
 	readonly pipelines: number[][] = [];
 	private nextScope = 1;
+	private nextAndList = 1;
 	private readonly source: string;
 
 	constructor(source: string) {
@@ -400,14 +410,23 @@ class Walker {
 				}
 				return;
 			case "list": {
-				// `a && b`, `a || b`: only the first command is sure to run.
-				let first = true;
-				for (const child of node.children) {
-					if (child.type === "&") this.background = true;
-					else if (child.isNamed) {
-						this.statement(child, first ? ctx : { ...ctx, conditional: true });
-						first = false;
+				// `a && b`, `a || b`: only the first command is sure to run. The
+				// grammar nests a longer list on the left (`(a && b) && c`); an
+				// `&&`-only one is walked flat, its members numbered as one list.
+				const members: SyntaxNode[] = [];
+				const operators: string[] = [];
+				const flatten = (list: SyntaxNode) => {
+					for (const child of list.children) {
+						if (child.type === "&") this.background = true;
+						else if (child.type === "list" && members.length === 0) flatten(child);
+						else if (child.isNamed) members.push(child);
+						else operators.push(child.type);
 					}
+				};
+				flatten(node);
+				const andList = operators.length > 0 && operators.every((operator) => operator === "&&") ? this.nextAndList++ : undefined;
+				for (const [index, child] of members.entries()) {
+					this.statement(child, { ...ctx, conditional: index > 0 || ctx.conditional || undefined, andList });
 				}
 				return;
 			}
@@ -499,6 +518,7 @@ class Walker {
 		if (ctx.lastInPipeline) segment.lastInPipeline = true;
 		if (ctx.pipelineShell) segment.pipelineShell = ctx.pipelineShell;
 		if (ctx.conditional) segment.conditional = true;
+		if (ctx.andList !== undefined) segment.andList = ctx.andList;
 		if (node?.type === "variable_assignment" || node?.type === "variable_assignments") {
 			// A line that only assigns: `a=1`, `a=1 b=2`.
 			const assignments = node.type === "variable_assignment" ? [node] : node.namedChildren.filter((child) => child.type === "variable_assignment");
@@ -664,7 +684,8 @@ class Walker {
 			}
 			const inner = parseCommand(text.slice(i + 1, end));
 			const scope = this.enterSubstitution(ctx, "command_substitution", text.slice(i + 1, end));
-			for (const segment of inner.segments) {
+			// The body's `&&` lists are numbered by its own parse, not this one: dropped.
+			for (const { andList: _andList, ...segment } of inner.segments) {
 				this.segments.push({
 					...segment,
 					// These words were parsed from a backtick body, not from this line.
