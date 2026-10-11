@@ -151,6 +151,30 @@ export function cutPlainText(text: string, width: number): string {
 	return `${sliceColumns(text, Math.max(0, width - 1)).text}…`;
 }
 
+/**
+ * Fit a key-hint row (`a · b · c`) into `width` columns by breaking it at its
+ * ` · ` separators onto as many lines as it needs, so a narrow terminal shows
+ * every key instead of cutting the last ones off. A single hint wider than
+ * the row is cut with an ellipsis.
+ */
+export function wrapHints(text: string, width: number, separator = " · "): string[] {
+	if (width <= 0) return [""];
+	if (visibleWidth(text) <= width) return [text];
+	const lines: string[] = [];
+	let current = "";
+	for (const hint of text.split(separator)) {
+		const joined = current ? `${current}${separator}${hint}` : hint;
+		if (!current || visibleWidth(joined) <= width) {
+			current = joined;
+			continue;
+		}
+		lines.push(cutPlainText(current, width));
+		current = hint;
+	}
+	if (current) lines.push(cutPlainText(current, width));
+	return lines;
+}
+
 /** Cut then pad plain (unpainted) text to exactly `width` terminal columns. */
 export function padPlainText(text: string, width: number): string {
 	const shortened = cutPlainText(text, width);

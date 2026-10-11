@@ -65,6 +65,12 @@ export class WorkflowWidget {
 		return Math.min(this.manager.list().length, MAX_STATUS_ROWS);
 	}
 
+	/** Rows the strip paints: one per shown run plus the "+n more" line. */
+	paintedRowCount(): number {
+		const total = this.manager.list().length;
+		return Math.min(total, MAX_STATUS_ROWS) + (total > MAX_STATUS_ROWS ? 1 : 0);
+	}
+
 	selectedRun(): ViewerRunSnapshot | undefined {
 		if (this.focusIndex === undefined) return undefined;
 		return this.manager.snapshots(MAX_STATUS_ROWS)[this.focusIndex];

@@ -64,6 +64,7 @@ import {
 	initialViewerState,
 	planSave,
 	renderViewer,
+	viewerHeight,
 	type ViewerRunSnapshot,
 } from "./viewer.ts";
 import { WorkflowWidget } from "./widget.ts";
@@ -151,7 +152,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 		if (viewerOpen) return;
 		viewerOpen = true;
 		try {
-			await openWorkflowViewer(pi.events, ctx, manager, opts);
+			await openWorkflowViewer(pi.events, ctx, manager, () => widget.paintedRowCount(), opts);
 		} finally {
 			viewerOpen = false;
 		}
@@ -538,6 +539,7 @@ async function openWorkflowViewer(
 	events: ExtensionAPI["events"],
 	ctx: ExtensionContext,
 	manager: WorkflowRunManager,
+	stripRows: () => number,
 	opts?: { height?: "full" | "half"; runIndex?: number },
 ): Promise<void> {
 	await panelUi(events, ctx.ui).custom<null>((tui, theme, _keybindings, done) => {
@@ -548,8 +550,7 @@ async function openWorkflowViewer(
 
 		// Full (the /workflows tab) fills the terminal; half (opened from the
 		// status strip) leaves the transcript visible above, like Claude Code.
-		const viewerHeight = (rows: number): number =>
-			opts?.height === "half" ? Math.max(12, Math.min(Math.floor(rows / 2), 30)) : Math.max(12, rows - 2);
+		const heightMode = opts?.height === "half" ? "half" : "full";
 
 		const state = initialViewerState(opts?.runIndex ?? 0);
 		let cache: { width: number; lines: string[] } | undefined;
@@ -589,7 +590,7 @@ async function openWorkflowViewer(
 		return {
 			render: (width: number) => {
 				if (cache?.width === width) return cache.lines;
-				const height = viewerHeight(tui.terminal.rows);
+				const height = viewerHeight(tui.terminal.rows, heightMode, stripRows());
 				const lines = renderViewer({ runs: snapshots(), state, width, height, now: Date.now() }, paint).map(
 					(line) => truncateLine(line, width),
 				);

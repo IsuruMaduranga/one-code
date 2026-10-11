@@ -11,7 +11,7 @@
  * before painting so ANSI escapes never enter the width accounting.
  */
 
-import { cutPlainText as cut, formatDuration, padPlainText, splitCell, splitRow, visibleWidth, wrapPlainText, wrapProse } from "../lib/tui-render.ts";
+import { cutPlainText as cut, formatDuration, padPlainText, splitCell, splitRow, visibleWidth, wrapHints, wrapPlainText, wrapProse } from "../lib/tui-render.ts";
 import { formatTokenCount } from "../subagents/usage.ts";
 import type { AgentRecord, RunStatus } from "./types.ts";
 import { keyId, keyText } from "../lib/key-input.ts";
@@ -375,6 +375,20 @@ export interface ViewerInput {
 
 const MIN_TWO_PANE_WIDTH = 70;
 
+/**
+ * Rows the viewer may take. It replaces the editor, so pi's layout keeps the
+ * rest of the dock beside it: the status strip, the permission-mode line and
+ * the footer below, at least one transcript row above, and a status or
+ * widget line. pi cuts a component taller than its share from the bottom,
+ * which took the key-hint row, so the viewer leaves those rows free.
+ * `stripRows` is the status strip's current row count.
+ */
+export function viewerHeight(terminalRows: number, mode: "full" | "half", stripRows: number): number {
+	const reserved = 4 + Math.max(0, stripRows);
+	const available = Math.max(8, terminalRows - reserved);
+	return mode === "half" ? Math.min(available, Math.max(12, Math.min(Math.floor(terminalRows / 2), 30))) : available;
+}
+
 export function renderViewer(input: ViewerInput, paint: ViewerPaint): string[] {
 	const { runs, state } = input;
 	const width = Math.max(20, input.width);
@@ -414,10 +428,18 @@ export function renderViewer(input: ViewerInput, paint: ViewerPaint): string[] {
 		out.push(paint.fg("error", cut(`⚠ ${run.errorMessage}`, width)));
 	}
 
-	// Body: two boxed panes, side by side (or stacked when narrow).
-	const footerRows = 1;
-	const bodyHeight = Math.max(6, input.height - out.length - footerRows);
+	// Footer: per-level key hints, replaced by a transient notice when set. It
+	// wraps at the separators on a narrow terminal so no key is cut off, and
+	// the body gives up the rows the footer needs.
 	const atAgents = state.level === "agents" && phase && phase.agents.length > 0;
+	const stopHint = run.status === "running" ? "x stop workflow · " : "";
+	const hints = !atAgents
+		? `↑↓ select · ⏎ open · ${runs.length > 1 ? "tab run · " : ""}${stopHint}s save · esc close`
+		: `↑↓ agent · ⏎ prompt · pgup/pgdn scroll · ${stopHint}s save · esc back`;
+	const footer = state.notice ? [cut(state.notice, width)] : wrapHints(hints, width);
+
+	// Body: two boxed panes, side by side (or stacked when narrow).
+	const bodyHeight = Math.max(6, input.height - out.length - footer.length);
 
 	const agentCountTitle = phase
 		? `${phase.title} · ${phase.agents.length} agent${phase.agents.length === 1 ? "" : "s"}`
@@ -466,12 +488,7 @@ export function renderViewer(input: ViewerInput, paint: ViewerPaint): string[] {
 		out.push(...boxPane(rightTitle, panes.right, width, rightHeight, paint));
 	}
 
-	// Footer: per-level key hints, replaced by a transient notice when set.
-	const stopHint = run.status === "running" ? "x stop workflow · " : "";
-	const hints = !atAgents
-		? `↑↓ select · ⏎ open · ${runs.length > 1 ? "tab run · " : ""}${stopHint}s save · esc close`
-		: `↑↓ agent · ⏎ prompt · pgup/pgdn scroll · ${stopHint}s save · esc back`;
-	out.push(paint.fg("dim", cut(state.notice ?? hints, width)));
+	for (const line of footer) out.push(paint.fg("dim", line));
 	return out;
 }
 
