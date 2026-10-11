@@ -42,7 +42,7 @@ afterEach(() => {
 	rmSync(dir, { recursive: true, force: true });
 });
 
-async function mount(records: AgentRunRecord[] = [], sessionModel = session, mode = "tui") {
+async function mount(records: AgentRunRecord[] = [], sessionModel = session, mode = "tui", sessionFile?: string) {
 	const fake = createFakePi();
 	const tasks = new Map<string, BackgroundTask>();
 	fake.events.on(TASK_REGISTER_CHANNEL, (task) => {
@@ -60,7 +60,7 @@ async function mount(records: AgentRunRecord[] = [], sessionModel = session, mod
 		sessionManager: {
 			getSessionId: () => "test-session",
 			getSessionDir: () => dir,
-			getSessionFile: () => undefined,
+			getSessionFile: () => sessionFile,
 			getBranch: () => records.length ? [{ type: "message", message: { role: "toolResult", toolName: "Agent", details: { agentRuns: records } } }] : [],
 		},
 	});
@@ -493,6 +493,42 @@ describe("subagent resumed turns", () => {
 		expect(result.isError).toBe(false);
 		expect(reviews).toEqual([{ toolCallId: "call", actions: risky }]);
 		expect(h.tasks.size).toBe(0);
+	});
+});
+
+describe("fork runs in a one-shot session", () => {
+	type Result = { content: Array<{ text: string }>; isError?: boolean; details?: { agentRuns?: AgentRunRecord[] } };
+	const mountFork = async () => {
+		const parent = join(dir, "parent.jsonl");
+		writeFileSync(parent, "");
+		const run = vi.fn((_options: { parentSystemPrompt?: string }) => ({ result: Promise.resolve(outcome()), kill: vi.fn(), snapshot: () => ({ text: "", toolCalls: 0, usage: emptyUsage() }) }));
+		vi.spyOn(SubagentRuntime, "create").mockResolvedValue({ run } as unknown as SubagentRuntime);
+		return { h: await mount([], session, "print", parent), run };
+	};
+
+	// DeepSeek V3.2 (battery round 8): a fork that ran to completion in a
+	// one-shot session could not take a follow-up; its prompt was never saved.
+	it("saves the fork's prompt, so a later SendMessage resumes it", async () => {
+		const { h, run } = await mountFork();
+		const spawned = (await h.call("Agent", { subagent_type: "fork", name: "historian", task: "Read the git history" })) as Result;
+		const record = spawned.details!.agentRuns![0];
+		writeFileSync(join(record.sessionSearchDir, "child.jsonl"), "");
+		const sent = (await h.call("SendMessage", { to: "historian", message: "Which commit added median?" })) as Result;
+		expect(sent.content[0].text).not.toContain("was not persisted");
+		expect(run).toHaveBeenCalledTimes(2);
+		expect(run.mock.calls[1][0].parentSystemPrompt).toBe(run.mock.calls[0][0].parentSystemPrompt);
+	});
+
+	// DeepSeek V3.2 (battery round 8): a fork rejected for its model override
+	// kept "truncate-check", so the corrected retry ran as "fork-1" and the
+	// note named "task ?".
+	it("frees the name of a spawn that failed validation", async () => {
+		const { h } = await mountFork();
+		const rejected = (await h.call("Agent", { subagent_type: "fork", name: "truncate-check", task: "Compare", model: "gpt-5-flash-text" })) as Result;
+		expect(rejected.isError).toBe(true);
+		const retried = (await h.call("Agent", { subagent_type: "fork", name: "truncate-check", task: "Compare" })) as Result;
+		expect(retried.content[0].text).not.toContain("already used");
+		expect(retried.details!.agentRuns![0].name).toBe("truncate-check");
 	});
 });
 

@@ -1646,14 +1646,19 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 		runningIds.add(record.taskId);
 		const live = trackLiveRun(record, request, parent);
+		// Saved as the resident path saves them, so a SendMessage can resume this fork later.
+		const forkPrompt = request.fork ? forkSystemPrompt(ctx) : undefined;
+		if (forkPrompt !== undefined) persistForkPrompt(record, forkPrompt);
+		const parentRequest = request.fork ? forkRequest(ctx) : undefined;
+		if (parentRequest) persistForkRequest(record, parentRequest);
 		const handle = runtime.run({
 			name: request.name,
 			agent: agentDef,
 			task: frameTask(request, worktree, base),
 			cwd: record.cwd,
 			forkFrom: request.fork ? forkFrom : undefined,
-			parentSystemPrompt: request.fork ? forkSystemPrompt(ctx) : undefined,
-			parentRequest: request.fork ? forkRequest(ctx) : undefined,
+			parentSystemPrompt: forkPrompt,
+			parentRequest,
 			sessionDir: record.sessionSearchDir || undefined,
 			model: request.model,
 			fallbackModel: request.fallbackModel,
@@ -2088,12 +2093,17 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					worktree: params.isolation === "worktree",
 				};
 			});
+			// A spawn that fails validation below never lands a record: free its names for the retry.
+			const releaseNames = () => {
+				for (const request of requested) registry.release(request.name);
+			};
 
 			// A fork continues this conversation; running it on a different model or
 			// reasoning effort is how the fork-confabulation incident happened (a
 			// minimal-thinking fork resumed the inherited topic instead of its task).
 			// Claude Code silently ignores `model` for forks; we fail loud instead.
 			if (requested.some((r) => r.fork) && (params.model || params.thinking)) {
+				releaseNames();
 				return {
 					content: [
 						{
@@ -2108,6 +2118,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 			const sessionFile = ctx.sessionManager.getSessionFile();
 			if (requested.some((r) => r.fork) && !sessionFile) {
+				releaseNames();
 				return {
 					content: [
 						{
@@ -2122,6 +2133,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 			const unknown = requested.filter((r) => !r.fork && !agents.some((a) => a.name === r.agent));
 			if (unknown.length > 0) {
+				releaseNames();
 				return {
 					content: [
 						{
@@ -2135,6 +2147,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			}
 
 			if (requested.some((r) => r.worktree) && !(await isGitRepo(workCwd(ctx)))) {
+				releaseNames();
 				return {
 					content: [{ type: "text", text: 'isolation: "worktree" needs a git repository; this directory is not one.' }],
 					details: {},
@@ -2208,6 +2221,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						available,
 						requireImageInput: supportsImageInput(ctx.model),
 					});
+					releaseNames();
 					return {
 						content: [
 							{
@@ -2235,6 +2249,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						available,
 						requireImageInput: supportsImageInput(ctx.model),
 					});
+					releaseNames();
 					return {
 						content: [
 							{
