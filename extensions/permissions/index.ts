@@ -811,7 +811,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text:
 					"Auto mode is active: your tool calls run without per-action prompts, but each one is screened by an approval classifier that blocks anything irreversible, destructive, or aimed outside this environment. " +
-					"Work normally — do not narrate the classifier or try to phrase calls to get past it. If a call is blocked, take the block at face value: explain what you were trying to do and let the user decide, rather than retrying it a different way. " +
+					"Work normally — do not narrate the classifier or try to phrase calls to get past it. If a call is blocked, take the block at face value: do not retry it, and do not reach the same result another way. Continue with work that does not depend on it, or explain what you were trying to do and let the user decide. " +
 					"Attempting to weaken this gate (editing permission settings, changing the mode, or routing work around it) is itself blocked.",
 				scope: "every-turn",
 				key: "permission-mode",
