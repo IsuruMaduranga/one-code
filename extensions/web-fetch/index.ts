@@ -19,7 +19,7 @@
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { recordUsage } from "../lib/usage-bus.ts";
-import { runSideCall } from "../lib/side-call-run.ts";
+import { releaseSideCalls, runSideCall } from "../lib/side-call-run.ts";
 import { runWithDeadline } from "../lib/operation-deadline.ts";
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
@@ -145,6 +145,8 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 	const learnedReasoning = new Map<string, ThinkingLevel>();
 	// Per-session: the thinking-off fields a native-call model turned out to need.
 	const learnedNativeThinking = new Map<string, ThinkingFields>();
+	// A child is disposed without this event; disposeChildSession releases its reader.
+	pi.on("session_shutdown", (_event, ctx) => releaseSideCalls(ctx.sessionManager.getSessionId(), ["reader"]));
 
 	const load = async (url: string, signal: AbortSignal | undefined, redirects = 0): Promise<CacheEntry> => {
 		signal?.throwIfAborted();

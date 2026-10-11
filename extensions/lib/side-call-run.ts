@@ -16,7 +16,7 @@
  * the pure prompt modules that use it.
  */
 
-import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions, ThinkingLevel } from "@earendil-works/pi-ai";
+import { type Api, type AssistantMessage, type Context, cleanupSessionResources, type Model, type SimpleStreamOptions, type ThinkingLevel } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { withReasoningFallback } from "./model-policy.ts";
 import { type SideCallLogContext, logSideCallUsage } from "./side-call-usage.ts";
@@ -48,10 +48,28 @@ export interface SideCallRun {
 	onUsage: (usage: unknown) => void;
 }
 
+type SideCallKind = SideCallLogContext["kind"];
+
+/** A side call's cache key, which pi-ai also takes as its `sessionId`. */
+function sideCallKey(sessionId: string, kind: SideCallKind): string {
+	return `${sessionId}:${kind}`;
+}
+
+/**
+ * Close what pi-ai holds open under a session's side-call keys. On openai-codex
+ * it keeps one WebSocket per `sessionId` with a 5-minute idle timer holding the
+ * process, and pi's own dispose closes only the session's id, so a `pi -p` run
+ * waited out the timer after its answer (findings §59). Call it as the session
+ * ends, for the kinds the caller runs.
+ */
+export function releaseSideCalls(sessionId: string, kinds: readonly SideCallKind[]): void {
+	for (const kind of kinds) cleanupSessionResources(sideCallKey(sessionId, kind));
+}
+
 /** Run the side call and return the final reply; a provider failure is in its `stopReason`, as with `completeSimple`. */
 export async function runSideCall(run: SideCallRun): Promise<AssistantMessage> {
 	const { kind, model, auth, context } = run;
-	const sessionId = `${run.sessionId}:${kind}`;
+	const sessionId = sideCallKey(run.sessionId, kind);
 	const target = auth.baseUrl ? ({ ...model, baseUrl: auth.baseUrl } as Model<Api>) : model;
 	const onPayload = run.cache?.apis.has(model.api) ? run.cache.place : undefined;
 	return withReasoningFallback(
