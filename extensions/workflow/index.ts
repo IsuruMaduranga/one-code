@@ -23,6 +23,7 @@
  * delivers the message. On older pi a queued message does not arm.
  */
 
+import { prepareWorkflowArguments } from "./args.ts";
 import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../lib/child-writes.ts";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -204,6 +205,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 					: undefined,
 		}),
 		description: workflowDescription("medium", false),
+		prepareArguments: prepareWorkflowArguments as never,
 		promptSnippet: "Run a script that orchestrates many subagents (opt-in ultracode mode)",
 		parameters: WorkflowParams,
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
@@ -296,7 +298,8 @@ export default function workflowExtension(pi: ExtensionAPI) {
 					}
 					const oneShotPrefix = forcedSync ? `${oneShotNote("workflow")}\n\n` : "";
 					return {
-						content: [{ type: "text", text: `${oneShotPrefix}${buildRunReport(handle)}` }],
+						// The script's path, as the background result gives it: a failed run is fixed by editing it and re-running with scriptPath.
+						content: [{ type: "text", text: `${oneShotPrefix}${buildRunReport(handle)}\nscript: ${handle.scriptPath}` }],
 						details: { runId: handle.runId, status: handle.status, scriptPath: handle.scriptPath },
 						isError: handle.status !== "completed",
 					};

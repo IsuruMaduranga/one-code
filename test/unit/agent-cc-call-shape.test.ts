@@ -1,5 +1,9 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { validateToolArguments } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
+import { decide, extractSubject, parseRules } from "../../extensions/permissions/matcher.ts";
 import { prepareAgentArguments } from "../../extensions/subagents/agent-args.ts";
 import subagentsExtension from "../../extensions/subagents/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
@@ -36,6 +40,35 @@ describe("Agent tool, Claude Code call shape (H1)", () => {
 		const result = (await run({ subagent_type: "general-purpose" })) as { isError?: boolean };
 		expect(result.isError).toBe(true);
 		expect(text(result)).toMatch(/`task` is required/);
+	});
+
+	// Battery round 7: DeepSeek V3.2 repeated a run without `subagent_type` up to
+	// 30 times against an error naming the fix. Claude Code starts
+	// general-purpose; so does One Code.
+	it("starts general-purpose when a run names no agent", async () => {
+		// The worktree check comes after the agent lookup, so reaching it proves
+		// the run found its agent.
+		const cwd = mkdtempSync(join(tmpdir(), "agent-default-"));
+		const tool = agentTool() as unknown as { prepareArguments: (a: unknown) => unknown; execute: (...a: unknown[]) => Promise<unknown> };
+		const result = await tool.execute("call-1", tool.prepareArguments({ task: "Read the git history.", isolation: "worktree" }), undefined, undefined, createFakeCtx({ cwd }));
+		rmSync(cwd, { recursive: true, force: true });
+		expect(text(result)).toBe('isolation: "worktree" needs a git repository; this directory is not one.');
+	});
+
+	// The default is set before the gate, so a deny rule naming the agent stops
+	// a call that leaves the type out.
+	it("gives the gate the default agent, so an Agent(general-purpose) deny rule holds", () => {
+		const prepared = prepareAgentArguments({ prompt: "Read the git history." }) as Record<string, unknown>;
+		expect(prepared.subagent_type).toBe("general-purpose");
+		const subject = extractSubject("Agent", prepared);
+		const decision = decide({ toolName: "Agent", subject, cwd: process.cwd(), mode: "default", deny: parseRules(["Agent(general-purpose)"]), ask: [], allow: [] });
+		expect(decision.decision).toBe("deny");
+	});
+
+	it("leaves a catalog listing without an agent type", () => {
+		expect((prepareAgentArguments({ action: "list" }) as Record<string, unknown>).subagent_type).toBeUndefined();
+		expect((prepareAgentArguments({}) as Record<string, unknown>).subagent_type).toBeUndefined();
+		expect((prepareAgentArguments({ subagent_type: "explore", task: "x" }) as Record<string, unknown>).subagent_type).toBe("explore");
 	});
 
 	it("rejects a blank task rather than spawning an empty child", async () => {

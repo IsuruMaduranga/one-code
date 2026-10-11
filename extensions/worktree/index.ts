@@ -301,7 +301,7 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 						{
 							type: "text",
 							text: `Left worktree session; back in ${current.originalCwd}. ` + (existsSync(current.path)
-								? `The worktree remains at ${current.path}${current.branch ? ` (branch ${current.branch})` : ""} — re-enter it with enter_worktree {path}.`
+								? `The worktree remains at ${current.path}${current.branch ? ` (branch ${current.branch})` : ""} — re-enter it with enter_worktree (path: "${current.path}").`
 								: `The worktree at ${current.path} no longer exists. No branch was removed.`),
 						},
 					],

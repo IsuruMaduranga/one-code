@@ -463,9 +463,14 @@ export class ReminderQueue {
 	 * on a request that ends in a user-like message (`openingUserAnchor`) —
 	 * mid-turn, breadcrumbs stay queued.
 	 */
-	pin(anchor: PinAnchor, placement: "last-append" | "user-prepend" = "last-append"): void {
+	pin(anchor: PinAnchor, placement: "last-append" | "user-prepend" = "last-append", messages?: readonly AgentMessage[]): void {
 		const { matching, rest } = partition(this.nextTurn, (r) => r.placement === placement);
-		for (const entry of matching) this.pinned.push({ ...entry, pin: anchor });
+		for (const entry of matching) {
+			// A one-shot bound to a call whose result hook already ran (a read's nested
+			// instructions) rides that call's result, not whichever result ended the batch.
+			const own = entry.toolCallId !== undefined && messages ? ownResultAnchor(messages, entry.toolCallId) : undefined;
+			this.pinned.push({ ...entry, pin: own ?? anchor });
+		}
 		this.nextTurn = rest;
 		if (matching.length > 0) this.changes++;
 	}
@@ -611,10 +616,7 @@ function carriesSticky(message: AgentMessage, entry: ReminderEntry): boolean {
 /** First carrier after activation; never reach back into an earlier user turn. */
 function firstStickyPin(messages: AgentMessage[], entry: ReminderEntry): PinAnchor | undefined {
 	if (entry.until !== undefined) return undefined;
-	if (entry.toolCallId !== undefined) {
-		return messages.some((m) => m.role === "toolResult" && m.toolCallId === entry.toolCallId)
-			? { kind: "toolResult", toolCallId: entry.toolCallId } : undefined;
-	}
+	if (entry.toolCallId !== undefined) return ownResultAnchor(messages, entry.toolCallId);
 	for (const message of messages) {
 		if (carriesSticky(message, entry)) return undefined;
 		if (message.role === "toolResult" && message.timestamp >= (entry.since ?? 0)) {
@@ -624,6 +626,11 @@ function firstStickyPin(messages: AgentMessage[], entry: ReminderEntry): PinAnch
 	// Overflow compaction may retain only an old reply/result. With no real
 	// user turn, a live state must still be visible and pinned to that tail.
 	return messages.some(isStickyCarrier) ? undefined : tailAnchor(messages);
+}
+
+/** `toolCallId`'s own result as an anchor, when this request holds it. */
+function ownResultAnchor(messages: readonly AgentMessage[], toolCallId: string): PinAnchor | undefined {
+	return messages.some((m) => m.role === "toolResult" && m.toolCallId === toolCallId) ? { kind: "toolResult", toolCallId } : undefined;
 }
 
 /** The anchor a one-shot lands on for this request: the trailing tool result, else the last user-like message. */

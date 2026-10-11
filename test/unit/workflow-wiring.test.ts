@@ -103,16 +103,33 @@ describe("workflow wiring: one-shot modes (LIFECYCLE-REVIEW-2026-09-06 M1)", () 
 	// No agent() call: completes without a model, so the run's shape alone is under test.
 	const script = "export const meta = { name: 'one-shot-probe', description: 'returns a value' }\nreturn { answer: 42 }";
 
+	// Battery round 7: every Qwen 3.8 model sent `args` as a JSON-encoded string
+	// despite the description, and `pipeline(args, …)` threw.
+	it.each([
+		['["a.py","b.py"]', "array:2"],
+		['{"files":["a.py"]}', "files:1"],
+		["plain text", "string:plain text"],
+	])("decodes a JSON-encoded array or object passed as args (%s)", async (args, expected) => {
+		const fake = createFakePi();
+		workflowExtension(fake.pi as never);
+		const probe = "export const meta = { name: 'args-probe', description: 'reports args' }\nreturn Array.isArray(args) ? `array:${args.length}` : typeof args === 'string' ? `string:${args}` : `files:${args.files.length}`";
+		const tool = fake.tools.get("workflow")! as unknown as { prepareArguments: (a: unknown) => unknown; execute: (...a: unknown[]) => Promise<unknown> };
+		const result = (await tool.execute("c1", tool.prepareArguments({ script: probe, args }), undefined, undefined, ctxFor("json"))) as { content: Array<{ text: string }> };
+		expect(result.content[0].text).toContain(expected);
+	});
+
 	it("in print/json mode a workflow runs to completion inside the tool call and reports inline", async () => {
 		const fake = createFakePi();
 		workflowExtension(fake.pi as never);
 		const result = (await fake.tools.get("workflow")!.execute("c1", { script }, undefined, undefined, ctxFor("json"))) as {
 			content: Array<{ text: string }>;
-			details: { background?: boolean; status?: string };
+			details: { background?: boolean; status?: string; scriptPath?: string };
 			isError?: boolean;
 		};
 		expect(result.details.background).toBeUndefined();
 		expect(result.details.status).toBe("completed");
+		// The tool promises the persisted script's path in every result, for a scriptPath re-run.
+		expect(result.content[0].text).toContain(`script: ${result.details.scriptPath}`);
 		expect(result.isError).toBe(false);
 		expect(result.content[0].text).toContain("This is a one-shot session, so the workflow ran to completion instead of in the background.");
 		expect(result.content[0].text).toContain("42");

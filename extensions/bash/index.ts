@@ -5,8 +5,9 @@
  * Registering a tool named `bash` overrides the built-in (findings §2), which
  * is how pi's official sandbox example does it too. The foreground path
  * delegates to pi's real executor (`createBashToolDefinition`) so upstream
- * bash behavior — timeout handling, truncation, PI_* env, spawn hooks — stays
- * exactly pi's; the shared body in lib/shell-tool.ts adds the background
+ * bash behavior — timeout handling, PI_* env, spawn hooks — stays exactly
+ * pi's (its tail cut of a long output is replaced by Claude Code's head-first
+ * one, lib/spill-file.ts); the shared body in lib/shell-tool.ts adds the background
  * branch (spool to `<sessionDir>/bash/<taskId>/output.log`, the shared
  * background registry, a steered completion notification), and this file only
  * supplies what is bash's: pi's definition, the bash the session resolved

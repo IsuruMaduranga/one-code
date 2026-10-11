@@ -15,7 +15,8 @@
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
 import { projectConfigDir, userConfigDir } from "../lib/config-mode.ts";
 import { SUBAGENT_HANDBACK } from "../lib/subagent-handback.ts";
@@ -157,6 +158,19 @@ export function parseAgentFile(path: string, content: string): AgentDefinition |
  */
 export function agentDirs(cwd: string, home: string, bundled?: string): string[] {
 	return [...(bundled ? [bundled] : []), join(userConfigDir(home), "agents"), join(projectConfigDir(cwd), "agents")];
+}
+
+/** The agent files the package ships (general-purpose, explore, plan, …). */
+export const BUNDLED_AGENTS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "agents");
+
+/**
+ * Every agent-file source in rank order, as the Agent tool loads them:
+ * bundled, then plugin agents, then the user and project folders. Workflows
+ * resolve `agentType` from the same list (the code-defined guide is the Agent
+ * tool's alone).
+ */
+export function agentFileSources(cwd: string, home: string, pluginAgentDirs: readonly (string | AgentSource)[]): Array<string | AgentSource> {
+	return [BUNDLED_AGENTS_DIR, ...pluginAgentDirs, ...agentDirs(cwd, home)];
 }
 
 /** A directory whose agents are exposed as `<namespace>:<name>` (plugins). */

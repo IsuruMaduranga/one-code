@@ -109,3 +109,26 @@ export function scanToolCallMarkup(text: string, from: number): { count: number;
 	}
 	return { count, contentCount, next: Math.max(next, text.length - LONGEST_MARKUP) };
 }
+
+/**
+ * Blank space a tool call may stream after its last argument character before
+ * the stream counts as runaway. Only a run holding a raw tab or newline
+ * counts: inside a JSON string those are escaped, so such a run is padding
+ * between tokens, never argument content (a string may hold any run of spaces).
+ */
+export const RUNAWAY_PADDING_LIMIT = 10_000;
+
+export interface TrailingPadding {
+	run: number;
+	structural: boolean;
+}
+
+/** The trailing blank run after one more streamed delta. */
+export function trailingPadding(previous: TrailingPadding | undefined, delta: string): TrailingPadding {
+	const last = delta.search(/\S\s*$/);
+	if (last < 0) {
+		return { run: (previous?.run ?? 0) + delta.length, structural: (previous?.structural ?? false) || /[\t\n\r]/.test(delta) };
+	}
+	const tail = delta.slice(last + 1);
+	return { run: tail.length, structural: /[\t\n\r]/.test(tail) };
+}

@@ -6,8 +6,7 @@
  * text Claude Code writes for its weakest models, with the fork guidance,
  * the briefing section and worked examples) to cheap and tiny ones
  * (lib/tool-variants.ts). Changes from Claude Code's text: a fork rejects a
- * `model` override rather than ignoring it, a missing `subagent_type` fails
- * instead of starting a general-purpose agent, agent definitions come from
+ * `model` override rather than ignoring it, agent definitions come from
  * `.claude/agents/*.md` only, and tool names are One Code's. The closing
  * paragraph describes what only One Code has: `task_output` and `task_stop`,
  * the one-shot print session, run names and `action: "list"`.
@@ -19,7 +18,7 @@ export const AGENT_SHORT_DESCRIPTION = `Launch a new agent to handle complex, mu
 
 Available agent types are listed in <system-reminder> messages in the conversation.
 
-When using the Agent tool, specify a subagent_type to select an agent: \`"fork"\` forks yourself (the fork inherits your full conversation context and always runs on your model — a \`model\` override is rejected); any other type starts a fresh agent.
+When using the Agent tool, specify a subagent_type to select an agent: \`"fork"\` forks yourself (the fork inherits your full conversation context and always runs on your model — a \`model\` override is rejected); any other type — or omitting it — starts a fresh agent (general-purpose by default).
 
 ## When to use
 
@@ -36,7 +35,7 @@ export const AGENT_LONG_DESCRIPTION = `Launch a new agent to handle complex, mul
 
 Available agent types are listed in <system-reminder> messages in the conversation.
 
-When using the Agent tool, specify a subagent_type to select an agent: \`"fork"\` forks yourself (the fork inherits your full conversation context and always runs on your model — a \`model\` override is rejected); any other type starts a fresh agent.
+When using the Agent tool, specify a subagent_type to select an agent: \`"fork"\` forks yourself (the fork inherits your full conversation context and always runs on your model — a \`model\` override is rejected); any other type — or omitting it — starts a fresh agent (general-purpose by default).
 
 ## Usage notes
 

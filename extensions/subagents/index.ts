@@ -29,7 +29,7 @@ import type { Api, Message, Model } from "@earendil-works/pi-ai";
 import { type AgentToolResult, defineTool, getAgentDir, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-mode/actions.ts";
-import { type AgentDefinition, type AgentSource, agentDirs, discoverAgents } from "./agents.ts";
+import { type AgentDefinition, agentFileSources, BUNDLED_AGENTS_DIR, discoverAgents } from "./agents.ts";
 import { findConfigured, modelIdentity, modelSpec, supportsImageInput } from "../lib/model-policy.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../lib/model-unusable.ts";
 import { applicableSubagentDefault, loadSubagentDefault, persistSubagentModel, type SubagentDefault } from "./default-model.ts";
@@ -122,10 +122,8 @@ const MCP_STATUS_LABELS: Record<McpStatusKind, string | undefined> = {
 	disabled: "disabled",
 };
 
-/** The catalog shipped in this package: <package>/agents. */
 /** This package's root (the `one-code-extension` directory). */
 const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const BUNDLED_AGENTS_DIR = join(PACKAGE_ROOT, "agents");
 
 interface RunRequest {
 	agent: string;
@@ -185,7 +183,7 @@ const SubagentParams = Type.Object({
 	subagent_type: Type.Optional(
 		Type.String({
 			description:
-				'The agent to run — a name from the "Available agents" system reminder, or "fork" to clone this conversation. Required unless action:"list". To run several in parallel, issue multiple Agent tool calls in one turn.',
+				'The agent to run — a name from the "Available agents" system reminder (general-purpose when omitted), or "fork" to clone this conversation. To run several in parallel, issue multiple Agent tool calls in one turn.',
 		}),
 	),
 	task: Type.String({ description: "The task — a complete, self-contained instruction (the agent cannot ask follow-ups)." }),
@@ -521,7 +519,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		// The code-defined guide ranks below every agent file, so one of the same
 		// name replaces it.
 		const plugins = discoverPlugins(defaultDiscoverRoots(getAgentDir(), cwd));
-		const fileSources: Array<string | AgentSource> = [BUNDLED_AGENTS_DIR, ...plugins.agentDirs, ...agentDirs(cwd, os.homedir())];
+		const fileSources = agentFileSources(cwd, os.homedir(), plugins.agentDirs);
 		// The prompt is built from the catalog it sits in, when a spawn reads it.
 		let catalog: AgentDefinition[] = [];
 		const guide = guideAgentDefinition(() => guideInput(cwd, catalog, plugins));
@@ -1441,7 +1439,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			// matched case-insensitively — a nested subagent is just as likely to be
 			// CC-trained.
 			parameters: Type.Object({
-				subagent_type: Type.String({ description: "An agent name from the list in this tool's description" }),
+				subagent_type: Type.Optional(Type.String({ description: "An agent name from the list in this tool's description (default: general-purpose)" })),
 				task: Type.String({ description: "The task — a complete, self-contained instruction" }),
 				prompt: Type.Optional(Type.String({ description: "Alias of `task` (Claude Code's name for it)." })),
 				description: Type.Optional(Type.String({ description: "A short (3-5 word) description of the task." })),
@@ -2032,11 +2030,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			const taskText = params.task ?? params.prompt;
 
 			// A call carrying run options (a task, a name, a model/thinking/isolation
-			// override, or action:"run") but no `subagent_type` is a run that forgot
-			// to name its agent. Fail loudly with a diagnostic rather than silently
-			// returning the catalog: a weaker model reads the catalog as a
-			// non-sequitur and invents wrong reasons for it, instead of learning it
-			// omitted `subagent_type`.
+			// override, or action:"run") is a run; prepareAgentArguments gave one that
+			// named no agent general-purpose, as Claude Code does (a tiny model
+			// repeated such a call 30 times against an error naming the fix, battery
+			// round 7). A call with neither lists the catalog.
 			const wantsRun =
 				params.action === "run" ||
 				taskText != null ||
@@ -2049,19 +2046,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				return {
 					content: [{ type: "text", text: `Available agents:\n${describeAgents(ctx.cwd)}` }],
 					details: { agents: agents.map((a) => a.name) },
-				};
-			}
-
-			if (!params.subagent_type) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: `No \`subagent_type\` given, but you passed run options — this looks like a run that forgot to name its agent. Set \`subagent_type\` to one of the names below (or "fork" to clone this conversation). To only browse the catalog, call with action:"list".\n\nAvailable agents:\n${describeAgents(ctx.cwd)}`,
-						},
-					],
-					details: {},
-					isError: true,
 				};
 			}
 

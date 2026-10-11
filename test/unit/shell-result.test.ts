@@ -67,6 +67,14 @@ describe("registerShellTool: the foreground result reads as Claude Code's", () =
 		expect(result.structuredContent).toBe(structuredContent);
 	});
 
+	it("persists an output past Claude Code's inline cap, head first", async () => {
+		const output = Array.from({ length: 4_000 }, (_, i) => `line ${i + 1}`).join("\n");
+		const run = mount({ content: [{ type: "text", text: output }], details: {}, structuredContent: { output, truncated: false, exit_code: 0, wall_time_seconds: 0 } });
+		const text = (await run("cat big")).content[0].text;
+		expect(text.startsWith("<persisted-output>\nOutput too large (")).toBe(true);
+		expect(text).toContain("Preview (first 2KB):\nline 1\nline 2\n");
+	});
+
 	it("trims a success", async () => {
 		const run = mount({ content: [{ type: "text", text: "hi\n" }], details: {}, structuredContent: { output: "hi\n", truncated: false, exit_code: 0, wall_time_seconds: 0 } });
 		expect((await run("echo hi")).content[0].text).toBe("hi");

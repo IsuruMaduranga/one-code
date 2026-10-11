@@ -5,7 +5,16 @@ import { TURN_FAILED_CHANNEL, type TurnFailedEvent } from "../lib/interrupt.ts";
 import { sessionOutlivesTurn } from "../lib/notifications.ts";
 import { isOpenRouter, openRouterProviderName, toolCallCorruptionNotice, type UpstreamFailure } from "../lib/openrouter-generation.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
-import { CONTENT_MARKUP_LIMIT, scanToolCallMarkup, TOOL_CALL_MARKUP_LIMIT, type ToolCallDamage, toolCallCorruptionReason } from "../lib/tool-call-corruption.ts";
+import {
+	CONTENT_MARKUP_LIMIT,
+	RUNAWAY_PADDING_LIMIT,
+	scanToolCallMarkup,
+	TOOL_CALL_MARKUP_LIMIT,
+	type ToolCallDamage,
+	type TrailingPadding,
+	toolCallCorruptionReason,
+	trailingPadding,
+} from "../lib/tool-call-corruption.ts";
 import { withKeepAlive } from "../lsp/keep-alive.ts";
 
 // Silence allowed inside a stream. Every raw chunk restarts the clock, but
@@ -32,6 +41,10 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 	const alive = sessionAlive(pi);
 	const rawCalls = new Map<number, { raw: string; markup: number; contentMarkup: number; next: number }>();
 	const flagged = new Map<string, ToolCallDamage>();
+	// Any provider: a call streaming blank padding without end never reaches
+	// toolcall_end, and nothing else stops it (gpt-6.1-sol, battery round 7:
+	// 26 MB of tabs and newlines over 25 minutes in a one-shot run).
+	const padding = new Map<number, TrailingPadding>();
 	const pending = new Map<AbortController, Promise<void>>();
 	let responseId: string | undefined;
 	// OpenRouter names the serving provider on every chunk; a cancelled
@@ -51,6 +64,7 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 	const resetMessage = () => {
 		rawCalls.clear();
 		flagged.clear();
+		padding.clear();
 		responseId = undefined;
 		streamProvider = undefined;
 		contentStarted = false;
@@ -131,6 +145,20 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 		if (typeof provider === "string" && provider.trim()) streamProvider = provider.trim();
 		// Any chunk is a sign of life, content or not (reasoning details, usage, an empty delta).
 		if (idleTimer) armIdle(ctx);
+	});
+
+	pi.on("message_update", (event, ctx) => {
+		const update = event.assistantMessageEvent;
+		if (!alive() || stopped || update.type !== "toolcall_delta") return;
+		const state = trailingPadding(padding.get(update.contentIndex), update.delta);
+		padding.set(update.contentIndex, state);
+		if (!state.structural || state.run < RUNAWAY_PADDING_LIMIT) return;
+		stopped = true;
+		clearIdle();
+		const reason = `The model streamed over ${RUNAWAY_PADDING_LIMIT.toLocaleString("en-US")} characters of blank space into a tool call's arguments without finishing it, so the turn was stopped.`;
+		pi.events.emit(TURN_FAILED_CHANNEL, { reason } satisfies TurnFailedEvent);
+		ctx.abort();
+		if (announce) notifyOrPrint({ hasUI: ctx.hasUI, ui: ctx.ui }, `${reason} Send the request again, or switch models if it repeats.`, "error");
 	});
 
 	pi.on("message_update", (event, ctx) => {
