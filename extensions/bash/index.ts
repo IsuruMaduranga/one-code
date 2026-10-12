@@ -25,6 +25,7 @@ import { Type } from "typebox";
 import { childProcessEnv, LAUNCHER_ENV_VAR } from "../lib/app-launch.mjs";
 import { perCwd } from "../lib/per-cwd.ts";
 import { bashSpawn, piShellEnv, withChildProcessEnv } from "../lib/shell-spawn.ts";
+import { sessionModelTier } from "../lib/session-model-tier.ts";
 import { registerShellTool } from "../lib/shell-tool.ts";
 import { type DescriptionForm, followDescriptionForm } from "../lib/tool-variants.ts";
 import { CONTEXT_BASELINE_CHANNEL, restoredContext } from "../lib/context-stack.ts";
@@ -74,7 +75,10 @@ export function bashTool(pi: ExtensionAPI, { announce }: { announce: boolean }) 
 	// first request starts. Re-registering on a mode switch changes both the
 	// description and pi's tool order, losing the entire cached prefix. Mode
 	// reminders and the live permission gate carry later changes instead.
+	// Tiny's dedicated search tools replace the long form's shell-find advice.
+	const requestTier = sessionModelTier(pi);
 	let form: DescriptionForm = "short";
+	let searchTools = false;
 	let autoMode = false;
 	let liveAutoMode = false;
 	let modeFrozen = false;
@@ -88,7 +92,7 @@ export function bashTool(pi: ExtensionAPI, { announce }: { announce: boolean }) 
 	const setDescription = registerShellTool(pi, {
 		name: "bash",
 		ccLabel: "Bash",
-		description: bashDescription(form, autoMode),
+		description: bashDescription(form, autoMode, searchTools),
 		parameters: BashParams,
 		base,
 		foreground: perCwd((cwd: string) => createBashToolDefinition(cwd, { shellPath, spawnHook })),
@@ -97,7 +101,8 @@ export function bashTool(pi: ExtensionAPI, { announce }: { announce: boolean }) 
 	});
 	followDescriptionForm(pi, (next) => {
 		form = next;
-		setDescription(bashDescription(form, autoMode));
+		searchTools = requestTier() === "tiny";
+		setDescription(bashDescription(form, autoMode, searchTools));
 	});
 	pi.events.on(PERMISSION_STATUS_CHANNEL, (data) => {
 		liveAutoMode = (data as PermissionStatus).mode === "auto";
@@ -106,13 +111,13 @@ export function bashTool(pi: ExtensionAPI, { announce }: { announce: boolean }) 
 		// Honor a restored variant even here: a temporary re-registration would
 		// move the tool despite putting its original description back afterwards.
 		autoMode = restoredAutoMode() ?? liveAutoMode;
-		setDescription(bashDescription(form, autoMode));
+		setDescription(bashDescription(form, autoMode, searchTools));
 	});
 	pi.on("session_start", () => {
 		const saved = restoredAutoMode();
 		modeFrozen = saved !== undefined;
 		autoMode = saved ?? liveAutoMode;
-		setDescription(bashDescription(form, autoMode));
+		setDescription(bashDescription(form, autoMode, searchTools));
 	});
 	pi.on("turn_start", () => {
 		modeFrozen = true;
