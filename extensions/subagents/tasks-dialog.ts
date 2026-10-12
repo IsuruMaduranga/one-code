@@ -1,7 +1,9 @@
 /**
  * `/tasks`: Claude Code 2.1.283's Background dialog (findings §40), pure
- * layout and key handling. It lists the running shells, the running local
- * agents, and the finished agents the user viewed:
+ * layout and key handling. It lists the shells the chip counts (running ones,
+ * and finished ones for the chip's linger window, so Enter on the chip always
+ * finds them), the running local agents, and the finished agents the user
+ * viewed:
  *
  *   Background
  *   2 active shells · 1 active agent
@@ -20,7 +22,7 @@
  */
 
 import type { BackgroundTask } from "../background/registry.ts";
-import { countNoun, cutPlainText as cut, formatDuration, padPlainText } from "../lib/tui-render.ts";
+import { countNoun, cutPlainText as cut, formatDuration, padPlainText, wrapHints } from "../lib/tui-render.ts";
 import { sanitizeDisplayText } from "../lib/terminal-text.ts";
 
 /** One selectable row. */
@@ -60,7 +62,7 @@ export function renderTasksDialog(input: TasksDialogInput, paint: TasksPaint): s
 	const items = tasksItems(input);
 	if (items.length === 0) {
 		out.push(line("  No tasks currently running"));
-		out.push(paint.fg("dim", line("  ↑/↓ to select · Enter to view · Esc to close")));
+		for (const hintLine of wrapHints("↑/↓ to select · Enter to view · Esc to close", width - 2)) out.push(paint.fg("dim", `  ${hintLine}`));
 		return out;
 	}
 	const agents = splitAgents(input.agents);
@@ -90,7 +92,8 @@ export function renderTasksDialog(input: TasksDialogInput, paint: TasksPaint): s
 	}
 	const current = items[input.selected];
 	const hint = ["↑/↓ to select", "Enter to view", ...(current?.running ? ["x to stop"] : []), "Esc to close"].join(" · ");
-	out.push(paint.fg("dim", line(`  ${hint}`)));
+	// Hints wrap at their separators on a narrow terminal, so none is cut off.
+	for (const hintLine of wrapHints(hint, width - 2)) out.push(paint.fg("dim", `  ${hintLine}`));
 	return out;
 }
 
@@ -106,12 +109,12 @@ export function moveTasksSelection(selected: number, key: "up" | "down", count: 
 export type TasksView = { mode: "list" } | { mode: "shell"; id: string };
 
 /**
- * The view to render now. A shell's details last while the shell runs: once
- * it finishes or is stopped it is no longer a background task, and the dialog
- * goes back to the list, as Claude Code's does.
+ * The view to render now. A shell's details last while the shell is known: one
+ * that finishes while shown keeps its details, with its final status and no
+ * `x`, and the dialog goes back to the list once the shell is gone.
  */
 export function settleTasksView(view: TasksView, shell: Pick<BackgroundTask, "status"> | undefined): TasksView {
-	return view.mode === "shell" && shell?.status !== "running" ? { mode: "list" } : view;
+	return view.mode === "shell" && shell === undefined ? { mode: "list" } : view;
 }
 
 /** What a key does in a shell's details: ← goes back, Esc/Enter/Space close, x stops a running shell. */
@@ -158,6 +161,6 @@ export function renderShellDetail(task: BackgroundTask, width: number, now: numb
 	out.push(`└${"─".repeat(Math.max(0, width - 2))}┘`);
 	out.push(paint.fg("dim", `Showing ${countNoun(shown.length, "line")}`), "");
 	const hint = ["← to go back", "Esc/Enter/Space to close", ...(task.status === "running" ? ["x to stop"] : [])].join(" · ");
-	out.push(paint.fg("dim", cut(hint, width)));
+	for (const hintLine of wrapHints(hint, width)) out.push(paint.fg("dim", hintLine));
 	return out;
 }
