@@ -41,6 +41,8 @@ import {
 	modelIdentity,
 	modelSpec as spec,
 	classifierCallCost,
+	hasCacheReadPrice,
+	pricedInput,
 } from "../lib/model-policy.ts";
 import { intrinsicTier, sameTierContainedCandidates } from "../lib/model-tier.ts";
 
@@ -172,8 +174,12 @@ function automaticClassifierCandidates(available: Model<Api>[], sessionModel: Mo
 	// 2026-10-07: a same-price older model saves nothing; 2026-10-12: judged on
 	// a call's own cost shape), and an unpriced session cannot prove an
 	// alternate cheaper. The classifier adds a window that contains the
-	// session's and never an experimental build or a moving alias.
-	const cheaper = sameTierContainedCandidates(available, sessionModel, { price: classifierCallCost }).filter(
+	// session's and never an experimental build or a moving alias. A session
+	// with no catalog cache-read price would have its per-call cost overstated
+	// (a quarter of OpenRouter's priced models list none), letting a dearer
+	// model win: such a session is compared by list input price instead.
+	const price = hasCacheReadPrice(sessionModel) ? classifierCallCost : pricedInput;
+	const cheaper = sameTierContainedCandidates(available, sessionModel, { price }).filter(
 		(model) =>
 			!isExperimentalBuild(model.id) && !isMovingAlias(model.id) && hasCatalogContextWindow(model) && model.contextWindow >= sessionModel.contextWindow,
 	);

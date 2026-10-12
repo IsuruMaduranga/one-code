@@ -298,6 +298,12 @@ export function pricedInput(model: Model<Api>): number | undefined {
 	return typeof input === "number" && input > 0 ? input : undefined;
 }
 
+/** Whether the catalog lists a cache-read price for the model (non-positive values are unpriced sentinels). */
+export function hasCacheReadPrice(model: Model<Api>): boolean {
+	const cacheRead = model.cost?.cacheRead;
+	return typeof cacheRead === "number" && cacheRead > 0;
+}
+
 /** A classifier call's measured shape: the cached ruleset and transcript, the new turn, the verdict. */
 export const CLASSIFIER_CALL_TOKENS = { cachedInput: 28_000, freshInput: 2_000, output: 700 } as const;
 
