@@ -26,7 +26,7 @@ import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { costRatioText } from "../lib/model-choice-warnings.ts";
 import { modeCycleKey } from "../lib/keys.ts";
-import { classifierCallCost, forcedReasoningLevel, isReasoningMandatoryError, modelSpec as spec, reasoningRetryLevel } from "../lib/model-policy.ts";
+import { classifierCostRatio, forcedReasoningLevel, isReasoningMandatoryError, modelSpec as spec, reasoningRetryLevel } from "../lib/model-policy.ts";
 import type { AutoModeConfig } from "./config.ts";
 import { CLASSIFIER_CACHE_APIS, cacheClassifierHistory } from "./cache.ts";
 import {
@@ -630,9 +630,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 				deps.state.refused.add(key);
 				const next = queue[0]?.model;
 				if (!next) return refusalStop(deps);
-				const nextCost = classifierCallCost(next);
-				const cost = classifierCallCost(model);
-				const ratio = nextCost !== undefined && cost !== undefined && cost > 0 ? nextCost / cost : undefined;
+				const ratio = classifierCostRatio(next, model);
 				notifyOnce(
 					deps,
 					`refused:${key}`,

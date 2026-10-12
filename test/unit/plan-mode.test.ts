@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { visibleWidth } from "../../extensions/lib/text-width.ts";
+import { wrapProse } from "../../extensions/lib/tui-render.ts";
 import { buildPlanModeReminder } from "../../extensions/plan-mode/reminder.ts";
 import { randomSlug } from "../../extensions/plan-mode/slug.ts";
 import {
@@ -10,7 +11,6 @@ import {
 	renderPlanViewer,
 	runPlanApproval,
 	selectPlanChoice,
-	wrapPlanText,
 } from "../../extensions/plan-mode/viewer.ts";
 
 /** The dialog's default choice list when auto mode is available (auto mode leads). */
@@ -106,14 +106,14 @@ describe("plan viewer", () => {
 	const plain = (_color: string, text: string) => text;
 
 	it("wraps long lines and preserves blank lines", () => {
-		const lines = wrapPlanText(`${"a".repeat(25)}\n\nshort`, 10);
+		const lines = wrapProse(`${"a".repeat(25)}\n\nshort`, 10);
 		expect(lines).toEqual(["a".repeat(10), "a".repeat(10), "a".repeat(5), "", "short"]);
 	});
 
 	// The dialog broke words at the edge ("repo" / "rt") at any width.
 	it("breaks at word boundaries and keeps an indent under its line", () => {
-		expect(wrapPlanText("verify with make test and report", 16)).toEqual(["verify with make", "test and report"]);
-		expect(wrapPlanText("  - nested item that wraps", 16)).toEqual(["  - nested item", "  that wraps"]);
+		expect(wrapProse("verify with make test and report", 16)).toEqual(["verify with make", "test and report"]);
+		expect(wrapProse("  - nested item that wraps", 16)).toEqual(["  - nested item", "  that wraps"]);
 	});
 
 	it("clamps the scroll offset to the content", () => {
@@ -134,7 +134,7 @@ describe("plan viewer", () => {
 
 	it("never renders a line wider than the given width", () => {
 		const width = 24;
-		const content = wrapPlanText(`# Plan\n${"word ".repeat(40)}\nshort`, width - 1);
+		const content = wrapProse(`# Plan\n${"word ".repeat(40)}\nshort`, width - 1);
 		const lines = renderPlanViewer({ lines: content, offset: 0, choice: 0, choices: CHOICES }, plain, width);
 		for (const line of lines) {
 			expect([...line].length, JSON.stringify(line)).toBeLessThanOrEqual(width);

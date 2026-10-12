@@ -22,30 +22,27 @@ export interface ShellPaint extends Paint {
 }
 
 /**
- * A finished shell keeps the chip this long, as a finished agent keeps its
- * strip row, and then the chip clears.
+ * The shells the chip counts: running ones, and finished ones for as long as a
+ * finished agent keeps its strip row (STRIP_LINGER_MS).
  */
-export const SHELL_CHIP_LINGER_MS = STRIP_LINGER_MS;
-
-/** The shells the chip counts: running ones, and finished ones inside the linger window. */
 export function shellRows(tasks: BackgroundTask[], now: number): BackgroundTask[] {
-	return tasks.filter((t) => t.status === "running" || (t.finishedAt ?? now) > now - SHELL_CHIP_LINGER_MS);
+	return tasks.filter((t) => t.status === "running" || (t.finishedAt ?? now) > now - STRIP_LINGER_MS);
 }
 
-export interface ShellTransition {
-	/** Whether the chip keeps focus. */
-	focused: boolean;
-	/** openTasks: open the Background dialog; toAgents: hand ↓ on to the agent
-	 * rows; passthrough: unhandled byte, so drop focus and let the editor have it. */
-	effect?: "openTasks" | "toAgents" | "passthrough";
-}
+/**
+ * What a key does on the focused chip. Every key drops the chip's focus;
+ * openTasks opens the Background dialog, toAgents hands ↓ on to the agent rows,
+ * passthrough lets the editor have an unhandled byte, and undefined (↑, Esc)
+ * only leaves the chip.
+ */
+export type ShellKeyEffect = "openTasks" | "toAgents" | "passthrough" | undefined;
 
 /** The focused chip's keys. */
-export function reduceShellKey(key: StripKey | undefined): ShellTransition {
-	if (key === "down") return { focused: false, effect: "toAgents" };
-	if (key === "open") return { focused: false, effect: "openTasks" };
-	if (key === "up" || key === "leave") return { focused: false };
-	return { focused: false, effect: "passthrough" };
+export function reduceShellKey(key: StripKey | undefined): ShellKeyEffect {
+	if (key === "down") return "toAgents";
+	if (key === "open") return "openTasks";
+	if (key === "up" || key === "leave") return undefined;
+	return "passthrough";
 }
 
 /** The chip's one line. Callers render it only while shellRows() is non-empty. */

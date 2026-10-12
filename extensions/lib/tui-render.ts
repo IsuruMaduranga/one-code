@@ -585,10 +585,13 @@ export function rejectionLine(
 	if (!isError) return undefined;
 	const kind = userDenialKind(textContent(result));
 	if (!kind) return undefined;
-	if (kind === "stop" && file?.path) {
-		return `  ⎿  ${theme.fg("dim", `User rejected ${file.op} to `)}${theme.bold(theme.fg("dim", sanitizeDisplayText(file.path)))}`;
-	}
+	if (kind === "stop" && file?.path) return `  ⎿  ${rejectedFileHead(theme, file.op, file.path)}`;
 	return `  ⎿  ${theme.fg("dim", TOOL_USE_REJECTED)}`;
+}
+
+/** "User rejected <op> to <path>", dimmed with the path in bold: a file tool's reasonless rejection, before the `⎿` elbow. */
+export function rejectedFileHead(theme: ThemeLike, op: RejectedFileOp, path: string): string {
+	return `${theme.fg("dim", `User rejected ${op} to `)}${theme.bold(theme.fg("dim", sanitizeDisplayText(path)))}`;
 }
 
 export interface CcRenderSpec<TArgs = unknown, TDetails = unknown> {
@@ -650,7 +653,8 @@ export function ccToolRenderers<TArgs = any, TDetails = any>(
 			theme: ThemeLike,
 			context: { args?: TArgs; isError: boolean },
 		) {
-			const rejected = rejectionLine(theme, stripReminderBlocks(result), context.isError);
+			const stripped = stripReminderBlocks(result);
+			const rejected = rejectionLine(theme, stripped, context.isError);
 			if (rejected) return linesComponent(() => [rejected]);
 			let text: string | undefined;
 			try {
@@ -658,7 +662,7 @@ export function ccToolRenderers<TArgs = any, TDetails = any>(
 			} catch {
 				text = undefined;
 			}
-			text ??= textContent(stripReminderBlocks(result));
+			text ??= textContent(stripped);
 			if (!text) return linesComponent(() => []);
 			let link: string | undefined;
 			try {

@@ -25,7 +25,7 @@
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { classifierCallCost, hasCatalogContextWindow, isExperimentalBuild, isMovingAlias, modelSpec as spec } from "./model-policy.ts";
+import { classifierCostRatio, hasCatalogContextWindow, isExperimentalBuild, isMovingAlias, modelSpec as spec } from "./model-policy.ts";
 import { intrinsicTier, tiersBelow } from "./model-tier.ts";
 import { newerModelSuggestion } from "./newer-model.ts";
 
@@ -107,13 +107,12 @@ export function chosenModelWarnings({
 			});
 		}
 		if (role === "classifier") {
-			const chosenCost = classifierCallCost(chosen);
-			const sessionCost = classifierCallCost(sessionModel);
-			if (chosenCost !== undefined && sessionCost !== undefined && chosenCost > sessionCost) {
+			const ratio = classifierCostRatio(chosen, sessionModel);
+			if (ratio !== undefined && ratio > 1) {
 				warnings.push({
 					kind: "costlier",
 					text:
-						`The ${label} ${spec(chosen)} costs about ${costRatioText(chosenCost / sessionCost)} as much per call as this session's ${spec(sessionModel)}. ` +
+						`The ${label} ${spec(chosen)} costs about ${costRatioText(ratio)} as much per call as this session's ${spec(sessionModel)}. ` +
 						"It screens nearly every gated call, so it can cost more than the session itself.",
 					fix: `Pick a cheaper one with ${command}, ${orAutomatic}`,
 				});

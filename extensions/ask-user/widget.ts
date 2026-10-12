@@ -513,8 +513,7 @@ function renderPreviewRows(state: WidgetState, style: WidgetStyle, width: number
 	const notesIndent = " ".repeat(sideBySide ? leftWidth : 2);
 	out.push("");
 	if (state.editing?.field === "notes") {
-		const [first, ...rest] = wrapUnder(`${notesIndent}Notes: `, `${state.editing.draft}▏`, width);
-		out.push(`${notesIndent}${paint("accent", "Notes: ")}${first.slice(notesIndent.length + "Notes: ".length)}`, ...rest);
+		out.push(...wrapUnder(`${notesIndent}Notes: `, `${state.editing.draft}▏`, width, `${notesIndent}${paint("accent", "Notes: ")}`));
 	} else if (questionState.notes) {
 		out.push(`${notesIndent}${paint("accent", "Notes: ")}${cut(questionState.notes)}`);
 	} else {
@@ -527,13 +526,14 @@ function renderPreviewRows(state: WidgetState, style: WidgetStyle, width: number
 
 /**
  * `prefix` then `text`, wrapped to the row width with continuation lines
- * indented under the text, so a typed answer shows whole.
+ * indented under the text, so a typed answer shows whole. `painted` replaces
+ * the plain prefix on the first line (same width, with colour).
  */
-function wrapUnder(prefix: string, text: string, width: number): string[] {
+function wrapUnder(prefix: string, text: string, width: number, painted = prefix): string[] {
 	const indent = visibleWidth(prefix);
 	const room = Math.max(4, width - 1 - indent);
 	const wrapped = wrapPlainText(text, room);
-	return wrapped.map((line, i) => (i === 0 ? prefix : " ".repeat(indent)) + line);
+	return wrapped.map((line, i) => (i === 0 ? painted : " ".repeat(indent)) + line);
 }
 
 function previewBox(preview: string, maxOuter: number, paint: Paint): string[] {

@@ -14,9 +14,6 @@
 import { cutPlainText, truncateLine, wrapProse } from "../lib/tui-render.ts";
 import { keyId } from "../lib/key-input.ts";
 
-/** Wrap a plan to `width` columns at word boundaries, keeping indents and blank lines. */
-export { wrapProse as wrapPlanText } from "../lib/tui-render.ts";
-
 /** Renders Markdown to painted lines at a width (pi-tui's Markdown, which the transcript uses). */
 export type PlanMarkdown = (text: string, width: number) => string[];
 

@@ -22,10 +22,12 @@ import { hardWrapColumns } from "../lib/text-width.ts";
 import { sanitizeDisplayText } from "../lib/terminal-text.ts";
 import {
 	callLine,
+	countNoun,
 	displayToolPath,
 	EXPAND_HINT,
 	elbowIndent,
 	linesComponent,
+	rejectedFileHead,
 	spinnerBulletColor,
 	stripReminderBlocks,
 	summarizeArgs,
@@ -47,9 +49,6 @@ export const WRITE_DIFF_MAX_BYTES = 512 * 1024;
  * (`+12 line`, `-12 line`, ` 12 line`), absent when it was too big to compute.
  */
 export type WriteDetails = { kind: "create" } | { kind: "update"; diff?: string };
-
-/** What the waiting call previews: the new content, or the diff against the file on disk. */
-export type WritePreview = { kind: "create" } | { kind: "update"; diff: string };
 
 /** Lines in the content, a trailing newline ending the last line rather than starting another (Claude Code's count). */
 export function countLines(content: string): number {
@@ -78,7 +77,7 @@ export function contentPreviewLines(theme: ThemeLike, content: string, width: nu
 	const shown = expanded ? source : source.slice(0, WRITE_PREVIEW_LINES);
 	const out = shown.flatMap((line) => wrapLine(line, width).map((part) => theme.fg("toolOutput", part)));
 	const hidden = total - shown.length;
-	if (!expanded && hidden > 0) out.push(theme.fg("dim", `… +${hidden} ${hidden === 1 ? "line" : "lines"} (${EXPAND_HINT})`));
+	if (!expanded && hidden > 0) out.push(theme.fg("dim", `… +${countNoun(hidden, "line")} (${EXPAND_HINT})`));
 	return out;
 }
 
@@ -114,9 +113,11 @@ export function updateSummary(theme: ThemeLike, diff: string): string {
 	return parts.length > 0 ? parts.join(", ") : "No changes";
 }
 
-/** The waiting call's preview body, wrapped to `width`. */
-export function writePreviewLines(theme: ThemeLike, preview: WritePreview, content: string, width: number, expanded: boolean): string[] {
-	return preview.kind === "update" ? diffPreviewLines(theme, preview.diff, width) : contentPreviewLines(theme, content, width, expanded);
+/** The waiting call's preview body, wrapped to `width`: the diff for an overwrite it could diff, the new content otherwise. */
+export function writePreviewLines(theme: ThemeLike, preview: WriteDetails, content: string, width: number, expanded: boolean): string[] {
+	return preview.kind === "update" && preview.diff !== undefined
+		? diffPreviewLines(theme, preview.diff, width)
+		: contentPreviewLines(theme, content, width, expanded);
 }
 
 /**
@@ -134,8 +135,7 @@ export function writeResultLines(theme: ThemeLike, details: WriteDetails | undef
 
 /** A write rejected without a reason: "User rejected write to <path>" and the first lines it would have written. */
 export function rejectedWriteLines(theme: ThemeLike, path: string, content: string, width: number, expanded: boolean): string[] {
-	const head = `${theme.fg("dim", "User rejected write to ")}${theme.bold(theme.fg("dim", sanitizeDisplayText(path)))}`;
-	return [head, ...contentPreviewLines(theme, content, width, expanded)];
+	return [rejectedFileHead(theme, "write", path), ...contentPreviewLines(theme, content, width, expanded)];
 }
 
 /** The I/O the renderers need, injected so this module stays pure. */
@@ -156,7 +156,7 @@ interface WriteArgs {
 interface PreviewState {
 	path: string;
 	content: string;
-	preview?: WritePreview;
+	preview?: WriteDetails;
 	lines?: { width: number; expanded: boolean; lines: string[] };
 }
 
@@ -188,18 +188,13 @@ export function createWriteRenderers(
 		const next: PreviewState = { path, content };
 		state.ccWritePreview = next;
 		const cwd = typeof context.cwd === "string" ? context.cwd : process.cwd();
-		const settle = (preview: WritePreview) => {
+		const settle = (preview: WriteDetails) => {
 			if (state.ccWritePreview !== next) return;
 			next.preview = preview;
 			context.invalidate?.();
 		};
 		deps.readBefore(path, cwd).then(
-			(before) =>
-				settle(
-					typeof before === "string" && before.length <= WRITE_DIFF_MAX_BYTES && content.length <= WRITE_DIFF_MAX_BYTES
-						? { kind: "update", diff: deps.diff(before, content) }
-						: { kind: "create" },
-				),
+			(before) => settle(writeDetails(before, content, deps.diff)),
 			() => settle({ kind: "create" }),
 		);
 		return next;

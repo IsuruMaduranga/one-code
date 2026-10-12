@@ -315,6 +315,13 @@ export function classifierCallCost(model: Model<Api>): number | undefined {
 	return (priced(model.cost?.cacheRead) * cachedInput + input * freshInput + priced(model.cost?.output) * output) / 1_000_000;
 }
 
+/** How many times `model`'s classifier call costs `base`'s, or undefined when either price is unknown or `base` is free. */
+export function classifierCostRatio(model: Model<Api>, base: Model<Api>): number | undefined {
+	const cost = classifierCallCost(model);
+	const baseCost = classifierCallCost(base);
+	return cost !== undefined && baseCost !== undefined && baseCost > 0 ? cost / baseCost : undefined;
+}
+
 /** A dated snapshot id (`claude-haiku-4-5-20251001`): the trailing `-YYYYMMDD` marks a pinned alias of an undated model. */
 export function isDatedModelId(id: string): boolean {
 	return /-20\d{6}$/.test(id);

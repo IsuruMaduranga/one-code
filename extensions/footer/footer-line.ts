@@ -95,7 +95,7 @@ interface Part {
 	/** Higher drops first when the line is too narrow; 0 = never dropped. */
 	dropPriority: number;
 	/** The model name: the one core part cut (with an ellipsis) when even the core overflows. */
-	model?: boolean;
+	model: boolean;
 }
 
 const SEP = " · ";
@@ -117,7 +117,7 @@ export function buildFooterLines(data: FooterData, width: number, paint: Paint):
 		if (!value) return;
 		const plain = label ? `${label} ${value}` : value;
 		const painted = label ? `${paint("muted", label)} ${paint(color, value)}` : paint(color, value);
-		parts.push({ plain, painted, dropPriority, ...(model ? { model } : {}) });
+		parts.push({ plain, painted, dropPriority, model });
 	};
 
 	// Context fill as "usage: tokens/window (pct%)", or "?/window" while the

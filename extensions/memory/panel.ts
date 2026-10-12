@@ -35,19 +35,21 @@ export function initialMemoryState(): MemoryPanelState {
 	return { cursor: 0 };
 }
 
-/** Auto-memory for this process, the value saved for the next start, and whether the env variable sets it. */
-export interface AutoMemoryView {
-	running: boolean;
-	saved: boolean;
+/** A setting's value in this process, the value saved for the next start, and whether an env variable sets it. */
+export interface SettingView<T> {
+	running: T;
+	saved: T;
 	fromEnv?: boolean;
 }
 
-/** The mode this process runs in, the one saved for the next start, and whether `ONECODE_CONFIG_MODE` sets it. */
-export interface ModeView {
-	running: ConfigMode;
-	saved: ConfigMode;
-	fromEnv?: boolean;
-}
+/** Auto-memory; `CLAUDE_CODE_DISABLE_AUTO_MEMORY` can set it. */
+export type AutoMemoryView = SettingView<boolean>;
+
+/** The config-sources mode; `ONECODE_CONFIG_MODE` can set it. */
+export type ModeView = SettingView<ConfigMode>;
+
+/** "; applies from the next start" while the saved value differs from the running one. */
+const pendingSuffix = (view: SettingView<unknown>): string => (view.saved === view.running ? "" : "; applies from the next start");
 
 const MODE_DESCRIPTIONS: Record<ConfigMode, string> = {
 	"claude-compatible": "~/.claude, CLAUDE.md, .agents and pi's dirs",
@@ -171,10 +173,10 @@ export function renderMemoryPanel(
 export function settingChanges(before: { mode: ConfigMode; autoMemory: boolean }, mode: ModeView, autoMemory: AutoMemoryView): string {
 	const lines: string[] = [];
 	if (autoMemory.saved !== before.autoMemory) {
-		lines.push(`Turned auto-memory ${autoMemory.saved ? "on" : "off"}${autoMemory.saved === autoMemory.running ? "" : "; applies from the next start"}`);
+		lines.push(`Turned auto-memory ${autoMemory.saved ? "on" : "off"}${pendingSuffix(autoMemory)}`);
 	}
 	if (mode.saved !== before.mode) {
-		lines.push(`Set config sources to ${MODE_LABELS[mode.saved]}${mode.saved === mode.running ? "" : "; applies from the next start"}`);
+		lines.push(`Set config sources to ${MODE_LABELS[mode.saved]}${pendingSuffix(mode)}`);
 	}
 	return lines.join("\n");
 }
@@ -185,22 +187,26 @@ export function modeConfirmQuestion(mode: ModeView): string {
 	return `Switch config sources to ${MODE_LABELS[next]}? One Code will read ${MODE_DESCRIPTIONS[next]} instead, from the next start.`;
 }
 
-/** "Auto-memory: on|off", with the same pending and env notes as the mode row. */
-function renderAutoMemoryRow(view: AutoMemoryView, selected: boolean, paint: PanelPaint): string {
+/**
+ * A toggle row's plain text, "<label>: <saved>", with "(from next start)" while
+ * the saved value differs from the running one; when `envName` sets it, the
+ * running value and that it is set there. Also returns the value shown.
+ */
+function settingRow<T>(label: string, view: SettingView<T>, valueText: (value: T) => string, envName: string, selected: boolean): { left: string; shown: T } {
 	const shown = view.fromEnv ? view.running : view.saved;
-	const note = view.fromEnv ? " (set by CLAUDE_CODE_DISABLE_AUTO_MEMORY)" : view.saved !== view.running ? " (from next start)" : "";
-	const left = `${selected ? "❯ " : "  "}Auto-memory: ${shown ? "on" : "off"}${note}`;
+	const note = view.fromEnv ? ` (set by ${envName})` : view.saved !== view.running ? " (from next start)" : "";
+	return { left: `${selected ? "❯ " : "  "}${label}: ${valueText(shown)}${note}`, shown };
+}
+
+/** "Auto-memory: on|off". */
+function renderAutoMemoryRow(view: AutoMemoryView, selected: boolean, paint: PanelPaint): string {
+	const { left } = settingRow("Auto-memory", view, (on) => (on ? "on" : "off"), "CLAUDE_CODE_DISABLE_AUTO_MEMORY", selected);
 	return selected ? paint.fg("accent", left) : left;
 }
 
-/**
- * "Config sources: <saved>", with "(from next start)" while it differs from the
- * running mode; under `ONECODE_CONFIG_MODE`, the running mode and that it is set there.
- */
+/** "Config sources: <mode>" and the mode's description. */
 function renderModeRow(mode: ModeView, selected: boolean, paint: PanelPaint): string {
-	const shown = mode.fromEnv ? mode.running : mode.saved;
-	const note = mode.fromEnv ? " (set by ONECODE_CONFIG_MODE)" : mode.saved !== mode.running ? " (from next start)" : "";
-	const left = `${selected ? "❯ " : "  "}Config sources: ${MODE_LABELS[shown]}${note}`;
+	const { left, shown } = settingRow("Config sources", mode, (value) => MODE_LABELS[value], "ONECODE_CONFIG_MODE", selected);
 	const pad = " ".repeat(Math.max(2, DESC_COL + 12 - left.length));
 	const description = MODE_DESCRIPTIONS[shown];
 	return selected ? `${paint.fg("accent", left)}${pad}${paint.fg("accent", description)}` : `${left}${pad}${paint.fg("muted", description)}`;

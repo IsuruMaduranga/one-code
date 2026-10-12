@@ -260,15 +260,16 @@ export function renderPanel(input: PanelRenderInput, paint: PanelPaint): string[
 	clampPanelState(state, view);
 
 	const out: string[] = [panelTopRule(paint.fg, width), tabBar(state, view, paint, width), ""];
+	// Wrapped to the width where it is set: the list counts its lines for the budget.
 	let footer: string[];
 
 	if (state.addDialog) {
 		out.push(...addDialogLines(state.addDialog.draft, paint, width));
-		footer = ["Enter to add · Esc to cancel"];
+		footer = fitFooter(["Enter to add · Esc to cancel"], width);
 	} else if (state.detail) {
 		const detail = detailLines(input, paint);
 		out.push(...detail.lines);
-		footer = [detail.footer];
+		footer = fitFooter([detail.footer], width);
 	} else {
 		let blocks: Block[];
 		switch (state.tab) {
@@ -315,6 +316,6 @@ export function renderPanel(input: PanelRenderInput, paint: PanelPaint): string[
 			),
 		);
 	}
-	out.push("", ...fitFooter(footer, width).map((line) => paint.fg("dim", cutPlainText(` ${line}`, width - 1))));
+	out.push("", ...footer.map((line) => paint.fg("dim", cutPlainText(` ${line}`, width - 1))));
 	return out;
 }

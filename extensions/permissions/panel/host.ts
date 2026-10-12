@@ -12,7 +12,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { panelFactory } from "../../lib/panel-focus.ts";
+import { panelUi } from "../../lib/panel-focus.ts";
 import { boundedDockHeight, safeThemeBold, safeThemeInverse, safeThemePaint } from "../../lib/tui-render.ts";
 import { decodePanelKey } from "./keys.ts";
 import { type PanelPaint, renderPanel } from "./render.ts";
@@ -64,7 +64,7 @@ export async function openPermissionsPanel(
 	const { state, changes } = session;
 
 	// Reports its focus, so a permission prompt waits for it to close (lib/panel-focus.ts).
-	await ctx.ui.custom<null>(panelFactory(events, (tui, theme, _keybindings, done) => {
+	await panelUi(events, ctx.ui).custom<null>((tui, theme, _keybindings, done) => {
 		const paint: PanelPaint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme), inverse: safeThemeInverse(theme) };
 		// Rendered lines are cached per width and cleared on every key; the view
 		// is rebuilt only when an effect changed the rules underneath it.
@@ -124,7 +124,7 @@ export async function openPermissionsPanel(
 				cache = undefined;
 			},
 		};
-	}));
+	});
 
 	return session;
 }

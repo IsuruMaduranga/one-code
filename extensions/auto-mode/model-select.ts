@@ -42,27 +42,7 @@ import {
 	modelSpec as spec,
 	classifierCallCost,
 } from "../lib/model-policy.ts";
-import { atLeastTier, economicalContainedCandidates, intrinsicTier } from "../lib/model-tier.ts";
-
-export { CLASSIFIER_CALL_TOKENS, classifierCallCost } from "../lib/model-policy.ts";
-
-/**
- * The contained models in the session's tier or above that cost strictly less
- * per classifier call than the session model, cheapest first. An unpriced
- * session cannot prove an alternate cheaper, so it gets none.
- */
-function cheaperPerCall(available: Model<Api>[], sessionModel: Model<Api>): Model<Api>[] {
-	const sessionCost = classifierCallCost(sessionModel);
-	if (sessionCost === undefined) return [];
-	const floor = intrinsicTier(sessionModel);
-	const sessionSpec = spec(sessionModel);
-	return economicalContainedCandidates(available, sessionModel)
-		.filter((model) => spec(model) !== sessionSpec && atLeastTier(intrinsicTier(model), floor))
-		.map((model) => ({ model, cost: classifierCallCost(model) }))
-		.filter((entry): entry is { model: Model<Api>; cost: number } => entry.cost !== undefined && entry.cost < sessionCost)
-		.sort((a, b) => a.cost - b.cost)
-		.map((entry) => entry.model);
-}
+import { intrinsicTier, sameTierContainedCandidates } from "../lib/model-tier.ts";
 
 export interface Candidate {
 	model: Model<Api>;
@@ -165,7 +145,8 @@ export function classifierCandidates({ available, sessionModel, configured, conf
  * strictly less than the session model, are not experimental builds or moving
  * `-latest` aliases (what answers one changes without notice), and have
  * a known catalog window at least as large as the session's: the same rule as
- * the subagent default (`sameTierContainedCandidates`) plus the window. The
+ * the subagent default (`sameTierContainedCandidates`), priced per classifier
+ * call, plus the window. The
  * cheapest qualifying model screens first, with the session retained as an
  * availability fallback.
  */
@@ -192,7 +173,7 @@ function automaticClassifierCandidates(available: Model<Api>[], sessionModel: Mo
 	// a call's own cost shape), and an unpriced session cannot prove an
 	// alternate cheaper. The classifier adds a window that contains the
 	// session's and never an experimental build or a moving alias.
-	const cheaper = cheaperPerCall(available, sessionModel).filter(
+	const cheaper = sameTierContainedCandidates(available, sessionModel, { price: classifierCallCost }).filter(
 		(model) =>
 			!isExperimentalBuild(model.id) && !isMovingAlias(model.id) && hasCatalogContextWindow(model) && model.contextWindow >= sessionModel.contextWindow,
 	);

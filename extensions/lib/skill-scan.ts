@@ -15,13 +15,13 @@
  * turn), so a root missing here is a skill with no `/name` command at startup.
  */
 
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { PluginSkill } from "./plugins.ts";
 import type { SkillScope } from "./skill-overrides.ts";
 import { claudeSourcesOn, projectConfigDir, userConfigDir } from "./config-mode.ts";
-import { claudeUserDir, isPathAtOrUnder } from "./paths.ts";
+import { claudeUserDir, isPathAtOrUnder, tryRealpath } from "./paths.ts";
 import { parseFrontmatterLoosely } from "./frontmatter.ts";
 
 /** The skill catalog shipped in this package: `<package>/skills` (Claude Code's self-contained built-in skills). */
@@ -85,18 +85,10 @@ function scanDir(dir: string, scope: SkillScope, into: Map<string, ScannedSkill>
 		} catch {
 			continue;
 		}
-		const real = tryRealpath(skillFile);
+		const real = tryRealpath(skillFile) ?? skillFile;
 		if (into.has(name) || seenFiles.has(real)) continue;
 		seenFiles.add(real);
 		into.set(name, { name, path: skillFile, scope });
-	}
-}
-
-function tryRealpath(path: string): string {
-	try {
-		return realpathSync(path);
-	} catch {
-		return path;
 	}
 }
 

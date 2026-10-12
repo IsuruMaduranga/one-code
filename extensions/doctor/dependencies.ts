@@ -62,8 +62,9 @@ export function projectLanguages(cwd: string): string[] {
 		if (seen.has(config.command)) continue;
 		if (config.rootMarkers.some((marker) => existsSync(join(cwd, marker)))) seen.set(config.command, languageId);
 	}
-	const wanted = Object.entries(SERVERS).filter(([, config]) => !seen.has(config.command)).length;
-	if (wanted > 0) {
+	// One entry per server binary: the walk stops once every one is accounted for.
+	const servers = new Set(Object.values(SERVERS).map((config) => config.command)).size;
+	if (seen.size < servers) {
 		let visited = 0;
 		const walk = (dir: string, depth: number): void => {
 			let entries: Dirent[];
@@ -73,7 +74,7 @@ export function projectLanguages(cwd: string): string[] {
 				return;
 			}
 			for (const entry of entries) {
-				if (++visited > SCAN_MAX_ENTRIES) return;
+				if (++visited > SCAN_MAX_ENTRIES || seen.size === servers) return;
 				if (entry.name.startsWith(".")) continue;
 				if (entry.isDirectory()) {
 					if (depth < SCAN_MAX_DEPTH && !SCAN_SKIP.has(entry.name)) walk(join(dir, entry.name), depth + 1);

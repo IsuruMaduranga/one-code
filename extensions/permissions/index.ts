@@ -125,7 +125,7 @@ import { announceLocalCommand, registerLocalCommand } from "../lib/local-command
 import { claudeSourcesOn } from "../lib/config-mode.ts";
 import { claudeJsonPath, tildify, tryRealpath } from "../lib/paths.ts";
 import { openPermissionsPanel, type PermissionsPanelHost } from "./panel/host.ts";
-import { PANEL_FOCUS_CHANNEL, PanelFocus, panelFactory } from "../lib/panel-focus.ts";
+import { PANEL_FOCUS_CHANNEL, PanelFocus, panelUi } from "../lib/panel-focus.ts";
 import {
 	AUTO_SECTION_LABELS,
 	AUTO_SECTIONS,
@@ -199,6 +199,13 @@ const BLOCKED_NOT_JUDGED = (reason: string) =>
 	"Do not rephrase it or route around the gate. Continue with other tasks that do not require this action — " +
 	"reading files, searching code, and other read-only operations do not require the classifier. " +
 	"If this action is essential, tell the user what you were about to do so they can re-run interactively or set another classifier model.";
+/** The text a classifier block hands the model: a timeout, a call never judged, or a denial. */
+const classifierBlockReason = (outcome: { tier?: string; noVerdict?: boolean; reason: string }): string =>
+	outcome.tier === "timeout"
+		? BLOCKED_BY_TIMEOUT(outcome.reason)
+		: outcome.noVerdict
+			? BLOCKED_NOT_JUDGED(outcome.reason)
+			: DENIED_BY_CLASSIFIER(outcome.reason);
 // "Choose a different approach" is exactly what a literal reader does with a
 // second command of the same effect: a tiny-tier model met `Bash(rm:*)` and
 // deleted the file with `python3 -c "import os; os.remove(…)"` 3/3 times
@@ -1431,9 +1438,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				// count toward the auto-pause. It is returned to the model as retryable
 				// (the call was never judged) rather than prompting — a prompt would
 				// hang an unattended session waiting on a classifier that was slow.
-				if (outcome.tier === "timeout") {
-					return { block: true, reason: BLOCKED_BY_TIMEOUT(outcome.reason) };
-				}
+				if (outcome.tier === "timeout") return { block: true, reason: classifierBlockReason(outcome) };
 
 				const tripped = pauseTracker.recordBlock({
 					toolName: event.toolName,
@@ -1468,7 +1473,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				// classifier's own reason, so it can find a safe alternative. Auto mode
 				// does not hand a soft block to the user as a per-action prompt. A call
 				// the classifier never judged is said to be one, not a denial.
-				return { block: true, reason: outcome.noVerdict ? BLOCKED_NOT_JUDGED(outcome.reason) : DENIED_BY_CLASSIFIER(outcome.reason) };
+				return { block: true, reason: classifierBlockReason(outcome) };
 			}
 			// Paused: fall through to the resume prompt below.
 		}
@@ -1664,8 +1669,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			});
 			if (outcome.decision === "allow") return undefined;
 			if (outcome.transcriptTooLong) return transcriptOverflow(ctx, toolName, subject, call.signal);
-			if (outcome.tier === "timeout") return { block: true, reason: BLOCKED_BY_TIMEOUT(outcome.reason) };
-			return { block: true, reason: outcome.noVerdict ? BLOCKED_NOT_JUDGED(outcome.reason) : DENIED_BY_CLASSIFIER(outcome.reason) };
+			return { block: true, reason: classifierBlockReason(outcome) };
 		}
 
 		// Safety floor: a write to the gate's own config is NEVER auto-approved and
@@ -2454,7 +2458,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			);
 			return;
 		}
-		const chosen = await ctx.ui.custom<PickerEntry | null>(panelFactory(pi.events, (tui, theme, _keybindings, done) =>
+		const chosen = await panelUi(pi.events, ctx.ui).custom<PickerEntry | null>((tui, theme, _keybindings, done) =>
 			modelPickerComponent(
 				{
 					entries: toPickerEntries(available),
@@ -2466,7 +2470,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				theme,
 				done,
 			),
-		));
+		);
 		if (chosen) await applyClassifierChoice(pickerSpec(chosen), ctx);
 	};
 

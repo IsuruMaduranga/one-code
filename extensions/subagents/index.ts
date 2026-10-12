@@ -1056,10 +1056,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			// ctrl+x (the agents stop-all chord arm) means nothing on the chip:
 			// swallow it rather than leaking the raw \x18 into the editor.
 			if (decoded.chordArmed) return { consume: true };
-			const result = reduceShellKey(decoded.key);
-			panel.setShellChipFocus(result.focused);
-			if (result.effect === "passthrough") return undefined; // typing resumes in the editor, byte included
-			if (result.effect === "toAgents") {
+			const effect = reduceShellKey(decoded.key);
+			panel.setShellChipFocus(false);
+			if (effect === "passthrough") return undefined; // typing resumes in the editor, byte included
+			if (effect === "toAgents") {
 				if (focusFirstAgentRow()) return { consume: true };
 				// No agent rows below the chip: stay on it. Dropping focus here handed
 				// the NEXT key to the editor, where ↑ recalls the last prompt — the
@@ -1068,7 +1068,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				panel.setShellChipFocus(true);
 				return { consume: true };
 			}
-			if (result.effect === "openTasks") {
+			if (effect === "openTasks") {
 				void openTasksDialog(ctx).catch((error: unknown) => {
 					ctx.ui.notify(`Could not open the tasks dialog: ${error instanceof Error ? error.message : String(error)}`, "error");
 				});
@@ -2823,10 +2823,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			};
 			return {
 				render: (width: number) => {
-					dialogView = settleTasksView(dialogView, dialogView.mode === "shell" ? shellById(dialogView.id) : undefined);
-					if (dialogView.mode === "shell") {
-						const task = shellById(dialogView.id);
-						if (task) return ["", ...renderShellDetail(task, width - 2, Date.now(), paint).map((line) => `  ${line}`), ""].map((line) => truncateLine(line, width));
+					const task = dialogView.mode === "shell" ? shellById(dialogView.id) : undefined;
+					dialogView = settleTasksView(dialogView, task);
+					if (dialogView.mode === "shell" && task) {
+						return ["", ...renderShellDetail(task, width - 2, Date.now(), paint).map((line) => `  ${line}`), ""].map((line) => truncateLine(line, width));
 					}
 					shown = tasksItems(snapshot);
 					selected = Math.max(0, Math.min(selected, shown.length - 1));

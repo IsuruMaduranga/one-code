@@ -21,7 +21,9 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { loadPluginHooks } from "../hooks/plugin-hooks.ts";
 import { type HooksSource, loadHookSettings } from "../hooks/settings.ts";
-import { claudeSourcesOn } from "../lib/config-mode.ts";
+// Claude Code's auto-memory switch, read through the whole settings ladder.
+import { AUTO_MEMORY_KEY as AUTO_MEMORY } from "../lib/auto-memory.ts";
+import { CONFIG_MODE_KEY, claudeSourcesOn } from "../lib/config-mode.ts";
 import { claudeJsonPath, claudeUserDir, oneCodeStateDir } from "../lib/paths.ts";
 import { claudeUserSettingsPath, managedSettingsPaths, settingsPaths } from "../lib/claude-settings.ts";
 import { discoverContextFilePaths, instructionRule } from "../lib/claude-context.ts";
@@ -85,8 +87,6 @@ export interface CompatReport {
  * (a checked-in env block must not route subagents).
  */
 const MCP_POLICY_KEYS = ["enableAllProjectMcpServers", "enabledMcpjsonServers", "disabledMcpjsonServers"];
-/** Claude Code's auto-memory switch, read through the whole settings ladder (lib/auto-memory.ts). */
-const AUTO_MEMORY = "autoMemoryEnabled";
 /** One Code's workflow keys, read from its user and project files (lib/one-code-settings.ts). */
 const WORKFLOW_KEYS = ["enableWorkflows", "disableWorkflows", "workflowSizeGuideline"];
 const CLAUDE_PROJECT_KEYS = new Set(["permissions", "hooks", "enabledPlugins", AUTO_MEMORY, ...MCP_POLICY_KEYS]);
@@ -103,7 +103,7 @@ const SCOPE_KEYS: Record<SettingsScope, ReadonlySet<string>> = {
 		"webSearch",
 		"disabledMcpServers",
 		// The /memory panel's two rows (lib/config-mode.ts, lib/auto-memory.ts).
-		"configMode",
+		CONFIG_MODE_KEY,
 		AUTO_MEMORY,
 		"modelTiers",
 		"suggestNewerModels",

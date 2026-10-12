@@ -28,9 +28,11 @@ export default function searchToolsExtension(pi: ExtensionAPI) {
 	pi.on("session_start", apply);
 	pi.on("model_select", apply);
 
-	// Overlapping context windows repeat lines (grep-merge.ts).
+	// Overlapping context windows repeat lines (grep-merge.ts); without context
+	// lines there are no windows to overlap.
 	pi.on("tool_result", (event) => {
 		if (event.toolName !== "grep" || event.isError) return undefined;
+		if (!(Number((event.input as { context?: unknown } | undefined)?.context) > 0)) return undefined;
 		const first = event.content?.[0];
 		if (first?.type !== "text" || typeof first.text !== "string") return undefined;
 		const text = mergeGrepWindows(first.text);
