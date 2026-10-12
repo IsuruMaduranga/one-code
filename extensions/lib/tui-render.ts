@@ -780,6 +780,9 @@ export function stripReminderBlocks<T extends { content?: unknown }>(result: T):
 	return changed ? { ...result, content: kept } : result;
 }
 
+/** The padding pi's built-in renderers hard-coded before pi 1.1.0 handed them the `outputPad` setting. */
+const BASE_OUTPUT_PAD = 1;
+
 export function ccWrapBuiltinRenderers<TArgs = any>(
 	label: string,
 	base: {
@@ -814,7 +817,8 @@ export function ccWrapBuiltinRenderers<TArgs = any>(
 			}
 			let inner: any;
 			try {
-				inner = base.renderCall(args, theme, { ...context, lastComponent: context.state.ccInnerCall });
+				// pi 1.1.0's edit preview pads by `outputPad`; pin the 1 pi used before.
+				inner = base.renderCall(args, theme, { ...context, outputPad: BASE_OUTPUT_PAD, lastComponent: context.state.ccInnerCall });
 				context.state.ccInnerCall = inner;
 			} catch {
 				return linesComponent(() => [head()]);
@@ -853,7 +857,11 @@ export function ccWrapBuiltinRenderers<TArgs = any>(
 			if (rejected) return linesComponent(() => [rejected]);
 			let inner: any;
 			try {
-				inner = base.renderResult?.(result, options, theme, { ...context, lastComponent: context.state.ccInnerResult });
+				// pi 1.1.0's renderers read two new context fields: the shell's
+				// `durationMs` adds a "Took Ns" line Claude Code's rows do not have,
+				// and `outputPad` sets the edit diff's indent. Hide the first and pin
+				// the second, so the row looks the same on every pi and setting.
+				inner = base.renderResult?.(result, options, theme, { ...context, durationMs: undefined, outputPad: BASE_OUTPUT_PAD, lastComponent: context.state.ccInnerResult });
 				context.state.ccInnerResult = inner;
 			} catch {
 				inner = undefined;
