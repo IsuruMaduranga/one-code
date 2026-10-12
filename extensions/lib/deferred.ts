@@ -104,8 +104,9 @@ export function deferredAddendumText(added: readonly string[]): string {
 /**
  * Whether Anthropic accepts client-side `tool_reference` blocks for this model,
  * with the model's own compat flag winning: first-party Anthropic, Claude 4.5
- * or newer, and Haiku 4.5 (it takes references with no beta, and an eager
- * append there rewrites the whole cache, findings §55 P4). Other Haikus stay out.
+ * or newer, Haiku 4.5 and later Haikus included (they take references with no
+ * beta, and an eager append there rewrites the whole cache: findings §55 P4
+ * for Haiku 4.5, §67 for Haiku 5.5). Older Haikus stay out.
  */
 export function supportsToolReferences(
 	model: { provider?: string; id?: string; compat?: { supportsToolReferences?: boolean } } | undefined,
@@ -113,7 +114,12 @@ export function supportsToolReferences(
 	if (!model) return false;
 	if (typeof model.compat?.supportsToolReferences === "boolean") return model.compat.supportsToolReferences;
 	if (model.provider !== "anthropic" || !model.id) return false;
-	if (model.id.includes("haiku")) return /^claude-haiku-4-5(?:-|$)/.test(model.id);
+	if (model.id.includes("haiku")) {
+		const haiku = model.id.match(/^claude-haiku-(\d+)(?:-(\d{1,2}))?(?:-|$)/);
+		if (!haiku) return false;
+		const major = Number(haiku[1]);
+		return major > 4 || (major === 4 && Number(haiku[2] ?? 0) >= 5);
+	}
 	const version = parseClaudeVersion(model.id);
 	return version !== undefined && (version.major > 4 || (version.major === 4 && version.minor >= 5));
 }

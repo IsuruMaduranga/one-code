@@ -8,14 +8,16 @@ import {
 } from "../../extensions/lib/deferred.ts";
 
 describe("supportsToolReferences", () => {
-	it("is first-party Claude 4.5+ and Haiku 4.5, not older Haikus or gateways", () => {
+	it("is first-party Claude 4.5+ and Haiku 4.5 or later, not older Haikus or gateways", () => {
 		expect(supportsToolReferences({ provider: "anthropic", id: "claude-sonnet-5" })).toBe(true);
 		expect(supportsToolReferences({ provider: "anthropic", id: "claude-opus-4-5-20251101" })).toBe(true);
 		expect(supportsToolReferences({ provider: "anthropic", id: "claude-fable-5-1" })).toBe(true);
 		expect(supportsToolReferences({ provider: "anthropic", id: "claude-opus-4-1" })).toBe(false);
 		expect(supportsToolReferences({ provider: "anthropic", id: "claude-haiku-4-5" })).toBe(true);
 		expect(supportsToolReferences({ provider: "anthropic", id: "claude-haiku-4-5-20251001" })).toBe(true);
+		expect(supportsToolReferences({ provider: "anthropic", id: "claude-haiku-5-5" })).toBe(true);
 		expect(supportsToolReferences({ provider: "anthropic", id: "claude-haiku-4" })).toBe(false);
+		expect(supportsToolReferences({ provider: "anthropic", id: "claude-haiku-4-20250101" })).toBe(false);
 		expect(supportsToolReferences({ provider: "anthropic", id: "claude-3-5-haiku" })).toBe(false);
 		expect(supportsToolReferences({ provider: "openrouter", id: "anthropic/claude-haiku-4.5" })).toBe(false);
 		expect(supportsToolReferences({ provider: "openrouter", id: "anthropic/claude-sonnet-5" })).toBe(false);

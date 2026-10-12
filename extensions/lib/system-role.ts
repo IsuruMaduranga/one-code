@@ -6,9 +6,10 @@
  * The gate is pi's model catalog flag `compat.supportsMidConvoSystemMessages`
  * alone, no list of our own: pi owns the per-model facts and adds models as it
  * confirms them (`working-docs/decisions/tools.md`, "Claude Code's request
- * shape, on every model pi flags for it"). Haiku is never in it: Anthropic
- * rejects the role there (findings §52). Every unflagged model keeps the
- * context in the first user message.
+ * shape, on every model pi flags for it"). Haiku before 5 is never in it:
+ * Anthropic rejects the role there (findings §52); Haiku 5.5 takes it
+ * (findings §67). Every unflagged model keeps the context in the first user
+ * message.
  */
 
 /** The wire shape a system message takes: Anthropic `system`, OpenAI Responses `input`, or Chat Completions `messages`. */
@@ -41,8 +42,15 @@ export function systemRoleLayout(model: SystemRoleModel | undefined): SystemRole
 	if (!model) return undefined;
 	const compat = model.compat as { supportsMidConvoSystemMessages?: unknown } | undefined;
 	if (compat?.supportsMidConvoSystemMessages !== true) return undefined;
-	if (model.api === "anthropic-messages" && model.id.includes("haiku")) return undefined;
+	if (model.api === "anthropic-messages" && isHaikuBeforeFive(model.id)) return undefined;
 	return wireShape(model.api);
+}
+
+/** A Haiku older than Haiku 5 (`claude-haiku-4-5`, `claude-3-5-haiku`), in any provider's spelling. */
+function isHaikuBeforeFive(id: string): boolean {
+	if (!id.includes("haiku")) return false;
+	const major = id.match(/haiku-(\d+)/)?.[1];
+	return major === undefined || Number(major) < 5;
 }
 
 /** One context block that moves: its text as injected on the user message, and its text inside the system message. */
