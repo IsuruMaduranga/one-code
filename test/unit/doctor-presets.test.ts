@@ -69,6 +69,7 @@ describe("computePresets", () => {
 			or("deepseek-v4-flash-0731", 0.065),
 			or("deepseek-v4-flash-0731:batch", 0.14),
 			or("deepseek-v4-flash-vision-exp", 0.22),
+			or("deepseek-v5-flash-exp", 0.1), // in no catalog: still never a preset
 			or("deepseek-v4-pro", 0.890358),
 			or("deepseek-v4-pro-0813", 1.12068),
 			or("deepseek-v4-pro-0813:batch", 1.32),

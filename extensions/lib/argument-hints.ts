@@ -152,10 +152,21 @@ export function extendingCompletions(prefix: string, options: readonly ArgumentC
 	return dropExactMatch(prefix, options.filter((option) => option.value.startsWith(typed)));
 }
 
-/** `items` without the one whose value is what was typed (case- and space-blind), or null when none is left. */
+/**
+ * When an item's value is exactly what was typed (case-blind), only the items
+ * that extend it, or null when none does: Enter then submits the typed
+ * argument instead of applying some other item a completer returned without
+ * filtering (`/auto-mode`). A value is compared as given, so a completion that
+ * carries the separator to a required next argument (`"stop "`) still extends
+ * a typed `stop`. With no exact item, `items` pass unchanged.
+ */
 export function dropExactMatch<T extends { value: string }>(prefix: string | undefined, items: readonly T[]): T[] | null {
 	const typed = (prefix ?? "").trim().toLowerCase();
-	const longer = items.filter((item) => item.value.trim().toLowerCase() !== typed);
+	if (!items.some((item) => item.value.toLowerCase() === typed)) return items.length ? [...items] : null;
+	const longer = items.filter((item) => {
+		const value = item.value.toLowerCase();
+		return value !== typed && value.startsWith(typed);
+	});
 	return longer.length ? longer : null;
 }
 
