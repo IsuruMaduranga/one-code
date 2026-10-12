@@ -169,6 +169,10 @@ export function withoutExactMatch<T extends { value: string }>(complete: Complet
 	};
 	return (prefix) => {
 		const items = complete(prefix);
-		return items instanceof Promise ? items.then((resolved) => settle(prefix, resolved)) : settle(prefix, items);
+		// Any thenable, not only a native Promise.
+		if (items && typeof (items as PromiseLike<T[] | null>).then === "function") {
+			return Promise.resolve(items).then((resolved) => settle(prefix, resolved));
+		}
+		return settle(prefix, items as T[] | null);
 	};
 }

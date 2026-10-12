@@ -82,9 +82,10 @@ export function renderTasksDialog(input: TasksDialogInput, paint: TasksPaint): s
 		out.push(paint.fg("dim", line(`    ${title} (${rows.length})`)));
 		for (const row of rows) {
 			const selected = index === input.selected;
-			// A finished shell shows how it ended; only a clean finish reads "done".
+			// A finished shell shows how it ended; only a clean finish reads "done",
+			// and only a failure gets the cross (a stop is the user's own choice).
 			const ended = row.kind === "shell" && row.status && row.status !== "completed" ? row.status : undefined;
-			const mark = row.running ? "⏺" : ended ? "✗" : "✔";
+			const mark = row.running ? "⏺" : ended === "failed" ? "✗" : "✔";
 			const status = row.running ? "running" : (ended ?? "done");
 			const suffix = row.kind === "agent" && row.model ? `${status} · ${row.model}` : status;
 			const text = line(`  ${selected ? "❯" : " "} ${mark} ${sanitizeDisplayText(row.text)}   ${suffix}`);

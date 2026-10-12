@@ -45,6 +45,8 @@ describe("shellRows", () => {
 		expect(rows.map((t) => t.id)).toEqual(["run", "fresh"]);
 		// A shell that finished a minute ago no longer holds the chip.
 		expect(shellRows([task({ status: "completed", finishedAt: NOW - 60_000 })], NOW)).toEqual([]);
+		// A finished shell with no timestamp never lingers (it would never expire).
+		expect(shellRows([task({ status: "failed", finishedAt: undefined })], NOW)).toEqual([]);
 	});
 });
 

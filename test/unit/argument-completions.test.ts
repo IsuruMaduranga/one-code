@@ -28,5 +28,7 @@ describe("withoutExactMatch", () => {
 	it("works for an async completer and passes null through", async () => {
 		expect(await withoutExactMatch(async () => items)("TRUST ")).toEqual(items.slice(0, 2));
 		expect(await withoutExactMatch(async () => null)("x")).toBeNull();
+		const thenable = { then: (resolve: (v: typeof items) => void) => resolve(items) } as unknown as Promise<typeof items>;
+		expect(await withoutExactMatch(() => thenable)("list")).toEqual(items.slice(1));
 	});
 });

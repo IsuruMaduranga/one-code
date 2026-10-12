@@ -26,7 +26,7 @@ export interface ShellPaint extends Paint {
  * finished agent keeps its strip row (STRIP_LINGER_MS).
  */
 export function shellRows(tasks: BackgroundTask[], now: number): BackgroundTask[] {
-	return tasks.filter((t) => t.status === "running" || (t.finishedAt ?? now) > now - STRIP_LINGER_MS);
+	return tasks.filter((t) => t.status === "running" || (t.finishedAt !== undefined && t.finishedAt > now - STRIP_LINGER_MS));
 }
 
 /**

@@ -2817,9 +2817,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			};
 			const unsubscribe = liveRuns.subscribe(refresh);
 			const unsubscribeShells = shellTasks.subscribe(refresh);
-			// A shell's details follow its runtime and output once a second.
+			// A shell's details follow its runtime and output once a second, and the
+			// list drops a finished shell once its linger window ends, as the chip does.
 			const ticker = setInterval(() => {
 				if (dialogView.mode === "shell") tui.requestRender();
+				else if (snapshot.shells.some((shell) => !shell.running)) refresh();
 			}, 1000);
 			ticker.unref?.();
 			const finish = (value: string | null) => {

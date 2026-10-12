@@ -121,7 +121,8 @@ export function renderMcpPanel(input: McpRenderInput, paint: McpPaint): string[]
 		out.push(paint.fg("dim", cutPlainText(` ${count}`, width - 1)));
 
 		footer = wrapFooter("↑/↓ to navigate · Enter to confirm · Esc to cancel");
-		const footerReserve = 2 + footer.length + input.notices.length + 1;
+		const noticeLines = input.notices.reduce((sum, notice) => sum + notice.split("\n").length, 0);
+		const footerReserve = 2 + footer.length + noticeLines + 1;
 		const budget = Math.max(1, height - out.length - footerReserve);
 		if (entries.length === 0) {
 			out.push("", paint.fg("dim", "  No MCP servers configured. Add them to .mcp.json or ~/.claude.json."));
