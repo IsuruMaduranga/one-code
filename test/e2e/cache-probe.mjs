@@ -63,8 +63,8 @@ const responses = lines(positional[1])
 	.filter((e) => e.type === "message_end" && e.message?.role === "assistant" && e.message.usage)
 	.map((e) => e.message);
 const usages = responses.map((m) => m.usage);
-/** Requests whose response errored, by index; only meaningful when every request has a response. */
-const errored = responses.length === requests.length ? responses.map((m) => m.stopReason === "error") : requests.map(() => false);
+/** Whether request i's response errored; only knowable when every request has a response. */
+const isErrored = (i) => responses.length === requests.length && responses[i].stopReason === "error";
 
 /** Implicit caches store whole blocks (OpenAI 128 tokens, DeepSeek 64); allow one partial block of 256. */
 const IMPLICIT_BLOCK = 256;
@@ -112,7 +112,7 @@ const firstDiff = (a, b) => {
 };
 
 const checkStable = (label, pick, { downgrade = false, skipErrored = false } = {}) => {
-	const indices = requests.map((_, i) => i).filter((i) => !(skipErrored && errored[i]));
+	const indices = requests.map((_, i) => i).filter((i) => !(skipErrored && isErrored(i)));
 	if (indices.length === 0) return;
 	const first = indices[0];
 	const base = pick(requests[first]);
@@ -134,7 +134,7 @@ checkStable("conversation head (to the first user message)", conversationHead, {
 checkStable("eager tools", eagerTools, { downgrade: eagerLoadOk });
 
 if (skipped > 0) console.log(`(${skipped} side-call request${skipped === 1 ? "" : "s"} skipped)`);
-const erroredCount = errored.filter(Boolean).length;
+const erroredCount = requests.filter((_, i) => isErrored(i)).length;
 if (erroredCount > 0) console.log(`(${erroredCount} errored request${erroredCount === 1 ? "" : "s"} left out of the head check)`);
 if (usages.length !== requests.length) {
 	warnings.push(`${requests.length} requests dumped but ${usages.length} assistant usages seen (retry or a request that did not complete?)`);

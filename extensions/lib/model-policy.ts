@@ -30,6 +30,8 @@ export interface ProviderPolicy {
 	kind: ProviderPolicyKind;
 	/** Fixed profile for direct vendors and stable hosted catalogs. */
 	profile?: string;
+	/** The provider also serves other vendors' models: a row whose id names its vendor takes that vendor's profile. */
+	profileFromId?: boolean;
 }
 
 const direct = (profile: string): ProviderPolicy => ({ kind: "direct", profile });
@@ -40,7 +42,7 @@ const opaque = (): ProviderPolicy => ({ kind: "opaque" });
 /**
  * Every built-in language-model provider in pi 1.1.0 (`model-policy.test.ts`
  * checks the list against pi's own), plus the names older pi still in the
- * tested range uses (`LEGACY_PROVIDER_NAMES`). Unknown/custom providers
+ * tested range uses. Unknown/custom providers
  * get the opaque policy below, so a pi upgrade fails safe rather than widening
  * automatic routing.
  */
@@ -51,8 +53,9 @@ export const BUILTIN_PROVIDER_POLICIES: Readonly<Record<string, ProviderPolicy>>
 	google: direct("google"),
 	"google-vertex": direct("google"),
 	openai: direct("openai"),
-	// Also serves Foundry models from other vendors (`deepseek-v4-pro`); modelIdentity profiles those by id.
-	azure: direct("openai"),
+	// Also serves Foundry models from other vendors (`deepseek-v4-pro`).
+	azure: { ...direct("openai"), profileFromId: true },
+	// pi before 1.0.3 named `azure` this way.
 	"azure-openai-responses": direct("openai"),
 	"openai-codex": direct("openai"),
 	radius: opaque(),
@@ -89,9 +92,6 @@ export const BUILTIN_PROVIDER_POLICIES: Readonly<Record<string, ProviderPolicy>>
 	"xiaomi-token-plan-ams": direct("xiaomi"),
 	"xiaomi-token-plan-sgp": direct("xiaomi"),
 };
-
-/** Provider names pi renamed inside the tested range, kept for the older pi: `azure` was `azure-openai-responses` before pi 1.0.3. */
-export const LEGACY_PROVIDER_NAMES: ReadonlySet<string> = new Set(["azure-openai-responses"]);
 
 const VENDOR_ALIASES: Readonly<Record<string, string>> = {
 	anthropic: "anthropic",
@@ -233,7 +233,7 @@ export function modelIdentity(model: Model<Api>): ModelIdentity {
 	}
 	return {
 		containment: model.provider,
-		profile: model.provider === "azure" ? (bareFamily(model.id) ?? policy.profile) : policy.profile,
+		profile: (policy.profileFromId && bareFamily(model.id)) || policy.profile,
 		normalizedId: model.id,
 		confidence: "exact",
 	};

@@ -780,8 +780,16 @@ export function stripReminderBlocks<T extends { content?: unknown }>(result: T):
 	return changed ? { ...result, content: kept } : result;
 }
 
-/** The padding pi's built-in renderers hard-coded before pi 1.1.0 handed them the `outputPad` setting. */
-const BASE_OUTPUT_PAD = 1;
+/**
+ * The context pi's built-in renderers get under the wrapper. pi 1.1.0 added
+ * two fields that would change our rows: the shell's `durationMs` prints a
+ * "Took Ns" line Claude Code's rows do not have, and `outputPad` sets the edit
+ * preview's and diff's indent. Hide the first and pin the second to the 1 pi
+ * hard-coded before, so a row looks the same on every pi and setting.
+ */
+function baseContext(context: any, lastComponent: unknown): any {
+	return { ...context, durationMs: undefined, outputPad: 1, lastComponent };
+}
 
 export function ccWrapBuiltinRenderers<TArgs = any>(
 	label: string,
@@ -817,8 +825,7 @@ export function ccWrapBuiltinRenderers<TArgs = any>(
 			}
 			let inner: any;
 			try {
-				// pi 1.1.0's edit preview pads by `outputPad`; pin the 1 pi used before.
-				inner = base.renderCall(args, theme, { ...context, outputPad: BASE_OUTPUT_PAD, lastComponent: context.state.ccInnerCall });
+				inner = base.renderCall(args, theme, baseContext(context, context.state.ccInnerCall));
 				context.state.ccInnerCall = inner;
 			} catch {
 				return linesComponent(() => [head()]);
@@ -857,11 +864,7 @@ export function ccWrapBuiltinRenderers<TArgs = any>(
 			if (rejected) return linesComponent(() => [rejected]);
 			let inner: any;
 			try {
-				// pi 1.1.0's renderers read two new context fields: the shell's
-				// `durationMs` adds a "Took Ns" line Claude Code's rows do not have,
-				// and `outputPad` sets the edit diff's indent. Hide the first and pin
-				// the second, so the row looks the same on every pi and setting.
-				inner = base.renderResult?.(result, options, theme, { ...context, durationMs: undefined, outputPad: BASE_OUTPUT_PAD, lastComponent: context.state.ccInnerResult });
+				inner = base.renderResult?.(result, options, theme, baseContext(context, context.state.ccInnerResult));
 				context.state.ccInnerResult = inner;
 			} catch {
 				inner = undefined;

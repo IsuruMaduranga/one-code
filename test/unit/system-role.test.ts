@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 import { withBetas } from "../../extensions/lib/anthropic-payload.ts";
+import { parseClaudeId } from "../../extensions/lib/claude-id.ts";
 import { systemRoleLayout } from "../../extensions/lib/system-role.ts";
 
 async function bundledCatalog(): Promise<Model<Api>[]> {
@@ -21,7 +22,9 @@ describe("systemRoleLayout", () => {
 		for (const model of catalog) {
 			const flag = (model.compat as { supportsMidConvoSystemMessages?: boolean } | undefined)?.supportsMidConvoSystemMessages === true;
 			const layout = systemRoleLayout(model);
-			if (model.api === "anthropic-messages" && /haiku-[0-4](?!\d)|\d-haiku/.test(model.id)) expect(layout, `${model.provider}/${model.id}`).toBeUndefined();
+			const claude = parseClaudeId(model.id);
+			const oldHaiku = claude ? claude.family === "haiku" && claude.major < 5 : model.id.includes("haiku");
+			if (model.api === "anthropic-messages" && oldHaiku) expect(layout, `${model.provider}/${model.id}`).toBeUndefined();
 			else if (!flag) expect(layout, `${model.provider}/${model.id}`).toBeUndefined();
 			if (layout) flagged++;
 		}

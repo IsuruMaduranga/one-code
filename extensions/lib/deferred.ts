@@ -13,7 +13,7 @@
 import { createHash } from "node:crypto";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { toolResultsOnBranch } from "./branch-restore.ts";
-import { parseClaudeVersion } from "./model-tier.ts";
+import { parseClaudeId } from "./claude-id.ts";
 import { RESPONSES_APIS } from "./system-role.ts";
 import { ADDENDUM_HEAD } from "./tool-additions.ts";
 import { normalizeToolName } from "../permissions/matcher.ts";
@@ -114,14 +114,8 @@ export function supportsToolReferences(
 	if (!model) return false;
 	if (typeof model.compat?.supportsToolReferences === "boolean") return model.compat.supportsToolReferences;
 	if (model.provider !== "anthropic" || !model.id) return false;
-	if (model.id.includes("haiku")) {
-		const haiku = model.id.match(/^claude-haiku-(\d+)(?:-(\d{1,2}))?(?:-|$)/);
-		if (!haiku) return false;
-		const major = Number(haiku[1]);
-		return major > 4 || (major === 4 && Number(haiku[2] ?? 0) >= 5);
-	}
-	const version = parseClaudeVersion(model.id);
-	return version !== undefined && (version.major > 4 || (version.major === 4 && version.minor >= 5));
+	const version = parseClaudeId(model.id);
+	return version !== undefined && (version.major > 4 || (version.major === 4 && (version.minor ?? 0) >= 5));
 }
 
 /** The slice of pi's ToolInfo the deferred definitions need. */

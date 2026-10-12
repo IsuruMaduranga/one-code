@@ -12,6 +12,8 @@
  * message.
  */
 
+import { parseClaudeId } from "./claude-id.ts";
+
 /** The wire shape a system message takes: Anthropic `system`, OpenAI Responses `input`, or Chat Completions `messages`. */
 export type SystemRoleLayout = "anthropic" | "responses" | "completions";
 
@@ -46,11 +48,10 @@ export function systemRoleLayout(model: SystemRoleModel | undefined): SystemRole
 	return wireShape(model.api);
 }
 
-/** A Haiku older than Haiku 5 (`claude-haiku-4-5`, `claude-3-5-haiku`), in any provider's spelling. */
+/** A Haiku older than Haiku 5 in any provider's spelling; the old `claude-3-5-haiku` order parses as none. */
 function isHaikuBeforeFive(id: string): boolean {
-	if (!id.includes("haiku")) return false;
-	const major = id.match(/haiku-(\d+)/)?.[1];
-	return major === undefined || Number(major) < 5;
+	const claude = parseClaudeId(id);
+	return claude ? claude.family === "haiku" && claude.major < 5 : id.includes("haiku");
 }
 
 /** One context block that moves: its text as injected on the user message, and its text inside the system message. */

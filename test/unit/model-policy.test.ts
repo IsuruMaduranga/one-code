@@ -9,7 +9,6 @@ import {
 	isReasoningMandatoryError,
 	isSelectableVariant,
 	isSnapshotDatedId,
-	LEGACY_PROVIDER_NAMES,
 	modelIdentity,
 	modelsContainedToSession,
 	reasoningRetryLevel,
@@ -84,6 +83,8 @@ const model = (provider: string, id: string, input = 1, api = "openai-responses"
 
 /** pi's built-in language-model providers: every provider with at least one chat model. */
 const BUILTIN_PROVIDERS = getBuiltinProviders().filter((provider) => getBuiltinModels(provider).length > 0);
+/** Provider names pi renamed inside the tested range, kept in the table for the older pi. */
+const LEGACY_PROVIDER_NAMES = new Set(["azure-openai-responses"]);
 
 describe("built-in provider policies", () => {
 	it("classifies every built-in pi language-model provider explicitly", () => {
@@ -98,7 +99,7 @@ describe("built-in provider policies", () => {
 	});
 
 	it("keeps each legacy provider name on its successor's policy", () => {
-		expect(BUILTIN_PROVIDER_POLICIES["azure-openai-responses"]).toEqual(BUILTIN_PROVIDER_POLICIES.azure);
+		expect(BUILTIN_PROVIDER_POLICIES["azure-openai-responses"]).toMatchObject({ kind: "direct", profile: "openai" });
 		for (const provider of LEGACY_PROVIDER_NAMES) expect(BUILTIN_PROVIDERS).not.toContain(provider);
 	});
 
