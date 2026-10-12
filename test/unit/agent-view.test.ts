@@ -60,6 +60,11 @@ describe("renderTasksDialog", () => {
 		{ kind: "agent" as const, taskId: "a2", text: "write a 300-word poem", model: "Haiku 4.5", running: false },
 	];
 
+	it("wraps its key hints on a narrow terminal instead of cutting Esc to close", () => {
+		const out = renderTasksDialog({ shells, agents, selected: 0, width: 30 }, paint);
+		expect(out.slice(-3).join(" ")).toContain("Esc to close");
+	});
+
 	it("groups shells, local agents and completed agents under Claude Code's headers", () => {
 		const out = renderTasksDialog({ shells, agents, selected: 0, width: 100 }, paint);
 		expect(out).toEqual([

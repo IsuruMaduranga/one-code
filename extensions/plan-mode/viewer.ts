@@ -11,7 +11,7 @@
  * the width accounting.
  */
 
-import { cutPlainText, truncateLine, wrapProse } from "../lib/tui-render.ts";
+import { cutPlainText, truncateLine, wrapHints, wrapProse } from "../lib/tui-render.ts";
 import { keyId } from "../lib/key-input.ts";
 
 /** Renders Markdown to painted lines at a width (pi-tui's Markdown, which the transcript uses). */
@@ -141,7 +141,8 @@ export function renderPlanViewer(view: PlanViewerView, paint: Paint, width: numb
 	const out: string[] = [];
 	out.push("");
 	out.push(paint("accent", cut("Approve this plan?")));
-	out.push(paint("dim", cut(`↑/↓ scroll · ←/→ switch choice · ${pickHint}enter confirm · esc cancel`)));
+	// The keys wrap at their separators on a narrow terminal, so "esc cancel" is never cut.
+	for (const line of wrapHints(`↑/↓ scroll · ←/→ switch choice · ${pickHint}enter confirm · esc cancel`, width)) out.push(paint("dim", line));
 	out.push(rule);
 
 	// Plan lines may arrive painted (Markdown), so the guard cut is ANSI-aware.
