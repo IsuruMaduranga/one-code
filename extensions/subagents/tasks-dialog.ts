@@ -27,7 +27,7 @@ import { sanitizeDisplayText } from "../lib/terminal-text.ts";
 
 /** One selectable row. */
 export type TasksItem =
-	| { kind: "shell"; id: string; text: string; running: boolean }
+	| { kind: "shell"; id: string; text: string; running: boolean; status?: BackgroundTask["status"] }
 	| { kind: "agent"; taskId: string; text: string; model?: string; running: boolean };
 
 export interface TasksDialogInput {
@@ -82,8 +82,10 @@ export function renderTasksDialog(input: TasksDialogInput, paint: TasksPaint): s
 		out.push(paint.fg("dim", line(`    ${title} (${rows.length})`)));
 		for (const row of rows) {
 			const selected = index === input.selected;
-			const mark = row.running ? "⏺" : "✔";
-			const status = row.running ? "running" : "done";
+			// A finished shell shows how it ended; only a clean finish reads "done".
+			const ended = row.kind === "shell" && row.status && row.status !== "completed" ? row.status : undefined;
+			const mark = row.running ? "⏺" : ended ? "✗" : "✔";
+			const status = row.running ? "running" : (ended ?? "done");
 			const suffix = row.kind === "agent" && row.model ? `${status} · ${row.model}` : status;
 			const text = line(`  ${selected ? "❯" : " "} ${mark} ${sanitizeDisplayText(row.text)}   ${suffix}`);
 			out.push(selected ? paint.fg("accent", paint.bold(text)) : text);

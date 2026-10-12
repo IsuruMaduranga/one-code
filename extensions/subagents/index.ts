@@ -2785,6 +2785,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				id: task.id,
 				text: task.command ?? task.description,
 				running: task.status === "running",
+				status: task.status,
 			}));
 			const agents = [
 				...runs.filter((run) => run.status === "running"),
