@@ -152,3 +152,23 @@ export function extendingCompletions(prefix: string, options: readonly ArgumentC
 	const matches = options.filter((option) => option.value.startsWith(typed) && option.value.trim() !== typed);
 	return matches.length ? matches : null;
 }
+
+type Completer<T extends { value: string }> = (prefix: string) => T[] | null | Promise<T[] | null>;
+
+/**
+ * A command's completer with the exact match left out (see
+ * `extendingCompletions`), so a fully typed argument runs on the first Enter.
+ * `registerLocalCommand` applies it to every local command.
+ */
+export function withoutExactMatch<T extends { value: string }>(complete: Completer<T>): Completer<T> {
+	const settle = (prefix: string, items: T[] | null): T[] | null => {
+		if (!items) return items;
+		const typed = (prefix ?? "").trim().toLowerCase();
+		const longer = items.filter((item) => item.value.trim().toLowerCase() !== typed);
+		return longer.length ? longer : null;
+	};
+	return (prefix) => {
+		const items = complete(prefix);
+		return items instanceof Promise ? items.then((resolved) => settle(prefix, resolved)) : settle(prefix, items);
+	};
+}
