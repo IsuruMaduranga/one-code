@@ -23,6 +23,7 @@ import {
 	summarizeArgs,
 	textContent,
 	truncateLine,
+	wrapHints,
 	type ThemeLike,
 	stripHarnessText,
 	stripReminderBlocks,
@@ -264,6 +265,13 @@ describe("notificationComponent: agent messages, Claude Code's transcript look",
 		expect(lines[0]).toContain("› Message from @a94a90cbdda8038c4");
 		expect(lines[0]).toContain("ctrl+o");
 		expect(lines[0]).not.toContain("finished");
+	});
+
+	it("names the agent instead of its task id when the name is known", () => {
+		const name = (from: string) => (from === "a94a90cbdda8038c4" ? "explore-2" : undefined);
+		expect(notificationComponent(theme, wire, false, name).render(200)[0]).toContain("› Message from @explore-2");
+		expect(notificationComponent(theme, wire, true, name).render(400)[0]).toContain("› Message from explore-2");
+		expect(notificationComponent(theme, wire, false, () => undefined).render(200)[0]).toContain("› Message from @a94a90cbdda8038c4");
 	});
 
 	it("expands to the header, the preamble and the indented report, guard and pointer hidden", () => {
@@ -630,5 +638,17 @@ describe("dimMarkedLine", () => {
 		const lines = plain(dimMarkedLine(undefined, "※", "recap: the overall goal is bumping pi, and the one next action is the commit").render(24));
 		expect(lines).toEqual(["※ recap: the overall", "  goal is bumping pi,", "  and the one next", "  action is the commit"]);
 		for (const line of lines) expect(line.length).toBeLessThanOrEqual(24);
+	});
+});
+
+describe("wrapHints", () => {
+	it("keeps a hint row that fits on one line", () => {
+		expect(wrapHints("a · b · c", 20)).toEqual(["a · b · c"]);
+	});
+	it("breaks at the separators so every key stays visible", () => {
+		expect(wrapHints("enter select · esc cancel · tab next", 26)).toEqual(["enter select · esc cancel", "tab next"]);
+	});
+	it("cuts a single hint wider than the row with an ellipsis", () => {
+		expect(wrapHints("averyveryverylonghint · x", 10)).toEqual(["averyvery…", "x"]);
 	});
 });

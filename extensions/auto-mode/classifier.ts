@@ -24,7 +24,9 @@ import { appendFileSync } from "node:fs";
 import { cleanupSessionResources, isContextOverflow, type Model, type Api, type AssistantMessage, type ThinkingLevel } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
-import { forcedReasoningLevel, isReasoningMandatoryError, reasoningRetryLevel } from "../lib/model-policy.ts";
+import { costRatioText, isNotablyCostlier } from "../lib/model-choice-warnings.ts";
+import { modeCycleKey } from "../lib/keys.ts";
+import { classifierCostRatio, forcedReasoningLevel, isReasoningMandatoryError, modelSpec as spec, reasoningRetryLevel } from "../lib/model-policy.ts";
 import type { AutoModeConfig } from "./config.ts";
 import { CLASSIFIER_CACHE_APIS, cacheClassifierHistory } from "./cache.ts";
 import {
@@ -73,6 +75,19 @@ export const FORCED_THINKING_PADDING = 2048;
  * stay the session's classifier forever. The next call re-runs selection.
  */
 export const ROTATE_AFTER_TIMEOUTS = 2;
+
+/**
+ * The provider refused the classifier's prompt as a possible usage-policy
+ * violation ("Invalid prompt: your prompt was flagged as potentially violating
+ * our usage policy"). GPT-6 Luna on Codex did this to about one classifier
+ * prompt in ten, at random, and passed the same prompt on a retry (findings
+ * §59). A refused call is retried once on the same model; a second refusal
+ * drops the model for the rest of the session (decisions/auto-mode.md,
+ * "A classifier that refuses its prompt").
+ */
+export function isPromptPolicyRefusal(message: string): boolean {
+	return /invalid prompt\b[^.\n]{0,80}\bflagged\b[^.\n]{0,80}usage policy/i.test(message);
+}
 
 /**
  * Whether a failure is our own classifier timeout (or an equivalent abort/stall)
@@ -131,6 +146,12 @@ export interface ClassifierState {
 	pinned?: Model<Api>;
 	/** `provider/id` of candidates that failed as unusable. */
 	rejected: Set<string>;
+	/**
+	 * The subset of `rejected` that refused the classifier's prompt twice. Unlike
+	 * another rejection, such a model is not retried when every candidate is
+	 * gone: it would refuse again, so the gate stops and says how to go on.
+	 */
+	refused: Set<string>;
 	/** Notices already delivered, so a per-call warning is not repeated per call. */
 	notified: Set<string>;
 	/**
@@ -162,7 +183,7 @@ export interface ClassifierState {
 }
 
 export function createClassifierState(): ClassifierState {
-	return { rejected: new Set(), notified: new Set(), timeoutStreak: 0, forcedReasoning: new Map() };
+	return { rejected: new Set(), refused: new Set(), notified: new Set(), timeoutStreak: 0, forcedReasoning: new Map() };
 }
 
 /** The `cacheKey` a session's classifier calls pass (`ClassifierDeps.cacheKey`). */
@@ -215,7 +236,7 @@ export interface ClassifierDeps {
 }
 
 /** How a single candidate's attempt failed, so the outer loop can react. */
-type StepKind = "timeout" | "cancelled" | "unavailable" | "error" | "truncated" | "transcript-too-long";
+type StepKind = "timeout" | "cancelled" | "unavailable" | "refused" | "error" | "truncated" | "transcript-too-long";
 class StepError extends Error {
 	constructor(
 		readonly kind: StepKind,
@@ -265,9 +286,35 @@ function remainingCandidates(deps: ClassifierDeps): { candidates: Candidate[]; n
 	// If everything has been rejected, the session model is still worth one more
 	// attempt: a gate that stops asking has stopped gating. It has to be the
 	// session model specifically — the *last* chain entry is the cost-ranked pick,
-	// which nothing price-chosen should lead, let alone be the sole retry.
+	// which nothing price-chosen should lead, let alone be the sole retry. A model
+	// that refused the prompt is not retried: it would refuse again
+	// (`refusalStop`).
 	const session = all.filter((entry) => entry.source === "session");
-	return { candidates: session.length > 0 ? session : all.slice(-1), notices };
+	const retry = session.length > 0 ? session : all.slice(-1);
+	return { candidates: retry.filter((entry) => !deps.state.refused.has(`${entry.model.provider}/${entry.model.id}`)), notices };
+}
+
+/**
+ * Every candidate is gone and one refused the classifier's prompt: the call is
+ * not judged, and the user is told once how to go on.
+ */
+function refusalStop(deps: ClassifierDeps, unusable: readonly string[] = []): ClassifyVerdict {
+	const refused = [...deps.state.refused].join(", ");
+	// A model that failed this call for another cause has its own fix: name it too.
+	const others = unusable.length > 0 ? ` ${unusable.join("; ")}.` : "";
+	notifyOnce(
+		deps,
+		"refusal-stop",
+		`Auto mode has no classifier left: ${refused} refused the classifier's prompt as a possible usage-policy violation, and no other eligible model can screen calls.${others} ` +
+			`Calls are not judged and do not run. Switch to manual approval (${modeCycleKey()} cycles permission modes), or choose another classifier with /auto-mode model <provider/id>.`,
+		"warning",
+	);
+	return {
+		decision: "block",
+		reason: `Auto mode has no classifier: ${refused} refused the classifier's prompt as a possible usage-policy violation.${others}`,
+		tier: "unmatched",
+		noVerdict: true,
+	};
 }
 
 function notifyOnce(deps: ClassifierDeps, key: string, message: string, level: "info" | "warning", notice?: ClassifierNotice) {
@@ -283,6 +330,7 @@ function notifyOnce(deps: ClassifierDeps, key: string, message: string, level: "
 export async function classify(request: ClassifyRequest, deps: ClassifierDeps): Promise<ClassifyVerdict> {
 	const { candidates, notices } = remainingCandidates(deps);
 	if (candidates.length === 0) {
+		if (deps.state.refused.size > 0) return refusalStop(deps);
 		return { decision: "block", reason: "No model is available to run the auto-mode classifier.", tier: "unmatched", noVerdict: true };
 	}
 
@@ -343,6 +391,8 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 
 	let lastError = "";
 	let sawTimeout = false;
+	/** Candidates rejected this call as unusable, with their errors. */
+	const unusable: string[] = [];
 	let timedOutKey: string | undefined;
 	/** The timed-out candidate's own error: a later candidate's failure must not relabel it. */
 	let timedOutError = "";
@@ -425,6 +475,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 					const msg = reply.errorMessage ?? reply.stopReason ?? "provider error";
 					if (isContextOverflow(reply)) throw new StepError("transcript-too-long", msg);
 					if (isClassifierTimeout(msg) || isTransportFailure(msg)) throw new StepError("timeout", msg);
+					if (isPromptPolicyRefusal(msg)) throw new StepError("refused", msg);
 					throw new StepError(isModelUnavailableError(msg) ? "unavailable" : "error", msg);
 				}
 				if (reply.stopReason === "length") return "length";
@@ -436,11 +487,13 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 			try {
 				seen = inspect(reply);
 			} catch (error) {
-				// One retry on a timeout, before giving up on this model — a stall under
-				// load usually clears on a second try. A user cancel or a substantive
-				// error is not retried.
-				if (error instanceof StepError && error.kind === "timeout") {
-					if (isTransportFailure(error.message)) await new Promise((resolve) => setTimeout(resolve, TRANSPORT_RETRY_DELAY_MS));
+				// One retry on a timeout or a usage-policy refusal, before giving up on
+				// this model: a stall under load usually clears on a second try, and a
+				// refused prompt usually passes. The identical request still reads the
+				// session's cached prefix. A user cancel or a substantive error is not
+				// retried.
+				if (error instanceof StepError && (error.kind === "timeout" || error.kind === "refused")) {
+					if (error.kind === "timeout" && isTransportFailure(error.message)) await new Promise((resolve) => setTimeout(resolve, TRANSPORT_RETRY_DELAY_MS));
 					reply = await runCall(userText, base, stage);
 					seen = inspect(reply);
 				} else {
@@ -572,9 +625,35 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 				}
 				continue;
 			}
+			if (kind === "refused") {
+				// Refused twice in a row: drop the model for the session and pin the next
+				// one, rather than pay a fallback's uncached prefix on every refusal. The
+				// refusal is about the classifier's prompt, not the account, so the
+				// subagent selector is not told.
+				reject(key);
+				deps.state.refused.add(key);
+				const next = queue[0]?.model;
+				// A candidate that timed out on this call is still eligible: end the
+				// chain as a timeout (after the loop), not as "no classifier left".
+				if (!next) {
+					if (sawTimeout) continue;
+					return refusalStop(deps, unusable);
+				}
+				const ratio = classifierCostRatio(next, model);
+				notifyOnce(
+					deps,
+					`refused:${key}`,
+					`${key} refused the auto-mode classifier's prompt twice as a possible usage-policy violation, so auto mode screens calls with ` +
+						`${spec(next)} for the rest of this session${isNotablyCostlier(ratio) ? `, at about ${costRatioText(ratio)} the cost per call` : ""}. ` +
+						"Choose another classifier with /auto-mode model <provider/id>.",
+					"warning",
+				);
+				continue;
+			}
 			// unavailable: this model is not usable here — step over it and record it.
 			reject(key);
 			deps.onModelUnusable?.(key, lastError);
+			unusable.push(`${key} cannot be used (${lastError})`);
 			notifyOnce(
 				deps,
 				`rejected:${key}`,
@@ -601,6 +680,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 		};
 	}
 
+	if (deps.state.refused.size > 0) return refusalStop(deps, unusable);
 	// Every candidate was unusable — say which knob fixes it.
 	return {
 		decision: "block",

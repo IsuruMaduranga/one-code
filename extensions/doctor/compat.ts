@@ -21,7 +21,9 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { loadPluginHooks } from "../hooks/plugin-hooks.ts";
 import { type HooksSource, loadHookSettings } from "../hooks/settings.ts";
-import { claudeSourcesOn } from "../lib/config-mode.ts";
+// Claude Code's auto-memory switch, read through the whole settings ladder.
+import { AUTO_MEMORY_KEY as AUTO_MEMORY } from "../lib/auto-memory.ts";
+import { CONFIG_MODE_KEY, claudeSourcesOn } from "../lib/config-mode.ts";
 import { claudeJsonPath, claudeUserDir, oneCodeStateDir } from "../lib/paths.ts";
 import { claudeUserSettingsPath, managedSettingsPaths, settingsPaths } from "../lib/claude-settings.ts";
 import { discoverContextFilePaths, instructionRule } from "../lib/claude-context.ts";
@@ -85,14 +87,43 @@ export interface CompatReport {
  * (a checked-in env block must not route subagents).
  */
 const MCP_POLICY_KEYS = ["enableAllProjectMcpServers", "enabledMcpjsonServers", "disabledMcpjsonServers"];
-const CLAUDE_PROJECT_KEYS = new Set(["permissions", "hooks", "enabledPlugins", ...MCP_POLICY_KEYS]);
+/** One Code's workflow keys, read from its user and project files (lib/one-code-settings.ts). */
+const WORKFLOW_KEYS = ["enableWorkflows", "disableWorkflows", "workflowSizeGuideline"];
+const CLAUDE_PROJECT_KEYS = new Set(["permissions", "hooks", "enabledPlugins", AUTO_MEMORY, ...MCP_POLICY_KEYS]);
 const SCOPE_KEYS: Record<SettingsScope, ReadonlySet<string>> = {
-	"claude-user": new Set(["permissions", "hooks", "env", "enabledPlugins", "autoMode", ...MCP_POLICY_KEYS]),
+	"claude-user": new Set(["permissions", "hooks", "env", "enabledPlugins", "autoMode", AUTO_MEMORY, ...MCP_POLICY_KEYS]),
 	"claude-project": CLAUDE_PROJECT_KEYS,
 	"claude-local": CLAUDE_PROJECT_KEYS,
-	managed: new Set(["permissions", "hooks", "env", "autoMode", "enabledPlugins"]),
-	"onecode-user": new Set(["subagentModel", "subagentModelSetFor", "autoMode", "permissions", "webSearch", "disabledMcpServers"]),
-	"onecode-project": new Set(["permissions", "disabledMcpServers"]),
+	managed: new Set(["permissions", "hooks", "env", "autoMode", "enabledPlugins", AUTO_MEMORY]),
+	"onecode-user": new Set([
+		"subagentModel",
+		"subagentModelSetFor",
+		"autoMode",
+		"permissions",
+		"webSearch",
+		"disabledMcpServers",
+		// The /memory panel's two rows (lib/config-mode.ts, lib/auto-memory.ts).
+		CONFIG_MODE_KEY,
+		AUTO_MEMORY,
+		"modelTiers",
+		"suggestNewerModels",
+		"refreshModelCatalog",
+		"artifacts",
+		...WORKFLOW_KEYS,
+		// Remembered "No" answers to startup questions (branding/declined.ts).
+		"compactionKeepDeclined",
+		"piBuiltinsTurnOffDeclined",
+	]),
+	"onecode-project": new Set([
+		"permissions",
+		"disabledMcpServers",
+		AUTO_MEMORY,
+		...WORKFLOW_KEYS,
+		// The external CLAUDE.md includes answer, per repository (lib/claude-external-includes.ts).
+		"hasClaudeMdExternalIncludesApproved",
+		"hasClaudeMdExternalIncludesWarningShown",
+		"claudeMdExternalIncludesRoot",
+	]),
 	"claude-json": new Set(),
 };
 /** Never worth reporting as "ignored". */
@@ -243,6 +274,7 @@ function summarizeFile(scope: SettingsScope, label: string, path: string, home: 
 		});
 	}
 	if (scope === "onecode-user") {
+		if (typeof file.configMode === "string") report.used.push(`configMode "${file.configMode}" (/memory config sources)`);
 		if (typeof file.subagentModel === "string") report.used.push(`subagentModel "${file.subagentModel}"`);
 		if (file.webSearch && typeof file.webSearch === "object") report.used.push("webSearch (keys/order for the search fallback)");
 	}
@@ -250,6 +282,7 @@ function summarizeFile(scope: SettingsScope, label: string, path: string, home: 
 		if (key in file && known.has(key)) report.used.push(`${key}: ${Array.isArray(file[key]) ? count(file[key]) : String(file[key])}`);
 	}
 	if ("disabledMcpServers" in file && known.has("disabledMcpServers")) report.used.push(`disabledMcpServers: ${count(file.disabledMcpServers)} (via /mcp disable)`);
+	if (typeof file[AUTO_MEMORY] === "boolean" && known.has(AUTO_MEMORY)) report.used.push(`${AUTO_MEMORY}: ${file[AUTO_MEMORY]}`);
 
 	for (const key of Object.keys(file)) {
 		if (known.has(key) || SILENT_KEYS.has(key) || handled.has(key)) continue;

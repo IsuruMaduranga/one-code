@@ -307,9 +307,50 @@ function blockToLines(block: TranscriptBlock, width: number, paint: Paint, prose
 	// A message the user typed at the agent, Claude Code's `❯ <text>` row.
 	if (block.kind === "user") return [...wrapProse(`❯ ${block.text}`, width), ""];
 	if (block.kind === "text") return [...prose(block, block.text, width), ""];
-	if (block.kind === "call") return [`${paint.fg("accent", "●")} ${cut(`${block.tool}(${block.text})`, width - 2)}`];
+	if (block.kind === "call") return [`${paint.fg("accent", "●")} ${cut(`${toolDisplayLabel(block.tool ?? "")}(${block.text})`, width - 2)}`];
 	const body = cut(block.text, width - 4);
 	return [`  ${paint.fg("dim", "⎿")} ${block.isError ? paint.fg("error", body) : body}`, ""];
+}
+
+/**
+ * Labels the main transcript gives tools whose name does not title-case to it
+ * (each tool's `ccToolRenderers` label; `agent-view-tool-labels.test.ts` keeps
+ * this table in step with the registrations).
+ */
+const TOOL_LABELS: Record<string, string> = {
+	edit: "Update",
+	ls: "LS",
+	powershell: "PowerShell",
+	ask_user_question: "Ask User",
+	task_create: "Create Task",
+	task_get: "Get Task",
+	task_list: "List Tasks",
+	task_update: "Update Task",
+	task_stop: "Stop Task",
+	lsp_diagnostics: "Diagnostics",
+	enter_plan_mode: "Enter plan mode",
+	exit_plan_mode: "Exit plan mode",
+	list_mcp_resources: "MCP Resources",
+	read_mcp_resource: "Read MCP Resource",
+	read_mcp_resource_dir: "List MCP Resource Directory",
+};
+
+/**
+ * The label the main transcript shows for a tool (`Bash(…)`, `Update(…)`,
+ * `Web Fetch(…)`, `server: tool(…)`), so a call reads the same in an agent's
+ * view: the irregular ones from a table, an MCP tool as `server: tool`, and
+ * the rest title-cased from the snake_case name, as the renderers label them.
+ */
+export function toolDisplayLabel(name: string): string {
+	const fixed = TOOL_LABELS[name];
+	if (fixed) return fixed;
+	const mcp = /^mcp__(.+?)__(.+)$/.exec(name);
+	if (mcp) return `${mcp[1]}: ${mcp[2]}`;
+	return name
+		.split("_")
+		.filter(Boolean)
+		.map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+		.join(" ");
 }
 
 /** A small inverse-video chip for the label, degrading to `[label]` when narrow. */

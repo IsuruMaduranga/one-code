@@ -11,6 +11,7 @@ import {
 	PROMPT_PREVIEW_LINES,
 	renderStatusRows,
 	renderViewer,
+	viewerHeight,
 	type ViewerRunSnapshot,
 } from "../../extensions/workflow/viewer.ts";
 import { formatDuration, wrapPlainText } from "../../extensions/lib/tui-render.ts";
@@ -54,6 +55,9 @@ describe("decodeViewerKey", () => {
 		expect(decodeViewerKey("\x1b[A")).toEqual({ kind: "up" });
 		expect(decodeViewerKey("\x1bOB")).toEqual({ kind: "down" });
 		expect(decodeViewerKey("\x1b[5~")).toEqual({ kind: "pageUp" });
+		// Space and b page too: pi's fullscreen mode keeps the page keys.
+		expect(decodeViewerKey(" ")).toEqual({ kind: "pageDown" });
+		expect(decodeViewerKey("b")).toEqual({ kind: "pageUp" });
 		expect(decodeViewerKey("\t")).toEqual({ kind: "nextRun" });
 		expect(decodeViewerKey("\r")).toEqual({ kind: "enter" });
 		expect(decodeViewerKey("\x1b")).toEqual({ kind: "back" });
@@ -387,6 +391,39 @@ describe("renderViewer", () => {
 		const lines = renderViewer({ runs, state, width: 100, height: 20, now: 5000 }, paint).map(strip);
 		expect(lines.at(-1)).toContain("saved to");
 		expect(lines[1]).toContain("run 1/2 (tab)");
+	});
+
+	it.each([[25], [45], [60]])("fills exactly its height with the hint row last at %d rows", (rows) => {
+		const height = viewerHeight(rows, "full", 1);
+		// Strip row, mode line, footer, a transcript row and a status line stay free.
+		expect(height).toBe(rows - 5);
+		for (const level of ["phases", "agents"] as const) {
+			const state = initialViewerState();
+			state.level = level;
+			const lines = renderViewer({ runs: [run(agents)], state, width: 100, height, now: 5000 }, paint).map(strip);
+			expect(lines).toHaveLength(height);
+			expect(lines.at(-1)).toContain("esc");
+		}
+	});
+
+	it("keeps the half-height viewer inside the full-height budget", () => {
+		expect(viewerHeight(80, "half", 1)).toBe(30);
+		expect(viewerHeight(40, "half", 1)).toBe(20);
+		expect(viewerHeight(16, "half", 4)).toBe(8);
+		expect(viewerHeight(16, "full", 4)).toBe(8);
+	});
+
+	it("wraps the hint row at its separators on a narrow terminal instead of cutting keys", () => {
+		const state = initialViewerState();
+		state.level = "agents";
+		const running = run(agents, { status: "running", finishedAt: undefined });
+		const lines = renderViewer({ runs: [running], state, width: 60, height: 20, now: 5000 }, paint).map(strip);
+		expect(lines).toHaveLength(20);
+		const footer = lines.slice(-2).join(" · ");
+		for (const key of ["↑↓ agent", "⏎ prompt", "space/b scroll", "x stop workflow", "s save", "esc back"]) {
+			expect(footer).toContain(key);
+		}
+		expect(lines.every((l) => !l.includes("…") || !l.includes("esc"))).toBe(true);
 	});
 
 	it("clamps cursors when agents shrink and drops to phases when a phase empties", () => {

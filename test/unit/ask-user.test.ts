@@ -288,6 +288,32 @@ describe("renderWidget", () => {
 		expect(text).toContain("Enter jumps to the first one");
 	});
 
+	it("starts the answer when typing on the free-text row, digits included", () => {
+		const state = createWidgetState([plainQuestion]);
+		press(state, { kind: "down" }, { kind: "down" }); // focus "Type something."
+		press(state, "4", "2 tabs");
+		expect(state.editing).toEqual({ field: "other", draft: "42 tabs" });
+		press(state, enter);
+		expect(collectAnswers(state)[0]).toMatchObject({ selected: ["42 tabs"], typed: true });
+	});
+
+	it("wraps a long typed answer instead of cutting it", () => {
+		const state = createWidgetState([plainQuestion]);
+		const answer = "a fairly long answer that runs well past the width of a sixty column terminal";
+		press(state, "3", answer);
+		const lines = renderWidget(state, style, 60);
+		expect(within(lines, 60)).toBe(true);
+		expect(lines.join("").replace(/\s+/g, "")).toContain(`${answer.replace(/\s+/g, "")}▏`);
+		expect(lines.some((line) => line.includes("…"))).toBe(false);
+	});
+
+	it("wraps the key hints at 60 columns so Esc to cancel stays visible", () => {
+		const state = createWidgetState([previewQuestion, plainQuestion]);
+		const lines = renderWidget(state, style, 60);
+		expect(within(lines, 60)).toBe(true);
+		expect(lines.join("\n")).toContain("Esc to cancel");
+	});
+
 	it("stays within narrow widths", () => {
 		const state = createWidgetState([previewQuestion, multiQuestion, plainQuestion]);
 		for (const width of [30, 45, 60]) {

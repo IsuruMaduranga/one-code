@@ -8,6 +8,14 @@ export const EXTERNAL_INCLUDES_TITLE = "Allow external CLAUDE.md file imports?";
 export const EXTERNAL_INCLUDES_YES = "Yes, allow external imports";
 export const EXTERNAL_INCLUDES_NO = "No, disable external imports";
 export const EXTERNAL_INCLUDES_SETTING = "External CLAUDE.md includes";
+/**
+ * `/config` with nothing to show. Claude Code's /config is a full settings
+ * panel and hides this row when there are no external includes; One Code's
+ * holds only this row so far (decisions/tools.md), so the empty case names
+ * where the other settings live instead of ending the command.
+ */
+export const EXTERNAL_INCLUDES_NONE =
+	"No external CLAUDE.md includes in this project, so /config has nothing to change. Other settings: /settings (pi's settings), /model, /permissions, /memory.";
 
 export interface ExternalIncludesApproval {
 	approved: boolean;

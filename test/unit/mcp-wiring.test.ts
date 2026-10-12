@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type Tool, validateToolArguments } from "@earendil-works/pi-ai";
 import * as mcpClient from "../../extensions/mcp/client.ts";
 import mcpExtension from "../../extensions/mcp/index.ts";
+import { noMcpServersMessage } from "../../extensions/mcp/config.ts";
 import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/mcp-share.ts";
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../../extensions/lib/mcp-status.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
@@ -132,7 +133,7 @@ describe("mcp wiring", () => {
 		await fake.fire("session_shutdown", {}, ctx);
 	});
 
-	it("records Claude Code's empty-server guidance as the local result", async () => {
+	it("records the empty-server guidance, naming One Code's commands, as the local result", async () => {
 		await boot();
 		const blocks: string[] = [];
 		fake.events.on(REMINDER_CHANNEL, (data) => {
@@ -140,7 +141,10 @@ describe("mcp wiring", () => {
 			if (payload.placement === "user-prepend" && payload.text !== undefined) blocks.push(payload.text);
 		});
 		const ctx = createFakeCtx({ cwd, hasUI: true, mode: "tui" });
-		const stdout = "No MCP servers configured. Run `claude doctor` if this is unexpected — it lists MCP config files that failed validation. Otherwise, run `claude mcp --help` or visit https://code.claude.com/docs/en/mcp to learn more.";
+		const stdout = noMcpServersMessage(true);
+		expect(stdout).toContain("Run /doctor if this is unexpected");
+		expect(stdout).toContain(".mcp.json in the project, ~/.claude.json");
+		expect(stdout).not.toMatch(/claude (doctor|mcp)|code\.claude\.com/);
 		await fake.commands.get("mcp")!.handler("", ctx);
 		expect(blocks).toEqual(localCommandBlocks({ name: "mcp", stdout }));
 		expect(ctx._notified).toContainEqual({ message: stdout, type: "info" });
@@ -171,7 +175,9 @@ describe("mcp wiring", () => {
 		});
 		const ctx = createFakeCtx({ cwd, hasUI: true, mode: "tui" });
 		await fake.commands.get("mcp")!.handler("", ctx);
-		const stdout = "No MCP servers configured. Add them to .pi/mcp.json or the agent dir's mcp.json.";
+		const stdout = noMcpServersMessage(false);
+		expect(stdout).toContain("add servers to .pi/mcp.json or the agent dir's mcp.json");
+		expect(stdout).not.toContain(".claude");
 		expect(blocks).toEqual(localCommandBlocks({ name: "mcp", stdout }));
 	});
 

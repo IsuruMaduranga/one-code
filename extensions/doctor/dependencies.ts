@@ -11,13 +11,13 @@
  * providers it depends on a third-party key.
  */
 
-import { existsSync } from "node:fs";
+import { type Dirent, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { whichOnPath } from "../lib/which.ts";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { getProviderKind } from "pi-web-search/src/api.ts";
 import { installHint, serverInstallHint } from "../lsp/install-hints.ts";
-import { SERVERS } from "../lsp/servers.ts";
+import { languageIdForPath, SERVERS } from "../lsp/servers.ts";
 import { typescriptPreflight } from "../lsp/servers.ts";
 import type { McpServer } from "../mcp/config.ts";
 import { BRAVE_KEY_ENV, resolveChain, TAVILY_KEY_ENV, type WebSearchSettings } from "../web/backends.ts";
@@ -44,12 +44,48 @@ export interface DependencyReport {
 	findings: Finding[];
 }
 
-/** Languages the working directory plausibly contains, by the LSP table's own root markers. */
+/** Folders the language scan never enters: dependencies, build output, virtual environments. */
+const SCAN_SKIP = new Set(["node_modules", "vendor", "dist", "build", "out", "target", "venv", "env", "__pycache__", "coverage"]);
+const SCAN_MAX_DEPTH = 4;
+const SCAN_MAX_ENTRIES = 5000;
+
+/**
+ * Languages the working directory contains: by the LSP table's own root
+ * markers, or by a source file the language server would open. The file scan
+ * is bounded (a few levels deep, a few thousand entries, no dot, dependency
+ * or build folders), so a project with `.py` files and no `pyproject.toml`,
+ * or TypeScript under `web/src`, still counts.
+ */
 export function projectLanguages(cwd: string): string[] {
 	const seen = new Map<string, string>(); // command → languageId (one per server binary)
 	for (const [languageId, config] of Object.entries(SERVERS)) {
 		if (seen.has(config.command)) continue;
 		if (config.rootMarkers.some((marker) => existsSync(join(cwd, marker)))) seen.set(config.command, languageId);
+	}
+	// One entry per server binary: the walk stops once every one is accounted for.
+	const servers = new Set(Object.values(SERVERS).map((config) => config.command)).size;
+	if (seen.size < servers) {
+		let visited = 0;
+		const walk = (dir: string, depth: number): void => {
+			let entries: Dirent[];
+			try {
+				entries = readdirSync(dir, { withFileTypes: true });
+			} catch {
+				return;
+			}
+			for (const entry of entries) {
+				if (++visited > SCAN_MAX_ENTRIES || seen.size === servers) return;
+				if (entry.name.startsWith(".")) continue;
+				if (entry.isDirectory()) {
+					if (depth < SCAN_MAX_DEPTH && !SCAN_SKIP.has(entry.name)) walk(join(dir, entry.name), depth + 1);
+					continue;
+				}
+				const languageId = languageIdForPath(entry.name);
+				const config = languageId ? SERVERS[languageId] : undefined;
+				if (languageId && config && !seen.has(config.command)) seen.set(config.command, languageId);
+			}
+		};
+		walk(cwd, 0);
 	}
 	return [...seen.values()];
 }

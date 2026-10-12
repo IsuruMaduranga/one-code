@@ -70,7 +70,8 @@ export function buildMemoryEntries(opts: {
 	home: string;
 	homeClaudeDir: string;
 	homeOneCodeDir: string;
-	memoryDir: string;
+	/** The auto-memory folder; undefined while auto-memory is off (no folder row, as in Claude Code). */
+	memoryDir: string | undefined;
 }): MemoryEntry[] {
 	const { cwd, home, homeClaudeDir, homeOneCodeDir, memoryDir } = opts;
 	// The same rule the # claudeMd block uses, so the list matches what it sends.
@@ -164,7 +165,7 @@ export function buildMemoryEntries(opts: {
 		}
 	}
 
-	add({ title: "Open auto-memory folder", path: memoryDir, kind: "folder", exists: true });
+	if (memoryDir) add({ title: "Open auto-memory folder", path: memoryDir, kind: "folder", exists: true });
 	return entries;
 }
 

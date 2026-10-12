@@ -230,6 +230,17 @@ export function findProjectConfigs(cwd: string): string[] {
 }
 
 /**
+ * `/mcp` with no servers: where to look when that is unexpected (`/doctor`
+ * lists config files that failed validation) and where servers go, by mode.
+ * Claude Code names its own CLI and docs here; One Code names its own.
+ */
+export const MCP_GUIDE_URL = "https://github.com/IsuruMaduranga/one-code/blob/master/docs/guide/skills-plugins-and-mcp.md#mcp-servers";
+export function noMcpServersMessage(claudeSources: boolean): string {
+	const where = claudeSources ? ".mcp.json in the project, ~/.claude.json, .pi/mcp.json or the agent dir's mcp.json" : ".pi/mcp.json or the agent dir's mcp.json";
+	return `No MCP servers configured. Run /doctor if this is unexpected — it lists MCP config files that failed validation. Otherwise, add servers to ${where}; see ${MCP_GUIDE_URL} to learn more.`;
+}
+
+/**
  * pi's own `mcp.json` files: the agent dir's and the project's. `configDirName`
  * is pi's `CONFIG_DIR_NAME` (`.pi` unless pi itself is rebranded); callers
  * that import pi pass it.

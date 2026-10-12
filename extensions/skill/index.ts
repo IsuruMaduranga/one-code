@@ -63,6 +63,7 @@ import { announceArgumentHint, type CommandHint, frontmatterCommandHint } from "
 import { parseSlashCommand, SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../lib/skill-body.ts";
 import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
+import { panelUi } from "../lib/panel-focus.ts";
 
 interface IndexedSkill {
 	name: string;
@@ -744,7 +745,8 @@ export default function skillExtension(pi: ExtensionAPI) {
 		skillsOnly(cwd).map((skill) => ({
 			key: skillOverrideKey(skill.scope, skill.name),
 			name: skill.name,
-			scope: skill.scope,
+			// The override key keeps the path's scope; the row names the catalog.
+			scope: isBundled(skill.path) ? ("bundled" as const) : skill.scope,
 			tokens: estimateSkillTokens(skill.path),
 			state: skill.state,
 			locked: skill.source === "plugin",
@@ -756,7 +758,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 	// the skill-overrides store live. Plugin skills show locked (managed via
 	// /plugins). Pure state/render live in ./panel; this owns repaint + writes.
 	const openSkillsPanel = async (ctx: ExtensionContext): Promise<void> => {
-		await ctx.ui.custom<null>((tui, theme, _keybindings, done) => {
+		await panelUi(pi.events, ctx.ui).custom<null>((tui, theme, _keybindings, done) => {
 			const paint: SkillsPaint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme) };
 			const state = initialSkillsState();
 			let rows = buildSkillsRows(ctx.cwd);

@@ -52,6 +52,7 @@ import type { ProseRenderer } from "../subagents/panel-render.ts";
 import { createMarkdownProse } from "../subagents/prose.ts";
 import { applyBtwKey, type BtwBody, BTW_MAX_HEIGHT, copyAnswer, decodeBtwKey, initialBtwState, renderBtwPanel } from "./panel.ts";
 import { type BtwExchange, exchangeMessages, historyMessages, sideQuestionMessage } from "./prompt.ts";
+import { panelUi } from "../lib/panel-focus.ts";
 
 const BTW_MAX_TOKENS = 8192;
 const BTW_TIMEOUT_MS = 120_000;
@@ -239,7 +240,7 @@ export default function btwExtension(pi: ExtensionAPI) {
 			};
 			let panelOpen = true;
 
-			await ctx.ui.custom<null>((tui, theme, _keybindings, done) => {
+			await panelUi(pi.events, ctx.ui).custom<null>((tui, theme, _keybindings, done) => {
 				const state = initialBtwState();
 				let cache: { width: number; lines: string[] } | undefined;
 				const repaint = () => {

@@ -49,6 +49,8 @@ import {
 	ULTRACODE_STATUS_KEY,
 } from "./slider.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
+import { panelUi } from "../lib/panel-focus.ts";
+import { extendingCompletions } from "../lib/argument-hints.ts";
 
 /** The levels pi says the active model can reach; the full ladder when unknown. */
 function supportedLevels(ctx: ExtensionContext): ThinkingLevel[] {
@@ -203,7 +205,7 @@ export default function effortExtension(pi: ExtensionAPI) {
 		index = nearestEnabled(index, enabled);
 
 		const label = modelLabel(ctx);
-		const chosen = await ctx.ui.custom<{ choice: EffortChoice; asDefault: boolean } | null>((tui, theme, _keybindings, done) => {
+		const chosen = await panelUi(pi.events, ctx.ui).custom<{ choice: EffortChoice; asDefault: boolean } | null>((tui, theme, _keybindings, done) => {
 			const paint = safeThemePaint(theme);
 			return {
 				// The slider's own layout is column-safe for its ASCII labels, but this
@@ -237,10 +239,7 @@ export default function effortExtension(pi: ExtensionAPI) {
 		description: `Set reasoning effort (shift+tab cycles the plain levels): /effort [${EFFORT_CHOICES.join("|")}|auto] — ultracode is ${ULTRACODE_LEVEL} + workflows`,
 		argumentHint: `[${EFFORT_CHOICES.join("|")}|auto]`,
 		reportsResult: true,
-		getArgumentCompletions: (prefix) => {
-			const matches = [...acceptedEffortArgs(), "auto", "unset"].filter((value) => value.startsWith(prefix.trim().toLowerCase()));
-			return matches.length ? matches.map((value) => ({ value, label: value })) : null;
-		},
+		getArgumentCompletions: (prefix) => extendingCompletions(prefix, [...acceptedEffortArgs(), "auto", "unset"].map((value) => ({ value, label: value }))),
 		handler: async (args, ctx) => {
 			const typed = args.trim();
 			if (typed) {

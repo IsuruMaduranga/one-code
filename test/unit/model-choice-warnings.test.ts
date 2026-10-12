@@ -1,7 +1,7 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 import { classifierCandidates } from "../../extensions/auto-mode/model-select.ts";
-import { chosenModelWarnings } from "../../extensions/lib/model-choice-warnings.ts";
+import { chosenModelWarnings, costRatioText, isNotablyCostlier } from "../../extensions/lib/model-choice-warnings.ts";
 import { setModelTierOverridesForTest } from "../../extensions/lib/model-tier.ts";
 import { pinReleaseDates } from "./catalog-fixture.ts";
 
@@ -23,6 +23,18 @@ function tiers() {
 }
 
 describe("chosenModelWarnings", () => {
+	it("warns when a chosen classifier costs more per call than the session model, naming how much", () => {
+		tiers();
+		const pricey = model("openai", "gpt-x-pricey", 20, 1_000_000);
+		setModelTierOverridesForTest({ "openai/gpt-x-big": "workhorse", "openai/gpt-x-pricey": "workhorse" });
+		const [warning] = chosenModelWarnings({ available: [session, pricey], sessionModel: session, chosen: pricey, role: "classifier" });
+		expect(warning?.kind).toBe("costlier");
+		expect(warning?.text).toContain("costs about 4 times as much per call as this session's openai/gpt-x-big");
+		expect(warning?.fix).toMatch(/\/auto-mode model/);
+		expect(chosenModelWarnings({ available: [session, pricey], sessionModel: session, chosen: pricey, role: "subagent" })).toEqual([]);
+		expect(chosenModelWarnings({ available: [session, mid], sessionModel: session, chosen: mid, role: "classifier" }).map((w) => w.kind)).not.toContain("costlier");
+	});
+
 	it("warns when the chosen model is two or more tiers below the session's, not one", () => {
 		tiers();
 		const kinds = (chosen: Model<Api>) => chosenModelWarnings({ available: [session, mid, small], sessionModel: session, chosen, role: "subagent" }).map((w) => w.kind);
@@ -101,5 +113,15 @@ describe("classifierCandidates with autoMode.classifierModel", () => {
 		const stale = classifierCandidates({ available: [session, other], sessionModel: session, configured: "anthropic/claude-sonnet-5-5", configuredSetForContainment: "anthropic" });
 		expect(stale.candidates.some((entry) => entry.model === other)).toBe(false);
 		expect(stale.notices[0]).toMatchObject({ level: "warning", text: expect.stringContaining("was set for a different provider") });
+	});
+});
+
+describe("isNotablyCostlier", () => {
+	it("warns only for a ratio that reads above 1 times", () => {
+		expect(isNotablyCostlier(1.04)).toBe(false);
+		expect(costRatioText(1.04)).toBe("1 times");
+		expect(isNotablyCostlier(1.05)).toBe(true);
+		expect(costRatioText(1.05)).toBe("1.1 times");
+		expect(isNotablyCostlier(undefined)).toBe(false);
 	});
 });

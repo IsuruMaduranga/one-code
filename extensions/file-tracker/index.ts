@@ -26,6 +26,7 @@ import { bashParserReady } from "../lib/bash-parser.ts";
 import { discoverContextFiles, instructionRule } from "../lib/claude-context.ts";
 import { readExternalIncludesApproval } from "../lib/claude-external-includes.ts";
 import { inContextEntries, latestCompaction } from "../lib/compaction-boundary.ts";
+import { autoMemoryEnabled } from "../lib/auto-memory.ts";
 import { projectMemoryDir } from "../lib/memory.ts";
 import { claudeConfigDir, comparablePath, isPathAtOrUnder, tryRealpath } from "../lib/paths.ts";
 import { estimateTextTokens } from "../lib/pi-ai-estimate.ts";
@@ -194,7 +195,7 @@ function inContextFiles(ctx: ExtensionContext, branch: readonly { type: string; 
 		includeExternal: readExternalIncludesApproval(ctx.cwd, home).approved,
 	}).flatMap((file) => [file.path, ...(file.imported ?? [])]);
 	return new Set(
-		[...stack, join(projectMemoryDir(ctx.cwd, home), "MEMORY.md"), planFileOnBranch(branch), ...kept.map((path) => resolveToolPath(path, ctx.cwd)), ...keptShell]
+		[...stack, autoMemoryEnabled(ctx.cwd) ? join(projectMemoryDir(ctx.cwd, home), "MEMORY.md") : undefined, planFileOnBranch(branch), ...kept.map((path) => resolveToolPath(path, ctx.cwd)), ...keptShell]
 			.filter((path): path is string => typeof path === "string")
 			.map(comparablePath),
 	);

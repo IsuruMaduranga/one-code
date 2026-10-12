@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -96,6 +96,29 @@ describe("favorites", () => {
 });
 
 describe("skill scan", () => {
+	it("loads a name once and a linked file once, as pi does", () => {
+		const cwd = join(root, "proj");
+		const home = join(root, "home");
+		const agentDir = join(root, "agent");
+		const bundled = join(root, "bundled-skills");
+		const make = (base: string, name: string) => {
+			mkdirSync(join(base, name), { recursive: true });
+			writeFileSync(join(base, name, "SKILL.md"), `---\nname: ${name}\ndescription: d\n---\nbody`);
+		};
+		make(join(home, ".agents", "skills"), "simplify");
+		make(bundled, "simplify");
+		make(bundled, "loop");
+		// No declared name: the folder names it, so only the real path ties the link to it.
+		mkdirSync(join(home, ".claude", "skills", "shared"), { recursive: true });
+		writeFileSync(join(home, ".claude", "skills", "shared", "SKILL.md"), "---\ndescription: d\n---\nbody");
+		mkdirSync(join(cwd, ".agents", "skills"), { recursive: true });
+		symlinkSync(join(home, ".claude", "skills", "shared"), join(cwd, ".agents", "skills", "linked"), "junction");
+		const skills = scanSkills(cwd, home, agentDir, [], bundled);
+		expect(skills.map((s) => s.name)).toEqual(["loop", "shared", "simplify"]);
+		// The user's simplify wins over the bundled one, as pi's first-wins load does.
+		expect(skills.find((s) => s.name === "simplify")?.path).toBe(join(home, ".agents", "skills", "simplify", "SKILL.md"));
+	});
+
 	it("scans project/user/agent dirs and merges plugin skills", () => {
 		const cwd = join(root, "proj");
 		const home = join(root, "home");

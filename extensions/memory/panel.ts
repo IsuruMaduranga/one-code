@@ -4,8 +4,10 @@
  * files plus "Open auto-memory folder", with an Auto-memory status line and a
  * learn-more link. Enter opens the selected entry (in `$EDITOR`); Esc closes.
  * Above the list, where CC keeps its toggle rows (↑ from the first file
- * reaches them), One Code's "Config sources" row switches between the
- * Claude-compatible and independent modes (lib/config-mode.ts).
+ * reaches them): CC's "Auto-memory" toggle (lib/auto-memory.ts), then One
+ * Code's "Config sources" row, which switches between the Claude-compatible
+ * and independent modes (lib/config-mode.ts) after a confirmation, since it
+ * changes every place configuration is read from.
  *
  * Kept free of pi imports so the layout and navigation are unit-tested; the
  * extension owns repaint, the overlay, and the actual open.
@@ -14,24 +16,40 @@
 import type { MemoryEntry } from "./entries.ts";
 import { type ConfigMode, MODE_LABELS } from "../lib/config-mode.ts";
 import { keyId } from "../lib/key-input.ts";
+import { wrapHints, wrapProse } from "../lib/tui-render.ts";
 
 export const MEMORY_DOCS_URL = "https://github.com/IsuruMaduranga/one-code";
 
+/** Cursor rows above the list. */
+export const AUTO_MEMORY_ROW = -2;
+export const CONFIG_SOURCES_ROW = -1;
+
 export interface MemoryPanelState {
-	/** The selected entry's index; -1 is the config-sources row above the list. */
+	/** The selected entry's index; the two toggle rows above the list are negative. */
 	cursor: number;
+	/** Set while the config-sources switch waits for a second Enter. */
+	confirmingMode?: boolean;
 }
 
 export function initialMemoryState(): MemoryPanelState {
 	return { cursor: 0 };
 }
 
-/** The mode this process runs in, the one saved for the next start, and whether `ONECODE_CONFIG_MODE` sets it. */
-export interface ModeView {
-	running: ConfigMode;
-	saved: ConfigMode;
+/** A setting's value in this process, the value saved for the next start, and whether an env variable sets it. */
+export interface SettingView<T> {
+	running: T;
+	saved: T;
 	fromEnv?: boolean;
 }
+
+/** Auto-memory; `CLAUDE_CODE_DISABLE_AUTO_MEMORY` can set it. */
+export type AutoMemoryView = SettingView<boolean>;
+
+/** The config-sources mode; `ONECODE_CONFIG_MODE` can set it. */
+export type ModeView = SettingView<ConfigMode>;
+
+/** "; applies from the next start" while the saved value differs from the running one. */
+const pendingSuffix = (view: SettingView<unknown>): string => (view.saved === view.running ? "" : "; applies from the next start");
 
 const MODE_DESCRIPTIONS: Record<ConfigMode, string> = {
 	"claude-compatible": "~/.claude, CLAUDE.md, .agents and pi's dirs",
@@ -58,23 +76,41 @@ export function decodeMemoryKey(data: string): MemoryKey | undefined {
 	}
 }
 
-export type MemoryEffect = { kind: "open"; entry: MemoryEntry } | { kind: "toggle-mode" } | { kind: "close" };
+export type MemoryEffect =
+	| { kind: "open"; entry: MemoryEntry }
+	| { kind: "confirm-mode" }
+	| { kind: "toggle-mode" }
+	| { kind: "toggle-auto-memory" }
+	| { kind: "close" };
 
+/**
+ * Enter on "Config sources" asks first (`confirm-mode`); a second Enter
+ * switches (`toggle-mode`), and Esc or a move keeps the mode and the panel.
+ * "Auto-memory" toggles at once, as in Claude Code.
+ */
 export function applyMemoryKey(state: MemoryPanelState, key: MemoryKey, entries: readonly MemoryEntry[]): MemoryEffect | undefined {
+	const confirming = state.confirmingMode === true;
+	state.confirmingMode = false;
 	switch (key.kind) {
 		case "up":
-			state.cursor = Math.max(-1, state.cursor - 1);
+			state.cursor = Math.max(AUTO_MEMORY_ROW, state.cursor - 1);
 			return undefined;
 		case "down":
 			state.cursor = Math.min(entries.length - 1, state.cursor + 1);
 			return undefined;
 		case "enter": {
-			if (state.cursor === -1) return { kind: "toggle-mode" };
+			if (state.cursor === AUTO_MEMORY_ROW) return { kind: "toggle-auto-memory" };
+			if (state.cursor === CONFIG_SOURCES_ROW) {
+				if (confirming) return { kind: "toggle-mode" };
+				state.confirmingMode = true;
+				return { kind: "confirm-mode" };
+			}
 			const entry = entries[state.cursor];
 			return entry ? { kind: "open", entry } : undefined;
 		}
 		case "close":
-			return { kind: "close" };
+			// Esc on the confirmation keeps the mode and the panel.
+			return confirming ? undefined : { kind: "close" };
 	}
 }
 
@@ -92,18 +128,33 @@ const DESC_COL = 34;
  * the cursor stays visible.
  */
 export function renderMemoryPanel(
-	input: { state: MemoryPanelState; entries: readonly MemoryEntry[]; width: number; height: number; mode: ModeView },
+	input: {
+		state: MemoryPanelState;
+		entries: readonly MemoryEntry[];
+		width: number;
+		height: number;
+		mode: ModeView;
+		autoMemory?: AutoMemoryView;
+	},
 	paint: PanelPaint,
 ): string[] {
-	const { state, entries, height, mode } = input;
+	const { state, entries, height, mode, width } = input;
+	const autoMemory = input.autoMemory ?? { running: true, saved: true };
 
-	const header = [paint.bold("Memory"), "", `  ${paint.fg("muted", "Auto-memory: on")}`, renderModeRow(mode, state.cursor === -1, paint), ""];
-	const footer = [
+	const header = [
+		paint.bold("Memory"),
 		"",
-		paint.fg("muted", `Learn more: ${MEMORY_DOCS_URL}`),
+		renderAutoMemoryRow(autoMemory, state.cursor === AUTO_MEMORY_ROW, paint),
+		renderModeRow(mode, state.cursor === CONFIG_SOURCES_ROW, paint),
 		"",
-		paint.fg("muted", "Enter to open or switch · ↑ for config sources · Esc to close"),
 	];
+	const hints = state.confirmingMode
+		? [
+				...wrapProse(modeConfirmQuestion(mode), Math.max(20, width)).map((line) => paint.fg("warning", line)),
+				...wrapHints(`Enter to switch · Esc to keep ${MODE_LABELS[mode.saved]}`, width).map((line) => paint.fg("muted", line)),
+			]
+		: wrapHints("Enter to open or toggle · ↑ for auto-memory and config sources · Esc to close", width).map((line) => paint.fg("muted", line));
+	const footer = ["", paint.fg("muted", `Learn more: ${MEMORY_DOCS_URL}`), "", ...hints];
 
 	const listCapacity = Math.max(1, height - header.length - footer.length);
 	const start = scrollStart(Math.max(0, state.cursor), entries.length, listCapacity);
@@ -116,13 +167,46 @@ export function renderMemoryPanel(
 }
 
 /**
- * "Config sources: <saved>", with "(from next start)" while it differs from the
- * running mode; under `ONECODE_CONFIG_MODE`, the running mode and that it is set there.
+ * One line per toggle the panel changed (the result `/memory` reports), empty
+ * when nothing changed.
  */
+export function settingChanges(before: { mode: ConfigMode; autoMemory: boolean }, mode: ModeView, autoMemory: AutoMemoryView): string {
+	const lines: string[] = [];
+	if (autoMemory.saved !== before.autoMemory) {
+		lines.push(`Turned auto-memory ${autoMemory.saved ? "on" : "off"}${pendingSuffix(autoMemory)}`);
+	}
+	if (mode.saved !== before.mode) {
+		lines.push(`Set config sources to ${MODE_LABELS[mode.saved]}${pendingSuffix(mode)}`);
+	}
+	return lines.join("\n");
+}
+
+/** The question the config-sources confirmation asks. */
+export function modeConfirmQuestion(mode: ModeView): string {
+	const next: ConfigMode = mode.saved === "independent" ? "claude-compatible" : "independent";
+	return `Switch config sources to ${MODE_LABELS[next]}? One Code will read ${MODE_DESCRIPTIONS[next]} instead, from the next start.`;
+}
+
+/**
+ * A toggle row's plain text, "<label>: <saved>", with "(from next start)" while
+ * the saved value differs from the running one; when `envName` sets it, the
+ * running value and that it is set there. Also returns the value shown.
+ */
+function settingRow<T>(label: string, view: SettingView<T>, valueText: (value: T) => string, envName: string, selected: boolean): { left: string; shown: T } {
+	const shown = view.fromEnv ? view.running : view.saved;
+	const note = view.fromEnv ? ` (set by ${envName})` : view.saved !== view.running ? " (from next start)" : "";
+	return { left: `${selected ? "❯ " : "  "}${label}: ${valueText(shown)}${note}`, shown };
+}
+
+/** "Auto-memory: on|off". */
+function renderAutoMemoryRow(view: AutoMemoryView, selected: boolean, paint: PanelPaint): string {
+	const { left } = settingRow("Auto-memory", view, (on) => (on ? "on" : "off"), "CLAUDE_CODE_DISABLE_AUTO_MEMORY", selected);
+	return selected ? paint.fg("accent", left) : left;
+}
+
+/** "Config sources: <mode>" and the mode's description. */
 function renderModeRow(mode: ModeView, selected: boolean, paint: PanelPaint): string {
-	const shown = mode.fromEnv ? mode.running : mode.saved;
-	const note = mode.fromEnv ? " (set by ONECODE_CONFIG_MODE)" : mode.saved !== mode.running ? " (from next start)" : "";
-	const left = `${selected ? "❯ " : "  "}Config sources: ${MODE_LABELS[shown]}${note}`;
+	const { left, shown } = settingRow("Config sources", mode, (value) => MODE_LABELS[value], "ONECODE_CONFIG_MODE", selected);
 	const pad = " ".repeat(Math.max(2, DESC_COL + 12 - left.length));
 	const description = MODE_DESCRIPTIONS[shown];
 	return selected ? `${paint.fg("accent", left)}${pad}${paint.fg("accent", description)}` : `${left}${pad}${paint.fg("muted", description)}`;

@@ -151,6 +151,30 @@ export function cutPlainText(text: string, width: number): string {
 	return `${sliceColumns(text, Math.max(0, width - 1)).text}…`;
 }
 
+/**
+ * Fit a key-hint row (`a · b · c`) into `width` columns by breaking it at its
+ * ` · ` separators onto as many lines as it needs, so a narrow terminal shows
+ * every key instead of cutting the last ones off. A single hint wider than
+ * the row is cut with an ellipsis.
+ */
+export function wrapHints(text: string, width: number, separator = " · "): string[] {
+	if (width <= 0) return [""];
+	if (visibleWidth(text) <= width) return [text];
+	const lines: string[] = [];
+	let current = "";
+	for (const hint of text.split(separator)) {
+		const joined = current ? `${current}${separator}${hint}` : hint;
+		if (!current || visibleWidth(joined) <= width) {
+			current = joined;
+			continue;
+		}
+		lines.push(cutPlainText(current, width));
+		current = hint;
+	}
+	if (current) lines.push(cutPlainText(current, width));
+	return lines;
+}
+
 /** Cut then pad plain (unpainted) text to exactly `width` terminal columns. */
 export function padPlainText(text: string, width: number): string {
 	const shortened = cutPlainText(text, width);
@@ -561,10 +585,13 @@ export function rejectionLine(
 	if (!isError) return undefined;
 	const kind = userDenialKind(textContent(result));
 	if (!kind) return undefined;
-	if (kind === "stop" && file?.path) {
-		return `  ⎿  ${theme.fg("dim", `User rejected ${file.op} to `)}${theme.bold(theme.fg("dim", sanitizeDisplayText(file.path)))}`;
-	}
+	if (kind === "stop" && file?.path) return `  ⎿  ${rejectedFileHead(theme, file.op, file.path)}`;
 	return `  ⎿  ${theme.fg("dim", TOOL_USE_REJECTED)}`;
+}
+
+/** "User rejected <op> to <path>", dimmed with the path in bold: a file tool's reasonless rejection, before the `⎿` elbow. */
+export function rejectedFileHead(theme: ThemeLike, op: RejectedFileOp, path: string): string {
+	return `${theme.fg("dim", `User rejected ${op} to `)}${theme.bold(theme.fg("dim", sanitizeDisplayText(path)))}`;
 }
 
 export interface CcRenderSpec<TArgs = unknown, TDetails = unknown> {
@@ -626,7 +653,8 @@ export function ccToolRenderers<TArgs = any, TDetails = any>(
 			theme: ThemeLike,
 			context: { args?: TArgs; isError: boolean },
 		) {
-			const rejected = rejectionLine(theme, stripReminderBlocks(result), context.isError);
+			const stripped = stripReminderBlocks(result);
+			const rejected = rejectionLine(theme, stripped, context.isError);
 			if (rejected) return linesComponent(() => [rejected]);
 			let text: string | undefined;
 			try {
@@ -634,7 +662,7 @@ export function ccToolRenderers<TArgs = any, TDetails = any>(
 			} catch {
 				text = undefined;
 			}
-			text ??= textContent(stripReminderBlocks(result));
+			text ??= textContent(stripped);
 			if (!text) return linesComponent(() => []);
 			let link: string | undefined;
 			try {
@@ -925,7 +953,12 @@ export function notificationUserMarkdown(text: string): string | undefined {
 		.join("\n\n");
 }
 
-export function notificationComponent(theme: ThemeLike, text: string, expanded: boolean): TuiComponent {
+/**
+ * `agentName` names the agent a message comes from (its task id is the
+ * wire address): the headline reads `› Message from @<name>`, falling back to
+ * the address when the name is unknown.
+ */
+export function notificationComponent(theme: ThemeLike, text: string, expanded: boolean, agentName?: (from: string) => string | undefined): TuiComponent {
 	// An agent's completion pointer says nothing the message above it does not;
 	// CC's transcript shows the message alone. Bodies carry shell output and
 	// agent replies, so control characters are removed before parsing.
@@ -947,8 +980,9 @@ export function notificationComponent(theme: ThemeLike, text: string, expanded: 
 				// the header, then the body as delivered (preamble, indented report),
 				// indented under it, when expanded. The guard is never shown.
 				const bodyLines = frame.body.split("\n");
-				if (expanded) out.push(dim(`› Message from ${frame.from}`), ...body(bodyLines));
-				else out.push(dim(`› Message from @${frame.from}`) + hint(bodyLines));
+				const sender = agentName?.(frame.from) ?? frame.from;
+				if (expanded) out.push(dim(`› Message from ${sender}`), ...body(bodyLines));
+				else out.push(dim(`› Message from @${sender}`) + hint(bodyLines));
 				continue;
 			}
 			if (frame.kind === "task" && isAgentCompletion(frame.summary)) {

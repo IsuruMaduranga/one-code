@@ -49,7 +49,7 @@ import { resolveToolPath } from "../lib/tool-path.ts";
 import { sessionWorkCwd, WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
 import { pathArgument } from "../auto-mode/paths.ts";
 import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
-import { EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_SETTING, EXTERNAL_INCLUDES_YES, externalIncludesDialog, persistExternalIncludesApproval, readExternalIncludesApproval } from "../lib/claude-external-includes.ts";
+import { EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_NONE, EXTERNAL_INCLUDES_SETTING, EXTERNAL_INCLUDES_YES, externalIncludesDialog, persistExternalIncludesApproval, readExternalIncludesApproval } from "../lib/claude-external-includes.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 import { consentDialog, installConsentDialogs, startupConsentReady } from "../lib/consent-dialogs.ts";
 
@@ -250,7 +250,7 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 			if (gen !== sessionGeneration || approvalAbort.signal.aborted) return;
 			const paths = externalPaths(ctx.cwd);
 			if (!paths.length) {
-				const text = "No external CLAUDE.md includes found.";
+				const text = EXTERNAL_INCLUDES_NONE;
 				ctx.ui.notify(text, "info");
 				return text;
 			}

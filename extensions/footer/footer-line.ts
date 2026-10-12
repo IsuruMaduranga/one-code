@@ -12,7 +12,8 @@
  * zero display width) always fits the width it was built for.
  */
 
-import { sliceColumns, tailColumns, visibleWidth } from "../lib/text-width.ts";
+import { cutPlainText } from "../lib/tui-render.ts";
+import { tailColumns, visibleWidth } from "../lib/text-width.ts";
 import { costOf, usageEntryCost } from "../lib/usage-bus.ts";
 import type { WorktreeLocation } from "../lib/worktree-channel.ts";
 
@@ -23,8 +24,12 @@ export interface FooterData {
 	cwd: string;
 	home: string;
 	branch?: string;
-	/** Context tokens in use and the model's window; both needed to show fill. */
-	contextTokens?: number;
+	/**
+	 * Context tokens in use and the model's window. Tokens are unknown right
+	 * after a compaction until the next reply; the fill then reads `?/window`,
+	 * as pi's own footer shows it.
+	 */
+	contextTokens?: number | null;
 	contextWindow?: number;
 	/** Context percentage, shown in parens after the fill; `null`/undefined omits it
 	 * (e.g. right after compaction, unknown until the next reply). */
@@ -89,6 +94,8 @@ interface Part {
 	painted: string;
 	/** Higher drops first when the line is too narrow; 0 = never dropped. */
 	dropPriority: number;
+	/** The model name: the one core part cut (with an ellipsis) when even the core overflows. */
+	model: boolean;
 }
 
 const SEP = " · ";
@@ -106,17 +113,19 @@ export function buildFooterLines(data: FooterData, width: number, paint: Paint):
 	// A labelled metric: the label is muted, the value takes `color`. The plain
 	// form (label + value) drives the width/drop math; the painted form colours
 	// the two halves separately.
-	const push = (label: string, value: string, color: string, dropPriority = 0) => {
+	const push = (label: string, value: string, color: string, dropPriority = 0, model = false) => {
 		if (!value) return;
 		const plain = label ? `${label} ${value}` : value;
 		const painted = label ? `${paint("muted", label)} ${paint(color, value)}` : paint(color, value);
-		parts.push({ plain, painted, dropPriority });
+		parts.push({ plain, painted, dropPriority, model });
 	};
 
-	// Context fill as "usage: tokens/window (pct%)".
-	if (typeof data.contextTokens === "number" && typeof data.contextWindow === "number" && data.contextWindow > 0) {
-		const pct = typeof data.contextPercent === "number" ? ` (${data.contextPercent.toFixed(0)}%)` : "";
-		push("usage:", `${formatTokens(data.contextTokens)}/${formatTokens(data.contextWindow)}${pct}`, "dim");
+	// Context fill as "usage: tokens/window (pct%)", or "?/window" while the
+	// tokens are unknown (right after a compaction).
+	if (typeof data.contextWindow === "number" && data.contextWindow > 0) {
+		const tokens = typeof data.contextTokens === "number" ? formatTokens(data.contextTokens) : "?";
+		const pct = typeof data.contextTokens === "number" && typeof data.contextPercent === "number" ? ` (${data.contextPercent.toFixed(0)}%)` : "";
+		push("usage:", `${tokens}/${formatTokens(data.contextWindow)}${pct}`, "dim");
 	}
 	// Total cost, always shown once known.
 	push("cost:", formatCost(data.cost), "dim");
@@ -126,7 +135,7 @@ export function buildFooterLines(data: FooterData, width: number, paint: Paint):
 		push("cache-hit:", `${data.cacheHitPercent.toFixed(0)}%`, color, 2);
 	}
 	// Model, then effort — no labels; both self-describing.
-	if (data.model) push("", data.model, "dim");
+	if (data.model) push("", data.model, "dim", 0, true);
 	if (data.effort) push("", data.effort, "accent");
 
 	// Left chunk: path + branch, with the open PR attached to the branch as
@@ -152,12 +161,21 @@ export function buildFooterLines(data: FooterData, width: number, paint: Paint):
 		kept = kept.filter((_, i) => i !== droppable.i);
 	}
 
-	const rightLen = visibleWidth(rightPlain());
-
-	// Even the core overflows: last resort, truncate the plain metrics to width.
-	if (rightLen > width) {
-		return [paint("dim", sliceColumns(rightPlain(), width).text)];
+	// Even the core overflows: cut the model name with an ellipsis so the
+	// effort after it stays; when that is not enough, cut the whole line.
+	const overflow = visibleWidth(rightPlain()) - width;
+	if (overflow > 0) {
+		const model = kept.find((p) => p.model);
+		const room = model ? visibleWidth(model.plain) - overflow : 0;
+		if (model && room >= 4) {
+			const shortened = cutPlainText(model.plain, room);
+			kept = kept.map((p) => (p === model ? { ...p, plain: shortened, painted: paint("dim", shortened) } : p));
+		} else {
+			return [paint("dim", cutPlainText(rightPlain(), width))];
+		}
 	}
+
+	const rightLen = visibleWidth(rightPlain());
 
 	const rightPaintedStr = kept.map((p) => p.painted).join(paint("dim", SEP));
 

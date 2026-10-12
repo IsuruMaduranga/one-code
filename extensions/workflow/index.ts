@@ -64,6 +64,7 @@ import {
 	initialViewerState,
 	planSave,
 	renderViewer,
+	viewerHeight,
 	type ViewerRunSnapshot,
 } from "./viewer.ts";
 import { WorkflowWidget } from "./widget.ts";
@@ -73,6 +74,7 @@ import { sessionWorkCwd } from "../lib/worktree-channel.ts";
 import { followEnteredWorktree } from "../lib/worktree-isolation.ts";
 import { isKeyRelease, keyId } from "../lib/key-input.ts";
 import { projectConfigDirName } from "../lib/config-mode.ts";
+import { panelUi } from "../lib/panel-focus.ts";
 
 /**
  * Claude Code's own arming reminder, verbatim in intent: the keyword is a
@@ -150,7 +152,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 		if (viewerOpen) return;
 		viewerOpen = true;
 		try {
-			await openWorkflowViewer(ctx, manager, opts);
+			await openWorkflowViewer(pi.events, ctx, manager, () => widget.paintedRowCount(), opts);
 		} finally {
 			viewerOpen = false;
 		}
@@ -534,11 +536,13 @@ export default function workflowExtension(pi: ExtensionAPI) {
  * lookup (findings §15).
  */
 async function openWorkflowViewer(
+	events: ExtensionAPI["events"],
 	ctx: ExtensionContext,
 	manager: WorkflowRunManager,
+	stripRows: () => number,
 	opts?: { height?: "full" | "half"; runIndex?: number },
 ): Promise<void> {
-	await ctx.ui.custom<null>((tui, theme, _keybindings, done) => {
+	await panelUi(events, ctx.ui).custom<null>((tui, theme, _keybindings, done) => {
 		const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme) };
 
 		// Newest run first, so the viewer opens on the latest.
@@ -546,8 +550,7 @@ async function openWorkflowViewer(
 
 		// Full (the /workflows tab) fills the terminal; half (opened from the
 		// status strip) leaves the transcript visible above, like Claude Code.
-		const viewerHeight = (rows: number): number =>
-			opts?.height === "half" ? Math.max(12, Math.min(Math.floor(rows / 2), 30)) : Math.max(12, rows - 2);
+		const heightMode = opts?.height === "half" ? "half" : "full";
 
 		const state = initialViewerState(opts?.runIndex ?? 0);
 		let cache: { width: number; lines: string[] } | undefined;
@@ -587,7 +590,7 @@ async function openWorkflowViewer(
 		return {
 			render: (width: number) => {
 				if (cache?.width === width) return cache.lines;
-				const height = viewerHeight(tui.terminal.rows);
+				const height = viewerHeight(tui.terminal.rows, heightMode, stripRows());
 				const lines = renderViewer({ runs: snapshots(), state, width, height, now: Date.now() }, paint).map(
 					(line) => truncateLine(line, width),
 				);

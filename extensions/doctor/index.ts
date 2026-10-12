@@ -52,12 +52,13 @@ import { doctorFixPrompt } from "./fix-prompt.ts";
 import { computePresets, describePresetChanges, findPreset, PRESET_NAMES, presetsSection } from "./presets.ts";
 import { type DoctorReport, renderDoctorReport, renderDoctorText, renderSection } from "./report.ts";
 import { lookupLatestVersion } from "./update-lookup.ts";
-import { applyDoctorKey, decodeDoctorKey, renderDoctorViewer, visibleBodyRows } from "./viewer.ts";
-import { announceArgumentHint } from "../lib/argument-hints.ts";
+import { applyDoctorKey, decodeDoctorKey, type DoctorViewerState, renderDoctorViewer, visibleBodyRows } from "./viewer.ts";
+import { announceArgumentHint, extendingCompletions } from "../lib/argument-hints.ts";
 import { announceLocalCommand } from "../lib/local-command.ts";
 import { registeredMcpServers } from "../mcp/config.ts";
 import { configMode } from "../lib/config-mode.ts";
 import { promptCommandText } from "../skill/invoke.ts";
+import { panelUi } from "../lib/panel-focus.ts";
 
 /** Rows the panel may take; the terminal's own height caps it (boundedDockHeight). */
 export const DOCTOR_PANEL_MAX_HEIGHT = 40;
@@ -207,10 +208,10 @@ export default function doctorExtension(pi: ExtensionAPI) {
 
 	const showPanel = async (ctx: ExtensionCommandContext, report: DoctorReport): Promise<void> => {
 		let wantFix = false;
-		await ctx.ui.custom<null>((tui, theme, _keybindings, done) => {
+		await panelUi(pi.events, ctx.ui).custom<null>((tui, theme, _keybindings, done) => {
 			const paint = safeThemePaint(theme);
 			const bold = safeThemeBold(theme);
-			const state = { offset: 0 };
+			const state: DoctorViewerState = { offset: 0 };
 			let cache: { width: number; lines: string[] } | undefined;
 			const body = (width: number) => {
 				if (cache?.width === width) return cache;
@@ -228,7 +229,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 					const key = decodeDoctorKey(data);
 					if (!key) return;
 					const termRows = (tui as { terminal?: { rows?: number } }).terminal?.rows ?? DOCTOR_PANEL_MAX_HEIGHT;
-					const visible = visibleBodyRows(boundedDockHeight(termRows, DOCTOR_PANEL_MAX_HEIGHT));
+					const visible = state.visibleRows ?? visibleBodyRows(boundedDockHeight(termRows, DOCTOR_PANEL_MAX_HEIGHT));
 					const effect = applyDoctorKey(state, key, cache?.lines.length ?? 0, visible);
 					if (effect?.kind === "fix") {
 						wantFix = true;
@@ -306,10 +307,8 @@ export default function doctorExtension(pi: ExtensionAPI) {
 	pi.registerCommand("doctor", {
 		description:
 			"Health-check your setup and fix what's wrong (Claude Code's checkup, run by the model). Subcommands: report (the measured report only), presets, preset <economical|balanced|quality>",
-		getArgumentCompletions: (prefix) => {
-			const typed = prefix.trim().toLowerCase();
-			return SUBCOMMANDS.filter((option) => option.value.startsWith(typed)).map((option) => ({ value: option.value, label: option.value, description: option.description }));
-		},
+		getArgumentCompletions: (prefix) =>
+			extendingCompletions(prefix, SUBCOMMANDS.map((option) => ({ value: option.value, label: option.value, description: option.description }))),
 		handler: async (args, ctx) => {
 			const [verb, ...rest] = args.trim().split(/\s+/).filter(Boolean);
 			if (verb === "preset") {

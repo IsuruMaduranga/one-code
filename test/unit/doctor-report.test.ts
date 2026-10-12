@@ -299,6 +299,16 @@ describe("buildDoctorReport", () => {
 		const text = modelsSection(facts, { model: anthropic[0], modelSource: "session" }, []).lines.map((line) => line.text).join("\n");
 		expect(text).toContain('Setting: "anthropic/claude-opus-5" via autoMode.classifierModel');
 	});
+
+	it("makes an unapplied CLAUDE_CODE_SUBAGENT_MODEL a finding, not only a warning line", () => {
+		const session = { model: openai[0], modelSource: "session" as const };
+		const facts = collectModelFacts(openai, session, home, { CLAUDE_CODE_SUBAGENT_MODEL: "sonnet" });
+		expect(facts.subagentConfiguredInapplicable).toBe(true);
+		const findings: Finding[] = [];
+		const section = modelsSection(facts, session, findings);
+		expect(section.lines.some((line) => line.level === "warn" && line.text.includes("not applied"))).toBe(true);
+		expect(findings.some((finding) => finding.text.startsWith('CLAUDE_CODE_SUBAGENT_MODEL sets "sonnet"'))).toBe(true);
+	});
 });
 
 describe("renderDoctorReport", () => {

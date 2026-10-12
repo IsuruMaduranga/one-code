@@ -136,7 +136,9 @@ project `.claude/`, no `CLAUDE.md`, no `~/.claude.json` or `.mcp.json`, and
 no managed settings either.
 
 To switch, run `/memory`, press **↑** to reach the **Config sources** row,
-and press **Enter**. The row shows **(from next start)** until you restart
+and press **Enter**. One Code asks first, since this changes everywhere it
+reads configuration from: press **Enter** again to switch, or **Esc** to
+keep the mode you have. The row shows **(from next start)** until you restart
 One Code, because the switch applies to the next session, not the one
 you're in. `/doctor` shows which mode is running.
 

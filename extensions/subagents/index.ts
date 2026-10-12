@@ -109,9 +109,12 @@ import { moveTasksSelection, renderShellDetail, renderTasksDialog, settleTasksVi
 import { reduceShellKey } from "./shell-panel.ts";
 import { trackShellTasks } from "../lib/shell-tasks.ts";
 import { createMarkdownProse } from "./prose.ts";
+import { asScrollableViewport, ViewportMirror } from "./viewport-mirror.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
+import { extendingCompletions } from "../lib/argument-hints.ts";
 import { CONTEXT_BASELINE_CHANNEL, restoredContext } from "../lib/context-stack.ts";
 import { emptySubagentBaseline, planSubagentAnnouncement, subagentBaseline, subagentBaselineFromStack, type SubagentBaseline } from "./announce.ts";
+import { panelUi } from "../lib/panel-focus.ts";
 
 /** How the guide's setup list names a server that is not connected. */
 const MCP_STATUS_LABELS: Record<McpStatusKind, string | undefined> = {
@@ -907,11 +910,14 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		let closed = false;
 		let repaintFn: (() => void) | undefined;
 		let doneFn: ((result: null) => void) | undefined;
+		/** Fullscreen only: turns pi's own viewport scrolling into view scrolling. */
+		let mirror: ViewportMirror | undefined;
 		const entry = {
 			retarget(id: string) {
 				if (currentId === id) return;
 				currentId = id;
 				scroll = 0;
+				mirror?.park(0);
 				panel.setView(id);
 				announceView(id);
 				repaintFn?.();
@@ -924,6 +930,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				if (closed) return;
 				closed = true;
 				if (view === entry) view = undefined;
+				mirror?.restore();
+				mirror = undefined;
 				panel.setView(undefined);
 				announceView(undefined);
 				doneFn?.(null);
@@ -935,7 +943,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		void (async () => {
 			const prose = await getProse(ctx);
 			if (closed) return;
-			await ctx.ui.custom<null>(
+			await panelUi(pi.events, ctx.ui).custom<null>(
 				(tui, theme, _keybindings, done) => {
 					doneFn = done;
 					// close() raced ahead of the factory — dissolve as soon as we exist.
@@ -951,8 +959,19 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					);
 					repaintFn = live.repaint;
 					const height = () => Math.max(8, tui.terminal.rows - viewReserve());
+					const viewport = asScrollableViewport(tui);
+					if (viewport && !closed) mirror = new ViewportMirror(viewport);
 					return {
 						render: (width: number) => {
+							// The page keys and the wheel scroll pi's main viewport, under
+							// this overlay; take the move as ours and park main again.
+							if (mirror) {
+								const next = mirror.absorb(scroll, maxScroll);
+								if (next !== scroll) {
+									scroll = next;
+									cache = undefined;
+								}
+							}
 							if (cache?.width === width) return cache.lines;
 							const run = liveRuns.get(currentId);
 							let lines: string[];
@@ -1037,10 +1056,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			// ctrl+x (the agents stop-all chord arm) means nothing on the chip:
 			// swallow it rather than leaking the raw \x18 into the editor.
 			if (decoded.chordArmed) return { consume: true };
-			const result = reduceShellKey(decoded.key);
-			panel.setShellChipFocus(result.focused);
-			if (result.effect === "passthrough") return undefined; // typing resumes in the editor, byte included
-			if (result.effect === "toAgents") {
+			const effect = reduceShellKey(decoded.key);
+			panel.setShellChipFocus(false);
+			if (effect === "passthrough") return undefined; // typing resumes in the editor, byte included
+			if (effect === "toAgents") {
 				if (focusFirstAgentRow()) return { consume: true };
 				// No agent rows below the chip: stay on it. Dropping focus here handed
 				// the NEXT key to the editor, where ↑ recalls the last prompt — the
@@ -1049,7 +1068,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				panel.setShellChipFocus(true);
 				return { consume: true };
 			}
-			if (result.effect === "openTasks") {
+			if (effect === "openTasks") {
 				void openTasksDialog(ctx).catch((error: unknown) => {
 					ctx.ui.notify(`Could not open the tasks dialog: ${error instanceof Error ? error.message : String(error)}`, "error");
 				});
@@ -1155,10 +1174,16 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 	// Compact transcript rendering for the notifications this extension injects
 	// (full body on ctrl+o); the verbose framing stays model-only.
+	// A message is addressed from the agent's task id; its headline names the
+	// agent, from the live registry or the message's own details (a resumed
+	// session has no live runs).
 	for (const customType of ["subagent-message", "subagent-result"]) {
-		pi.registerMessageRenderer(customType, (message, { expanded }, theme) =>
-			notificationComponent(theme, customMessageText(message.content), expanded),
-		);
+		pi.registerMessageRenderer(customType, (message, { expanded }, theme) => {
+			const details = (message as { details?: { taskId?: unknown; name?: unknown } }).details;
+			const agentName = (from: string): string | undefined =>
+				liveRuns.get(from)?.name ?? (details?.taskId === from && typeof details.name === "string" ? details.name : undefined);
+			return notificationComponent(theme, customMessageText(message.content), expanded, agentName);
+		});
 	}
 
 	// A hand-back the model already read through task_output (block: true on the
@@ -2777,7 +2802,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				// A dead process's stop() throwing must not break the dialog.
 			}
 		};
-		const chosen = await ctx.ui.custom<string | null>((tui, theme, _keybindings, done) => {
+		const chosen = await panelUi(pi.events, ctx.ui).custom<string | null>((tui, theme, _keybindings, done) => {
 			const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme) };
 			const refresh = () => {
 				snapshot = build();
@@ -2798,10 +2823,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			};
 			return {
 				render: (width: number) => {
-					dialogView = settleTasksView(dialogView, dialogView.mode === "shell" ? shellById(dialogView.id) : undefined);
-					if (dialogView.mode === "shell") {
-						const task = shellById(dialogView.id);
-						if (task) return ["", ...renderShellDetail(task, width - 2, Date.now(), paint).map((line) => `  ${line}`), ""].map((line) => truncateLine(line, width));
+					const task = dialogView.mode === "shell" ? shellById(dialogView.id) : undefined;
+					dialogView = settleTasksView(dialogView, task);
+					if (dialogView.mode === "shell" && task) {
+						return ["", ...renderShellDetail(task, width - 2, Date.now(), paint).map((line) => `  ${line}`), ""].map((line) => truncateLine(line, width));
 					}
 					shown = tasksItems(snapshot);
 					selected = Math.max(0, Math.min(selected, shown.length - 1));
@@ -3023,10 +3048,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	registerLocalCommand(pi, "subagent", {
 		description: "Set the default model for subagent/workflow runs: /subagent [provider/model-id|inherit|status|clear]",
 		argumentHint: "[provider/model-id|inherit|status|clear]",
-		getArgumentCompletions: (prefix) =>
-			["inherit", "status", "clear"]
-				.filter((value) => value.startsWith(prefix.trim().toLowerCase()))
-				.map((value) => ({ value, label: value })),
+		getArgumentCompletions: (prefix) => extendingCompletions(prefix, ["inherit", "status", "clear"].map((value) => ({ value, label: value }))),
 		handler: async (args, ctx) => {
 			const typed = args.trim();
 			if (typed === "clear") {
@@ -3070,7 +3092,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			const current = configured && configured.spec.includes("/") ? configured.spec : undefined;
 			const entries = toPickerEntries(available);
 
-			const chosen = await ctx.ui.custom<PickerEntry | null>((tui, theme, _keybindings, done) =>
+			const chosen = await panelUi(pi.events, ctx.ui).custom<PickerEntry | null>((tui, theme, _keybindings, done) =>
 				modelPickerComponent(
 					{
 						entries,

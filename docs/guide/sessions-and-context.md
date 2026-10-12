@@ -100,9 +100,16 @@ warned; past the limit, a write to it still succeeds but returns an error
 so the model trims the index.
 
 Run `/memory` to open the memory folder or any instruction file. Files open
-in `$VISUAL` or `$EDITOR`; folders open in your file manager. The
-**Config sources** row at the top switches between Claude-compatible and
-independent mode, starting with the next session.
+in `$VISUAL` or `$EDITOR`; folders open in your file manager. The two rows
+at the top are settings, and both take effect from the next session:
+
+- **Auto-memory** turns memory on or off. Off, the model gets no memory
+  instructions and no `MEMORY.md` index, and the memory folder isn't
+  offered. It's saved as `autoMemoryEnabled` in `~/.onecode/settings.json`,
+  Claude Code's setting name, and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`
+  overrides it.
+- **Config sources** switches between Claude-compatible and independent
+  mode. It asks you to confirm with a second **Enter**.
 
 ## The context window
 

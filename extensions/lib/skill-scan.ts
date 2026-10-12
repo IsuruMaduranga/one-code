@@ -3,11 +3,13 @@
  * command registration (pure fs). (The /plugins Installed tab builds its rows
  * from discoverPlugins directly and no longer calls this.)
  *
- * Scans the SAME directories claude-compat feeds to pi, in pi's order —
- * `~/.claude/skills`, `~/.agents/skills`, `<cwd>/.claude/skills`,
- * `<cwd>/.agents/skills`, `<agentDir>/skills`, then the bundled catalog last
- * (so it loses a name collision, as it does in pi) — and merges the plugin
- * skills the caller resolved. Rows carry the SKILL.md path (for the ~token
+ * Scans the SAME directories pi loads, in pi's order — `<agentDir>/skills`
+ * (pi's own), then the ones claude-compat feeds it: `~/.claude/skills`,
+ * `~/.agents/skills`, `<cwd>/.claude/skills`, `<cwd>/.agents/skills`, and the
+ * bundled catalog last — and merges the plugin skills the caller resolved.
+ * As in pi, a name loads once (the first wins, so the bundled catalog loses a
+ * collision) and a file reached twice through a link counts once, so the
+ * banner, `/skills` and `/doctor` count the skills pi actually loads. Rows carry the SKILL.md path (for the ~token
  * size estimate) and the scope used by skill-overrides keys. Before the first
  * turn this scan is the only skill list One Code has (pi resolves skills per
  * turn), so a root missing here is a skill with no `/name` command at startup.
@@ -19,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import type { PluginSkill } from "./plugins.ts";
 import type { SkillScope } from "./skill-overrides.ts";
 import { claudeSourcesOn, projectConfigDir, userConfigDir } from "./config-mode.ts";
-import { claudeUserDir, isPathAtOrUnder } from "./paths.ts";
+import { claudeUserDir, isPathAtOrUnder, tryRealpath } from "./paths.ts";
 import { parseFrontmatterLoosely } from "./frontmatter.ts";
 
 /** The skill catalog shipped in this package: `<package>/skills` (Claude Code's self-contained built-in skills). */
@@ -64,7 +66,7 @@ export function commandDirs(cwd: string, home: string, claudeDir: string = claud
 	return [join(claudeSourcesOn() ? claudeDir : userConfigDir(home), "commands"), join(projectConfigDir(cwd), "commands")];
 }
 
-function scanDir(dir: string, scope: SkillScope, into: Map<string, ScannedSkill>): void {
+function scanDir(dir: string, scope: SkillScope, into: Map<string, ScannedSkill>, seenFiles: Set<string>): void {
 	if (!existsSync(dir)) return;
 	let entries: string[];
 	try {
@@ -83,7 +85,10 @@ function scanDir(dir: string, scope: SkillScope, into: Map<string, ScannedSkill>
 		} catch {
 			continue;
 		}
-		if (!into.has(`${scope}:${name}`)) into.set(`${scope}:${name}`, { name, path: skillFile, scope });
+		const real = tryRealpath(skillFile) ?? skillFile;
+		if (into.has(name) || seenFiles.has(real)) continue;
+		seenFiles.add(real);
+		into.set(name, { name, path: skillFile, scope });
 	}
 }
 
@@ -95,9 +100,10 @@ export function scanSkills(
 	bundledSkillsDir?: string,
 ): ScannedSkill[] {
 	const skills = new Map<string, ScannedSkill>();
-	for (const { dir, scope } of skillSourceDirs(cwd, home)) scanDir(dir, scope, skills);
-	scanDir(join(agentDir, "skills"), "user", skills);
-	if (bundledSkillsDir) scanDir(bundledSkillsDir, scopeForPath(bundledSkillsDir, home, agentDir), skills);
+	const seenFiles = new Set<string>();
+	scanDir(join(agentDir, "skills"), "user", skills, seenFiles);
+	for (const { dir, scope } of skillSourceDirs(cwd, home)) scanDir(dir, scope, skills, seenFiles);
+	if (bundledSkillsDir) scanDir(bundledSkillsDir, scopeForPath(bundledSkillsDir, home, agentDir), skills, seenFiles);
 	for (const skill of pluginSkills) {
 		skills.set(`plugin:${skill.name}`, { name: skill.name, path: skill.path, scope: "plugin" });
 	}

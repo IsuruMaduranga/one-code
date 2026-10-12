@@ -329,6 +329,15 @@ describe("renderPanel", () => {
 		for (const line of lines) expect(line.length).toBeLessThanOrEqual(320);
 	});
 
+	it("wraps the footer hints at 60 columns so Esc to close stays", () => {
+		const state = initialPanelState();
+		const view = makeView({ discover: [{ id: "beta@mp", name: "beta", marketplace: "mp", installed: false, busy: false, installs: 1, description: "desc" }] });
+		const lines = renderPanel({ ...renderInput(state, view), width: 60 }, paint).map(strip);
+		for (const line of lines) expect(line.length).toBeLessThanOrEqual(60);
+		expect(lines.join("\n")).toContain("Esc to close");
+		expect(lines.length).toBeLessThanOrEqual(24);
+	});
+
 	it("renders the marketplaces tab with Add row and counts", () => {
 		const state = initialPanelState();
 		state.tab = "marketplaces";

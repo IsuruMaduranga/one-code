@@ -56,7 +56,7 @@ import { type McpEntry, type McpEntryStatus } from "./panel/model.ts";
 import { renderMcpPanel, type McpPaint } from "./panel/render.ts";
 import { applyMcpKey, initialMcpState, type McpEffect } from "./panel/state.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
-import { loadServers, type McpServer, piMcpConfigPaths, registeredMcpServers } from "./config.ts";
+import { loadServers, type McpServer, noMcpServersMessage, piMcpConfigPaths, registeredMcpServers } from "./config.ts";
 import { approveMcpServers, type McpTrustDeps, persistApproval, projectRootOf, reconnectRefusal } from "./trust.ts";
 import {
 	capDescription,
@@ -72,6 +72,7 @@ import { canShowCustomUi, notifyRpcReadOnly } from "../lib/headless-output.ts";
 import { claudeSourcesOn } from "../lib/config-mode.ts";
 import { claudeJsonPath } from "../lib/paths.ts";
 import { consentDialog, startupConsentReady } from "../lib/consent-dialogs.ts";
+import { panelUi } from "../lib/panel-focus.ts";
 
 /** Anthropic's hard limit on a tool name; a longer one fails the whole request. */
 const MAX_TOOL_NAME_LENGTH = 128;
@@ -772,7 +773,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	const MCP_PANEL_MAX_HEIGHT = 22;
 
 	const openMcpPanel = async (ctx: ExtensionContext): Promise<void> => {
-		await ctx.ui.custom<null>((tui, theme, _keybindings, done) => {
+		await panelUi(pi.events, ctx.ui).custom<null>((tui, theme, _keybindings, done) => {
 			const paint: McpPaint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme) };
 			const state = initialMcpState();
 			let notices: string[] = [];
@@ -981,9 +982,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		description: "Manage MCP servers (status, reconnect, authenticate, enable/disable)",
 		handler: async (args, ctx) => {
 			if (servers.length === 0) {
-				const stdout = claudeSourcesOn()
-					? "No MCP servers configured. Run `claude doctor` if this is unexpected — it lists MCP config files that failed validation. Otherwise, run `claude mcp --help` or visit https://code.claude.com/docs/en/mcp to learn more."
-					: "No MCP servers configured. Add them to .pi/mcp.json or the agent dir's mcp.json.";
+				const stdout = noMcpServersMessage(claudeSourcesOn());
 				ctx.ui.notify(stdout, "info");
 				return stdout;
 			}

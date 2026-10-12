@@ -373,6 +373,9 @@ export function usesClaudeCodeFastPaths(model: Model<Api> | undefined): boolean 
 	return !!model && atLeastTier(intrinsicTier(model), "workhorse");
 }
 
+/** A model's price for comparing candidates, or undefined when it has none. */
+export type ModelPrice = (model: Model<Api>) => number | undefined;
+
 /**
  * The budget-gated form the automatic secondary-model pickers all share: same as
  * `economicalContainedCandidates`, minus the session model itself and anything
@@ -380,19 +383,21 @@ export function usesClaudeCodeFastPaths(model: Model<Api> | undefined): boolean 
  * the classifier: a same-price model saves nothing); non-strict allows equal
  * price (the reader). With the session price unknown there is no demonstrable
  * saving, so `strict` yields nothing while non-strict keeps the tier-ranked
- * list. `contained` is forwarded to skip the containment recompute.
+ * list. `contained` is forwarded to skip the containment recompute. `price`
+ * replaces the list input price (the classifier judges per-call cost).
  */
 export function cheaperContainedCandidates(
 	available: Model<Api>[],
 	sessionModel: Model<Api>,
-	opts: { strict?: boolean; contained?: Model<Api>[]; requireImageInput?: boolean } = {},
+	opts: { strict?: boolean; contained?: Model<Api>[]; requireImageInput?: boolean; price?: ModelPrice } = {},
 ): Model<Api>[] {
+	const priceOf = opts.price ?? pricedInput;
 	const sessionSpec = modelSpec(sessionModel);
-	const sessionPrice = pricedInput(sessionModel);
+	const sessionPrice = priceOf(sessionModel);
 	return economicalContainedCandidates(available, sessionModel, opts.contained, opts.requireImageInput).filter((model) => {
 		if (modelSpec(model) === sessionSpec) return false;
 		if (sessionPrice === undefined) return !opts.strict;
-		const price = pricedInput(model);
+		const price = priceOf(model);
 		return price !== undefined && (opts.strict ? price < sessionPrice : price <= sessionPrice);
 	});
 }
@@ -409,12 +414,13 @@ export function cheaperContainedCandidates(
 export function sameTierContainedCandidates(
 	available: Model<Api>[],
 	sessionModel: Model<Api>,
-	opts: { contained?: Model<Api>[]; requireImageInput?: boolean } = {},
+	opts: { contained?: Model<Api>[]; requireImageInput?: boolean; price?: ModelPrice } = {},
 ): Model<Api>[] {
+	const priceOf = opts.price ?? pricedInput;
 	const floor = intrinsicTier(sessionModel);
 	return cheaperContainedCandidates(available, sessionModel, { ...opts, strict: true })
 		.filter((model) => atLeastTier(intrinsicTier(model), floor))
-		.sort((a, b) => pricedInput(a)! - pricedInput(b)!);
+		.sort((a, b) => priceOf(a)! - priceOf(b)!);
 }
 
 export interface EconomicalModelChoice {

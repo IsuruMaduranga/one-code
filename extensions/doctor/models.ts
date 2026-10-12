@@ -177,6 +177,14 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 				indent: 1,
 				level: facts.subagentConfiguredInapplicable ? "warn" : "dim",
 			});
+			// A warning line is a finding too, so the summary never says "No issues found" beside it.
+			if (facts.subagentConfiguredInapplicable) {
+				findings.push({
+					level: "warn",
+					text: `${knob} sets "${facts.subagentConfigured.spec}" for subagents, but it applies only when the main model is a Claude model, so it is not used here.`,
+					fix: "Choose the subagent model with /subagent (it writes subagentModel in ~/.onecode/settings.json), or unset the variable.",
+				});
+			}
 		}
 		for (const notice of sub.notices) {
 			lines.push({ text: notice, indent: 1, level: "warn" });
@@ -205,6 +213,11 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 		});
 	} else {
 		lines.push({ text: "Auto-mode classifier: none — auto mode stays out of the mode cycle until a model is available", level: "warn" });
+		findings.push({
+			level: "warn",
+			text: "No auto-mode classifier model resolves, so auto mode stays out of the mode cycle.",
+			fix: "Choose one with /auto-mode model, or connect a provider with /login.",
+		});
 	}
 	for (const notice of classifier.notices) {
 		lines.push({ text: notice.text, indent: 1, level: notice.level === "warning" ? "warn" : "dim" });

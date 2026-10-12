@@ -4,7 +4,7 @@ import { TASK_REGISTER_CHANNEL } from "../../extensions/background/registry.ts";
 import { trackShellTasks } from "../../extensions/lib/shell-tasks.ts";
 import { decodeStripKey } from "../../extensions/subagents/panel-keys.ts";
 import { STRIP_LINGER_MS } from "../../extensions/subagents/panel-render.ts";
-import { reduceShellKey, renderShellChip, SHELL_CHIP_LINGER_MS, shellRows } from "../../extensions/subagents/shell-panel.ts";
+import { reduceShellKey, renderShellChip, shellRows } from "../../extensions/subagents/shell-panel.ts";
 import { OUTPUT_BOX_ROWS, renderShellDetail, settleTasksView, shellDetailKey } from "../../extensions/subagents/tasks-dialog.ts";
 
 /** Paint that tags styled text so tests can strip/inspect it. */
@@ -34,11 +34,10 @@ const NOW = 100_000;
 
 describe("shellRows", () => {
 	it("keeps running shells, and a finished one only for the agent rows' linger window", () => {
-		expect(SHELL_CHIP_LINGER_MS).toBe(STRIP_LINGER_MS);
 		const rows = shellRows(
 			[
 				task({ id: "run", startedAt: 1 }),
-				task({ id: "stale", status: "completed", finishedAt: NOW - SHELL_CHIP_LINGER_MS - 1 }),
+				task({ id: "stale", status: "completed", finishedAt: NOW - STRIP_LINGER_MS - 1 }),
 				task({ id: "fresh", status: "stopped", finishedAt: NOW - 1000 }),
 			],
 			NOW,
@@ -51,18 +50,18 @@ describe("shellRows", () => {
 
 describe("reduceShellKey", () => {
 	it("Enter opens the Background dialog, ↓ hands over to the agent rows, ↑/Esc leave", () => {
-		expect(reduceShellKey("open")).toEqual({ focused: false, effect: "openTasks" });
-		expect(reduceShellKey("down")).toEqual({ focused: false, effect: "toAgents" });
-		expect(reduceShellKey("leave")).toEqual({ focused: false });
-		expect(reduceShellKey("up")).toEqual({ focused: false });
+		expect(reduceShellKey("open")).toBe("openTasks");
+		expect(reduceShellKey("down")).toBe("toAgents");
+		expect(reduceShellKey("leave")).toBeUndefined();
+		expect(reduceShellKey("up")).toBeUndefined();
 	});
 
 	it("typing and keys the chip does not take pass through to the editor", () => {
-		expect(reduceShellKey(undefined)).toEqual({ focused: false, effect: "passthrough" });
-		expect(reduceShellKey("stop")).toEqual({ focused: false, effect: "passthrough" });
+		expect(reduceShellKey(undefined)).toBe("passthrough");
+		expect(reduceShellKey("stop")).toBe("passthrough");
 		// ← and space are typing here: the chip lets go and the editor gets the byte.
-		expect(reduceShellKey(decodeStripKey("\x1b[D", false).key)).toEqual({ focused: false, effect: "passthrough" });
-		expect(reduceShellKey(decodeStripKey(" ", false).key)).toEqual({ focused: false, effect: "passthrough" });
+		expect(reduceShellKey(decodeStripKey("\x1b[D", false).key)).toBe("passthrough");
+		expect(reduceShellKey(decodeStripKey(" ", false).key)).toBe("passthrough");
 	});
 });
 

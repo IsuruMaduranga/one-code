@@ -92,6 +92,20 @@ describe("collectCompat: settings files", () => {
 		expect(onecode.used).toEqual(['subagentModel "inherit"', "webSearch (keys/order for the search fallback)"]);
 	});
 
+	it("counts One Code's own keys, the /memory rows among them, as used rather than ignored", () => {
+		write(join(home, ".onecode", "settings.json"), {
+			configMode: "independent",
+			autoMemoryEnabled: false,
+			modelTiers: { "x/y": "cheap" },
+			suggestNewerModels: false,
+			workflowSizeGuideline: "small",
+			compactionKeepDeclined: true,
+		});
+		const onecode = collectCompat(input()).files.find((f) => f.scope === "onecode-user")!;
+		expect(onecode.ignored).toEqual([]);
+		expect(onecode.used).toEqual(expect.arrayContaining(['configMode "independent" (/memory config sources)', "autoMemoryEnabled: false"]));
+	});
+
 	it("refuses a classifier model in Claude Code's settings: One Code reads it from ~/.onecode only", () => {
 		write(join(home, ".claude", "settings.json"), { subagentModel: "sonnet", autoMode: { classifierModel: "anthropic/claude-haiku-4-5", environment: ["x"] } });
 		const compat = collectCompat(input());
@@ -188,6 +202,18 @@ describe("dependencies", () => {
 		expect(report.findings.some((f) => f.text.includes('MCP server "srv" runs "my-mcp"'))).toBe(true);
 		expect(report.findings.some((f) => f.text.startsWith("git is not on PATH"))).toBe(true);
 		expect(report.checks.find((c) => c.name === "typescript-language-server")).toMatchObject({ need: "unused" });
+	});
+
+	it("finds a project's languages by its source files when it has no root marker", () => {
+		write(join(cwd, "scripts", "tool.py"), "print(1)\n");
+		write(join(cwd, "web", "src", "app.ts"), "export {};\n");
+		write(join(cwd, "node_modules", "dep", "main.go"), "package dep\n");
+		write(join(cwd, ".cache", "x.rs"), "fn main() {}\n");
+		expect(projectLanguages(cwd).sort()).toEqual(["python", "typescript"]);
+		const report = checkDependencies({ cwd, env: { PATH: "" }, platform: "darwin", mcpServers: [], webSearchSettings: {} });
+		expect(report.checks.find((c) => c.name === "pyright-langserver")).toMatchObject({ need: "project" });
+		expect(report.checks.find((c) => c.name === "typescript-language-server")).toMatchObject({ need: "project" });
+		expect(report.checks.find((c) => c.name === "gopls")).toMatchObject({ need: "unused" });
 	});
 
 	it("names the web-search route", () => {

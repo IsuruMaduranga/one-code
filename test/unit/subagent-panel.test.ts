@@ -17,6 +17,7 @@ import {
 	spinnerVerb,
 	STRIP_LINGER_MS,
 	TASKS_NOTICE,
+	toolDisplayLabel,
 } from "../../extensions/subagents/panel-render.ts";
 import { userMessageForAgent } from "../../extensions/lib/agent-view.ts";
 import { wrapProse } from "../../extensions/lib/tui-render.ts";
@@ -375,6 +376,21 @@ describe("renderTranscript", () => {
 		expect(joined).toContain("Read(store.ts)");
 		expect(joined).toContain("195 lines");
 		expect(out.some((l) => /… \(/.test(l))).toBe(true); // spinner verb
+	});
+
+	it("labels tool calls as the main transcript does", () => {
+		expect(toolDisplayLabel("bash")).toBe("Bash");
+		expect(toolDisplayLabel("edit")).toBe("Update");
+		expect(toolDisplayLabel("ls")).toBe("LS");
+		expect(toolDisplayLabel("powershell")).toBe("PowerShell");
+		expect(toolDisplayLabel("web_fetch")).toBe("Web Fetch");
+		expect(toolDisplayLabel("Agent")).toBe("Agent");
+		expect(toolDisplayLabel("mcp__github__list_issues")).toBe("github: list_issues");
+		const labelled = new LiveRunRegistry();
+		const lid = register(labelled, { task: "" });
+		labelled.block(lid, { kind: "call", tool: "bash", text: "ls -la" });
+		const out = renderTranscript({ run: labelled.get(lid)!, width: 80, height: 12, scroll: 0, now: 4000 }, paint).lines.map(strip);
+		expect(out.join("\n")).toContain("Bash(ls -la)");
 	});
 
 	it("streams the in-flight assistant text after the settled blocks, wrapped", () => {

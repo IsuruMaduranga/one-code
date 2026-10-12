@@ -14,7 +14,7 @@
  * painting wherever it can along the way.
  */
 
-import { cutPlainText, padPlainText, truncateLine, visibleWidth, wrapPlainText } from "../lib/tui-render.ts";
+import { cutPlainText, padPlainText, truncateLine, visibleWidth, wrapHints, wrapPlainText } from "../lib/tui-render.ts";
 import type { Answer, Question } from "./questions.ts";
 import { keyId, keyText } from "../lib/key-input.ts";
 
@@ -199,6 +199,12 @@ export function applyWidgetKey(state: WidgetState, key: WidgetKey): WidgetResult
 		case "enter":
 			return activateRow(state, rows[questionState.cursor]);
 		case "text": {
+			// The free-text row is an input: typing on it starts the answer, as in
+			// Claude Code, instead of being dropped until Enter opens it.
+			if (rows[questionState.cursor]?.kind === "other") {
+				state.editing = { field: "other", draft: questionState.otherText + key.text };
+				return;
+			}
 			if (key.text === "n" && hasPreviews(question)) {
 				state.editing = { field: "notes", draft: questionState.notes };
 				return;
@@ -331,7 +337,9 @@ export function renderWidget(state: WidgetState, style: WidgetStyle, width: numb
 	if (state.tab === state.questions.length) renderSubmitTab(state, paint, width, out);
 	else renderQuestionTab(state, style, width, out);
 	out.push("");
-	out.push(paint("dim", cutPlainText(footerFor(state), Math.max(1, width - 1))));
+	// The key hints wrap at their separators on a narrow terminal, so "Esc to
+	// cancel" is never the part cut off.
+	for (const line of wrapHints(footerFor(state), Math.max(1, width - 1))) out.push(paint("dim", line));
 	// Final ANSI-aware guard: pi-tui crashes the app on an overwide line, and
 	// the painted tab bar can exceed narrow widths.
 	return out.map((line) => truncateLine(line, width));
@@ -438,7 +446,9 @@ function renderStackedRows(state: WidgetState, style: WidgetStyle, width: number
 				const editing = state.editing?.field === "other";
 				const check = question.multiSelect ? (questionState.otherChosen ? "[✔] " : "[ ] ") : "";
 				if (editing) {
-					out.push(paint("accent", cut(`❯ ${number} ${check}${state.editing?.draft ?? ""}▏`)));
+					// A long answer wraps under its row while typing; nothing is cut.
+					const prefix = `❯ ${number} ${check}`;
+					for (const line of wrapUnder(prefix, `${state.editing?.draft ?? ""}▏`, width)) out.push(paint("accent", line));
 				} else if (questionState.otherText) {
 					out.push(labelRow(`${pointer} ${number} ${check}`, questionState.otherText, focused || questionState.otherChosen));
 				} else {
@@ -503,7 +513,7 @@ function renderPreviewRows(state: WidgetState, style: WidgetStyle, width: number
 	const notesIndent = " ".repeat(sideBySide ? leftWidth : 2);
 	out.push("");
 	if (state.editing?.field === "notes") {
-		out.push(`${notesIndent}${paint("accent", "Notes: ")}${cut(state.editing.draft)}▏`);
+		out.push(...wrapUnder(`${notesIndent}Notes: `, `${state.editing.draft}▏`, width, `${notesIndent}${paint("accent", "Notes: ")}`));
 	} else if (questionState.notes) {
 		out.push(`${notesIndent}${paint("accent", "Notes: ")}${cut(questionState.notes)}`);
 	} else {
@@ -512,6 +522,18 @@ function renderPreviewRows(state: WidgetState, style: WidgetStyle, width: number
 
 	out.push("");
 	pushChatRow(state, rows, style, width, out);
+}
+
+/**
+ * `prefix` then `text`, wrapped to the row width with continuation lines
+ * indented under the text, so a typed answer shows whole. `painted` replaces
+ * the plain prefix on the first line (same width, with colour).
+ */
+function wrapUnder(prefix: string, text: string, width: number, painted = prefix): string[] {
+	const indent = visibleWidth(prefix);
+	const room = Math.max(4, width - 1 - indent);
+	const wrapped = wrapPlainText(text, room);
+	return wrapped.map((line, i) => (i === 0 ? painted : " ".repeat(indent)) + line);
 }
 
 function previewBox(preview: string, maxOuter: number, paint: Paint): string[] {
