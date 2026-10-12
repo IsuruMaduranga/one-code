@@ -952,7 +952,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					// close() raced ahead of the factory — dissolve as soon as we exist.
 					if (closed) queueMicrotask(() => done(null));
 					const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme) };
-					let cache: { width: number; lines: string[] } | undefined;
+					let cache: { width: number; height: number; lines: string[] } | undefined;
 					const live = liveRepaint(
 						tui,
 						() => {
@@ -975,17 +975,19 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 									cache = undefined;
 								}
 							}
-							if (cache?.width === width) return cache.lines;
+							// Keyed by height too: a resize or another strip changing size moves the room.
+							const viewHeight = height();
+							if (cache?.width === width && cache.height === viewHeight) return cache.lines;
 							const run = liveRuns.get(currentId);
 							let lines: string[];
 							if (run) {
-								const transcript = renderTranscript({ run, width, height: height(), scroll, now: Date.now(), prose }, paint);
+								const transcript = renderTranscript({ run, width, height: viewHeight, scroll, now: Date.now(), prose }, paint);
 								maxScroll = transcript.maxScroll;
 								lines = transcript.lines;
 							} else {
 								lines = [paint.fg("dim", "agent gone")];
 							}
-							cache = { width, lines: lines.map((line) => truncateLine(line, width)) };
+							cache = { width, height: viewHeight, lines: lines.map((line) => truncateLine(line, width)) };
 							return cache.lines;
 						},
 						invalidate: () => {
