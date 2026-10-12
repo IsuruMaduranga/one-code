@@ -43,6 +43,8 @@ export class WorkflowWidget {
 	constructor(
 		private readonly manager: WorkflowRunManager,
 		private readonly getCtx: () => ExtensionContext | undefined,
+		/** Told the rows this strip paints below the editor (lib/dock-rows.ts). */
+		private readonly onRows: (rows: number) => void = () => {},
 	) {}
 
 	attach(handle: RunHandle): void {
@@ -106,6 +108,7 @@ export class WorkflowWidget {
 
 	dispose(): void {
 		this.disposed = true;
+		this.onRows(0);
 		if (this.timer) clearTimeout(this.timer);
 		if (this.ticker) clearInterval(this.ticker);
 		this.timer = this.ticker = undefined;
@@ -131,6 +134,7 @@ export class WorkflowWidget {
 		this.syncTicker(runs);
 		if (!runs.length) {
 			ctx.ui.setWidget(WIDGET_KEY, undefined);
+			this.onRows(0);
 			return;
 		}
 		if (this.focusIndex !== undefined && this.focusIndex >= this.rowCount()) {
@@ -143,6 +147,7 @@ export class WorkflowWidget {
 			const lines = runs.map((run) => `${run.runId} ${run.name} — ${run.status} (${run.agents.length} agents)`);
 			if (totalRuns > runs.length) lines.push(`${totalRuns - runs.length} more workflows — /workflows to list all`);
 			ctx.ui.setWidget(WIDGET_KEY, lines, { placement: "belowEditor" });
+			this.onRows(0); // no TUI view sizes itself in RPC
 			return;
 		}
 		ctx.ui.setWidget(
@@ -162,6 +167,7 @@ export class WorkflowWidget {
 			},
 			{ placement: "belowEditor" },
 		);
+		this.onRows(this.paintedRowCount());
 	}
 
 	/** Keep elapsed time ticking while any run is live; stop when none is. */

@@ -75,6 +75,7 @@ import { followEnteredWorktree } from "../lib/worktree-isolation.ts";
 import { isKeyRelease, keyId } from "../lib/key-input.ts";
 import { projectConfigDirName } from "../lib/config-mode.ts";
 import { panelUi } from "../lib/panel-focus.ts";
+import { dockRowsReporter, trackDockRows } from "../lib/dock-rows.ts";
 
 /**
  * Claude Code's own arming reminder, verbatim in intent: the keyword is a
@@ -138,7 +139,9 @@ export default function workflowExtension(pi: ExtensionAPI) {
 	const enteredWorktree = followEnteredWorktree(pi.events);
 	const manager = new WorkflowRunManager();
 	let lastCtx: ExtensionContext | undefined;
-	const widget = new WorkflowWidget(manager, () => lastCtx);
+	const widget = new WorkflowWidget(manager, () => lastCtx, dockRowsReporter(pi.events, "workflow"));
+	// The other strips below the editor (the subagent panel), so the viewer leaves their rows free.
+	const dock = trackDockRows(pi.events);
 	let viewerOpen = false;
 
 	// Parent permission bridge for workflow agents' gates — same bridge the
@@ -152,7 +155,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 		if (viewerOpen) return;
 		viewerOpen = true;
 		try {
-			await openWorkflowViewer(pi.events, ctx, manager, () => widget.paintedRowCount(), opts);
+			await openWorkflowViewer(pi.events, ctx, manager, () => widget.paintedRowCount() + dock.others("workflow"), opts);
 		} finally {
 			viewerOpen = false;
 		}
@@ -553,7 +556,7 @@ async function openWorkflowViewer(
 		const heightMode = opts?.height === "half" ? "half" : "full";
 
 		const state = initialViewerState(opts?.runIndex ?? 0);
-		let cache: { width: number; lines: string[] } | undefined;
+		let cache: { width: number; height: number; lines: string[] } | undefined;
 		const repaint = () => {
 			cache = undefined;
 			tui.requestRender();
@@ -589,12 +592,13 @@ async function openWorkflowViewer(
 
 		return {
 			render: (width: number) => {
-				if (cache?.width === width) return cache.lines;
+				// Keyed by height too: a resize or a strip that grows changes the room.
 				const height = viewerHeight(tui.terminal.rows, heightMode, stripRows());
+				if (cache?.width === width && cache.height === height) return cache.lines;
 				const lines = renderViewer({ runs: snapshots(), state, width, height, now: Date.now() }, paint).map(
 					(line) => truncateLine(line, width),
 				);
-				cache = { width, lines };
+				cache = { width, height, lines };
 				return lines;
 			},
 			handleInput: (data: string) => {

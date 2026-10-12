@@ -115,6 +115,7 @@ import { extendingCompletions } from "../lib/argument-hints.ts";
 import { CONTEXT_BASELINE_CHANNEL, restoredContext } from "../lib/context-stack.ts";
 import { emptySubagentBaseline, planSubagentAnnouncement, subagentBaseline, subagentBaselineFromStack, type SubagentBaseline } from "./announce.ts";
 import { panelUi } from "../lib/panel-focus.ts";
+import { dockRowsReporter, trackDockRows } from "../lib/dock-rows.ts";
 
 /** How the guide's setup list names a server that is not connected. */
 const MCP_STATUS_LABELS: Record<McpStatusKind, string | undefined> = {
@@ -337,7 +338,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	const stoppedTaskIds = new Set<string>();
 	let lastCtx: ExtensionContext | undefined;
 	const shellTasks = trackShellTasks(pi);
-	const panel = new SubagentWidget(liveRuns, () => lastCtx, shellTasks);
+	const panel = new SubagentWidget(liveRuns, () => lastCtx, shellTasks, dockRowsReporter(pi.events, "subagents"));
+	// The other strips below the editor (workflow status rows), so the agent view leaves their rows free.
+	const dock = trackDockRows(pi.events);
 
 	/**
 	 * Register a child in the live panel and return the wiring the spawn sites
@@ -880,10 +883,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	 * back.
 	 */
 	let view: { retarget(taskId: string): void; scrollBy(delta: number): void; close(): void } | undefined;
-	/** Rows kept clear at the bottom: token counter + editor(3) + mode line + strip hint + strip rows + shell section + cwd/status(2) + one spare. */
+	/** Rows kept clear at the bottom: token counter + editor(3) + mode line + strip hint + strip rows + shell section + other strips + cwd/status(2) + one spare. */
 	const viewReserve = () => {
 		const shellLines = panel.shellLineCount();
-		return panel.rowCount() + (shellLines ? shellLines + 1 : 0) + 9;
+		return panel.rowCount() + (shellLines ? shellLines + 1 : 0) + dock.others("subagents") + 9;
 	};
 
 	/**
@@ -949,7 +952,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					// close() raced ahead of the factory — dissolve as soon as we exist.
 					if (closed) queueMicrotask(() => done(null));
 					const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme) };
-					let cache: { width: number; lines: string[] } | undefined;
+					let cache: { width: number; height: number; lines: string[] } | undefined;
 					const live = liveRepaint(
 						tui,
 						() => {
@@ -972,17 +975,19 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 									cache = undefined;
 								}
 							}
-							if (cache?.width === width) return cache.lines;
+							// Keyed by height too: a resize or another strip changing size moves the room.
+							const viewHeight = height();
+							if (cache?.width === width && cache.height === viewHeight) return cache.lines;
 							const run = liveRuns.get(currentId);
 							let lines: string[];
 							if (run) {
-								const transcript = renderTranscript({ run, width, height: height(), scroll, now: Date.now(), prose }, paint);
+								const transcript = renderTranscript({ run, width, height: viewHeight, scroll, now: Date.now(), prose }, paint);
 								maxScroll = transcript.maxScroll;
 								lines = transcript.lines;
 							} else {
 								lines = [paint.fg("dim", "agent gone")];
 							}
-							cache = { width, lines: lines.map((line) => truncateLine(line, width)) };
+							cache = { width, height: viewHeight, lines: lines.map((line) => truncateLine(line, width)) };
 							return cache.lines;
 						},
 						invalidate: () => {
