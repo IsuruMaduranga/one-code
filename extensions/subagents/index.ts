@@ -105,7 +105,7 @@ import { decodeStripKey, editorYieldsDown, isStripEntryKey, type StripKey } from
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../permissions/modes.ts";
 import { AGENT_VIEW_CHANNEL, type AgentViewAnnouncement, agentViewTarget, userMessageForAgent } from "../lib/agent-view.ts";
 import { isKeyRelease, keyId, keyText } from "../lib/key-input.ts";
-import { moveTasksSelection, renderTasksDialog, type TasksItem, tasksItems } from "./tasks-dialog.ts";
+import { moveTasksSelection, renderShellDetail, renderTasksDialog, settleTasksView, shellDetailKey, tasksItems, type TasksView } from "./tasks-dialog.ts";
 import { reduceShellKey } from "./shell-panel.ts";
 import { trackShellTasks } from "../lib/shell-tasks.ts";
 import { createMarkdownProse } from "./prose.ts";
@@ -1015,9 +1015,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			leave();
 			return undefined;
 		};
-		/** Keys the agents branch owns; any other decode (typing, shell-only keys
-		 * like left/space) drops focus and passes through — stated positively so a
-		 * future StripKey addition is foreign here by default. */
+		/** Keys the agents branch owns; any other decode (typing) drops focus and
+		 * passes through — stated positively so a future StripKey addition is
+		 * foreign here by default. */
 		const AGENT_KEYS = new Set<StripKey>(["up", "down", "open", "leave", "stop", "stopAll", "pageUp", "pageDown"]);
 		/** Row 0 exists only past the synthetic `main` row. */
 		const focusFirstAgentRow = (): boolean => {
@@ -1025,50 +1025,38 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			panel.setFocus(0);
 			return true;
 		};
-		/** The shell-manager stages (chip → list → details); agents keys untouched. */
+		/** The focused shells chip; agents keys untouched. */
 		const handleShellKey = (data: string, ctx: ExtensionContext): KeyResult => {
-			// Focus moved to a dialog/overlay — drop soft focus, let it have the key.
-			if (!panel.editorFocused()) {
-				panel.setShellFocus(undefined);
+			// Focus moved to a dialog/overlay, or the chip cleared under us: drop
+			// soft focus and let the key through.
+			if (!panel.editorFocused() || !panel.shellChipAvailable()) {
+				panel.setShellChipFocus(false);
 				return undefined;
 			}
-			// Derive the row order once per keystroke; every step below reuses it.
-			const ids = panel.shellIds();
-			const focus = panel.anchoredShellFocus(ids);
-			if (!focus) return undefined;
 			const decoded = decodeStripKey(data, false);
-			// ctrl+x (the agents stop-all chord arm) means nothing in the shell
-			// stages — swallow it rather than leaking the raw \x18 into the editor.
+			// ctrl+x (the agents stop-all chord arm) means nothing on the chip:
+			// swallow it rather than leaking the raw \x18 into the editor.
 			if (decoded.chordArmed) return { consume: true };
-			const result = reduceShellKey(focus, decoded.key, ids);
-			if (result.effect === "passthrough") {
-				panel.setShellFocus(undefined);
-				return undefined; // typing resumes in the editor, byte included
-			}
+			const result = reduceShellKey(decoded.key);
+			panel.setShellChipFocus(result.focused);
+			if (result.effect === "passthrough") return undefined; // typing resumes in the editor, byte included
 			if (result.effect === "toAgents") {
-				panel.setShellFocus(undefined);
 				if (focusFirstAgentRow()) return { consume: true };
 				// No agent rows below the chip: stay on it. Dropping focus here handed
 				// the NEXT key to the editor, where ↑ recalls the last prompt — the
 				// "sometimes ↓ recalls history" seen on the Windows VM (2026-09-19):
 				// ↓ chip, ↓ (nothing below, focus silently gone), ↑ → history.
-				panel.setShellFocus({ stage: "chip" });
+				panel.setShellChipFocus(true);
 				return { consume: true };
 			}
-			if (result.effect === "stopSelected") {
-				try {
-					panel.selectedShellTask()?.stop();
-				} catch {
-					// A dead process's stop() throwing must not break the panel.
-				}
-				panel.setShellFocus(result.focus, ids);
+			if (result.effect === "openTasks") {
+				void openTasksDialog(ctx).catch((error: unknown) => {
+					ctx.ui.notify(`Could not open the tasks dialog: ${error instanceof Error ? error.message : String(error)}`, "error");
+				});
 				return { consume: true };
 			}
-			panel.setShellFocus(result.focus, ids);
 			// While the model streams, esc must still interrupt it — consume only when idle.
-			if (decoded.key === "leave" && result.focus === undefined) {
-				return ctx.isIdle() ? { consume: true } : undefined;
-			}
+			if (decoded.key === "leave") return ctx.isIdle() ? { consume: true } : undefined;
 			return { consume: true };
 		};
 		try {
@@ -1085,7 +1073,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				// O(rows) checks run only once a Down actually asks to focus, never on
 				// plain typing. Claude Code's order: the FIRST ↓ lands on the shells
 				// chip when shells are running; the next ↓ moves into the agent rows.
-				if (panel.focusIndex === undefined && panel.shellFocus === undefined) {
+				if (panel.focusIndex === undefined && !panel.shellChipFocused) {
 					// Viewing an agent with the editor focused: the page keys scroll the
 					// view, and Esc in an empty editor goes back to main.
 					if (view && panel.editorFocused()) {
@@ -1104,12 +1092,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					// autocomplete list; the strip takes it only past the draft's last line.
 					if (!editorYieldsDown(panel.editorBaseline)) return undefined;
 					if (panel.shellChipAvailable()) {
-						panel.setShellFocus({ stage: "chip" });
+						panel.setShellChipFocus(true);
 						return { consume: true };
 					}
 					return focusFirstAgentRow() ? { consume: true } : undefined;
 				}
-				if (panel.shellFocus !== undefined) return handleShellKey(data, ctx);
+				if (panel.shellChipFocused) return handleShellKey(data, ctx);
 				const focusIndex = panel.focusIndex;
 				if (focusIndex === undefined) return undefined; // unreachable: one of the two focuses was set
 				// The strip emptied under us (finished rows lingered out) — let go.
@@ -1131,7 +1119,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 							// Back up out of the agent rows: onto the shells chip when
 							// shells are running, otherwise out of the panel entirely.
 							leave();
-							if (panel.shellChipAvailable()) panel.setShellFocus({ stage: "chip" });
+							if (panel.shellChipAvailable()) panel.setShellChipFocus(true);
 						} else panel.setFocus(focusIndex - 1);
 						return { consume: true };
 					case "down":
@@ -2746,8 +2734,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	/**
 	 * `/tasks`: Claude Code's Background dialog (findings §40): running shells,
 	 * running agents, and the finished agents the user viewed. Enter views an
-	 * agent (or opens a shell's details below the editor), x stops the selected
-	 * running task, Esc closes.
+	 * agent or shows a shell's details in the dialog, x stops the selected
+	 * running task, Esc closes. Enter on the shells chip below the editor opens
+	 * it too.
 	 */
 	const openTasksDialog = async (ctx: ExtensionContext) => {
 		if (!canShowCustomUi(ctx)) {
@@ -2778,7 +2767,17 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		// The rows on screen: keys act on what the user sees, even when a change
 		// has rebuilt the snapshot and its render is still pending.
 		let shown = tasksItems(snapshot);
-		const chosen = await ctx.ui.custom<TasksItem | null>((tui, theme, _keybindings, done) => {
+		// The list, or one shell's details inside the same dialog.
+		let dialogView: TasksView = { mode: "list" };
+		const shellById = (id: string) => shellTasks.list().find((task) => task.id === id);
+		const stopShell = (task: { stop(): void } | undefined) => {
+			try {
+				task?.stop();
+			} catch {
+				// A dead process's stop() throwing must not break the dialog.
+			}
+		};
+		const chosen = await ctx.ui.custom<string | null>((tui, theme, _keybindings, done) => {
 			const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme) };
 			const refresh = () => {
 				snapshot = build();
@@ -2786,21 +2785,41 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			};
 			const unsubscribe = liveRuns.subscribe(refresh);
 			const unsubscribeShells = shellTasks.subscribe(refresh);
-			const finish = (value: TasksItem | null) => {
+			// A shell's details follow its runtime and output once a second.
+			const ticker = setInterval(() => {
+				if (dialogView.mode === "shell") tui.requestRender();
+			}, 1000);
+			ticker.unref?.();
+			const finish = (value: string | null) => {
+				clearInterval(ticker);
 				unsubscribe();
 				unsubscribeShells();
 				done(value);
 			};
 			return {
 				render: (width: number) => {
+					dialogView = settleTasksView(dialogView, dialogView.mode === "shell" ? shellById(dialogView.id) : undefined);
+					if (dialogView.mode === "shell") {
+						const task = shellById(dialogView.id);
+						if (task) return ["", ...renderShellDetail(task, width - 2, Date.now(), paint).map((line) => `  ${line}`), ""].map((line) => truncateLine(line, width));
+					}
 					shown = tasksItems(snapshot);
 					selected = Math.max(0, Math.min(selected, shown.length - 1));
 					return ["", ...renderTasksDialog({ ...snapshot, selected, width }, paint), ""].map((line) => truncateLine(line, width));
 				},
 				handleInput: (data: string) => {
 					if (isKeyRelease(data)) return;
-					const items = shown;
 					const id = keyId(data);
+					if (dialogView.mode === "shell") {
+						const task = shellById(dialogView.id);
+						const action = shellDetailKey(id, keyText(data), task?.status === "running");
+						if (action === "close") return finish(null);
+						if (action === "back") dialogView = { mode: "list" };
+						else if (action === "stop") stopShell(task);
+						tui.requestRender();
+						return;
+					}
+					const items = shown;
 					if (id === "escape") return finish(null);
 					if (id === "up" || id === "down") {
 						selected = moveTasksSelection(selected, id, items.length);
@@ -2808,18 +2827,22 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						return;
 					}
 					const item = items[selected];
-					if (id === "enter") return item ? finish(item) : undefined;
+					if (id === "enter" && item?.kind === "agent") return finish(item.taskId);
+					if (id === "enter" && item?.kind === "shell") {
+						dialogView = { mode: "shell", id: item.id };
+						tui.requestRender();
+						return;
+					}
 					if (keyText(data)?.toLowerCase() === "x" && item?.running) {
 						if (item.kind === "agent") void stopAgent(item.taskId);
-						else shellTasks.running().find((task) => task.id === item.id)?.stop();
+						else stopShell(shellById(item.id));
 						tui.requestRender();
 					}
 				},
 				invalidate: () => {},
 			};
 		});
-		if (chosen?.kind === "agent") openView(ctx, chosen.taskId);
-		else if (chosen?.kind === "shell") panel.setShellFocus({ stage: "details", selectedId: chosen.id });
+		if (chosen) openView(ctx, chosen);
 	};
 	registerLocalCommand(pi, "tasks", {
 		description: "List background tasks: shells, running agents, and the agents you viewed",

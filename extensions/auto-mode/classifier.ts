@@ -94,9 +94,21 @@ export function isClassifierTimeout(message: string): boolean {
  * of `fetch failed` on openai-codex blocked read-only calls as "denied".
  */
 export function isTransportFailure(message: string): boolean {
-	return /\bfetch failed\b|\beconn(reset|refused|aborted)\b|\benotfound\b|\beai_again\b|\bepipe\b|socket hang up|other side closed|\bund_err_socket\b|network (error|is unreachable)/i.test(
+	return /\bfetch failed\b|\beconn(reset|refused|aborted)\b|\benotfound\b|\beai_again\b|\bepipe\b|socket hang up|other side closed|\bund_err_socket\b|network (error|is unreachable)|\bwebsocket (closed|error)\b/i.test(
 		message,
 	);
+}
+
+/**
+ * A provider's error without its advice to the user ("Please try again with a
+ * different prompt", "try rephrasing your request", a link): handed to the
+ * model in a block, that advice invites rephrasing the call past the gate.
+ */
+export function providerErrorSummary(message: string): string {
+	// Advice follows a sentence end, a colon or semicolon, or a line break.
+	const cut = message.search(/(?:[.!:;]\s+|\n\s*)(please\b|if this seems|try\b|you can\b|learn more|see\b)/i);
+	const kept = cut >= 0 ? message.slice(0, cut + 1) : message;
+	return kept.replace(/:?\s*https?:\/\/\S+/g, "").trim().replace(/[:;]$/, "");
 }
 
 /** A provider rejected the input window, not the action's safety or output limit. */
@@ -546,7 +558,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 				}
 				// A substantive, non-transient failure that is not "model unusable here":
 				// surface it rather than papering over something about to clear.
-				return { decision: "block", reason: `Auto-mode classifier could not be reached (${lastError}).`, tier: "unmatched", noVerdict: true };
+				return { decision: "block", reason: `The auto-mode classifier returned no verdict (${providerErrorSummary(lastError)}).`, tier: "unmatched", noVerdict: true };
 			}
 			if (kind === "timeout") {
 				// Transient — do NOT reject the model, it may be fine next call. Step to

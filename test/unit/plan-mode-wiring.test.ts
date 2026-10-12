@@ -164,6 +164,86 @@ describe("exit_plan_mode and the mode before planning (PERMISSIONS-REVIEW-2026-0
 		expect(offered[0].join("\n")).not.toContain("the mode before planning");
 	});
 
+	/** A `ctx.ui.custom` that answers each showing of the approval viewer with the next key from `keys`. */
+	const pressEach = (keys: string[]) =>
+		vi.fn(async (factory: ViewerFactory) => {
+			let picked: unknown;
+			const component = factory({ requestRender: () => {} }, {}, {}, (v) => (picked = v));
+			component.render(120);
+			component.handleInput(keys.shift() ?? "\x1b");
+			return picked;
+		});
+
+	type ExitResult = { isError?: boolean; terminate?: boolean; content: Array<{ text: string }>; details: { approved?: boolean; feedback?: string } };
+
+	it("keep planning asks what to change and sends the words back; the turn goes on in plan mode", async () => {
+		const input = vi.fn(async () => "name it greet.txt instead");
+		const ctx = createFakeCtx({ cwd: stateDir, hasUI: true, modelRegistry: { getAvailable: () => [] }, ui: { custom: pressEach(["3"]), input } });
+		await fake.fireOne("session_start", {}, ctx);
+		await enterPlanWithPlanText(ctx);
+		modeRequests.length = 0;
+		const result = (await fake.tools.get("exit_plan_mode")!.execute("t6", {}, undefined, undefined, ctx)) as ExitResult;
+		await fake.fire("tool_execution_end", { toolCallId: "t6" }, ctx);
+		expect(input).toHaveBeenCalledWith("Tell the agent what to change", undefined, expect.anything());
+		expect(result.isError).toBe(true);
+		expect(result.details).toMatchObject({ approved: false, feedback: "name it greet.txt instead" });
+		expect(result.content[0].text).toContain("To tell you how to proceed, the user said:\nname it greet.txt instead");
+		expect(result.terminate).toBeUndefined();
+		expect(ctx.abort).not.toHaveBeenCalled();
+		expect(modeRequests).toHaveLength(0);
+	});
+
+	it("Esc on the approval rejects without words and stops the turn once the result is recorded", async () => {
+		const input = vi.fn(async () => "unused");
+		const ctx = createFakeCtx({ cwd: stateDir, hasUI: true, modelRegistry: { getAvailable: () => [] }, ui: { custom: pressEach(["\x1b"]), input } });
+		await fake.fireOne("session_start", {}, ctx);
+		await enterPlanWithPlanText(ctx);
+		modeRequests.length = 0;
+		const result = (await fake.tools.get("exit_plan_mode")!.execute("t7", {}, undefined, undefined, ctx)) as ExitResult;
+		expect(input).not.toHaveBeenCalled();
+		expect(result.content[0].text).toContain("STOP what you are doing");
+		expect(result.terminate).toBe(true);
+		expect(ctx.abort).not.toHaveBeenCalled(); // not before pi records the result
+		await fake.fire("tool_execution_end", { toolCallId: "t7" }, ctx);
+		expect(ctx.abort).toHaveBeenCalledTimes(1);
+		expect(modeRequests).toHaveLength(0);
+	});
+
+	it("an aborted turn closes the approval as a cancel instead of leaving it open", async () => {
+		const closedWith: unknown[] = [];
+		const controller = new AbortController();
+		const custom = vi.fn(
+			(factory: ViewerFactory) =>
+				new Promise((resolve) => {
+					const component = factory({ requestRender: () => {} }, {}, {}, (v) => {
+						closedWith.push(v);
+						resolve(v);
+					});
+					component.render(120);
+					controller.abort();
+				}),
+		);
+		const ctx = createFakeCtx({ cwd: stateDir, hasUI: true, modelRegistry: { getAvailable: () => [] }, ui: { custom } });
+		await fake.fireOne("session_start", {}, ctx);
+		await enterPlanWithPlanText(ctx);
+		modeRequests.length = 0;
+		await fake.tools.get("exit_plan_mode")!.execute("t9", {}, controller.signal, undefined, ctx);
+		expect(closedWith).toEqual([null]);
+		expect(modeRequests).toHaveLength(0);
+	});
+
+	it("a blank keep-planning answer reopens the approval", async () => {
+		const custom = pressEach(["3", "2"]);
+		const ctx = createFakeCtx({ cwd: stateDir, hasUI: true, modelRegistry: { getAvailable: () => [] }, ui: { custom, input: vi.fn(async () => "") } });
+		await fake.fireOne("session_start", {}, ctx);
+		await enterPlanWithPlanText(ctx);
+		modeRequests.length = 0;
+		const result = (await fake.tools.get("exit_plan_mode")!.execute("t8", {}, undefined, undefined, ctx)) as ExitResult;
+		expect(custom).toHaveBeenCalledTimes(2);
+		expect(result.details.approved).toBe(true);
+		expect(modeRequests).toEqual([{ mode: "default", toolCallId: "t8" }]);
+	});
+
 	it("interactive: a steady frame is served from cache, not re-wrapped (TUI-REVIEW M1)", async () => {
 		// render() twice at the same width with no input between → the exact same
 		// array is returned, proving the plan was not re-wrapped and the frame not

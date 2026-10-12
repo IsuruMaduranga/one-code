@@ -182,7 +182,7 @@ export function describeChanges(
 }
 
 export const UNREAD_REASON = (path: string, tool: string) =>
-	`Read ${path} before using ${tool} on it. The file exists and has not been read in this conversation, so an edit could silently discard content you have not seen. A shell read counts only when its output showed the whole file (a plain \`cat\`); after a partial one (head, sed -n, a pipe, or output cut off at the size limit), use the read tool.`;
+	`Read ${path} before using ${tool} on it. The file exists and has not been read in this conversation, so an edit could silently discard content you have not seen. A shell read counts only when it printed the whole file as it is on disk (a plain \`cat\`); after a partial one (head, sed -n, a pipe, or output cut off at the size limit) or another version of it (such as \`git show HEAD:<file>\`), use the read tool.`;
 
 /**
  * The same notice when one of this session's subagents or workflow agents

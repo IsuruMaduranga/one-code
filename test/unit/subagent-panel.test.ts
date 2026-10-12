@@ -490,14 +490,11 @@ describe("decodeStripKey", () => {
 		expect(decodeStripKey("\x1b[5~", false).key).toBe("pageUp");
 		expect(decodeStripKey("\x1b[6~", false).key).toBe("pageDown");
 		expect(decodeStripKey("a", false).key).toBeUndefined();
-		// Tab is `switch` — index.ts acts on it only while a transcript view is
-		// open (retarget to the next agent); with no view open the agents branch
-		// treats it like typing. Right still decodes to nothing; left and space
-		// decode (the shell stages use them).
+		// Tab, the side arrows and space are typing: no strip key uses them.
 		expect(decodeStripKey("\t", false).key).toBeUndefined(); // Tab is typing (no next-agent key)
 		expect(decodeStripKey("\x1b[C", false).key).toBeUndefined();
-		expect(decodeStripKey("\x1b[D", false).key).toBe("left");
-		expect(decodeStripKey(" ", false).key).toBe("space");
+		expect(decodeStripKey("\x1b[D", false).key).toBeUndefined();
+		expect(decodeStripKey(" ", false).key).toBeUndefined();
 	});
 
 	it("handles the ctrl+x ctrl+k stop-all chord", () => {

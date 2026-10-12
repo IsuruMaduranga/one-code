@@ -13,11 +13,14 @@
  *     ✔ write a 300-word poem about the word in the file   done · Haiku 4.5
  *   ↑/↓ to select · Enter to view · x to stop · Esc to close
  *
- * With nothing to list it reads `No tasks currently running`. index.ts owns the
- * dialog and what Enter and x do.
+ * With nothing to list it reads `No tasks currently running`. Enter on a shell
+ * shows its details in the same dialog (renderShellDetail), and ← goes back
+ * to the list. The shells chip below the editor opens this dialog too.
+ * index.ts owns the dialog and what Enter and x do.
  */
 
-import { countNoun, cutPlainText as cut } from "../lib/tui-render.ts";
+import type { BackgroundTask } from "../background/registry.ts";
+import { countNoun, cutPlainText as cut, formatDuration, padPlainText } from "../lib/tui-render.ts";
 import { sanitizeDisplayText } from "../lib/terminal-text.ts";
 
 /** One selectable row. */
@@ -97,4 +100,64 @@ export type TasksKey = "up" | "down" | "view" | "stop" | "close";
 export function moveTasksSelection(selected: number, key: "up" | "down", count: number): number {
 	if (count === 0) return 0;
 	return key === "up" ? Math.max(0, selected - 1) : Math.min(count - 1, selected + 1);
+}
+
+/** What the dialog shows: the list, or one shell's details. */
+export type TasksView = { mode: "list" } | { mode: "shell"; id: string };
+
+/**
+ * The view to render now. A shell's details last while the shell runs: once
+ * it finishes or is stopped it is no longer a background task, and the dialog
+ * goes back to the list, as Claude Code's does.
+ */
+export function settleTasksView(view: TasksView, shell: Pick<BackgroundTask, "status"> | undefined): TasksView {
+	return view.mode === "shell" && shell?.status !== "running" ? { mode: "list" } : view;
+}
+
+/** What a key does in a shell's details: ← goes back, Esc/Enter/Space close, x stops a running shell. */
+export function shellDetailKey(id: string | undefined, text: string | undefined, running: boolean): "back" | "close" | "stop" | undefined {
+	if (id === "left") return "back";
+	if (id === "escape" || id === "enter" || id === "space" || text === " ") return "close";
+	if (running && text?.toLowerCase() === "x") return "stop";
+	return undefined;
+}
+
+/** Output-box height in a shell's details (content rows, borders excluded). */
+export const OUTPUT_BOX_ROWS = 10;
+
+/** Only this much of the spool is split per frame: the box shows 10 lines. */
+const OUTPUT_TAIL_CHARS = 8192;
+
+const STATUS_COLOR: Record<string, string> = { running: "accent", failed: "error", stopped: "dim" };
+
+/** One shell's details: Status, Runtime, Command, a bordered tail of its output, and the keys it takes. */
+export function renderShellDetail(task: BackgroundTask, width: number, now: number, paint: TasksPaint): string[] {
+	width = Math.max(20, width);
+	const out = [paint.bold(cut("Shell details", width)), ""];
+	const field = (label: string, value: string) => `${paint.bold(padPlainText(label, 9))} ${value}`;
+	out.push(field("Status:", paint.fg(STATUS_COLOR[task.status] ?? "dim", task.status)));
+	out.push(field("Runtime:", formatDuration(task.startedAt, task.finishedAt, now)));
+	out.push(field("Command:", cut(sanitizeDisplayText(task.command ?? task.description), Math.max(1, width - 10))));
+	out.push("", paint.bold("Output:"));
+
+	let output = "";
+	try {
+		output = task.output();
+	} catch {
+		output = "(output unavailable)";
+	}
+	// Bound the split to a tail slice: re-splitting a 200KB spool every frame to
+	// keep 10 lines is O(buffer) work for nothing. A mid-line cut only matters
+	// when the tail holds fewer lines than the box, and those are width-cut anyway.
+	const tail = output.length > OUTPUT_TAIL_CHARS ? output.slice(-OUTPUT_TAIL_CHARS) : output;
+	const lines = tail ? tail.replace(/\r\n/g, "\n").replace(/\n$/, "").split("\n") : [];
+	const shown = lines.slice(-OUTPUT_BOX_ROWS);
+	const inner = Math.max(1, width - 4);
+	out.push(`┌${"─".repeat(Math.max(0, width - 2))}┐`);
+	for (let i = 0; i < OUTPUT_BOX_ROWS; i++) out.push(`│ ${padPlainText(cut(shown[i] ?? "", inner), inner)} │`);
+	out.push(`└${"─".repeat(Math.max(0, width - 2))}┘`);
+	out.push(paint.fg("dim", `Showing ${countNoun(shown.length, "line")}`), "");
+	const hint = ["← to go back", "Esc/Enter/Space to close", ...(task.status === "running" ? ["x to stop"] : [])].join(" · ");
+	out.push(paint.fg("dim", cut(hint, width)));
+	return out;
 }

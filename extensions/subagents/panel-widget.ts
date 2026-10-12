@@ -1,7 +1,7 @@
 /**
  * The persistent panel below the editor: Claude Code's agent tree PLUS its
- * background-shell manager (chip → Background list → shell details, rendered
- * by shell-panel.ts). Mirrors workflow/widget.ts: a component-overload
+ * background-shells chip (shell-panel.ts; Enter on it opens the `/tasks`
+ * Background dialog). Mirrors workflow/widget.ts: a component-overload
  * setWidget so rows can right-align against the real width, debounced
  * re-renders, and a 1s ticker to keep elapsed time moving. Also carries both
  * soft-focus states for the down-arrow flow (wired in index.ts): the FIRST ↓
@@ -16,13 +16,7 @@ import type { ShellTaskTracker } from "../lib/shell-tasks.ts";
 import { linesComponent, liveUiCtx, safeThemeBold, safeThemeInverse, safeThemePaint } from "../lib/tui-render.ts";
 import { buildRows, MAX_STRIP_ROWS, recentlyLeftStrip, renderStrip, TASKS_NOTICE, type PanelRow } from "./panel-render.ts";
 import type { LiveRunRegistry } from "./live-runs.ts";
-import {
-	anchorShellFocus,
-	renderShellSection,
-	type ShellFocus,
-	shellRows,
-	shellSectionVisible,
-} from "./shell-panel.ts";
+import { renderShellChip, shellRows } from "./shell-panel.ts";
 
 const WIDGET_KEY = "subagents";
 const DEBOUNCE_MS = 200;
@@ -42,8 +36,8 @@ export class SubagentWidget {
 	 * actually selected, never on whatever slid into its slot.
 	 */
 	private focusId: string | undefined;
-	/** The shell-manager side of the panel (chip → list → details). */
-	shellFocus: ShellFocus | undefined;
+	/** Whether the shells chip holds soft focus. */
+	shellChipFocused = false;
 	/**
 	 * The taskId whose transcript is open, or undefined when none is (set by
 	 * index.ts). Drives the strip's scroll hints AND pins that run in the strip
@@ -133,58 +127,31 @@ export class SubagentWidget {
 		return this.viewedId;
 	}
 
-	// --- Shell-manager state (Claude Code's ↓-to-manage flow) ---
+	// --- The shells chip (Claude Code's ↓-to-manage flow) ---
 
-	/** Live shell rows for the list/details views. */
-	shellTasks(): BackgroundTask[] {
+	/** The shells the chip counts: running, or finished inside the linger window. */
+	private shellTasks(): BackgroundTask[] {
 		return this.shells ? shellRows(this.shells.list(), Date.now()) : [];
-	}
-
-	shellIds(): string[] {
-		return this.shellTasks().map((t) => t.id);
 	}
 
 	private runningShellCount(): number {
 		return this.shells?.running().length ?? 0;
 	}
 
-	/** Whether ↓ from the editor should land on the chip first — running shells
-	 * or finished ones still inside the linger window. */
+	/** Whether the chip shows, so ↓ from the editor lands on it first: running
+	 * shells, or finished ones still inside the linger window. */
 	shellChipAvailable(): boolean {
 		return this.shellTasks().length > 0;
 	}
 
-	/** `ids`, when the caller already derived the row order, skips re-deriving it. */
-	setShellFocus(focus: ShellFocus | undefined, ids?: string[]): void {
-		this.shellFocus = focus && anchorShellFocus(focus, ids ?? this.shellIds());
+	setShellChipFocus(focused: boolean): void {
+		this.shellChipFocused = focused;
 		this.render();
 	}
 
-	/** The anchored current focus (the selected shell may have lingered out). */
-	anchoredShellFocus(ids?: string[]): ShellFocus | undefined {
-		if (this.shellFocus) this.shellFocus = anchorShellFocus(this.shellFocus, ids ?? this.shellIds());
-		return this.shellFocus;
-	}
-
-	/** Point lookup — no need for the linger-filtered, sorted row build. */
-	shellTaskById(id: string): BackgroundTask | undefined {
-		return this.shells?.list().find((t) => t.id === id);
-	}
-
-	selectedShellTask(): BackgroundTask | undefined {
-		const focus = this.anchoredShellFocus();
-		if (!focus || focus.stage === "chip") return undefined;
-		return this.shellTaskById(focus.selectedId);
-	}
-
-	private shellVisible(): boolean {
-		return shellSectionVisible(this.shellTasks().length, this.shellFocus);
-	}
-
-	/** Lines the shell section currently occupies (for overlay reserve math) —
-	 * measured off the real renderer so layout changes can never desync it. */
+	/** Lines the chip occupies (for overlay reserve math). */
 	shellLineCount(): number {
-		return this.shellVisible() ? this.shellSectionLines(80).length : 0;
+		return this.shellChipAvailable() ? 1 : 0;
 	}
 
 	/** Re-derive focusIndex from focusId against the given rows (see focusId doc). */
@@ -237,23 +204,6 @@ export class SubagentWidget {
 		this.timer.unref?.();
 	}
 
-	/** The shell section's lines; identity paint when only counting. */
-	private shellSectionLines(
-		width: number,
-		paint = { fg: (_c: string, t: string) => t, bold: (t: string) => t, inverse: (t: string) => t },
-	): string[] {
-		return renderShellSection(
-			{
-				rows: this.shellTasks(),
-				runningCount: this.runningShellCount(),
-				focus: this.shellFocus,
-				width,
-				now: Date.now(),
-			},
-			paint,
-		);
-	}
-
 	private render(): void {
 		const ctx = this.liveCtx();
 		if (!ctx) {
@@ -264,16 +214,18 @@ export class SubagentWidget {
 		}
 		const now = Date.now();
 		const rows = this.rows();
-		const shellVisible = this.shellVisible();
+		const shellTasks = this.shellTasks();
+		const shellVisible = shellTasks.length > 0;
+		// The chip goes with its last shell: a focus left on it would read "0 shells".
+		if (!shellVisible) this.shellChipFocused = false;
+		const chipFocused = this.shellChipFocused;
 		// The chip is time-invariant while every shell runs (count changes arrive
-		// as tracker events), so the clock is needed only for the list (linger
-		// expiry) and details (runtime, live output) stages — or when finished
-		// shells are lingering, whose expiry is what hides the section.
-		const shellStage = this.shellFocus?.stage;
-		const lingering = shellVisible && this.shellTasks().length > this.runningShellCount();
+		// as tracker events), so the clock is needed only while finished shells
+		// linger, whose expiry is what clears the chip.
+		const lingering = shellTasks.length > this.runningShellCount();
 		// A run that just left the strip leaves Claude Code's `/tasks` pointer behind for a moment.
 		const notice = rows.length <= 1 && recentlyLeftStrip(this.registry.list(), now, this.viewedId);
-		this.syncTicker(rows.length > 1 || notice || shellStage === "list" || shellStage === "details" || lingering);
+		this.syncTicker(rows.length > 1 || notice || lingering);
 		// Only the synthetic `main` row exists and no shells → nothing to show yet.
 		// Never tear down while a transcript view is open (viewedId set): clearing
 		// focus here would orphan the overlay with no key path to close it.
@@ -282,11 +234,9 @@ export class SubagentWidget {
 			ctx.ui.setWidget(WIDGET_KEY, undefined);
 			this.focusIndex = undefined;
 			this.focusId = undefined;
-			this.shellFocus = undefined;
 			return;
 		}
 		this.anchor(rows);
-		if (this.shellFocus) this.shellFocus = anchorShellFocus(this.shellFocus, this.shellIds());
 		const selected = this.focusIndex;
 		const showStrip = rows.length > 1;
 		// RPC forwards string-array widgets, not component factories or key handlers.
@@ -296,7 +246,7 @@ export class SubagentWidget {
 			);
 			if (rows.length > MAX_STRIP_ROWS) lines.push(`${rows.length - MAX_STRIP_ROWS} more agents — /tasks to list all`);
 			if (notice) lines.push(TASKS_NOTICE);
-			if (shellVisible) lines.push(...this.shellTasks().map((task) => `${task.id} [shell] ${task.status}: ${task.command ?? task.description}`));
+			if (shellVisible) lines.push(...shellTasks.map((task) => `${task.id} [shell] ${task.status}: ${task.command ?? task.description}`));
 			// The ticker repaints every second; each send is a message to the client.
 			const text = lines.join("\n");
 			if (text === this.rpcSent) return;
@@ -319,7 +269,7 @@ export class SubagentWidget {
 					else if (notice) lines.push(paint.fg("dim", TASKS_NOTICE));
 					if (shellVisible) {
 						if (lines.length) lines.push("");
-						lines.push(...this.shellSectionLines(width - 1, paint));
+						lines.push(renderShellChip(shellTasks.length, chipFocused, width - 1, paint));
 					}
 					return lines.map((line) => ` ${line}`);
 				});
@@ -329,10 +279,9 @@ export class SubagentWidget {
 	}
 
 	/**
-	 * Tick while any child row is shown or the shell manager is focused —
-	 * elapsed times move, finished rows expire out of the strip/list (linger
-	 * windows), and the details view's output box follows the live spool,
-	 * all without needing another registry event.
+	 * Tick while any child row is shown or a finished shell lingers: elapsed
+	 * times move and finished rows expire out of the strip and the chip (linger
+	 * windows), without needing another registry event.
 	 */
 	private syncTicker(active: boolean): void {
 		if (active && !this.ticker && !this.disposed) {

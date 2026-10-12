@@ -187,6 +187,13 @@ const BLOCKED_BY_TIMEOUT = (reason: string) =>
 	"If it keeps failing, continue with other tasks that do not require this action and come back to it later — " +
 	"reading files, searching code, and other read-only operations do not require the classifier and can still be used. " +
 	"Do not try to route around the gate; if this specific action is essential, tell the user what you were about to do so they can re-run interactively or switch the session model.";
+// The classifier ran but gave no verdict (a provider refusal or error, a
+// truncated reply, no usable model): not a denial, and nothing to route around.
+const BLOCKED_NOT_JUDGED = (reason: string) =>
+	`${reason}\n\nThis was not a judgement that the call is unsafe: the approval classifier gave no verdict, so the call did not run. ` +
+	"Do not rephrase it or route around the gate. Continue with other tasks that do not require this action — " +
+	"reading files, searching code, and other read-only operations do not require the classifier. " +
+	"If this action is essential, tell the user what you were about to do so they can re-run interactively or set another classifier model.";
 // "Choose a different approach" is exactly what a literal reader does with a
 // second command of the same effect: a tiny-tier model met `Bash(rm:*)` and
 // deleted the file with `python3 -c "import os; os.remove(…)"` 3/3 times
@@ -811,7 +818,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text:
 					"Auto mode is active: your tool calls run without per-action prompts, but each one is screened by an approval classifier that blocks anything irreversible, destructive, or aimed outside this environment. " +
-					"Work normally — do not narrate the classifier or try to phrase calls to get past it. If a call is blocked, take the block at face value: explain what you were trying to do and let the user decide, rather than retrying it a different way. " +
+					"Work normally — do not narrate the classifier or try to phrase calls to get past it. If a call is blocked, take the block at face value: do not retry it, and do not reach the same result another way. Continue with work that does not depend on it, or explain what you were trying to do and let the user decide. " +
 					"Attempting to weaken this gate (editing permission settings, changing the mode, or routing work around it) is itself blocked.",
 				scope: "every-turn",
 				key: "permission-mode",
@@ -916,9 +923,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	pi.on("turn_start", (_event, ctx) => {
 		if (autoNoteDecided) return;
 		autoNoteDecided = true;
-		if (mode !== "auto" || !ctx.model) return;
+		const note = mode === "auto" && ctx.model ? autoModeSystemNote(ctx.model) : undefined;
+		if (!note) return;
 		pi.events.emit(REMINDER_CHANNEL, {
-			text: autoModeSystemNote(ctx.model.id),
+			text: note,
 			scope: "every-turn",
 			key: "auto-mode-note",
 			placement: "first-prepend",
@@ -1439,8 +1447,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				}
 				// Every classifier block (hard or soft) goes back to the model with the
 				// classifier's own reason, so it can find a safe alternative. Auto mode
-				// does not hand a soft block to the user as a per-action prompt.
-				return { block: true, reason: DENIED_BY_CLASSIFIER(outcome.reason) };
+				// does not hand a soft block to the user as a per-action prompt. A call
+				// the classifier never judged is said to be one, not a denial.
+				return { block: true, reason: outcome.noVerdict ? BLOCKED_NOT_JUDGED(outcome.reason) : DENIED_BY_CLASSIFIER(outcome.reason) };
 			}
 			// Paused: fall through to the resume prompt below.
 		}
@@ -1637,7 +1646,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			if (outcome.decision === "allow") return undefined;
 			if (outcome.transcriptTooLong) return transcriptOverflow(ctx, toolName, subject, call.signal);
 			if (outcome.tier === "timeout") return { block: true, reason: BLOCKED_BY_TIMEOUT(outcome.reason) };
-			return { block: true, reason: DENIED_BY_CLASSIFIER(outcome.reason) };
+			return { block: true, reason: outcome.noVerdict ? BLOCKED_NOT_JUDGED(outcome.reason) : DENIED_BY_CLASSIFIER(outcome.reason) };
 		}
 
 		// Safety floor: a write to the gate's own config is NEVER auto-approved and

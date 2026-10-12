@@ -145,6 +145,23 @@ describe("/permissions panel state", () => {
 		expect(state.dialog).toBeUndefined();
 	});
 
+	it("draws the add-rule input with its right border under the frame's corner", () => {
+		const v = view();
+		const state = initialPanelState(false);
+		for (const draft of ["", "Bash(npm test:*)"]) {
+			press(state, v, ENTER);
+			press(state, v, ...draft.split(""));
+			const lines = renderPanel({ state, view: v, width: 60, height: 30 }, paint);
+			const top = lines.findIndex((line) => line.includes("╭"));
+			const [upper, row, lower] = lines.slice(top, top + 3);
+			expect(row.trimEnd().endsWith("│")).toBe(true);
+			expect(visibleWidth(row.trimEnd())).toBe(visibleWidth(upper.trimEnd()));
+			expect(visibleWidth(lower.trimEnd())).toBe(visibleWidth(upper.trimEnd()));
+			expect(row).not.toContain("⌕");
+			press(state, v, ESC);
+		}
+	});
+
 	it("deletes an editable rule only on Yes, and only shows a read-only one", () => {
 		const v = view();
 		const state = initialPanelState(false);

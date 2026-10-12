@@ -43,7 +43,19 @@ import {
 	EXIT_PLAN_MODE_DESCRIPTION,
 	exitedPlanModeText,
 } from "./texts.ts";
-import { clampOffset, decodeViewerKey, initialPlanChoice, type PlanChoice, renderPlanViewer, selectPlanChoice, wrapPlanText } from "./viewer.ts";
+import { createMarkdownProse } from "../subagents/prose.ts";
+import type { ProseRenderer } from "../subagents/panel-render.ts";
+import {
+	clampOffset,
+	decodeViewerKey,
+	initialPlanChoice,
+	KEEP_PLANNING_QUESTION,
+	type PlanChoice,
+	planLines,
+	renderPlanViewer,
+	runPlanApproval,
+	selectPlanChoice,
+} from "./viewer.ts";
 
 import { MODE_CHANNEL, PLAN_FILE_CHANNEL, PLAN_FILE_ENTRY, planFileOnBranch } from "../lib/plan-mode-channels.ts";
 export { MODE_CHANNEL, PLAN_FILE_CHANNEL };
@@ -111,6 +123,24 @@ export default function planModeExtension(pi: ExtensionAPI) {
 			toolCallId,
 		});
 	};
+
+	/**
+	 * pi-tui's Markdown renderer for the approval dialog, loaded on first use.
+	 * A failed load is not cached (the theme may not be ready yet); the dialog
+	 * then wraps the plan as plain text.
+	 */
+	let markdownLoad: Promise<ProseRenderer | undefined> | undefined;
+	const planMarkdown = (): Promise<ProseRenderer | undefined> =>
+		(markdownLoad ??= createMarkdownProse().catch(() => {
+			markdownLoad = undefined;
+			return undefined;
+		}));
+
+	/** Plan approvals the user dismissed without words: the turn stops once pi records their result. */
+	const abortAfterResult = new Set<string>();
+	pi.on("tool_execution_end", (event, ctx) => {
+		if (abortAfterResult.delete(event.toolCallId)) ctx.abort();
+	});
 
 	/** The last context seen, for a refresh triggered off the bus (no ctx of its own). */
 	let lastCtx: ExtensionContext | undefined;
@@ -254,11 +284,30 @@ export default function planModeExtension(pi: ExtensionAPI) {
 			];
 			const choices = options.map((o) => o.label);
 
-			const choice = !canShowCustomUi(ctx) ? await selectPlanChoice(ctx.ui, plan, path, choices, signal) : await ctx.ui.custom<PlanChoice | null>((tui, theme, _keybindings, done) => {
+			// The plan renders as Markdown, like assistant text in the transcript.
+			const prose = canShowCustomUi(ctx) ? await planMarkdown() : undefined;
+			const planRef = {};
+			const markdown = prose ? (text: string, width: number) => prose(planRef, text, width) : undefined;
+
+			// The scroll position and the highlighted choice outlive one showing: a
+			// blank keep-planning answer reopens the dialog where the user left it.
+			const maxVisible = 12;
+			let offset = 0;
+			let selected: PlanChoice = initialPlanChoice(options);
+			const showDialog = (): Promise<PlanChoice | null> => !canShowCustomUi(ctx) ? selectPlanChoice(ctx.ui, plan, path, choices, signal) : ctx.ui.custom<PlanChoice | null>((tui, theme, _keybindings, close) => {
+				// An aborted turn closes the dialog as a cancel; a choice or a cancel
+				// drops the abort listener. Either way the dialog settles once.
+				let settled = false;
+				const onAbort = () => done(null);
+				const done = (choice: PlanChoice | null) => {
+					if (settled) return;
+					settled = true;
+					signal?.removeEventListener("abort", onAbort);
+					close(choice);
+				};
+				if (signal?.aborted) queueMicrotask(onAbort);
+				else signal?.addEventListener("abort", onAbort, { once: true });
 				const paint = safeThemePaint(theme);
-				const maxVisible = 12;
-				let offset = 0;
-				let selected: PlanChoice = initialPlanChoice(options);
 				let lineCount = 0;
 				// The dialog stays open while exit_plan_mode runs, so pi's working
 				// spinner drives ~8 frames a second — and re-wrapping the whole plan
@@ -271,7 +320,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 				let wrapped: { width: number; lines: string[] } | undefined;
 				let frame: { key: string; lines: string[] } | undefined;
 				const wrapAt = (wrapWidth: number): string[] => {
-					if (wrapped?.width !== wrapWidth) wrapped = { width: wrapWidth, lines: wrapPlanText(plan, wrapWidth) };
+					if (wrapped?.width !== wrapWidth) wrapped = { width: wrapWidth, lines: planLines(plan, wrapWidth, markdown) };
 					return wrapped.lines;
 				};
 				return {
@@ -302,8 +351,14 @@ export default function planModeExtension(pi: ExtensionAPI) {
 					},
 				};
 			});
+			const decision = await runPlanApproval(
+				options,
+				showDialog,
+				() => ctx.ui.input(KEEP_PLANNING_QUESTION, undefined, { signal }),
+				signal,
+			);
 
-			const picked = choice != null ? options[choice] : undefined;
+			const picked = decision.kind === "approve" ? options[decision.index] : undefined;
 			if (picked?.mode) {
 				pi.events.emit(MODE_CHANNEL, { mode: picked.mode, toolCallId });
 				// Claude Code's exit reminder, queued from execute so it is written
@@ -315,12 +370,19 @@ export default function planModeExtension(pi: ExtensionAPI) {
 				};
 			}
 
-			// Kept planning or dismissed: Claude Code's rejection, which stops the
-			// model until the user says how to proceed.
+			// Rejected: Claude Code's rejection text. With the user's words the model
+			// acts on them and keeps planning; without (Esc) the turn stops, as a
+			// reasonless permission rejection does (permissions/index.ts): `terminate`
+			// ends pi's loop after the batch, and the abort waits for the recorded
+			// result so the run ends as the user's interrupt.
+			const feedback = decision.kind === "reject" ? decision.feedback : undefined;
+			const stop = !feedback;
+			if (stop) abortAfterResult.add(toolCallId);
 			return {
-				content: [{ type: "text", text: userDenialText() }],
-				details: { plan, approved: false },
+				content: [{ type: "text", text: userDenialText(feedback) }],
+				details: { plan, approved: false, ...(feedback ? { feedback } : {}) },
 				isError: true,
+				...(stop ? { terminate: true } : {}),
 			};
 		},
 	});

@@ -212,7 +212,7 @@ function dialogLines(dialog: Dialog, input: PanelRenderInput, paint: PanelPaint)
 	const text = (line: string) => cutPlainText(` ${line}`, width - 1);
 	const wrapped = (line: string) => wrapPlainText(line, Math.max(10, width - 2)).map((part) => ` ${part}`);
 	const gone = { lines: [paint.fg("dim", text("(this entry is no longer in the list)"))], footer: "Esc to go back" };
-	const draftBox = (draft: string, placeholder: string) => searchBoxLines(draft, placeholder, paint.fg, width).map((line) => line.replace("⌕ ", ""));
+	const draftBox = (draft: string, placeholder: string) => searchBoxLines(draft, placeholder, paint.fg, width, "");
 
 	switch (dialog.kind) {
 		case "addRule":
