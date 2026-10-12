@@ -571,5 +571,8 @@ describe("classify: a provider that refuses the classifier's prompt", () => {
 		const verdict = await classify(request, deps);
 		expect(verdict).toMatchObject({ decision: "block", noVerdict: true });
 		expect(verdict.reason).toMatch(/^Auto mode has no classifier: openai\/gpt-5-mini refused/);
+		// The model that failed for another cause is named with its own error.
+		expect(verdict.reason).toContain("cannot be used (");
+		expect(verdict.reason).toContain("not supported when using Codex");
 	});
 });

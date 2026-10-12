@@ -70,6 +70,7 @@ import { isShellTool } from "./matcher.ts";
 import { gitStatusOutput } from "../lib/git.ts";
 import { gitStatusMeta, gitStatusMetaArgs, reachesIgnoredFiles, wantsGitStatusMeta } from "../auto-mode/git-status-meta.ts";
 import { actionResolvedPaths } from "../auto-mode/resolved-paths-meta.ts";
+import { autoMemoryEnabled } from "../lib/auto-memory.ts";
 import { projectMemoryDir } from "../lib/memory.ts";
 import { queueNotice } from "../lib/notices.ts";
 import { canShowCustomUi, rpcReadOnlyText } from "../lib/headless-output.ts";
@@ -987,7 +988,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			denials.reset();
 			sessionWorkspaceDirs.length = 0;
 		}
-		memoryDirPath = projectMemoryDir(ctx.cwd);
+		// With auto-memory off the folder is nobody's working space: no grant.
+		memoryDirPath = autoMemoryEnabled(ctx.cwd) ? projectMemoryDir(ctx.cwd) : undefined;
 		// Working space only when it is private to this user: another local user
 		// who owns the directory on a shared /tmp could swap what is written there.
 		scratchpadDirPath = privateSessionScratchpadDir(ctx.cwd, ctx.sessionManager.getSessionId());

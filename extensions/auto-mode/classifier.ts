@@ -298,18 +298,20 @@ function remainingCandidates(deps: ClassifierDeps): { candidates: Candidate[]; n
  * Every candidate is gone and one refused the classifier's prompt: the call is
  * not judged, and the user is told once how to go on.
  */
-function refusalStop(deps: ClassifierDeps): ClassifyVerdict {
+function refusalStop(deps: ClassifierDeps, unusable: readonly string[] = []): ClassifyVerdict {
 	const refused = [...deps.state.refused].join(", ");
+	// A model that failed this call for another cause has its own fix: name it too.
+	const others = unusable.length > 0 ? ` ${unusable.join("; ")}.` : "";
 	notifyOnce(
 		deps,
 		"refusal-stop",
-		`Auto mode has no classifier left: ${refused} refused the classifier's prompt as a possible usage-policy violation, and no other eligible model can screen calls. ` +
+		`Auto mode has no classifier left: ${refused} refused the classifier's prompt as a possible usage-policy violation, and no other eligible model can screen calls.${others} ` +
 			`Calls are not judged and do not run. Switch to manual approval (${modeCycleKey()} cycles permission modes), or choose another classifier with /auto-mode model <provider/id>.`,
 		"warning",
 	);
 	return {
 		decision: "block",
-		reason: `Auto mode has no classifier: ${refused} refused the classifier's prompt as a possible usage-policy violation.`,
+		reason: `Auto mode has no classifier: ${refused} refused the classifier's prompt as a possible usage-policy violation.${others}`,
 		tier: "unmatched",
 		noVerdict: true,
 	};
@@ -389,6 +391,8 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 
 	let lastError = "";
 	let sawTimeout = false;
+	/** Candidates rejected this call as unusable, with their errors. */
+	const unusable: string[] = [];
 	let timedOutKey: string | undefined;
 	/** The timed-out candidate's own error: a later candidate's failure must not relabel it. */
 	let timedOutError = "";
@@ -629,7 +633,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 				reject(key);
 				deps.state.refused.add(key);
 				const next = queue[0]?.model;
-				if (!next) return refusalStop(deps);
+				if (!next) return refusalStop(deps, unusable);
 				const ratio = classifierCostRatio(next, model);
 				notifyOnce(
 					deps,
@@ -644,6 +648,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 			// unavailable: this model is not usable here — step over it and record it.
 			reject(key);
 			deps.onModelUnusable?.(key, lastError);
+			unusable.push(`${key} cannot be used (${lastError})`);
 			notifyOnce(
 				deps,
 				`rejected:${key}`,
@@ -670,7 +675,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 		};
 	}
 
-	if (deps.state.refused.size > 0) return refusalStop(deps);
+	if (deps.state.refused.size > 0) return refusalStop(deps, unusable);
 	// Every candidate was unusable — say which knob fixes it.
 	return {
 		decision: "block",

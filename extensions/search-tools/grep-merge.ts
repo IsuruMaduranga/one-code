@@ -17,8 +17,12 @@ export function mergeGrepWindows(text: string): string {
 	/** Each line's context form → its index in `out`. */
 	const at = new Map<string, number>();
 	for (const line of text.split("\n")) {
-		const match = MATCH_ROW.exec(line);
-		const key = match ? `${match[1]}-${match[2]}- ${match[3]}` : CONTEXT_ROW.test(line) ? line : undefined;
+		// The separator that comes first decides: a row's text may itself hold
+		// `:N: ` or `-N- ` (`a.ts-12- k:3: v` is a context row).
+		const asMatch = MATCH_ROW.exec(line);
+		const asContext = CONTEXT_ROW.exec(line);
+		const match = asMatch && (!asContext || asMatch[1].length < asContext[1].length) ? asMatch : null;
+		const key = match ? `${match[1]}-${match[2]}- ${match[3]}` : asContext ? line : undefined;
 		if (key === undefined) {
 			out.push(line);
 			continue;

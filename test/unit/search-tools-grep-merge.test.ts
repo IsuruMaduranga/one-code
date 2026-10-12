@@ -12,4 +12,9 @@ describe("mergeGrepWindows", () => {
 		const text = ["a.js:1: same", "b.js:1: same", "", "[10 matches limit reached. Use limit=20 for more, or refine pattern]"].join("\n");
 		expect(mergeGrepWindows(text)).toBe(text);
 	});
+
+	it("reads a row by its first separator, so text holding `:N: ` or `-N- ` still merges", () => {
+		const text = ["a.yml-2- k:3: v", "a.yml:3: x-1- y", "a.yml:2: k:3: v", "a.yml-3- x-1- y"].join("\n");
+		expect(mergeGrepWindows(text)).toBe(["a.yml:2: k:3: v", "a.yml:3: x-1- y"].join("\n"));
+	});
 });

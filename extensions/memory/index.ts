@@ -259,6 +259,7 @@ function openMemoryPanel(
 				if (effect?.kind === "toggle-auto-memory") {
 					if (autoMemory.fromEnv) {
 						ctx.ui.notify("Auto-memory is set by CLAUDE_CODE_DISABLE_AUTO_MEMORY. Unset it to switch here.", "info");
+						repaint();
 						return;
 					}
 					try {
