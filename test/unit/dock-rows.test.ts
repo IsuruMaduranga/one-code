@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DOCK_ROWS_CHANNEL, DockRows, dockRowsReporter } from "../../extensions/lib/dock-rows.ts";
+import { DOCK_ROWS_CHANNEL, DockRows, dockRowsReporter, trackDockRows } from "../../extensions/lib/dock-rows.ts";
 
 describe("dock rows", () => {
 	it("reports a strip's rows only on a change, and sums the other strips", () => {
@@ -20,5 +20,12 @@ describe("dock rows", () => {
 		expect(dock.others("workflow")).toBe(0);
 		dock.note({ rows: 3 }); // malformed: ignored
 		expect(dock.others("workflow")).toBe(0);
+	});
+
+	it("tracks the channel for an extension", () => {
+		const handlers: Array<(data: unknown) => void> = [];
+		const dock = trackDockRows({ on: (channel: string, handler: (data: unknown) => void) => channel === DOCK_ROWS_CHANNEL && handlers.push(handler) });
+		for (const handler of handlers) handler({ source: "subagents", rows: 3 });
+		expect(dock.others("workflow")).toBe(3);
 	});
 });

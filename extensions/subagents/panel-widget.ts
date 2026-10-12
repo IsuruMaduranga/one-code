@@ -256,6 +256,7 @@ export class SubagentWidget {
 			if (text === this.rpcSent) return;
 			this.rpcSent = text;
 			ctx.ui.setWidget(WIDGET_KEY, lines, { placement: "belowEditor" });
+			this.onRows(0); // no TUI view sizes itself in RPC
 			return;
 		}
 		ctx.ui.setWidget(

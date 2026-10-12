@@ -115,7 +115,7 @@ import { extendingCompletions } from "../lib/argument-hints.ts";
 import { CONTEXT_BASELINE_CHANNEL, restoredContext } from "../lib/context-stack.ts";
 import { emptySubagentBaseline, planSubagentAnnouncement, subagentBaseline, subagentBaselineFromStack, type SubagentBaseline } from "./announce.ts";
 import { panelUi } from "../lib/panel-focus.ts";
-import { DOCK_ROWS_CHANNEL, DockRows, dockRowsReporter } from "../lib/dock-rows.ts";
+import { dockRowsReporter, trackDockRows } from "../lib/dock-rows.ts";
 
 /** How the guide's setup list names a server that is not connected. */
 const MCP_STATUS_LABELS: Record<McpStatusKind, string | undefined> = {
@@ -340,8 +340,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	const shellTasks = trackShellTasks(pi);
 	const panel = new SubagentWidget(liveRuns, () => lastCtx, shellTasks, dockRowsReporter(pi.events, "subagents"));
 	// The other strips below the editor (workflow status rows), so the agent view leaves their rows free.
-	const dock = new DockRows();
-	pi.events.on(DOCK_ROWS_CHANNEL, (data) => dock.note(data));
+	const dock = trackDockRows(pi.events);
 
 	/**
 	 * Register a child in the live panel and return the wiring the spawn sites

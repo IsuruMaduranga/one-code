@@ -108,6 +108,7 @@ export class WorkflowWidget {
 
 	dispose(): void {
 		this.disposed = true;
+		this.onRows(0);
 		if (this.timer) clearTimeout(this.timer);
 		if (this.ticker) clearInterval(this.ticker);
 		this.timer = this.ticker = undefined;
@@ -146,6 +147,7 @@ export class WorkflowWidget {
 			const lines = runs.map((run) => `${run.runId} ${run.name} — ${run.status} (${run.agents.length} agents)`);
 			if (totalRuns > runs.length) lines.push(`${totalRuns - runs.length} more workflows — /workflows to list all`);
 			ctx.ui.setWidget(WIDGET_KEY, lines, { placement: "belowEditor" });
+			this.onRows(0); // no TUI view sizes itself in RPC
 			return;
 		}
 		ctx.ui.setWidget(

@@ -75,7 +75,7 @@ import { followEnteredWorktree } from "../lib/worktree-isolation.ts";
 import { isKeyRelease, keyId } from "../lib/key-input.ts";
 import { projectConfigDirName } from "../lib/config-mode.ts";
 import { panelUi } from "../lib/panel-focus.ts";
-import { DOCK_ROWS_CHANNEL, DockRows, dockRowsReporter } from "../lib/dock-rows.ts";
+import { dockRowsReporter, trackDockRows } from "../lib/dock-rows.ts";
 
 /**
  * Claude Code's own arming reminder, verbatim in intent: the keyword is a
@@ -141,8 +141,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 	let lastCtx: ExtensionContext | undefined;
 	const widget = new WorkflowWidget(manager, () => lastCtx, dockRowsReporter(pi.events, "workflow"));
 	// The other strips below the editor (the subagent panel), so the viewer leaves their rows free.
-	const dock = new DockRows();
-	pi.events.on(DOCK_ROWS_CHANNEL, (data) => dock.note(data));
+	const dock = trackDockRows(pi.events);
 	let viewerOpen = false;
 
 	// Parent permission bridge for workflow agents' gates — same bridge the

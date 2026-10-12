@@ -33,6 +33,13 @@ export function dockRowsReporter(events: Emitter, source: string): (rows: number
 	};
 }
 
+/** A `DockRows` fed from `events`, for an extension that sizes a view to the dock. */
+export function trackDockRows(events: { on(channel: string, handler: (data: unknown) => void): unknown }): DockRows {
+	const dock = new DockRows();
+	events.on(DOCK_ROWS_CHANNEL, (data) => dock.note(data));
+	return dock;
+}
+
 /** The dock's rows as reported, by source. */
 export class DockRows {
 	private readonly rows = new Map<string, number>();
