@@ -13,7 +13,10 @@
  *   1. `system`/`instructions` is byte-identical across every request.
  *   2. The head of the conversation, every item up to and including the first
  *      user message (its reminder stack), is byte-identical across every
- *      request — the H2 regression rewrote it.
+ *      request — the H2 regression rewrote it. A request whose response
+ *      errored (stopReason "error", e.g. "servers overloaded") cached nothing,
+ *      so the head compares from the first request that did not error: a
+ *      one-shot that arrived meanwhile legitimately rides message 1.
  *      pi's `cache_control` markers are stripped first: the breakpoint sits on
  *      the last user block in request 1 and moves to the tool result after,
  *      which is placement, not content.
@@ -56,9 +59,12 @@ const sessionModel = dumped.find(hasTools)?.model;
 const isSession = (p) => hasTools(p) && p.model === sessionModel;
 const requests = dumped.filter(isSession);
 const skipped = dumped.length - requests.length;
-const usages = lines(positional[1])
+const responses = lines(positional[1])
 	.filter((e) => e.type === "message_end" && e.message?.role === "assistant" && e.message.usage)
-	.map((e) => e.message.usage);
+	.map((e) => e.message);
+const usages = responses.map((m) => m.usage);
+/** Requests whose response errored, by index; only meaningful when every request has a response. */
+const errored = responses.length === requests.length ? responses.map((m) => m.stopReason === "error") : requests.map(() => false);
 
 /** Implicit caches store whole blocks (OpenAI 128 tokens, DeepSeek 64); allow one partial block of 256. */
 const IMPLICIT_BLOCK = 256;
@@ -105,14 +111,17 @@ const firstDiff = (a, b) => {
 	return i;
 };
 
-const checkStable = (label, pick, downgrade = false) => {
-	const base = pick(requests[0]);
-	for (let i = 1; i < requests.length; i++) {
+const checkStable = (label, pick, { downgrade = false, skipErrored = false } = {}) => {
+	const indices = requests.map((_, i) => i).filter((i) => !(skipErrored && errored[i]));
+	if (indices.length === 0) return;
+	const first = indices[0];
+	const base = pick(requests[first]);
+	for (const i of indices.slice(1)) {
 		const cur = pick(requests[i]);
 		if (cur === base) continue;
 		const at = firstDiff(base, cur);
 		const msg =
-			`${label} changed between request 1 and request ${i + 1} ` +
+			`${label} changed between request ${first + 1} and request ${i + 1} ` +
 			`(${base.length} → ${cur.length} chars; first difference at char ${at}: ` +
 			`…${JSON.stringify(base.slice(at, at + 60))} vs …${JSON.stringify(cur.slice(at, at + 60))})`;
 		(downgrade ? warnings : failures).push(msg);
@@ -121,10 +130,12 @@ const checkStable = (label, pick, downgrade = false) => {
 };
 
 checkStable("system", systemText);
-checkStable("conversation head (to the first user message)", conversationHead);
-checkStable("eager tools", eagerTools, eagerLoadOk);
+checkStable("conversation head (to the first user message)", conversationHead, { skipErrored: true });
+checkStable("eager tools", eagerTools, { downgrade: eagerLoadOk });
 
 if (skipped > 0) console.log(`(${skipped} side-call request${skipped === 1 ? "" : "s"} skipped)`);
+const erroredCount = errored.filter(Boolean).length;
+if (erroredCount > 0) console.log(`(${erroredCount} errored request${erroredCount === 1 ? "" : "s"} left out of the head check)`);
 if (usages.length !== requests.length) {
 	warnings.push(`${requests.length} requests dumped but ${usages.length} assistant usages seen (retry or a request that did not complete?)`);
 }
