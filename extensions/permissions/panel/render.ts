@@ -6,7 +6,7 @@
  * One Code where Claude Code names itself.
  */
 
-import { cutPlainText, panelTopRule, type RenderBlock as Block, searchBoxLines, truncateLine, visibleWidth, windowBlocks, wrapHints, wrapPlainText } from "../../lib/tui-render.ts";
+import { cutPlainText, hintLines, panelTopRule, type RenderBlock as Block, searchBoxLines, truncateLine, visibleWidth, windowBlocks, wrapPlainText } from "../../lib/tui-render.ts";
 import {
 	AUTO_SECTION_LABELS,
 	AUTO_SECTIONS,
@@ -410,9 +410,8 @@ export function renderPanel(input: PanelRenderInput, paint: PanelPaint): string[
 	if (input.status) out.push(paint.fg("dim", cutPlainText(` ${input.status}`, width - 1)));
 	out.push("");
 
-	// Hints wrap at their separators on a narrow terminal, so none is cut off;
-	// the list budget counts the wrapped lines.
-	const wrapFooter = (lines: string[]) => lines.flatMap((line) => wrapHints(line, Math.max(1, width - 2)));
+	// Hints wrap at their separators (hintLines); the list budget counts the rows.
+	const wrapFooter = (lines: string[]) => hintLines(lines, width - 1, " ");
 	let footer: string[];
 	if (state.dialog) {
 		const dialog = dialogLines(state.dialog, input, paint);
@@ -444,7 +443,7 @@ export function renderPanel(input: PanelRenderInput, paint: PanelPaint): string[
 	}
 
 	if (state.notice) out.push(paint.fg("warning", cutPlainText(`  ${state.notice}`, width - 1)));
-	out.push("", ...footer.map((line) => paint.fg("dim", cutPlainText(` ${line}`, width - 1))));
+	out.push("", ...footer.map((line) => paint.fg("dim", line)));
 	// Painted rows (the tab bar, a denial's mark and tail) are measured after
 	// painting, so every line gets a final column-aware cut.
 	return out.map((line) => truncateLine(line, width));

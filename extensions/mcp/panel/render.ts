@@ -8,7 +8,7 @@
  * Only width-1 glyphs are used so cutPlainText's code-point count stays exact.
  */
 
-import { cutPlainText, padPlainText, panelTopRule, type RenderBlock as Block, windowBlocks, wrapHints } from "../../lib/tui-render.ts";
+import { cutPlainText, hintLines, padPlainText, panelTopRule, type RenderBlock as Block, windowBlocks } from "../../lib/tui-render.ts";
 import { actionsFor, type McpEntry, statusText } from "./model.ts";
 import { clampMcpCursor, detailEntry, type McpPanelState } from "./state.ts";
 
@@ -106,8 +106,8 @@ export function renderMcpPanel(input: McpRenderInput, paint: McpPaint): string[]
 	clampMcpCursor(state, entries);
 
 	const out: string[] = [panelTopRule(paint.fg, width)];
-	// Hints wrap at their separators on a narrow terminal, so none is cut off.
-	const wrapFooter = (text: string) => wrapHints(text, Math.max(1, width - 2));
+	// Hints wrap at their separators (hintLines); the list budget counts the rows.
+	const wrapFooter = (text: string) => hintLines(text, width - 1, " ");
 	let footer: string[];
 
 	if (state.detail) {
@@ -139,6 +139,6 @@ export function renderMcpPanel(input: McpRenderInput, paint: McpPaint): string[]
 		for (const line of notice.split("\n")) out.push(paint.fg("warning", cutPlainText(`  ${line}`, width - 1)));
 	}
 	out.push("");
-	for (const line of footer) out.push(paint.fg("dim", cutPlainText(` ${line}`, width - 1)));
+	for (const line of footer) out.push(paint.fg("dim", line));
 	return out;
 }

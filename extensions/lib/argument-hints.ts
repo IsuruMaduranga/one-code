@@ -149,8 +149,14 @@ export interface ArgumentCompletion {
  */
 export function extendingCompletions(prefix: string, options: readonly ArgumentCompletion[]): ArgumentCompletion[] | null {
 	const typed = prefix.trim().toLowerCase();
-	const matches = options.filter((option) => option.value.startsWith(typed) && option.value.trim() !== typed);
-	return matches.length ? matches : null;
+	return dropExactMatch(prefix, options.filter((option) => option.value.startsWith(typed)));
+}
+
+/** `items` without the one whose value is what was typed (case- and space-blind), or null when none is left. */
+export function dropExactMatch<T extends { value: string }>(prefix: string | undefined, items: readonly T[]): T[] | null {
+	const typed = (prefix ?? "").trim().toLowerCase();
+	const longer = items.filter((item) => item.value.trim().toLowerCase() !== typed);
+	return longer.length ? longer : null;
 }
 
 type Completer<T extends { value: string }> = (prefix: string) => T[] | null | Promise<T[] | null>;
@@ -161,12 +167,7 @@ type Completer<T extends { value: string }> = (prefix: string) => T[] | null | P
  * `registerLocalCommand` applies it to every local command.
  */
 export function withoutExactMatch<T extends { value: string }>(complete: Completer<T>): Completer<T> {
-	const settle = (prefix: string, items: T[] | null): T[] | null => {
-		if (!items) return items;
-		const typed = (prefix ?? "").trim().toLowerCase();
-		const longer = items.filter((item) => item.value.trim().toLowerCase() !== typed);
-		return longer.length ? longer : null;
-	};
+	const settle = (prefix: string, items: T[] | null): T[] | null => (items ? dropExactMatch(prefix, items) : items);
 	return (prefix) => {
 		const items = complete(prefix);
 		// Any thenable, not only a native Promise.

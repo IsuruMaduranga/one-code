@@ -22,12 +22,12 @@
  */
 
 import type { BackgroundTask } from "../background/registry.ts";
-import { countNoun, cutPlainText as cut, formatDuration, padPlainText, wrapHints } from "../lib/tui-render.ts";
+import { countNoun, cutPlainText as cut, formatDuration, hintLines, padPlainText } from "../lib/tui-render.ts";
 import { sanitizeDisplayText } from "../lib/terminal-text.ts";
 
 /** One selectable row. */
 export type TasksItem =
-	| { kind: "shell"; id: string; text: string; running: boolean; status?: BackgroundTask["status"] }
+	| { kind: "shell"; id: string; text: string; running: boolean; status: BackgroundTask["status"] }
 	| { kind: "agent"; taskId: string; text: string; model?: string; running: boolean };
 
 export interface TasksDialogInput {
@@ -60,9 +60,13 @@ export function renderTasksDialog(input: TasksDialogInput, paint: TasksPaint): s
 	const line = (text: string) => cut(text, width);
 	const out = [paint.bold(line("  Background"))];
 	const items = tasksItems(input);
+	const current = items[input.selected];
+	// Hints wrap at their separators on a narrow terminal, so none is cut off.
+	const hint = ["↑/↓ to select", "Enter to view", ...(current?.running ? ["x to stop"] : []), "Esc to close"].join(" · ");
+	const pushHints = () => out.push(...hintLines(hint, width, "  ").map((hintLine) => paint.fg("dim", hintLine)));
 	if (items.length === 0) {
 		out.push(line("  No tasks currently running"));
-		for (const hintLine of wrapHints("↑/↓ to select · Enter to view · Esc to close", width - 2)) out.push(paint.fg("dim", `  ${hintLine}`));
+		pushHints();
 		return out;
 	}
 	const agents = splitAgents(input.agents);
@@ -84,7 +88,7 @@ export function renderTasksDialog(input: TasksDialogInput, paint: TasksPaint): s
 			const selected = index === input.selected;
 			// A finished shell shows how it ended; only a clean finish reads "done",
 			// and only a failure gets the cross (a stop is the user's own choice).
-			const ended = row.kind === "shell" && row.status && row.status !== "completed" ? row.status : undefined;
+			const ended = row.kind === "shell" && !row.running && row.status !== "completed" ? row.status : undefined;
 			const mark = row.running ? "⏺" : ended === "failed" ? "✗" : "✔";
 			const status = row.running ? "running" : (ended ?? "done");
 			const suffix = row.kind === "agent" && row.model ? `${status} · ${row.model}` : status;
@@ -93,10 +97,7 @@ export function renderTasksDialog(input: TasksDialogInput, paint: TasksPaint): s
 			index++;
 		}
 	}
-	const current = items[input.selected];
-	const hint = ["↑/↓ to select", "Enter to view", ...(current?.running ? ["x to stop"] : []), "Esc to close"].join(" · ");
-	// Hints wrap at their separators on a narrow terminal, so none is cut off.
-	for (const hintLine of wrapHints(hint, width - 2)) out.push(paint.fg("dim", `  ${hintLine}`));
+	pushHints();
 	return out;
 }
 
@@ -116,8 +117,8 @@ export type TasksView = { mode: "list" } | { mode: "shell"; id: string };
  * that finishes while shown keeps its details, with its final status and no
  * `x`, and the dialog goes back to the list once the shell is gone.
  */
-export function settleTasksView(view: TasksView, shell: Pick<BackgroundTask, "status"> | undefined): TasksView {
-	return view.mode === "shell" && shell === undefined ? { mode: "list" } : view;
+export function settleTasksView(view: TasksView, shellKnown: boolean): TasksView {
+	return view.mode === "shell" && !shellKnown ? { mode: "list" } : view;
 }
 
 /** What a key does in a shell's details: ← goes back, Esc/Enter/Space close, x stops a running shell. */
@@ -164,6 +165,6 @@ export function renderShellDetail(task: BackgroundTask, width: number, now: numb
 	out.push(`└${"─".repeat(Math.max(0, width - 2))}┘`);
 	out.push(paint.fg("dim", `Showing ${countNoun(shown.length, "line")}`), "");
 	const hint = ["← to go back", "Esc/Enter/Space to close", ...(task.status === "running" ? ["x to stop"] : [])].join(" · ");
-	for (const hintLine of wrapHints(hint, width)) out.push(paint.fg("dim", hintLine));
+	out.push(...hintLines(hint, width).map((hintLine) => paint.fg("dim", hintLine)));
 	return out;
 }

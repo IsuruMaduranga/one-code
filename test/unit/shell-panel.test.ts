@@ -125,10 +125,9 @@ describe("shell details in the Background dialog", () => {
 
 	it("keeps a finished shell's details, and goes back to the list once the shell is gone", () => {
 		const view = { mode: "shell" as const, id: "b1" };
-		expect(settleTasksView(view, { status: "running" })).toBe(view);
-		expect(settleTasksView(view, { status: "stopped" })).toBe(view);
-		expect(settleTasksView(view, undefined)).toEqual({ mode: "list" });
-		expect(settleTasksView({ mode: "list" }, undefined)).toEqual({ mode: "list" });
+		expect(settleTasksView(view, true)).toBe(view);
+		expect(settleTasksView(view, false)).toEqual({ mode: "list" });
+		expect(settleTasksView({ mode: "list" }, false)).toEqual({ mode: "list" });
 	});
 });
 

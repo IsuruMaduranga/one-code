@@ -175,6 +175,17 @@ export function wrapHints(text: string, width: number, separator = " · "): stri
 	return lines;
 }
 
+/**
+ * A panel's key-hint rows: each hint line wrapped at its separators to fit
+ * `width` after `indent`, so no key is cut off on a narrow terminal, and
+ * returned indented (plain; the caller paints). A list panel counts the rows
+ * in its body budget.
+ */
+export function hintLines(hints: string | readonly string[], width: number, indent = ""): string[] {
+	const room = Math.max(1, width - visibleWidth(indent));
+	return (typeof hints === "string" ? [hints] : hints).flatMap((line) => wrapHints(line, room).map((part) => `${indent}${part}`));
+}
+
 /** Cut then pad plain (unpainted) text to exactly `width` terminal columns. */
 export function padPlainText(text: string, width: number): string {
 	const shortened = cutPlainText(text, width);

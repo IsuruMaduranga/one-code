@@ -2817,11 +2817,15 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			};
 			const unsubscribe = liveRuns.subscribe(refresh);
 			const unsubscribeShells = shellTasks.subscribe(refresh);
-			// A shell's details follow its runtime and output once a second, and the
-			// list drops a finished shell once its linger window ends, as the chip does.
+			// A running shell's details follow its runtime and output once a second,
+			// and the list drops a finished shell once its linger window ends, as
+			// the chip does (a rebuild only when that row set changes).
 			const ticker = setInterval(() => {
-				if (dialogView.mode === "shell") tui.requestRender();
-				else if (snapshot.shells.some((shell) => !shell.running)) refresh();
+				if (dialogView.mode === "shell") {
+					if (shellById(dialogView.id)?.status === "running") tui.requestRender();
+				} else if (snapshot.shells.some((shell) => !shell.running) && shellRows(shellTasks.list(), Date.now()).length !== snapshot.shells.length) {
+					refresh();
+				}
 			}, 1000);
 			ticker.unref?.();
 			const finish = (value: string | null) => {
@@ -2833,7 +2837,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			return {
 				render: (width: number) => {
 					const task = dialogView.mode === "shell" ? shellById(dialogView.id) : undefined;
-					dialogView = settleTasksView(dialogView, task);
+					dialogView = settleTasksView(dialogView, task !== undefined);
 					if (dialogView.mode === "shell" && task) {
 						return ["", ...renderShellDetail(task, width - 2, Date.now(), paint).map((line) => `  ${line}`), ""].map((line) => truncateLine(line, width));
 					}

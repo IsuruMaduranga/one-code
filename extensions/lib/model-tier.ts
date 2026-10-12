@@ -29,6 +29,7 @@ import {
 	BUILTIN_PROVIDER_POLICIES,
 	baseModelId,
 	isDatedDuplicate,
+	isExperimentalBuild,
 	modelIdentity,
 	modelsContainedToSession,
 	modelSpec,
@@ -328,13 +329,16 @@ export function economicalContainedCandidates(
 
 /**
  * Whether automatic selection may pick `model` at all: the catalogs know it and
- * do not mark it legacy, deprecated, tool-less or non-text, or superseded by a
+ * do not mark it legacy, deprecated, tool-less or non-text, it is not an
+ * experimental build (`isExperimentalBuild`), and it is not superseded by a
  * model `served` holds (`model-catalog.ts autoSelectable`; `served` is
  * `servedCatalogIds` of the session's contained pool). A model the user tiered
  * by hand in `modelTiers` still needs a catalog entry: the setting speaks to
  * its tier, not to whether it is current.
  */
 export function isAutoSelectable(model: Model<Api>, served: ReadonlySet<string>): boolean {
+	// The pi id too: a row can name an experimental build its catalog entry does not.
+	if (isExperimentalBuild(model.id)) return false;
 	const entry = catalogModelFor(model);
 	return entry !== undefined && autoSelectable(entry, served);
 }

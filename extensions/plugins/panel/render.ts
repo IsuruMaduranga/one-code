@@ -7,7 +7,7 @@
  */
 
 import { formatInstallCount } from "../counts.ts";
-import { cutPlainText, panelTopRule, type RenderBlock as Block, searchBoxLines, windowBlocks, wrapHints } from "../../lib/tui-render.ts";
+import { cutPlainText, hintLines, panelTopRule, type RenderBlock as Block, searchBoxLines, windowBlocks } from "../../lib/tui-render.ts";
 import type { DiscoverRow, InstalledRow } from "./rows.ts";
 import { clampPanelState, type PanelState, type PanelView, resolveDetail, selectableRows, TABS, type Tab } from "./state.ts";
 
@@ -252,7 +252,7 @@ const INSTALLED_SEARCH_FOOTER = ["Type to search · Enter/Space to toggle · Esc
 
 /** Footer hint lines wrapped at their separators to the panel's width (one leading space), so no key is cut off. */
 function fitFooter(lines: string[], width: number): string[] {
-	return lines.flatMap((line) => wrapHints(line, Math.max(1, width - 2)));
+	return hintLines(lines, width - 1, " ");
 }
 
 export function renderPanel(input: PanelRenderInput, paint: PanelPaint): string[] {
@@ -316,6 +316,6 @@ export function renderPanel(input: PanelRenderInput, paint: PanelPaint): string[
 			),
 		);
 	}
-	out.push("", ...footer.map((line) => paint.fg("dim", cutPlainText(` ${line}`, width - 1))));
+	out.push("", ...footer.map((line) => paint.fg("dim", line)));
 	return out;
 }

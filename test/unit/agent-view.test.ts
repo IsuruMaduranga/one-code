@@ -54,7 +54,7 @@ describe("applyBorderBadge", () => {
 });
 
 describe("renderTasksDialog", () => {
-	const shells = [{ kind: "shell" as const, id: "b1", text: "sleep 25; echo done", running: true }];
+	const shells = [{ kind: "shell" as const, id: "b1", text: "sleep 25; echo done", running: true, status: "running" as const }];
 	const agents = [
 		{ kind: "agent" as const, taskId: "a1", text: "Read notes.txt and report after delay", model: "Sonnet 5", running: true },
 		{ kind: "agent" as const, taskId: "a2", text: "write a 300-word poem", model: "Haiku 4.5", running: false },
