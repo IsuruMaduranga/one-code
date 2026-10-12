@@ -113,6 +113,11 @@ const firstDiff = (a, b) => {
 
 const checkStable = (label, pick, { downgrade = false, skipErrored = false } = {}) => {
 	const indices = requests.map((_, i) => i).filter((i) => !(skipErrored && isErrored(i)));
+	// Every request erroring leaves nothing to compare, which must not read as stable.
+	if (indices.length < 2 && requests.length >= 2 && skipErrored) {
+		failures.push(`${label}: only ${indices.length} of ${requests.length} requests finished without an error, too few to compare`);
+		return;
+	}
 	if (indices.length === 0) return;
 	const first = indices[0];
 	const base = pick(requests[first]);
