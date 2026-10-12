@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { visibleWidth } from "../../extensions/lib/text-width.ts";
 import type { ThemeLike } from "../../extensions/lib/tui-render.ts";
@@ -163,7 +164,8 @@ describe("createWriteRenderers", () => {
 		const r = make(undefined);
 		const ctx = { args: { path: "/w/notes/hello.txt", content: "hi\n" }, isError: false, cwd: "/w", state: {} };
 		const out = r.renderResult({ content: [{ type: "text", text: "File created successfully at: /w/notes/hello.txt" }], details: { kind: "create" } }, { expanded: false, isPartial: false }, plain, ctx).render(80);
-		expect(out).toEqual(["  ⎿  Wrote 1 lines to notes/hello.txt", "     hi"]);
+		// Relative and native, as the transcript shows it on Windows too.
+		expect(out).toEqual([`  ⎿  Wrote 1 lines to ${join("notes", "hello.txt")}`, "     hi"]);
 	});
 
 	it("shows a rejection without a reason as Claude Code's line and the content; anything else falls back", () => {

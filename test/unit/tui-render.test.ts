@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { agentMessage, frameForDelivery, handBackPointer, taskNotification } from "../../extensions/lib/notifications.ts";
 import {
@@ -436,7 +437,7 @@ describe("a call the user rejected", () => {
 			expect(lines).toEqual(["  ⎿  Tool use rejected"]);
 			expect(task.renderResult(rejection(text), opts, plainTheme, ctx({})).render(120)).toEqual(["  ⎿  Tool use rejected"]);
 		}
-		expect(edit.renderResult(rejection(userDenialText()), opts, plainTheme, ctx({ path: "/w/src/x.ts" })).render(120)).toEqual(["  ⎿  User rejected update to src/x.ts"]);
+		expect(edit.renderResult(rejection(userDenialText()), opts, plainTheme, ctx({ path: "/w/src/x.ts" })).render(120)).toEqual([`  ⎿  User rejected update to ${join("src", "x.ts")}`]);
 		expect(edit.renderResult(rejection(userDenialText("no")), opts, plainTheme, ctx({ path: "src/x.ts" })).render(120)).toEqual(["  ⎿  Tool use rejected"]);
 	});
 
