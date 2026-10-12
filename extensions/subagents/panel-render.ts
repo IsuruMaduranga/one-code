@@ -312,12 +312,27 @@ function blockToLines(block: TranscriptBlock, width: number, paint: Paint, prose
 	return [`  ${paint.fg("dim", "⎿")} ${block.isError ? paint.fg("error", body) : body}`, ""];
 }
 
-/** Labels the main transcript gives tools whose name does not title-case to it. */
+/**
+ * Labels the main transcript gives tools whose name does not title-case to it
+ * (each tool's `ccToolRenderers` label; `agent-view-tool-labels.test.ts` keeps
+ * this table in step with the registrations).
+ */
 const TOOL_LABELS: Record<string, string> = {
 	edit: "Update",
 	ls: "LS",
 	powershell: "PowerShell",
 	ask_user_question: "Ask User",
+	task_create: "Create Task",
+	task_get: "Get Task",
+	task_list: "List Tasks",
+	task_update: "Update Task",
+	task_stop: "Stop Task",
+	lsp_diagnostics: "Diagnostics",
+	enter_plan_mode: "Enter plan mode",
+	exit_plan_mode: "Exit plan mode",
+	list_mcp_resources: "MCP Resources",
+	read_mcp_resource: "Read MCP Resource",
+	read_mcp_resource_dir: "List MCP Resource Directory",
 };
 
 /**
