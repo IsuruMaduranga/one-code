@@ -43,6 +43,8 @@ export class WorkflowWidget {
 	constructor(
 		private readonly manager: WorkflowRunManager,
 		private readonly getCtx: () => ExtensionContext | undefined,
+		/** Told the rows this strip paints below the editor (lib/dock-rows.ts). */
+		private readonly onRows: (rows: number) => void = () => {},
 	) {}
 
 	attach(handle: RunHandle): void {
@@ -131,6 +133,7 @@ export class WorkflowWidget {
 		this.syncTicker(runs);
 		if (!runs.length) {
 			ctx.ui.setWidget(WIDGET_KEY, undefined);
+			this.onRows(0);
 			return;
 		}
 		if (this.focusIndex !== undefined && this.focusIndex >= this.rowCount()) {
@@ -162,6 +165,7 @@ export class WorkflowWidget {
 			},
 			{ placement: "belowEditor" },
 		);
+		this.onRows(this.paintedRowCount());
 	}
 
 	/** Keep elapsed time ticking while any run is live; stop when none is. */

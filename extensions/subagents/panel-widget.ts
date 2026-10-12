@@ -63,6 +63,8 @@ export class SubagentWidget {
 		private readonly registry: LiveRunRegistry,
 		private readonly getCtx: () => ExtensionContext | undefined,
 		private readonly shells?: ShellTaskTracker,
+		/** Told the rows this strip paints below the editor (lib/dock-rows.ts). */
+		private readonly onRows: (rows: number) => void = () => {},
 	) {
 		this.unsubscribes.push(registry.subscribe(() => this.schedule()));
 		if (shells) this.unsubscribes.push(shells.subscribe(() => this.schedule()));
@@ -188,6 +190,7 @@ export class SubagentWidget {
 		if (this.ticker) clearInterval(this.ticker);
 		this.timer = this.ticker = undefined;
 		for (const unsubscribe of this.unsubscribes.splice(0)) unsubscribe();
+		this.onRows(0);
 		try {
 			ctx?.ui.setWidget(WIDGET_KEY, undefined);
 		} catch {
@@ -232,6 +235,7 @@ export class SubagentWidget {
 		if (rows.length <= 1 && !shellVisible && !notice && this.viewedId === undefined) {
 			this.rpcSent = undefined;
 			ctx.ui.setWidget(WIDGET_KEY, undefined);
+			this.onRows(0);
 			this.focusIndex = undefined;
 			this.focusId = undefined;
 			return;
@@ -271,6 +275,7 @@ export class SubagentWidget {
 						if (lines.length) lines.push("");
 						lines.push(renderShellChip(shellTasks.length, chipFocused, width - 1, paint));
 					}
+					this.onRows(lines.length);
 					return lines.map((line) => ` ${line}`);
 				});
 			},

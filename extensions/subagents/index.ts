@@ -115,6 +115,7 @@ import { extendingCompletions } from "../lib/argument-hints.ts";
 import { CONTEXT_BASELINE_CHANNEL, restoredContext } from "../lib/context-stack.ts";
 import { emptySubagentBaseline, planSubagentAnnouncement, subagentBaseline, subagentBaselineFromStack, type SubagentBaseline } from "./announce.ts";
 import { panelUi } from "../lib/panel-focus.ts";
+import { DOCK_ROWS_CHANNEL, DockRows, dockRowsReporter } from "../lib/dock-rows.ts";
 
 /** How the guide's setup list names a server that is not connected. */
 const MCP_STATUS_LABELS: Record<McpStatusKind, string | undefined> = {
@@ -337,7 +338,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	const stoppedTaskIds = new Set<string>();
 	let lastCtx: ExtensionContext | undefined;
 	const shellTasks = trackShellTasks(pi);
-	const panel = new SubagentWidget(liveRuns, () => lastCtx, shellTasks);
+	const panel = new SubagentWidget(liveRuns, () => lastCtx, shellTasks, dockRowsReporter(pi.events, "subagents"));
+	// The other strips below the editor (workflow status rows), so the agent view leaves their rows free.
+	const dock = new DockRows();
+	pi.events.on(DOCK_ROWS_CHANNEL, (data) => dock.note(data));
 
 	/**
 	 * Register a child in the live panel and return the wiring the spawn sites
@@ -880,10 +884,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	 * back.
 	 */
 	let view: { retarget(taskId: string): void; scrollBy(delta: number): void; close(): void } | undefined;
-	/** Rows kept clear at the bottom: token counter + editor(3) + mode line + strip hint + strip rows + shell section + cwd/status(2) + one spare. */
+	/** Rows kept clear at the bottom: token counter + editor(3) + mode line + strip hint + strip rows + shell section + other strips + cwd/status(2) + one spare. */
 	const viewReserve = () => {
 		const shellLines = panel.shellLineCount();
-		return panel.rowCount() + (shellLines ? shellLines + 1 : 0) + 9;
+		return panel.rowCount() + (shellLines ? shellLines + 1 : 0) + dock.others("subagents") + 9;
 	};
 
 	/**
