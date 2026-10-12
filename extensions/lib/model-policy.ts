@@ -276,8 +276,8 @@ export function isMovingAlias(id: string): boolean {
 
 /**
  * An experimental build (`deepseek-v4-flash-vision-exp`, `tev1-4b-experimental`):
- * a research variant, never picked automatically as a screener or suggested as
- * an upgrade. `preview` is deliberately not matched: Google ships mainline
+ * a research variant, never picked automatically (as a screener or the
+ * subagent default) or suggested as an upgrade. `preview` is deliberately not matched: Google ships mainline
  * Gemini models under it (`gemini-3-flash-preview`).
  */
 export function isExperimentalBuild(id: string): boolean {

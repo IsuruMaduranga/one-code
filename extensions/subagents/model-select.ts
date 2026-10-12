@@ -54,6 +54,7 @@ import {
 	findConfigured,
 	isClaudeFamilyModel,
 	isDatedDuplicate,
+	isExperimentalBuild,
 	isSnapshotDatedId,
 	isStaleContainmentStamp,
 	modelsContainedToSession,
@@ -405,7 +406,12 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 		// there are none when the session price is unknown, so a cheap-tier pick
 		// never silently upgrades an unpriced session. Reuse the `contained` set
 		// computed above for the hot path.
-		const cheaper = sameTierContainedCandidates(available, sessionModel, { contained, requireImageInput })[0];
+		// Never an experimental build, as for the classifier: a research variant
+		// can change without notice mid-delegation. A moving alias stays allowed
+		// here (Mistral serves most models only as `-latest`).
+		const cheaper = sameTierContainedCandidates(available, sessionModel, { contained, requireImageInput }).find(
+			(model) => !isExperimentalBuild(model.id),
+		);
 		if (cheaper) return { model: cheaper, source: "automatic", notices };
 	}
 

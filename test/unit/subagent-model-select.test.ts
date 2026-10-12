@@ -299,6 +299,18 @@ describe("resolveSubagentModel: precedence and exact references", () => {
 		expect(resolution.source).toBe("automatic");
 	});
 
+	it("never picks an experimental build automatically, taking the next cheapest instead", () => {
+		pinCatalog([
+			{ id: "openai/gpt-5.6-sol", released: "2026-09-01", price: [5, 20] },
+			{ id: "openai/gpt-5.6-terra", released: "2026-09-01", price: [2, 8] },
+			{ id: "openai/gpt-5.6-terra-exp", released: "2026-09-01", price: [1.5, 6] },
+		]);
+		const catalog = [model("openai-codex", "gpt-5.6-sol", 5), model("openai-codex", "gpt-5.6-terra", 2), model("openai-codex", "gpt-5.6-terra-exp", 1.5)];
+		const resolution = resolveSubagentModel({ sessionModel: catalog[0], available: catalog });
+		expect(resolution.model?.id).toBe("gpt-5.6-terra");
+		expect(resolution.source).toBe("automatic");
+	});
+
 	it("keeps a Sonnet session's subagents on Sonnet: nothing cheaper is in its tier", () => {
 		const resolution = resolveSubagentModel({ sessionModel: anthropic[1], available: anthropic });
 		expect(resolution.model?.id).toBe("claude-sonnet-5-5");
