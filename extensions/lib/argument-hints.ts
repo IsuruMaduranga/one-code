@@ -149,6 +149,42 @@ export interface ArgumentCompletion {
  */
 export function extendingCompletions(prefix: string, options: readonly ArgumentCompletion[]): ArgumentCompletion[] | null {
 	const typed = prefix.trim().toLowerCase();
-	const matches = options.filter((option) => option.value.startsWith(typed) && option.value.trim() !== typed);
-	return matches.length ? matches : null;
+	return dropExactMatch(prefix, options.filter((option) => option.value.startsWith(typed)));
+}
+
+/**
+ * When an item's value is exactly what was typed (case-blind), only the items
+ * that extend it, or null when none does: Enter then submits the typed
+ * argument instead of applying some other item a completer returned without
+ * filtering (`/auto-mode`). A value is compared as given, so a completion that
+ * carries the separator to a required next argument (`"stop "`) still extends
+ * a typed `stop`. With no exact item, `items` pass unchanged.
+ */
+export function dropExactMatch<T extends { value: string }>(prefix: string | undefined, items: readonly T[]): T[] | null {
+	const typed = (prefix ?? "").trim().toLowerCase();
+	if (!items.some((item) => item.value.toLowerCase() === typed)) return items.length ? [...items] : null;
+	const longer = items.filter((item) => {
+		const value = item.value.toLowerCase();
+		return value !== typed && value.startsWith(typed);
+	});
+	return longer.length ? longer : null;
+}
+
+type Completer<T extends { value: string }> = (prefix: string) => T[] | null | Promise<T[] | null>;
+
+/**
+ * A command's completer with the exact match left out (see
+ * `extendingCompletions`), so a fully typed argument runs on the first Enter.
+ * `registerLocalCommand` applies it to every local command.
+ */
+export function withoutExactMatch<T extends { value: string }>(complete: Completer<T>): Completer<T> {
+	const settle = (prefix: string, items: T[] | null): T[] | null => (items ? dropExactMatch(prefix, items) : items);
+	return (prefix) => {
+		const items = complete(prefix);
+		// Any thenable, not only a native Promise.
+		if (items && typeof (items as PromiseLike<T[] | null>).then === "function") {
+			return Promise.resolve(items).then((resolved) => settle(prefix, resolved));
+		}
+		return settle(prefix, items as T[] | null);
+	};
 }

@@ -150,6 +150,13 @@ describe("plan viewer", () => {
 		}
 	});
 
+	it("wraps its key hints on a narrow terminal instead of cutting esc cancel", () => {
+		const out = renderPlanViewer({ lines: ["plan"], offset: 0, choice: 0, choices: CHOICES }, plain, 30);
+		const hints = out.slice(2, out.findIndex((line) => /^─+$/.test(line)));
+		expect(hints.length).toBeGreaterThan(1);
+		expect(hints.join(" · ")).toContain("esc cancel");
+	});
+
 	// Markdown output is painted: an overwide painted line is cut ANSI-aware, never past the width.
 	it("keeps painted plan lines within the width", () => {
 		const painted = `\x1b[1m${"bold ".repeat(20)}\x1b[22m`;

@@ -6,7 +6,7 @@
  * One Code where Claude Code names itself.
  */
 
-import { cutPlainText, panelTopRule, type RenderBlock as Block, searchBoxLines, truncateLine, visibleWidth, windowBlocks, wrapPlainText } from "../../lib/tui-render.ts";
+import { cutPlainText, hintLines, panelTopRule, type RenderBlock as Block, searchBoxLines, truncateLine, visibleWidth, windowBlocks, wrapPlainText } from "../../lib/tui-render.ts";
 import {
 	AUTO_SECTION_LABELS,
 	AUTO_SECTIONS,
@@ -410,11 +410,13 @@ export function renderPanel(input: PanelRenderInput, paint: PanelPaint): string[
 	if (input.status) out.push(paint.fg("dim", cutPlainText(` ${input.status}`, width - 1)));
 	out.push("");
 
+	// Hints wrap at their separators (hintLines); the list budget counts the rows.
+	const wrapFooter = (lines: string[]) => hintLines(lines, width - 1, " ");
 	let footer: string[];
 	if (state.dialog) {
 		const dialog = dialogLines(state.dialog, input, paint);
 		out.push(...dialog.lines);
-		footer = [dialog.footer];
+		footer = wrapFooter([dialog.footer]);
 	} else {
 		let blocks: Block[];
 		if (state.tab === "recent") {
@@ -433,7 +435,7 @@ export function renderPanel(input: PanelRenderInput, paint: PanelPaint): string[
 			out.push(...searchBoxLines(state.search[state.tab], placeholder, paint.fg, width));
 			blocks = isRuleTab(state.tab) ? ruleBlocks(input, paint, state.tab) : autoBlocks(input, paint);
 		}
-		footer = footerFor(state, view);
+		footer = wrapFooter(footerFor(state, view));
 		const budget = Math.max(3, height - out.length - 2 - footer.length - (state.notice ? 1 : 0));
 		const windowed = windowBlocks(blocks, state.cursor[state.tab], budget);
 		out.push(...windowed.lines);
@@ -441,7 +443,7 @@ export function renderPanel(input: PanelRenderInput, paint: PanelPaint): string[
 	}
 
 	if (state.notice) out.push(paint.fg("warning", cutPlainText(`  ${state.notice}`, width - 1)));
-	out.push("", ...footer.map((line) => paint.fg("dim", cutPlainText(` ${line}`, width - 1))));
+	out.push("", ...footer.map((line) => paint.fg("dim", line)));
 	// Painted rows (the tab bar, a denial's mark and tail) are measured after
 	// painting, so every line gets a final column-aware cut.
 	return out.map((line) => truncateLine(line, width));

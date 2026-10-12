@@ -54,11 +54,26 @@ describe("applyBorderBadge", () => {
 });
 
 describe("renderTasksDialog", () => {
-	const shells = [{ kind: "shell" as const, id: "b1", text: "sleep 25; echo done", running: true }];
+	const shells = [{ kind: "shell" as const, id: "b1", text: "sleep 25; echo done", running: true, status: "running" as const }];
 	const agents = [
 		{ kind: "agent" as const, taskId: "a1", text: "Read notes.txt and report after delay", model: "Sonnet 5", running: true },
 		{ kind: "agent" as const, taskId: "a2", text: "write a 300-word poem", model: "Haiku 4.5", running: false },
 	];
+
+	it("shows how a finished shell ended", () => {
+		const finished = [
+			{ kind: "shell" as const, id: "b2", text: "make", running: false, status: "failed" as const },
+			{ kind: "shell" as const, id: "b3", text: "ls", running: false, status: "completed" as const },
+		];
+		const out = renderTasksDialog({ shells: finished, agents: [], selected: 0, width: 100 }, paint).join("\n");
+		expect(out).toContain("✗ make   failed");
+		expect(out).toContain("✔ ls   done");
+	});
+
+	it("wraps its key hints on a narrow terminal instead of cutting Esc to close", () => {
+		const out = renderTasksDialog({ shells, agents, selected: 0, width: 30 }, paint);
+		expect(out.slice(-3).join(" ")).toContain("Esc to close");
+	});
 
 	it("groups shells, local agents and completed agents under Claude Code's headers", () => {
 		const out = renderTasksDialog({ shells, agents, selected: 0, width: 100 }, paint);

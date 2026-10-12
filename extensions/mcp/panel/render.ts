@@ -8,7 +8,7 @@
  * Only width-1 glyphs are used so cutPlainText's code-point count stays exact.
  */
 
-import { cutPlainText, padPlainText, panelTopRule, type RenderBlock as Block, windowBlocks } from "../../lib/tui-render.ts";
+import { cutPlainText, hintLines, padPlainText, panelTopRule, type RenderBlock as Block, windowBlocks } from "../../lib/tui-render.ts";
 import { actionsFor, type McpEntry, statusText } from "./model.ts";
 import { clampMcpCursor, detailEntry, type McpPanelState } from "./state.ts";
 
@@ -106,19 +106,23 @@ export function renderMcpPanel(input: McpRenderInput, paint: McpPaint): string[]
 	clampMcpCursor(state, entries);
 
 	const out: string[] = [panelTopRule(paint.fg, width)];
-	let footer: string;
+	// Hints wrap at their separators (hintLines); the list budget counts the rows.
+	const wrapFooter = (text: string) => hintLines(text, width - 1, " ");
+	let footer: string[];
 
 	if (state.detail) {
 		out.push("");
 		const detail = detailLines(input, paint);
 		out.push(...detail.lines);
-		footer = detail.footer;
+		footer = wrapFooter(detail.footer);
 	} else {
 		out.push(` ${paint.bold("Manage MCP servers")}`);
 		const count = `${entries.length} server${entries.length === 1 ? "" : "s"}${input.settled ? "" : " · connecting…"}`;
 		out.push(paint.fg("dim", cutPlainText(` ${count}`, width - 1)));
 
-		const footerReserve = 3 + input.notices.length + 1;
+		footer = wrapFooter("↑/↓ to navigate · Enter to confirm · Esc to cancel");
+		const noticeLines = input.notices.reduce((sum, notice) => sum + notice.split("\n").length, 0);
+		const footerReserve = 2 + footer.length + noticeLines + 1;
 		const budget = Math.max(1, height - out.length - footerReserve);
 		if (entries.length === 0) {
 			out.push("", paint.fg("dim", "  No MCP servers configured. Add them to .mcp.json or ~/.claude.json."));
@@ -129,13 +133,12 @@ export function renderMcpPanel(input: McpRenderInput, paint: McpPaint): string[]
 		}
 		out.push("");
 		out.push(paint.fg("dim", cutPlainText("  Servers are configured in .mcp.json or ~/.claude.json.", width - 1)));
-		footer = "↑/↓ to navigate · Enter to confirm · Esc to cancel";
 	}
 
 	for (const notice of input.notices) {
 		for (const line of notice.split("\n")) out.push(paint.fg("warning", cutPlainText(`  ${line}`, width - 1)));
 	}
 	out.push("");
-	out.push(paint.fg("dim", cutPlainText(` ${footer}`, width - 1)));
+	for (const line of footer) out.push(paint.fg("dim", line));
 	return out;
 }

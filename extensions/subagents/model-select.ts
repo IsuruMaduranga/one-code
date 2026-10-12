@@ -405,6 +405,9 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 		// there are none when the session price is unknown, so a cheap-tier pick
 		// never silently upgrades an unpriced session. Reuse the `contained` set
 		// computed above for the hot path.
+		// Experimental builds are never auto-selectable (model-tier.ts
+		// isAutoSelectable); a moving alias stays allowed here (Mistral serves
+		// most models only as `-latest`).
 		const cheaper = sameTierContainedCandidates(available, sessionModel, { contained, requireImageInput })[0];
 		if (cheaper) return { model: cheaper, source: "automatic", notices };
 	}

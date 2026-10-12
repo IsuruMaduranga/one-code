@@ -48,7 +48,7 @@
 
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { type CatalogSources, loadCatalogSources, MODELS_DEV_PROVIDER, type ModelsDevModel, type OpenRouterModel } from "./model-catalog-data.ts";
-import { BUILTIN_PROVIDER_POLICIES, baseModelId, DAY_MS, isMovingAlias, modelIdentity, stripSnapshotDate, vendorProfile } from "./model-policy.ts";
+import { BUILTIN_PROVIDER_POLICIES, baseModelId, DAY_MS, isExperimentalBuild, isMovingAlias, modelIdentity, stripSnapshotDate, vendorProfile } from "./model-policy.ts";
 import { oneCodeStateDir } from "./paths.ts";
 
 export const TINY_PARAMS = 40e9;
@@ -427,6 +427,7 @@ export function autoSelectSkipReason(model: CatalogModel, served: ReadonlySet<st
 	if (model.deprecated) return "deprecated";
 	if (!model.tools) return "cannot call tools";
 	if (model.nonTextOutput) return "not a text model";
+	if (isExperimentalBuild(model.id)) return "an experimental build";
 	return undefined;
 }
 

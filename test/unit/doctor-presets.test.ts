@@ -69,6 +69,7 @@ describe("computePresets", () => {
 			or("deepseek-v4-flash-0731", 0.065),
 			or("deepseek-v4-flash-0731:batch", 0.14),
 			or("deepseek-v4-flash-vision-exp", 0.22),
+			or("deepseek-v5-flash-exp", 0.1), // in no catalog: still never a preset
 			or("deepseek-v4-pro", 0.890358),
 			or("deepseek-v4-pro-0813", 1.12068),
 			or("deepseek-v4-pro-0813:batch", 1.32),
@@ -78,11 +79,11 @@ describe("computePresets", () => {
 		const session = catalog.find((m) => m.id === "deepseek/deepseek-v4-pro")!;
 		// V3.2 (and the deepseek-chat alias serving it) is superseded by V4 Flash,
 		// V3.1 by V3.2; snapshots collapse onto their undated alias; batch variants,
-		// the moving `~…-latest` alias and other vendors are out.
+		// the moving `~…-latest` alias, the experimental vision build and other
+		// vendors are out.
 		expect(presetPool(catalog, session).map((m) => m.id)).toEqual([
 			"deepseek/deepseek-r1",
 			"deepseek/deepseek-v4-flash",
-			"deepseek/deepseek-v4-flash-vision-exp",
 			"deepseek/deepseek-v4-pro",
 		]);
 		const { presets } = computePresets(catalog, session);

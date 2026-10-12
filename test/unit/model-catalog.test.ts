@@ -117,6 +117,11 @@ describe("the tier rules", () => {
 		expect(entry(models, "acme/mid").successors).toEqual(["acme/max-0902", "acme/max"]);
 	});
 
+	it("never auto-selects an experimental build, and says so", () => {
+		const models: FixtureModel[] = [{ id: "deepseek/deepseek-v4-flash-vision-exp", released: "2026-08-21", price: [0.4, 0.8] }];
+		expect(autoSelectSkipReason(entry(models, "deepseek/deepseek-v4-flash-vision-exp"), new Set())).toBe("an experimental build");
+	});
+
 	it("skips a superseded model only when the pool serves its successor", () => {
 		const models: FixtureModel[] = [
 			{ id: "anthropic/opus-new", released: "2026-09-22", price: [4, 20] },

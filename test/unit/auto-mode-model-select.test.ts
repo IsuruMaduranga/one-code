@@ -9,6 +9,8 @@ const model = (provider: string, id: string, input?: number, contextWindow?: num
 	({ provider, id, name: id, cost: input === undefined ? undefined : { input, output: input * 4 }, ...(contextWindow === undefined ? {} : { contextWindow }) }) as any;
 
 const pickFull = (available: any[], sessionModel: any) => classifierCandidates({ available, sessionModel });
+/** An OpenRouter model with a full cost record (cache-read price optional) and a 1M window. */
+const priced = (id: string, cost: { input: number; cacheRead?: number; output: number }) => ({ ...model("openrouter", id, cost.input, 1_000_000), cost }) as any;
 
 /**
  * One release date, so nothing supersedes anything: large, medium and mid are
@@ -114,14 +116,23 @@ describe("classifierCandidates: containment, tier and context floors", () => {
 	// A classifier call is mostly cached input, so a model dearer by list input
 	// price can be the cheaper screener (DeepSeek V3.2 against V4.1 Flash).
 	it("judges cheaper per classifier call, where cache reads dominate", () => {
-		const priced = (id: string, cost: { input: number; cacheRead?: number; output: number }) => ({ ...model("openrouter", id, cost.input, 1_000_000), cost }) as any;
-		const session = priced("qwen/qwen3.8-27b", { input: 0.3, output: 1.2 });
-		const cachedMax = priced("qwen/qwen3.8-max", { input: 1.2, cacheRead: 0.06, output: 6 });
+		const session = priced("qwen/qwen3.8-27b", { input: 0.3, cacheRead: 0.3, output: 1.2 }); // a cache read at no discount
+		const cachedMax = priced("qwen/qwen3.8-max", { input: 1.2, cacheRead: 0.03, output: 6 });
 		expect(classifierCallCost(cachedMax)!).toBeLessThan(classifierCallCost(session)!);
 		expect(pickFull([session, cachedMax], session).candidates).toEqual([{ model: cachedMax, source: "economical" }, { model: session, source: "session" }]);
 		// Without a cheap cache read the same list prices stay dearer per call.
 		const uncachedMax = priced("qwen/qwen3.8-max", { input: 1.2, output: 6 });
 		expect(pickFull([session, uncachedMax], session).candidates).toEqual([{ model: session, source: "session" }]);
+	});
+
+	// A session whose catalog lists no cache-read price would be overstated per
+	// call, so a dearer model could win; it is compared by list input price.
+	it("compares by list input price when the session has no cache-read price", () => {
+		const session = priced("qwen/qwen3.8-27b", { input: 0.3, output: 1.2 });
+		const cachedMax = priced("qwen/qwen3.8-max", { input: 1.2, cacheRead: 0.06, output: 6 });
+		expect(pickFull([session, cachedMax], session).candidates).toEqual([{ model: session, source: "session" }]);
+		const flash = priced("qwen/qwen3.8-flash", { input: 0.05, cacheRead: 0.01, output: 0.4 });
+		expect(pickFull([session, cachedMax, flash], session).candidates).toEqual([{ model: flash, source: "economical" }, { model: session, source: "session" }]);
 	});
 
 	it("prices a call at the measured shape, overstating a missing cache-read or output price", () => {

@@ -45,6 +45,8 @@ describe("shellRows", () => {
 		expect(rows.map((t) => t.id)).toEqual(["run", "fresh"]);
 		// A shell that finished a minute ago no longer holds the chip.
 		expect(shellRows([task({ status: "completed", finishedAt: NOW - 60_000 })], NOW)).toEqual([]);
+		// A finished shell with no timestamp never lingers (it would never expire).
+		expect(shellRows([task({ status: "failed", finishedAt: undefined })], NOW)).toEqual([]);
 	});
 });
 
@@ -93,6 +95,10 @@ describe("shell details in the Background dialog", () => {
 		expect(lines[8 + OUTPUT_BOX_ROWS]).toBe(`└${"─".repeat(38)}┘`);
 		expect(lines[9 + OUTPUT_BOX_ROWS]).toBe(`Showing ${OUTPUT_BOX_ROWS} lines`);
 		expect(strip(renderShellDetail(task(), 100, NOW, paint).at(-1)!)).toBe("← to go back · Esc/Enter/Space to close · x to stop");
+		// On a narrow terminal the hints wrap, so x to stop stays on screen.
+		const narrow = renderShellDetail(task(), 30, NOW, paint).map(strip);
+		expect(narrow.slice(-3).join(" · ")).toContain("x to stop");
+		for (const line of narrow.slice(-3)) expect(line.length).toBeLessThanOrEqual(30);
 	});
 
 	it("never offers x on a finished or stopped shell", () => {
@@ -117,12 +123,11 @@ describe("shell details in the Background dialog", () => {
 		expect(shellDetailKey(undefined, "x", false)).toBeUndefined();
 	});
 
-	it("goes back to the list once the shell is no longer running", () => {
+	it("keeps a finished shell's details, and goes back to the list once the shell is gone", () => {
 		const view = { mode: "shell" as const, id: "b1" };
-		expect(settleTasksView(view, { status: "running" })).toBe(view);
-		expect(settleTasksView(view, { status: "stopped" })).toEqual({ mode: "list" });
-		expect(settleTasksView(view, undefined)).toEqual({ mode: "list" });
-		expect(settleTasksView({ mode: "list" }, undefined)).toEqual({ mode: "list" });
+		expect(settleTasksView(view, true)).toBe(view);
+		expect(settleTasksView(view, false)).toEqual({ mode: "list" });
+		expect(settleTasksView({ mode: "list" }, false)).toEqual({ mode: "list" });
 	});
 });
 

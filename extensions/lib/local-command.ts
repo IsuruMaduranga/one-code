@@ -32,7 +32,7 @@
  * memory, not written to the session file as CC does — a `--resume` drops them.
  */
 
-import { announceArgumentHint, type HintEmitter } from "./argument-hints.ts";
+import { announceArgumentHint, type HintEmitter, withoutExactMatch } from "./argument-hints.ts";
 import { REMINDER_CHANNEL, type ReminderPayload } from "./reminders.ts";
 
 /** The slice of pi's ExtensionAPI the announcer needs (its event bus). */
@@ -114,7 +114,9 @@ type LocalCommandOptions<O extends CommandOptions> = Omit<O, "handler"> & { argu
  * a breadcrumb queued after `sendUserMessage` would miss that message. `/clear`
  * is the one exception — it announces from the NEW session's `session_start`
  * (see clear/index.ts) and registers plainly. `argumentHint` is the prompt's
- * dim placeholder for the command's argument (lib/argument-hints.ts).
+ * dim placeholder for the command's argument (lib/argument-hints.ts). Its
+ * completions leave out an exact match, so a fully typed argument runs on the
+ * first Enter (`withoutExactMatch`).
  */
 export function registerLocalCommand<O extends CommandOptions>(
 	pi: ReminderEmitter & HintEmitter & { registerCommand(name: string, options: O): void },
@@ -123,8 +125,10 @@ export function registerLocalCommand<O extends CommandOptions>(
 ): void {
 	const { argumentHint, reportsResult, ...rest } = options;
 	if (argumentHint) announceArgumentHint(pi, name, argumentHint);
+	const complete = (rest as { getArgumentCompletions?: Parameters<typeof withoutExactMatch>[0] }).getArgumentCompletions;
 	pi.registerCommand(name, {
 		...(rest as unknown as O),
+		...(complete ? { getArgumentCompletions: withoutExactMatch(complete) } : {}),
 		handler: async (args: string, ctx: Parameters<O["handler"]>[1]) => {
 			if (!reportsResult) {
 				announceLocalCommand(pi, { name, args });

@@ -19,7 +19,7 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { classifierCandidates } from "../auto-mode/model-select.ts";
 import { autoSelectable, catalogModelFor } from "../lib/model-catalog.ts";
-import { isDatedDuplicate, modelsContainedToSession, modelSpec, pricedInput, supportsImageInput } from "../lib/model-policy.ts";
+import { isDatedDuplicate, isExperimentalBuild, modelsContainedToSession, modelSpec, pricedInput, supportsImageInput } from "../lib/model-policy.ts";
 import { intrinsicTier, type PromptTier, servedCatalogIds } from "../lib/model-tier.ts";
 import { newerModelSuggestion } from "../lib/newer-model.ts";
 import { resolveSubagentModel } from "../subagents/model-select.ts";
@@ -78,7 +78,8 @@ export function presetPool(available: Model<Api>[], sessionModel: Model<Api>): M
 		// to call tools, not a text model: model-catalog.ts), whatever its tier.
 		// A model no catalog knows stays, judged by its tier alone.
 		(m) => {
-			if (pricedInput(m) === undefined || outdated.has(identity(m))) return false;
+			// An experimental build is out whether or not a catalog knows it.
+			if (pricedInput(m) === undefined || outdated.has(identity(m)) || isExperimentalBuild(m.id)) return false;
 			const entry = catalogModelFor(m);
 			return !entry || autoSelectable(entry, served);
 		},

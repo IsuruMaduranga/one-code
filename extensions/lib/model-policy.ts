@@ -276,8 +276,8 @@ export function isMovingAlias(id: string): boolean {
 
 /**
  * An experimental build (`deepseek-v4-flash-vision-exp`, `tev1-4b-experimental`):
- * a research variant, never picked automatically as a screener or suggested as
- * an upgrade. `preview` is deliberately not matched: Google ships mainline
+ * a research variant, never picked automatically (as a screener or the
+ * subagent default) or suggested as an upgrade. `preview` is deliberately not matched: Google ships mainline
  * Gemini models under it (`gemini-3-flash-preview`).
  */
 export function isExperimentalBuild(id: string): boolean {
@@ -292,10 +292,14 @@ export function hasCatalogContextWindow(model: { contextWindow?: number }): mode
 /** One day in milliseconds, for the release-date arithmetic in model-catalog.ts. */
 export const DAY_MS = 86_400_000;
 
-/** Non-positive values are catalog sentinels/unpriced, not evidence of being free. */
+/** A catalog price, or undefined: non-positive values are sentinels/unpriced, not evidence of being free. */
+function catalogPrice(value: number | undefined): number | undefined {
+	return typeof value === "number" && value > 0 ? value : undefined;
+}
+
+/** The model's list input price, or undefined when it is unpriced. */
 export function pricedInput(model: Model<Api>): number | undefined {
-	const input = model.cost?.input;
-	return typeof input === "number" && input > 0 ? input : undefined;
+	return catalogPrice(model.cost?.input);
 }
 
 /** A classifier call's measured shape: the cached ruleset and transcript, the new turn, the verdict. */
@@ -310,15 +314,28 @@ export const CLASSIFIER_CALL_TOKENS = { cachedInput: 28_000, freshInput: 2_000, 
 export function classifierCallCost(model: Model<Api>): number | undefined {
 	const input = pricedInput(model);
 	if (input === undefined) return undefined;
-	const priced = (value: number | undefined) => (typeof value === "number" && value > 0 ? value : input);
+	const priced = (value: number | undefined) => catalogPrice(value) ?? input;
 	const { cachedInput, freshInput, output } = CLASSIFIER_CALL_TOKENS;
 	return (priced(model.cost?.cacheRead) * cachedInput + input * freshInput + priced(model.cost?.output) * output) / 1_000_000;
 }
 
-/** How many times `model`'s classifier call costs `base`'s, or undefined when either price is unknown or `base` is free. */
+/**
+ * How classifier candidates are priced against `base` (the session model):
+ * per classifier call, unless `base` lists no cache-read price. Then its
+ * per-call cost would be overstated (a quarter of OpenRouter's priced models
+ * list none) and a dearer model could win, so both sides compare by list
+ * input price. The selector and the cost warnings share this, so "cheaper per
+ * call" means one thing everywhere.
+ */
+export function classifierPrice(base: Model<Api>): (model: Model<Api>) => number | undefined {
+	return catalogPrice(base.cost?.cacheRead) === undefined ? pricedInput : classifierCallCost;
+}
+
+/** How many times `model`'s classifier call costs `base`'s (priced by `classifierPrice(base)`), or undefined when either price is unknown. */
 export function classifierCostRatio(model: Model<Api>, base: Model<Api>): number | undefined {
-	const cost = classifierCallCost(model);
-	const baseCost = classifierCallCost(base);
+	const price = classifierPrice(base);
+	const cost = price(model);
+	const baseCost = price(base);
 	return cost !== undefined && baseCost !== undefined && baseCost > 0 ? cost / baseCost : undefined;
 }
 

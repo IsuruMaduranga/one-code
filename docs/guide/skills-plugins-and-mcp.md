@@ -11,12 +11,14 @@ manage them.
 An Agent Skill is a packaged set of instructions for a kind of task. One
 Code discovers skills from these places, in order of precedence:
 
-1. `.claude/skills/` in the project
-2. `~/.claude/skills/` and `~/.agents/skills/`
-3. Skills from installed plugins
-4. The bundled catalog
+1. `~/.claude/skills/` and `~/.agents/skills/`, your own skills for every
+   project
+2. `.claude/skills/` and `.agents/skills/` in the project
+3. The bundled catalog
 
-A skill of the same name earlier in the list wins.
+A skill of the same name earlier in the list wins, so your own copy of a
+skill beats the one a repository ships. Skills from installed plugins keep
+their plugin prefix, so they never clash with these.
 
 The model calls a skill with the `skill` tool when a task matches its
 description. You can also run one yourself by typing its name as a slash
@@ -65,7 +67,8 @@ Six of Claude Code's built-in skills ship with One Code:
 - `artifact-design`: the page rules the model follows before publishing an
   artifact. See [Artifacts](tools.md#artifacts).
 
-A skill of the same name in your own `.claude/skills/` takes precedence.
+A skill of the same name in your user or project skills folder takes
+precedence over the bundled one.
 
 ### Skills not bundled
 

@@ -106,7 +106,7 @@ import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../permissions
 import { AGENT_VIEW_CHANNEL, type AgentViewAnnouncement, agentViewTarget, userMessageForAgent } from "../lib/agent-view.ts";
 import { isKeyRelease, keyId, keyText } from "../lib/key-input.ts";
 import { moveTasksSelection, renderShellDetail, renderTasksDialog, settleTasksView, shellDetailKey, tasksItems, type TasksView } from "./tasks-dialog.ts";
-import { reduceShellKey } from "./shell-panel.ts";
+import { reduceShellKey, shellRows } from "./shell-panel.ts";
 import { trackShellTasks } from "../lib/shell-tasks.ts";
 import { createMarkdownProse } from "./prose.ts";
 import { asScrollableViewport, ViewportMirror } from "./viewport-mirror.ts";
@@ -2767,7 +2767,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		if (!canShowCustomUi(ctx)) {
 			if (ctx.mode !== "rpc") return;
 			const lines = [
-				...shellTasks.running().map((task) => `- ${task.id} [shell, running] ${task.command ?? task.description}`),
+				...shellRows(shellTasks.list(), Date.now()).map((task) => `- ${task.id} [shell, ${task.status}] ${task.command ?? task.description}`),
 				...liveRuns.list().filter((run) => run.depth === 0).map((run) => `- ${run.taskId} [${run.name}, ${run.status}] ${run.label}`),
 			];
 			ctx.ui.notify([
@@ -2779,7 +2779,14 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		}
 		const build = () => {
 			const runs = liveRuns.list().filter((run) => run.depth === 0);
-			const shells = shellTasks.running().map((task) => ({ kind: "shell" as const, id: task.id, text: task.command ?? task.description, running: true }));
+			// The shells the chip counts, so Enter on a chip whose shell just finished finds it.
+			const shells = shellRows(shellTasks.list(), Date.now()).map((task) => ({
+				kind: "shell" as const,
+				id: task.id,
+				text: task.command ?? task.description,
+				running: task.status === "running",
+				status: task.status,
+			}));
 			const agents = [
 				...runs.filter((run) => run.status === "running"),
 				...runs.filter((run) => run.status !== "running" && run.viewed),
@@ -2810,9 +2817,15 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			};
 			const unsubscribe = liveRuns.subscribe(refresh);
 			const unsubscribeShells = shellTasks.subscribe(refresh);
-			// A shell's details follow its runtime and output once a second.
+			// A running shell's details follow its runtime and output once a second,
+			// and the list drops a finished shell once its linger window ends, as
+			// the chip does (a rebuild only when that row set changes).
 			const ticker = setInterval(() => {
-				if (dialogView.mode === "shell") tui.requestRender();
+				if (dialogView.mode === "shell") {
+					if (shellById(dialogView.id)?.status === "running") tui.requestRender();
+				} else if (snapshot.shells.some((shell) => !shell.running) && shellRows(shellTasks.list(), Date.now()).length !== snapshot.shells.length) {
+					refresh();
+				}
 			}, 1000);
 			ticker.unref?.();
 			const finish = (value: string | null) => {
@@ -2824,7 +2837,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			return {
 				render: (width: number) => {
 					const task = dialogView.mode === "shell" ? shellById(dialogView.id) : undefined;
-					dialogView = settleTasksView(dialogView, task);
+					dialogView = settleTasksView(dialogView, task !== undefined);
 					if (dialogView.mode === "shell" && task) {
 						return ["", ...renderShellDetail(task, width - 2, Date.now(), paint).map((line) => `  ${line}`), ""].map((line) => truncateLine(line, width));
 					}
