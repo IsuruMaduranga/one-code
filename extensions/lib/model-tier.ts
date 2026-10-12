@@ -94,7 +94,8 @@ function isAnthropicFrontier(model: Model<Api>): boolean {
 /**
  * OpenAI first-party frontier gate: the GPT-6 Astra and Sol lines and later
  * majors (`gpt-6-astra`, `gpt-6-sol`, `gpt-6.1-sol-pro`), served by OpenAI
- * itself (the `openai`, `openai-codex` and `azure-openai-responses` providers).
+ * itself (the `openai`, `openai-codex` and `azure` providers; `azure-openai-responses`
+ * before pi 1.0.3).
  * GPT-5.x Sol and Terra, and every Luna, stay below it (decided 2026-09-25:
  * Astra and Sol 6 are the OpenAI models comparable to Fable and Opus 5). A
  * gateway-proxied copy can't be verified, the same rule as Claude above.
