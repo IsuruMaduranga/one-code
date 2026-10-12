@@ -22,7 +22,7 @@ function sources(dir: string): string[] {
 const REGISTRATION = /name: "([a-z_]+)",\n(?:[^\n]*\n){0,2}?\s*\.\.\.ccToolRenderers\("([^"]+)"/g;
 
 describe("agent view tool labels", () => {
-	const pairs = sources(EXTENSIONS).flatMap((file) => [...readFileSync(file, "utf8").matchAll(REGISTRATION)].map((m) => ({ name: m[1], label: m[2] })));
+	const pairs = sources(EXTENSIONS).flatMap((file) => [...readFileSync(file, "utf8").replace(/\r\n/g, "\n").matchAll(REGISTRATION)].map((m) => ({ name: m[1], label: m[2] })));
 
 	it("finds the registrations it checks", () => {
 		expect(pairs.length).toBeGreaterThan(15);

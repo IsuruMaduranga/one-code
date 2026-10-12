@@ -34,6 +34,7 @@ import { withKeepAlive } from "../lsp/keep-alive.ts";
 import { bashParserReady } from "./bash-parser.ts";
 import { findProjectRoot } from "./git.ts";
 import { SUBAGENT_HANDBACK } from "./subagent-handback.ts";
+import { autoMemoryEnabled } from "./auto-memory.ts";
 import { memoryDir } from "./memory.ts";
 import type { PowerShellParse } from "./powershell-parser.ts";
 import { usesClaudeCodeFastPaths } from "./model-tier.ts";
@@ -156,8 +157,9 @@ export function permissionGateFactory(
 	);
 	// Memory writes work inside agent sessions too — otherwise the protected
 	// `.claude` check turns them into "needs interactive approval" and the
-	// harness blocks its own feature (same rationale as in decide()).
-	const memoryDirPath = memoryDir(home, projectRoot);
+	// harness blocks its own feature (same rationale as in decide()). With
+	// auto-memory off the folder gets no grant, as in the parent's gate.
+	const memoryDirPath = autoMemoryEnabled(projectRoot) ? memoryDir(home, projectRoot) : undefined;
 	const protectedDirs = runtimeProtectedDirs();
 	const secretPaths = runtimeSecretPaths(home);
 

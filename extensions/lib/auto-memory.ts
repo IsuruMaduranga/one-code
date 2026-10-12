@@ -39,12 +39,17 @@ export function autoMemoryFromEnv(env: Record<string, string | undefined> = proc
  * Default on.
  */
 export function savedAutoMemory(cwd: string, home: string = os.homedir()): boolean {
-	let enabled = true;
+	return savedAutoMemorySource(cwd, home).enabled;
+}
+
+/** `savedAutoMemory` and the settings file that decides it (undefined: the default). */
+export function savedAutoMemorySource(cwd: string, home: string = os.homedir()): { enabled: boolean; path?: string } {
+	let decided: { enabled: boolean; path?: string } = { enabled: true };
 	for (const [, path] of settingsSources(cwd, home)) {
 		const value = readSettingsFile(path)?.[AUTO_MEMORY_KEY];
-		if (typeof value === "boolean") enabled = value;
+		if (typeof value === "boolean") decided = { enabled: value, path };
 	}
-	return enabled;
+	return decided;
 }
 
 export function readAutoMemory(cwd: string, home: string = os.homedir(), env: Record<string, string | undefined> = process.env): boolean {

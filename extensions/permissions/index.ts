@@ -490,6 +490,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		autoConfig = undefined; // reloaded lazily
 		classifierState.pinned = undefined;
 		classifierState.rejected.clear();
+		// A subset of `rejected`: kept alone it would block the retry and blame a
+		// refusal from the previous choice.
+		classifierState.refused.clear();
 		classifierState.notified.clear();
 		classifierState.timeoutStreak = 0;
 		classifierState.chainCache = undefined;

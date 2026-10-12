@@ -34,7 +34,7 @@ import {
 import { type ConfigMode, CONFIG_MODE_KEY, claudeSourcesOn, configMode, configModeFromEnv, savedConfigMode } from "../lib/config-mode.ts";
 import { isClaudeLocation } from "../lib/claude-context.ts";
 import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
-import { claudeConfigDir, comparablePath, isPathAtOrUnder, oneCodeStateDir, tryRealpath } from "../lib/paths.ts";
+import { claudeConfigDir, comparablePath, isPathAtOrUnder, oneCodeStateDir, tildify, tryRealpath } from "../lib/paths.ts";
 import { resolveThroughLinks } from "../auto-mode/paths.ts";
 import { resolveToolPath } from "../lib/tool-path.ts";
 import { tryReadFile } from "../lib/plugins.ts";
@@ -43,7 +43,7 @@ import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "
 import { buildMemoryEntries, entryName, type MemoryEntry } from "./entries.ts";
 import { editorHint, memoryDisplayPath, openPath } from "./open-external.ts";
 import { applyMemoryKey, type AutoMemoryView, decodeMemoryKey, initialMemoryState, type ModeView, renderMemoryPanel, settingChanges } from "./panel.ts";
-import { AUTO_MEMORY_KEY, autoMemoryEnabled, autoMemoryFromEnv, savedAutoMemory } from "../lib/auto-memory.ts";
+import { AUTO_MEMORY_KEY, autoMemoryEnabled, autoMemoryFromEnv, savedAutoMemory, savedAutoMemorySource } from "../lib/auto-memory.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 import { canShowCustomUi } from "../lib/headless-output.ts";
 import { panelUi } from "../lib/panel-focus.ts";
@@ -263,9 +263,14 @@ function openMemoryPanel(
 						return;
 					}
 					try {
-						saveUserSetting(AUTO_MEMORY_KEY, !autoMemory.saved);
+						const wanted = !autoMemory.saved;
+						saveUserSetting(AUTO_MEMORY_KEY, wanted);
 						// Re-read the ladder: a project or managed file can still outrank the user file.
-						autoMemory.saved = savedAutoMemory(ctx.cwd);
+						const decided = savedAutoMemorySource(ctx.cwd);
+						autoMemory.saved = decided.enabled;
+						if (decided.enabled !== wanted && decided.path) {
+							ctx.ui.notify(`${tildify(decided.path, os.homedir())} sets ${AUTO_MEMORY_KEY}: ${decided.enabled}, which outranks your user setting. Change it there.`, "info");
+						}
 					} catch (error) {
 						ctx.ui.notify(`Couldn't save the auto-memory setting: ${error instanceof Error ? error.message : error}`, "error");
 					}

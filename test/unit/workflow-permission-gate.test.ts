@@ -1,7 +1,9 @@
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { resetAutoMemoryForTest } from "../../extensions/lib/auto-memory.ts";
+import { memoryDir } from "../../extensions/lib/memory.ts";
 import { localGateMode } from "../../extensions/lib/permission-gate.ts";
 import { powerShellSpawn } from "../../extensions/lib/shell-spawn.ts";
 import { sessionResultsDir } from "../../extensions/lib/persisted-output.ts";
@@ -35,6 +37,24 @@ describe("permissionGateFactory", () => {
 		// A Read allow rule covering the path still clears it.
 		const allowed = buildGate({ permissions: { allow: [outsideRule] } });
 		expect(await allowed({ toolName: "read", input: { path: outsideFile } })).toBeUndefined();
+	});
+
+	it("grants the memory folder only while auto-memory is on", async () => {
+		try {
+			for (const enabled of [true, false]) {
+				resetAutoMemoryForTest(enabled);
+				// Real paths: the gate compares the resolved subject with the folder.
+				const cwd = realpathSync.native(mkdtempSync(join(os.tmpdir(), "gate-cwd-")));
+				const home = realpathSync.native(mkdtempSync(join(os.tmpdir(), "gate-home-")));
+				const dir = memoryDir(home, cwd);
+				mkdirSync(dir, { recursive: true });
+				const handler = buildGateHarness.rebuild(cwd, home);
+				const result = await handler({ toolName: "write", input: { path: join(dir, "fact.md"), content: "x" } });
+				expect(result?.block ?? false, result?.reason).toBe(!enabled);
+			}
+		} finally {
+			resetAutoMemoryForTest();
+		}
 	});
 
 	it("lets the agent read back its own persisted tool output (sessionResultsDir)", async () => {

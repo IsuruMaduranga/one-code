@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { autoMemoryEnabled, autoMemoryFromEnv, readAutoMemory, resetAutoMemoryForTest, savedAutoMemory } from "../../extensions/lib/auto-memory.ts";
+import { autoMemoryEnabled, autoMemoryFromEnv, readAutoMemory, resetAutoMemoryForTest, savedAutoMemory, savedAutoMemorySource } from "../../extensions/lib/auto-memory.ts";
 import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
 import { readMemoryIndex } from "../../extensions/lib/memory-index.ts";
 import { projectMemoryDir } from "../../extensions/lib/memory.ts";
@@ -59,6 +59,8 @@ describe("savedAutoMemory", () => {
 		write(join(home, ".onecode", "settings.json"), { autoMemoryEnabled: false });
 		write(join(cwd, ".claude", "settings.json"), { autoMemoryEnabled: true });
 		expect(savedAutoMemory(cwd, home)).toBe(true);
+		// The /memory toggle names that file when it outranks the user's choice.
+		expect(savedAutoMemorySource(cwd, home)).toEqual({ enabled: true, path: join(cwd, ".claude", "settings.json") });
 	});
 
 	it("reads no Claude Code file in independent mode", () => {
