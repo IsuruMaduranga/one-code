@@ -209,6 +209,29 @@ describe("exit_plan_mode and the mode before planning (PERMISSIONS-REVIEW-2026-0
 		expect(modeRequests).toHaveLength(0);
 	});
 
+	it("an aborted turn closes the approval as a cancel instead of leaving it open", async () => {
+		const closedWith: unknown[] = [];
+		const controller = new AbortController();
+		const custom = vi.fn(
+			(factory: ViewerFactory) =>
+				new Promise((resolve) => {
+					const component = factory({ requestRender: () => {} }, {}, {}, (v) => {
+						closedWith.push(v);
+						resolve(v);
+					});
+					component.render(120);
+					controller.abort();
+				}),
+		);
+		const ctx = createFakeCtx({ cwd: stateDir, hasUI: true, modelRegistry: { getAvailable: () => [] }, ui: { custom } });
+		await fake.fireOne("session_start", {}, ctx);
+		await enterPlanWithPlanText(ctx);
+		modeRequests.length = 0;
+		await fake.tools.get("exit_plan_mode")!.execute("t9", {}, controller.signal, undefined, ctx);
+		expect(closedWith).toEqual([null]);
+		expect(modeRequests).toHaveLength(0);
+	});
+
 	it("a blank keep-planning answer reopens the approval", async () => {
 		const custom = pressEach(["3", "2"]);
 		const ctx = createFakeCtx({ cwd: stateDir, hasUI: true, modelRegistry: { getAvailable: () => [] }, ui: { custom, input: vi.fn(async () => "") } });

@@ -105,8 +105,10 @@ export function isTransportFailure(message: string): boolean {
  * model in a block, that advice invites rephrasing the call past the gate.
  */
 export function providerErrorSummary(message: string): string {
-	const cut = message.search(/[.!]\s+(please\b|if this seems|try\b|you can\b|learn more|see\b)/i);
-	return (cut >= 0 ? message.slice(0, cut + 1) : message).replace(/:?\s*https?:\/\/\S+/g, "").trim();
+	// Advice follows a sentence end, a colon or semicolon, or a line break.
+	const cut = message.search(/(?:[.!:;]\s+|\n\s*)(please\b|if this seems|try\b|you can\b|learn more|see\b)/i);
+	const kept = cut >= 0 ? message.slice(0, cut + 1) : message;
+	return kept.replace(/:?\s*https?:\/\/\S+/g, "").trim().replace(/[:;]$/, "");
 }
 
 /** A provider rejected the input window, not the action's safety or output limit. */

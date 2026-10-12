@@ -294,7 +294,19 @@ export default function planModeExtension(pi: ExtensionAPI) {
 			const maxVisible = 12;
 			let offset = 0;
 			let selected: PlanChoice = initialPlanChoice(options);
-			const showDialog = (): Promise<PlanChoice | null> => !canShowCustomUi(ctx) ? selectPlanChoice(ctx.ui, plan, path, choices, signal) : ctx.ui.custom<PlanChoice | null>((tui, theme, _keybindings, done) => {
+			const showDialog = (): Promise<PlanChoice | null> => !canShowCustomUi(ctx) ? selectPlanChoice(ctx.ui, plan, path, choices, signal) : ctx.ui.custom<PlanChoice | null>((tui, theme, _keybindings, close) => {
+				// An aborted turn closes the dialog as a cancel; a choice or a cancel
+				// drops the abort listener. Either way the dialog settles once.
+				let settled = false;
+				const onAbort = () => done(null);
+				const done = (choice: PlanChoice | null) => {
+					if (settled) return;
+					settled = true;
+					signal?.removeEventListener("abort", onAbort);
+					close(choice);
+				};
+				if (signal?.aborted) queueMicrotask(onAbort);
+				else signal?.addEventListener("abort", onAbort, { once: true });
 				const paint = safeThemePaint(theme);
 				let lineCount = 0;
 				// The dialog stays open while exit_plan_mode runs, so pi's working

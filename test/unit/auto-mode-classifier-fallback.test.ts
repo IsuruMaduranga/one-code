@@ -448,6 +448,14 @@ describe("providerErrorSummary", () => {
 		);
 		expect(providerErrorSummary("500 internal server error")).toBe("500 internal server error");
 	});
+
+	it("drops advice after a colon, a semicolon or a line break", () => {
+		expect(providerErrorSummary("Request blocked: please rephrase and retry")).toBe("Request blocked");
+		expect(providerErrorSummary("Content filtered; try a different prompt")).toBe("Content filtered");
+		expect(providerErrorSummary("Content filtered\nYou can appeal at the help center")).toBe("Content filtered");
+		// A colon inside the finding itself stays.
+		expect(providerErrorSummary("Codex error: Invalid prompt")).toBe("Codex error: Invalid prompt");
+	});
 });
 
 describe("isModelUnavailableError: quota wording", () => {
