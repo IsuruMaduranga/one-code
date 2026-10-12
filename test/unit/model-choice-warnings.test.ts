@@ -1,7 +1,7 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 import { classifierCandidates } from "../../extensions/auto-mode/model-select.ts";
-import { chosenModelWarnings } from "../../extensions/lib/model-choice-warnings.ts";
+import { chosenModelWarnings, costRatioText, isNotablyCostlier } from "../../extensions/lib/model-choice-warnings.ts";
 import { setModelTierOverridesForTest } from "../../extensions/lib/model-tier.ts";
 import { pinReleaseDates } from "./catalog-fixture.ts";
 
@@ -113,5 +113,15 @@ describe("classifierCandidates with autoMode.classifierModel", () => {
 		const stale = classifierCandidates({ available: [session, other], sessionModel: session, configured: "anthropic/claude-sonnet-5-5", configuredSetForContainment: "anthropic" });
 		expect(stale.candidates.some((entry) => entry.model === other)).toBe(false);
 		expect(stale.notices[0]).toMatchObject({ level: "warning", text: expect.stringContaining("was set for a different provider") });
+	});
+});
+
+describe("isNotablyCostlier", () => {
+	it("warns only for a ratio that reads above 1 times", () => {
+		expect(isNotablyCostlier(1.04)).toBe(false);
+		expect(costRatioText(1.04)).toBe("1 times");
+		expect(isNotablyCostlier(1.05)).toBe(true);
+		expect(costRatioText(1.05)).toBe("1.1 times");
+		expect(isNotablyCostlier(undefined)).toBe(false);
 	});
 });

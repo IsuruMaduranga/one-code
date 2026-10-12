@@ -49,6 +49,11 @@ export function costRatioText(ratio: number): string {
 	return `${ratio < 10 ? Math.round(ratio * 10) / 10 : Math.round(ratio)} times`;
 }
 
+/** A cost ratio worth a warning: one that `costRatioText` shows above "1 times". */
+export function isNotablyCostlier(ratio: number | undefined): ratio is number {
+	return ratio !== undefined && ratio >= 1.05;
+}
+
 const COMMAND: Record<ChosenModelRole, string> = { subagent: "/subagent", classifier: "/auto-mode model" };
 const LABEL: Record<ChosenModelRole, string> = { subagent: "subagent default", classifier: "auto-mode classifier" };
 
@@ -108,7 +113,7 @@ export function chosenModelWarnings({
 		}
 		if (role === "classifier") {
 			const ratio = classifierCostRatio(chosen, sessionModel);
-			if (ratio !== undefined && ratio > 1) {
+			if (isNotablyCostlier(ratio)) {
 				warnings.push({
 					kind: "costlier",
 					text:

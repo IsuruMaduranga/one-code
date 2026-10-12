@@ -540,6 +540,15 @@ describe("classify: a provider that refuses the classifier's prompt", () => {
 		expect(completeMock.mock.calls.map((call) => call[0])).toEqual([sessionModel]);
 	});
 
+	it("ends as a timeout, not as no classifier left, when another candidate only timed out on this call", async () => {
+		completeMock.mockImplementation(async (m: any) => (m.id === miniModel.id ? abortedReply() : refusal()));
+		const { deps, notices } = makeDeps();
+		const verdict = await classify(request, deps);
+		expect(verdict.tier).toBe("timeout");
+		expect(deps.state.rejected.has(`${miniModel.provider}/${miniModel.id}`)).toBe(false);
+		expect(notices.some((notice) => notice.startsWith("Auto mode has no classifier left"))).toBe(false);
+	});
+
 	it("stops with no verdict when no other model can screen, and does not ask the refusing model again", async () => {
 		const { deps, notices } = makeDeps({
 			registry: {

@@ -24,7 +24,7 @@ import { appendFileSync } from "node:fs";
 import { cleanupSessionResources, isContextOverflow, type Model, type Api, type AssistantMessage, type ThinkingLevel } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
-import { costRatioText } from "../lib/model-choice-warnings.ts";
+import { costRatioText, isNotablyCostlier } from "../lib/model-choice-warnings.ts";
 import { modeCycleKey } from "../lib/keys.ts";
 import { classifierCostRatio, forcedReasoningLevel, isReasoningMandatoryError, modelSpec as spec, reasoningRetryLevel } from "../lib/model-policy.ts";
 import type { AutoModeConfig } from "./config.ts";
@@ -633,13 +633,18 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 				reject(key);
 				deps.state.refused.add(key);
 				const next = queue[0]?.model;
-				if (!next) return refusalStop(deps, unusable);
+				// A candidate that timed out on this call is still eligible: end the
+				// chain as a timeout (after the loop), not as "no classifier left".
+				if (!next) {
+					if (sawTimeout) continue;
+					return refusalStop(deps, unusable);
+				}
 				const ratio = classifierCostRatio(next, model);
 				notifyOnce(
 					deps,
 					`refused:${key}`,
 					`${key} refused the auto-mode classifier's prompt twice as a possible usage-policy violation, so auto mode screens calls with ` +
-						`${spec(next)} for the rest of this session${ratio !== undefined && ratio > 1 ? `, at about ${costRatioText(ratio)} the cost per call` : ""}. ` +
+						`${spec(next)} for the rest of this session${isNotablyCostlier(ratio) ? `, at about ${costRatioText(ratio)} the cost per call` : ""}. ` +
 						"Choose another classifier with /auto-mode model <provider/id>.",
 					"warning",
 				);
