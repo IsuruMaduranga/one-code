@@ -101,6 +101,21 @@ export function deferredAddendumText(added: readonly string[]): string {
 	return [ADDENDUM_HEAD, ...added].join("\n");
 }
 
+/** The loader every deferred tool sits behind. */
+export const TOOL_SEARCH = "tool_search";
+
+/**
+ * Whether deferral applies at all: `tool_search` is among pi's registered
+ * tools. A `--tools` allowlist that leaves it out (or `--exclude-tools
+ * tool_search`) unregisters it, and since pi 1.0.4 the allowlist keeps the
+ * `mcp__*` tools registered unless an entry names one (findings §66). Without
+ * the loader nothing can be loaded, so no tool is deferred or listed: the
+ * tools the allowlist kept stay as pi activated them.
+ */
+export function deferralEnabled(tools: readonly { name: string }[]): boolean {
+	return tools.some((tool) => tool.name === TOOL_SEARCH);
+}
+
 /**
  * Whether Anthropic accepts client-side `tool_reference` blocks for this model,
  * with the model's own compat flag winning: first-party Anthropic, Claude 4.5
@@ -144,7 +159,7 @@ export function toolSearchLoads(branch: readonly SessionEntry[]): Map<string, st
 	}
 	return loads;
 }
-const TOOL_SEARCH_NAMES: ReadonlySet<string> = new Set(["tool_search"]);
+const TOOL_SEARCH_NAMES: ReadonlySet<string> = new Set([TOOL_SEARCH]);
 
 type WireTool = Record<string, unknown> & { name: string };
 type WireBlock = Record<string, unknown> & { type?: unknown };

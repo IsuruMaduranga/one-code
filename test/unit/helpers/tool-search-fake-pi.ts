@@ -15,7 +15,7 @@ export interface Reminder {
 
 export function makeToolSearchFakePi(initialActive: string[] = []) {
 	const busHandlers = new Map<string, Array<(data: unknown) => void>>();
-	const lifecycleHandlers = new Map<string, Array<(event: unknown, ctx?: unknown) => void>>();
+	const lifecycleHandlers = new Map<string, Array<(event: unknown, ctx?: unknown) => unknown>>();
 	const reminders: Reminder[] = [];
 	let active: string[] = initialActive;
 	const allTools: Array<{ name: string; description: string }> = [];
@@ -33,22 +33,24 @@ export function makeToolSearchFakePi(initialActive: string[] = []) {
 				for (const h of busHandlers.get(channel) ?? []) h(data);
 			},
 		},
-		on(event: string, handler: (event: unknown, ctx?: unknown) => void) {
+		on(event: string, handler: (event: unknown, ctx?: unknown) => unknown) {
 			const list = lifecycleHandlers.get(event) ?? [];
 			list.push(handler);
 			lifecycleHandlers.set(event, list);
 		},
-		/** `ctx` is optional: most tests need none; a session_start with a transcript passes a fake sessionManager. */
-		fire(event: string, payload: unknown, ctx?: unknown) {
-			for (const h of lifecycleHandlers.get(event) ?? []) h(payload, ctx);
+		/** `ctx` is optional: most tests need none; a session_start with a transcript passes a fake sessionManager. Returns each handler's result. */
+		fire(event: string, payload: unknown, ctx?: unknown): unknown[] {
+			return (lifecycleHandlers.get(event) ?? []).map((h) => h(payload, ctx));
 		},
 		getAllTools: () => allTools,
 		getActiveTools: () => active,
 		setActiveTools: (names: string[]) => {
 			active = names;
 		},
-		registerTool: (tool: { name: string; execute: (id: string, params: unknown) => Promise<unknown> }) => {
+		/** Registered tools join getAllTools, as in pi (deferral keys on tool_search being there). */
+		registerTool: (tool: { name: string; description?: string; execute: (id: string, params: unknown) => Promise<unknown> }) => {
 			registered.set(tool.name, tool);
+			allTools.push({ name: tool.name, description: tool.description ?? "" });
 		},
 		registerCommand: () => {},
 	};
