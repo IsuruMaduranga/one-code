@@ -61,6 +61,7 @@ import {
 	pricedInput,
 	supportsImageInput,
 } from "../lib/model-policy.ts";
+import { pairedModel } from "../lib/model-pairings.ts";
 import { atLeastTier, economicalContainedCandidates, intrinsicTier, type PromptTier, sameTierContainedCandidates } from "../lib/model-tier.ts";
 
 /**
@@ -401,10 +402,16 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 	// spends the saving on retries. It excludes unpriced and uncatalogued
 	// models by construction; those sessions degrade to the session model below.
 	if (sessionModel && !suppressAutomatic) {
-		// The candidates are always strictly cheaper than the session model, and
-		// there are none when the session price is unknown, so a cheap-tier pick
-		// never silently upgrades an unpriced session. Reuse the `contained` set
-		// computed above for the hot path.
+		// The pairing table speaks first for the models it names
+		// (lib/model-pairings.ts): a measured smaller model of the session's
+		// vendor, never dearer than the session where both are priced. Reuse the
+		// `contained` set computed above for the hot path.
+		const paired = pairedModel("subagent", available, sessionModel, { contained, requireImageInput });
+		if (paired?.kind === "session") return { model: sessionModel, source: "session", notices };
+		if (paired) return { model: paired.model, source: "automatic", notices };
+		// Otherwise the candidates are always strictly cheaper than the session
+		// model, and there are none when the session price is unknown, so a
+		// cheap-tier pick never silently upgrades an unpriced session.
 		// Experimental builds are never auto-selectable (model-tier.ts
 		// isAutoSelectable); a moving alias stays allowed here (Mistral serves
 		// most models only as `-latest`).
@@ -421,7 +428,7 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
  * gated: the per-call `model` field is the one input the main model chooses for
  * itself. User knobs (setting, env var, agent files the user installed,
  * "inherit") are never gated — naming a model is choosing it — and the
- * automatic default can only ever pick cheaper. With either price unknown the
+ * automatic default never picks a dearer model. With either price unknown the
  * gate stays open: a gate that fails closed on an unpriced catalog blocks the
  * feature outright.
  *

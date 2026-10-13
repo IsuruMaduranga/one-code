@@ -28,6 +28,8 @@ const ANTHROPIC: FixtureModel[] = [
 	{ id: "anthropic/claude-fable-5-1", released: "2026-09-01", price: [10, 50] },
 	{ id: "anthropic/claude-opus-5-5", released: "2026-09-22", price: [4, 20], servedAs: ["openrouter/anthropic/claude-opus-5.5"] },
 	{ id: "anthropic/claude-sonnet-5-5", released: "2026-09-28", price: [2, 10] },
+	// Not in the model pairing table: the cost algorithm picks for it.
+	{ id: "anthropic/claude-opus-4-9", released: "2026-09-22", price: [4, 20] },
 	{ id: "anthropic/claude-sonnet-5", released: "2026-06-29", price: [2, 10] },
 	{ id: "anthropic/claude-haiku-4-5", released: "2025-10-15", price: [1, 5] },
 ];
@@ -94,13 +96,20 @@ describe("classifierCandidates: containment, tier and context floors", () => {
 		expect(pickFull([session, small], session).candidates).toEqual([{ model: session, source: "session" }]);
 	});
 
-	it("screens a frontier session with the cheapest frontier model, never a lower tier", () => {
+	it("screens a frontier session the table names with its pairing, the session as fallback", () => {
 		const opus = model("anthropic", "claude-opus-5-5", 4, 200_000);
 		const sonnet = model("anthropic", "claude-sonnet-5-5", 2, 200_000);
 		const haiku = model("anthropic", "claude-haiku-4-5", 1, 200_000);
-		expect(pickFull([opus, sonnet, haiku], opus).candidates).toEqual([{ model: sonnet, source: "economical" }, { model: opus, source: "session" }]);
+		expect(pickFull([opus, sonnet, haiku], opus).candidates).toEqual([{ model: sonnet, source: "paired" }, { model: opus, source: "session" }]);
 		const fable = model("anthropic", "claude-fable-5-1", 10, 200_000);
-		expect(pickFull([fable, opus, sonnet, haiku], fable).candidates.map((entry) => entry.model.id)).toEqual(["claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1"]);
+		expect(pickFull([fable, opus, sonnet, haiku], fable).candidates.map((entry) => entry.model.id)).toEqual(["claude-sonnet-5-5", "claude-fable-5-1"]);
+	});
+
+	it("screens a frontier session the table does not name with the cheapest frontier model, never a lower tier", () => {
+		const opus = model("anthropic", "claude-opus-4-9", 4, 200_000);
+		const sonnet = model("anthropic", "claude-sonnet-5-5", 2, 200_000);
+		const haiku = model("anthropic", "claude-haiku-4-5", 1, 200_000);
+		expect(pickFull([opus, sonnet, haiku], opus).candidates).toEqual([{ model: sonnet, source: "economical" }, { model: opus, source: "session" }]);
 	});
 
 	it("screens a tiny session with a cheaper model of a higher tier, never a dearer one", () => {

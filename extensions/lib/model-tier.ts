@@ -55,14 +55,6 @@ export function tiersBelow(tier: PromptTier, reference: PromptTier): number {
 }
 
 /**
- * Cost-preference order for automatic secondary-model selection: cheapest
- * *capable* tier first, stepping UP only when a tier is empty. `tiny` is absent
- * on purpose — automatic selection never lands there (see
- * `economicalContainedCandidates`).
- */
-const COST_PREFERENCE: Record<Exclude<PromptTier, "tiny">, number> = { cheap: 0, workhorse: 1, frontier: 2 };
-
-/**
  * `CC_PROMPT_TIER=frontier|workhorse|cheap|tiny` forces a register; `auto`/unset
  * classifies. Env only — a project must not be able to downgrade its own
  * scaffolding, the same reasoning that keeps `autoMode` out of project settings.
@@ -73,17 +65,21 @@ export function tierOverride(env: NodeJS.ProcessEnv = process.env): PromptTier |
 }
 
 /**
- * Anthropic first-party frontier gate: Opus ≥ 4.8, Sonnet ≥ 5.5 and every
- * Fable — the models Claude Code gives its short prompt and tool forms (Opus
- * 4.7 and Sonnet 5 get the long ones). Claude Code decides this by version, so
- * One Code does too. Adapted from pi-ai's
- * `defaultSupportsToolReferences` — never Haiku, and the `length < 8` guard stops
+ * Anthropic first-party frontier gate: Opus ≥ 4.8, Sonnet ≥ 5.5, Haiku ≥ 5 and
+ * every Fable — the models Claude Code gives its short prompt and tool forms
+ * (Opus 4.7, Sonnet 5 and Haiku 4.5 get the long ones; findings §56, §68).
+ * Claude Code decides this by version, so One Code does too. Adapted from pi-ai's
+ * `defaultSupportsToolReferences`; the `length < 8` guard stops
  * a dated suffix (`claude-opus-4-8-20251101`) being read as the minor version.
  * Version parse, not price: `claude-opus-4-1` ($15/M) costs more than
  * `opus-4-8`/`opus-5` ($5/M), so cost ranking would misclassify it.
  */
 function isAnthropicFrontier(model: Model<Api>): boolean {
-	if (model.provider !== "anthropic" || model.id.includes("haiku")) return false;
+	if (model.provider !== "anthropic") return false;
+	if (model.id.includes("haiku")) {
+		const major = model.id.match(/^claude-haiku-(\d+)(?:-|$)/)?.[1];
+		return major !== undefined && Number(major) >= 5;
+	}
 	const version = parseClaudeVersion(model.id);
 	if (!version) return false;
 	if (version.family === "fable") return true;
@@ -266,8 +262,10 @@ export function taskToolsEnabled(
  *   - priced only: on a provider with no usable prices the chain is empty and
  *     callers degrade to the session model (correct, merely not cheap).
  *
- * Sorted by cost preference (cheapest *tier* first) then input price, so the
- * head is "the cheapest usable model this provider offers." The session model
+ * Sorted by input price, the more capable tier first at equal price, so the
+ * head is "the cheapest usable model this provider offers." Price leads, not
+ * tier: a frontier model cheaper than every cheap one (Haiku 5.5 against Haiku
+ * 4.5) is the better pick on both counts. The session model
  * may appear in the chain; the budget-gated `cheaperContainedCandidates` drops
  * it. Budget ceilings and tier floors are caller policy — this function ranks,
  * it does not gate. A caller that already computed the containment set may
@@ -304,10 +302,10 @@ export function economicalContainedCandidates(
 		// the security floor. Selection must judge each model on its own merits.
 		.map((model) => ({ model, tier: intrinsicTier(model), price: pricedInput(model) }))
 		.filter(
-			(entry): entry is { model: Model<Api>; tier: Exclude<PromptTier, "tiny">; price: number } =>
+			(entry): entry is { model: Model<Api>; tier: PromptTier; price: number } =>
 				entry.tier !== "tiny" && entry.price !== undefined,
 		)
-		.sort((a, b) => COST_PREFERENCE[a.tier] - COST_PREFERENCE[b.tier] || a.price - b.price)
+		.sort((a, b) => a.price - b.price || TIER_RANK[a.tier] - TIER_RANK[b.tier])
 		.map((entry) => entry.model);
 }
 

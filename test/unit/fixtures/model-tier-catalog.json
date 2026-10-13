@@ -199,7 +199,7 @@
 	"anthropic/claude-fable-5-1": "frontier · anthropic frontier allowlist",
 	"anthropic/claude-haiku-4-5": "cheap · catalog anthropic/claude-haiku-4-5: $2.00/M blended, 0.20 of anthropic's median current price ($10.00)",
 	"anthropic/claude-haiku-4-5-20251001": "cheap · catalog anthropic/claude-haiku-4-5-20251001: $2.00/M blended, 0.20 of anthropic's median current price ($10.00)",
-	"anthropic/claude-haiku-5-5": "cheap · catalog anthropic/claude-haiku-5-5: $0.20/M blended, 0.02 of anthropic's median current price ($10.00)",
+	"anthropic/claude-haiku-5-5": "frontier · anthropic frontier allowlist",
 	"anthropic/claude-opus-4-5": "workhorse · catalog anthropic/claude-opus-4-5: $10.00/M blended, 1.00 of anthropic's median current price ($10.00)",
 	"anthropic/claude-opus-4-5-20251101": "workhorse · catalog anthropic/claude-opus-4-5-20251101: $10.00/M blended, 1.00 of anthropic's median current price ($10.00)",
 	"anthropic/claude-opus-4-6": "workhorse · catalog anthropic/claude-opus-4-6: $10.00/M blended, 1.00 of anthropic's median current price ($10.00)",
