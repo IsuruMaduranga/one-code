@@ -990,7 +990,7 @@ export function createUserMessageSender(pi: Pick<ExtensionAPI, "on" | "sendUserM
 		if (sessionOutlivesTurn(ctx.mode)) {
 			// followUp by default: pi 1.2.0 counts a starting run as busy and
 			// rejects a send without deliverAs there; when idle it changes nothing.
-			pi.sendUserMessage(content, { deliverAs: "followUp", ...options });
+			pi.sendUserMessage(content, { ...options, deliverAs: options?.deliverAs ?? "followUp" });
 			return;
 		}
 		let release!: () => void;

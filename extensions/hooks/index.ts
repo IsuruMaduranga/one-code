@@ -67,6 +67,7 @@ import { QueuedDelivery } from "../lib/queued-delivery.ts";
 import { SKILL_INVOCATION_TYPE, type SkillInvocationDetails } from "../skill/invoke.ts";
 import { isNotificationDetails } from "../lib/notifications.ts";
 import { consentDialog } from "../lib/consent-dialogs.ts";
+import { isUserRun } from "../lib/prompt-options.ts";
 import { followWorkCwd } from "../lib/worktree-channel.ts";
 
 /** Claude Code's `hook_additional_context` attachment text (utils/messages.ts). */
@@ -460,7 +461,9 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		// continuation keeps the cap counting: a notification or scheduled run
 		// starts a fresh turn, as a prompt does.
 		if (!isStopContinuation(event)) stopHookBlocks = 0;
-		if (pendingPromptContext.length === 0) return;
+		// Queued prompt context belongs to the user's next prompt, not to a run
+		// a notification or scheduled fire opened (pi 1.2.0 fires this for both).
+		if (pendingPromptContext.length === 0 || !isUserRun(event)) return;
 		const texts = pendingPromptContext;
 		pendingPromptContext = [];
 		return {

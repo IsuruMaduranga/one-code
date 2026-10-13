@@ -161,6 +161,17 @@ describe("hooks wiring", () => {
 		expect(again).toBeUndefined();
 	});
 
+	it("keeps UserPromptSubmit context for the prompt when a notification opens a run first (pi 1.2.0 custom run)", async () => {
+		const hookPrompt = script("hook-prompt-custom.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"additionalContext":"for the prompt"}}'\n`);
+		writeUserHooks({ UserPromptSubmit: [{ hooks: [{ type: "command", command: hookPrompt }] }] });
+		mount();
+		await fake.fireOne("input", { source: "interactive", text: "hello" }, ctx());
+		const custom = await fake.fireOne<{ message?: unknown }>("before_agent_start", { messageType: "custom", message: { role: "custom", customType: "task-notification" } }, ctx());
+		expect(custom).toBeUndefined();
+		const result = await fake.fireOne<{ message?: { content: string } }>("before_agent_start", { prompt: "hello" }, ctx());
+		expect(result?.message?.content).toBe(wrapReminder(hookContextText("UserPromptSubmit", "for the prompt")));
+	});
+
 	it.each(["steer", "followUp"] as const)(
 		"UserPromptSubmit context for a message queued mid-turn (%s) rides the request that delivers it, not the next prompt",
 		async (behavior) => {

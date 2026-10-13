@@ -497,7 +497,7 @@ export function deferredMissReminderText(name: string): string {
  * tool_search out (`deferralEnabled`): nothing can load them now.
  */
 export function loaderUnavailableReminderText(): string {
-	return "tool_search is not available in this session, so the deferred tools listed earlier in this conversation cannot be loaded or called. Work with the tools you have.";
+	return "tool_search is not available in this session, so it cannot load the deferred tools listed earlier in this conversation. Use only the tools defined for this session.";
 }
 
 /**
