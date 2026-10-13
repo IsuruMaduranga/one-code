@@ -91,7 +91,7 @@ export function collectModelFacts(available: Model<Api>[], session: SessionView,
 			refreshed: sources.refreshed === true,
 			refreshEnabled: readCatalogRefreshEnabled(oneCodeSettingsPath(home, env), env),
 		},
-		tierReason: sessionModel ? classifyModelTier(sessionModel, {}).reason : undefined,
+		tierReason: sessionModel ? classifyModelTier(sessionModel, {}, "capability").reason : undefined,
 		inCatalog: entry !== undefined,
 		skipReason: entry && sessionModel ? autoSelectSkipReason(entry, servedCatalogIds(modelsContainedToSession(available, sessionModel))) : undefined,
 		newerModel: suggestNewer ? newerModelSuggestion(available, sessionModel) : undefined,
@@ -207,7 +207,7 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 			lines.push({ text: `Setting: "${classifier.configured}" via autoMode.classifierModel in ~/.onecode/settings.json (/auto-mode model clear returns to automatic)`, indent: 1, level: "dim" });
 		}
 		lines.push({
-			text: "Classifier policy: the cheapest model on this provider in this session's tier or above, strictly cheaper than it, with a context window at least as large, not an experimental build and not a moving -latest alias, else this session's model; /auto-mode model chooses one by hand.",
+			text: "Classifier policy: for the models One Code's pairing table names, the table's pick on this provider (or this session's model), unless it costs more than this session's model or its window is smaller; otherwise the cheapest model on this provider in this session's tier or above, strictly cheaper than it, with a context window at least as large, not an experimental build and not a moving -latest alias, else this session's model; /auto-mode model chooses one by hand.",
 			indent: 1,
 			level: "dim",
 		});

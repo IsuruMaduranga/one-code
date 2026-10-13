@@ -103,7 +103,7 @@ describe("buildDoctorReport", () => {
 		expect(text).toContain("Subagents and workflow agents: anthropic/claude-sonnet-5-5 — automatic");
 		// Classifier: the same tier on a frontier session → Sonnet 5.5, and the live pin is shown.
 		expect(text).toContain("Auto-mode classifier: anthropic/claude-sonnet-5-5");
-		expect(text).toContain("Classifier policy: the cheapest model on this provider in this session's tier or above");
+		expect(text).toContain("otherwise the cheapest model on this provider in this session's tier or above");
 		expect(text).toMatch(/screening this session on\s+anthropic\/claude-sonnet-5-5/);
 		expect(text).toContain("Permission mode: auto");
 		expect(text).toContain("Updates: up to date (0.2.1 is the latest release)");
@@ -147,7 +147,7 @@ describe("buildDoctorReport", () => {
 		const text = modelsSection(facts, { model: main, modelSource: "session" }, []).lines.map((line) => line.text).join("\n");
 		expect(text).toContain("Auto-mode classifier: openai/gpt-5.6-terra (cheapest model within openai in the session's tier or above");
 		expect(text).toContain(
-			"Classifier policy: the cheapest model on this provider in this session's tier or above, strictly cheaper than it, with a context window at least as large, not an experimental build and not a moving -latest alias, else this session's model; /auto-mode model chooses one by hand.",
+			"Classifier policy: for the models One Code's pairing table names, the table's pick on this provider (or this session's model), unless it costs more than this session's model or its window is smaller; otherwise the cheapest model on this provider in this session's tier or above, strictly cheaper than it, with a context window at least as large, not an experimental build and not a moving -latest alias, else this session's model; /auto-mode model chooses one by hand.",
 		);
 		expect(text).toContain("Tier: workhorse — catalog openai/gpt-5.6-sol: $8.75/M blended");
 		expect(text).toContain(

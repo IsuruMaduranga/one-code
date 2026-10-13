@@ -118,14 +118,16 @@ export function pairedModel(
 	if (!sessionEntry || !row) return undefined;
 	const pool = opts.contained ?? modelsContainedToSession(available, sessionModel);
 	const served = servedCatalogIds(pool);
-	const usable = pool.filter((model) => !isDatedDuplicate(model, pool) && isAutoSelectable(model, served));
-	// The table predates this vendor's newest model: it no longer speaks for the vendor.
+	const selectable = pool.filter((model) => isAutoSelectable(model, served));
+	// The table predates this vendor's newest model: it no longer speaks for the
+	// vendor. A new dated snapshot counts, even beside the undated alias.
 	const vendor = vendorProfile(sessionEntry.vendor);
-	const newer = usable.some((model) => {
+	const newer = selectable.some((model) => {
 		const entry = catalogModelFor(model);
 		return entry !== undefined && vendorProfile(entry.vendor) === vendor && entry.released !== undefined && entry.released > AS_OF_TIME;
 	});
 	if (newer) return undefined;
+	const usable = selectable.filter((model) => !isDatedDuplicate(model, pool));
 	const pick = row[role];
 	if (pick === SESSION) return { kind: "session" };
 	const wanted = pick.toLowerCase();

@@ -65,27 +65,39 @@ export function tierOverride(env: NodeJS.ProcessEnv = process.env): PromptTier |
 }
 
 /**
- * Anthropic first-party frontier gate: Opus ≥ 4.8, Sonnet ≥ 5.5, Haiku ≥ 5 and
- * every Fable — the models Claude Code gives its short prompt and tool forms
- * (Opus 4.7, Sonnet 5 and Haiku 4.5 get the long ones; findings §56, §68).
+ * Anthropic first-party frontier gate: Opus ≥ 4.8, Sonnet ≥ 5.5 and every
+ * Fable — the models Claude Code gives its short prompt and tool forms (Opus
+ * 4.7 and Sonnet 5 get the long ones; findings §56). Haiku 5 and later get the
+ * short forms too, but only for the prompt (`isHaikuWithFrontierForms`).
  * Claude Code decides this by version, so One Code does too. Adapted from pi-ai's
- * `defaultSupportsToolReferences`; the `length < 8` guard stops
+ * `defaultSupportsToolReferences` — never Haiku, and the `length < 8` guard stops
  * a dated suffix (`claude-opus-4-8-20251101`) being read as the minor version.
  * Version parse, not price: `claude-opus-4-1` ($15/M) costs more than
  * `opus-4-8`/`opus-5` ($5/M), so cost ranking would misclassify it.
  */
 function isAnthropicFrontier(model: Model<Api>): boolean {
-	if (model.provider !== "anthropic") return false;
-	if (model.id.includes("haiku")) {
-		const major = model.id.match(/^claude-haiku-(\d+)(?:-|$)/)?.[1];
-		return major !== undefined && Number(major) >= 5;
-	}
+	if (model.provider !== "anthropic" || model.id.includes("haiku")) return false;
 	const version = parseClaudeVersion(model.id);
 	if (!version) return false;
 	if (version.family === "fable") return true;
 	if (version.family === "sonnet") return version.major > 5 || (version.major === 5 && version.minor >= 5);
 	return version.major > 4 || (version.major === 4 && version.minor >= 8);
 }
+
+/**
+ * First-party Haiku 5 and later take the frontier prompt and tool forms
+ * (findings §68), but nothing else that reads the tier: model selection, the
+ * permission gate's fast paths and the doctor judge a Haiku by its catalog
+ * tier, so the cost algorithm never offers one as an Opus-class substitute.
+ */
+function isHaikuWithFrontierForms(model: Model<Api>): boolean {
+	if (model.provider !== "anthropic") return false;
+	const major = model.id.match(/^claude-haiku-(\d+)(?:-|$)/)?.[1];
+	return major !== undefined && Number(major) >= 5;
+}
+
+/** What a tier is for: the session's prompt and tool forms, or judging a model's capability. */
+export type TierPurpose = "prompt" | "capability";
 
 /**
  * OpenAI first-party frontier gate: the GPT-6 Astra and Sol lines and later
@@ -133,20 +145,26 @@ export interface TierClassification {
  *   1. `CC_PROMPT_TIER` (the session's register only; selection ignores it);
  *   2. the user's `modelTiers` setting for this model;
  *   3. the Claude Code parity gate: first-party Opus ≥ 4.8, Sonnet ≥ 5.5,
- *      Fable, and OpenAI's GPT-6+ Astra and Sol are frontier;
+ *      Fable, and OpenAI's GPT-6+ Astra and Sol are frontier; for the prompt
+ *      (`purpose: "prompt"`, the default) first-party Haiku ≥ 5 is too;
  *   4. the catalog tier (`model-catalog.ts`): tiny by size, workhorse or cheap
  *      by size or price against the same vendor's current models, demoted one
  *      step by age;
  *   5. a model no catalog knows: tiny when its id names a small size or it is
  *      unpriced or on a custom provider, cheap otherwise.
  */
-export function classifyModelTier(model: Model<Api> | undefined, env: NodeJS.ProcessEnv = process.env): TierClassification {
+export function classifyModelTier(
+	model: Model<Api> | undefined,
+	env: NodeJS.ProcessEnv = process.env,
+	purpose: TierPurpose = "prompt",
+): TierClassification {
 	const forced = tierOverride(env);
 	if (forced) return { tier: forced, reason: "CC_PROMPT_TIER" };
 	if (!model) return { tier: "tiny", reason: "no model" }; // unknown model → maximum scaffolding
 	const configured = configuredModelTier(model);
 	if (configured) return { tier: configured, reason: "modelTiers setting" };
 	if (isAnthropicFrontier(model)) return { tier: "frontier", reason: "anthropic frontier allowlist" };
+	if (purpose === "prompt" && isHaikuWithFrontierForms(model)) return { tier: "frontier", reason: "anthropic frontier allowlist (prompt and tool forms)" };
 	if (isOpenAIFrontier(model)) return { tier: "frontier", reason: "openai frontier allowlist" };
 	const entry = catalogModelFor(model);
 	if (entry) return { tier: entry.tier, reason: `catalog ${entry.id}: ${entry.reason}` };
@@ -338,9 +356,13 @@ export function servedCatalogIds(pool: readonly Model<Api>[]): Set<string> {
 /** No CC_PROMPT_TIER override: automatic model *selection* always uses intrinsic tiers. */
 const INTRINSIC_TIER_ENV: NodeJS.ProcessEnv = Object.freeze({}) as NodeJS.ProcessEnv;
 
-/** A model's own tier, CC_PROMPT_TIER ignored — what selection judges a candidate by. */
+/**
+ * A model's own capability tier, CC_PROMPT_TIER ignored — what selection, the
+ * permission gate and the doctor judge a model by. It differs from the prompt
+ * tier only for Haiku 5 and later (`isHaikuWithFrontierForms`).
+ */
 export function intrinsicTier(model: Model<Api>): PromptTier {
-	return resolveModelTier(model, INTRINSIC_TIER_ENV);
+	return classifyModelTier(model, INTRINSIC_TIER_ENV, "capability").tier;
 }
 
 /** Whether `tier` is at least as capable as `floor` (frontier ≥ workhorse ≥ cheap ≥ tiny). */

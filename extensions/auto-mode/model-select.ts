@@ -182,7 +182,6 @@ function automaticClassifierCandidates(available: Model<Api>[], sessionModel: Mo
 			text: `Auto mode is screening calls with ${spec(sessionModel)}, this session's model: One Code's model pairing table finds no smaller model of its vendor close enough in capability to screen for it.`,
 		});
 	}
-	if (paired) return { candidates: [{ model: paired.model, source: "paired" }, { model: sessionModel, source: "session" }], notices: [] };
 	// Never weaker than the session, strictly cheaper per call (the user,
 	// 2026-10-05: Qwen 3.8 27B drew a 2.4T model at five times its input price;
 	// 2026-10-07: a same-price older model saves nothing; 2026-10-12: judged on
@@ -192,6 +191,12 @@ function automaticClassifierCandidates(available: Model<Api>[], sessionModel: Mo
 	// auto-selectable at all). A session with no catalog cache-read price is
 	// compared by list input price (classifierPrice).
 	const cheaper = sameTierContainedCandidates(available, sessionModel, { contained, price }).filter(fits);
+	// The cost algorithm's picks stay behind the table's, in case the provider
+	// lists the paired model but refuses it to this account at call time.
+	if (paired) {
+		const backups = cheaper.filter((model) => model !== paired.model).map((model): Candidate => ({ model, source: "economical" }));
+		return { candidates: [{ model: paired.model, source: "paired" }, ...backups, { model: sessionModel, source: "session" }], notices: [] };
+	}
 	if (cheaper.length === 0) {
 		return sessionOnly({
 			reason: "no-qualifying-model",

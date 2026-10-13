@@ -56,6 +56,12 @@ describe("pairedModel", () => {
 		expect(pairedModel("subagent", [opus, sonnet, haiku], opus)).toEqual({ kind: "model", model: sonnet });
 	});
 
+	it("steps aside for a vendor's new dated snapshot listed beside an older undated alias", () => {
+		pinCatalog([...ANTHROPIC, { id: "anthropic/claude-haiku-5-5-20261201", released: "2026-12-01", price: [0.1, 0.5] }]);
+		const snapshot = model("anthropic", "claude-haiku-5-5-20261201", 0.1);
+		expect(pairedModel("subagent", [opus, sonnet, haiku, snapshot], opus)).toBeUndefined();
+	});
+
 	it("falls through when the pick is not served or fails the caller's gate", () => {
 		pinCatalog(ANTHROPIC);
 		expect(pairedModel("subagent", [opus, haiku], opus)).toBeUndefined();

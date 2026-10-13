@@ -175,7 +175,10 @@ the system prompt to match:
 | Cheap | A vendor's smaller models, and large ones a year or more behind its newest. | The full prompt, with longer, more explicit tool descriptions. |
 | Tiny | Small models: under 40 billion parameters, or, when the size isn't published, a name with `nano`, `micro`, `lite` or `tiny` in it. | The cheap tier's prompt plus extra scaffolding and the `grep`, `find`, and `ls` tools. |
 
-Frontier is a fixed list, decided by model version. Everything else
+Frontier is a fixed list, decided by model version. Haiku 5 and later get
+the frontier prompt only: when One Code picks a model for subagents or the
+classifier, or decides how strict the permission gate is, a Haiku counts at
+its catalog tier, so it never stands in for Opus. Everything else
 comes from three public catalogs: [models.dev](https://models.dev) for
 release dates and prices, OpenRouter's model list, and Hugging Face for
 parameter counts. Each model is compared with its own vendor's current
