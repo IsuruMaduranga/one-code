@@ -432,11 +432,14 @@ describe("hooks wiring", () => {
 		await fake.fireOne("input", { source: "interactive", text: "also this", streamingBehavior: "steer" }, ctx());
 		await settle(); // the queued message joined that continuation
 		// pi 1.2.0 fires before_agent_start for the continuation run itself, as a custom run.
-		await fake.fireOne("before_agent_start", { messageType: "custom", message: { role: "custom" } }, ctx());
+		await fake.fireOne("before_agent_start", { messageType: "custom", message: { role: "custom", customType: "one-code:hook-stop" } }, ctx());
 		await settle(); // still the continuation chain
 		await fake.fireOne("before_agent_start", { prompt: "a new prompt" }, ctx());
 		await settle(); // a new turn
-		expect(flags()).toEqual([false, true, true, false]);
+		// A run a notification opened starts fresh too.
+		await fake.fireOne("before_agent_start", { messageType: "custom", message: { role: "custom", customType: "task-notification" } }, ctx());
+		await settle();
+		expect(flags()).toEqual([false, true, true, false, false]);
 	});
 
 	it("Stop continue:false ends the turn even when another hook requests a continuation", async () => {

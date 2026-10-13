@@ -27,7 +27,7 @@ export const PROMPT_OPTIONS_CHANNEL = "one-code:prompt-options";
  * continuation, a scheduled fire), marked `messageType: "custom"` and without
  * `prompt`. Older pi fires it only for prompts and sends no `messageType`.
  */
-export function isUserRun(event: unknown): boolean {
+export function isUserRun<E>(event: E): event is Exclude<E, { messageType: "custom" }> {
 	return (event as { messageType?: unknown } | undefined)?.messageType !== "custom";
 }
 

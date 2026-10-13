@@ -988,7 +988,9 @@ export function createUserMessageSender(pi: Pick<ExtensionAPI, "on" | "sendUserM
 	): Promise<void> => {
 		if (!active) throw new Error("Session shut down before the command's user turn completed.");
 		if (sessionOutlivesTurn(ctx.mode)) {
-			pi.sendUserMessage(content, options);
+			// followUp by default: pi 1.2.0 counts a starting run as busy and
+			// rejects a send without deliverAs there; when idle it changes nothing.
+			pi.sendUserMessage(content, { deliverAs: "followUp", ...options });
 			return;
 		}
 		let release!: () => void;

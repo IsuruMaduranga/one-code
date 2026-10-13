@@ -65,7 +65,7 @@ export default function sessionTitleExtension(pi: ExtensionAPI) {
 		// A run an extension opened (pi 1.2.0) carries no prompt: wait for the user's.
 		if (!isUserRun(event)) return;
 		attempted = true;
-		const text = firstUserText(ctx.sessionManager.getEntries() as never) ?? (event as { prompt: string }).prompt;
+		const text = firstUserText(ctx.sessionManager.getEntries() as never) ?? event.prompt;
 		if (!isNameableText(text)) return;
 		void generate(text, ctx);
 	});

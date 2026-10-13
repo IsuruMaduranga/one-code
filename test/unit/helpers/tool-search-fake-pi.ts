@@ -3,6 +3,7 @@
  * every reminder, a lifecycle `fire()`, and a mutable tool registry / active
  * set. Shared by tool-search-defer-miss.test.ts and tool-search-announce.test.ts.
  */
+import { CONTEXT_RESTORE_CHANNEL, type ContextRestoreRequest } from "../../../extensions/lib/context-stack.ts";
 import { DEFER_CHANNEL } from "../../../extensions/lib/deferred.ts";
 import { REMINDER_CHANNEL } from "../../../extensions/lib/reminders.ts";
 
@@ -69,5 +70,18 @@ export function makeToolSearchFakePi(initialActive: string[] = []) {
 		return tool.execute("call-1", params) as Promise<{ content: Array<{ text: string }>; details: unknown }>;
 	};
 
-	return { pi, reminders, allTools, setActive: (n: string[]) => (active = n), activeTools: () => active, addDeferred, runTool };
+	/** Take a tool out of the registry, as pi's `--tools` filter does. */
+	const unregister = (name: string) => {
+		const at = allTools.findIndex((tool) => tool.name === name);
+		if (at !== -1) allTools.splice(at, 1);
+	};
+
+	/** Answer the context-restore request as a resumed session whose saved listing named `names`. */
+	const restoreBaseline = (names: string[]) => {
+		pi.events.on(CONTEXT_RESTORE_CHANNEL, (data) => {
+			(data as ContextRestoreRequest).restored = { version: 1, stack: [], sticky: [], baselines: { "tool-search": names } };
+		});
+	};
+
+	return { pi, reminders, allTools, setActive: (n: string[]) => (active = n), activeTools: () => active, addDeferred, runTool, unregister, restoreBaseline };
 }

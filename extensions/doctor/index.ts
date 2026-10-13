@@ -202,7 +202,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 			decisionLogEnabled: loadAutoModeConfig(home).logDecisions,
 			independent: configMode() === "independent",
 		});
-		await sendUserMessage(ctx, promptCommandText("doctor", "", prompt), { deliverAs: "followUp" });
+		await sendUserMessage(ctx, promptCommandText("doctor", "", prompt));
 		return true;
 	};
 

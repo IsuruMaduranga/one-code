@@ -589,7 +589,7 @@ function registerPluginCommand(pi: ExtensionAPI, plugin: Plugin, name: string, p
 			}
 			recordUsage(pluginRoot(getAgentDir()), "command", name);
 			// Deliver as a user turn, which is how Claude Code runs a command template.
-			await sendUserMessage(ctx, promptCommandText(name, args.trim(), expanded), { deliverAs: "followUp" });
+			await sendUserMessage(ctx, promptCommandText(name, args.trim(), expanded));
 		},
 	});
 }

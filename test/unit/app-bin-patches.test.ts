@@ -1,7 +1,10 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { piDist, piTuiDist } from "./helpers/pi-install.ts";
+
+/** The installed pi's settings type, which pi 1.2.0 moved into settings-schema.d.ts. */
+const settingsTypes = () => readFileSync(join(piDist, "core", "settings-schema.d.ts"), "utf8");
 
 /**
  * app/bin.mjs patches two pi prototypes and reads five unexported renderer
@@ -44,20 +47,14 @@ describe("app/bin.mjs pi-internal patch points (A3)", () => {
 	});
 
 	it("pi still accepts the fullscreenExitOutput setting bin.mjs seeds", () => {
-		// pi 1.2.0 moved the settings type into settings-schema.d.ts.
-		const declared = ["settings-schema.d.ts", "settings-manager.d.ts"]
-			.map((file) => join(piDist, "core", file))
-			.filter((file) => existsSync(file))
-			.some((file) => readFileSync(file, "utf8").includes("fullscreenExitOutput"));
-		expect(declared).toBe(true);
+		expect(settingsTypes()).toContain("fullscreenExitOutput");
 	});
 
 	it("bin.mjs backfills the compaction keep window, and pi still reads that setting", () => {
 		const bin = readFileSync(new URL("../../app/bin.mjs", import.meta.url), "utf8");
 		expect(bin).toContain('"compaction-keep.mjs"');
 		expect(bin).toContain("withCompactionKeepBackfilled(settings)");
-		const source = readFileSync(join(piDist, "core", "settings-manager.d.ts"), "utf8");
-		expect(source).toContain("keepRecentTokens");
+		expect(settingsTypes()).toContain("keepRecentTokens");
 	});
 
 	it("updateContent still keys the abort line off stopReason", () => {

@@ -10,9 +10,10 @@
  * and with event types on, every press is followed by a release such as
  * `\x1b[1;1:3B`. A decoder that compares legacy bytes misses all of those.
  *
- * `parseKey` is pi-tui's own parser (`dist/keys.js`, MIT, unchanged from
- * 0.87.1 to 1.1.0; 1.2.0 added the logical shifted-symbol reading), ported verbatim so every panel names a key exactly as
- * pi-tui and pi's keybindings do. It stays here because `lib/` modules
+ * `parseKey` is pi-tui's own parser (`dist/keys.js`, MIT; unchanged from
+ * 0.87.1 to 1.1.0, then 1.2.0's logical shifted-symbol reading), ported
+ * verbatim so every panel names a key exactly as pi-tui and pi's
+ * keybindings do. It stays here because `lib/` modules
  * import nothing from pi, and the bare `@earendil-works/pi-tui` specifier
  * resolves to a different pi-tui in tests than at runtime.
  * `key-input.test.ts` compares this port with the installed pi-tui over

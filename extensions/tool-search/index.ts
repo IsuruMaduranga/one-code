@@ -211,7 +211,8 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	// load item at the tool_search result instead (stabilizeResponsesToolLoads).
 	pi.on("before_provider_request", (event, ctx) => {
 		latestModel = ctx.model;
-		const enabled = deferring();
+		const allTools = pi.getAllTools();
+		const enabled = deferralEnabled(allTools);
 		const toolLoadCompat = responsesToolLoadCompat(ctx.model as ResponsesToolLoadModel | undefined);
 		if (toolLoadCompat) {
 			if (!enabled) return undefined;
@@ -230,7 +231,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		// A tool that arrived mid-session goes out as Claude Code's tool_addition
 		// where the model takes one, declared deferred.
 		const lifted = additions ? withToolAdditions(original, addendaByCall) : undefined;
-		const stable = stabilizeDeferredTools(lifted?.payload ?? original, pi.getAllTools(), isDeferred, loads, new Set(lifted?.names ?? []));
+		const stable = stabilizeDeferredTools(lifted?.payload ?? original, allTools, isDeferred, loads, new Set(lifted?.names ?? []));
 		// Renamed (OAuth) tools cannot be referenced: the active tools stay as pi
 		// rendered them and the addition goes as text.
 		if (!stable) return announceAsText();
@@ -329,9 +330,9 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		// Map a Claude Code spelling (a direct `NotebookEdit` call) to our name so
 		// the miss is recognised and the steer names the loadable tool (M1).
 		const name = raw ? normalizeToolName(raw) : undefined;
-		// Without tool_search there is nothing to steer the model to.
-		if (!name || !deferring()) return;
-		if (deferredRegistry.has(name)) {
+		if (!name) return;
+		// Without tool_search there is nothing to steer a deferred-tool miss to.
+		if (deferredRegistry.has(name) && deferring()) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				scope: "next-turn",
 				key: `deferred-miss-${name}`,
@@ -350,6 +351,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
+		// A literal, like every registration: agent-view-tool-labels.test.ts reads them from source.
 		name: "tool_search",
 		label: "Tool Search",
 		...ccToolRenderers("Tool Search"),
@@ -395,7 +397,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 			if (matches.length === 0 && eager.length > 0) {
 				return {
 					content: [{ type: "text", text: `Already loaded: ${eager.join(", ")}.${notFoundNote}` }],
-					details: { matches: eager, added: [] as string[], notFound },
+					details: { matches: eager, added: [] as string[], notFound, refused: [] as string[] },
 				};
 			}
 
@@ -405,25 +407,23 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 					content: [
 						{ type: "text", text: `No tools matched "${params.query}".${notFoundNote} Tools that can be loaded: ${names}` },
 					],
-					details: { matches: [] as string[], added: [] as string[], notFound },
+					details: { matches: [] as string[], added: [] as string[], notFound, refused: [] as string[] },
 					isError: true,
 				};
 			}
 
-			let added = matches.map((m) => m.name).filter((name) => !active.includes(name));
+			const matchNames = matches.map((m) => m.name);
+			const toActivate = matchNames.filter((name) => !active.includes(name));
+			if (toActivate.length > 0) pi.setActiveTools([...new Set([...active, ...toActivate])]);
 			// pi can decline to activate a tool: since 1.0.4 a `--tools` list that
 			// names no `mcp__*` entry keeps the MCP tools registered but not
 			// activatable. Report what pi actually activated, never a plausible load.
-			let refused: string[] = [];
-			if (added.length > 0) {
-				pi.setActiveTools([...new Set([...active, ...added])]);
-				const now = new Set(pi.getActiveTools());
-				refused = added.filter((name) => !now.has(name));
-				added = added.filter((name) => now.has(name));
-				if (added.length > 0) loads.set(toolCallId, added);
-			}
+			const now = new Set(pi.getActiveTools());
+			const added = toActivate.filter((name) => now.has(name));
+			const refused = toActivate.filter((name) => !now.has(name));
+			if (added.length > 0) loads.set(toolCallId, added);
 
-			const loaded = [...new Set([...matches.map((m) => m.name), ...eager])].filter((name) => !refused.includes(name));
+			const loaded = [...new Set([...matchNames, ...eager])].filter((name) => now.has(name));
 			const already = loaded.filter((name) => !added.includes(name));
 			const refusedNote =
 				refused.length > 0 ? ` Could not load ${refused.join(", ")}: this session's tool list (pi's --tools) leaves them out, so they cannot be called.` : "";
@@ -438,8 +438,8 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 							].filter(Boolean).join(" ") + refusedNote + notFoundNote).trim(),
 					},
 				],
-				details: { matches: loaded, added, notFound, ...(refused.length > 0 ? { refused } : {}) },
-				...(loaded.length === 0 ? { isError: true } : {}),
+				details: { matches: loaded, added, notFound, refused },
+				isError: loaded.length === 0,
 			};
 		},
 	});

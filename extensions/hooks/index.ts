@@ -67,7 +67,6 @@ import { QueuedDelivery } from "../lib/queued-delivery.ts";
 import { SKILL_INVOCATION_TYPE, type SkillInvocationDetails } from "../skill/invoke.ts";
 import { isNotificationDetails } from "../lib/notifications.ts";
 import { consentDialog } from "../lib/consent-dialogs.ts";
-import { isUserRun } from "../lib/prompt-options.ts";
 import { followWorkCwd } from "../lib/worktree-channel.ts";
 
 /** Claude Code's `hook_additional_context` attachment text (utils/messages.ts). */
@@ -113,6 +112,15 @@ interface HookDispatchCtx {
 
 /** Claude Code's default cap on consecutive Stop-hook continuations in one user turn. */
 const MAX_STOP_CONTINUATIONS = 8;
+
+/** The customType of the Stop hook's continuation message. */
+const STOP_CONTINUATION_TYPE = "one-code:hook-stop";
+
+/** Whether a `before_agent_start` opens the Stop hook's own continuation run (pi 1.2.0 fires it for custom runs). */
+function isStopContinuation(event: unknown): boolean {
+	const run = event as { messageType?: string; message?: { customType?: string } };
+	return run.messageType === "custom" && run.message?.customType === STOP_CONTINUATION_TYPE;
+}
 
 export default function hooksExtension(pi: ExtensionAPI) {
 	const workCwd = followWorkCwd(pi.events);
@@ -447,10 +455,11 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		// turns with no input event.
 		await drainSessionStart();
 		if (gen !== sessionGen) return;
-		// Every prompt that opens a turn lands here. A queued delivery does not,
-		// and the Stop hook's own continuation (an idle sendMessage) arrives as a
-		// custom run on pi 1.2.0, which must not reset the continuation cap.
-		if (isUserRun(event)) stopHookBlocks = 0;
+		// Every run that opens lands here (on pi 1.2.0 also one an extension
+		// opened; a queued delivery does not). Only the Stop hook's own
+		// continuation keeps the cap counting: a notification or scheduled run
+		// starts a fresh turn, as a prompt does.
+		if (!isStopContinuation(event)) stopHookBlocks = 0;
 		if (pendingPromptContext.length === 0) return;
 		const texts = pendingPromptContext;
 		pendingPromptContext = [];
@@ -646,7 +655,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		try {
 			pi.sendMessage(
 				{
-					customType: "one-code:hook-stop",
+					customType: STOP_CONTINUATION_TYPE,
 					content: `Stop hook blocked stopping: ${outcome.block.reason}`,
 					display: false,
 				},

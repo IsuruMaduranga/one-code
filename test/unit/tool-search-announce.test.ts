@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFER_CHANNEL, deferredAddendumText } from "../../extensions/lib/deferred.ts";
 import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/mcp-share.ts";
-import { CONTEXT_BASELINE_CHANNEL, CONTEXT_RESTORE_CHANNEL } from "../../extensions/lib/context-stack.ts";
+import { CONTEXT_BASELINE_CHANNEL } from "../../extensions/lib/context-stack.ts";
 import { applyAnnouncement, planAnnouncement } from "../../extensions/tool-search/announce.ts";
 import toolSearchExtension from "../../extensions/tool-search/index.ts";
 import { makeToolSearchFakePi, type Reminder } from "./helpers/tool-search-fake-pi.ts";
@@ -155,13 +155,8 @@ describe("tool-search announce wiring", () => {
 
 describe("tool-search resumed capability wiring", () => {
 	it("keeps an unchanged saved listing silent, appends only additions, and persists that correction for the next resume", () => {
-		const restore = (fake: ReturnType<typeof makeFakePi>, names: string[]) => {
-			fake.pi.events.on(CONTEXT_RESTORE_CHANNEL, (data) => {
-				(data as { restored?: unknown }).restored = { version: 1, stack: [], sticky: [], baselines: { "tool-search": names } };
-			});
-		};
 		const first = makeFakePi();
-		restore(first, ["web_fetch"]);
+		first.restoreBaseline(["web_fetch"]);
 		const published: string[][] = [];
 		first.pi.events.on(CONTEXT_BASELINE_CHANNEL, (data) => {
 			const baseline = data as { key: string; value: string[] };
@@ -186,7 +181,7 @@ describe("tool-search resumed capability wiring", () => {
 		expect(corrected).toEqual(["web_fetch", "new_tool"]);
 
 		const second = makeFakePi();
-		restore(second, corrected);
+		second.restoreBaseline(corrected);
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		toolSearchExtension(second.pi as any);
 		second.addDeferred("web_fetch");

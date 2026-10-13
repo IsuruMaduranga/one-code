@@ -21,7 +21,7 @@ export default function initExtension(pi: ExtensionAPI) {
 	pi.registerCommand("init", {
 		description: "Initialize a new CLAUDE.md file with codebase documentation",
 		handler: async (_args, ctx) => {
-			await sendUserMessage(ctx, promptCommandText("init", "", INIT_PROMPT), { deliverAs: "followUp" });
+			await sendUserMessage(ctx, promptCommandText("init", "", INIT_PROMPT));
 		},
 	});
 }

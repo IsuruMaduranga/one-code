@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CONTEXT_RESTORE_CHANNEL, type ContextRestoreRequest } from "../../extensions/lib/context-stack.ts";
 import { DEFER_CHANNEL, deferralEnabled, loaderUnavailableReminderText } from "../../extensions/lib/deferred.ts";
 import toolSearchExtension from "../../extensions/tool-search/index.ts";
 import { makeToolSearchFakePi } from "./helpers/tool-search-fake-pi.ts";
@@ -25,7 +24,7 @@ describe("tool-search without its own registration", () => {
 		fake.allTools.push({ name: "read", description: "read" }, { name: "bash", description: "bash" });
 		toolSearchExtension(fake.pi as never);
 		// pi filters tool_search out of the registry under `--tools read,bash`.
-		fake.allTools.splice(fake.allTools.findIndex((t) => t.name === "tool_search"), 1);
+		fake.unregister("tool_search");
 		fake.addDeferred("mcp__fixture__lookup_ticket");
 		fake.pi.fire("session_start", {});
 	});
@@ -61,11 +60,9 @@ describe("a resumed session without tool_search", () => {
 		const fake = makeToolSearchFakePi(["read", "bash"]);
 		fake.allTools.push({ name: "read", description: "read" }, { name: "bash", description: "bash" });
 		// The restored first message listed a deferred MCP tool.
-		fake.pi.events.on(CONTEXT_RESTORE_CHANNEL, (data) => {
-			(data as ContextRestoreRequest).restored = { version: 1, stack: [], sticky: [], baselines: { "tool-search": ["mcp__fixture__lookup_ticket"] } };
-		});
+		fake.restoreBaseline(["mcp__fixture__lookup_ticket"]);
 		toolSearchExtension(fake.pi as never);
-		fake.allTools.splice(fake.allTools.findIndex((t) => t.name === "tool_search"), 1);
+		fake.unregister("tool_search");
 		fake.addDeferred("mcp__fixture__lookup_ticket");
 		fake.pi.fire("session_start", {});
 		expect(fake.reminders.filter((r) => r.key === "deferred-unavailable")).toEqual([
@@ -97,7 +94,7 @@ describe("tool_search when pi declines to activate a tool", () => {
 
 		const mixed = await fake.runTool("tool_search", { query: "select:web_fetch,mcp__fixture__lookup_ticket" });
 		expect(mixed.content[0].text).toMatch(/^Loaded web_fetch\. These tools are now callable\. Could not load mcp__fixture__lookup_ticket:/);
-		expect((mixed as { isError?: boolean }).isError).toBeUndefined();
+		expect((mixed as { isError?: boolean }).isError).toBe(false);
 		expect(fake.activeTools()).toContain("web_fetch");
 	});
 });
