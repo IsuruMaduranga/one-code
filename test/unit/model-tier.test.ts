@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
 	classifyModelTier,
 	economicalContainedCandidates,
+	intrinsicTier,
 	isPromptTier,
 	pickEconomicalContainedModel,
 	resolveModelTier,
@@ -73,6 +74,18 @@ describe("resolveModelTier", () => {
 		expect(resolveModelTier(model("claude-sonnet-5", "anthropic", 2), noEnv)).toBe("workhorse");
 		// A gateway copy cannot be verified for the frontier gate: its catalog tier serves.
 		expect(resolveModelTier(model("anthropic/claude-sonnet-5.5", "openrouter", 2), noEnv)).toBe("workhorse");
+	});
+
+	it("gives Haiku 5 and later the frontier prompt, and no older Haiku however its id is spelled", () => {
+		pinCatalog(ANTHROPIC);
+		for (const id of ["claude-haiku-5-5", "claude-haiku-6"]) {
+			expect(resolveModelTier(model(id, "anthropic", 0.1), noEnv)).toBe("frontier");
+			// Only for the prompt: selection and the permission gate judge it by the catalog.
+			expect(intrinsicTier(model(id, "anthropic", 0.1))).not.toBe("frontier");
+		}
+		for (const id of ["claude-haiku-4-5", "claude-haiku-4-5-20251001", "claude-3-5-haiku-20241022", "claude-3-haiku-20240307"]) {
+			expect(resolveModelTier(model(id, "anthropic", 1), noEnv)).not.toBe("frontier");
+		}
 	});
 
 	it("classifies first-party OpenAI Astra/Sol ≥6 as frontier", () => {

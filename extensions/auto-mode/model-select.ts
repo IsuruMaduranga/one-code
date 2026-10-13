@@ -40,13 +40,15 @@ import {
 	modelIdentity,
 	modelSpec as spec,
 	classifierPrice,
+	modelsContainedToSession,
 } from "../lib/model-policy.ts";
+import { pairedModel } from "../lib/model-pairings.ts";
 import { intrinsicTier, sameTierContainedCandidates } from "../lib/model-tier.ts";
 
 export interface Candidate {
 	model: Model<Api>;
 	/** How this candidate was arrived at, for the notice shown to the user. */
-	source: "configured" | "economical" | "session";
+	source: "configured" | "paired" | "economical" | "session";
 }
 
 export interface SelectInput {
@@ -67,7 +69,7 @@ export interface SelectInput {
 }
 
 /** Why automatic selection had to keep the session model. */
-export type ClassifierFallbackReason = "unknown-session-context-window" | "no-qualifying-model";
+export type ClassifierFallbackReason = "unknown-session-context-window" | "paired-session" | "no-qualifying-model";
 
 /** Structured selection fallback, retained with the chain for permission UI and logging. */
 export interface ClassifierFallback {
@@ -139,7 +141,9 @@ export function classifierCandidates({ available, sessionModel, configured, conf
 }
 
 /**
- * The automatic chain. Entries stay on the session provider/route, sit in the
+ * The automatic chain. For a session model the pairing table names
+ * (`lib/model-pairings.ts`), its pick leads (or the session alone screens);
+ * otherwise the cost algorithm below. Entries stay on the session provider/route, sit in the
  * session's tier or above (`model-tier.ts`, from the public catalogs), cost
  * strictly less than the session model, are not experimental builds or moving
  * `-latest` aliases (what answers one changes without notice), and have
@@ -166,6 +170,18 @@ function automaticClassifierCandidates(available: Model<Api>[], sessionModel: Mo
 			text: `Auto mode is screening calls with ${spec(sessionModel)}, this session's model, because its catalog context window is unknown and no alternate classifier can be verified to contain it.`,
 		});
 	}
+	// The pairing table speaks first for the models it names (lib/model-pairings.ts),
+	// under the same window and moving-alias gates; it may also keep the session.
+	const fits = (model: Model<Api>) => !isMovingAlias(model.id) && hasCatalogContextWindow(model) && model.contextWindow >= sessionModel.contextWindow;
+	const contained = modelsContainedToSession(available, sessionModel);
+	const price = classifierPrice(sessionModel);
+	const paired = pairedModel("classifier", available, sessionModel, { contained, price, accept: fits });
+	if (paired?.kind === "session") {
+		return sessionOnly({
+			reason: "paired-session",
+			text: `Auto mode is screening calls with ${spec(sessionModel)}, this session's model: One Code's model pairing table finds no smaller model of its vendor close enough in capability to screen for it.`,
+		});
+	}
 	// Never weaker than the session, strictly cheaper per call (the user,
 	// 2026-10-05: Qwen 3.8 27B drew a 2.4T model at five times its input price;
 	// 2026-10-07: a same-price older model saves nothing; 2026-10-12: judged on
@@ -174,9 +190,13 @@ function automaticClassifierCandidates(available: Model<Api>[], sessionModel: Mo
 	// session's and never a moving alias (experimental builds are never
 	// auto-selectable at all). A session with no catalog cache-read price is
 	// compared by list input price (classifierPrice).
-	const cheaper = sameTierContainedCandidates(available, sessionModel, { price: classifierPrice(sessionModel) }).filter(
-		(model) => !isMovingAlias(model.id) && hasCatalogContextWindow(model) && model.contextWindow >= sessionModel.contextWindow,
-	);
+	const cheaper = sameTierContainedCandidates(available, sessionModel, { contained, price }).filter(fits);
+	// The cost algorithm's picks stay behind the table's, in case the provider
+	// lists the paired model but refuses it to this account at call time.
+	if (paired) {
+		const backups = cheaper.filter((model) => model !== paired.model).map((model): Candidate => ({ model, source: "economical" }));
+		return { candidates: [{ model: paired.model, source: "paired" }, ...backups, { model: sessionModel, source: "session" }], notices: [] };
+	}
 	if (cheaper.length === 0) {
 		return sessionOnly({
 			reason: "no-qualifying-model",
@@ -226,6 +246,8 @@ export function describeCandidate(candidate: Candidate): string {
 	switch (candidate.source) {
 		case "configured":
 			return `${name} (autoMode.classifierModel)`;
+		case "paired":
+			return `${name} (paired with the session model in One Code's model pairing table)`;
 		case "economical":
 			return `${name} (cheapest model within ${where} in the session's tier or above that contains the session catalog context window)`;
 		case "session":

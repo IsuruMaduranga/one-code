@@ -376,6 +376,22 @@ describe("resolveSubagentModel: precedence and exact references", () => {
 	});
 });
 
+describe("resolveSubagentModel: the model pairing table", () => {
+	it("takes the table's pick, or its 'session', ahead of the cost algorithm; a setting still wins", () => {
+		// Opus 4.8 pairs with Sonnet 5.5 although Haiku 4.5 is cheaper.
+		expect(resolveSubagentModel({ sessionModel: anthropic[0], available: anthropic })).toMatchObject({ source: "automatic", model: { id: "claude-sonnet-5-5" } });
+		// GPT-6 Luna sessions keep their own model; the cost algorithm would pick a cheaper one.
+		pinCatalog([
+			{ id: "openai/gpt-6-luna", released: "2026-09-22", price: [0.1, 0.5] },
+			{ id: "openai/gpt-6-nano", released: "2026-09-22", price: [0.05, 0.4] },
+			{ id: "openai/gpt-5-mini", released: "2026-09-01", price: [0.08, 0.4] },
+		]);
+		const luna = model("openai", "gpt-6-luna", 0.1);
+		expect(resolveSubagentModel({ sessionModel: luna, available: [luna, model("openai", "gpt-5-mini", 0.08)] })).toMatchObject({ source: "session", model: luna });
+		expect(resolveSubagentModel({ sessionModel: anthropic[0], available: anthropic, configuredDefault: setting("claude-haiku-4-5") }).model?.id).toBe("claude-haiku-4-5");
+	});
+});
+
 describe("resolveSubagentModel: agent-file provider containment", () => {
 	// gpt-5.1-codex: the cheaper workhorse sibling the automatic pick lands on.
 	const openaiCatalog = [model("openai", "gpt-5.1", 1.25), model("openai", "gpt-5-mini", 0.25), model("openai", "gpt-5.1-codex", 1)];

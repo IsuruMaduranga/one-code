@@ -418,8 +418,8 @@ Which actions skip the classifier depends on the tier of the model making
 the call (see [Prompting adapts to the
 model](providers-and-models.md#prompting-adapts-to-the-model)). Frontier
 and workhorse models get Claude Code's shortcuts. Cheap and tiny models
-get a stricter set: Claude Code doesn't run auto mode on Haiku-class
-models at all, and smaller models are the likeliest to take a risky
+get a stricter set: Claude Code doesn't run auto mode on Haiku 4.5 and
+older at all, and smaller models are the likeliest to take a risky
 action nobody asked for.
 
 With every model:
@@ -530,13 +530,16 @@ Session grants from the approval prompt don't apply in auto mode either.
 ### The classifier model
 
 The classifier stays on your session's provider unless you choose otherwise.
-It runs on the cheapest model in your session's tier or above that costs less
-than your own: there's no point screening a model with a weaker or more
-expensive one, and a model at the same price saves nothing. An Opus session
-screens with Sonnet 5.5, and GPT-6 Astra with GPT-6.1 Sol. The pick also has
-to fit your session's context window and can't be an experimental (`-exp`)
-build. If no model in your tier or above meets all of that, your own model
-screens its calls. The details are in
+For the models people use most, a pairing table built from measured scores
+picks it: an Opus session screens with Sonnet 5.5, a Sonnet 5.5 session with
+Haiku 5.5, and GPT-6 Astra with GPT-6.1 Sol. Where no smaller model of the same
+vendor comes close enough, like GPT-6.1 Sol, your own model screens. For any
+other model, it runs on the cheapest model in your session's tier or above that
+costs less than your own: there's no point screening a model with a weaker or
+more expensive one, and a model at the same price saves nothing. Either way,
+the pick has to fit your session's context window and can't be an experimental
+(`-exp`) build. If nothing meets all of that, your own model screens its calls.
+The table and the rest of the rules are in
 [Automatic model selection](providers-and-models.md#automatic-model-selection).
 
 To choose the classifier yourself, run `/auto-mode model`, or

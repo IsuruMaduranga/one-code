@@ -16,7 +16,7 @@
  * - **Classifier only, costlier than the session:** the classifier runs on
  *   nearly every gated call, so a model that costs more per call than the
  *   session model can cost more than the session itself. Automatic selection
- *   only picks a strictly cheaper one.
+ *   never picks a costlier one.
  * - **Classifier only, unstable model:** a moving `-latest` alias or an
  *   experimental build can change what answers without notice, and with it the
  *   permission boundary. Automatic selection never picks one as the classifier.

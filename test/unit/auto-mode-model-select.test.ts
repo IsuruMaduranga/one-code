@@ -28,6 +28,8 @@ const ANTHROPIC: FixtureModel[] = [
 	{ id: "anthropic/claude-fable-5-1", released: "2026-09-01", price: [10, 50] },
 	{ id: "anthropic/claude-opus-5-5", released: "2026-09-22", price: [4, 20], servedAs: ["openrouter/anthropic/claude-opus-5.5"] },
 	{ id: "anthropic/claude-sonnet-5-5", released: "2026-09-28", price: [2, 10] },
+	// Not in the model pairing table: the cost algorithm picks for it.
+	{ id: "anthropic/claude-opus-4-9", released: "2026-09-22", price: [4, 20] },
 	{ id: "anthropic/claude-sonnet-5", released: "2026-06-29", price: [2, 10] },
 	{ id: "anthropic/claude-haiku-4-5", released: "2025-10-15", price: [1, 5] },
 ];
@@ -94,13 +96,25 @@ describe("classifierCandidates: containment, tier and context floors", () => {
 		expect(pickFull([session, small], session).candidates).toEqual([{ model: session, source: "session" }]);
 	});
 
-	it("screens a frontier session with the cheapest frontier model, never a lower tier", () => {
+	it("screens a frontier session the table names with its pairing, the cost algorithm's picks behind it, the session last", () => {
 		const opus = model("anthropic", "claude-opus-5-5", 4, 200_000);
 		const sonnet = model("anthropic", "claude-sonnet-5-5", 2, 200_000);
 		const haiku = model("anthropic", "claude-haiku-4-5", 1, 200_000);
-		expect(pickFull([opus, sonnet, haiku], opus).candidates).toEqual([{ model: sonnet, source: "economical" }, { model: opus, source: "session" }]);
+		expect(pickFull([opus, sonnet, haiku], opus).candidates).toEqual([{ model: sonnet, source: "paired" }, { model: opus, source: "session" }]);
 		const fable = model("anthropic", "claude-fable-5-1", 10, 200_000);
-		expect(pickFull([fable, opus, sonnet, haiku], fable).candidates.map((entry) => entry.model.id)).toEqual(["claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1"]);
+		// Opus 5.5 stays as a backup, in case the provider refuses Sonnet 5.5 to this account.
+		expect(pickFull([fable, opus, sonnet, haiku], fable).candidates).toEqual([
+			{ model: sonnet, source: "paired" },
+			{ model: opus, source: "economical" },
+			{ model: fable, source: "session" },
+		]);
+	});
+
+	it("screens a frontier session the table does not name with the cheapest frontier model, never a lower tier", () => {
+		const opus = model("anthropic", "claude-opus-4-9", 4, 200_000);
+		const sonnet = model("anthropic", "claude-sonnet-5-5", 2, 200_000);
+		const haiku = model("anthropic", "claude-haiku-4-5", 1, 200_000);
+		expect(pickFull([opus, sonnet, haiku], opus).candidates).toEqual([{ model: sonnet, source: "economical" }, { model: opus, source: "session" }]);
 	});
 
 	it("screens a tiny session with a cheaper model of a higher tier, never a dearer one", () => {
@@ -185,6 +199,26 @@ describe("classifierCandidates: containment, tier and context floors", () => {
 		const session = model("openai", "gpt-x-large", 10, 200_000);
 		const medium = model("openai", "gpt-x-medium", 5, 200_000);
 		expect(pickFull([medium], session).candidates).toEqual([{ model: medium, source: "economical" }, { model: session, source: "session" }]);
+	});
+});
+
+describe("classifierCandidates: Haiku 5 has the frontier prompt, not an Opus-class place", () => {
+	const haiku55: FixtureModel = { id: "anthropic/claude-haiku-5-5", released: "2026-10-07", price: [0.1, 0.5] };
+	const opus46: FixtureModel = { id: "anthropic/claude-opus-4-6", released: "2026-02-05", price: [5, 25] };
+
+	it("never hands an Opus session the table does not name, or one it steps aside for, to Haiku 5.5", () => {
+		const sonnet6: FixtureModel = { id: "anthropic/claude-sonnet-6", released: "2026-12-01", price: [2, 10] };
+		pinCatalog([...ANTHROPIC, haiku55, opus46, sonnet6]);
+		const haiku = model("anthropic", "claude-haiku-5-5", 0.1, 1_000_000);
+		const sonnet = model("anthropic", "claude-sonnet-5-5", 2, 1_000_000);
+		const opus4 = model("anthropic", "claude-opus-4-6", 5, 1_000_000);
+		expect(pickFull([opus4, sonnet, haiku], opus4).candidates[0].model.id).toBe("claude-sonnet-5-5");
+		// A newer Anthropic model switches the table off; the cost algorithm still skips Haiku.
+		const opus = model("anthropic", "claude-opus-5-5", 4, 1_000_000);
+		const sonnet6Model = model("anthropic", "claude-sonnet-6", 2, 1_000_000);
+		const chain = pickFull([opus, sonnet, sonnet6Model, haiku], opus).candidates.map((c: { model: { id: string } }) => c.model.id);
+		expect(chain).not.toContain("claude-haiku-5-5");
+		expect(intrinsicTier(haiku)).not.toBe("frontier");
 	});
 });
 
