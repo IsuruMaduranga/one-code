@@ -492,6 +492,15 @@ export function deferredMissReminderText(name: string): string {
 }
 
 /**
+ * The notice for a resumed session whose first message still lists deferred
+ * tools (that message keeps its bytes) while this run's tool list leaves
+ * tool_search out (`deferralEnabled`): nothing can load them now.
+ */
+export function loaderUnavailableReminderText(): string {
+	return "tool_search is not available in this session, so the deferred tools listed earlier in this conversation cannot be loaded or called. Work with the tools you have.";
+}
+
+/**
  * The correction for a tool WITHHOLD_CHANNEL took away (the task tools on a
  * frontier or Sonnet 5+ model): unlike an ordinary deferred miss, `tool_search`
  * cannot load it — the name is gone from the registry, not merely inactive —

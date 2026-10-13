@@ -35,6 +35,7 @@ import {
 	DeferredRegistry,
 	deferralEnabled,
 	deferredReminderText,
+	loaderUnavailableReminderText,
 	type DeferRequest,
 	resultText,
 	searchTools,
@@ -303,6 +304,11 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		// already told the model about these names, so merge them before planning.
 		for (const name of addendumNamesOnBranch(branch)) announced.add(name);
 		deferAll();
+		// A restored message 1 keeps its listing (its bytes are locked), so when
+		// this run's tool list leaves tool_search out, say once that it is gone.
+		if (restored && announced.size > 0 && !deferring()) {
+			pi.events.emit(REMINDER_CHANNEL, { scope: "next-turn", key: "deferred-unavailable", text: loaderUnavailableReminderText() });
+		}
 		// Even an absent listing is meaningful on resume: preserve that baseline so
 		// the first later deferred tool is a tail notice, not a message-1 rewrite.
 		if (!restored) publishBaseline(announced);
@@ -323,7 +329,8 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		// Map a Claude Code spelling (a direct `NotebookEdit` call) to our name so
 		// the miss is recognised and the steer names the loadable tool (M1).
 		const name = raw ? normalizeToolName(raw) : undefined;
-		if (!name) return;
+		// Without tool_search there is nothing to steer the model to.
+		if (!name || !deferring()) return;
 		if (deferredRegistry.has(name)) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				scope: "next-turn",
