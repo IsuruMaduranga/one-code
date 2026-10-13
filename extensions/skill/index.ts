@@ -570,7 +570,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 			// async preflight when this handler returns, so the session looks idle,
 			// and a one-shot run disposed the session before that turn ran.
 			if (extra.fromInput) return { action: "transform", text: `${breadcrumb}\n${text}`, images: extra.images };
-			pi.sendUserMessage(content);
+			pi.sendUserMessage(content, { deliverAs: "followUp" });
 			await awaitOneShotTurn(ctx);
 			return "handled";
 		}

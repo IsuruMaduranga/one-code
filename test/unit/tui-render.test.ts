@@ -459,6 +459,28 @@ describe("a call the user rejected", () => {
 	});
 });
 
+describe("pi's render context under the wrapper", () => {
+	const plainTheme: ThemeLike = { fg: (_c, t) => t, bold: (t) => t, italic: (t) => t };
+
+	it("hides pi 1.1.0's shell duration and pins the base renderers' padding", async () => {
+		const { ccWrapBuiltinRenderers } = await import("../../extensions/lib/tui-render.ts");
+		const seen: Array<Record<string, unknown>> = [];
+		const component = { render: () => ["BASE"], invalidate() {} };
+		const base = {
+			renderCall: (_args: unknown, _theme: unknown, context: Record<string, unknown>) => (seen.push(context), component),
+			renderResult: (_result: unknown, _options: unknown, _theme: unknown, context: Record<string, unknown>) => (seen.push(context), component),
+		};
+		const wrapped = ccWrapBuiltinRenderers("Bash", base, { keepBaseCall: true });
+		const context = { args: {}, isError: false, isPartial: false, state: {}, durationMs: 1234, outputPad: 0 };
+		wrapped.renderCall({}, plainTheme, context).render(80);
+		wrapped.renderResult({ content: [{ type: "text", text: "ok" }] }, { expanded: false, isPartial: false }, plainTheme, context).render(80);
+		expect(seen).toHaveLength(2);
+		// pi before 1.1.0 padded its renderers by 1 whatever the setting said.
+		for (const passed of seen) expect(passed).toMatchObject({ outputPad: 1 });
+		expect(seen[1].durationMs).toBeUndefined();
+	});
+});
+
 describe("elbowIndent / ccWrapBuiltinRenderers", () => {
 	it("indents under the elbow and strips leading blank lines", async () => {
 		const { elbowIndent } = await import("../../extensions/lib/tui-render.ts");

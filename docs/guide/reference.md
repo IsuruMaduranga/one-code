@@ -121,7 +121,7 @@ The ones you will use most; `/hotkeys` shows all of them.
 | **ctrl+v** | Paste an image or text. |
 | **shift+enter**, **ctrl+j** | Insert a newline. |
 | **ctrl+x** | Copy the last reply. While the model works with a message queued or typed, it starts **ctrl+x ctrl+s** instead. |
-| **PgUp**, **PgDn**, **Home**, **End** | Scroll the transcript in full-screen mode. |
+| **PgUp**, **PgDn**, **ctrl+home**, **ctrl+end** | Scroll the transcript in full-screen mode. On pi before 1.0.3, **Home** and **End** jump to the top and bottom instead. |
 | **ctrl+shift+f** | Search the transcript in full-screen mode. |
 | **!** at the start of a line | Run a shell command yourself. |
 

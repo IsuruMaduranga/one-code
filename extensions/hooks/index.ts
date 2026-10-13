@@ -67,6 +67,7 @@ import { QueuedDelivery } from "../lib/queued-delivery.ts";
 import { SKILL_INVOCATION_TYPE, type SkillInvocationDetails } from "../skill/invoke.ts";
 import { isNotificationDetails } from "../lib/notifications.ts";
 import { consentDialog } from "../lib/consent-dialogs.ts";
+import { isUserRun } from "../lib/prompt-options.ts";
 import { followWorkCwd } from "../lib/worktree-channel.ts";
 
 /** Claude Code's `hook_additional_context` attachment text (utils/messages.ts). */
@@ -112,6 +113,15 @@ interface HookDispatchCtx {
 
 /** Claude Code's default cap on consecutive Stop-hook continuations in one user turn. */
 const MAX_STOP_CONTINUATIONS = 8;
+
+/** The customType of the Stop hook's continuation message. */
+const STOP_CONTINUATION_TYPE = "one-code:hook-stop";
+
+/** Whether a `before_agent_start` opens the Stop hook's own continuation run (pi 1.2.0 fires it for custom runs). */
+function isStopContinuation(event: unknown): boolean {
+	const run = event as { messageType?: string; message?: { customType?: string } };
+	return run.messageType === "custom" && run.message?.customType === STOP_CONTINUATION_TYPE;
+}
 
 export default function hooksExtension(pi: ExtensionAPI) {
 	const workCwd = followWorkCwd(pi.events);
@@ -435,7 +445,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	// custom message pi appends right AFTER the user's prompt (the
 	// before_agent_start `message` return). An idle `sendMessage` from here
 	// landed it BEFORE the prompt (pi appends first, then adds the user message).
-	pi.on("before_agent_start", async (_event, ctx) => {
+	pi.on("before_agent_start", async (event, ctx) => {
 		const gen = sessionGen;
 		lastCtx = ctx;
 		prompted = true;
@@ -446,12 +456,19 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		// turns with no input event.
 		await drainSessionStart();
 		if (gen !== sessionGen) return;
-		// Every prompt that opens a turn lands here; a queued delivery and the
-		// Stop hook's own continuation (an idle sendMessage) do not.
-		stopHookBlocks = 0;
-		if (pendingPromptContext.length === 0) return;
-		const texts = pendingPromptContext;
-		pendingPromptContext = [];
+		// Every run that opens lands here (on pi 1.2.0 also one an extension
+		// opened; a queued delivery does not). Only the Stop hook's own
+		// continuation keeps the cap counting: a notification or scheduled run
+		// starts a fresh turn, as a prompt does.
+		if (!isStopContinuation(event)) stopHookBlocks = 0;
+		// UserPromptSubmit context belongs to the user's prompt; SessionStart and
+		// PostCompact context belong to whichever run opens next, which on pi
+		// 1.2.0 can be one a notification or scheduled fire opened. Its
+		// message_start can no longer deliver them: `prompted` is set above.
+		const userRun = isUserRun(event);
+		const texts = pendingPromptContext.filter((entry) => userRun || entry.event !== "UserPromptSubmit");
+		if (texts.length === 0) return;
+		pendingPromptContext = pendingPromptContext.filter((entry) => !texts.includes(entry));
 		return {
 			message: {
 				customType: "one-code:hook-context",
@@ -644,7 +661,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		try {
 			pi.sendMessage(
 				{
-					customType: "one-code:hook-stop",
+					customType: STOP_CONTINUATION_TYPE,
 					content: `Stop hook blocked stopping: ${outcome.block.reason}`,
 					display: false,
 				},

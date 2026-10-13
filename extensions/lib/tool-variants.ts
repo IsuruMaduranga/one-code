@@ -57,9 +57,13 @@ export function registerFormTool(pi: ExtensionAPI, tool: AnyToolDefinition, desc
 	followDescriptionForm(pi, registerVariantTool<DescriptionForm>(pi, "short", (form) => ({ ...tool, description: describe(form) })));
 }
 
-/** Apply the frozen session tier's form only at session and model boundaries. */
-export function followDescriptionForm(pi: ExtensionAPI, apply: (form: DescriptionForm) => void): void {
+/** Apply the frozen session tier's form (and the tier it came from) only at session and model boundaries. */
+export function followDescriptionForm(pi: ExtensionAPI, apply: (form: DescriptionForm, tier: PromptTier) => void): void {
 	const requestTier = sessionModelTier(pi);
-	pi.on("session_start", () => apply(descriptionForm(requestTier())));
-	pi.on("model_select", () => apply(descriptionForm(requestTier())));
+	const follow = () => {
+		const tier = requestTier();
+		apply(descriptionForm(tier), tier);
+	};
+	pi.on("session_start", follow);
+	pi.on("model_select", follow);
 }

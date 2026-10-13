@@ -780,6 +780,17 @@ export function stripReminderBlocks<T extends { content?: unknown }>(result: T):
 	return changed ? { ...result, content: kept } : result;
 }
 
+/**
+ * The context pi's built-in renderers get under the wrapper. pi 1.1.0 added
+ * two fields that would change our rows: the shell's `durationMs` prints a
+ * "Took Ns" line Claude Code's rows do not have, and `outputPad` sets the edit
+ * preview's and diff's indent. Hide the first and pin the second to the 1 pi
+ * hard-coded before, so a row looks the same on every pi and setting.
+ */
+function baseContext(context: any, lastComponent: unknown): any {
+	return { ...context, durationMs: undefined, outputPad: 1, lastComponent };
+}
+
 export function ccWrapBuiltinRenderers<TArgs = any>(
 	label: string,
 	base: {
@@ -814,7 +825,7 @@ export function ccWrapBuiltinRenderers<TArgs = any>(
 			}
 			let inner: any;
 			try {
-				inner = base.renderCall(args, theme, { ...context, lastComponent: context.state.ccInnerCall });
+				inner = base.renderCall(args, theme, baseContext(context, context.state.ccInnerCall));
 				context.state.ccInnerCall = inner;
 			} catch {
 				return linesComponent(() => [head()]);
@@ -853,7 +864,7 @@ export function ccWrapBuiltinRenderers<TArgs = any>(
 			if (rejected) return linesComponent(() => [rejected]);
 			let inner: any;
 			try {
-				inner = base.renderResult?.(result, options, theme, { ...context, lastComponent: context.state.ccInnerResult });
+				inner = base.renderResult?.(result, options, theme, baseContext(context, context.state.ccInnerResult));
 				context.state.ccInnerResult = inner;
 			} catch {
 				inner = undefined;

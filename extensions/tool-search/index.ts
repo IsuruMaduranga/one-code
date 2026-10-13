@@ -33,7 +33,9 @@ import {
 	deferredAddendumText,
 	deferredMissReminderText,
 	DeferredRegistry,
+	deferralEnabled,
 	deferredReminderText,
+	loaderUnavailableReminderText,
 	type DeferRequest,
 	resultText,
 	searchTools,
@@ -93,15 +95,19 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	/** The session's model as last seen, for an announcement made outside any hook. */
 	let latestModel: { provider?: string; api?: string; compat?: unknown } | undefined;
 
-	const searchableTools = () =>
-		pi
-			.getAllTools()
+	/** Whether tool_search is registered; a `--tools` list without it turns deferral off (lib/deferred.ts). */
+	const deferring = () => deferralEnabled(pi.getAllTools());
+	const searchableTools = () => {
+		const all = pi.getAllTools();
+		if (!deferralEnabled(all)) return [];
+		return all
 			.filter((tool) => deferredRegistry.has(tool.name))
 			.map((tool) => ({
 				name: tool.name,
 				description: tool.description ?? "",
 				keywords: deferredRegistry.keywordsFor(tool.name),
 			}));
+	};
 
 	const publishBaseline = (names: ReadonlySet<string>) => {
 		pi.events.emit(CONTEXT_BASELINE_CHANNEL, { key: "tool-search", value: [...names] });
@@ -205,8 +211,11 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	// load item at the tool_search result instead (stabilizeResponsesToolLoads).
 	pi.on("before_provider_request", (event, ctx) => {
 		latestModel = ctx.model;
+		const allTools = pi.getAllTools();
+		const enabled = deferralEnabled(allTools);
 		const toolLoadCompat = responsesToolLoadCompat(ctx.model as ResponsesToolLoadModel | undefined);
 		if (toolLoadCompat) {
+			if (!enabled) return undefined;
 			return stabilizeResponsesToolLoads(event.payload as Record<string, unknown>, (name) => deferredRegistry.has(name), loads, toolLoadCompat);
 		}
 		const original = event.payload as Record<string, unknown>;
@@ -217,12 +226,12 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 			const text = additions ? withToolAdditions(original, addendaByCall, false) : undefined;
 			return text ? withBetas(text.payload, [MID_CONVERSATION_SYSTEM_BETA]) : undefined;
 		};
-		if (!supportsToolReferences(ctx.model as { provider?: string; id?: string } | undefined) || !looksLikeAnthropicRequest(original)) return announceAsText();
+		if (!enabled || !supportsToolReferences(ctx.model as { provider?: string; id?: string } | undefined) || !looksLikeAnthropicRequest(original)) return announceAsText();
 		const isDeferred = (name: string) => deferredRegistry.has(name);
 		// A tool that arrived mid-session goes out as Claude Code's tool_addition
 		// where the model takes one, declared deferred.
 		const lifted = additions ? withToolAdditions(original, addendaByCall) : undefined;
-		const stable = stabilizeDeferredTools(lifted?.payload ?? original, pi.getAllTools(), isDeferred, loads, new Set(lifted?.names ?? []));
+		const stable = stabilizeDeferredTools(lifted?.payload ?? original, allTools, isDeferred, loads, new Set(lifted?.names ?? []));
 		// Renamed (OAuth) tools cannot be referenced: the active tools stay as pi
 		// rendered them and the addition goes as text.
 		if (!stable) return announceAsText();
@@ -233,7 +242,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	/** Deactivate every deferred-registry tool the transcript has not loaded, and announce the loadable set. */
 	const deferAll = () => {
 		const deferred = new Set(deferredRegistry.names);
-		if (deferred.size === 0) return;
+		if (deferred.size === 0 || !deferring()) return;
 		const active = pi.getActiveTools();
 		const next = active.filter((name) => !deferred.has(name) || loadedBefore.has(name));
 		if (next.length !== active.length) pi.setActiveTools(next);
@@ -248,7 +257,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		// asynchronously and register their tools then) would otherwise leave the
 		// tool eager AND unlisted in the reminder. Deactivate it (unless the
 		// transcript loaded it) and refresh the keyed reminder.
-		if (sessionStarted && request?.name) {
+		if (sessionStarted && request?.name && deferring()) {
 			const active = pi.getActiveTools();
 			if (active.includes(request.name) && !loadedBefore.has(request.name)) {
 				pi.setActiveTools(active.filter((name) => name !== request.name));
@@ -296,6 +305,11 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		// already told the model about these names, so merge them before planning.
 		for (const name of addendumNamesOnBranch(branch)) announced.add(name);
 		deferAll();
+		// A restored message 1 keeps its listing (its bytes are locked), so when
+		// this run's tool list leaves tool_search out, say once that it is gone.
+		if (restored && announced.size > 0 && !deferring()) {
+			pi.events.emit(REMINDER_CHANNEL, { scope: "next-turn", key: "deferred-unavailable", text: loaderUnavailableReminderText() });
+		}
 		// Even an absent listing is meaningful on resume: preserve that baseline so
 		// the first later deferred tool is a tail notice, not a message-1 rewrite.
 		if (!restored) publishBaseline(announced);
@@ -317,7 +331,8 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		// the miss is recognised and the steer names the loadable tool (M1).
 		const name = raw ? normalizeToolName(raw) : undefined;
 		if (!name) return;
-		if (deferredRegistry.has(name)) {
+		// Without tool_search there is nothing to steer a deferred-tool miss to.
+		if (deferredRegistry.has(name) && deferring()) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				scope: "next-turn",
 				key: `deferred-miss-${name}`,
@@ -336,6 +351,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
+		// A literal, like every registration: agent-view-tool-labels.test.ts reads them from source.
 		name: "tool_search",
 		label: "Tool Search",
 		...ccToolRenderers("Tool Search"),
@@ -381,7 +397,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 			if (matches.length === 0 && eager.length > 0) {
 				return {
 					content: [{ type: "text", text: `Already loaded: ${eager.join(", ")}.${notFoundNote}` }],
-					details: { matches: eager, added: [] as string[], notFound },
+					details: { matches: eager, added: [] as string[], notFound, refused: [] as string[] },
 				};
 			}
 
@@ -391,31 +407,39 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 					content: [
 						{ type: "text", text: `No tools matched "${params.query}".${notFoundNote} Tools that can be loaded: ${names}` },
 					],
-					details: { matches: [] as string[], added: [] as string[], notFound },
+					details: { matches: [] as string[], added: [] as string[], notFound, refused: [] as string[] },
 					isError: true,
 				};
 			}
 
-			const added = matches.map((m) => m.name).filter((name) => !active.includes(name));
-			if (added.length > 0) {
-				pi.setActiveTools([...new Set([...active, ...added])]);
-				loads.set(toolCallId, added);
-			}
+			const matchNames = matches.map((m) => m.name);
+			const toActivate = matchNames.filter((name) => !active.includes(name));
+			if (toActivate.length > 0) pi.setActiveTools([...new Set([...active, ...toActivate])]);
+			// pi can decline to activate a tool: since 1.0.4 a `--tools` list that
+			// names no `mcp__*` entry keeps the MCP tools registered but not
+			// activatable. Report what pi actually activated, never a plausible load.
+			const now = new Set(pi.getActiveTools());
+			const added = toActivate.filter((name) => now.has(name));
+			const refused = toActivate.filter((name) => !now.has(name));
+			if (added.length > 0) loads.set(toolCallId, added);
 
-			const loaded = [...new Set([...matches.map((m) => m.name), ...eager])];
+			const loaded = [...new Set([...matchNames, ...eager])].filter((name) => now.has(name));
 			const already = loaded.filter((name) => !added.includes(name));
+			const refusedNote =
+				refused.length > 0 ? ` Could not load ${refused.join(", ")}: this session's tool list (pi's --tools) leaves them out, so they cannot be called.` : "";
 			return {
 				content: [
 					{
 						type: "text",
 						text:
-							[
+							([
 								added.length > 0 ? `Loaded ${added.join(", ")}. These tools are now callable.` : "",
 								already.length > 0 ? `Already loaded: ${already.join(", ")}.` : "",
-							].filter(Boolean).join(" ") + notFoundNote,
+							].filter(Boolean).join(" ") + refusedNote + notFoundNote).trim(),
 					},
 				],
-				details: { matches: loaded, added, notFound },
+				details: { matches: loaded, added, notFound, refused },
+				isError: loaded.length === 0,
 			};
 		},
 	});
@@ -423,6 +447,10 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	registerLocalCommand(pi, "tools-deferred", {
 		description: "Show which tools are deferred (loadable via tool_search)",
 		handler: async (args, ctx) => {
+			if (!deferring()) {
+				ctx.ui.notify("tool_search is not registered (a --tools list leaves it out), so no tool is deferred.", "info");
+				return;
+			}
 			const available = searchableTools();
 			const activeSet = new Set(pi.getActiveTools());
 			const lines = available.map((t) => `${activeSet.has(t.name) ? "loaded " : "deferred"} ${t.name}`);

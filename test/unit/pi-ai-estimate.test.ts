@@ -15,7 +15,7 @@ import { clampMaxTokensToContext as realClampImpl } from "@earendil-works/pi-ai/
 import { estimateMessageTokens as realEstimate } from "@earendil-works/pi-ai/utils/estimate";
 import { normalizeContext as realNormalize } from "@earendil-works/pi-ai/utils/transcript";
 import { describe, expect, it } from "vitest";
-import { clampMaxTokensToContext, estimateMessageTokens, normalizeContext } from "../../extensions/lib/pi-ai-estimate.ts";
+import { charsPerToken, clampMaxTokensToContext, estimateMessageTokens, normalizeContext } from "../../extensions/lib/pi-ai-estimate.ts";
 
 // Mirror fit.ts / completeSimple: normalize before clamping. The real
 // normalizeContext returns the branded TranscriptContext the real clamp expects,
@@ -35,6 +35,18 @@ const toolResult = (text: string, extra: Record<string, unknown> = {}): Message 
 const imageResult = (): Message =>
 	({ role: "toolResult", toolCallId: "t", toolName: "read", content: [{ type: "text", text: "hi" }, { type: "image", data: "…", mimeType: "image/png" }], timestamp: 3 }) as unknown as Message;
 const req = (messages: Message[], systemPrompt?: string, tools?: unknown[]): Context => ({ systemPrompt, messages, tools: tools as never });
+
+describe("charsPerToken follows the running pi", () => {
+	it("keeps pi-ai 0.x's 4 on pi 0.x and takes pi-ai 1.1.0's 3.5 from pi 1.0 on", () => {
+		expect(charsPerToken("0.84.3")).toBe(4);
+		expect(charsPerToken("0.99.2")).toBe(4);
+		// pi 1.0.x can float onto either pi-ai; 3.5 predicts the smaller output room.
+		expect(charsPerToken("1.0.1")).toBe(3.5);
+		expect(charsPerToken("1.1.0")).toBe(3.5);
+		expect(charsPerToken(undefined)).toBe(3.5);
+		expect(charsPerToken("not-a-version")).toBe(3.5);
+	});
+});
 
 describe("estimateMessageTokens parity with pi-ai", () => {
 	const messages: Message[] = [

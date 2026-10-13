@@ -35,7 +35,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { withKeepAlive } from "../lsp/keep-alive.ts";
 import { ONE_SHOT_COMMAND_FAILED_CHANNEL, RunOutcomeLatch } from "./interrupt.ts";
 import { escapeXml } from "./local-command.ts";
-import { PROMPT_OPTIONS_CHANNEL } from "./prompt-options.ts";
+import { isUserRun, PROMPT_OPTIONS_CHANNEL } from "./prompt-options.ts";
 import { wrapReminder } from "./reminders.ts";
 
 /** pi's session-mode union, derived from the context (the package root does not export ExtensionMode itself). */
@@ -695,7 +695,9 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 				// No confirmation possible for a user-role message (no details), and
 				// prompt() cannot be cleared by Esc before it starts: count it delivered.
 				pending.delete(id);
-				pi.sendUserMessage(frameForDelivery(entry.text, "opens-turn"));
+				// followUp: pi 1.2.0 counts a starting run as busy and rejects a
+				// bare send there; when idle, the option changes nothing.
+				pi.sendUserMessage(frameForDelivery(entry.text, "opens-turn"), { deliverAs: "followUp" });
 				return;
 			}
 			pi.sendMessage(
@@ -830,9 +832,11 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 		// the session is working again, so what was held steers into it.
 		if (interrupted) release(false);
 	});
-	pi.on("before_agent_start", () => {
+	pi.on("before_agent_start", (event) => {
 		prompted = true;
-		release(true);
+		// A run an extension opened (pi 1.2.0 fires this for it too) has no user
+		// message to ride; agent_start releases into it as before.
+		if (isUserRun(event)) release(true);
 	});
 	pi.events?.on(PROMPT_OPTIONS_CHANNEL, () => {
 		prompted = true;
@@ -984,7 +988,9 @@ export function createUserMessageSender(pi: Pick<ExtensionAPI, "on" | "sendUserM
 	): Promise<void> => {
 		if (!active) throw new Error("Session shut down before the command's user turn completed.");
 		if (sessionOutlivesTurn(ctx.mode)) {
-			pi.sendUserMessage(content, options);
+			// followUp by default: pi 1.2.0 counts a starting run as busy and
+			// rejects a send without deliverAs there; when idle it changes nothing.
+			pi.sendUserMessage(content, { ...options, deliverAs: options?.deliverAs ?? "followUp" });
 			return;
 		}
 		let release!: () => void;

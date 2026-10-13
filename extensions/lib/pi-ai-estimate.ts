@@ -20,7 +20,8 @@
  * (which pi-ai re-exports from its entry point, so it needs no vendoring — unlike
  * the estimate/clamp helpers under `/utils/estimate` and `/api/simple-options`,
  * which have no bare re-export). The two exported helpers
- * are byte-identical to upstream; the one adaptation is the internal
+ * are byte-identical to upstream (pi-ai 1.1.0 changed only `CHARS_PER_TOKEN`,
+ * which `charsPerToken` picks for the running pi); the one adaptation is the internal
  * `estimateContextTokens`, narrowed to accept only `Context` (the sole shape we
  * call it with) rather than upstream's `Context | Message[]` overload — the
  * Message[] branch would be dead code here. `test/unit/pi-ai-estimate.test.ts`
@@ -48,8 +49,22 @@
  */
 
 import { getSystemMessageText, type Api, type Context, type ImageContent, type Message, type Model, type TextContent, type Usage } from "@earendil-works/pi-ai";
+import { VERSION as PI_VERSION } from "@earendil-works/pi-coding-agent";
+import { compareVersions } from "./pi-version.ts";
 
-const CHARS_PER_TOKEN = 4;
+/**
+ * pi-ai's characters per token: 4 through pi-ai 1.0.x, 3.5 from pi-ai 1.1.0.
+ * pi-ai's entry point looks the same on both, so the running pi's version
+ * stands in: pi 0.x keeps pi-ai 0.x and pi 1.1.0 requires pi-ai ^1.1.0, but
+ * pi 1.0.x can float onto either (pi ships no shrinkwrap since 1.0.1). There
+ * 3.5 wins, as it predicts less output room than pi gives, never more.
+ */
+export function charsPerToken(piVersion: string | undefined): number {
+	const order = piVersion === undefined ? undefined : compareVersions(piVersion, "1.0.0");
+	return order !== undefined && order < 0 ? 4 : 3.5;
+}
+
+const CHARS_PER_TOKEN = charsPerToken(PI_VERSION);
 const ESTIMATED_IMAGE_CHARS = 4800;
 const CONTEXT_SAFETY_TOKENS = 4096;
 const MIN_MAX_TOKENS = 1;

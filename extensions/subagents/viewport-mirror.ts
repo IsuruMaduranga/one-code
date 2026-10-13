@@ -2,11 +2,12 @@
  * Viewport mirror for the agent view (pure; no pi imports).
  *
  * In pi's fullscreen mode the terminal's scroll input (PageUp/PageDown, the
- * mouse wheel, Home/End) is taken by pi-tui's own viewport handler before any
- * extension input listener runs (findings §10), and it scrolls the main
- * transcript. The agent view is an overlay over that transcript, so the user
- * saw nothing move in the view while main, hidden below it, scrolled away and
- * stayed scrolled up after the view closed.
+ * mouse wheel, Ctrl+Home/Ctrl+End, plain Home/End before pi 1.0.3) is taken
+ * by pi-tui's own viewport handler before any extension input listener runs
+ * (findings §10), and it scrolls the main transcript. The agent view is an
+ * overlay over that transcript, so the user saw nothing move in the view while
+ * main, hidden below it, scrolled away and stayed scrolled up after the view
+ * closed.
  *
  * The mirror turns those moves into agent-view scrolling, as Claude Code
  * scrolls whatever transcript is on screen: each frame it reads how far the

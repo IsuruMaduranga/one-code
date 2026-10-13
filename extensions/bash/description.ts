@@ -10,7 +10,10 @@
  * and the working-directory sentence says what this tool does, since each
  * command starts in the session's working directory and a `cd` does not carry
  * over (lib/shell-tool.ts), where Claude Code tracks the directory between
- * calls. The parameter texts are Claude Code's.
+ * calls. The parameter texts are Claude Code's. On the tiny tier, the one
+ * with dedicated grep, find and ls tools (search-tools/tools.ts), the long
+ * form's two shell-`find` bullets give way to a pointer at those tools, as
+ * tiny's system prompt says (system-prompt/tiers/low.ts).
  */
 
 import type { DescriptionForm } from "../lib/tool-variants.ts";
@@ -148,9 +151,19 @@ Important:
 # Other common operations
 - View comments on a Github PR: gh api repos/foo/bar/pulls/123/comments`;
 
-/** The description for a form and permission mode. */
-export function bashDescription(form: DescriptionForm, autoMode: boolean): string {
-	if (form === "long") return BASH_LONG_DESCRIPTION;
+/** The long form's shell-`find` advice, which the tiny tier's search tools replace. */
+const SHELL_FIND_LINES = ` - When running \`find\`, search from \`.\` (or a specific path), not \`/\` — scanning the full filesystem can exhaust system resources on large trees.
+ - When using \`find -regex\` with alternation, put the longest alternative first. Example: use \`'.*\\.\\(tsx\\|ts\\)'\` not \`'.*\\.\\(ts\\|tsx\\)'\` — the second form silently skips \`.tsx\` files.
+`;
+const SEARCH_TOOLS_LINE = ` - Search with the dedicated tools, not this shell: the find tool for files, the grep tool for content, the ls tool to list a directory.
+`;
+
+/** The long form on the tiny tier, whose grep, find and ls tools replace shell searches. */
+export const BASH_LONG_SEARCH_TOOLS_DESCRIPTION = BASH_LONG_DESCRIPTION.replace(SHELL_FIND_LINES, SEARCH_TOOLS_LINE);
+
+/** The description for a form and permission mode; `searchTools` when the session has the dedicated search tools. */
+export function bashDescription(form: DescriptionForm, autoMode: boolean, searchTools = false): string {
+	if (form === "long") return searchTools ? BASH_LONG_SEARCH_TOOLS_DESCRIPTION : BASH_LONG_DESCRIPTION;
 	return autoMode ? BASH_SHORT_DESCRIPTION.replace(BASH_AVOID_SHELL_READS_LINE, "") : BASH_SHORT_DESCRIPTION;
 }
 

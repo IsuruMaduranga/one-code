@@ -94,14 +94,14 @@ function isAnthropicFrontier(model: Model<Api>): boolean {
 /**
  * OpenAI first-party frontier gate: the GPT-6 Astra and Sol lines and later
  * majors (`gpt-6-astra`, `gpt-6-sol`, `gpt-6.1-sol-pro`), served by OpenAI
- * itself (the `openai`, `openai-codex` and `azure-openai-responses` providers).
+ * itself (the `openai`, `openai-codex` and `azure` providers; `azure-openai-responses`
+ * before pi 1.0.3).
  * GPT-5.x Sol and Terra, and every Luna, stay below it (decided 2026-09-25:
  * Astra and Sol 6 are the OpenAI models comparable to Fable and Opus 5). A
  * gateway-proxied copy can't be verified, the same rule as Claude above.
  */
 function isOpenAIFrontier(model: Model<Api>): boolean {
-	const policy = providerPolicy(model.provider);
-	if (policy.kind !== "direct" || policy.profile !== "openai") return false;
+	if (providerPolicy(model.provider).kind !== "direct" || modelIdentity(model).profile !== "openai") return false;
 	const match = model.id.match(/^gpt-(\d+)(?:\.\d+)?-(?:astra|sol)(?:-|$)/);
 	return match !== null && Number(match[1]) >= 6;
 }
@@ -111,7 +111,7 @@ function isOpenAIFrontier(model: Model<Api>): boolean {
  * `claude-sonnet-5`, `claude-opus-4-5-20251101`): family, major, minor. A
  * dated suffix is never read as the minor version (the `length < 8` guard).
  * Undefined for anything else. Shared by the frontier gate here and the
- * tool-reference gate in `deferred.ts`.
+ * server-tools gate in `anthropic-server-tools.ts`.
  */
 export function parseClaudeVersion(id: string): { family: "opus" | "sonnet" | "fable"; major: number; minor: number } | undefined {
 	const version = id.match(/^claude-(opus|sonnet|fable)-(\d+)(?:-(\d+))?(?:-|$)/);
@@ -123,23 +123,7 @@ export function parseClaudeVersion(id: string): { family: "opus" | "sonnet" | "f
 	};
 }
 
-/**
- * A Claude model id in any provider's spelling (`claude-opus-5-5`,
- * `claude-haiku-4-5-20251001`, `anthropic/claude-sonnet-5.5`, Bedrock's
- * `us.anthropic.claude-fable-5-1-v1`): family, major, and minor when the id
- * has one. A dated suffix is never read as the minor version. Undefined for
- * anything else. `parseClaudeVersion` stays first-party only, for the gates.
- */
-export function parseClaudeId(id: string): { family: "opus" | "sonnet" | "haiku" | "fable"; major: number; minor?: number } | undefined {
-	const match = id.match(/(?:^|[/.])claude-(opus|sonnet|haiku|fable)-(\d+)(?:[-.](\d{1,2}))?(?=$|[-@:[])/);
-	if (!match) return undefined;
-	return { family: match[1] as "opus" | "sonnet" | "haiku" | "fable", major: Number(match[2]), ...(match[3] ? { minor: Number(match[3]) } : {}) };
-}
-
-/** The Claude family of a model id in any provider's spelling. */
-export function claudeFamily(id: string): "opus" | "sonnet" | "haiku" | "fable" | undefined {
-	return parseClaudeId(id)?.family;
-}
+export { claudeFamily, parseClaudeId } from "./claude-id.ts";
 
 export interface TierClassification {
 	tier: PromptTier;

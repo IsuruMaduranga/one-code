@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 import { withBetas } from "../../extensions/lib/anthropic-payload.ts";
+import { parseClaudeId } from "../../extensions/lib/claude-id.ts";
 import { systemRoleLayout } from "../../extensions/lib/system-role.ts";
 
 async function bundledCatalog(): Promise<Model<Api>[]> {
@@ -15,13 +16,15 @@ async function bundledCatalog(): Promise<Model<Api>[]> {
 }
 
 describe("systemRoleLayout", () => {
-	it("follows pi's catalog flag on every bundled row, never Haiku", async () => {
+	it("follows pi's catalog flag on every bundled row, never a Haiku before 5", async () => {
 		const catalog = await bundledCatalog();
 		let flagged = 0;
 		for (const model of catalog) {
 			const flag = (model.compat as { supportsMidConvoSystemMessages?: boolean } | undefined)?.supportsMidConvoSystemMessages === true;
 			const layout = systemRoleLayout(model);
-			if (model.id.includes("haiku")) expect(layout, `${model.provider}/${model.id}`).toBeUndefined();
+			const claude = parseClaudeId(model.id);
+			const oldHaiku = claude ? claude.family === "haiku" && claude.major < 5 : model.id.includes("haiku");
+			if (model.api === "anthropic-messages" && oldHaiku) expect(layout, `${model.provider}/${model.id}`).toBeUndefined();
 			else if (!flag) expect(layout, `${model.provider}/${model.id}`).toBeUndefined();
 			if (layout) flagged++;
 		}
@@ -36,6 +39,16 @@ describe("systemRoleLayout", () => {
 		}
 		expect(systemRoleLayout(anthropic("claude-sonnet-5"))).toBeUndefined();
 		expect(systemRoleLayout(anthropic("claude-haiku-4-5"))).toBeUndefined();
+	});
+
+	it("gives Haiku 5.5 the Anthropic shape as its flag says, and keeps older Haikus out even when flagged", async () => {
+		const catalog = await bundledCatalog();
+		expect(systemRoleLayout(catalog.find((m) => m.provider === "anthropic" && m.id === "claude-haiku-5-5"))).toBe("anthropic");
+		const flagged = { api: "anthropic-messages", compat: { supportsMidConvoSystemMessages: true } };
+		for (const id of ["claude-haiku-4-5", "claude-haiku-4-5-20251001", "claude-3-5-haiku-latest", "anthropic/claude-haiku-4.5"]) {
+			expect(systemRoleLayout({ id, ...flagged }), id).toBeUndefined();
+		}
+		expect(systemRoleLayout({ id: "anthropic/claude-haiku-5.5", ...flagged })).toBe("anthropic");
 	});
 
 	it("maps each API to its wire shape", () => {

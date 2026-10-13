@@ -76,7 +76,7 @@ describe("resolveModelTier", () => {
 	});
 
 	it("classifies first-party OpenAI Astra/Sol ≥6 as frontier", () => {
-		for (const provider of ["openai", "openai-codex", "azure-openai-responses"]) {
+		for (const provider of ["openai", "openai-codex", "azure", "azure-openai-responses"]) {
 			for (const id of ["gpt-6-astra", "gpt-6-sol", "gpt-6.1-sol-pro", "gpt-7-astra"]) {
 				expect(resolveModelTier(model(id, provider, 2), noEnv)).toBe("frontier");
 			}

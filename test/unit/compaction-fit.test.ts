@@ -35,8 +35,8 @@ const request = (messages: Message[], systemPrompt = "sys"): Context => ({ syste
 // counted), exactly as pi's completeSimple does. normalizeContext returns the
 // branded TranscriptContext the real clamp expects, so no cast is needed.
 const clampMaxTokensToContext = (model: Model<Api>, context: Context, maxTokens: number) => clampMaxTokensToContextImpl(model, normalizeContext(context), maxTokens);
-/** ~N tokens of text under pi's chars/4 estimate. */
-const tokensOf = (n: number) => "x".repeat(n * 4);
+/** ~N tokens of text under pi-ai's estimate (3.5 characters per token since pi-ai 1.1.0). */
+const tokensOf = (n: number) => "x".repeat(Math.floor(n * 3.5));
 
 describe("replayFits (H2)", () => {
 	it("never replays on overflow: the capture is the request that just failed", () => {

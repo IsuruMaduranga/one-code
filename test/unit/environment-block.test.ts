@@ -33,6 +33,9 @@ describe("modelLine", () => {
 		expect(modelLine({ id: "claude-haiku-4-5-20251001" })).toBe(
 			"You are powered by the model named Haiku 4.5. The exact model ID is claude-haiku-4-5-20251001. Assistant knowledge cutoff is February 2025.",
 		);
+		expect(modelLine({ id: "claude-haiku-5-5" })).toBe(
+			"You are powered by the model named Haiku 5.5. The exact model ID is claude-haiku-5-5. Assistant knowledge cutoff is June 2026.",
+		);
 		expect(modelLine({ id: "claude-opus-5" })).toContain("named Opus 5. The exact model ID is claude-opus-5. Assistant knowledge cutoff is May 2026.");
 	});
 

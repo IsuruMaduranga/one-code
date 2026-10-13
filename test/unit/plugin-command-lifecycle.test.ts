@@ -59,7 +59,7 @@ describe("plugin command lifecycle", () => {
 		writeFileSync(join(updated, "commands", "ping.md"), "Updated command $ARGUMENTS");
 		writeRegistry(updated);
 		await fake.commands.get("fixture:ping")!.handler("ARGS", createFakeCtx({ cwd: home, mode: "tui" }));
-		expect(fake.sentUserMessages).toEqual([{ content: promptCommandText("fixture:ping", "ARGS", "Updated command ARGS"), options: undefined }]);
+		expect(fake.sentUserMessages).toEqual([{ content: promptCommandText("fixture:ping", "ARGS", "Updated command ARGS"), options: { deliverAs: "followUp" } }]);
 	});
 
 	it("rejects a load-time command outside its project in the actual session cwd", async () => {

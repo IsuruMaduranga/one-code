@@ -161,6 +161,17 @@ describe("hooks wiring", () => {
 		expect(again).toBeUndefined();
 	});
 
+	it("keeps UserPromptSubmit context for the prompt when a notification opens a run first (pi 1.2.0 custom run)", async () => {
+		const hookPrompt = script("hook-prompt-custom.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"additionalContext":"for the prompt"}}'\n`);
+		writeUserHooks({ UserPromptSubmit: [{ hooks: [{ type: "command", command: hookPrompt }] }] });
+		mount();
+		await fake.fireOne("input", { source: "interactive", text: "hello" }, ctx());
+		const custom = await fake.fireOne<{ message?: unknown }>("before_agent_start", { messageType: "custom", message: { role: "custom", customType: "task-notification" } }, ctx());
+		expect(custom).toBeUndefined();
+		const result = await fake.fireOne<{ message?: { content: string } }>("before_agent_start", { prompt: "hello" }, ctx());
+		expect(result?.message?.content).toBe(wrapReminder(hookContextText("UserPromptSubmit", "for the prompt")));
+	});
+
 	it.each(["steer", "followUp"] as const)(
 		"UserPromptSubmit context for a message queued mid-turn (%s) rides the request that delivers it, not the next prompt",
 		async (behavior) => {
@@ -431,9 +442,15 @@ describe("hooks wiring", () => {
 		await settle(); // the Stop hook blocks: its continuation runs with the latch set
 		await fake.fireOne("input", { source: "interactive", text: "also this", streamingBehavior: "steer" }, ctx());
 		await settle(); // the queued message joined that continuation
+		// pi 1.2.0 fires before_agent_start for the continuation run itself, as a custom run.
+		await fake.fireOne("before_agent_start", { messageType: "custom", message: { role: "custom", customType: "one-code:hook-stop" } }, ctx());
+		await settle(); // still the continuation chain
 		await fake.fireOne("before_agent_start", { prompt: "a new prompt" }, ctx());
 		await settle(); // a new turn
-		expect(flags()).toEqual([false, true, false]);
+		// A run a notification opened starts fresh too.
+		await fake.fireOne("before_agent_start", { messageType: "custom", message: { role: "custom", customType: "task-notification" } }, ctx());
+		await settle();
+		expect(flags()).toEqual([false, true, true, false, false]);
 	});
 
 	it("Stop continue:false ends the turn even when another hook requests a continuation", async () => {
@@ -636,6 +653,25 @@ describe("hooks wiring", () => {
 		expect(await typedAfter).toBeGreaterThanOrEqual(300);
 		// The hook's context rode the notification's turn, the first one.
 		expect(reminders).toContain(hookContextText("SessionStart", "session context"));
+	});
+
+	it("SessionStart context rides a first run a notification opens on pi 1.2.0, while UserPromptSubmit context waits for its prompt", async () => {
+		const start = script("hook-start-custom.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"additionalContext":"session context"}}'\n`);
+		const prompt = script("hook-prompt-held.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"additionalContext":"for the prompt"}}'\n`);
+		writeUserHooks({ SessionStart: [{ hooks: [{ type: "command", command: start }] }], UserPromptSubmit: [{ hooks: [{ type: "command", command: prompt }] }] });
+		mount();
+		await fake.fireOne("session_start", { reason: "startup" }, ctx());
+		await fake.fireOne("input", { source: "interactive", text: "hello" }, ctx());
+		const notificationMessage = { role: "custom", customType: "subagent-result", content: [], details: { notificationId: "1-a" } };
+		const custom = await fake.fireOne<{ message?: { content: string } }>("before_agent_start", { messageType: "custom", message: notificationMessage }, ctx());
+		expect(custom?.message?.content).toBe(wrapReminder(hookContextText("SessionStart", "session context")));
+		// The run's message_start delivers nothing more.
+		const reminders: string[] = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => reminders.push((data as { text: string }).text));
+		await fake.fireOne("message_start", { message: notificationMessage }, ctx());
+		expect(reminders).toEqual([]);
+		const result = await fake.fireOne<{ message?: { content: string } }>("before_agent_start", { messageType: "user", prompt: "hello" }, ctx());
+		expect(result?.message?.content).toBe(wrapReminder(hookContextText("UserPromptSubmit", "for the prompt")));
 	});
 });
 

@@ -13,7 +13,7 @@
 import { createHash } from "node:crypto";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { toolResultsOnBranch } from "./branch-restore.ts";
-import { parseClaudeVersion } from "./model-tier.ts";
+import { parseClaudeId } from "./claude-id.ts";
 import { RESPONSES_APIS } from "./system-role.ts";
 import { ADDENDUM_HEAD } from "./tool-additions.ts";
 import { normalizeToolName } from "../permissions/matcher.ts";
@@ -101,11 +101,27 @@ export function deferredAddendumText(added: readonly string[]): string {
 	return [ADDENDUM_HEAD, ...added].join("\n");
 }
 
+/** The loader every deferred tool sits behind. */
+export const TOOL_SEARCH = "tool_search";
+
+/**
+ * Whether deferral applies at all: `tool_search` is among pi's registered
+ * tools. A `--tools` allowlist that leaves it out (or `--exclude-tools
+ * tool_search`) unregisters it, and since pi 1.0.4 the allowlist keeps the
+ * `mcp__*` tools registered unless an entry names one (findings §66). Without
+ * the loader nothing can be loaded, so no tool is deferred or listed: the
+ * tools the allowlist kept stay as pi activated them.
+ */
+export function deferralEnabled(tools: readonly { name: string }[]): boolean {
+	return tools.some((tool) => tool.name === TOOL_SEARCH);
+}
+
 /**
  * Whether Anthropic accepts client-side `tool_reference` blocks for this model,
  * with the model's own compat flag winning: first-party Anthropic, Claude 4.5
- * or newer, and Haiku 4.5 (it takes references with no beta, and an eager
- * append there rewrites the whole cache, findings §55 P4). Other Haikus stay out.
+ * or newer, Haiku 4.5 and later Haikus included (they take references with no
+ * beta, and an eager append there rewrites the whole cache: findings §55 P4
+ * for Haiku 4.5, §67 for Haiku 5.5). Older Haikus stay out.
  */
 export function supportsToolReferences(
 	model: { provider?: string; id?: string; compat?: { supportsToolReferences?: boolean } } | undefined,
@@ -113,9 +129,8 @@ export function supportsToolReferences(
 	if (!model) return false;
 	if (typeof model.compat?.supportsToolReferences === "boolean") return model.compat.supportsToolReferences;
 	if (model.provider !== "anthropic" || !model.id) return false;
-	if (model.id.includes("haiku")) return /^claude-haiku-4-5(?:-|$)/.test(model.id);
-	const version = parseClaudeVersion(model.id);
-	return version !== undefined && (version.major > 4 || (version.major === 4 && version.minor >= 5));
+	const version = parseClaudeId(model.id);
+	return version !== undefined && (version.major > 4 || (version.major === 4 && (version.minor ?? 0) >= 5));
 }
 
 /** The slice of pi's ToolInfo the deferred definitions need. */
@@ -144,7 +159,7 @@ export function toolSearchLoads(branch: readonly SessionEntry[]): Map<string, st
 	}
 	return loads;
 }
-const TOOL_SEARCH_NAMES: ReadonlySet<string> = new Set(["tool_search"]);
+const TOOL_SEARCH_NAMES: ReadonlySet<string> = new Set([TOOL_SEARCH]);
 
 type WireTool = Record<string, unknown> & { name: string };
 type WireBlock = Record<string, unknown> & { type?: unknown };
@@ -474,6 +489,15 @@ export function deferredMissReminderText(name: string): string {
 		`\`${name}\` is a deferred tool — its schema is not loaded, so that call failed with "Tool ${name} not found".`,
 		`Load it first with tool_search (\`select:${name}\`), then reissue the call. It stays callable for the rest of the session once loaded.`,
 	].join(" ");
+}
+
+/**
+ * The notice for a resumed session whose first message still lists deferred
+ * tools (that message keeps its bytes) while this run's tool list leaves
+ * tool_search out (`deferralEnabled`): nothing can load them now.
+ */
+export function loaderUnavailableReminderText(): string {
+	return "tool_search is not available in this session, so it cannot load the deferred tools listed earlier in this conversation. Use only the tools defined for this session.";
 }
 
 /**

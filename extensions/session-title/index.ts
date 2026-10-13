@@ -27,6 +27,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { withReasoningFallback } from "../lib/model-policy.ts";
 import { pickEconomicalContainedModel } from "../lib/model-tier.ts";
 import { sessionOutlivesTurn } from "../lib/notifications.ts";
+import { isUserRun } from "../lib/prompt-options.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 import { firstUserText, isNameableText, parseTitle, SESSION_TITLE_PROMPT, sessionTitleInput } from "./title.ts";
 
@@ -61,6 +62,8 @@ export default function sessionTitleExtension(pi: ExtensionAPI) {
 		// message never changes, so it is examined once: a first message that is
 		// not prose (a breadcrumb, a slash command sent as text) leaves the
 		// session unnamed rather than re-scanning the entries every turn.
+		// A run an extension opened (pi 1.2.0) carries no prompt: wait for the user's.
+		if (!isUserRun(event)) return;
 		attempted = true;
 		const text = firstUserText(ctx.sessionManager.getEntries() as never) ?? event.prompt;
 		if (!isNameableText(text)) return;

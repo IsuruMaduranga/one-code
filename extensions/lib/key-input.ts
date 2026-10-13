@@ -10,9 +10,10 @@
  * and with event types on, every press is followed by a release such as
  * `\x1b[1;1:3B`. A decoder that compares legacy bytes misses all of those.
  *
- * `parseKey` is pi-tui's own parser (`dist/keys.js`, MIT, unchanged from
- * 0.87.1 to 0.99.2), ported verbatim so every panel names a key exactly as
- * pi-tui and pi's keybindings do. It stays here because `lib/` modules
+ * `parseKey` is pi-tui's own parser (`dist/keys.js`, MIT; unchanged from
+ * 0.87.1 to 1.1.0, then 1.2.0's logical shifted-symbol reading), ported
+ * verbatim so every panel names a key exactly as pi-tui and pi's
+ * keybindings do. It stays here because `lib/` modules
  * import nothing from pi, and the bare `@earendil-works/pi-tui` specifier
  * resolves to a different pi-tui in tests than at runtime.
  * `key-input.test.ts` compares this port with the installed pi-tui over
@@ -238,6 +239,22 @@ const NAMED_CODEPOINTS = new Map<number, string>([
 	[ARROW_CODEPOINTS.right, "right"],
 ]);
 
+/** Symbols a modifyOtherKeys terminal reports as Shift plus the physical key (pi-tui 1.2.0). */
+const SHIFTED_SYMBOL_KEYS = new Set("~!@#$%^&*()_+|{}:<>?");
+
+/**
+ * pi-tui 1.2.0's logical reading of a shifted symbol: kitty reports "+" as
+ * Shift plus the physical "=" key (the produced symbol in the shifted-key
+ * field), and bindings name the produced symbol, so the implicit Shift is
+ * consumed while Ctrl, Alt and Super stay.
+ */
+function logicalShiftedSymbol(codepoint: number | undefined, modifier: number, allowed: ReadonlySet<string>): { codepoint: number; modifier: number } | undefined {
+	if (codepoint === undefined || (modifier & MODIFIERS.shift) === 0) return undefined;
+	const normalized = normalizeKittyFunctionalCodepoint(codepoint);
+	if (!allowed.has(String.fromCharCode(normalized))) return undefined;
+	return { codepoint: normalized, modifier: modifier & ~MODIFIERS.shift };
+}
+
 function formatParsedKey(codepoint: number, modifier: number, baseLayoutKey?: number): string | undefined {
 	const identity = normalizeShiftedLetterIdentityCodepoint(normalizeKittyFunctionalCodepoint(codepoint), modifier);
 	// The codepoint is authoritative for a Latin letter, digit or known symbol
@@ -266,13 +283,19 @@ function isWindowsTerminalSession(env: NodeJS.ProcessEnv = process.env): boolean
 	return Boolean(env.WT_SESSION) && !env.SSH_CONNECTION && !env.SSH_CLIENT && !env.SSH_TTY;
 }
 
-/** pi-tui's `parseKey` (0.87.1 to 0.99.2): the key id of one input chunk, or undefined. Releases parse like presses. */
+/** pi-tui's `parseKey` (1.2.0): the key id of one input chunk, or undefined. Releases parse like presses. */
 export function parseKey(data: string, options: ParseKeyOptions = {}): string | undefined {
 	const kitty = options.kittyActive ?? false;
 	const kittySeq = parseKittySequence(data);
-	if (kittySeq) return formatParsedKey(kittySeq.codepoint, kittySeq.modifier, kittySeq.baseLayoutKey);
+	if (kittySeq) {
+		const symbol = logicalShiftedSymbol(kittySeq.shiftedKey, kittySeq.modifier, SYMBOL_KEYS);
+		return formatParsedKey(symbol?.codepoint ?? kittySeq.codepoint, symbol?.modifier ?? kittySeq.modifier, kittySeq.baseLayoutKey);
+	}
 	const mok = parseModifyOtherKeysSequence(data);
-	if (mok) return formatParsedKey(mok.codepoint, mok.modifier);
+	if (mok) {
+		const symbol = logicalShiftedSymbol(mok.codepoint, mok.modifier, SHIFTED_SYMBOL_KEYS);
+		return formatParsedKey(symbol?.codepoint ?? mok.codepoint, symbol?.modifier ?? mok.modifier);
+	}
 	if (kitty && (data === "\x1b\r" || data === "\n")) return "shift+enter";
 	const legacy = LEGACY_SEQUENCE_KEY_IDS[data];
 	if (legacy) return legacy;

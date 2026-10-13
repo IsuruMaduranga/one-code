@@ -83,16 +83,24 @@ const model = (provider: string, id: string, input = 1, api = "openai-responses"
 
 /** pi's built-in language-model providers: every provider with at least one chat model. */
 const BUILTIN_PROVIDERS = getBuiltinProviders().filter((provider) => getBuiltinModels(provider).length > 0);
+/** Provider names pi renamed inside the tested range, kept in the table for the older pi. */
+const LEGACY_PROVIDER_NAMES = new Set(["azure-openai-responses"]);
 
 describe("built-in provider policies", () => {
 	it("classifies every built-in pi language-model provider explicitly", () => {
-		expect(Object.keys(BUILTIN_PROVIDER_POLICIES).sort()).toEqual([...BUILTIN_PROVIDERS].sort());
+		const current = Object.keys(BUILTIN_PROVIDER_POLICIES).filter((provider) => !LEGACY_PROVIDER_NAMES.has(provider));
+		expect(current.sort()).toEqual([...BUILTIN_PROVIDERS].sort());
 		expect(BUILTIN_PROVIDERS.length).toBeGreaterThan(40);
 	});
 
 	it("contains Meta's own API and the Qwen individual plan like their siblings", () => {
 		expect(BUILTIN_PROVIDER_POLICIES.meta).toEqual({ kind: "direct", profile: "meta" });
 		expect(BUILTIN_PROVIDER_POLICIES["qwen-token-plan-individual"]).toEqual(BUILTIN_PROVIDER_POLICIES["qwen-token-plan"]);
+	});
+
+	it("keeps each legacy provider name on its successor's policy", () => {
+		expect(BUILTIN_PROVIDER_POLICIES["azure-openai-responses"]).toMatchObject({ kind: "direct", profile: "openai" });
+		for (const provider of LEGACY_PROVIDER_NAMES) expect(BUILTIN_PROVIDERS).not.toContain(provider);
 	});
 
 	it("marks opaque routers as session-only", () => {
@@ -129,6 +137,14 @@ describe("model identity and containment", () => {
 		expect(modelIdentity(session).containment).toBe("groq");
 		expect(modelIdentity(worker).containment).toBe("groq");
 		expect(modelsContainedToSession([session, worker], session)).toEqual([session, worker]);
+	});
+
+	it("profiles an Azure Foundry row by its own vendor, inside the one Azure containment", () => {
+		const session = model("azure", "gpt-6-sol", 5);
+		const foundry = model("azure", "deepseek-v4-pro", 1, "openai-completions");
+		expect(modelIdentity(session)).toMatchObject({ containment: "azure", profile: "openai" });
+		expect(modelIdentity(foundry)).toMatchObject({ containment: "azure", profile: "deepseek" });
+		expect(crossesProvider(foundry, session)).toBe(false);
 	});
 
 	it("keeps opaque routers on the exact session model", () => {

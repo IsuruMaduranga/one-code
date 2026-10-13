@@ -191,7 +191,7 @@ describe("the tier rules", () => {
 describe("matching pi rows to catalog models", () => {
 	it("follows a hosted row's canonical id, and matches Codex and Azure rows through their identity", () => {
 		const index = buildCatalogIndex(catalogSources([{ id: "openai/gpt-x", released: "2026-08-01", price: [1, 4], servedAs: ["amazon-bedrock/openai.gpt-x-v1:0"] }]));
-		for (const row of [{ provider: "amazon-bedrock", id: "openai.gpt-x-v1:0" }, { provider: "openai-codex", id: "gpt-x" }, { provider: "azure-openai-responses", id: "gpt-x" }]) {
+		for (const row of [{ provider: "amazon-bedrock", id: "openai.gpt-x-v1:0" }, { provider: "openai-codex", id: "gpt-x" }, { provider: "azure-openai-responses", id: "gpt-x" }, { provider: "azure", id: "gpt-x" }]) {
 			expect(catalogModelFor(row, index)?.id, row.provider).toBe("openai/gpt-x");
 		}
 	});

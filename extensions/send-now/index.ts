@@ -82,7 +82,10 @@ export default function sendNowExtension(pi: ExtensionAPI) {
 				const text = turnCtx.ui.getEditorText().trim();
 				if (!text) return;
 				turnCtx.ui.setEditorText("");
-				pi.sendUserMessage(text);
+				// followUp: an async UserPromptSubmit hook runs before pi's busy
+				// check, and on pi 1.2.0 a run starting meanwhile would reject a
+				// bare send after the editor was cleared.
+				pi.sendUserMessage(text, { deliverAs: "followUp" });
 			} finally {
 				sending = false;
 			}

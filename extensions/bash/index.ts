@@ -75,6 +75,8 @@ export function bashTool(pi: ExtensionAPI, { announce }: { announce: boolean }) 
 	// description and pi's tool order, losing the entire cached prefix. Mode
 	// reminders and the live permission gate carry later changes instead.
 	let form: DescriptionForm = "short";
+	// Tiny's dedicated search tools replace the long form's shell-find advice.
+	let searchTools = false;
 	let autoMode = false;
 	let liveAutoMode = false;
 	let modeFrozen = false;
@@ -85,19 +87,21 @@ export function bashTool(pi: ExtensionAPI, { announce }: { announce: boolean }) 
 		if (typeof saved === "boolean") return saved;
 		return typeof baselines?.["permission-mode"] === "string" ? baselines["permission-mode"] === "auto" : undefined;
 	};
+	const describe = () => bashDescription(form, autoMode, searchTools);
 	const setDescription = registerShellTool(pi, {
 		name: "bash",
 		ccLabel: "Bash",
-		description: bashDescription(form, autoMode),
+		description: describe(),
 		parameters: BashParams,
 		base,
 		foreground: perCwd((cwd: string) => createBashToolDefinition(cwd, { shellPath, spawnHook })),
 		guard: bashGuardReason,
 		backgroundShell: () => bash.spawn,
 	});
-	followDescriptionForm(pi, (next) => {
+	followDescriptionForm(pi, (next, tier) => {
 		form = next;
-		setDescription(bashDescription(form, autoMode));
+		searchTools = tier === "tiny";
+		setDescription(describe());
 	});
 	pi.events.on(PERMISSION_STATUS_CHANNEL, (data) => {
 		liveAutoMode = (data as PermissionStatus).mode === "auto";
@@ -106,13 +110,13 @@ export function bashTool(pi: ExtensionAPI, { announce }: { announce: boolean }) 
 		// Honor a restored variant even here: a temporary re-registration would
 		// move the tool despite putting its original description back afterwards.
 		autoMode = restoredAutoMode() ?? liveAutoMode;
-		setDescription(bashDescription(form, autoMode));
+		setDescription(describe());
 	});
 	pi.on("session_start", () => {
 		const saved = restoredAutoMode();
 		modeFrozen = saved !== undefined;
 		autoMode = saved ?? liveAutoMode;
-		setDescription(bashDescription(form, autoMode));
+		setDescription(describe());
 	});
 	pi.on("turn_start", () => {
 		modeFrozen = true;

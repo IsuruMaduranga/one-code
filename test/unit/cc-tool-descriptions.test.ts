@@ -11,7 +11,7 @@ import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import askUserExtension from "../../extensions/ask-user/index.ts";
 import { ASK_LONG_DESCRIPTION, ASK_SHORT_DESCRIPTION } from "../../extensions/ask-user/description.ts";
-import { BASH_AVOID_SHELL_READS_LINE, BASH_LONG_DESCRIPTION, BASH_SHORT_DESCRIPTION, bashDescription } from "../../extensions/bash/description.ts";
+import { BASH_AVOID_SHELL_READS_LINE, BASH_LONG_DESCRIPTION, BASH_LONG_SEARCH_TOOLS_DESCRIPTION, BASH_SHORT_DESCRIPTION, bashDescription } from "../../extensions/bash/description.ts";
 import bashExtension from "../../extensions/bash/index.ts";
 import { NOTEBOOK_EDIT_DESCRIPTION } from "../../extensions/notebook/description.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts";
@@ -187,6 +187,20 @@ describe("switching forms mid-session", () => {
 		bashExtension(fake.pi as never);
 		vi.stubEnv("CC_PROMPT_TIER", "tiny");
 		await fake.fire("session_start", { type: "session_start", reason: "startup" }, createFakeCtx({ model: someModel }));
+		expect(fake.tools.get("bash")!.description).toBe(BASH_LONG_SEARCH_TOOLS_DESCRIPTION);
+	});
+
+	it("on tiny, the long form points at the search tools instead of shell find; cheap keeps Claude Code's text", async () => {
+		expect(BASH_LONG_DESCRIPTION).toContain("When running `find`");
+		expect(BASH_LONG_SEARCH_TOOLS_DESCRIPTION).not.toContain("`find`");
+		expect(BASH_LONG_SEARCH_TOOLS_DESCRIPTION).toContain("the find tool for files, the grep tool for content, the ls tool");
+		expect(bashDescription("short", false, true)).toBe(bashDescription("short", false));
+
+		const fake = createFakePi();
+		bashExtension(fake.pi as never);
+		await switchTier(fake, "tiny");
+		expect(fake.tools.get("bash")!.description).toBe(BASH_LONG_SEARCH_TOOLS_DESCRIPTION);
+		await switchTier(fake, "cheap");
 		expect(fake.tools.get("bash")!.description).toBe(BASH_LONG_DESCRIPTION);
 	});
 
