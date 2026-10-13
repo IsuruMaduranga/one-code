@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { piDist, piTuiDist } from "./helpers/pi-install.ts";
@@ -44,8 +44,12 @@ describe("app/bin.mjs pi-internal patch points (A3)", () => {
 	});
 
 	it("pi still accepts the fullscreenExitOutput setting bin.mjs seeds", () => {
-		const source = readFileSync(join(piDist, "core", "settings-manager.d.ts"), "utf8");
-		expect(source).toContain("fullscreenExitOutput");
+		// pi 1.2.0 moved the settings type into settings-schema.d.ts.
+		const declared = ["settings-schema.d.ts", "settings-manager.d.ts"]
+			.map((file) => join(piDist, "core", file))
+			.filter((file) => existsSync(file))
+			.some((file) => readFileSync(file, "utf8").includes("fullscreenExitOutput"));
+		expect(declared).toBe(true);
 	});
 
 	it("bin.mjs backfills the compaction keep window, and pi still reads that setting", () => {
