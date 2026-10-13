@@ -50,6 +50,7 @@ const CLAUDE_CUTOFFS: Record<string, string> = {
 	"sonnet 5": "January 2026",
 	"sonnet 5.5": "June 2026",
 	"haiku 4.5": "February 2025",
+	"haiku 5.5": "June 2026",
 	"fable 5.1": "June 2026",
 };
 
