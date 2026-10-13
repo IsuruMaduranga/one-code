@@ -461,11 +461,14 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		// continuation keeps the cap counting: a notification or scheduled run
 		// starts a fresh turn, as a prompt does.
 		if (!isStopContinuation(event)) stopHookBlocks = 0;
-		// Queued prompt context belongs to the user's next prompt, not to a run
-		// a notification or scheduled fire opened (pi 1.2.0 fires this for both).
-		if (pendingPromptContext.length === 0 || !isUserRun(event)) return;
-		const texts = pendingPromptContext;
-		pendingPromptContext = [];
+		// UserPromptSubmit context belongs to the user's prompt; SessionStart and
+		// PostCompact context belong to whichever run opens next, which on pi
+		// 1.2.0 can be one a notification or scheduled fire opened. Its
+		// message_start can no longer deliver them: `prompted` is set above.
+		const userRun = isUserRun(event);
+		const texts = pendingPromptContext.filter((entry) => userRun || entry.event !== "UserPromptSubmit");
+		if (texts.length === 0) return;
+		pendingPromptContext = pendingPromptContext.filter((entry) => !texts.includes(entry));
 		return {
 			message: {
 				customType: "one-code:hook-context",

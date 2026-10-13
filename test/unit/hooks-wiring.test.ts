@@ -654,6 +654,25 @@ describe("hooks wiring", () => {
 		// The hook's context rode the notification's turn, the first one.
 		expect(reminders).toContain(hookContextText("SessionStart", "session context"));
 	});
+
+	it("SessionStart context rides a first run a notification opens on pi 1.2.0, while UserPromptSubmit context waits for its prompt", async () => {
+		const start = script("hook-start-custom.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"additionalContext":"session context"}}'\n`);
+		const prompt = script("hook-prompt-held.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"additionalContext":"for the prompt"}}'\n`);
+		writeUserHooks({ SessionStart: [{ hooks: [{ type: "command", command: start }] }], UserPromptSubmit: [{ hooks: [{ type: "command", command: prompt }] }] });
+		mount();
+		await fake.fireOne("session_start", { reason: "startup" }, ctx());
+		await fake.fireOne("input", { source: "interactive", text: "hello" }, ctx());
+		const notificationMessage = { role: "custom", customType: "subagent-result", content: [], details: { notificationId: "1-a" } };
+		const custom = await fake.fireOne<{ message?: { content: string } }>("before_agent_start", { messageType: "custom", message: notificationMessage }, ctx());
+		expect(custom?.message?.content).toBe(wrapReminder(hookContextText("SessionStart", "session context")));
+		// The run's message_start delivers nothing more.
+		const reminders: string[] = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => reminders.push((data as { text: string }).text));
+		await fake.fireOne("message_start", { message: notificationMessage }, ctx());
+		expect(reminders).toEqual([]);
+		const result = await fake.fireOne<{ message?: { content: string } }>("before_agent_start", { messageType: "user", prompt: "hello" }, ctx());
+		expect(result?.message?.content).toBe(wrapReminder(hookContextText("UserPromptSubmit", "for the prompt")));
+	});
 });
 
 describe("hooks wiring: SessionEnd (LIFECYCLE-REVIEW-2026-09-06 M4)", () => {
