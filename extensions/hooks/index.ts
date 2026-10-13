@@ -67,6 +67,7 @@ import { QueuedDelivery } from "../lib/queued-delivery.ts";
 import { SKILL_INVOCATION_TYPE, type SkillInvocationDetails } from "../skill/invoke.ts";
 import { isNotificationDetails } from "../lib/notifications.ts";
 import { consentDialog } from "../lib/consent-dialogs.ts";
+import { isUserRun } from "../lib/prompt-options.ts";
 import { followWorkCwd } from "../lib/worktree-channel.ts";
 
 /** Claude Code's `hook_additional_context` attachment text (utils/messages.ts). */
@@ -435,7 +436,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	// custom message pi appends right AFTER the user's prompt (the
 	// before_agent_start `message` return). An idle `sendMessage` from here
 	// landed it BEFORE the prompt (pi appends first, then adds the user message).
-	pi.on("before_agent_start", async (_event, ctx) => {
+	pi.on("before_agent_start", async (event, ctx) => {
 		const gen = sessionGen;
 		lastCtx = ctx;
 		prompted = true;
@@ -446,9 +447,10 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		// turns with no input event.
 		await drainSessionStart();
 		if (gen !== sessionGen) return;
-		// Every prompt that opens a turn lands here; a queued delivery and the
-		// Stop hook's own continuation (an idle sendMessage) do not.
-		stopHookBlocks = 0;
+		// Every prompt that opens a turn lands here. A queued delivery does not,
+		// and the Stop hook's own continuation (an idle sendMessage) arrives as a
+		// custom run on pi 1.2.0, which must not reset the continuation cap.
+		if (isUserRun(event)) stopHookBlocks = 0;
 		if (pendingPromptContext.length === 0) return;
 		const texts = pendingPromptContext;
 		pendingPromptContext = [];

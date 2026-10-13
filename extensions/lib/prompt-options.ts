@@ -20,6 +20,17 @@
 
 export const PROMPT_OPTIONS_CHANNEL = "one-code:prompt-options";
 
+/**
+ * Whether a `before_agent_start` event opens a run the user typed. pi 1.2.0
+ * also fires the event for a run an extension opens from idle with
+ * `sendMessage(…, { triggerTurn: true })` (a notification, the Stop hook's
+ * continuation, a scheduled fire), marked `messageType: "custom"` and without
+ * `prompt`. Older pi fires it only for prompts and sends no `messageType`.
+ */
+export function isUserRun(event: unknown): boolean {
+	return (event as { messageType?: unknown } | undefined)?.messageType !== "custom";
+}
+
 /** The payload: pi's base options, and the session cwd they were read in. */
 export interface PromptOptionsAnnouncement {
 	options: unknown;

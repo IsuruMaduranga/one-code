@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import sessionTitleExtension from "../../extensions/session-title/index.ts";
 import {
 	firstUserText,
 	isNameableText,
@@ -9,6 +10,7 @@ import {
 	SESSION_TITLE_PROMPT,
 	sessionTitleInput,
 } from "../../extensions/session-title/title.ts";
+import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 describe("session title prompt (CC 2.1.278 capture)", () => {
 	it("matches the captured naming request verbatim when the capture is present", () => {
@@ -73,5 +75,19 @@ describe("firstUserText", () => {
 			firstUserText([{ type: "message", message: { role: "user", content: [{ type: "image" }, { type: "text", text: "with image" }] } }])?.trim(),
 		).toBe("with image");
 		expect(firstUserText([{ type: "session_info" }])).toBeUndefined();
+	});
+});
+
+describe("session-title wiring on a run an extension opened", () => {
+	it("waits for the user's first prompt instead of spending its one attempt on a custom run (pi 1.2.0)", async () => {
+		const fake = createFakePi();
+		sessionTitleExtension(fake.pi as never);
+		const getEntries = vi.fn(() => []);
+		const ctx = createFakeCtx({ mode: "tui", sessionManager: { getEntries } });
+		await fake.fire("before_agent_start", { messageType: "custom", message: { role: "custom" } }, ctx);
+		expect(getEntries).not.toHaveBeenCalled();
+		// The user's prompt still gets examined (a slash command is not nameable, so no request).
+		await fake.fire("before_agent_start", { messageType: "user", prompt: "/help" }, ctx);
+		expect(getEntries).toHaveBeenCalledTimes(1);
 	});
 });

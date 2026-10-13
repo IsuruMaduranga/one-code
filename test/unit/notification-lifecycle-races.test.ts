@@ -17,6 +17,21 @@ const interrupt = async (fake: FakePi) => {
 describe("notification lifecycle races", () => {
 	afterEach(() => vi.useRealTimers());
 
+	it("a run an extension opened (pi 1.2.0 messageType custom) does not release held frames as riding a user prompt", async () => {
+		const fake = createFakePi();
+		const notify = createTaskNotifier(fake.pi as never, { coalesceMs: 0 });
+		await fake.fire("before_agent_start", {});
+		await fake.fire("agent_start", {});
+		await interrupt(fake);
+		notify("task-notification", completion("held"), { taskId: "held" });
+		const sentBefore = fake.sentMessages.length;
+		await fake.fire("before_agent_start", { messageType: "custom", message: { role: "custom" } });
+		expect(fake.sentMessages).toHaveLength(sentBefore);
+		await fake.fire("agent_start", {});
+		expect(fake.sentMessages).toHaveLength(sentBefore + 1);
+		expect(fake.sentMessages[sentBefore].options).not.toEqual({ deliverAs: "nextTurn" });
+	});
+
 	it("confirming one producer cannot acknowledge another producer's simultaneous notification", async () => {
 		vi.useFakeTimers();
 		vi.setSystemTime(new Date("2026-10-04T12:00:00Z"));

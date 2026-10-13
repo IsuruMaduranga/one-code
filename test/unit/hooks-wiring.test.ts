@@ -431,9 +431,12 @@ describe("hooks wiring", () => {
 		await settle(); // the Stop hook blocks: its continuation runs with the latch set
 		await fake.fireOne("input", { source: "interactive", text: "also this", streamingBehavior: "steer" }, ctx());
 		await settle(); // the queued message joined that continuation
+		// pi 1.2.0 fires before_agent_start for the continuation run itself, as a custom run.
+		await fake.fireOne("before_agent_start", { messageType: "custom", message: { role: "custom" } }, ctx());
+		await settle(); // still the continuation chain
 		await fake.fireOne("before_agent_start", { prompt: "a new prompt" }, ctx());
 		await settle(); // a new turn
-		expect(flags()).toEqual([false, true, false]);
+		expect(flags()).toEqual([false, true, true, false]);
 	});
 
 	it("Stop continue:false ends the turn even when another hook requests a continuation", async () => {
