@@ -364,7 +364,7 @@ flowchart LR
     subgraph write["Written by One Code"]
         direction TB
         oc["~/.onecode<br/>settings.json · projects/&lt;slug&gt;/settings.json<br/>plans/ · artifacts/ · plugins/<br/>consent stores · cached model catalogs"]
-        piState["pi agent directory<br/>sessions · pi settings · auth<br/>(~/.onecode in the app, resolved by getAgentDir())"]
+        piState["pi agent directory<br/>sessions · pi settings · auth<br/>(~/.onecode/agent in the app, resolved by getAgentDir())"]
         memDir["~/.claude/projects/&lt;repo&gt;/memory<br/>shared auto-memory"]
     end
 

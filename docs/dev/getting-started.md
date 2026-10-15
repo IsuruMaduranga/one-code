@@ -67,12 +67,15 @@ directory so your own pi setup stays untouched:
 
 ```bash
 ONE_CODE="$PWD"
+export PATH="$ONE_CODE/node_modules/.bin:$PATH"   # this shell's pi is the checkout's
 export PI_CODING_AGENT_DIR="$(mktemp -d)"
-"$ONE_CODE/node_modules/.bin/pi" install "$ONE_CODE"
+pi install "$ONE_CODE"
 
 cd /path/to/some/project
-"$ONE_CODE/node_modules/.bin/pi"
+pi
 ```
+
+Every `pi` command in these pages assumes a shell set up this way.
 
 The new state directory has no saved logins, so use an API key from the
 environment or run `/login` once inside the session.

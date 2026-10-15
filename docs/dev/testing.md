@@ -50,9 +50,9 @@ floor in the same pull request and say why.
 
 ## Running against a live model
 
-The commands below write `pi` for the pi in your checkout,
-`node_modules/.bin/pi`, with the package installed as described in
-[Getting started](getting-started.md#the-whole-package-in-pi).
+The commands below run in a shell set up as in
+[Getting started](getting-started.md#the-whole-package-in-pi), where `pi` is
+your checkout's `node_modules/.bin/pi` with the package installed.
 
 Unit tests can't catch a prompt the model misreads, a hook that fires in the
 wrong order, or a permission prompt that never appears. For any change in

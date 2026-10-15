@@ -237,7 +237,7 @@ and the blocked direction live.
 - **One Code's own settings go to `~/.onecode`** through
   `extensions/lib/one-code-settings.ts`.
 - **Never hardcode `~/.pi`.** Resolve pi's state through pi's
-  `getAgentDir()`, since the app moves it to `~/.onecode`.
+  `getAgentDir()`, since the app moves it to `~/.onecode/agent`.
 - **Never spawn `/bin/sh`, `$SHELL` or a bare `pwsh`.** Go through
   `extensions/lib/shell-spawn.ts`, which knows about Git Bash and PowerShell
   on Windows. A user-named command (a language server, `$EDITOR`) goes
