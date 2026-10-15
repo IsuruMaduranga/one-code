@@ -318,6 +318,8 @@ pi list
 
 The [user guide](https://github.com/IsuruMaduranga/one-code/blob/master/docs/guide/README.md) covers setup, configuration, providers,
 permissions, workflows, tools, session management, and troubleshooting.
+If you want to change One Code itself, the [developer docs](https://github.com/IsuruMaduranga/one-code/blob/master/docs/dev/README.md)
+cover the architecture, the rules extensions follow, and how to test.
 
 For the ideas behind the project, read
 [Harness Engineering 101](https://isuruwijesiri.com/harness-engineering-101/).

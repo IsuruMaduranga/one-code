@@ -1,96 +1,94 @@
 # AGENTS.md
 
-Guidance for AI coding agents and human contributors working in this
-repository. One Code recreates the Claude Code workflow as a
+Guidance for AI coding agents working in this repository. Human contributors
+should start with the [developer docs](docs/dev/README.md); this file is the
+short version and points there for detail.
+
+One Code recreates the Claude Code workflow as a
 [pi](https://github.com/earendil-works/pi) package, so the same agent
-experience runs on any model or provider. See the
-[user guide](docs/guide/README.md) for product docs.
+experience runs on any model or provider. The [user guide](docs/guide/README.md)
+covers the product.
 
 ## Ground rules
 
-- One Code is an ordinary pi package. It uses the public pi extension API only.
-  Never fork or patch pi; if something seems to need a patch, it does not.
-- Behaviour parity with Claude Code is a goal. When a feature mirrors Claude
-  Code, keep it byte-compatible with the captured reference rather than
-  inventing new behaviour.
-- Keep changes focused. One logical change per pull request.
+- One Code is an ordinary pi package and uses the public pi extension API
+  only. Never fork or patch pi.
+- When a feature mirrors Claude Code, match Claude Code's behavior rather
+  than inventing new behavior.
+- Keep changes focused: one logical change per pull request, opened against
+  `dev`.
 
-## Setup and commands
+## Commands
 
-Requires Node >= 22.19.
+Requires Node 22.19 or later.
 
 ```bash
-npm install          # install dependencies
+npm install
+npm run typecheck    # tsc --noEmit, must pass
+npm test             # vitest run, must pass
 
-npm run typecheck    # tsc --noEmit (must pass)
-npm test             # vitest run (must pass)
-
-# Try one extension in isolation against a live model:
-pi -e ./extensions/<name>/index.ts -p "…"
+# One extension in isolation against a live model:
+npx pi -e ./extensions/<name>/index.ts -p "…"
 ```
 
-Both `npm run typecheck` and `npm test` must pass before a change is ready to
-merge.
+Running the whole package from source: [Getting started](docs/dev/getting-started.md#run-your-checkout).
 
-## Repository layout
+## Where things are
 
-- `extensions/` — the pi extensions that make up One Code. Each is a folder
-  with a thin `index.ts` for wiring plus pure logic modules. `extensions/lib/`
-  holds shared modules used across extensions.
-- `app/` — the bundled npm app (`@one-ai/one-code`, the `onecode` binary):
-  `bin.mjs` and `update-check.mjs`, plain JavaScript.
-- `agents/` — bundled agent catalog (general-purpose, explore, plan).
-- `skills/` — bundled skill catalog adapted from Claude Code's built-ins.
-- `themes/` — bundled colour themes.
-- `test/unit/` — vitest over the pure modules. `test/e2e/` — end-to-end harness
-  scripts.
-- `docs/guide/` — the user-facing documentation.
+- `extensions/<name>/`: one pi extension each, a thin `index.ts` plus pure
+  logic modules. `extensions/lib/` holds the shared modules.
+- `extensions/auto-mode/`: the auto-mode classifier library, used by
+  `permissions`.
+- `app/`: the bundled `onecode` app, plain JavaScript.
+- `agents/`, `skills/`, `themes/`: bundled catalogs.
+- `test/unit/`: vitest. `test/e2e/`: live harnesses.
+- `docs/guide/`: the user guide. `docs/dev/`: the developer docs.
 
-## Conventions
+[Architecture](docs/dev/architecture.md) has diagrams of how these fit
+together.
 
-- **Logic lives in pure modules with no pi imports; `index.ts` is thin
-  wiring.** Unit-test the module, drive the wiring end to end.
-- **Tool names are pi-idiomatic snake_case.** Claude Code PascalCase
-  counterparts are mapped in `extensions/permissions/matcher.ts`.
-- **The `pi.extensions` order in `package.json` is load-bearing.** Extensions
-  that emit on a channel must load after the extension that owns that channel,
-  because the event bus does not replay. Do not reorder without understanding
-  the dependency.
-- **Never share module state between extension files.** Each file is isolated;
-  pass cross-extension data over `pi.events`.
-- **Steer the model through the reminder queue, not ad-hoc messages.** Emit the
-  documented events rather than injecting text directly.
-- **Keep the request prefix cache-stable.** The system prompt and the first
-  user message must stay byte-stable across turns when nothing relevant
-  changed, so the provider prompt cache keeps hitting. Do not rebuild the
-  system prompt for a deferred tool.
-- **Confine reads and edits to the working directory** and the harness session
-  directories. Anything outside is gated by the permission system.
-- **Never truncate model-facing text; persist it instead.** Bound large tool
-  results, reports, and notifications through the persisted-output helper (file
-  plus preview plus path), never a bare slice.
-- **Tool `execute()` errors fail loud.** A malformed, ambiguous, or
-  missing-required call returns an error naming the fix, never a
-  plausible-but-wrong success.
-- **Auto mode is safety-critical.** The permission classifier and shell gate
-  decide what runs without asking. Treat any change there as security-sensitive
-  and test both the allow and the block direction against a live model.
+## Rules that break silently
 
-## Testing notes
+Each of these has caused a real bug. The reasons, and the full list, are in
+[Extension rules](docs/dev/extension-rules.md).
 
-- Unit tests (`npm test`) cover the pure modules. Add a unit test with any new
-  pure module.
-- Interactive behaviour (permission prompts, plan approval, LSP diagnostics)
-  cannot be tested in one-shot `-p` mode. Drive `pi --mode rpc` and answer the
-  UI request messages; `test/e2e/rpc-permission-test.mjs` is the worked
-  example.
-- Test at least one path without `--dangerously-skip-permissions`, or
-  permission-gating bugs stay invisible.
+- Logic goes in pure modules with no pi imports; `index.ts` is wiring only.
+- The `pi.extensions` order in `package.json` is load-bearing. Don't reorder
+  it without reading [Load order](docs/dev/extension-rules.md#load-order).
+- Never share module state between extension files. Each extension gets its
+  own copy of every module; cross-extension data goes over `pi.events`.
+- Steer the model through the reminder queue (`one-code:system-reminder`),
+  never with ad-hoc messages.
+- Keep the request prefix byte-stable. Nothing that changes mid-session goes
+  in the system prompt; deferred tools never set `promptSnippet` or
+  `promptGuidelines`. After touching anything that reaches the request, run
+  the [cache probe](docs/dev/testing.md#the-prompt-cache-probe).
+- Never truncate model-facing text. Bound it with `persistIfLarge`
+  (`extensions/lib/persisted-output.ts`).
+- Tool `execute()` errors fail loud and name the fix, never a plausible
+  success.
+- Auto mode is security-sensitive. The shell pre-gate only proves "safe" and
+  never denies; a command joins the read-only fast path only with an option
+  table in `extensions/auto-mode/read-only-options.ts`; don't hand-edit
+  `classifier-prompt.ts`.
+- `~/.claude` is read-only (except the shared memory folder). One Code's
+  settings go to `~/.onecode`; pi's state is resolved with `getAgentDir()`.
+- Spawn shells through `extensions/lib/shell-spawn.ts`, never `/bin/sh`,
+  `$SHELL` or a bare `pwsh`.
+
+## Testing
+
+- Add a unit test with any new pure module.
+- Interactive behavior (permission prompts, plan approval, dialogs) can't be
+  tested with `-p`. Drive `pi --mode rpc`; `test/e2e/rpc-permission-test.mjs`
+  is the worked example.
+- Run at least one path without `--dangerously-skip-permissions`.
+
+More in [Testing](docs/dev/testing.md).
 
 ## Commits and pull requests
 
-- Write commit messages that describe what changed and why. Mention how the
-  change was verified when behaviour was checked against a live model.
-- Do not add AI attribution or `Co-Authored-By` trailers to commits.
-- Open pull requests against `master`. Keep the diff focused so review stays
-  sharp.
+- Describe what changed and why. Mention how you checked it, and the model,
+  when you ran it live.
+- Don't add AI attribution or `Co-Authored-By` trailers.
+- Open pull requests against `dev`.
