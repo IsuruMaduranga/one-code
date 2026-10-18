@@ -44,7 +44,7 @@ flowchart TB
 
     subgraph extPkg["one-code-extension &nbsp;(repository root)"]
         direction LR
-        exts["extensions/&lt;name&gt;/index.ts<br/>50 extensions, loaded in package.json order"]
+        exts["extensions/&lt;name&gt;/index.ts<br/>loaded in package.json order"]
         lib["extensions/lib/<br/>shared pure modules"]
         catalogs["agents/ · skills/ · themes/<br/>bundled catalogs"]
     end
@@ -81,12 +81,6 @@ extension: it is the auto-mode classifier library that `permissions` calls.
 
 ```mermaid
 flowchart LR
-    subgraph api["pi extension API"]
-        a1["event hooks"]
-        a2["tool and command registration"]
-        a3["pi.events bus"]
-    end
-
     subgraph ctx["Prompt and context"]
         c1["system-prompt<br/>claude-context · memory"]
         c2["system-reminder<br/>context-budget"]
@@ -235,9 +229,8 @@ A few properties hold throughout:
 - Deny rules win over everything, including `bypassPermissions` mode.
 - An explicit ask rule always prompts, even in auto mode.
 - The shell pre-gate can only conclude "safe". It never denies, so it can
-  never be the reason a call is blocked. A command joins its read-only fast
-  path only through an option table in
-  `extensions/auto-mode/read-only-options.ts`.
+  never be the reason a call is blocked. The rules for extending it are in
+  [Extension rules](extension-rules.md#safety-and-permissions).
 - Any classifier failure (no model, no credentials, a timeout, an unreadable
   reply) blocks. A gate that cannot reach its classifier has approved
   nothing.
@@ -377,5 +370,7 @@ flowchart LR
 
 The path helpers are `extensions/lib/paths.ts` (Claude Code locations),
 `extensions/lib/one-code-settings.ts` (One Code's own settings) and pi's
-`getAgentDir()` (pi state). Never hardcode `~/.pi` or write under
-`~/.claude` outside the memory folder.
+`getAgentDir()` (pi state). The rules for using them are in
+[Extension rules](extension-rules.md#paths-state-and-shells), and the
+[configuration guide](../guide/configuration.md#what-is-stored-under-onecode)
+lists what `~/.onecode` holds.

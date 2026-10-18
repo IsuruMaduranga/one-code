@@ -93,17 +93,10 @@ takes seconds to load, for example) lives on `globalThis`, as
 model something, emit on `one-code:system-reminder` (the constant is
 `REMINDER_CHANNEL` in `extensions/lib/reminders.ts`). The
 `system-reminder` extension places the block in the request. Pick the
-placement by the kind of fact:
-
-| Placement | Use it for |
-|---|---|
-| `first-prepend` | Session context that never changes: instructions, catalogs, deferred tool names. |
-| `sticky-append` | Session state that switches on and off: a mode, a worktree. |
-| `last-append` (the default) | One-shot news: a file changed, new diagnostics, a tool miss. |
-| `user-prepend` | Breadcrumbs for a slash command the user ran. |
-
-The [reminder queue diagram](architecture.md#steering-the-model-the-reminder-queue)
-shows where each one lands. A local slash command that should leave a
+placement by the kind of fact; `last-append` is the default. The
+[reminder queue](architecture.md#steering-the-model-the-reminder-queue)
+table lists the four placements, what each is for, and where each one
+lands. A local slash command that should leave a
 breadcrumb registers through `registerLocalCommand` in
 `extensions/lib/local-command.ts`.
 
@@ -136,9 +129,8 @@ every turn of every session. A cache miss is a bug, not an accepted cost.
   request (`extensions/lib/request-replay.ts`), never from a fresh prompt.
   Every side call passes a stable per-session cache key and puts its cache
   breakpoint on the reusable prefix.
-- **Check it.** After touching anything that feeds the request (prompts, tool
-  descriptions, reminders, deferral, the subagent runner), run the cache
-  probe described in [Testing](testing.md#the-prompt-cache-probe).
+- **Check it.** After touching anything that feeds the request, run the
+  cache probe. [Testing](testing.md#the-prompt-cache-probe) lists what counts.
 
 ## Tool behavior
 

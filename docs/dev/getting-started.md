@@ -29,7 +29,7 @@ npm install
 ```
 
 Work happens on `dev`, and `master` only moves when `dev` is promoted to
-it. Branch from `dev` and open your pull request against `dev`.
+it. Branch from `dev`.
 
 Check that everything passes before you change anything:
 
@@ -62,23 +62,24 @@ instead.
 
 ### The whole package in pi
 
-Install your checkout as a pi package. Do it with a throwaway pi state
+Install your checkout as a pi package. Do it with a separate pi state
 directory so your own pi setup stays untouched:
 
 ```bash
 ONE_CODE="$PWD"
-export PATH="$ONE_CODE/node_modules/.bin:$PATH"   # this shell's pi is the checkout's
-export PI_CODING_AGENT_DIR="$(mktemp -d)"
-pi install "$ONE_CODE"
+export PATH="$ONE_CODE/node_modules/.bin:$PATH"     # this shell's pi is the checkout's
+export PI_CODING_AGENT_DIR="$HOME/.pi-onecode-dev"  # a pi state directory for development
+pi install "$ONE_CODE"                              # once; later shells need only the two exports
 
 cd /path/to/some/project
 pi
 ```
 
-Every `pi` command in these pages assumes a shell set up this way.
+Every `pi` command in these pages assumes a shell with those two exports.
 
-The new state directory has no saved logins, so use an API key from the
-environment or run `/login` once inside the session.
+The new state directory starts with no saved logins, so use an API key from
+the environment or run `/login` once inside a session. The login is kept
+there for later sessions.
 
 pi loads the package straight from your checkout, so an edit takes effect
 the next time you start pi, or after `/reload` inside a session. `pi list`
@@ -130,12 +131,9 @@ in what order. See [Architecture](architecture.md) for what each group does.
 3. Read [Extension rules](extension-rules.md) for anything your change
    touches. The rules about load order, caching and the permission system are
    the ones that break silently.
-4. Run it live against a model at least once, without
-   `--dangerously-skip-permissions`, so the permission gate is part of the
-   run.
-5. If you changed anything that reaches the model's request (prompts, tool
-   descriptions, reminders, deferral), run the cache probe. See
-   [Testing](testing.md#the-prompt-cache-probe).
+4. Before you open the pull request, go through the checklist in
+   [Testing](testing.md#before-you-open-a-pull-request): the live run with
+   permissions on, and the cache probe if your change reaches the request.
 
 ## Pull requests
 

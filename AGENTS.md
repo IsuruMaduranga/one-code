@@ -15,8 +15,6 @@ covers the product.
   only. Never fork or patch pi.
 - When a feature mirrors Claude Code, match Claude Code's behavior rather
   than inventing new behavior.
-- Keep changes focused: one logical change per pull request, opened against
-  `dev`.
 
 ## Commands
 
@@ -26,6 +24,7 @@ Requires Node 22.19 or later.
 npm install
 npm run typecheck    # tsc --noEmit, must pass
 npm test             # vitest run, must pass
+npx vitest run test/unit/<name>.test.ts   # one file, while iterating
 
 # One extension in isolation against a live model:
 npx pi -e ./extensions/<name>/index.ts -p "…"
@@ -91,4 +90,4 @@ More in [Testing](docs/dev/testing.md).
 - Describe what changed and why. Mention how you checked it, and the model,
   when you ran it live.
 - Don't add AI attribution or `Co-Authored-By` trailers.
-- Open pull requests against `dev`.
+- Keep each pull request to one logical change, opened against `dev`.
