@@ -69,13 +69,14 @@ directory so your own pi setup stays untouched:
 ONE_CODE="$PWD"
 export PATH="$ONE_CODE/node_modules/.bin:$PATH"     # this shell's pi is the checkout's
 export PI_CODING_AGENT_DIR="$HOME/.pi-onecode-dev"  # a pi state directory for development
-pi install "$ONE_CODE"                              # once; later shells need only the two exports
+pi install "$ONE_CODE"                              # once; later shells repeat only the three lines above
 
 cd /path/to/some/project
 pi
 ```
 
-Every `pi` command in these pages assumes a shell with those two exports.
+Every `pi` command in these pages assumes a shell that ran those first three
+lines from the checkout.
 
 The new state directory starts with no saved logins, so use an API key from
 the environment or run `/login` once inside a session. The login is kept

@@ -177,10 +177,13 @@ Start the work and let it finish in the background.
 and binds the curated child extensions. Subagents and workflow agents both
 use it.
 
-**A child reattaches the permission gate through the parent's bridge, and
-that bridge fails closed.** If the bridge is missing, the child's tool calls
-are refused, never allowed. The hook bridge loads first and fails open,
-because a missing hook must not stop the agent.
+**A child reattaches the permission gate through the parent's bridge.** The
+parent's mode, rules, classifier and prompts judge every child tool call, and
+a bridge that fails to resolve or to answer blocks the call. With no parent
+bridge at all (a headless workflow run), `extensions/lib/permission-gate.ts`
+judges locally: deny rules win, allow rules allow, and anything that would
+ask is refused. The hook bridge loads first and fails open, because a missing
+hook must not stop the agent.
 
 ## Safety and permissions
 

@@ -323,7 +323,7 @@ flowchart LR
     mcpExt -.->|"shared MCP tools"| childLoop
     childLoop --- childExt
     childLoop --- childGate
-    childGate -.->|"each tool call,<br/>fails closed"| gates
+    childGate -.->|"each tool call;<br/>a failed bridge blocks"| gates
     childLoop -->|progress| panel
     childLoop -->|result| notifier
     notifier -->|"task notification"| model
