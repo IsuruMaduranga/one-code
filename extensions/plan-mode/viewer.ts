@@ -141,8 +141,8 @@ export function renderPlanViewer(view: PlanViewerView, paint: Paint, width: numb
 	const out: string[] = [];
 	out.push("");
 	out.push(paint("accent", cut("Approve this plan?")));
-	// The keys wrap at their separators on a narrow terminal, so "esc cancel" is never cut.
-	out.push(...hintLines(`↑/↓ scroll · ←/→ switch choice · ${pickHint}enter confirm · esc cancel`, width).map((line) => paint("dim", line)));
+	// Each hint sits beside what its keys move: scrolling above the plan, choosing under the choices.
+	out.push(paint("dim", cut("↑/↓ scroll the plan")));
 	out.push(rule);
 
 	// Plan lines may arrive painted (Markdown), so the guard cut is ANSI-aware.
@@ -162,6 +162,8 @@ export function renderPlanViewer(view: PlanViewerView, paint: Paint, width: numb
 			index === view.choice ? paint("accent", cut(`❯ ${numbered}`)) : cut(`  ${numbered}`),
 		);
 	}
+	// The keys wrap at their separators on a narrow terminal, so "esc cancel" is never cut.
+	out.push(...hintLines(`←/→ choose · ${pickHint}enter confirm · esc cancel`, width).map((line) => paint("dim", line)));
 	out.push("");
 	return out;
 }
