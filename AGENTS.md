@@ -13,8 +13,8 @@ covers the product.
 
 - One Code is an ordinary pi package and uses the public pi extension API
   only. Never fork or patch pi.
-- When a feature mirrors Claude Code, match Claude Code's behavior rather
-  than inventing new behavior.
+- When a feature mirrors Claude Code, match Claude Code's behavior, with no
+  extras, rather than inventing new behavior.
 
 ## Commands
 
