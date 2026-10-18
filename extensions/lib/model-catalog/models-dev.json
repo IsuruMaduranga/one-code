@@ -1,5 +1,5 @@
 {
-	"fetchedAt": "2026-10-12T20:56:07.761Z",
+	"fetchedAt": "2026-10-18T06:11:57.814Z",
 	"source": "https://models.dev/api.json",
 	"payload": {
 		"alibaba": {
@@ -3427,6 +3427,15 @@
 					},
 					"canonical_model_id": "deepseek/deepseek-v4-pro"
 				},
+				"deepseek-ai/DeepSeek-V4.1-Flash-1017": {
+					"release_date": "2026-10-17",
+					"tool_call": true,
+					"cost": {
+						"input": 0.3,
+						"output": 1.2
+					},
+					"canonical_model_id": "deepseek/deepseek-v4.1-flash-1017"
+				},
 				"MiniMaxAI/MiniMax-M2.5": {
 					"release_date": "2026-02-12",
 					"status": "deprecated",
@@ -3763,6 +3772,24 @@
 					},
 					"canonical_model_id": "meta/muse-spark-1.2"
 				},
+				"meta/muse-wonder-1.0": {
+					"release_date": "2026-10-12",
+					"tool_call": true,
+					"cost": {
+						"input": 4,
+						"output": 20
+					},
+					"canonical_model_id": "meta/muse-wonder-1.0"
+				},
+				"meta/muse-spark-open": {
+					"release_date": "2026-10-15",
+					"tool_call": true,
+					"cost": {
+						"input": 1.25,
+						"output": 4.25
+					},
+					"canonical_model_id": "meta/muse-spark-open"
+				},
 				"alibaba/qwen3.7-max": {
 					"release_date": "2026-05-21",
 					"tool_call": true,
@@ -3807,6 +3834,24 @@
 						"output": 1.28
 					},
 					"canonical_model_id": "alibaba/qwen3.7-plus"
+				},
+				"google/gemini-4-argon": {
+					"release_date": "2026-10-13",
+					"tool_call": true,
+					"cost": {
+						"input": 2,
+						"output": 10
+					},
+					"canonical_model_id": "google/gemini-4-argon"
+				},
+				"reflection-ai/beam-1.0-501b-a23b": {
+					"release_date": "2026-10-05",
+					"tool_call": true,
+					"cost": {
+						"input": 0,
+						"output": 0
+					},
+					"canonical_model_id": "reflection/beam-1.0-501b-a23b"
 				},
 				"xai/grok-4.7": {
 					"release_date": "2026-09-21",
@@ -3861,6 +3906,15 @@
 						"output": 6
 					},
 					"canonical_model_id": "xai/grok-4.6"
+				},
+				"fireworks/ember-1": {
+					"release_date": "2026-09-22",
+					"tool_call": true,
+					"cost": {
+						"input": 3,
+						"output": 15
+					},
+					"canonical_model_id": "fireworks/ember-1"
 				},
 				"moonshotai/kimi-k3": {
 					"release_date": "2026-07-16",
@@ -4481,23 +4535,23 @@
 		"deepseek": {
 			"models": {
 				"deepseek-v4-flash-vision-exp": {
-					"release_date": "2026-09-10",
+					"release_date": "2026-10-17",
 					"status": "deprecated",
 					"tool_call": true,
 					"cost": {
 						"input": 0.15,
 						"output": 0.6
 					},
-					"canonical_model_id": "deepseek/deepseek-v4.1-flash"
+					"canonical_model_id": "deepseek/deepseek-v4.1-flash-1017"
 				},
 				"deepseek-flash": {
-					"release_date": "2026-09-10",
+					"release_date": "2026-10-17",
 					"tool_call": true,
 					"cost": {
 						"input": 0.15,
 						"output": 0.6
 					},
-					"canonical_model_id": "deepseek/deepseek-v4.1-flash"
+					"canonical_model_id": "deepseek/deepseek-v4.1-flash-1017"
 				},
 				"deepseek-v4-pro": {
 					"release_date": "2026-08-12",
@@ -4509,14 +4563,14 @@
 					"canonical_model_id": "deepseek/deepseek-v4-pro-0813"
 				},
 				"deepseek-v4-flash": {
-					"release_date": "2026-09-10",
+					"release_date": "2026-10-17",
 					"status": "deprecated",
 					"tool_call": true,
 					"cost": {
 						"input": 0.15,
 						"output": 0.6
 					},
-					"canonical_model_id": "deepseek/deepseek-v4.1-flash"
+					"canonical_model_id": "deepseek/deepseek-v4.1-flash-1017"
 				}
 			}
 		},
@@ -4827,6 +4881,15 @@
 						"output": 20
 					},
 					"canonical_model_id": "openai/gpt-5.6-sol"
+				},
+				"gemini-4-argon": {
+					"release_date": "2026-10-13",
+					"tool_call": true,
+					"cost": {
+						"input": 2,
+						"output": 10
+					},
+					"canonical_model_id": "google/gemini-4-argon"
 				},
 				"gpt-6-sol": {
 					"release_date": "2026-09-22",
@@ -5258,6 +5321,15 @@
 						]
 					}
 				},
+				"gemini-4-argon": {
+					"release_date": "2026-10-13",
+					"tool_call": true,
+					"cost": {
+						"input": 2,
+						"output": 10
+					},
+					"canonical_model_id": "google/gemini-4-argon"
+				},
 				"gemini-3.1-flash-lite": {
 					"release_date": "2026-05-07",
 					"tool_call": true,
@@ -5670,6 +5742,15 @@
 						"output": 10
 					},
 					"canonical_model_id": "anthropic/claude-sonnet-5"
+				},
+				"gemini-4-argon": {
+					"release_date": "2026-10-13",
+					"tool_call": true,
+					"cost": {
+						"input": 2,
+						"output": 10
+					},
+					"canonical_model_id": "google/gemini-4-argon"
 				},
 				"gemini-3.1-flash-lite": {
 					"release_date": "2026-05-07",
@@ -6746,6 +6827,10 @@
 				"muse-wonder-1.0": {
 					"release_date": "2026-10-12",
 					"tool_call": true,
+					"cost": {
+						"input": 4,
+						"output": 20
+					},
 					"canonical_model_id": "meta/muse-wonder-1.0"
 				},
 				"muse-spark-1.3-contributor": {
@@ -7951,15 +8036,6 @@
 						"output": 0
 					}
 				},
-				"nvidia/nemotron-3-super-120b-a12b": {
-					"release_date": "2026-03-11",
-					"tool_call": true,
-					"cost": {
-						"input": 0.2,
-						"output": 0.8
-					},
-					"canonical_model_id": "nvidia/nemotron-3-super-120b-a12b"
-				},
 				"nvidia/studiovoice": {
 					"release_date": "2024-10-03",
 					"tool_call": false,
@@ -8095,6 +8171,15 @@
 						"output": 0
 					},
 					"canonical_model_id": "nvidia/nemotron-3-content-safety"
+				},
+				"nvidia/nemotron-3.5-super-vl-120b-a12b": {
+					"release_date": "2026-10-15",
+					"tool_call": true,
+					"cost": {
+						"input": 0,
+						"output": 0
+					},
+					"canonical_model_id": "nvidia/nemotron-3.5-super-vl-120b-a12b"
 				},
 				"nvidia/llama-3.3-nemotron-super-49b-v1": {
 					"release_date": "2025-04-07",
@@ -8790,6 +8875,7 @@
 			"models": {
 				"ling-3.0-flash-fin-free": {
 					"release_date": "2026-08-27",
+					"status": "deprecated",
 					"tool_call": true,
 					"cost": {
 						"input": 0,
@@ -8861,6 +8947,7 @@
 				},
 				"ling-3.1-flash-free": {
 					"release_date": "2026-09-29",
+					"status": "deprecated",
 					"tool_call": true,
 					"cost": {
 						"input": 0,
@@ -9105,6 +9192,7 @@
 				},
 				"exo-free": {
 					"release_date": "2026-10-06",
+					"status": "deprecated",
 					"tool_call": true,
 					"cost": {
 						"input": 0,
@@ -9182,6 +9270,15 @@
 				},
 				"minimax-m2.5-free": {
 					"release_date": "2026-02-12",
+					"status": "deprecated",
+					"tool_call": true,
+					"cost": {
+						"input": 0,
+						"output": 0
+					}
+				},
+				"cat-jam-free": {
+					"release_date": "2026-10-12",
 					"status": "deprecated",
 					"tool_call": true,
 					"cost": {
@@ -9330,6 +9427,15 @@
 				},
 				"space-bunny-free": {
 					"release_date": "2026-09-23",
+					"tool_call": true,
+					"cost": {
+						"input": 0,
+						"output": 0
+					}
+				},
+				"ll-alpha-free": {
+					"release_date": "2026-10-15",
+					"status": "deprecated",
 					"tool_call": true,
 					"cost": {
 						"input": 0,
@@ -9513,6 +9619,15 @@
 						"output": 0
 					}
 				},
+				"glm-5.3-flash-free": {
+					"release_date": "2026-08-26",
+					"tool_call": true,
+					"cost": {
+						"input": 0,
+						"output": 0
+					},
+					"canonical_model_id": "zhipuai/glm-5.3-flash"
+				},
 				"claude-sonnet-5": {
 					"release_date": "2026-06-30",
 					"tool_call": true,
@@ -9578,6 +9693,15 @@
 					},
 					"canonical_model_id": "zhipuai/glm-5.2"
 				},
+				"nemotron-3.5-super-vl-free": {
+					"release_date": "2026-10-15",
+					"tool_call": true,
+					"cost": {
+						"input": 0,
+						"output": 0
+					},
+					"canonical_model_id": "nvidia/nemotron-3.5-super-vl-120b-a12b"
+				},
 				"kimi-k2": {
 					"release_date": "2025-09-05",
 					"status": "deprecated",
@@ -9612,6 +9736,24 @@
 						"output": 2
 					},
 					"canonical_model_id": "xai/grok-build-0.1"
+				},
+				"deepseek-v4.1-flash-free": {
+					"release_date": "2026-09-10",
+					"tool_call": true,
+					"cost": {
+						"input": 0,
+						"output": 0
+					},
+					"canonical_model_id": "deepseek/deepseek-v4.1-flash"
+				},
+				"beam-free": {
+					"release_date": "2026-10-05",
+					"tool_call": true,
+					"cost": {
+						"input": 0,
+						"output": 0
+					},
+					"canonical_model_id": "reflection/beam-1.0-501b-a23b"
 				},
 				"ling-3.0-flash-free": {
 					"release_date": "2026-07-23",
@@ -9729,6 +9871,7 @@
 				},
 				"step-5-preview-free": {
 					"release_date": "2026-09-16",
+					"status": "deprecated",
 					"tool_call": true,
 					"cost": {
 						"input": 0,
@@ -9805,6 +9948,15 @@
 					},
 					"canonical_model_id": "openai/gpt-5.6-sol"
 				},
+				"gemini-4-argon": {
+					"release_date": "2026-10-13",
+					"tool_call": true,
+					"cost": {
+						"input": 2,
+						"output": 10
+					},
+					"canonical_model_id": "google/gemini-4-argon"
+				},
 				"x-preview-f-free": {
 					"release_date": "2026-08-21",
 					"status": "deprecated",
@@ -9816,6 +9968,7 @@
 				},
 				"muse-spark-1.3-contributor-free": {
 					"release_date": "2026-09-02",
+					"status": "deprecated",
 					"tool_call": true,
 					"cost": {
 						"input": 0,
@@ -9853,15 +10006,6 @@
 					},
 					"canonical_model_id": "xiaomi/mimo-v2.6-pro"
 				},
-				"qwen3.7-max": {
-					"release_date": "2026-05-21",
-					"status": "deprecated",
-					"tool_call": true,
-					"cost": {
-						"input": 2.5,
-						"output": 7.5
-					}
-				},
 				"mimo-v2.5": {
 					"release_date": "2026-04-22",
 					"tool_call": true,
@@ -9887,6 +10031,15 @@
 						"output": 0
 					},
 					"canonical_model_id": "meituan/longcat-2.5-preview"
+				},
+				"gemini-4-argon-contributor": {
+					"release_date": "2026-10-13",
+					"tool_call": true,
+					"cost": {
+						"input": 4,
+						"output": 20
+					},
+					"canonical_model_id": "google/gemini-4-argon"
 				},
 				"glm-5.3-flash": {
 					"release_date": "2026-08-26",
@@ -9924,23 +10077,14 @@
 					},
 					"canonical_model_id": "deepseek/deepseek-v4.1-flash"
 				},
-				"deepseek-v4-flash-vision-exp": {
-					"release_date": "2026-08-21",
+				"step-5-preview": {
+					"release_date": "2026-09-16",
 					"tool_call": true,
 					"cost": {
-						"input": 0.15,
-						"output": 0.6
+						"input": 1,
+						"output": 2.7
 					},
-					"canonical_model_id": "deepseek/deepseek-v4-flash-vision-exp"
-				},
-				"kimi-k2.6": {
-					"release_date": "2026-04-21",
-					"status": "deprecated",
-					"tool_call": true,
-					"cost": {
-						"input": 0.95,
-						"output": 4
-					}
+					"canonical_model_id": "stepfun/step-5-preview"
 				},
 				"longcat-2.0": {
 					"release_date": "2026-06-30",
@@ -9951,15 +10095,14 @@
 					},
 					"canonical_model_id": "meituan/longcat-2.0"
 				},
-				"grok-4.5": {
-					"release_date": "2026-07-08",
+				"cat-jam-free": {
+					"release_date": "2026-10-12",
 					"status": "deprecated",
 					"tool_call": true,
 					"cost": {
-						"input": 2,
-						"output": 6
-					},
-					"canonical_model_id": "xai/grok-4.5"
+						"input": 0,
+						"output": 0
+					}
 				},
 				"space-bunny": {
 					"release_date": "2026-09-23",
@@ -9971,19 +10114,11 @@
 				},
 				"minimax-m2.7": {
 					"release_date": "2026-03-18",
+					"status": "deprecated",
 					"tool_call": true,
 					"cost": {
 						"input": 0.3,
 						"output": 1.2
-					}
-				},
-				"space-bunny-free": {
-					"release_date": "2026-09-23",
-					"status": "deprecated",
-					"tool_call": true,
-					"cost": {
-						"input": 0,
-						"output": 0
 					}
 				},
 				"mimo-v2.5-pro": {
@@ -10056,6 +10191,15 @@
 					},
 					"canonical_model_id": "meta/muse-spark-1.2"
 				},
+				"beam-free": {
+					"release_date": "2026-10-05",
+					"tool_call": true,
+					"cost": {
+						"input": 0,
+						"output": 0
+					},
+					"canonical_model_id": "reflection/beam-1.0-501b-a23b"
+				},
 				"claude-haiku-5-5": {
 					"release_date": "2026-10-07",
 					"tool_call": true,
@@ -10082,15 +10226,6 @@
 						"output": 1.98
 					}
 				},
-				"qwen3.6-plus": {
-					"release_date": "2026-04-02",
-					"status": "deprecated",
-					"tool_call": true,
-					"cost": {
-						"input": 0.5,
-						"output": 3
-					}
-				},
 				"hy4-preview": {
 					"release_date": "2026-08-28",
 					"tool_call": true,
@@ -10110,6 +10245,7 @@
 				},
 				"step-5-preview-free": {
 					"release_date": "2026-09-16",
+					"status": "deprecated",
 					"tool_call": true,
 					"cost": {
 						"input": 0,
@@ -10135,15 +10271,6 @@
 					},
 					"canonical_model_id": "moonshotai/kimi-k2.7-code"
 				},
-				"grok-4.6": {
-					"release_date": "2026-08-12",
-					"tool_call": true,
-					"cost": {
-						"input": 2,
-						"output": 6
-					},
-					"canonical_model_id": "xai/grok-4.6"
-				},
 				"qwen3.7-plus": {
 					"release_date": "2026-06-02",
 					"tool_call": true,
@@ -10151,15 +10278,6 @@
 						"input": 0.4,
 						"output": 1.6
 					}
-				},
-				"deepseek-v4-flash": {
-					"release_date": "2026-07-31",
-					"tool_call": true,
-					"cost": {
-						"input": 0.15,
-						"output": 0.6
-					},
-					"canonical_model_id": "deepseek/deepseek-v4-flash-0731"
 				}
 			}
 		},
@@ -10244,8 +10362,8 @@
 					"release_date": "2026-04-27",
 					"tool_call": true,
 					"cost": {
-						"input": 0.73,
-						"output": 10
+						"input": 0.27,
+						"output": 14
 					}
 				},
 				"poolside/laguna-s-2.1:free": {
@@ -10398,14 +10516,6 @@
 					},
 					"canonical_model_id": "anthropic/claude-fable-5"
 				},
-				"anthropic/claude-sonnet-4": {
-					"release_date": "2025-05-22",
-					"tool_call": true,
-					"cost": {
-						"input": 3,
-						"output": 15
-					}
-				},
 				"anthropic/claude-sonnet-5": {
 					"release_date": "2026-06-30",
 					"tool_call": true,
@@ -10472,7 +10582,8 @@
 					"cost": {
 						"input": 2.5,
 						"output": 10
-					}
+					},
+					"canonical_model_id": "cohere/command-a"
 				},
 				"cohere/north-mini-code:free": {
 					"release_date": "2026-06-17",
@@ -10506,14 +10617,15 @@
 					"cost": {
 						"input": 0.25,
 						"output": 0.95
-					}
+					},
+					"canonical_model_id": "deepseek/deepseek-chat-v3.1"
 				},
 				"deepseek/deepseek-v4-flash-0731": {
 					"release_date": "2026-07-31",
 					"tool_call": true,
 					"cost": {
-						"input": 0.016,
-						"output": 0.64
+						"input": 0.1,
+						"output": 0.3
 					},
 					"canonical_model_id": "deepseek/deepseek-v4-flash-0731"
 				},
@@ -10521,8 +10633,8 @@
 					"release_date": "2026-09-10",
 					"tool_call": true,
 					"cost": {
-						"input": 0.04,
-						"output": 1.188
+						"input": 0.0648,
+						"output": 0.144
 					},
 					"canonical_model_id": "deepseek/deepseek-v4.1-flash"
 				},
@@ -10575,7 +10687,8 @@
 					"cost": {
 						"input": 0.29,
 						"output": 1.14
-					}
+					},
+					"canonical_model_id": "deepseek/deepseek-chat-v3-0324"
 				},
 				"deepseek/deepseek-r1": {
 					"release_date": "2025-01-20",
@@ -10590,8 +10703,8 @@
 					"release_date": "2026-04-24",
 					"tool_call": true,
 					"cost": {
-						"input": 0.41238,
-						"output": 0.82476
+						"input": 0.2088,
+						"output": 0.4176
 					},
 					"canonical_model_id": "deepseek/deepseek-v4-pro"
 				},
@@ -10608,36 +10721,44 @@
 					"release_date": "2025-12-01",
 					"tool_call": true,
 					"cost": {
-						"input": 0.259,
-						"output": 0.8
+						"input": 0.28,
+						"output": 0.42
 					},
 					"canonical_model_id": "deepseek/deepseek-v3.2"
+				},
+				"deepseek/deepseek-v4.1-flash-1017": {
+					"release_date": "2026-10-17",
+					"tool_call": true,
+					"cost": {
+						"input": 0.15,
+						"output": 0.6
+					},
+					"canonical_model_id": "deepseek/deepseek-v4.1-flash-1017"
 				},
 				"deepseek/deepseek-v4-flash": {
 					"release_date": "2026-04-24",
 					"tool_call": true,
 					"cost": {
-						"input": 0.0131,
-						"output": 1.28
+						"input": 0.091,
+						"output": 0.182
 					},
 					"canonical_model_id": "deepseek/deepseek-v4-flash"
 				},
-				"unbiased/pareto-26.10-preview": {
-					"release_date": "2026-10-01",
+				"unbiased/pareto-26.9": {
+					"release_date": "2026-10-13",
+					"tool_call": true,
+					"cost": {
+						"input": 2.5,
+						"output": 7.5
+					}
+				},
+				"unbiased/pareto-26.10": {
+					"release_date": "2026-10-15",
 					"tool_call": true,
 					"cost": {
 						"input": 0.8,
 						"output": 3.2
 					}
-				},
-				"unbiased/pareto": {
-					"release_date": "2026-09-17",
-					"tool_call": true,
-					"cost": {
-						"input": 2.5,
-						"output": 7.5
-					},
-					"canonical_model_id": "unbiased/pareto"
 				},
 				"tencent/hy3-preview": {
 					"release_date": "2026-04-20",
@@ -10662,7 +10783,8 @@
 					"cost": {
 						"input": 0.074,
 						"output": 0.295
-					}
+					},
+					"canonical_model_id": "tencent/hy-mt2-30b-a3b"
 				},
 				"tencent/hy-mt2-1.8b": {
 					"release_date": "2026-08-20",
@@ -10670,14 +10792,15 @@
 					"cost": {
 						"input": 0.044,
 						"output": 0.177
-					}
+					},
+					"canonical_model_id": "tencent/hy-mt2-1.8b"
 				},
 				"tencent/hy3": {
 					"release_date": "2026-07-06",
 					"tool_call": true,
 					"cost": {
-						"input": 0.0825,
-						"output": 0.33
+						"input": 0.132,
+						"output": 0.528
 					},
 					"canonical_model_id": "tencent/hy3"
 				},
@@ -10687,14 +10810,15 @@
 					"cost": {
 						"input": 0.074,
 						"output": 0.295
-					}
+					},
+					"canonical_model_id": "tencent/hy-mt2-7b"
 				},
 				"tencent/hy4-preview": {
 					"release_date": "2026-08-28",
 					"tool_call": true,
 					"cost": {
-						"input": 0.7506,
-						"output": 2.2509
+						"input": 0.834,
+						"output": 2.501
 					},
 					"canonical_model_id": "tencent/hy4-preview"
 				},
@@ -10710,8 +10834,8 @@
 					"release_date": "2025-04-05",
 					"tool_call": true,
 					"cost": {
-						"input": 0.18,
-						"output": 0.59
+						"input": 0.1,
+						"output": 0.3
 					}
 				},
 				"meta-llama/llama-guard-4-12b": {
@@ -10734,8 +10858,8 @@
 					"release_date": "2024-12-06",
 					"tool_call": true,
 					"cost": {
-						"input": 0.22,
-						"output": 0.5
+						"input": 0.1,
+						"output": 0.32
 					},
 					"canonical_model_id": "meta/llama-3.3-70b-instruct"
 				},
@@ -10787,7 +10911,15 @@
 					"tool_call": true,
 					"cost": {
 						"input": 2,
-						"output": 12
+						"output": 10
+					}
+				},
+				"~unbiased/pareto-latest": {
+					"release_date": "2026-10-13",
+					"tool_call": true,
+					"cost": {
+						"input": 0.8,
+						"output": 3.2
 					}
 				},
 				"perceptron/perceptron-mk1": {
@@ -10845,8 +10977,8 @@
 					"release_date": "2026-08-26",
 					"tool_call": true,
 					"cost": {
-						"input": 0.15,
-						"output": 0.5
+						"input": 0.048,
+						"output": 0.2
 					},
 					"canonical_model_id": "zhipuai/glm-5.3-flash"
 				},
@@ -10863,8 +10995,8 @@
 					"release_date": "2026-02-12",
 					"tool_call": true,
 					"cost": {
-						"input": 0.6,
-						"output": 1.92
+						"input": 1,
+						"output": 3.2
 					},
 					"canonical_model_id": "zhipuai/glm-5"
 				},
@@ -10898,8 +11030,8 @@
 					"release_date": "2025-12-22",
 					"tool_call": true,
 					"cost": {
-						"input": 0.6,
-						"output": 2.2
+						"input": 0.54,
+						"output": 1.98
 					},
 					"canonical_model_id": "zhipuai/glm-4.7"
 				},
@@ -10907,8 +11039,8 @@
 					"release_date": "2026-06-13",
 					"tool_call": true,
 					"cost": {
-						"input": 0.06,
-						"output": 7
+						"input": 0.62,
+						"output": 2.42
 					},
 					"canonical_model_id": "zhipuai/glm-5.2"
 				},
@@ -10947,6 +11079,14 @@
 						"output": 4.8
 					},
 					"canonical_model_id": "zhipuai/glm-5.3"
+				},
+				"reflection/beam-1.0-501b-a23b": {
+					"release_date": "2026-10-16",
+					"tool_call": true,
+					"cost": {
+						"input": 1,
+						"output": 3
+					}
 				},
 				"inference-net/schematron-v2-small": {
 					"release_date": "2026-09-12",
@@ -11138,6 +11278,15 @@
 						"output": 0.2
 					}
 				},
+				"meta/muse-spark-open": {
+					"release_date": "2026-10-15",
+					"tool_call": true,
+					"cost": {
+						"input": 1.25,
+						"output": 4.25
+					},
+					"canonical_model_id": "meta/muse-spark-open"
+				},
 				"nousresearch/hermes-3-llama-3.1-70b": {
 					"release_date": "2024-08-18",
 					"tool_call": false,
@@ -11162,20 +11311,36 @@
 						"output": 3
 					}
 				},
+				"scaledown/summarize": {
+					"release_date": "2026-10-13",
+					"tool_call": false,
+					"cost": {
+						"input": 0.04,
+						"output": 0
+					}
+				},
+				"scaledown/extract": {
+					"release_date": "2026-10-13",
+					"tool_call": false,
+					"cost": {
+						"input": 0.04,
+						"output": 0
+					}
+				},
 				"~z-ai/glm-flash-latest": {
 					"release_date": "2026-08-27",
 					"tool_call": true,
 					"cost": {
-						"input": 0.032,
-						"output": 0.84
+						"input": 0.048,
+						"output": 0.2
 					}
 				},
 				"~z-ai/glm-latest": {
 					"release_date": "2026-08-19",
 					"tool_call": true,
 					"cost": {
-						"input": 0.079,
-						"output": 4.8
+						"input": 0.0632,
+						"output": 4.4
 					}
 				},
 				"arcee-ai/trinity-large-thinking": {
@@ -11320,6 +11485,14 @@
 					},
 					"canonical_model_id": "xai/grok-4.6"
 				},
+				"elorian/glimpse": {
+					"release_date": "2026-10-17",
+					"tool_call": true,
+					"cost": {
+						"input": 0.6,
+						"output": 3
+					}
+				},
 				"~anthropic/claude-opus-latest": {
 					"release_date": "2026-04-21",
 					"tool_call": true,
@@ -11380,24 +11553,24 @@
 					"release_date": "2026-09-14",
 					"tool_call": true,
 					"cost": {
-						"input": 0.04,
-						"output": 1.188
+						"input": 0.05,
+						"output": 0.6
 					}
 				},
 				"~deepseek/deepseek-pro-latest": {
 					"release_date": "2026-09-14",
 					"tool_call": true,
 					"cost": {
-						"input": 0.24948,
-						"output": 0.74844
+						"input": 0.12,
+						"output": 8
 					}
 				},
 				"~deepseek/deepseek-v4-flash-latest": {
 					"release_date": "2026-08-01",
 					"tool_call": true,
 					"cost": {
-						"input": 0.0128,
-						"output": 0.768
+						"input": 0.0052,
+						"output": 0.143616
 					}
 				},
 				"~x-ai/grok-latest": {
@@ -11424,12 +11597,20 @@
 						"output": 0
 					}
 				},
+				"liquid/lfm-2.5-24b-a2b": {
+					"release_date": "2026-10-13",
+					"tool_call": true,
+					"cost": {
+						"input": 0.05,
+						"output": 0.7
+					}
+				},
 				"google/gemma-4-31b-it": {
 					"release_date": "2026-04-02",
 					"tool_call": true,
 					"cost": {
-						"input": 0.09,
-						"output": 0.34
+						"input": 0.2,
+						"output": 0.4
 					},
 					"canonical_model_id": "google/gemma-4-31b-it"
 				},
@@ -11468,7 +11649,7 @@
 					"tool_call": true,
 					"cost": {
 						"input": 0.08,
-						"output": 0.45
+						"output": 0.35
 					},
 					"canonical_model_id": "google/gemma-3-27b-it"
 				},
@@ -11511,7 +11692,8 @@
 					"cost": {
 						"input": 0.65,
 						"output": 0.65
-					}
+					},
+					"canonical_model_id": "google/gemma-2-27b-it"
 				},
 				"google/gemini-3.6-flash": {
 					"release_date": "2026-07-21",
@@ -11526,8 +11708,8 @@
 					"release_date": "2026-04-02",
 					"tool_call": true,
 					"cost": {
-						"input": 0.0765,
-						"output": 0.255
+						"input": 0.0675,
+						"output": 0.225
 					},
 					"canonical_model_id": "google/gemma-4-26b-a4b-it"
 				},
@@ -11691,8 +11873,8 @@
 					"release_date": "2026-09-02",
 					"tool_call": true,
 					"cost": {
-						"input": 0.75,
-						"output": 3.75
+						"input": 0.825,
+						"output": 4.125
 					},
 					"canonical_model_id": "google/gemini-3.8-flash"
 				},
@@ -11720,7 +11902,8 @@
 					"cost": {
 						"input": 1.25,
 						"output": 10
-					}
+					},
+					"canonical_model_id": "google/gemini-2.5-pro-preview"
 				},
 				"google/gemini-3.1-flash-lite-preview": {
 					"release_date": "2026-03-03",
@@ -11746,6 +11929,15 @@
 						]
 					}
 				},
+				"google/gemini-4-argon": {
+					"release_date": "2026-10-13",
+					"tool_call": true,
+					"cost": {
+						"input": 2,
+						"output": 10
+					},
+					"canonical_model_id": "google/gemini-4-argon"
+				},
 				"google/gemini-3.1-flash-lite": {
 					"release_date": "2026-05-07",
 					"tool_call": true,
@@ -11761,6 +11953,22 @@
 					"cost": {
 						"input": 0.6,
 						"output": 6
+					}
+				},
+				"moondream/moondream3-preview": {
+					"release_date": "2026-10-15",
+					"tool_call": false,
+					"cost": {
+						"input": 0.3,
+						"output": 2.5
+					}
+				},
+				"moondream/moondream3.1-9b-a2b": {
+					"release_date": "2026-10-15",
+					"tool_call": false,
+					"cost": {
+						"input": 0.3,
+						"output": 2.5
 					}
 				},
 				"ibm-granite/granite-4.0-h-micro": {
@@ -11802,7 +12010,8 @@
 					"cost": {
 						"input": 0.15,
 						"output": 0.15
-					}
+					},
+					"canonical_model_id": "mistral/ministral-8b-2512"
 				},
 				"mistralai/mistral-small-24b-instruct-2501": {
 					"release_date": "2025-01-30",
@@ -11810,7 +12019,8 @@
 					"cost": {
 						"input": 0.05,
 						"output": 0.08
-					}
+					},
+					"canonical_model_id": "mistral/mistral-small-24b-instruct-2501"
 				},
 				"mistralai/devstral-2512": {
 					"release_date": "2025-12-09",
@@ -11827,7 +12037,8 @@
 					"cost": {
 						"input": 0.2,
 						"output": 0.6
-					}
+					},
+					"canonical_model_id": "mistral/mistral-saba"
 				},
 				"mistralai/mistral-medium-3-5": {
 					"release_date": "2026-04-30",
@@ -11835,7 +12046,8 @@
 					"cost": {
 						"input": 1.5,
 						"output": 7.5
-					}
+					},
+					"canonical_model_id": "mistral/mistral-medium-3-5"
 				},
 				"mistralai/mistral-medium-3.1": {
 					"release_date": "2025-08-13",
@@ -11843,7 +12055,8 @@
 					"cost": {
 						"input": 0.4,
 						"output": 2
-					}
+					},
+					"canonical_model_id": "mistral/mistral-medium-3.1"
 				},
 				"mistralai/mistral-small-3.2-24b-instruct": {
 					"release_date": "2025-06-20",
@@ -11851,7 +12064,8 @@
 					"cost": {
 						"input": 0.09375,
 						"output": 0.25
-					}
+					},
+					"canonical_model_id": "mistral/mistral-small-3.2-24b-instruct"
 				},
 				"mistralai/mistral-large": {
 					"release_date": "2024-02-26",
@@ -11859,7 +12073,8 @@
 					"cost": {
 						"input": 2,
 						"output": 6
-					}
+					},
+					"canonical_model_id": "mistral/mistral-large"
 				},
 				"mistralai/mistral-small-2603": {
 					"release_date": "2026-03-16",
@@ -11876,7 +12091,8 @@
 					"cost": {
 						"input": 0.4,
 						"output": 2
-					}
+					},
+					"canonical_model_id": "mistral/mistral-medium-3"
 				},
 				"mistralai/voxtral-small-24b-2507": {
 					"release_date": "2025-07-15",
@@ -11902,7 +12118,8 @@
 					"cost": {
 						"input": 2,
 						"output": 6
-					}
+					},
+					"canonical_model_id": "mistral/mistral-large-2407"
 				},
 				"mistralai/ministral-14b-2512": {
 					"release_date": "2025-12-02",
@@ -11910,7 +12127,8 @@
 					"cost": {
 						"input": 0.2,
 						"output": 0.2
-					}
+					},
+					"canonical_model_id": "mistral/ministral-14b-2512"
 				},
 				"mistralai/mistral-large-4-0": {
 					"release_date": "2026-10-06",
@@ -11926,7 +12144,8 @@
 					"cost": {
 						"input": 0.351,
 						"output": 0.555
-					}
+					},
+					"canonical_model_id": "mistral/mistral-small-3.1-24b-instruct"
 				},
 				"mistralai/ministral-3b-2512": {
 					"release_date": "2025-12-02",
@@ -11934,7 +12153,8 @@
 					"cost": {
 						"input": 0.1,
 						"output": 0.1
-					}
+					},
+					"canonical_model_id": "mistral/ministral-3b-2512"
 				},
 				"mistralai/mixtral-8x22b-instruct": {
 					"release_date": "2024-04-17",
@@ -11942,7 +12162,8 @@
 					"cost": {
 						"input": 2,
 						"output": 6
-					}
+					},
+					"canonical_model_id": "mistral/mixtral-8x22b-instruct"
 				},
 				"mistralai/codestral-2508": {
 					"release_date": "2025-07-30",
@@ -11959,7 +12180,8 @@
 					"cost": {
 						"input": 2,
 						"output": 6
-					}
+					},
+					"canonical_model_id": "sakana/fugu-max"
 				},
 				"sakana/fugu-ultra-v2": {
 					"release_date": "2026-09-11",
@@ -11967,7 +12189,8 @@
 					"cost": {
 						"input": 5,
 						"output": 30
-					}
+					},
+					"canonical_model_id": "sakana/fugu-ultra-v2"
 				},
 				"sakana/fugu-ultra": {
 					"release_date": "2026-06-15",
@@ -11999,40 +12222,24 @@
 					"release_date": "2026-10-02",
 					"tool_call": true,
 					"cost": {
-						"input": 0,
-						"output": 0
-					}
-				},
-				"inclusionai/ling-3.0-flash-sante": {
-					"release_date": "2026-09-04",
-					"tool_call": true,
-					"cost": {
-						"input": 0.042,
-						"output": 0.1232
+						"input": 0.075,
+						"output": 0.225
 					}
 				},
 				"inclusionai/ling-3.0-flash-vl": {
 					"release_date": "2026-09-10",
 					"tool_call": true,
 					"cost": {
-						"input": 0.021,
-						"output": 0.0616
-					}
-				},
-				"inclusionai/ling-3.0-flash-fin": {
-					"release_date": "2026-08-27",
-					"tool_call": true,
-					"cost": {
-						"input": 0.042,
-						"output": 0.1232
+						"input": 0.06,
+						"output": 0.18
 					}
 				},
 				"moonshotai/kimi-k3": {
 					"release_date": "2026-07-16",
 					"tool_call": true,
 					"cost": {
-						"input": 0.73,
-						"output": 10
+						"input": 0.304,
+						"output": 11.936
 					},
 					"canonical_model_id": "moonshotai/kimi-k3"
 				},
@@ -12078,7 +12285,8 @@
 					"cost": {
 						"input": 0.57,
 						"output": 2.3
-					}
+					},
+					"canonical_model_id": "moonshotai/kimi-k2"
 				},
 				"moonshotai/kimi-k2.7-code": {
 					"release_date": "2026-06-12",
@@ -12105,8 +12313,8 @@
 						"output": 0.1
 					}
 				},
-				"apodex/apodex-1.1-mini:free": {
-					"release_date": "2026-10-01",
+				"nvidia/nemotron-3.5-super-vl:free": {
+					"release_date": "2026-10-15",
 					"tool_call": true,
 					"cost": {
 						"input": 0,
@@ -12157,6 +12365,14 @@
 						"output": 0.45
 					},
 					"canonical_model_id": "nvidia/nemotron-3-super-120b-a12b"
+				},
+				"nvidia/nemotron-3.5-super-vl": {
+					"release_date": "2026-10-15",
+					"tool_call": true,
+					"cost": {
+						"input": 0.1,
+						"output": 0.4
+					}
 				},
 				"nvidia/nemotron-3-ultra-550b-a55b:free": {
 					"release_date": "2026-06-04",
@@ -12269,7 +12485,7 @@
 					"tool_call": true,
 					"cost": {
 						"input": 0.27,
-						"output": 1.08
+						"output": 0.95
 					},
 					"canonical_model_id": "minimax/MiniMax-M2.5"
 				},
@@ -12294,8 +12510,8 @@
 					"release_date": "2026-03-18",
 					"tool_call": true,
 					"cost": {
-						"input": 0.21,
-						"output": 0.84
+						"input": 0.3,
+						"output": 1.2
 					},
 					"canonical_model_id": "minimax/MiniMax-M2.7"
 				},
@@ -12329,8 +12545,8 @@
 					"release_date": "2025-10-27",
 					"tool_call": true,
 					"cost": {
-						"input": 0.3,
-						"output": 1.2
+						"input": 0.255,
+						"output": 1.02
 					},
 					"canonical_model_id": "minimax/MiniMax-M2"
 				},
@@ -12527,8 +12743,8 @@
 					"release_date": "2026-08-14",
 					"tool_call": true,
 					"cost": {
-						"input": 0.04,
-						"output": 2.3
+						"input": 0.24,
+						"output": 2.2
 					},
 					"canonical_model_id": "alibaba/qwen3.8-27b"
 				},
@@ -12651,8 +12867,8 @@
 					"release_date": "2026-04-17",
 					"tool_call": true,
 					"cost": {
-						"input": 0.1,
-						"output": 0.95
+						"input": 0.15,
+						"output": 1
 					},
 					"canonical_model_id": "alibaba/qwen3.6-35b-a3b"
 				},
@@ -12660,7 +12876,7 @@
 					"release_date": "2025-09",
 					"tool_call": true,
 					"cost": {
-						"input": 0.1,
+						"input": 0.09,
 						"output": 1.1
 					},
 					"canonical_model_id": "alibaba/qwen3-next-80b-a3b-instruct"
@@ -12746,8 +12962,8 @@
 					"release_date": "2026-02-23",
 					"tool_call": true,
 					"cost": {
-						"input": 0.08,
-						"output": 0.75
+						"input": 0.15,
+						"output": 1
 					},
 					"canonical_model_id": "alibaba/qwen3.5-35b-a3b"
 				},
@@ -12764,8 +12980,8 @@
 					"release_date": "2026-02-15",
 					"tool_call": true,
 					"cost": {
-						"input": 0.55,
-						"output": 3.5
+						"input": 0.5,
+						"output": 3.6
 					},
 					"canonical_model_id": "alibaba/qwen3.5-397b-a17b"
 				},
@@ -12781,7 +12997,7 @@
 					"release_date": "2025-07-29",
 					"tool_call": true,
 					"cost": {
-						"input": 0.1,
+						"input": 0.09,
 						"output": 0.3
 					}
 				},
@@ -12821,8 +13037,8 @@
 					"release_date": "2026-04-22",
 					"tool_call": true,
 					"cost": {
-						"input": 0.32,
-						"output": 3.2
+						"input": 0.25,
+						"output": 2
 					},
 					"canonical_model_id": "alibaba/qwen3.6-27b"
 				},
@@ -12861,6 +13077,14 @@
 					},
 					"canonical_model_id": "alibaba/qwen3.8-max-0902"
 				},
+				"xingchen-agi/xing4.0-29b-a4b:free": {
+					"release_date": "2026-10-16",
+					"tool_call": true,
+					"cost": {
+						"input": 0,
+						"output": 0
+					}
+				},
 				"morph/morph-v3-large": {
 					"release_date": "2025-07-07",
 					"tool_call": false,
@@ -12893,6 +13117,7 @@
 						"input": 8,
 						"output": 15
 					},
+					"canonical_model_id": "openai/gpt-5.4-image-2",
 					"modalities": {
 						"output": [
 							"image",
@@ -13028,8 +13253,8 @@
 					"release_date": "2026-07-09",
 					"tool_call": true,
 					"cost": {
-						"input": 2,
-						"output": 10
+						"input": 4,
+						"output": 20
 					},
 					"canonical_model_id": "openai/gpt-5.6-sol"
 				},
@@ -13183,6 +13408,7 @@
 						"input": 2.5,
 						"output": 2
 					},
+					"canonical_model_id": "openai/gpt-5-image-mini",
 					"modalities": {
 						"output": [
 							"image",
@@ -13265,6 +13491,7 @@
 						"input": 10,
 						"output": 10
 					},
+					"canonical_model_id": "openai/gpt-5-image",
 					"modalities": {
 						"output": [
 							"image",
@@ -13416,8 +13643,8 @@
 					"release_date": "2025-08-05",
 					"tool_call": true,
 					"cost": {
-						"input": 0.037,
-						"output": 0.17
+						"input": 0.15,
+						"output": 0.6
 					},
 					"canonical_model_id": "openai/gpt-oss-120b"
 				},
@@ -13452,8 +13679,8 @@
 					"release_date": "2026-07-09",
 					"tool_call": true,
 					"cost": {
-						"input": 2,
-						"output": 10
+						"input": 4,
+						"output": 20
 					},
 					"canonical_model_id": "openai/gpt-5.6-sol"
 				},
@@ -13521,6 +13748,19 @@
 						"output": 0
 					},
 					"canonical_model_id": "poolside/laguna-m.1"
+				}
+			}
+		},
+		"reflection": {
+			"models": {
+				"Beam-1.0-501B-A23B": {
+					"release_date": "2026-10-05",
+					"tool_call": true,
+					"cost": {
+						"input": 0,
+						"output": 0
+					},
+					"canonical_model_id": "reflection/beam-1.0-501b-a23b"
 				}
 			}
 		},
@@ -13726,6 +13966,14 @@
 				},
 				"stealth/glyph-cluster": {
 					"release_date": "2026-10-07",
+					"tool_call": true,
+					"cost": {
+						"input": 0,
+						"output": 0
+					}
+				},
+				"stealth/cat-jam": {
+					"release_date": "2026-10-15",
 					"tool_call": true,
 					"cost": {
 						"input": 0,
@@ -14293,15 +14541,6 @@
 					},
 					"canonical_model_id": "anthropic/claude-opus-4-8"
 				},
-				"anthropic/claude-sonnet-4": {
-					"release_date": "2025-05-22",
-					"tool_call": true,
-					"cost": {
-						"input": 3,
-						"output": 15
-					},
-					"canonical_model_id": "anthropic/claude-sonnet-4-20250514"
-				},
 				"anthropic/claude-sonnet-5": {
 					"release_date": "2026-06-30",
 					"tool_call": true,
@@ -14360,7 +14599,8 @@
 					"cost": {
 						"input": 2.5,
 						"output": 10
-					}
+					},
+					"canonical_model_id": "cohere/command-a"
 				},
 				"cohere/embed-v4.0": {
 					"release_date": "2025-04-15",
@@ -14387,12 +14627,21 @@
 					},
 					"canonical_model_id": "deepseek/deepseek-v4-flash-0731"
 				},
+				"deepseek/deepseek-v4.1-flash-1017-fast": {
+					"release_date": "2026-10-17",
+					"tool_call": true,
+					"cost": {
+						"input": 0.6,
+						"output": 2.4
+					},
+					"canonical_model_id": "deepseek/deepseek-v4.1-flash-1017"
+				},
 				"deepseek/deepseek-v4.1-flash": {
 					"release_date": "2026-09-10",
 					"tool_call": true,
 					"cost": {
-						"input": 0.3,
-						"output": 1.2
+						"input": 0.075,
+						"output": 0.3
 					},
 					"canonical_model_id": "deepseek/deepseek-v4.1-flash"
 				},
@@ -14458,6 +14707,15 @@
 					},
 					"canonical_model_id": "deepseek/deepseek-v3.2"
 				},
+				"deepseek/deepseek-v4.1-flash-1017": {
+					"release_date": "2026-10-17",
+					"tool_call": true,
+					"cost": {
+						"input": 0.075,
+						"output": 0.3
+					},
+					"canonical_model_id": "deepseek/deepseek-v4.1-flash-1017"
+				},
 				"deepseek/deepseek-v4-flash": {
 					"release_date": "2026-04-24",
 					"tool_call": true,
@@ -14475,15 +14733,6 @@
 						"output": 5.4
 					},
 					"canonical_model_id": "deepseek/deepseek-r1"
-				},
-				"quiverai/arrow-1.1": {
-					"release_date": "2026-04-16",
-					"tool_call": false,
-					"modalities": {
-						"output": [
-							"image"
-						]
-					}
 				},
 				"quiverai/arrow-2": {
 					"release_date": "2026-09-16",
@@ -14548,6 +14797,15 @@
 					"modalities": {
 						"output": [
 							"video"
+						]
+					}
+				},
+				"bfl/flux-3-image-klein": {
+					"release_date": "2026-10-15",
+					"tool_call": false,
+					"modalities": {
+						"output": [
+							"image"
 						]
 					}
 				},
@@ -14672,6 +14930,22 @@
 						"output": [
 							"video"
 						]
+					}
+				},
+				"reflection/beam": {
+					"release_date": "2026-10-16",
+					"tool_call": true,
+					"cost": {
+						"input": 0,
+						"output": 0
+					}
+				},
+				"reflection/beam-free": {
+					"release_date": "2026-10-16",
+					"tool_call": true,
+					"cost": {
+						"input": 0,
+						"output": 0
 					}
 				},
 				"inference-net/schematron-v2-small": {
@@ -14817,6 +15091,15 @@
 						"input": 0.1,
 						"output": 0.2
 					}
+				},
+				"meta/muse-spark-open": {
+					"release_date": "2026-10-15",
+					"tool_call": true,
+					"cost": {
+						"input": 1.25,
+						"output": 4.25
+					},
+					"canonical_model_id": "meta/muse-spark-open"
 				},
 				"meta/llama-3.3-70b": {
 					"release_date": "2024-12-06",
@@ -15180,6 +15463,14 @@
 					},
 					"canonical_model_id": "mixedbread/toast-1"
 				},
+				"elorian/glimpse": {
+					"release_date": "2026-10-16",
+					"tool_call": false,
+					"cost": {
+						"input": 0.6,
+						"output": 3
+					}
+				},
 				"klingai/kling-v2.6-t2v": {
 					"release_date": "2025-12-03",
 					"tool_call": false,
@@ -15373,6 +15664,14 @@
 					"cost": {
 						"input": 0.25,
 						"output": 2
+					}
+				},
+				"liquid/lfm2.5-24b-a2b": {
+					"release_date": "2026-10-13",
+					"tool_call": true,
+					"cost": {
+						"input": 0.05,
+						"output": 0.7
 					}
 				},
 				"google/gemma-4-31b-it": {
@@ -15693,6 +15992,15 @@
 						]
 					}
 				},
+				"google/gemini-4-argon": {
+					"release_date": "2026-10-13",
+					"tool_call": true,
+					"cost": {
+						"input": 2,
+						"output": 10
+					},
+					"canonical_model_id": "google/gemini-4-argon"
+				},
 				"google/gemini-3.1-flash-lite": {
 					"release_date": "2026-05-07",
 					"tool_call": true,
@@ -15737,20 +16045,22 @@
 					}
 				},
 				"sakana/fugu-max": {
-					"release_date": "2026-09-10",
+					"release_date": "2026-09-11",
 					"tool_call": true,
 					"cost": {
 						"input": 2,
 						"output": 6
-					}
+					},
+					"canonical_model_id": "sakana/fugu-max"
 				},
 				"sakana/fugu-ultra-v2": {
-					"release_date": "2026-09-10",
+					"release_date": "2026-09-11",
 					"tool_call": true,
 					"cost": {
 						"input": 5,
 						"output": 30
-					}
+					},
+					"canonical_model_id": "sakana/fugu-ultra-v2"
 				},
 				"sakana/namazu": {
 					"release_date": "2026-08-03",
@@ -15769,15 +16079,6 @@
 					},
 					"canonical_model_id": "sakana/fugu-ultra"
 				},
-				"inclusionai/ling-3.1-flash-free": {
-					"release_date": "2026-09-29",
-					"tool_call": true,
-					"cost": {
-						"input": 0,
-						"output": 0
-					},
-					"canonical_model_id": "inclusionai/ling-3.1-flash"
-				},
 				"inclusionai/ling-3.0-flash": {
 					"release_date": "2026-08-06",
 					"tool_call": true,
@@ -15790,8 +16091,8 @@
 					"release_date": "2026-09-29",
 					"tool_call": true,
 					"cost": {
-						"input": 0,
-						"output": 0
+						"input": 0.3,
+						"output": 0.9
 					},
 					"canonical_model_id": "inclusionai/ling-3.1-flash"
 				},
@@ -15871,7 +16172,8 @@
 					"cost": {
 						"input": 0.57,
 						"output": 2.3
-					}
+					},
+					"canonical_model_id": "moonshotai/kimi-k2"
 				},
 				"moonshotai/kimi-k2.7-code": {
 					"release_date": "2026-06-12",
@@ -15945,6 +16247,14 @@
 					},
 					"canonical_model_id": "nvidia/nemotron-3-super-120b-a12b"
 				},
+				"nvidia/nemotron-3.5-super-vl": {
+					"release_date": "2026-10-15",
+					"tool_call": true,
+					"cost": {
+						"input": 0.2,
+						"output": 0.5
+					}
+				},
 				"nvidia/nemotron-3-ultra-550b-a55b": {
 					"release_date": "2026-06-04",
 					"tool_call": true,
@@ -15953,6 +16263,15 @@
 						"output": 2.4
 					},
 					"canonical_model_id": "nvidia/nemotron-3-ultra-550b-a55b"
+				},
+				"nvidia/nemotron-3.5-lightning-free": {
+					"release_date": "2026-08-11",
+					"tool_call": true,
+					"cost": {
+						"input": 0,
+						"output": 0
+					},
+					"canonical_model_id": "nvidia/nemotron-3.5-lightning"
 				},
 				"nvidia/nemotron-nano-12b-v2-vl": {
 					"release_date": "2025-10-28",
@@ -15994,8 +16313,8 @@
 					"release_date": "2026-04-22",
 					"tool_call": true,
 					"cost": {
-						"input": 0.435,
-						"output": 0.87
+						"input": 0.3045,
+						"output": 0.609
 					},
 					"canonical_model_id": "xiaomi/mimo-v2.5-pro"
 				},
@@ -16261,6 +16580,15 @@
 				},
 				"fish-audio/s2.1-pro": {
 					"release_date": "2026-07-28",
+					"tool_call": false,
+					"modalities": {
+						"output": [
+							"audio"
+						]
+					}
+				},
+				"fish-audio/drama-3": {
+					"release_date": "2026-10-13",
 					"tool_call": false,
 					"modalities": {
 						"output": [
@@ -17087,6 +17415,19 @@
 						]
 					}
 				},
+				"microsoft/mai-image-2.6": {
+					"release_date": "2026-10-13",
+					"tool_call": false,
+					"cost": {
+						"input": 5,
+						"output": 38
+					},
+					"modalities": {
+						"output": [
+							"image"
+						]
+					}
+				},
 				"microsoft/mai-transcribe-2-streaming": {
 					"release_date": "2026-10-01",
 					"tool_call": false
@@ -17094,6 +17435,19 @@
 				"microsoft/mai-transcribe-2": {
 					"release_date": "2026-09-03",
 					"tool_call": false
+				},
+				"microsoft/mai-image-2.6-flash": {
+					"release_date": "2026-10-13",
+					"tool_call": false,
+					"cost": {
+						"input": 1.75,
+						"output": 19
+					},
+					"modalities": {
+						"output": [
+							"image"
+						]
+					}
 				},
 				"microsoft/mai-voice-2": {
 					"release_date": "2026-06-02",
@@ -17267,6 +17621,7 @@
 				},
 				"mimo-v2.5": {
 					"release_date": "2026-04-22",
+					"status": "deprecated",
 					"tool_call": true,
 					"cost": {
 						"input": 0.14,
@@ -17301,6 +17656,7 @@
 				},
 				"mimo-v2.5-pro": {
 					"release_date": "2026-04-22",
+					"status": "deprecated",
 					"tool_call": true,
 					"cost": {
 						"input": 0.435,
@@ -17317,7 +17673,7 @@
 				},
 				"mimo-v2.5-pro-ultraspeed": {
 					"release_date": "2026-06-08",
-					"status": "beta",
+					"status": "deprecated",
 					"tool_call": true,
 					"cost": {
 						"input": 1.305,
@@ -17361,6 +17717,7 @@
 				},
 				"mimo-v2.5-pro": {
 					"release_date": "2026-04-22",
+					"status": "deprecated",
 					"tool_call": true,
 					"cost": {
 						"input": 0,
@@ -17419,6 +17776,7 @@
 				},
 				"mimo-v2.5": {
 					"release_date": "2026-04-22",
+					"status": "deprecated",
 					"tool_call": true,
 					"cost": {
 						"input": 0,
@@ -17441,6 +17799,7 @@
 				},
 				"mimo-v2.5": {
 					"release_date": "2026-04-22",
+					"status": "deprecated",
 					"tool_call": true,
 					"cost": {
 						"input": 0,
@@ -17499,6 +17858,7 @@
 				},
 				"mimo-v2.5-pro": {
 					"release_date": "2026-04-22",
+					"status": "deprecated",
 					"tool_call": true,
 					"cost": {
 						"input": 0,
@@ -17565,6 +17925,7 @@
 				},
 				"mimo-v2.5-pro": {
 					"release_date": "2026-04-22",
+					"status": "deprecated",
 					"tool_call": true,
 					"cost": {
 						"input": 0,
@@ -17623,6 +17984,7 @@
 				},
 				"mimo-v2.5": {
 					"release_date": "2026-04-22",
+					"status": "deprecated",
 					"tool_call": true,
 					"cost": {
 						"input": 0,
