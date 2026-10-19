@@ -152,9 +152,18 @@ describe("plan viewer", () => {
 
 	it("wraps its key hints on a narrow terminal instead of cutting esc cancel", () => {
 		const out = renderPlanViewer({ lines: ["plan"], offset: 0, choice: 0, choices: CHOICES }, plain, 30);
-		const hints = out.slice(2, out.findIndex((line) => /^─+$/.test(line)));
+		const lastChoice = out.findLastIndex((line) => /^. \d\. /.test(line));
+		const hints = out.slice(lastChoice + 1).filter(Boolean);
 		expect(hints.length).toBeGreaterThan(1);
 		expect(hints.join(" · ")).toContain("esc cancel");
+	});
+
+	// Seen on a real Windows screen: with the choice keys only above a long plan, ←/→ was not obvious.
+	it("puts the choice keys directly under the choices and the scroll key above the plan", () => {
+		const out = renderPlanViewer({ lines: ["plan"], offset: 0, choice: 0, choices: CHOICES }, plain, 80);
+		const lastChoice = out.findLastIndex((line) => /^. \d\. /.test(line));
+		expect(out[lastChoice + 1]).toBe("←/→ choose · 1-4 pick · enter confirm · esc cancel");
+		expect(out[2]).toBe("↑/↓ scroll the plan");
 	});
 
 	// Markdown output is painted: an overwide painted line is cut ANSI-aware, never past the width.

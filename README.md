@@ -83,7 +83,7 @@ The [`@one-ai/one-code`](https://www.npmjs.com/package/@one-ai/one-code)
 app package bundles a pinned version of pi and provides the `onecode` command.
 The [`one-code-extension`](https://www.npmjs.com/package/one-code-extension)
 package uses your existing pi installation and is tested against pi versions
-0.84.3 through 1.2. For the extension package, use `pi` in place of `onecode`.
+0.84.3 through 1.3. For the extension package, use `pi` in place of `onecode`.
 
 The app opens in a full-screen terminal interface by default. See the
 [installation guide](docs/guide/installation.md) for display settings and more
@@ -318,6 +318,8 @@ pi list
 
 The [user guide](docs/guide/README.md) covers setup, configuration, providers,
 permissions, workflows, tools, session management, and troubleshooting.
+If you want to change One Code itself, the [developer docs](docs/dev/README.md)
+cover the architecture, the rules extensions follow, and how to test.
 
 For the ideas behind the project, read
 [Harness Engineering 101](https://isuruwijesiri.com/harness-engineering-101/).
