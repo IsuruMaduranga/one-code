@@ -18,7 +18,8 @@
  *    <id>` would not just be mis-branded but broken, since stock pi cannot
  *    see ~/.onecode sessions.
  * 4. Suppresses pi's own update check and installs One Code's instead
- *    (update-check.mjs), with an install-method-aware upgrade hint.
+ *    (update-check.mjs), with an install-method-aware upgrade hint, and
+ *    marks pi's changelog seen so a pin bump shows no pi release notes.
  *
  * Two subcommands never reach pi: `onecode --version` (the app's version) and
  * `onecode doctor` (the setup report, extensions/doctor/cli.ts).
@@ -57,6 +58,19 @@ const { applyLauncherEnv, installMethodFor } = await import(
 );
 const { withReplacedBuiltinsOff } = await import(pathToFileURL(join(corePath, "extensions", "lib", "replaced-builtins.mjs")).href);
 const { withCompactionKeepBackfilled } = await import(pathToFileURL(join(corePath, "extensions", "lib", "compaction-keep.mjs")).href);
+// The bundled pi, located without importing it. pi's exports map blocks
+// "<pkg>/package.json" and carries only an `import` condition (no CJS
+// require.resolve); resolve the ESM entry (<pkg>/dist/index.js) and walk up.
+// pi itself starts without its package.json (VERSION "0.0.0"), so an
+// unreadable one leaves piVersion undefined instead of failing the launch.
+const piEntry = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
+let piVersion;
+try {
+	piVersion = JSON.parse(readFileSync(join(dirname(dirname(piEntry)), "package.json"), "utf8")).version;
+} catch {
+	// --version prints "unknown"; the doctor takes an unknown version.
+}
+
 // Where the bin lives says how it was installed. Published before any fast
 // path (the doctor CLI exits early): the doctor's update lookup and the update
 // notice read it (lib/update-check.mjs minReleaseAgeFor) — under Homebrew a
@@ -73,13 +87,7 @@ const agentDir = applyLauncherEnv(process.env, { home: homedir(), appVersion, in
 // --- fast path: --version reports the app, not the harness ----------------
 const argv = process.argv.slice(2);
 if (argv[0] === "--version" || argv[0] === "-v") {
-	// pi's exports map blocks "<pkg>/package.json" and carries only an
-	// `import` condition (no CJS require.resolve); resolve the ESM entry
-	// (<pkg>/dist/index.js) and walk up instead.
-	const piEntry = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
-	const piPackageJson = join(dirname(dirname(piEntry)), "package.json");
-	const piVersion = JSON.parse(readFileSync(piPackageJson, "utf8")).version;
-	process.stdout.write(`${appVersion} (pi ${piVersion})\n`);
+	process.stdout.write(`${appVersion} (pi ${piVersion ?? "unknown"})\n`);
 	process.exit(0);
 }
 
@@ -147,11 +155,20 @@ try {
 	// value (extensions/lib/compaction-keep.mjs).
 	const keep = withCompactionKeepBackfilled(settings);
 	if (keep.changed) settings = keep.settings;
+	// pi prints its release notes ("What's New", under pi's version) at the
+	// first start after lastChangelogVersion lags pi, so every pin bump would
+	// show them to One Code's users: marked seen at every launch, /changelog
+	// still has them. pi's install ping keys off the same check (findings §5).
+	// Left to pi when its version is unknown here or PI_PACKAGE_DIR makes pi
+	// read it from another package.json: a mismatch would rewrite it each start.
+	const changelogLags = piVersion !== undefined && !process.env.PI_PACKAGE_DIR && settings.lastChangelogVersion !== piVersion;
+	if (changelogLags) settings.lastChangelogVersion = piVersion;
 	const changed =
 		firstRun ||
 		backfillExitOutput ||
 		builtins.changed ||
 		keep.changed ||
+		changelogLags ||
 		packages.length !== next.length ||
 		packages.some((p, i) => sourceOf(p) !== sourceOf(next[i]));
 	if (changed) {
@@ -184,9 +201,7 @@ if (runDoctor) {
  */
 async function runDoctorCli() {
 	try {
-		const piEntry = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
 		const piRequire = createRequire(piEntry);
-		const piVersion = JSON.parse(readFileSync(join(dirname(dirname(piEntry)), "package.json"), "utf8")).version;
 		const jitiModule = await import(pathToFileURL(piRequire.resolve("jiti")).href);
 		const createJiti = jitiModule.createJiti ?? jitiModule.default;
 		const alias = {};
