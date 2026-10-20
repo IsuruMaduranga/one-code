@@ -34,7 +34,7 @@ const EXTENSIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 // (mode "print"), so `run_in_background` runs blocking there and nothing a
 // child starts outlives it (Claude Code kills an agent's shells as it exits).
 export const CHILD_EXTENSIONS = [
-	"system-reminder", "tool-search", "claude-context", "tool-call-corruption/child",
+	"system-reminder", "tool-search", "cache-marks", "claude-context", "tool-call-corruption/child",
 	"file-tracker", "search-tools", "skill", "bash/child", "powershell/child", "web", "web-fetch", "notebook",
 ];
 
