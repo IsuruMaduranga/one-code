@@ -32,20 +32,37 @@
  *      input + cacheRead, less one cache block (IMPLICIT_BLOCK) for the
  *      provider's rounding.
  *
+ *   5. With `--late-tool NAME` (cache-probe-late-tool.sh): NAME is absent from
+ *      request 1, rides every later request's `tools` as `defer_loading: true`
+ *      once it appears, and is announced either by a reference-form
+ *      `tool_addition` in a system message or by the deferred-tool addendum.
+ *      `--late-tool-form tool_addition|addendum` also requires that form.
+ *
  * Usage: node test/e2e/cache-probe.mjs <wire.jsonl> <events.jsonl> [--slack N] [--eager-load-ok]
+ *          [--late-tool NAME [--late-tool-form tool_addition|addendum]]
  * Exit 1 on any failed check. `cache-probe.sh` produces both inputs.
  */
 import { readFileSync } from "node:fs";
 
+const USAGE =
+	"usage: cache-probe.mjs <wire.jsonl> <events.jsonl> [--slack N] [--eager-load-ok] [--late-tool NAME [--late-tool-form tool_addition|addendum]]";
+const VALUE_FLAGS = new Set(["--slack", "--late-tool", "--late-tool-form"]);
 const args = process.argv.slice(2);
-const positional = args.filter((a) => !a.startsWith("--"));
-if (positional.length !== 2) {
-	console.error("usage: cache-probe.mjs <wire.jsonl> <events.jsonl> [--slack N] [--eager-load-ok]");
+const positional = [];
+const flags = new Map();
+for (let i = 0; i < args.length; i++) {
+	if (VALUE_FLAGS.has(args[i])) flags.set(args[i], args[++i]);
+	else if (args[i].startsWith("--")) flags.set(args[i], true);
+	else positional.push(args[i]);
+}
+const lateToolForm = flags.get("--late-tool-form");
+if (positional.length !== 2 || [...flags.values()].includes(undefined) || (lateToolForm !== undefined && !["tool_addition", "addendum"].includes(lateToolForm))) {
+	console.error(USAGE);
 	process.exit(2);
 }
-const slackIndex = args.indexOf("--slack");
-const slack = slackIndex === -1 ? 0 : Number(args[slackIndex + 1] ?? 0);
-const eagerLoadOk = args.includes("--eager-load-ok");
+const slack = Number(flags.get("--slack") ?? 0);
+const eagerLoadOk = flags.has("--eager-load-ok");
+const lateTool = flags.get("--late-tool");
 
 const lines = (path) =>
 	readFileSync(path, "utf8")
@@ -158,6 +175,32 @@ for (let i = 0; i < usages.length; i++) {
 			failures.push(`request ${i + 1} read ${u.cacheRead ?? 0} cached tokens; it should have read at least ${need} of what request ${i} sent (miss of ${need - (u.cacheRead ?? 0)} tokens)`);
 		}
 	}
+}
+
+/** The first line of the deferred-tool addendum (lib/tool-additions.ts ADDENDUM_HEAD). */
+const ADDENDUM_START = "Additional deferred tools became available via tool_search";
+
+if (lateTool !== undefined) {
+	const entryIn = (p) => (p.tools ?? []).find((t) => t?.name === lateTool);
+	const firstWith = requests.findIndex((p) => entryIn(p) !== undefined);
+	const additionIn = (p) =>
+		(p.messages ?? []).some(
+			(m) => m?.role === "system" && Array.isArray(m.content) && m.content.some((b) => b?.type === "tool_addition" && b.tool?.name === lateTool),
+		);
+	// The addendum lists the names one per line after its first line.
+	const addendumIn = (p) => (p.messages ?? []).some((m) => JSON.stringify(m.content ?? "").includes(ADDENDUM_START) && JSON.stringify(m.content).includes(`\\n${lateTool}`));
+	const form = requests.some(additionIn) ? "tool_addition" : requests.some(addendumIn) ? "addendum" : undefined;
+	const called = responses.some((m) => (m.content ?? []).some((c) => c?.type === "toolCall" && c.name === lateTool));
+	console.log(`late tool ${lateTool}: first in request ${firstWith === -1 ? "none" : firstWith + 1}, announced by ${form ?? "nothing"}, ${called ? "called" : "not called"}`);
+	if (firstWith === 0) failures.push(`${lateTool} was already in request 1; the fixture registered it too early to test a late arrival`);
+	else if (firstWith === -1) failures.push(`${lateTool} never reached a request's tools`);
+	else {
+		const eager = requests.slice(firstWith).findIndex((p) => entryIn(p)?.defer_loading !== true);
+		if (eager !== -1) failures.push(`${lateTool} went out without defer_loading in request ${firstWith + eager + 1}; an eager late tool re-caches the conversation`);
+	}
+	if (form === undefined) failures.push(`${lateTool} was never announced, by tool_addition or by the addendum`);
+	else if (lateToolForm !== undefined && form !== lateToolForm) failures.push(`${lateTool} was announced by ${form}, expected ${lateToolForm}`);
+	if (!called) warnings.push(`the model never called ${lateTool}`);
 }
 
 for (const w of warnings) console.log(`WARN  ${w}`);

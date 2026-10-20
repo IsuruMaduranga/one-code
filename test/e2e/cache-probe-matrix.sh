@@ -8,8 +8,13 @@
 #
 #   test/e2e/cache-probe-matrix.sh
 #
+# The Anthropic run's late-tool phase takes the deferred-tool addendum (Sonnet 5
+# rejects tool changes), so one more late-tool probe runs on a model that takes
+# Claude Code's `tool_addition` and requires that form (findings §55 P1).
+#
 # Override a model with CACHE_PROBE_ANTHROPIC, CACHE_PROBE_OPENAI,
-# CACHE_PROBE_CODEX, CACHE_PROBE_OPENROUTER or CACHE_PROBE_OPENROUTER_CLAUDE.
+# CACHE_PROBE_CODEX, CACHE_PROBE_OPENROUTER, CACHE_PROBE_OPENROUTER_CLAUDE or
+# CACHE_PROBE_TOOL_ADDITION.
 # Each run includes the auto-mode classifier phase (cache-probe.sh). From a
 # sandboxed shell, run it inside tmux.
 set -uo pipefail
@@ -43,6 +48,15 @@ for run in "${RUNS[@]}"; do
 	fi
 	echo
 done
+addition_model="${CACHE_PROBE_TOOL_ADDITION:-anthropic/claude-sonnet-5-5}"
+echo "=== $addition_model late tool (tool_addition)"
+if bash "$REPO/test/e2e/cache-probe-late-tool.sh" "$addition_model" --form tool_addition; then
+	summary+=("PASS  $addition_model late tool")
+else
+	summary+=("FAIL  $addition_model late tool")
+	failed=1
+fi
+echo
 echo "=== summary"
 printf '%s\n' "${summary[@]}"
 exit $failed

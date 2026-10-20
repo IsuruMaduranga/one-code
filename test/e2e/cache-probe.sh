@@ -21,6 +21,9 @@
 # the classifier's own CC_AUTO_MODE_LOG). `--no-classifier` skips it.
 # A third phase repeats a web_fetch reader call against a deterministic page
 # fixture (cache-probe-reader.sh). `--no-reader` skips it.
+# On a first-party Anthropic model a fourth phase registers a tool mid-session
+# and checks it is announced without a cache miss (cache-probe-late-tool.sh).
+# `--no-late-tool` skips it.
 #
 # openai-codex models talk over WebSocket by default, which dump-requests.ts
 # cannot see; the probe project sets `transport: "sse"` and is trusted with
@@ -41,11 +44,17 @@ PROMPT='First call tool_search with query select:cron_list. Then call cron_list 
 CHECK_ARGS=()
 CLASSIFIER=1
 READER=1
+LATE_TOOL=0
+case "$MODEL" in
+anthropic/*) LATE_TOOL=1 ;;
+esac
 for arg in "$@"; do
 	if [ "$arg" = "--no-classifier" ]; then
 		CLASSIFIER=0
 	elif [ "$arg" = "--no-reader" ]; then
 		READER=0
+	elif [ "$arg" = "--no-late-tool" ]; then
+		LATE_TOOL=0
 	elif [ "$arg" = "--no-load" ]; then
 		PROMPT='Run echo probe-one with the bash tool. Then run echo probe-two with the bash tool. Then reply with exactly the word done.'
 	else
@@ -99,5 +108,9 @@ fi
 if [ "$READER" = 1 ]; then
 	echo "--- reader phase"
 	CACHE_PROBE_WORK_DIR="$WORK/reader" bash "$REPO/test/e2e/cache-probe-reader.sh" "$MODEL" || status=1
+fi
+if [ "$LATE_TOOL" = 1 ]; then
+	echo "--- late-tool phase"
+	CACHE_PROBE_WORK_DIR="$WORK/late-tool" bash "$REPO/test/e2e/cache-probe-late-tool.sh" "$MODEL" || status=1
 fi
 exit $status
