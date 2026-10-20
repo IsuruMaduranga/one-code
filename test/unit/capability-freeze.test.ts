@@ -297,7 +297,7 @@ describe("system-reminder capability refresh", () => {
 		const before = fake.appendedEntries.length;
 		fake.events.emit(CONTEXT_CAPABILITY_REFRESH_CHANNEL, { key: "deferred-tools", text: "new listing", order: 20 });
 		fake.events.emit(CONTEXT_CAPABILITY_REFRESH_CHANNEL, { key: "skills", text: "skills listing", order: 30 });
-		await Promise.resolve();
+		await new Promise((resolve) => setImmediate(resolve));
 		expect(fake.appendedEntries.length).toBe(before + 1);
 		expect(lastStored()?.stack).toEqual([
 			{ key: "deferred-tools", text: "new listing", placement: "first-prepend", order: 20 },
@@ -305,7 +305,7 @@ describe("system-reminder capability refresh", () => {
 		]);
 
 		fake.events.emit(CONTEXT_CAPABILITY_REFRESH_CHANNEL, { key: "deferred-tools", text: null, order: 20 });
-		await Promise.resolve();
+		await new Promise((resolve) => setImmediate(resolve));
 		expect(lastStored()?.stack).toEqual([{ key: "skills", text: "skills listing", placement: "first-prepend", order: 30 }]);
 	});
 });

@@ -37,6 +37,7 @@ import { claudeFamily } from "../lib/model-tier.ts";
 import { emptyToolResultContent } from "../lib/empty-tool-result.ts";
 import { instructionRole, messagesKey, type MovedBlock, systemRoleLayout, wireShape, withSystemRoleContext } from "../lib/system-role.ts";
 import { resolveCountdowns, withTurnBudgetMessages } from "../lib/turn-budget-layout.ts";
+import { sessionAlive } from "../lib/session-lifecycle.ts";
 
 /**
  * Roles a reminder can be attached to (see injectReminders). `custom` is a
@@ -48,6 +49,8 @@ import { resolveCountdowns, withTurnBudgetMessages } from "../lib/turn-budget-la
 const ANCHOR_ROLES = new Set(["user", "toolResult", "compactionSummary", "custom"]);
 
 export default function systemReminderExtension(pi: ExtensionAPI) {
+	// First, so its handlers run before this extension's own (lib/session-lifecycle.ts).
+	const alive = sessionAlive(pi);
 	const reminderQueue = new ReminderQueue();
 	let restored: ContextStackSnapshot | undefined;
 	let stored = false;
@@ -124,9 +127,10 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 		persistSnapshot();
 	});
 	// The summary starts a new prefix, so a capability block frozen on message 1
-	// is rebuilt from live state (lib/context-stack.ts). Every emitter rebuilds
-	// in the same session_compact pass: one snapshot after them, still before
-	// anything else can happen.
+	// is rebuilt from live state (lib/context-stack.ts). Every emitter rebuilds in
+	// the same session_compact pass, which pi awaits handler by handler: storing on
+	// the next turn of the event loop batches the rebuilds that finish without I/O
+	// into one snapshot, and a later rebuild stores its own.
 	let refreshPersistQueued = false;
 	pi.events.on(CONTEXT_CAPABILITY_REFRESH_CHANNEL, (data) => {
 		const refresh = data as ContextCapabilityRefresh | undefined;
@@ -136,9 +140,9 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 		reminderQueue.cancelPendingNotices(refresh.key);
 		if (refreshPersistQueued) return;
 		refreshPersistQueued = true;
-		queueMicrotask(() => {
+		setImmediate(() => {
 			refreshPersistQueued = false;
-			persistSnapshot();
+			if (alive()) persistSnapshot();
 		});
 	});
 	/** The blocks the last `context` pass placed for the system message; the payload hook moves them. */

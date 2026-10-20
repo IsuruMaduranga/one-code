@@ -195,8 +195,12 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	// Whether the last request kept loaded tools out of the fixed `tools` array
 	// (Anthropic references, OpenAI Responses loads). Only then does a loaded
 	// tool go back to deferred at a compaction; elsewhere it is in `tools`
-	// already, and removing it would be the miss.
+	// already, and removing it would be the miss. A model switch makes it
+	// unknown until the next request.
 	let nativeLoads = false;
+	pi.on("model_select", () => {
+		nativeLoads = false;
+	});
 
 	// On models that take client-side tool references (first-party Claude >= 4.5,
 	// not Haiku) the `tools` array is held byte-identical to request 1's: every

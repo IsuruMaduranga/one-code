@@ -27,7 +27,7 @@ import { awaitOneShotTurn, sessionOutlivesTurn } from "../lib/notifications.ts";
 import { PROMPT_OPTIONS_CHANNEL, type PromptOptionsAnnouncement } from "../lib/prompt-options.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { CONTEXT_BASELINE_CHANNEL, CONTEXT_CAPABILITY_REFRESH_CHANNEL, restoredContext } from "../lib/context-stack.ts";
-import { applyAnnouncement, deferredToolsBaseline as listedNamesBaseline, planAnnouncement } from "../tool-search/announce.ts";
+import { applyAnnouncement, namesBaseline, planAnnouncement } from "../lib/announced-names.ts";
 import {
 	nextSkillState,
 	readSkillStates,
@@ -153,7 +153,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 		const restored = restoredContext(pi.events);
 		requestSent = restored !== undefined;
 		listedSkills.clear();
-		const stored = listedNamesBaseline(restored?.baselines.skills) ?? skillNamesFromListing(restored?.stack.find((entry) => entry.key === "skills")?.text);
+		const stored = namesBaseline(restored?.baselines.skills) ?? skillNamesFromListing(restored?.stack.find((entry) => entry.key === "skills")?.text);
 		for (const name of stored ?? []) listedSkills.add(name);
 	});
 	pi.on("context", () => {
