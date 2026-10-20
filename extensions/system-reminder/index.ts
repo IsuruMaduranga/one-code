@@ -29,8 +29,8 @@ import {
 } from "../lib/reminders.ts";
 import {
 	CONTEXT_BASELINE_CHANNEL, CONTEXT_RESTORE_CHANNEL, CONTEXT_STACK_ENTRY, CONTEXT_STATE_ENTRY, CONTEXT_FACTS_REFRESH_CHANNEL,
-	contextStackOnBranch, RESTORED_STACK_KEYS, LIVE_CONTEXT_KEYS,
-	type ContextBaseline, type ContextRestoreRequest, type ContextStackSnapshot, type ContextFactsRefresh,
+	CONTEXT_CAPABILITY_REFRESH_CHANNEL, contextStackOnBranch, RESTORED_STACK_KEYS, LIVE_CONTEXT_KEYS,
+	type ContextBaseline, type ContextRestoreRequest, type ContextStackSnapshot, type ContextFactsRefresh, type ContextCapabilityRefresh,
 } from "../lib/context-stack.ts";
 import { CONTEXT_FACT_KEYS, DATE_CHANGE_KEY, RESUME_FACTS_KEY } from "../lib/context-facts.ts";
 import { claudeFamily } from "../lib/model-tier.ts";
@@ -123,6 +123,17 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 		// the next request, so a resume cannot revive the pre-compaction facts.
 		persistSnapshot();
 	});
+	// The summary starts a new prefix, so a capability block frozen on message 1
+	// is rebuilt from live state (lib/context-stack.ts). Persisted at once, as
+	// above: an exit right after /compact must not resume the old blocks.
+	pi.events.on(CONTEXT_CAPABILITY_REFRESH_CHANNEL, (data) => {
+		const refresh = data as ContextCapabilityRefresh | undefined;
+		if (typeof refresh?.key !== "string") return;
+		const entries: ReminderEntry[] = refresh.text ? [{ key: refresh.key, text: refresh.text, order: refresh.order, placement: "first-prepend" }] : [];
+		reminderQueue.replaceFirstPrepend([refresh.key], entries);
+		reminderQueue.cancelPendingNotices(refresh.key);
+		persistSnapshot();
+	});
 	/** The blocks the last `context` pass placed for the system message; the payload hook moves them. */
 	let moved: MovedBlock[] = [];
 	/** The tool results' countdowns the last `context` pass lifted, by call id (lib/turn-budget-layout.ts). */
@@ -146,6 +157,7 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 				since: payload.since,
 				once: payload.once,
 				toolCallId: payload.toolCallId,
+				group: payload.group,
 			});
 		}
 	});

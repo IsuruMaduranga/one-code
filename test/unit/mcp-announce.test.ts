@@ -111,15 +111,18 @@ describe("mcpChangeNotices", () => {
 			recovered: ["ctx7"],
 			dropped: ["old"],
 		});
-		expect(notices).toHaveLength(4);
-		expect(notices[0]).toContain("ctx7");
-		expect(notices[0]).toContain("connected after this conversation started");
-		expect(notices[1]).toContain("# MCP Server Instructions");
-		expect(notices[1]).toContain("## deepwiki\nUse ask_question.");
-		expect(notices[2]).toContain("- gh: 401 bad token");
-		expect(notices[2]).toContain("failed to connect");
-		expect(notices[3]).toContain("old");
-		expect(notices[3]).toContain("disconnected");
+		const texts = notices.map((notice) => notice.text);
+		expect(texts).toHaveLength(4);
+		expect(texts[0]).toContain("ctx7");
+		expect(texts[0]).toContain("connected after this conversation started");
+		expect(texts[1]).toContain("# MCP Server Instructions");
+		expect(texts[1]).toContain("## deepwiki\nUse ask_question.");
+		expect(texts[2]).toContain("- gh: 401 bad token");
+		expect(texts[2]).toContain("failed to connect");
+		expect(texts[3]).toContain("old");
+		expect(texts[3]).toContain("disconnected");
+		// A compaction's rebuild repeats instructions and failures, not a recovery or a drop.
+		expect(notices.map((notice) => notice.rebuilt)).toEqual([false, true, true, false]);
 	});
 });
 

@@ -63,6 +63,7 @@ The fixed points:
 | `kept-thinking` | First to handle `context` | Every later copy of the request's messages must already have old signed thinking stripped. |
 | `system-reminder`, `tool-search` | Before anything that emits on their channels while loading | They own the reminder queue and the deferred-tool registry. |
 | `context-budget` | Immediately before `system-reminder` | Its token-countdown line has to be queued when `system-reminder`'s `tool_result` handler writes one-shots into the result. |
+| `cache-marks` | After `tool-search`, before `compaction` | It marks the previous request's cache breakpoint again, so it must see the messages after the last extension that edits them, and before `compaction` saves the request for reuse. |
 | `system-prompt` | Last | It builds the system prompt from what every other extension registered. |
 
 The curated list that child sessions load

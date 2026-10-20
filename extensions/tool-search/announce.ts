@@ -12,30 +12,7 @@
  * reports "not found" if the model asks for one.
  */
 
-export type AnnouncementPlan =
-	| { kind: "none" }
-	/** Nothing is cached yet: (re)write the standing listing with every name. */
-	| { kind: "rewrite"; names: string[] }
-	/** Message 1 is frozen: announce only the new names as a one-shot. */
-	| { kind: "addendum"; added: string[] };
-
-export function planAnnouncement(input: {
-	requestSent: boolean;
-	announced: ReadonlySet<string>;
-	available: readonly string[];
-}): AnnouncementPlan {
-	if (!input.requestSent) {
-		return input.available.length === 0 ? { kind: "none" } : { kind: "rewrite", names: [...input.available] };
-	}
-	const added = input.available.filter((name) => !input.announced.has(name));
-	return added.length === 0 ? { kind: "none" } : { kind: "addendum", added };
-}
-
-/** JSON-safe persisted baseline for the names already described to the model. */
-export function deferredToolsBaseline(value: unknown): string[] | undefined {
-	if (!Array.isArray(value) || !value.every((name) => typeof name === "string")) return undefined;
-	return [...new Set(value)];
-}
+export { applyAnnouncement, type AnnouncementPlan, namesBaseline as deferredToolsBaseline, planAnnouncement } from "../lib/announced-names.ts";
 
 /** Compatibility fallback for a v1 stack written before structured baselines. */
 export function deferredToolsFromReminder(text: string | undefined): string[] | undefined {
@@ -45,14 +22,4 @@ export function deferredToolsFromReminder(text: string | undefined): string[] | 
 	return lines.length > 1 && lines[0].startsWith("The following deferred tools are available via tool_search")
 		? lines.slice(1).filter(Boolean)
 		: undefined;
-}
-
-/** Bring the announced set in line with what the plan told the model. */
-export function applyAnnouncement(announced: Set<string>, plan: AnnouncementPlan): void {
-	if (plan.kind === "rewrite") {
-		announced.clear();
-		for (const name of plan.names) announced.add(name);
-	} else if (plan.kind === "addendum") {
-		for (const name of plan.added) announced.add(name);
-	}
 }

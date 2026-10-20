@@ -52,14 +52,14 @@ describe("phase-2 capability baselines", () => {
 
 	it("does not rewrite unchanged resumed capability blocks, appends real changes, and resets fresh sessions", () => {
 		const baseline = { models: "old models", agents: "old agents", delegation: null, refusedModels: [] };
-		expect(planSubagentAnnouncement({ restored: true, baseline, capability: "models", text: "old models" }).kind).toBe("none");
-		expect(planSubagentAnnouncement({ restored: true, baseline, capability: "models", text: "new models" })).toMatchObject({
+		expect(planSubagentAnnouncement({ frozen: true, baseline, capability: "models", text: "old models" }).kind).toBe("none");
+		expect(planSubagentAnnouncement({ frozen: true, baseline, capability: "models", text: "new models" })).toMatchObject({
 			kind: "addendum", text: "new models",
 		});
-		expect(planSubagentAnnouncement({ restored: true, baseline, capability: "delegation", text: "tiny guidance" })).toMatchObject({
+		expect(planSubagentAnnouncement({ frozen: true, baseline, capability: "delegation", text: "tiny guidance" })).toMatchObject({
 			kind: "addendum", text: "tiny guidance",
 		});
-		expect(planSubagentAnnouncement({ restored: false, baseline: emptySubagentBaseline(), capability: "models", text: "fresh models" })).toMatchObject({
+		expect(planSubagentAnnouncement({ frozen: false, baseline: emptySubagentBaseline(), capability: "models", text: "fresh models" })).toMatchObject({
 			kind: "standing",
 		});
 	});

@@ -25,10 +25,17 @@ function harness() {
 	toolSearchExtension(fake.pi as never);
 	webExtension(fake.pi as never);
 	fake.setActiveTools(["read", ...fake.tools.keys()]);
-	const ctx = (model: Model) => createFakeCtx({ model });
+	// The session's branch holds its own tool_search results, as pi's would: a
+	// /tree switch re-reads the loads from it.
+	const branch: unknown[] = [];
+	const ctx = (model: Model) => createFakeCtx({ model, sessionManager: { getBranch: () => branch } });
 	let call = 0;
-	const search = (query = "select:url_context") =>
-		fake.tools.get("tool_search")!.execute(`search-${++call}`, { query }, undefined, undefined, ctx(other)) as Promise<SearchResult>;
+	const search = async (query = "select:url_context") => {
+		const toolCallId = `search-${++call}`;
+		const result = (await fake.tools.get("tool_search")!.execute(toolCallId, { query }, undefined, undefined, ctx(other))) as SearchResult;
+		branch.push({ type: "message", message: { role: "toolResult", toolName: "tool_search", toolCallId, content: result.content, details: result.details } });
+		return result;
+	};
 	return {
 		...fake,
 		reminders,

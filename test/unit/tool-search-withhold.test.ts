@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFER_CHANNEL, deferredAddendumText, WITHHOLD_CHANNEL } from "../../extensions/lib/deferred.ts";
-import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/mcp-share.ts";
 import toolSearchExtension from "../../extensions/tool-search/index.ts";
 import { makeToolSearchFakePi, type Reminder } from "./helpers/tool-search-fake-pi.ts";
 
@@ -39,7 +38,6 @@ describe("tool-search withhold", () => {
 	});
 
 	it("keeps the frozen listing after the first request, and announces a re-defer as an addendum", async () => {
-		fake.pi.events.emit(MCP_TOOLS_CHANNEL, { tools: [], settled: true });
 		fake.pi.fire("context", { messages: [] });
 		fake.reminders.length = 0;
 		fake.pi.events.emit(WITHHOLD_CHANNEL, { name: "task_create" });
@@ -60,7 +58,6 @@ describe("tool-search withhold", () => {
 
 	it("announces a tool withheld at start once a model change brings it back", async () => {
 		fake.pi.events.emit(WITHHOLD_CHANNEL, { name: "task_create" });
-		fake.pi.events.emit(MCP_TOOLS_CHANNEL, { tools: [], settled: true });
 		fake.pi.fire("context", { messages: [] });
 		fake.pi.events.emit(DEFER_CHANNEL, { name: "task_create" });
 		await vi.advanceTimersByTimeAsync(150);

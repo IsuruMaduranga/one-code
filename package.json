@@ -35,6 +35,7 @@
 			"extensions/tool-call-corruption/index.ts",
 			"extensions/hooks/index.ts",
 			"extensions/tool-search/index.ts",
+			"extensions/cache-marks/index.ts",
 			"extensions/search-tools/index.ts",
 			"extensions/tool-style/index.ts",
 			"extensions/plugins/index.ts",

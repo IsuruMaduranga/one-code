@@ -84,7 +84,7 @@ flowchart LR
     subgraph ctx["Prompt and context"]
         c1["system-prompt<br/>claude-context · memory"]
         c2["system-reminder<br/>context-budget"]
-        c3["tool-search<br/>search-tools"]
+        c3["tool-search · cache-marks<br/>search-tools"]
         c4["compaction · idle-compact<br/>kept-thinking · context-management"]
     end
 

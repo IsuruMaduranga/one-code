@@ -224,10 +224,17 @@ export interface ReminderPayload {
 	 * countdown to another call in a parallel batch.
 	 */
 	toolCallId?: string;
+	/**
+	 * `last-append` only: the capability block (its `first-prepend` key) this
+	 * notice is about. A compaction's rebuild of that block cancels the notice
+	 * while it is undelivered (lib/context-stack.ts CONTEXT_CAPABILITY_REFRESH_CHANNEL).
+	 */
+	group?: string;
 }
 
 interface StoredReminder extends ReminderEntry {
 	key?: string;
+	group?: string;
 }
 
 type EnqueueOptions = {
@@ -245,6 +252,8 @@ type EnqueueOptions = {
 	once?: boolean;
 	/** The switching tool result, or the hook that takes a one-shot (see ReminderPayload). */
 	toolCallId?: string;
+	/** The capability block a notice is about (see ReminderPayload). */
+	group?: string;
 };
 
 export class ReminderQueue {
@@ -291,6 +300,7 @@ export class ReminderQueue {
 		};
 		if (opts?.systemRoleOnly) entry.systemRoleOnly = true;
 		if (opts?.skipStackCarrier) entry.skipStackCarrier = true;
+		if (opts?.group) entry.group = opts.group;
 		const key = opts?.key ?? text;
 		const previous = this.everyTurn.get(key);
 		if (placement === "sticky-append") {
@@ -417,11 +427,20 @@ export class ReminderQueue {
 		this.changes++;
 	}
 
+	/** A rebuilt capability block supersedes its undelivered notices (their `group`). */
+	cancelPendingNotices(group: string): void {
+		this.dropPending((entry) => entry.group === group);
+	}
+
 	/** A new snapshot supersedes undelivered notices about its old facts. Delivered pins stay history. */
 	cancelPending(keys: readonly string[]): void {
 		const cancelled = new Set(keys);
+		this.dropPending((entry) => entry.key !== undefined && cancelled.has(entry.key));
+	}
+
+	private dropPending(cancelled: (entry: StoredReminder) => boolean): void {
 		const before = this.nextTurn.length;
-		this.nextTurn = this.nextTurn.filter((entry) => !entry.key || !cancelled.has(entry.key));
+		this.nextTurn = this.nextTurn.filter((entry) => !cancelled(entry));
 		if (this.nextTurn.length !== before) this.changes++;
 	}
 
