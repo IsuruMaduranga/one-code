@@ -12,6 +12,7 @@ export interface Reminder {
 	key?: string;
 	text?: string;
 	placement?: string;
+	group?: string;
 }
 
 export function makeToolSearchFakePi(initialActive: string[] = []) {

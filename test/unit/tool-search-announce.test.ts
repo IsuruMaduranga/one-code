@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFER_CHANNEL, deferredAddendumText } from "../../extensions/lib/deferred.ts";
-import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/mcp-share.ts";
 import { CONTEXT_BASELINE_CHANNEL } from "../../extensions/lib/context-stack.ts";
 import { applyAnnouncement, planAnnouncement } from "../../extensions/tool-search/announce.ts";
 import toolSearchExtension from "../../extensions/tool-search/index.ts";
@@ -54,7 +53,7 @@ const makeFakePi = () => makeToolSearchFakePi(["read", "bash"]);
 
 const listings = (reminders: Reminder[]) => reminders.filter((r) => r.key === "deferred-tools");
 const addenda = (reminders: Reminder[]) =>
-	reminders.filter((r) => r.key?.startsWith("deferred-tools:") && r.text?.startsWith("Additional deferred tools became available"));
+	reminders.filter((r) => r.group === "deferred-tools" && r.text?.startsWith("Additional deferred tools became available"));
 
 describe("tool-search announce wiring", () => {
 	let fake: ReturnType<typeof makeFakePi>;
@@ -84,7 +83,6 @@ describe("tool-search announce wiring", () => {
 	});
 
 	it("after the first request a late defer becomes a one-shot addendum and the listing stays frozen", async () => {
-		fake.pi.events.emit(MCP_TOOLS_CHANNEL, { tools: [], settled: true });
 		fake.pi.fire("context", { messages: [] });
 		fake.reminders.length = 0;
 
@@ -100,7 +98,6 @@ describe("tool-search announce wiring", () => {
 	});
 
 	it("a request going out during the debounce turns the pending rewrite into an addendum (the -p race)", async () => {
-		fake.pi.events.emit(MCP_TOOLS_CHANNEL, { tools: [], settled: true });
 		fake.reminders.length = 0;
 		fake.addDeferred("mcp__late__tool"); // timer scheduled, request not yet sent
 		fake.pi.fire("context", { messages: [] }); // first request goes out inside the window
@@ -125,7 +122,6 @@ describe("tool-search announce wiring", () => {
 	});
 
 	it("does not announce the same name twice", async () => {
-		fake.pi.events.emit(MCP_TOOLS_CHANNEL, { tools: [], settled: true });
 		fake.pi.fire("context", { messages: [] });
 		fake.reminders.length = 0;
 		fake.addDeferred("mcp__b__z");
@@ -136,7 +132,6 @@ describe("tool-search announce wiring", () => {
 	});
 
 	it("a new session starts over with a fresh listing", async () => {
-		fake.pi.events.emit(MCP_TOOLS_CHANNEL, { tools: [], settled: true });
 		fake.pi.fire("context", { messages: [] });
 		fake.addDeferred("mcp__c__w");
 		await vi.advanceTimersByTimeAsync(150);
@@ -198,7 +193,6 @@ describe("tool-search announce lifecycle (LIFECYCLE-REVIEW-2026-09-06 L1)", () =
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		toolSearchExtension(fake.pi as any);
 		fake.pi.fire("session_start", {});
-		fake.pi.events.emit(MCP_TOOLS_CHANNEL, { tools: [], settled: true });
 		fake.reminders.length = 0;
 
 		fake.addDeferred("mcp__late__tool"); // 100 ms debounce armed

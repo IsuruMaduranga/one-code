@@ -12,27 +12,35 @@
  * that entry directly. It costs nothing: the entry exists, so the mark reads.
  */
 
-/** Anthropic's limit on `cache_control` breakpoints in one request. */
-const MAX_MARKS = 4;
+import { MAX_CACHE_MARKERS } from "./request-replay.ts";
 
 type Block = Record<string, unknown> & { cache_control?: unknown };
 type Message = { role?: unknown; content?: unknown };
 
-/** Where a request's last conversation breakpoint sat, and the block's bytes without it. */
+/** Where a request's last conversation breakpoint sat, and the block it marked. */
 export interface MessageMark {
 	message: number;
 	block: number;
 	marker: unknown;
-	bytes: string;
+	/** The marked block itself: pi builds each request afresh but reuses large strings (an image's data), so a structural compare short-circuits on them. */
+	content: Block;
 }
 
 const blocksOf = (message: unknown): Block[] =>
 	Array.isArray((message as Message | null)?.content) ? ((message as Message).content as Block[]) : [];
 
-const unmarked = (block: Block): string => {
-	const { cache_control: _mark, ...rest } = block;
-	return JSON.stringify(rest);
-};
+/** Equal JSON values, ignoring a top-level `cache_control`. */
+function sameBlock(a: Block, b: Block): boolean {
+	const keys = (block: Block) => Object.keys(block).filter((key) => key !== "cache_control");
+	const left = keys(a);
+	return left.length === keys(b).length && left.every((key) => sameValue(a[key], b[key]));
+}
+function sameValue(a: unknown, b: unknown): boolean {
+	if (a === b) return true;
+	if (typeof a !== "object" || typeof b !== "object" || a === null || b === null || Array.isArray(a) !== Array.isArray(b)) return false;
+	const left = Object.keys(a);
+	return left.length === Object.keys(b).length && left.every((key) => sameValue((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]));
+}
 
 /** The last breakpoint in `messages`, or undefined when none carries one. */
 export function lastMessageMark(messages: unknown): MessageMark | undefined {
@@ -41,7 +49,7 @@ export function lastMessageMark(messages: unknown): MessageMark | undefined {
 		const blocks = blocksOf(messages[message]);
 		for (let block = blocks.length - 1; block >= 0; block--) {
 			const marker = blocks[block]?.cache_control;
-			if (marker !== undefined) return { message, block, marker, bytes: unmarked(blocks[block]) };
+			if (marker !== undefined) return { message, block, marker, content: blocks[block] };
 		}
 	}
 	return undefined;
@@ -65,8 +73,8 @@ export function withPreviousMark<T extends Record<string, unknown>>(payload: T, 
 	const messages = payload.messages as Message[];
 	const blocks = blocksOf(messages[previous.message]);
 	const target = blocks[previous.block];
-	if (!target || target.cache_control !== undefined || unmarked(target) !== previous.bytes) return payload;
-	if (marksIn(payload.tools) + marksIn(payload.system) + marksIn(messages) >= MAX_MARKS) return payload;
+	if (!target || target.cache_control !== undefined || !sameBlock(target, previous.content)) return payload;
+	if (marksIn(payload.tools) + marksIn(payload.system) + marksIn(messages) >= MAX_CACHE_MARKERS) return payload;
 	const copy = [...messages];
 	const content = [...blocks];
 	content[previous.block] = { ...target, cache_control: previous.marker };

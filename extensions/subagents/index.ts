@@ -112,7 +112,7 @@ import { createMarkdownProse } from "./prose.ts";
 import { asScrollableViewport, ViewportMirror } from "./viewport-mirror.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 import { extendingCompletions } from "../lib/argument-hints.ts";
-import { capabilityNoticeKey, CONTEXT_BASELINE_CHANNEL, CONTEXT_CAPABILITY_REFRESH_CHANNEL, restoredContext } from "../lib/context-stack.ts";
+import { CONTEXT_BASELINE_CHANNEL, CONTEXT_CAPABILITY_REFRESH_CHANNEL, restoredContext } from "../lib/context-stack.ts";
 import { emptySubagentBaseline, planSubagentAnnouncement, subagentBaseline, subagentBaselineFromStack, type SubagentBaseline } from "./announce.ts";
 import { panelUi } from "../lib/panel-focus.ts";
 import { dockRowsReporter, trackDockRows } from "../lib/dock-rows.ts";
@@ -625,7 +625,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	// conversation and drop its earlier thinking (findings §46). A compaction
 	// starts a new prefix and rebuilds all three blocks.
 	let requestSent = false;
-	let restoredSession = false;
 	let capabilityBaseline: SubagentBaseline = emptySubagentBaseline();
 	const publishCapabilityBaseline = (baseline: SubagentBaseline) => {
 		pi.events.emit(CONTEXT_BASELINE_CHANNEL, { key: "subagents", value: baseline });
@@ -633,7 +632,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	pi.on("context", () => {
 		requestSent = true;
 	});
-	const frozen = () => restoredSession || requestSent;
 
 	/**
 	 * The every-turn menu reminder and the banner's subagent-default status.
@@ -676,15 +674,15 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				refusedModels: [...new Set([...capabilityBaseline.refusedModels, refused])],
 			};
 			publishCapabilityBaseline(capabilityBaseline);
-			pi.events.emit(REMINDER_CHANNEL, { text: refusedModelNote(refused, resolution.model), key: capabilityNoticeKey("subagent-models") });
+			pi.events.emit(REMINDER_CHANNEL, { text: refusedModelNote(refused, resolution.model), group: "subagent-models" });
 			pi.events.emit(SUBAGENT_STATUS_CHANNEL, subagentStatusModel(configured, resolution));
 			return;
 		}
-		const plan = planSubagentAnnouncement({ restored: frozen(), baseline: capabilityBaseline, capability: "models", text });
+		const plan = planSubagentAnnouncement({ frozen: requestSent, baseline: capabilityBaseline, capability: "models", text });
 		capabilityBaseline = plan.baseline;
 		if (plan.kind !== "none") publishCapabilityBaseline(capabilityBaseline);
-		if (plan.kind === "addendum") pi.events.emit(REMINDER_CHANNEL, { text: plan.text, key: capabilityNoticeKey("subagent-models") });
-		else if (!frozen()) pi.events.emit(REMINDER_CHANNEL, {
+		if (plan.kind === "addendum") pi.events.emit(REMINDER_CHANNEL, { text: plan.text, group: "subagent-models" });
+		else if (!requestSent) pi.events.emit(REMINDER_CHANNEL, {
 			text, scope: "every-turn", key: "subagent-models", placement: "first-prepend", order: CONTEXT_ORDER.subagentModels,
 		});
 		pi.events.emit(SUBAGENT_STATUS_CHANNEL, subagentStatusModel(configured, resolution));
@@ -700,11 +698,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		`Available agent types for the Agent tool:\n${describeAgents(ctx.cwd)}\n\nWhen you launch multiple agents for independent work, send them in a single message with multiple tool uses so they run concurrently.`;
 	const emitAgentCatalog = (ctx: ExtensionContext) => {
 		const text = agentCatalog(ctx);
-		const plan = planSubagentAnnouncement({ restored: frozen(), baseline: capabilityBaseline, capability: "agents", text });
+		const plan = planSubagentAnnouncement({ frozen: requestSent, baseline: capabilityBaseline, capability: "agents", text });
 		capabilityBaseline = plan.baseline;
 		if (plan.kind !== "none") publishCapabilityBaseline(capabilityBaseline);
-		if (plan.kind === "addendum") pi.events.emit(REMINDER_CHANNEL, { text: plan.text, key: capabilityNoticeKey("subagent-agents") });
-		else if (!frozen()) pi.events.emit(REMINDER_CHANNEL, {
+		if (plan.kind === "addendum") pi.events.emit(REMINDER_CHANNEL, { text: plan.text, group: "subagent-agents" });
+		else if (!requestSent) pi.events.emit(REMINDER_CHANNEL, {
 			scope: "every-turn", key: "subagent-agents", text, placement: "first-prepend", order: CONTEXT_ORDER.agents,
 		});
 	};
@@ -712,14 +710,14 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	const delegationSteer = () => (requestTier() === "tiny" ? DELEGATION_STEER : null);
 	const emitDelegationSteer = () => {
 		const text = delegationSteer();
-		const plan = planSubagentAnnouncement({ restored: frozen(), baseline: capabilityBaseline, capability: "delegation", text });
+		const plan = planSubagentAnnouncement({ frozen: requestSent, baseline: capabilityBaseline, capability: "delegation", text });
 		capabilityBaseline = plan.baseline;
 		if (plan.kind !== "none") publishCapabilityBaseline(capabilityBaseline);
-		if (plan.kind === "addendum") pi.events.emit(REMINDER_CHANNEL, { text: plan.text, key: capabilityNoticeKey("subagent-delegation") });
-		else if (!frozen() && text !== null) pi.events.emit(REMINDER_CHANNEL, {
+		if (plan.kind === "addendum") pi.events.emit(REMINDER_CHANNEL, { text: plan.text, group: "subagent-delegation" });
+		else if (!requestSent && text !== null) pi.events.emit(REMINDER_CHANNEL, {
 			scope: "every-turn", key: "subagent-delegation", text, placement: "first-prepend", order: CONTEXT_ORDER.delegation,
 		});
-		else if (!frozen()) pi.events.emit(REMINDER_CHANNEL, { key: "subagent-delegation", remove: true });
+		else if (!requestSent) pi.events.emit(REMINDER_CHANNEL, { key: "subagent-delegation", remove: true });
 	};
 
 	let shuttingDown = false;
@@ -763,8 +761,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 	pi.on("session_start", (_event, ctx) => {
 		const restored = restoredContext(pi.events);
-		restoredSession = restored !== undefined;
-		requestSent = restoredSession;
+		requestSent = restored !== undefined;
 		// New snapshots carry exact structured text; old v1 snapshots can still
 		// seed from their locked first-prepend blocks without rewriting them.
 		capabilityBaseline = subagentBaseline(restored?.baselines.subagents)
@@ -807,7 +804,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		publishCapabilityBaseline(capabilityBaseline);
 		pi.events.emit(CONTEXT_CAPABILITY_REFRESH_CHANNEL, { key: "subagent-models", text: models, order: CONTEXT_ORDER.subagentModels });
 		pi.events.emit(CONTEXT_CAPABILITY_REFRESH_CHANNEL, { key: "subagent-agents", text: agents, order: CONTEXT_ORDER.agents });
-		pi.events.emit(CONTEXT_CAPABILITY_REFRESH_CHANNEL, { key: "subagent-delegation", text: delegation ?? undefined, order: CONTEXT_ORDER.delegation });
+		pi.events.emit(CONTEXT_CAPABILITY_REFRESH_CHANNEL, { key: "subagent-delegation", text: delegation, order: CONTEXT_ORDER.delegation });
 	});
 	pi.on("session_tree", (_event, ctx) => reconstructRuns(ctx));
 	pi.on("session_shutdown", async () => {

@@ -24,7 +24,7 @@ describe("previous-mark", () => {
 	const previous = lastMessageMark(one.messages);
 
 	it("finds the request's last conversation breakpoint", () => {
-		expect(previous).toEqual({ message: 1, block: 0, marker: mark, bytes: JSON.stringify(text("session facts")) });
+		expect(previous).toEqual({ message: 1, block: 0, marker: mark, content: text("session facts", true) });
 		expect(lastMessageMark([first])).toBeUndefined();
 	});
 

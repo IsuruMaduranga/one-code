@@ -53,13 +53,13 @@ import {
 } from "../lib/deferred.ts";
 import { looksLikeAnthropicRequest, MID_CONVERSATION_SYSTEM_BETA, withBetas } from "../lib/anthropic-payload.ts";
 import { addendumNamesOnBranch, liftAddenda, supportsToolAdditions, TOOL_ADDITION_BETAS, withToolAdditions } from "../lib/tool-additions.ts";
-import { latestCompaction } from "../lib/compaction-boundary.ts";
+import { inContextEntries } from "../lib/compaction-boundary.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 import { normalizeToolName } from "../permissions/matcher.ts";
 import { applyAnnouncement, deferredToolsBaseline, deferredToolsFromReminder, planAnnouncement } from "./announce.ts";
-import { capabilityNoticeKey, CONTEXT_BASELINE_CHANNEL, CONTEXT_CAPABILITY_REFRESH_CHANNEL, restoredContext } from "../lib/context-stack.ts";
+import { CONTEXT_BASELINE_CHANNEL, CONTEXT_CAPABILITY_REFRESH_CHANNEL, restoredContext } from "../lib/context-stack.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 
 /** Coalesces the burst of per-tool defers one server emits into one listing update. */
@@ -132,9 +132,10 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 				order: CONTEXT_ORDER.deferredTools,
 			});
 		} else if (plan.kind === "addendum") {
-			// A key of its own: a shared one would replace an undelivered addendum and
-			// lose its names. A compaction's rebuilt listing cancels it (lib/context-stack.ts).
-			pi.events.emit(REMINDER_CHANNEL, { text: deferredAddendumText(plan.added), key: capabilityNoticeKey("deferred-tools") });
+			// Unkeyed: a keyed next-turn reminder replaces its predecessor, and an
+			// addendum replaced before delivery would lose names. Its group lets a
+			// compaction's rebuilt listing cancel it (lib/context-stack.ts).
+			pi.events.emit(REMINDER_CHANNEL, { text: deferredAddendumText(plan.added), group: "deferred-tools" });
 			// Where the request carries it as Claude Code's tool_addition, the model
 			// calls the tool directly, so pi's dispatcher must already accept it.
 			if (supportsToolAdditions(latestModel)) {
@@ -294,9 +295,10 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		loads = toolSearchLoads(branch);
 		loadedBefore = new Set([...loads.values()].flat());
 		// Tools added mid-session by tool_addition stay callable after a resume.
+		const addedOnBranch = addendumNamesOnBranch(branch);
 		activatedByAddition.clear();
 		if (supportsToolAdditions(latestModel)) {
-			for (const name of addendumNamesOnBranch(branch)) {
+			for (const name of addedOnBranch) {
 				loadedBefore.add(name);
 				activatedByAddition.add(name);
 			}
@@ -311,7 +313,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		for (const name of baseline ?? legacy ?? []) announced.add(name);
 		// Native tool_addition entries can outlive an older baseline snapshot; they
 		// already told the model about these names, so merge them before planning.
-		for (const name of addendumNamesOnBranch(branch)) announced.add(name);
+		for (const name of addedOnBranch) announced.add(name);
 		deferAll();
 		// A restored message 1 keeps its listing (its bytes are locked), so when
 		// this run's tool list leaves tool_search out, say once that it is gone.
@@ -333,13 +335,10 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		// its shape (Claude Code declares a deferred tool only while a reference
 		// to it is in the history).
 		if (nativeLoads) {
-			const branch = ctx?.sessionManager?.getBranch?.() ?? [];
-			const boundary = latestCompaction(branch);
-			const kept = boundary ? branch.slice(boundary.keptStart, boundary.index) : branch;
+			const kept = inContextEntries(ctx?.sessionManager?.getBranch?.() ?? []);
 			const candidates = [...[...loads.values()].flat(), ...activatedByAddition].filter((name) => deferredRegistry.has(name));
 			const redefer = new Set(toolsToRedefer(candidates, kept));
-			const keptLoads = toolSearchLoads(kept);
-			loads = new Map([...loads].filter(([callId]) => keptLoads.has(callId)));
+			loads = toolSearchLoads(kept);
 			for (const name of redefer) {
 				activatedByAddition.delete(name);
 				loadedBefore.delete(name);

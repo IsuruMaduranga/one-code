@@ -124,14 +124,22 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 		persistSnapshot();
 	});
 	// The summary starts a new prefix, so a capability block frozen on message 1
-	// is rebuilt from live state (lib/context-stack.ts). Persisted at once, as above.
+	// is rebuilt from live state (lib/context-stack.ts). Every emitter rebuilds
+	// in the same session_compact pass: one snapshot after them, still before
+	// anything else can happen.
+	let refreshPersistQueued = false;
 	pi.events.on(CONTEXT_CAPABILITY_REFRESH_CHANNEL, (data) => {
 		const refresh = data as ContextCapabilityRefresh | undefined;
 		if (typeof refresh?.key !== "string") return;
 		const entries: ReminderEntry[] = refresh.text ? [{ key: refresh.key, text: refresh.text, order: refresh.order, placement: "first-prepend" }] : [];
 		reminderQueue.replaceFirstPrepend([refresh.key], entries);
 		reminderQueue.cancelPendingNotices(refresh.key);
-		persistSnapshot();
+		if (refreshPersistQueued) return;
+		refreshPersistQueued = true;
+		queueMicrotask(() => {
+			refreshPersistQueued = false;
+			persistSnapshot();
+		});
 	});
 	/** The blocks the last `context` pass placed for the system message; the payload hook moves them. */
 	let moved: MovedBlock[] = [];
@@ -156,6 +164,7 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 				since: payload.since,
 				once: payload.once,
 				toolCallId: payload.toolCallId,
+				group: payload.group,
 			});
 		}
 	});

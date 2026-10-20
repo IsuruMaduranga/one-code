@@ -11,7 +11,7 @@ export const CONTEXT_FACTS_REFRESH_CHANNEL = "one-code:context-facts-refresh";
  * A completed compaction rebuilds one capability block (deferred tools, MCP,
  * skills, subagents) from live state; no `text` removes it. Its owner publishes
  * the matching baseline first, so the stored snapshot holds both. A notice
- * about the block, keyed `<key>:<n>` (`capabilityNoticeKey`), that is still
+ * about the block (its reminder `group` is the block's key) that is still
  * undelivered is dropped: the rebuilt block already says it.
  */
 export const CONTEXT_CAPABILITY_REFRESH_CHANNEL = "one-code:context-capability-refresh";
@@ -28,13 +28,7 @@ export interface ContextStackSnapshot {
 export interface ContextRestoreRequest { restored?: ContextStackSnapshot }
 export interface ContextBaseline { key: string; value: unknown }
 export interface ContextFactsRefresh { entries: ReminderEntry[]; baseline: unknown }
-export interface ContextCapabilityRefresh { key: string; text?: string; order: number }
-
-/** A unique key for a one-shot notice about capability block `blockKey`, cancellable by its rebuild. */
-export function capabilityNoticeKey(blockKey: string): string {
-	return `${blockKey}:${++noticeCount}`;
-}
-let noticeCount = 0;
+export interface ContextCapabilityRefresh { key: string; text?: string | null; order: number }
 interface Bus { emit(channel: string, data: unknown): void }
 
 /** Synchronous request/reply: system-reminder restores before the emitters' session_start hooks. */

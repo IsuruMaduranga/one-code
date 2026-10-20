@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFER_CHANNEL } from "../../extensions/lib/deferred.ts";
-import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/mcp-share.ts";
 import toolSearchExtension from "../../extensions/tool-search/index.ts";
 import { makeToolSearchFakePi, type Reminder } from "./helpers/tool-search-fake-pi.ts";
 
@@ -115,7 +114,8 @@ describe("tool-search late-defer announcements (M7)", () => {
 		expect(listings()).toHaveLength(0);
 		// … the new name rides a one-shot addendum with a key of its own instead (tool-search/announce.ts).
 		expect(fake.reminders).toHaveLength(1);
-		expect(fake.reminders[0].key).toMatch(/^deferred-tools:\d+$/);
+		expect(fake.reminders[0].key).toBeUndefined();
+		expect(fake.reminders[0].group).toBe("deferred-tools");
 		expect(fake.reminders[0].text).toContain("mcp__s__a");
 	});
 });

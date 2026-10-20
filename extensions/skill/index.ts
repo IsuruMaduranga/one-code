@@ -26,8 +26,8 @@ import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
 import { awaitOneShotTurn, sessionOutlivesTurn } from "../lib/notifications.ts";
 import { PROMPT_OPTIONS_CHANNEL, type PromptOptionsAnnouncement } from "../lib/prompt-options.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
-import { capabilityNoticeKey, CONTEXT_BASELINE_CHANNEL, CONTEXT_CAPABILITY_REFRESH_CHANNEL, restoredContext } from "../lib/context-stack.ts";
-import { applyAnnouncement, planAnnouncement } from "../tool-search/announce.ts";
+import { CONTEXT_BASELINE_CHANNEL, CONTEXT_CAPABILITY_REFRESH_CHANNEL, restoredContext } from "../lib/context-stack.ts";
+import { applyAnnouncement, deferredToolsBaseline as listedNamesBaseline, planAnnouncement } from "../tool-search/announce.ts";
 import {
 	nextSkillState,
 	readSkillStates,
@@ -60,7 +60,7 @@ import { codeReviewBody } from "./code-review.ts";
 import { decodeSkillsKey } from "./panel/keys.ts";
 import { frontmatterFlag, readableSkillListing, skillListingBudget, skillListingText, usageScore, withoutPiSkillsBlock } from "./listing.ts";
 import { renderSkillsPanel, type SkillsPaint } from "./panel/render.ts";
-import { listableSkillNames, listedSkillsBaseline, SKILL_LISTING_HEADER, skillNamesFromListing } from "./announce.ts";
+import { listableSkillNames, SKILL_LISTING_HEADER, skillNamesFromListing } from "./announce.ts";
 import { applySkillsKey, followRow, initialSkillsState, type SkillsRow, visibleRows } from "./panel/state.ts";
 import { announceArgumentHint, type CommandHint, frontmatterCommandHint } from "../lib/argument-hints.ts";
 import { parseSlashCommand, SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../lib/skill-body.ts";
@@ -153,7 +153,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 		const restored = restoredContext(pi.events);
 		requestSent = restored !== undefined;
 		listedSkills.clear();
-		const stored = listedSkillsBaseline(restored?.baselines.skills) ?? skillNamesFromListing(restored?.stack.find((entry) => entry.key === "skills")?.text);
+		const stored = listedNamesBaseline(restored?.baselines.skills) ?? skillNamesFromListing(restored?.stack.find((entry) => entry.key === "skills")?.text);
 		for (const name of stored ?? []) listedSkills.add(name);
 	});
 	pi.on("context", () => {
@@ -220,7 +220,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 		} else if (plan.kind === "addendum") {
 			const added = new Set(plan.added);
 			const text = listingText(all.filter((skill) => added.has(skill.name)));
-			if (text) pi.events.emit(REMINDER_CHANNEL, { text, key: capabilityNoticeKey("skills") });
+			if (text) pi.events.emit(REMINDER_CHANNEL, { text, group: "skills" });
 		}
 		if (plan.kind === "none") return;
 		applyAnnouncement(listedSkills, plan);

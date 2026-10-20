@@ -30,12 +30,6 @@ export function listableSkillNames(skills: ReadonlyArray<ListedSkill & { path?: 
 		.map((skill) => skill.name);
 }
 
-/** JSON-safe persisted baseline: the names the model has been shown. */
-export function listedSkillsBaseline(value: unknown): string[] | undefined {
-	if (!Array.isArray(value) || !value.every((name) => typeof name === "string")) return undefined;
-	return [...new Set(value)];
-}
-
 /**
  * The names in a stored listing, for a session saved before the baseline
  * existed. A line is `- <name>`, `- <name>: <description>` or, in the

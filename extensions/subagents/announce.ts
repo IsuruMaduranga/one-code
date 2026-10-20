@@ -48,18 +48,19 @@ export type SubagentAnnouncement =
 	| { kind: "addendum"; text: string; baseline: SubagentBaseline };
 
 /**
- * Fresh sessions may rewrite message 1; resumed sessions must leave its locked
- * block alone and describe a real capability change at the tail instead.
+ * Before the first request a session may rewrite message 1; once one has gone
+ * out (or the session was resumed), its block is frozen and a real capability
+ * change is described at the tail instead.
  */
 export function planSubagentAnnouncement(input: {
-	restored: boolean;
+	frozen: boolean;
 	baseline: SubagentBaseline;
 	capability: SubagentCapability;
 	text: string | null;
 }): SubagentAnnouncement {
 	if (input.baseline[input.capability] === input.text) return { kind: "none", baseline: input.baseline };
 	const baseline = { ...input.baseline, [input.capability]: input.text };
-	if (!input.restored) return { kind: "standing", baseline };
+	if (!input.frozen) return { kind: "standing", baseline };
 	if (input.text !== null) return { kind: "addendum", text: input.text, baseline };
 	return {
 		kind: "addendum",

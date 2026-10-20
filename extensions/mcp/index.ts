@@ -50,7 +50,7 @@ import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "
 import { authenticate as runOAuthFlow, silentProvider } from "./oauth/flow.ts";
 import { hasStoredTokens } from "./oauth/store.ts";
 import { announcedFrom, applyMcpDelta, emptyAnnounced, mcpAnnouncedBaseline, mcpAnnouncedFromReminders, mcpChangeNotices, mcpDelta, serializeMcpAnnounced, type McpAnnounced, type McpSnapshot, mcpStartupNotices } from "./announce.ts";
-import { capabilityNoticeKey, CONTEXT_BASELINE_CHANNEL, CONTEXT_CAPABILITY_REFRESH_CHANNEL, restoredContext } from "../lib/context-stack.ts";
+import { CONTEXT_BASELINE_CHANNEL, CONTEXT_CAPABILITY_REFRESH_CHANNEL, restoredContext } from "../lib/context-stack.ts";
 import { decodeMcpKey } from "./panel/keys.ts";
 import { type McpEntry, type McpEntryStatus } from "./panel/model.ts";
 import { renderMcpPanel, type McpPaint } from "./panel/render.ts";
@@ -375,7 +375,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 			applyMcpDelta(nextAnnounced, delta);
 			publishBaseline(nextAnnounced);
 		}
-		for (const text of notices) pi.events.emit(REMINDER_CHANNEL, { text, key: capabilityNoticeKey("mcp-instructions") });
+		for (const text of notices) pi.events.emit(REMINDER_CHANNEL, { text, group: "mcp-instructions" });
 		applyMcpDelta(announced, delta);
 	};
 
@@ -387,7 +387,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		publishBaseline(announced);
 		pi.events.emit(CONTEXT_CAPABILITY_REFRESH_CHANNEL, {
 			key: "mcp-instructions",
-			text: mcpInstructionsReminder([...connections.values()]) ?? undefined,
+			text: mcpInstructionsReminder([...connections.values()]),
 			order: CONTEXT_ORDER.mcp,
 		});
 		pi.events.emit(CONTEXT_CAPABILITY_REFRESH_CHANNEL, {
