@@ -7,6 +7,14 @@ export const CONTEXT_RESTORE_CHANNEL = "one-code:context-restore";
 export const CONTEXT_BASELINE_CHANNEL = "one-code:context-baseline";
 /** A completed compaction replaces the Claude context facts, including absent blocks. */
 export const CONTEXT_FACTS_REFRESH_CHANNEL = "one-code:context-facts-refresh";
+/**
+ * A completed compaction rebuilds one capability block (deferred tools, MCP,
+ * skills, subagents) from live state; no `text` removes it. Its owner publishes
+ * the matching baseline first, so the stored snapshot holds both. A notice
+ * about the block, keyed `<key>:<n>` (`capabilityNoticeKey`), that is still
+ * undelivered is dropped: the rebuilt block already says it.
+ */
+export const CONTEXT_CAPABILITY_REFRESH_CHANNEL = "one-code:context-capability-refresh";
 
 export interface ContextStackSnapshot {
 	version: 1;
@@ -20,6 +28,13 @@ export interface ContextStackSnapshot {
 export interface ContextRestoreRequest { restored?: ContextStackSnapshot }
 export interface ContextBaseline { key: string; value: unknown }
 export interface ContextFactsRefresh { entries: ReminderEntry[]; baseline: unknown }
+export interface ContextCapabilityRefresh { key: string; text?: string; order: number }
+
+/** A unique key for a one-shot notice about capability block `blockKey`, cancellable by its rebuild. */
+export function capabilityNoticeKey(blockKey: string): string {
+	return `${blockKey}:${++noticeCount}`;
+}
+let noticeCount = 0;
 interface Bus { emit(channel: string, data: unknown): void }
 
 /** Synchronous request/reply: system-reminder restores before the emitters' session_start hooks. */
@@ -30,13 +45,13 @@ export function restoredContext(events: Bus): ContextStackSnapshot | undefined {
 }
 
 /** Phase-1 capabilities must be re-emitted by their live owners, including removal. */
-export const LIVE_CONTEXT_KEYS = new Set(["environment", "model-line", "one-shot", "skills"]);
+export const LIVE_CONTEXT_KEYS = new Set(["environment", "model-line", "one-shot"]);
 
 /** Session facts and phase-2 emitters keep even an absent original block absent. */
 export const RESTORED_STACK_KEYS = new Set([
 	"claude-context", "one-code-context", "claude-context-context", "claude-context-date",
 	"total-tokens-first", "auto-mode-note", "deferred-tools", "mcp-instructions", "mcp-failures",
-	"subagent-models", "subagent-agents", "subagent-delegation",
+	"subagent-models", "subagent-agents", "subagent-delegation", "skills",
 ]);
 
 function record(value: unknown): value is Record<string, unknown> {

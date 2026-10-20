@@ -112,7 +112,7 @@ import { createMarkdownProse } from "./prose.ts";
 import { asScrollableViewport, ViewportMirror } from "./viewport-mirror.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 import { extendingCompletions } from "../lib/argument-hints.ts";
-import { CONTEXT_BASELINE_CHANNEL, restoredContext } from "../lib/context-stack.ts";
+import { capabilityNoticeKey, CONTEXT_BASELINE_CHANNEL, CONTEXT_CAPABILITY_REFRESH_CHANNEL, restoredContext } from "../lib/context-stack.ts";
 import { emptySubagentBaseline, planSubagentAnnouncement, subagentBaseline, subagentBaselineFromStack, type SubagentBaseline } from "./announce.ts";
 import { panelUi } from "../lib/panel-focus.ts";
 import { dockRowsReporter, trackDockRows } from "../lib/dock-rows.ts";
@@ -620,9 +620,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	};
 
 	// Message 1 is frozen once a request has gone out (decisions/caching.md):
-	// after that, a model the account refused is corrected by a one-shot, not by
-	// rewriting the menu and re-caching the conversation. A user's /model or
-	// /subagent still rewrites it.
+	// after that, a model the account refused, a /model or a /subagent change
+	// rides a one-shot, never a rewrite of the menu that would re-cache the
+	// conversation and drop its earlier thinking (findings §46). A compaction
+	// starts a new prefix and rebuilds all three blocks.
 	let requestSent = false;
 	let restoredSession = false;
 	let capabilityBaseline: SubagentBaseline = emptySubagentBaseline();
@@ -632,6 +633,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	pi.on("context", () => {
 		requestSent = true;
 	});
+	const frozen = () => restoredSession || requestSent;
 
 	/**
 	 * The every-turn menu reminder and the banner's subagent-default status.
@@ -641,7 +643,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	 * `refused` names a model the account just refused: once a request has gone
 	 * out, that change rides a one-shot instead.
 	 */
-	const emitModelStatus = (ctx: ExtensionContext, sessionModel = ctx.model, refused?: string) => {
+	const modelMenu = (ctx: ExtensionContext, sessionModel = ctx.model) => {
 		const available = usableModels(ctx);
 		const configured = applicableSubagentDefault(loadSubagentDefault(os.homedir()), sessionModel);
 		const resolution = resolveAutoDefault(sessionModel, available, configured);
@@ -649,6 +651,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			available, sessionModel, defaultModel: resolution.model, defaultSource: resolution.source, configured,
 			requireImageInput: supportsImageInput(sessionModel),
 		});
+		return { available, configured, resolution, text };
+	};
+	const emitModelStatus = (ctx: ExtensionContext, sessionModel = ctx.model, refused?: string) => {
+		const { available, configured, resolution, text } = modelMenu(ctx, sessionModel);
 		for (const notice of resolution.notices) notifyModelOnce(ctx, notice);
 		// The user's own subagentModel setting is honoured, so say what it costs:
 		// a newer model in its line, or a model far weaker than the session's.
@@ -670,15 +676,15 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				refusedModels: [...new Set([...capabilityBaseline.refusedModels, refused])],
 			};
 			publishCapabilityBaseline(capabilityBaseline);
-			pi.events.emit(REMINDER_CHANNEL, { text: refusedModelNote(refused, resolution.model) });
+			pi.events.emit(REMINDER_CHANNEL, { text: refusedModelNote(refused, resolution.model), key: capabilityNoticeKey("subagent-models") });
 			pi.events.emit(SUBAGENT_STATUS_CHANNEL, subagentStatusModel(configured, resolution));
 			return;
 		}
-		const plan = planSubagentAnnouncement({ restored: restoredSession, baseline: capabilityBaseline, capability: "models", text });
+		const plan = planSubagentAnnouncement({ restored: frozen(), baseline: capabilityBaseline, capability: "models", text });
 		capabilityBaseline = plan.baseline;
 		if (plan.kind !== "none") publishCapabilityBaseline(capabilityBaseline);
-		if (plan.kind === "addendum") pi.events.emit(REMINDER_CHANNEL, { text: plan.text });
-		else if (!restoredSession) pi.events.emit(REMINDER_CHANNEL, {
+		if (plan.kind === "addendum") pi.events.emit(REMINDER_CHANNEL, { text: plan.text, key: capabilityNoticeKey("subagent-models") });
+		else if (!frozen()) pi.events.emit(REMINDER_CHANNEL, {
 			text, scope: "every-turn", key: "subagent-models", placement: "first-prepend", order: CONTEXT_ORDER.subagentModels,
 		});
 		pi.events.emit(SUBAGENT_STATUS_CHANNEL, subagentStatusModel(configured, resolution));
@@ -690,27 +696,30 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	 * model has to guess names or make a discovery call first. Keyed and
 	 * byte-stable within a session, so it costs nothing in prompt-cache terms.
 	 */
+	const agentCatalog = (ctx: ExtensionContext) =>
+		`Available agent types for the Agent tool:\n${describeAgents(ctx.cwd)}\n\nWhen you launch multiple agents for independent work, send them in a single message with multiple tool uses so they run concurrently.`;
 	const emitAgentCatalog = (ctx: ExtensionContext) => {
-		const text = `Available agent types for the Agent tool:\n${describeAgents(ctx.cwd)}\n\nWhen you launch multiple agents for independent work, send them in a single message with multiple tool uses so they run concurrently.`;
-		const plan = planSubagentAnnouncement({ restored: restoredSession, baseline: capabilityBaseline, capability: "agents", text });
+		const text = agentCatalog(ctx);
+		const plan = planSubagentAnnouncement({ restored: frozen(), baseline: capabilityBaseline, capability: "agents", text });
 		capabilityBaseline = plan.baseline;
 		if (plan.kind !== "none") publishCapabilityBaseline(capabilityBaseline);
-		if (plan.kind === "addendum") pi.events.emit(REMINDER_CHANNEL, { text: plan.text });
-		else if (!restoredSession) pi.events.emit(REMINDER_CHANNEL, {
+		if (plan.kind === "addendum") pi.events.emit(REMINDER_CHANNEL, { text: plan.text, key: capabilityNoticeKey("subagent-agents") });
+		else if (!frozen()) pi.events.emit(REMINDER_CHANNEL, {
 			scope: "every-turn", key: "subagent-agents", text, placement: "first-prepend", order: CONTEXT_ORDER.agents,
 		});
 	};
 
+	const delegationSteer = () => (requestTier() === "tiny" ? DELEGATION_STEER : null);
 	const emitDelegationSteer = () => {
-		const text = requestTier() === "tiny" ? DELEGATION_STEER : null;
-		const plan = planSubagentAnnouncement({ restored: restoredSession, baseline: capabilityBaseline, capability: "delegation", text });
+		const text = delegationSteer();
+		const plan = planSubagentAnnouncement({ restored: frozen(), baseline: capabilityBaseline, capability: "delegation", text });
 		capabilityBaseline = plan.baseline;
 		if (plan.kind !== "none") publishCapabilityBaseline(capabilityBaseline);
-		if (plan.kind === "addendum") pi.events.emit(REMINDER_CHANNEL, { text: plan.text });
-		else if (!restoredSession && text !== null) pi.events.emit(REMINDER_CHANNEL, {
+		if (plan.kind === "addendum") pi.events.emit(REMINDER_CHANNEL, { text: plan.text, key: capabilityNoticeKey("subagent-delegation") });
+		else if (!frozen() && text !== null) pi.events.emit(REMINDER_CHANNEL, {
 			scope: "every-turn", key: "subagent-delegation", text, placement: "first-prepend", order: CONTEXT_ORDER.delegation,
 		});
-		else if (!restoredSession) pi.events.emit(REMINDER_CHANNEL, { key: "subagent-delegation", remove: true });
+		else if (!frozen()) pi.events.emit(REMINDER_CHANNEL, { key: "subagent-delegation", remove: true });
 	};
 
 	let shuttingDown = false;
@@ -788,6 +797,17 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		autoDefaultCache = undefined;
 		const live = liveUiCtx(lastCtx);
 		if (live) emitModelStatus(live);
+	});
+	// A compaction starts a new prefix: rebuild the three blocks from live state.
+	pi.on("session_compact", (_event, ctx) => {
+		const models = modelMenu(ctx).text;
+		const agents = agentCatalog(ctx);
+		const delegation = delegationSteer();
+		capabilityBaseline = { ...capabilityBaseline, models, agents, delegation };
+		publishCapabilityBaseline(capabilityBaseline);
+		pi.events.emit(CONTEXT_CAPABILITY_REFRESH_CHANNEL, { key: "subagent-models", text: models, order: CONTEXT_ORDER.subagentModels });
+		pi.events.emit(CONTEXT_CAPABILITY_REFRESH_CHANNEL, { key: "subagent-agents", text: agents, order: CONTEXT_ORDER.agents });
+		pi.events.emit(CONTEXT_CAPABILITY_REFRESH_CHANNEL, { key: "subagent-delegation", text: delegation ?? undefined, order: CONTEXT_ORDER.delegation });
 	});
 	pi.on("session_tree", (_event, ctx) => reconstructRuns(ctx));
 	pi.on("session_shutdown", async () => {

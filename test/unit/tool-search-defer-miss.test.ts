@@ -103,20 +103,19 @@ describe("tool-search late-defer announcements (M7)", () => {
 		expect(listings()[0].text).toContain("mcp__s__b");
 	});
 
-	it("after a request went out, holds the announcement until MCP settles, then sends one addendum (the listing stays frozen)", async () => {
+	it("after a request went out, deactivates a late defer at once and announces it in one addendum (the listing stays frozen)", async () => {
 		fake.pi.fire("context", { messages: [] });
 		fake.allTools.push({ name: "mcp__s__a", description: "a" });
 		fake.setActive(["read", "mcp__s__a"]);
 		fake.pi.events.emit(DEFER_CHANNEL, { name: "mcp__s__a" });
-		await new Promise((r) => setTimeout(r, 150));
 		expect(fake.pi.getActiveTools()).toEqual(["read"]); // deactivated at once
-		expect(fake.reminders).toHaveLength(0); // but not announced yet
-		fake.pi.events.emit(MCP_TOOLS_CHANNEL, { tools: [], settled: true });
+		expect(fake.reminders).toHaveLength(0); // announced after the debounce
+		await new Promise((r) => setTimeout(r, 150));
 		// Message 1 is cached by now: the standing listing is never rewritten …
 		expect(listings()).toHaveLength(0);
-		// … the new name rides an unkeyed one-shot addendum instead (tool-search/announce.ts).
+		// … the new name rides a one-shot addendum with a key of its own instead (tool-search/announce.ts).
 		expect(fake.reminders).toHaveLength(1);
-		expect(fake.reminders[0].key).toBeUndefined();
+		expect(fake.reminders[0].key).toMatch(/^deferred-tools:\d+$/);
 		expect(fake.reminders[0].text).toContain("mcp__s__a");
 	});
 });

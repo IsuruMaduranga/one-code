@@ -525,7 +525,7 @@ describe("mcp wiring", () => {
 		expect(reminders.some((r) => (r as { key?: string }).key === "mcp-instructions")).toBe(false);
 		expect(reminders.some((r) => (r as { key?: string }).key === "mcp-failures")).toBe(false);
 		// … just an unkeyed one-shot the model reads where it is.
-		const notice = reminders.find((r) => (r as { key?: string }).key === undefined) as { text: string; scope?: string } | undefined;
+		const notice = reminders.find((r) => (r as { key?: string }).key?.startsWith("mcp-instructions:")) as { text: string; scope?: string } | undefined;
 		expect(notice).toBeDefined();
 		expect(notice!.text).toContain("demo");
 		expect(notice!.text).toContain("connection closed by the server");

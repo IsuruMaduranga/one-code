@@ -54,7 +54,7 @@ const makeFakePi = () => makeToolSearchFakePi(["read", "bash"]);
 
 const listings = (reminders: Reminder[]) => reminders.filter((r) => r.key === "deferred-tools");
 const addenda = (reminders: Reminder[]) =>
-	reminders.filter((r) => r.key === undefined && r.text?.startsWith("Additional deferred tools became available"));
+	reminders.filter((r) => r.key?.startsWith("deferred-tools:") && r.text?.startsWith("Additional deferred tools became available"));
 
 describe("tool-search announce wiring", () => {
 	let fake: ReturnType<typeof makeFakePi>;
@@ -111,15 +111,12 @@ describe("tool-search announce wiring", () => {
 		expect(addenda(fake.reminders)[0].text).toContain("mcp__late__tool");
 	});
 
-	it("holds post-request defers until the MCP connect settles, then sends one addendum", async () => {
+	it("announces a server's burst after the debounce, without waiting for the whole MCP connect to settle", async () => {
 		fake.pi.fire("context", { messages: [] });
 		fake.reminders.length = 0;
 		fake.addDeferred("mcp__a__x");
 		fake.addDeferred("mcp__a__y");
-		await vi.advanceTimersByTimeAsync(500);
-		expect(addenda(fake.reminders)).toHaveLength(0);
-
-		fake.pi.events.emit(MCP_TOOLS_CHANNEL, { tools: [], settled: true });
+		await vi.advanceTimersByTimeAsync(150);
 		const notes = addenda(fake.reminders);
 		expect(notes).toHaveLength(1);
 		expect(notes[0].text).toContain("mcp__a__x");

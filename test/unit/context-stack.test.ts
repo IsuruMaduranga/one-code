@@ -83,7 +83,7 @@ describe("restored reminder queue", () => {
 
 	it("drops phase-1 capabilities not re-emitted, while retaining identical live and frozen blocks", () => {
 		const queue = new ReminderQueue();
-		queue.restore([block("skills", "removed skills"), block("environment", "same environment"), block("one-shot", "old print mode"), block("claude-context", "rules")], [], RESTORED_STACK_KEYS, LIVE_CONTEXT_KEYS);
+		queue.restore([block("model-line", "removed model line"), block("environment", "same environment"), block("one-shot", "old print mode"), block("claude-context", "rules")], [], RESTORED_STACK_KEYS, LIVE_CONTEXT_KEYS);
 		queue.enqueue("same environment", { scope: "every-turn", key: "environment", placement: "first-prepend", order: 50 });
 		queue.finishRestore();
 		expect(queue.persistentEntries("first-prepend").map((entry) => entry.text)).toEqual(["same environment", "rules"]);

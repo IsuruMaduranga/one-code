@@ -50,7 +50,7 @@ import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "
 import { authenticate as runOAuthFlow, silentProvider } from "./oauth/flow.ts";
 import { hasStoredTokens } from "./oauth/store.ts";
 import { announcedFrom, applyMcpDelta, emptyAnnounced, mcpAnnouncedBaseline, mcpAnnouncedFromReminders, mcpChangeNotices, mcpDelta, serializeMcpAnnounced, type McpAnnounced, type McpSnapshot, mcpStartupNotices } from "./announce.ts";
-import { CONTEXT_BASELINE_CHANNEL, restoredContext } from "../lib/context-stack.ts";
+import { capabilityNoticeKey, CONTEXT_BASELINE_CHANNEL, CONTEXT_CAPABILITY_REFRESH_CHANNEL, restoredContext } from "../lib/context-stack.ts";
 import { decodeMcpKey } from "./panel/keys.ts";
 import { type McpEntry, type McpEntryStatus } from "./panel/model.ts";
 import { renderMcpPanel, type McpPaint } from "./panel/render.ts";
@@ -324,12 +324,13 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	const publishBaseline = (value: McpAnnounced) => {
 		pi.events.emit(CONTEXT_BASELINE_CHANNEL, { key: "mcp", value: serializeMcpAnnounced(value) });
 	};
+	const liveSnapshot = (): McpSnapshot => ({
+		connected: [...connections.values()].map((c) => ({ name: c.server.name, instructions: c.instructions })),
+		failed: failures.filter((f) => !connections.has(f.server.name)).map((f) => ({ name: f.server.name, error: f.error })),
+	});
 	const emitInstructions = () => {
 		const live = [...connections.values()];
-		const snapshot: McpSnapshot = {
-			connected: live.map((c) => ({ name: c.server.name, instructions: c.instructions })),
-			failed: failures.filter((f) => !connections.has(f.server.name)).map((f) => ({ name: f.server.name, error: f.error })),
-		};
+		const snapshot = liveSnapshot();
 
 		if (!requestSent) {
 			// Nothing is cached yet: (re)write the standing message-1 blocks.
@@ -374,9 +375,27 @@ export default function mcpExtension(pi: ExtensionAPI) {
 			applyMcpDelta(nextAnnounced, delta);
 			publishBaseline(nextAnnounced);
 		}
-		for (const text of notices) pi.events.emit(REMINDER_CHANNEL, { text });
+		for (const text of notices) pi.events.emit(REMINDER_CHANNEL, { text, key: capabilityNoticeKey("mcp-instructions") });
 		applyMcpDelta(announced, delta);
 	};
+
+	// A compaction starts a new prefix: rewrite both blocks from live state, so a
+	// server announced only in a notice the summary replaced is described again.
+	pi.on("session_compact", () => {
+		const snapshot = liveSnapshot();
+		announced = announcedFrom(snapshot);
+		publishBaseline(announced);
+		pi.events.emit(CONTEXT_CAPABILITY_REFRESH_CHANNEL, {
+			key: "mcp-instructions",
+			text: mcpInstructionsReminder([...connections.values()]) ?? undefined,
+			order: CONTEXT_ORDER.mcp,
+		});
+		pi.events.emit(CONTEXT_CAPABILITY_REFRESH_CHANNEL, {
+			key: "mcp-failures",
+			text: snapshot.failed.length > 0 ? mcpFailuresReminder(snapshot.failed) : undefined,
+			order: CONTEXT_ORDER.mcp + 1,
+		});
+	});
 
 	/** Config files that exist but failed to parse (review M11) — shown at startup and in /mcp. */
 	let configErrors: string[] = [];

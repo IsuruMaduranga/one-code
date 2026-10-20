@@ -26,6 +26,8 @@ import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
 import { awaitOneShotTurn, sessionOutlivesTurn } from "../lib/notifications.ts";
 import { PROMPT_OPTIONS_CHANNEL, type PromptOptionsAnnouncement } from "../lib/prompt-options.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
+import { capabilityNoticeKey, CONTEXT_BASELINE_CHANNEL, CONTEXT_CAPABILITY_REFRESH_CHANNEL, restoredContext } from "../lib/context-stack.ts";
+import { applyAnnouncement, planAnnouncement } from "../tool-search/announce.ts";
 import {
 	nextSkillState,
 	readSkillStates,
@@ -58,6 +60,7 @@ import { codeReviewBody } from "./code-review.ts";
 import { decodeSkillsKey } from "./panel/keys.ts";
 import { frontmatterFlag, readableSkillListing, skillListingBudget, skillListingText, usageScore, withoutPiSkillsBlock } from "./listing.ts";
 import { renderSkillsPanel, type SkillsPaint } from "./panel/render.ts";
+import { listableSkillNames, listedSkillsBaseline, SKILL_LISTING_HEADER, skillNamesFromListing } from "./announce.ts";
 import { applySkillsKey, followRow, initialSkillsState, type SkillsRow, visibleRows } from "./panel/state.ts";
 import { announceArgumentHint, type CommandHint, frontmatterCommandHint } from "../lib/argument-hints.ts";
 import { parseSlashCommand, SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../lib/skill-body.ts";
@@ -123,6 +126,10 @@ export default function skillExtension(pi: ExtensionAPI) {
 	 * prompt from system-prompt's context_with_system handler (idle-turn.ts).
 	 */
 	let prompted = false;
+	/** Whether a request has gone out, freezing the listing on message 1 (./announce.ts). */
+	let requestSent = false;
+	/** The names the model has been shown: the frozen listing plus every notice. */
+	const listedSkills = new Set<string>();
 	/**
 	 * A one-shot run (`-p`, `--mode json`) ends when its prompt returns, so the
 	 * bare `/<name>` skill forms are taken by the `input` hook there instead of
@@ -141,6 +148,26 @@ export default function skillExtension(pi: ExtensionAPI) {
 		announcedSkills = false;
 		sessionUsage = undefined;
 		sessionModel = ctx.model;
+		// A restored stack is already message 1: seed what its listing named, so a
+		// skill added since is one notice, not a rewrite.
+		const restored = restoredContext(pi.events);
+		requestSent = restored !== undefined;
+		listedSkills.clear();
+		const stored = listedSkillsBaseline(restored?.baselines.skills) ?? skillNamesFromListing(restored?.stack.find((entry) => entry.key === "skills")?.text);
+		for (const name of stored ?? []) listedSkills.add(name);
+	});
+	pi.on("context", () => {
+		requestSent = true;
+	});
+	// A compaction starts a new prefix: list every skill again, so one announced
+	// only in a notice the summary replaced is named once more.
+	pi.on("session_compact", () => {
+		const all = index();
+		const text = listingText(all);
+		listedSkills.clear();
+		for (const name of text ? listableNow(all) : []) listedSkills.add(name);
+		publishListed();
+		pi.events.emit(CONTEXT_CAPABILITY_REFRESH_CHANNEL, { key: "skills", text, order: CONTEXT_ORDER.skills });
 	});
 	pi.on("model_select", (event) => {
 		sessionModel = event.model;
@@ -162,27 +189,42 @@ export default function skillExtension(pi: ExtensionAPI) {
 				disableModelInvocation: record.disableModelInvocation === true || (path ? readModelInvocationDisabled(path) : false),
 			};
 		});
-		// Claude Code lists skills as a <system-reminder> on the first user message
-		// (its block 3), framed for the Skill tool — not in the system prompt. A
-		// session without that tool (an agent limited to read and bash, a main
-		// session started with fewer tools) gets the same block framed for reading
-		// the file, since pi's own section is dropped from every prompt below.
+		announceSkills();
+	};
+	/**
+	 * Claude Code lists skills as a <system-reminder> on the first user message
+	 * (its block 3), framed for the Skill tool — not in the system prompt. A
+	 * session without that tool (an agent limited to read and bash, a main
+	 * session started with fewer tools) gets the same block framed for reading
+	 * the file, since pi's own section is dropped from every prompt below.
+	 * `skills` is the whole index or, for a later notice, only the new ones.
+	 */
+	const listingText = (skills: IndexedSkill[]): string | undefined => {
 		const tools = pi.getActiveTools();
-		if (!tools.includes("skill")) {
-			const readable = readableSkillListing(index(), tools.includes("read") ? "the read tool" : "the shell");
-			if (readable) pi.events.emit(REMINDER_CHANNEL, { text: readable, scope: "every-turn", key: "skills", placement: "first-prepend", order: CONTEXT_ORDER.skills });
-			return;
+		if (!tools.includes("skill")) return readableSkillListing(skills, tools.includes("read") ? "the read tool" : "the shell");
+		const listing = describe(skills);
+		return listing === "(no skills available)" ? undefined : `${SKILL_LISTING_HEADER}\n\n${listing}`;
+	};
+	const listableNow = (skills: IndexedSkill[]) => listableSkillNames(skills, !pi.getActiveTools().includes("skill"));
+	const publishListed = () => pi.events.emit(CONTEXT_BASELINE_CHANNEL, { key: "skills", value: [...listedSkills] });
+	/**
+	 * The listing is frozen once a request has gone out (./announce.ts): a skill
+	 * that becomes listable later rides a one-shot with only its own line.
+	 */
+	const announceSkills = () => {
+		const all = index();
+		const plan = planAnnouncement({ requestSent, announced: listedSkills, available: listableNow(all) });
+		if (plan.kind === "rewrite") {
+			const text = listingText(all);
+			if (text) pi.events.emit(REMINDER_CHANNEL, { text, scope: "every-turn", key: "skills", placement: "first-prepend", order: CONTEXT_ORDER.skills });
+		} else if (plan.kind === "addendum") {
+			const added = new Set(plan.added);
+			const text = listingText(all.filter((skill) => added.has(skill.name)));
+			if (text) pi.events.emit(REMINDER_CHANNEL, { text, key: capabilityNoticeKey("skills") });
 		}
-		const listing = describe();
-		if (listing !== "(no skills available)") {
-			pi.events.emit(REMINDER_CHANNEL, {
-				text: `The following skills are available for use with the Skill tool:\n\n${listing}`,
-				scope: "every-turn",
-				key: "skills",
-				placement: "first-prepend",
-				order: CONTEXT_ORDER.skills,
-			});
-		}
+		if (plan.kind === "none") return;
+		applyAnnouncement(listedSkills, plan);
+		publishListed();
 	};
 	pi.on("before_agent_start", (event, ctx) => {
 		prompted = true;
@@ -349,10 +391,10 @@ export default function skillExtension(pi: ExtensionAPI) {
 	let sessionUsage: { usage: ReturnType<typeof readUsage>; now: Date } | undefined;
 
 	/** The listing, within Claude Code's budget for the session model's context window. */
-	const describe = () => {
+	const describe = (source: IndexedSkill[] = index()) => {
 		sessionUsage ??= { usage: readUsage(pluginRoot(getAgentDir())), now: new Date() };
 		const { usage, now } = sessionUsage;
-		const skills = index().map((skill) => ({
+		const skills = source.map((skill) => ({
 			...skill,
 			bundled: isBundled(skill.path),
 			usage: usageScore(usage[usageKey(skill.kind ?? "skill", skill.name)], now),

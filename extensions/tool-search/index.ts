@@ -47,18 +47,19 @@ import {
 	supportsToolReferences,
 	toolNotFoundName,
 	toolSearchLoads,
+	toolsToRedefer,
 	WITHHOLD_CHANNEL,
 	withheldMissReminderText,
 } from "../lib/deferred.ts";
 import { looksLikeAnthropicRequest, MID_CONVERSATION_SYSTEM_BETA, withBetas } from "../lib/anthropic-payload.ts";
 import { addendumNamesOnBranch, liftAddenda, supportsToolAdditions, TOOL_ADDITION_BETAS, withToolAdditions } from "../lib/tool-additions.ts";
-import { MCP_TOOLS_CHANNEL, type McpToolsPayload } from "../lib/mcp-share.ts";
+import { latestCompaction } from "../lib/compaction-boundary.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 import { normalizeToolName } from "../permissions/matcher.ts";
 import { applyAnnouncement, deferredToolsBaseline, deferredToolsFromReminder, planAnnouncement } from "./announce.ts";
-import { CONTEXT_BASELINE_CHANNEL, restoredContext } from "../lib/context-stack.ts";
+import { capabilityNoticeKey, CONTEXT_BASELINE_CHANNEL, CONTEXT_CAPABILITY_REFRESH_CHANNEL, restoredContext } from "../lib/context-stack.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 
 /** Coalesces the burst of per-tool defers one server emits into one listing update. */
@@ -80,11 +81,11 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	// FROZEN and later arrivals ride a one-shot addendum where the model reads
 	// next (./announce.ts — a rewrite re-cached 16.7k tokens of history on
 	// request 2 of every run whose MCP tools registered inside the debounce,
-	// measured 2026-09-04). While the initial MCP connect is still settling the
-	// addendum waits for settle, so one burst of per-tool defers is one notice.
+	// measured 2026-09-04). The debounce makes one server's burst of per-tool
+	// defers one notice; a notice is a one-shot at the tail, so nothing waits
+	// for the whole MCP connect to settle (one slow server held every late tool
+	// back from the model until it did).
 	let requestSent = false;
-	let mcpSettled = false;
-	let announcePending = false;
 	let announceTimer: NodeJS.Timeout | undefined;
 	// After session_shutdown every pi.* call throws (the runner is invalidated,
 	// findings §8); a debounced announce landing in a timer callback then would
@@ -131,13 +132,16 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 				order: CONTEXT_ORDER.deferredTools,
 			});
 		} else if (plan.kind === "addendum") {
-			// Unkeyed on purpose: a keyed next-turn reminder replaces its
-			// predecessor, and an addendum replaced before delivery would lose names.
-			pi.events.emit(REMINDER_CHANNEL, { text: deferredAddendumText(plan.added) });
+			// A key of its own: a shared one would replace an undelivered addendum and
+			// lose its names. A compaction's rebuilt listing cancels it (lib/context-stack.ts).
+			pi.events.emit(REMINDER_CHANNEL, { text: deferredAddendumText(plan.added), key: capabilityNoticeKey("deferred-tools") });
 			// Where the request carries it as Claude Code's tool_addition, the model
 			// calls the tool directly, so pi's dispatcher must already accept it.
 			if (supportsToolAdditions(latestModel)) {
-				for (const name of plan.added) loadedBefore.add(name);
+				for (const name of plan.added) {
+					loadedBefore.add(name);
+					activatedByAddition.add(name);
+				}
 				pi.setActiveTools([...new Set([...pi.getActiveTools(), ...plan.added])]);
 			}
 		}
@@ -153,25 +157,12 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		if (!alive()) return;
 		announceTimer = setTimeout(() => {
 			announceTimer = undefined;
-			// Decided at fire time, not schedule time: a request may have gone out
-			// during the debounce (the -p race).
-			if (requestSent && !mcpSettled) {
-				announcePending = true;
-				return;
-			}
+			// Rewrite or addendum is decided at fire time, not schedule time: a
+			// request may have gone out during the debounce (the -p race).
 			announce();
 		}, ANNOUNCE_DEBOUNCE_MS);
 		announceTimer.unref?.();
 	};
-
-	pi.events.on(MCP_TOOLS_CHANNEL, (data) => {
-		if (!(data as McpToolsPayload | undefined)?.settled) return;
-		mcpSettled = true;
-		if (announcePending) {
-			announcePending = false;
-			announce();
-		}
-	});
 
 	/** The addenda the last `context` pass lifted off tool results, by call id (lib/tool-additions.ts). */
 	let addendaByCall = new Map<string, string[]>();
@@ -197,6 +188,14 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	// late-defer handler leave those alone. A load made during this session
 	// activates the tool directly and never needs this set.
 	let loadedBefore = new Set<string>();
+	// The tools activated only so a tool_addition could name them; with the
+	// tool_search loads, a compaction returns them to deferred (lib/deferred.ts toolsToRedefer).
+	const activatedByAddition = new Set<string>();
+	// Whether the last request kept loaded tools out of the fixed `tools` array
+	// (Anthropic references, OpenAI Responses loads). Only then does a loaded
+	// tool go back to deferred at a compaction; elsewhere it is in `tools`
+	// already, and removing it would be the miss.
+	let nativeLoads = false;
 
 	// On models that take client-side tool references (first-party Claude >= 4.5,
 	// not Haiku) the `tools` array is held byte-identical to request 1's: every
@@ -214,8 +213,10 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		const allTools = pi.getAllTools();
 		const enabled = deferralEnabled(allTools);
 		const toolLoadCompat = responsesToolLoadCompat(ctx.model as ResponsesToolLoadModel | undefined);
+		nativeLoads = false;
 		if (toolLoadCompat) {
 			if (!enabled) return undefined;
+			nativeLoads = true;
 			return stabilizeResponsesToolLoads(event.payload as Record<string, unknown>, (name) => deferredRegistry.has(name), loads, toolLoadCompat);
 		}
 		const original = event.payload as Record<string, unknown>;
@@ -235,6 +236,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		// Renamed (OAuth) tools cannot be referenced: the active tools stay as pi
 		// rendered them and the addition goes as text.
 		if (!stable) return announceAsText();
+		nativeLoads = true;
 		return lifted ? withBetas(stable, TOOL_ADDITION_BETAS) : stable;
 	});
 
@@ -292,7 +294,13 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		loads = toolSearchLoads(branch);
 		loadedBefore = new Set([...loads.values()].flat());
 		// Tools added mid-session by tool_addition stay callable after a resume.
-		if (supportsToolAdditions(latestModel)) for (const name of addendumNamesOnBranch(branch)) loadedBefore.add(name);
+		activatedByAddition.clear();
+		if (supportsToolAdditions(latestModel)) {
+			for (const name of addendumNamesOnBranch(branch)) {
+				loadedBefore.add(name);
+				activatedByAddition.add(name);
+			}
+		}
 		const restored = restoredContext(pi.events);
 		// A restored stack is already message 1. Seed its announced names so a live
 		// capability change becomes one addendum, not a rewrite or duplicate notice.
@@ -313,6 +321,41 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		// Even an absent listing is meaningful on resume: preserve that baseline so
 		// the first later deferred tool is a tail notice, not a message-1 rewrite.
 		if (!restored) publishBaseline(announced);
+	});
+
+	// A compaction starts a new prefix: list every deferred tool again, so one
+	// announced only in a notice or a tool_addition the summary replaced is named
+	// once more (Claude Code re-announces the whole set after compacting).
+	pi.on("session_compact", (_event, ctx) => {
+		clearAnnounce();
+		// The loads and additions that named a loaded tool went with the summary:
+		// the tool goes back to deferred, listed below, so the tools array keeps
+		// its shape (Claude Code declares a deferred tool only while a reference
+		// to it is in the history).
+		if (nativeLoads) {
+			const branch = ctx?.sessionManager?.getBranch?.() ?? [];
+			const boundary = latestCompaction(branch);
+			const kept = boundary ? branch.slice(boundary.keptStart, boundary.index) : branch;
+			const candidates = [...[...loads.values()].flat(), ...activatedByAddition].filter((name) => deferredRegistry.has(name));
+			const redefer = new Set(toolsToRedefer(candidates, kept));
+			const keptLoads = toolSearchLoads(kept);
+			loads = new Map([...loads].filter(([callId]) => keptLoads.has(callId)));
+			for (const name of redefer) {
+				activatedByAddition.delete(name);
+				loadedBefore.delete(name);
+			}
+			const active = pi.getActiveTools();
+			if (active.some((name) => redefer.has(name))) pi.setActiveTools(active.filter((name) => !redefer.has(name)));
+		}
+		const available = searchableTools();
+		announced.clear();
+		for (const tool of available) announced.add(tool.name);
+		publishBaseline(announced);
+		pi.events.emit(CONTEXT_CAPABILITY_REFRESH_CHANNEL, {
+			key: "deferred-tools",
+			text: available.length > 0 ? deferredReminderText(available) : undefined,
+			order: CONTEXT_ORDER.deferredTools,
+		});
 	});
 
 	pi.on("session_shutdown", clearAnnounce);

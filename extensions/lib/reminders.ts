@@ -417,6 +417,17 @@ export class ReminderQueue {
 		this.changes++;
 	}
 
+	/**
+	 * A rebuilt capability block supersedes its undelivered notices, keyed
+	 * `<block key>:<n>` (lib/context-stack.ts CONTEXT_CAPABILITY_REFRESH_CHANNEL).
+	 */
+	cancelPendingNotices(blockKey: string): void {
+		const prefix = `${blockKey}:`;
+		const before = this.nextTurn.length;
+		this.nextTurn = this.nextTurn.filter((entry) => !entry.key?.startsWith(prefix));
+		if (this.nextTurn.length !== before) this.changes++;
+	}
+
 	/** A new snapshot supersedes undelivered notices about its old facts. Delivered pins stay history. */
 	cancelPending(keys: readonly string[]): void {
 		const cancelled = new Set(keys);
