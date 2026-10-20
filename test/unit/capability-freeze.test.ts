@@ -270,6 +270,19 @@ describe("loaded tools at a compaction", () => {
 		});
 	});
 
+	it("makes a tool callable again when the request still announces it by tool_addition", () => {
+		const fake = makeToolSearchFakePi(["read"]);
+		toolSearchExtension(fake.pi as never);
+		fake.addDeferred("late_echo");
+		fake.pi.fire("session_start", {}, createFakeCtx({ model: sonnet, sessionManager: { getBranch: () => [] } }));
+		expect(fake.activeTools()).toEqual(["read"]);
+		// A notice pinned to a user message rides the request, not the stored branch.
+		const pinned = { type: "text", text: `<system-reminder>\n${deferredAddendumText(["late_echo"])}\n</system-reminder>` };
+		const payload = { model: "claude-sonnet-5-5", max_tokens: 100, tools: [{ name: "tool_search", input_schema: { type: "object" } }], messages: [{ role: "user", content: [{ type: "text", text: "hi" }, pinned] }] };
+		fake.pi.fire("before_provider_request", { payload }, { model: sonnet });
+		expect(fake.activeTools()).toContain("late_echo");
+	});
+
 	describe("seeded from the turns still in context", () => {
 		const compacted = (entries: unknown[]) => [...entries, { type: "message", id: "kept", message: { role: "assistant", content: [] } }, { type: "compaction", id: "cmp", firstKeptEntryId: "kept" }];
 

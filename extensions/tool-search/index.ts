@@ -234,6 +234,15 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		// A tool that arrived mid-session goes out as Claude Code's tool_addition
 		// where the model takes one, declared deferred.
 		const lifted = additions ? withToolAdditions(original, addendaByCall) : undefined;
+		// Every tool this request announces by tool_addition must be callable,
+		// whatever a compaction decided from the stored branch: an addendum pinned
+		// to a user message is not stored there.
+		if (lifted) {
+			const active = pi.getActiveTools();
+			const missing = lifted.names.filter((name) => deferredRegistry.has(name) && !active.includes(name));
+			for (const name of lifted.names) loadedTools.add(name);
+			if (missing.length > 0) pi.setActiveTools([...active, ...missing]);
+		}
 		const stable = stabilizeDeferredTools(lifted?.payload ?? original, allTools, isDeferred, loads, new Set(lifted?.names ?? []));
 		// Renamed (OAuth) tools cannot be referenced: the active tools stay as pi
 		// rendered them and the addition goes as text.
