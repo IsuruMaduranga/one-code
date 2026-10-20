@@ -5,11 +5,10 @@
  * request has gone out it is part of every later request's cached prefix, and
  * rewriting it also breaks the binding of every earlier signed thinking block
  * (findings §46). So it is FROZEN after the first request, as the deferred-tools
- * listing is (tool-search/announce.ts), and follows Claude Code's
- * `sentSkillNames`: a skill that becomes listable later is announced in a
- * one-shot under the listing's own header; a skill that leaves the listing is
- * not announced, and the skill tool refuses it by name. A compaction starts a
- * new prefix and re-lists every skill.
+ * listing is (tool-search/announce.ts). As in Claude Code, a skill that
+ * becomes listable later is announced in a one-shot under the listing's own
+ * header, and a skill that leaves the listing is not announced: the skill tool
+ * refuses it by name. A compaction starts a new prefix and re-lists every skill.
  */
 
 import { skillListingVisibility } from "../lib/skill-overrides.ts";
