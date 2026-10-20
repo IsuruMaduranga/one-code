@@ -62,7 +62,8 @@ describe("cache-probe late-tool phase wiring (offline CLI)", () => {
 			expect(calls).toHaveLength(runs ? 2 : 1);
 			expect(result.stdout.includes("--- late-tool phase")).toBe(runs);
 			if (runs) {
-				expect(calls[1].args).toContain(resolve("test/e2e/late-tool-fixture.ts"));
+				// The driver spells the repo path in its shell's form (`/d/a/…` in Git Bash).
+				expect(calls[1].args.some((arg: string) => arg.replaceAll("\\", "/").endsWith("/test/e2e/late-tool-fixture.ts"))).toBe(true);
 				expect(calls[1].args).toContain(model);
 				expect(result.stdout).toContain("late_echo never reached a request's tools");
 			}

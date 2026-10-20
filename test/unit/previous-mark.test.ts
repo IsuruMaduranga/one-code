@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { lastMessageMark, withPreviousMark } from "../../extensions/lib/previous-mark.ts";
 import cacheMarksExtension from "../../extensions/cache-marks/index.ts";
 import { createFakePi } from "./helpers/fake-pi.ts";
@@ -48,6 +48,9 @@ describe("previous-mark", () => {
 });
 
 describe("cache-marks wiring", () => {
+	// On, whatever the environment running the tests says.
+	beforeEach(() => vi.stubEnv("CC_CACHE_MARKS", ""));
+	afterEach(() => vi.unstubAllEnvs());
 	const anthropic = { model: { provider: "anthropic", api: "anthropic-messages" } };
 
 	it("carries each request's breakpoint into the next one, on first-party Anthropic only", async () => {
@@ -63,6 +66,14 @@ describe("cache-marks wiring", () => {
 		const openrouter = { model: { provider: "openrouter", api: "anthropic-messages" } };
 		await other.fire("before_provider_request", { payload: request([first, facts(true)]) }, openrouter);
 		expect(await other.fireOne("before_provider_request", { payload: request([first, facts(false), additions, tail(true)]) }, openrouter)).toBeUndefined();
+	});
+
+	it("leaves a proxy endpoint alone", async () => {
+		const fake = createFakePi();
+		cacheMarksExtension(fake.pi as never);
+		const proxy = { model: { provider: "anthropic", api: "anthropic-messages", baseUrl: "https://proxy.example.com" } };
+		await fake.fire("before_provider_request", { payload: request([first, facts(true)]) }, proxy);
+		expect(await fake.fireOne("before_provider_request", { payload: request([first, facts(false), additions, tail(true)]) }, proxy)).toBeUndefined();
 	});
 
 	it("forgets the previous breakpoint at a compaction", async () => {

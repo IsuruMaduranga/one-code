@@ -375,7 +375,9 @@ export default function mcpExtension(pi: ExtensionAPI) {
 			applyMcpDelta(nextAnnounced, delta);
 			publishBaseline(nextAnnounced);
 		}
-		for (const text of notices) pi.events.emit(REMINDER_CHANNEL, { text, group: "mcp-instructions" });
+		// A compaction's rebuild repeats new instructions and failures, so those may
+		// be cancelled; a recovery or a drop is said only here.
+		for (const notice of notices) pi.events.emit(REMINDER_CHANNEL, { text: notice.text, ...(notice.rebuilt ? { group: "mcp-instructions" } : {}) });
 		applyMcpDelta(announced, delta);
 	};
 

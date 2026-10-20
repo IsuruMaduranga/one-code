@@ -137,31 +137,44 @@ export function applyMcpDelta(announced: McpAnnounced, delta: McpDelta): void {
 	for (const name of delta.dropped) announced.instructed.delete(name);
 }
 
-/** One-shot notice texts for a delta, in the order they should be queued. Empty when nothing changed. */
-export function mcpChangeNotices(delta: McpDelta): string[] {
-	const notices: string[] = [];
+/**
+ * One-shot notices for a delta, in the order they should be queued. Empty when
+ * nothing changed. `rebuilt`: a compaction's rebuild of the two blocks says the
+ * same again (new instructions, new failures); a recovery or a drop it does not.
+ */
+export interface McpNotice {
+	text: string;
+	rebuilt: boolean;
+}
+
+export function mcpChangeNotices(delta: McpDelta): McpNotice[] {
+	const notices: McpNotice[] = [];
+	const add = (text: string, rebuilt: boolean) => notices.push({ text, rebuilt });
 	if (delta.recovered.length > 0) {
-		notices.push(
+		add(
 			`MCP server${delta.recovered.length === 1 ? "" : "s"} ${delta.recovered.join(", ")} ` +
 				"connected after this conversation started (an earlier notice reported a connection failure). " +
 				"The server's tools are available as deferred tools — load them with tool_search.",
+			false,
 		);
 	}
 	if (delta.newInstructions.length > 0) {
 		const names = delta.newInstructions.map((s) => s.name);
-		notices.push(
+		add(
 			`MCP server${names.length === 1 ? "" : "s"} ${names.join(", ")} connected after this conversation started; ` +
 				"the tools are available as deferred tools (load with tool_search). Server instructions:\n\n" +
 				mcpInstructionsReminder(delta.newInstructions.map((s) => ({ server: { name: s.name }, instructions: s.instructions }))),
+			true,
 		);
 	}
 	if (delta.newFailures.length > 0) {
-		notices.push(mcpFailuresReminder(delta.newFailures));
+		add(mcpFailuresReminder(delta.newFailures), true);
 	}
 	if (delta.dropped.length > 0) {
-		notices.push(
+		add(
 			`MCP server${delta.dropped.length === 1 ? "" : "s"} ${delta.dropped.join(", ")} disconnected; ` +
 				'their tools answer "not connected" until the server is reconnected (the user can do that in /mcp).',
+			false,
 		);
 	}
 	return notices;

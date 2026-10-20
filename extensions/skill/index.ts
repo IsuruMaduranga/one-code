@@ -463,14 +463,22 @@ export default function skillExtension(pi: ExtensionAPI) {
 				};
 			}
 
-			// "off" is the only state that refuses invocation (matching Claude Code,
-			// where invoking an off skill by name returns the skillOverrides error).
-			// "user-only" is invocable — it's just hidden from the model's listing,
-			// so the model won't auto-trigger it, but /skill-name still runs it.
+			// An off skill is refused (matching Claude Code, where invoking an off
+			// skill by name returns the skillOverrides error). A user-only skill is
+			// hidden from the model and runs only as the user's `/<name>`, which does
+			// not come through this tool; a listing frozen before the user hid it can
+			// still name it, so the tool refuses it too (./announce.ts).
 			if (found.state === "off") {
 				const where = found.source === "plugin" ? "/plugins" : "/skills";
 				return {
 					content: [{ type: "text", text: `Skill "${found.name}" is turned off — the user can re-enable it from ${where}.` }],
+					details: { skill: found.name, state: found.state } as Record<string, unknown>,
+					isError: true,
+				};
+			}
+			if (found.state === "user-only") {
+				return {
+					content: [{ type: "text", text: `Skill "${found.name}" is set to user-only — only the user can run it, by typing /${found.name}.` }],
 					details: { skill: found.name, state: found.state } as Record<string, unknown>,
 					isError: true,
 				};

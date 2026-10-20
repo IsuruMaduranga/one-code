@@ -13,6 +13,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { looksLikeAnthropicRequest } from "../lib/anthropic-payload.ts";
+import { isFirstPartyAnthropic } from "../lib/anthropic-server-tools.ts";
 import { lastMessageMark, type MessageMark, withPreviousMark } from "../lib/previous-mark.ts";
 
 export default function cacheMarksExtension(pi: ExtensionAPI) {
@@ -27,9 +28,8 @@ export default function cacheMarksExtension(pi: ExtensionAPI) {
 	pi.on("session_tree", forget);
 
 	pi.on("before_provider_request", (event, ctx) => {
-		const model = ctx.model as { provider?: string; api?: string } | undefined;
 		const payload = event.payload as Record<string, unknown>;
-		if (model?.provider !== "anthropic" || model.api !== "anthropic-messages" || !looksLikeAnthropicRequest(payload)) return undefined;
+		if (!ctx.model || !isFirstPartyAnthropic(ctx.model) || !looksLikeAnthropicRequest(payload)) return undefined;
 		const next = withPreviousMark(payload, previous);
 		previous = lastMessageMark(next.messages);
 		return next === payload ? undefined : next;

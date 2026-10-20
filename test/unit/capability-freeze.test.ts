@@ -25,6 +25,8 @@ import {
 } from "../../extensions/lib/context-stack.ts";
 import { REMINDER_CHANNEL, ReminderQueue } from "../../extensions/lib/reminders.ts";
 import { deferredAddendumText, toolsToRedefer } from "../../extensions/lib/deferred.ts";
+import { pluginRoot } from "../../extensions/lib/plugin-root.ts";
+import { setSkillState } from "../../extensions/lib/skill-overrides.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { makeToolSearchFakePi, type Reminder } from "./helpers/tool-search-fake-pi.ts";
@@ -88,7 +90,7 @@ describe("skills listing wiring", () => {
 		const ctx = createFakeCtx({ cwd, mode: "tui", hasUI: true });
 		await fake.fire("session_start", { reason: restored ? "resume" : "startup" }, ctx);
 		const turn = (skills: unknown[]) => fake.fire("before_agent_start", { systemPromptOptions: { skills } }, ctx);
-		return { fake, reminders, refreshes, baselines, turn };
+		return { fake, reminders, refreshes, baselines, turn, ctx };
 	}
 	const standing = (reminders: Reminder[]) => reminders.filter((r) => r.key === "skills" && r.placement === "first-prepend");
 	const notices = (reminders: Reminder[]) => reminders.filter((r) => r.group === "skills");
@@ -113,6 +115,20 @@ describe("skills listing wiring", () => {
 		reminders.length = 0;
 		await turn([beta]);
 		expect(reminders).toEqual([]);
+	});
+
+	it("refuses the model a skill the user set to user-only, though a frozen listing still names it", async () => {
+		const { fake, turn, ctx } = await mount();
+		await turn([alpha, beta]);
+		await fake.fire("context", { messages: [] });
+		setSkillState(pluginRoot(join(root, "agent")), "project:beta", "user-only");
+		try {
+			const result = (await fake.tools.get("skill")!.execute("call", { skill: "beta" }, undefined, undefined, ctx)) as { isError?: boolean; content: Array<{ text: string }> };
+			expect(result.isError).toBe(true);
+			expect(result.content[0].text).toContain("only the user can run it, by typing /beta");
+		} finally {
+			setSkillState(pluginRoot(join(root, "agent")), "project:beta", "on");
+		}
 	});
 
 	it("relists every skill at a compaction", async () => {
@@ -234,6 +250,48 @@ describe("loaded tools at a compaction", () => {
 		it("leaves them active where a loaded tool already sits in the tools array", async () => {
 			expect(await compactAfterLoads(openrouter)).toEqual(expect.arrayContaining(["read", "web_fetch"]));
 		});
+
+		it("keeps a tool the kept turns used eligible, and re-defers it at a later compaction", async () => {
+			const fake = makeToolSearchFakePi(["read"]);
+			toolSearchExtension(fake.pi as never);
+			fake.addDeferred("web_fetch");
+			fake.pi.fire("session_start", {}, createFakeCtx({ model: sonnet, sessionManager: { getBranch: () => [] } }));
+			fake.pi.fire("context", { messages: [] }, { model: sonnet });
+			await fake.runTool("tool_search", { query: "select:web_fetch" });
+			fake.pi.fire("before_provider_request", { payload: { model: "claude-sonnet-5-5", max_tokens: 100, messages: [], tools: [{ name: "tool_search", input_schema: { type: "object" } }] } }, { model: sonnet });
+			const compactWith = (kept: unknown[]) => {
+				const branch = [...kept, { type: "compaction", id: "cmp", firstKeptEntryId: (kept[0] as { id: string }).id }];
+				fake.pi.fire("session_compact", {}, createFakeCtx({ sessionManager: { getBranch: () => branch } }));
+			};
+			compactWith([{ ...call("web_fetch"), id: "k1" }]);
+			expect(fake.activeTools()).toContain("web_fetch");
+			compactWith([{ type: "message", id: "k2", message: { role: "assistant", content: [{ type: "text", text: "done" }] } }]);
+			expect(fake.activeTools()).not.toContain("web_fetch");
+		});
+	});
+
+	describe("seeded from the turns still in context", () => {
+		const compacted = (entries: unknown[]) => [...entries, { type: "message", id: "kept", message: { role: "assistant", content: [] } }, { type: "compaction", id: "cmp", firstKeptEntryId: "kept" }];
+
+		it("leaves a load the summary replaced deferred on resume", () => {
+			const fake = makeToolSearchFakePi(["read"]);
+			toolSearchExtension(fake.pi as never);
+			fake.addDeferred("web_fetch");
+			fake.setActive(["read", "web_fetch"]); // pi restored the saved loadout
+			fake.pi.fire("session_start", { reason: "resume" }, createFakeCtx({ sessionManager: { getBranch: () => compacted([load("t1", ["web_fetch"])]) } }));
+			expect(fake.activeTools()).toEqual(["read"]);
+		});
+
+		it("makes a /tree branch's own loads callable again, and only those", () => {
+			const fake = makeToolSearchFakePi(["read"]);
+			toolSearchExtension(fake.pi as never);
+			fake.addDeferred("web_fetch");
+			fake.addDeferred("notebook_edit");
+			fake.pi.fire("session_start", {}, createFakeCtx({ sessionManager: { getBranch: () => [] } }));
+			fake.setActive(["read", "notebook_edit"]);
+			fake.pi.fire("session_tree", {}, createFakeCtx({ sessionManager: { getBranch: () => [load("t1", ["web_fetch"])] } }));
+			expect(fake.activeTools()).toEqual(["read", "web_fetch"]);
+		});
 	});
 });
 
@@ -280,7 +338,7 @@ describe("system-reminder capability refresh", () => {
 		expect(queue.takeOneShots("call").map((entry) => entry.text)).toEqual(["skill notice", "unkeyed notice"]);
 	});
 
-	it("replaces a resume-locked capability block and stores one snapshot after the rebuilds", async () => {
+	it("replaces a resume-locked capability block and stores the new stack at once", async () => {
 		const fake = createFakePi();
 		systemReminderExtension(fake.pi as never);
 		const restored: ContextStackSnapshot = {
@@ -293,19 +351,16 @@ describe("system-reminder capability refresh", () => {
 
 		// The owner's own enqueue cannot touch a restored block...
 		fake.events.emit(REMINDER_CHANNEL, { text: "ignored", scope: "every-turn", key: "deferred-tools", placement: "first-prepend", order: 20 });
-		// ...but a compaction rebuild can, stored once after every emitter's rebuild.
-		const before = fake.appendedEntries.length;
+		// ...but a compaction rebuild can, stored before anything else runs.
 		fake.events.emit(CONTEXT_CAPABILITY_REFRESH_CHANNEL, { key: "deferred-tools", text: "new listing", order: 20 });
+		expect(lastStored()?.stack).toEqual([{ key: "deferred-tools", text: "new listing", placement: "first-prepend", order: 20 }]);
 		fake.events.emit(CONTEXT_CAPABILITY_REFRESH_CHANNEL, { key: "skills", text: "skills listing", order: 30 });
-		await new Promise((resolve) => setImmediate(resolve));
-		expect(fake.appendedEntries.length).toBe(before + 1);
 		expect(lastStored()?.stack).toEqual([
 			{ key: "deferred-tools", text: "new listing", placement: "first-prepend", order: 20 },
 			{ key: "skills", text: "skills listing", placement: "first-prepend", order: 30 },
 		]);
 
 		fake.events.emit(CONTEXT_CAPABILITY_REFRESH_CHANNEL, { key: "deferred-tools", text: null, order: 20 });
-		await new Promise((resolve) => setImmediate(resolve));
 		expect(lastStored()?.stack).toEqual([{ key: "skills", text: "skills listing", placement: "first-prepend", order: 30 }]);
 	});
 });

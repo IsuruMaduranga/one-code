@@ -26,7 +26,7 @@
  * and pi's event bus only delivers to listeners already registered.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import {
 	DEFER_CHANNEL,
@@ -140,8 +140,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 			// calls the tool directly, so pi's dispatcher must already accept it.
 			if (supportsToolAdditions(latestModel)) {
 				for (const name of plan.added) {
-					loadedBefore.add(name);
-					activatedByAddition.add(name);
+					loadedTools.add(name);
 				}
 				pi.setActiveTools([...new Set([...pi.getActiveTools(), ...plan.added])]);
 			}
@@ -180,18 +179,16 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	// transcript at session_start and extended by each load: the wire hook needs
 	// it to reference a loaded tool from the result that loaded it.
 	let loads = new Map<string, string[]>();
-	// The loads a resumed session's transcript already holds (empty after
-	// /clear). The transcript tells the model those tools are callable, and
-	// Claude Code keeps a ToolSearch-loaded tool callable across a resume (its
-	// tool_reference blocks stay in the history), so deferring them again would
-	// send the model into a "Tool <name> not found" round trip. pi restores them
-	// as active from the transcript before session_start; deferAll and the
-	// late-defer handler leave those alone. A load made during this session
-	// activates the tool directly and never needs this set.
-	let loadedBefore = new Set<string>();
-	// The tools activated only so a tool_addition could name them; with the
-	// tool_search loads, a compaction returns them to deferred (lib/deferred.ts toolsToRedefer).
-	const activatedByAddition = new Set<string>();
+	// Every deferred tool a tool_search load or a tool_addition activated and no
+	// compaction has returned to deferred: seeded from the turns still in context
+	// at session_start and on a /tree switch (empty after /clear). The transcript
+	// tells the model those tools are callable, and Claude Code keeps a loaded
+	// tool callable across a resume (its tool_reference blocks stay in the
+	// history), so deferring them again would send the model into a "Tool <name>
+	// not found" round trip. deferAll and the late-defer handler leave them alone;
+	// a compaction re-defers the ones its kept turns no longer use
+	// (lib/deferred.ts toolsToRedefer).
+	let loadedTools = new Set<string>();
 	// Whether the last request kept loaded tools out of the fixed `tools` array
 	// (Anthropic references, OpenAI Responses loads). Only then does a loaded
 	// tool go back to deferred at a compaction; elsewhere it is in `tools`
@@ -251,7 +248,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		const deferred = new Set(deferredRegistry.names);
 		if (deferred.size === 0 || !deferring()) return;
 		const active = pi.getActiveTools();
-		const next = active.filter((name) => !deferred.has(name) || loadedBefore.has(name));
+		const next = active.filter((name) => !deferred.has(name) || loadedTools.has(name));
 		if (next.length !== active.length) pi.setActiveTools(next);
 		announce();
 	};
@@ -259,14 +256,15 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	pi.events.on(DEFER_CHANNEL, (data) => {
 		const request = data as DeferRequest;
 		deferredRegistry.add(request);
-		if (request?.name) withheldNames.delete(request.name);
+		// A withheld tool brought back starts deferred again, whatever loaded it before.
+		if (request?.name && withheldNames.delete(request.name)) loadedTools.delete(request.name);
 		// A defer arriving after the session_start pass (MCP servers connect
 		// asynchronously and register their tools then) would otherwise leave the
 		// tool eager AND unlisted in the reminder. Deactivate it (unless the
 		// transcript loaded it) and refresh the keyed reminder.
 		if (sessionStarted && request?.name && deferring()) {
 			const active = pi.getActiveTools();
-			if (active.includes(request.name) && !loadedBefore.has(request.name)) {
+			if (active.includes(request.name) && !loadedTools.has(request.name)) {
 				pi.setActiveTools(active.filter((name) => name !== request.name));
 			}
 			// The tool is searchable (keyword search reads the registry) from now;
@@ -279,6 +277,8 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		const name = (data as { name?: string } | undefined)?.name;
 		if (!name || !deferredRegistry.remove(name)) return;
 		withheldNames.add(name);
+		// No longer loaded: a later re-defer starts it deferred again.
+		loadedTools.delete(name);
 		if (!alive()) return;
 		const active = pi.getActiveTools();
 		if (active.includes(name)) pi.setActiveTools(active.filter((n) => n !== name));
@@ -288,6 +288,35 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		if (sessionStarted && !requestSent) announce();
 	});
 
+	/**
+	 * Seed the loads and the loaded set from the branch's turns still in context
+	 * (a compaction's summary replaced the rest); returns the names their
+	 * tool_addition notices announced.
+	 */
+	const adoptLoads = (branch: SessionEntry[]): string[] => {
+		const inContext = inContextEntries(branch);
+		loads = toolSearchLoads(inContext);
+		loadedTools = new Set([...loads.values()].flat());
+		const added = addendumNamesOnBranch(inContext);
+		// Tools added mid-session by tool_addition stay callable after a resume.
+		if (supportsToolAdditions(latestModel)) for (const name of added) loadedTools.add(name);
+		return added;
+	};
+
+	// A /tree switch keeps the process: the selected branch's loads decide which
+	// deferred tools are callable and referenced there.
+	pi.on("session_tree", (_event, ctx) => {
+		adoptLoads(ctx?.sessionManager?.getBranch?.() ?? []);
+		if (!deferring()) return;
+		const registered = new Set(pi.getAllTools().map((tool) => tool.name));
+		const active = pi.getActiveTools();
+		const next = [...new Set([
+			...active.filter((name) => !deferredRegistry.has(name) || loadedTools.has(name)),
+			...[...loadedTools].filter((name) => deferredRegistry.has(name) && registered.has(name)),
+		])];
+		if (next.length !== active.length || next.some((name) => !active.includes(name))) pi.setActiveTools(next);
+	});
+
 	pi.on("session_start", (_event, ctx) => {
 		sessionStarted = true;
 		// A pending debounce belongs to the previous session's listing (RPC's
@@ -295,18 +324,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		// announces the fresh one.
 		clearAnnounce();
 		latestModel = ctx?.model;
-		const branch = ctx?.sessionManager?.getBranch?.() ?? [];
-		loads = toolSearchLoads(branch);
-		loadedBefore = new Set([...loads.values()].flat());
-		// Tools added mid-session by tool_addition stay callable after a resume.
-		const addedOnBranch = addendumNamesOnBranch(branch);
-		activatedByAddition.clear();
-		if (supportsToolAdditions(latestModel)) {
-			for (const name of addedOnBranch) {
-				loadedBefore.add(name);
-				activatedByAddition.add(name);
-			}
-		}
+		const addedOnBranch = adoptLoads(ctx?.sessionManager?.getBranch?.() ?? []);
 		const restored = restoredContext(pi.events);
 		// A restored stack is already message 1. Seed its announced names so a live
 		// capability change becomes one addendum, not a rewrite or duplicate notice.
@@ -340,13 +358,9 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		// to it is in the history).
 		if (nativeLoads) {
 			const kept = inContextEntries(ctx?.sessionManager?.getBranch?.() ?? []);
-			const candidates = [...[...loads.values()].flat(), ...activatedByAddition].filter((name) => deferredRegistry.has(name));
-			const redefer = new Set(toolsToRedefer(candidates, kept));
+			const redefer = new Set(toolsToRedefer([...loadedTools].filter((name) => deferredRegistry.has(name)), kept));
 			loads = toolSearchLoads(kept);
-			for (const name of redefer) {
-				activatedByAddition.delete(name);
-				loadedBefore.delete(name);
-			}
+			for (const name of redefer) loadedTools.delete(name);
 			const active = pi.getActiveTools();
 			if (active.some((name) => redefer.has(name))) pi.setActiveTools(active.filter((name) => !redefer.has(name)));
 		}
@@ -467,7 +481,10 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 			const now = new Set(pi.getActiveTools());
 			const added = toActivate.filter((name) => now.has(name));
 			const refused = toActivate.filter((name) => !now.has(name));
-			if (added.length > 0) loads.set(toolCallId, added);
+			if (added.length > 0) {
+				loads.set(toolCallId, added);
+				for (const name of added) loadedTools.add(name);
+			}
 
 			const loaded = [...new Set([...matchNames, ...eager])].filter((name) => now.has(name));
 			const already = loaded.filter((name) => !added.includes(name));

@@ -37,7 +37,6 @@ import { claudeFamily } from "../lib/model-tier.ts";
 import { emptyToolResultContent } from "../lib/empty-tool-result.ts";
 import { instructionRole, messagesKey, type MovedBlock, systemRoleLayout, wireShape, withSystemRoleContext } from "../lib/system-role.ts";
 import { resolveCountdowns, withTurnBudgetMessages } from "../lib/turn-budget-layout.ts";
-import { sessionAlive } from "../lib/session-lifecycle.ts";
 
 /**
  * Roles a reminder can be attached to (see injectReminders). `custom` is a
@@ -49,8 +48,6 @@ import { sessionAlive } from "../lib/session-lifecycle.ts";
 const ANCHOR_ROLES = new Set(["user", "toolResult", "compactionSummary", "custom"]);
 
 export default function systemReminderExtension(pi: ExtensionAPI) {
-	// First, so its handlers run before this extension's own (lib/session-lifecycle.ts).
-	const alive = sessionAlive(pi);
 	const reminderQueue = new ReminderQueue();
 	let restored: ContextStackSnapshot | undefined;
 	let stored = false;
@@ -127,23 +124,15 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 		persistSnapshot();
 	});
 	// The summary starts a new prefix, so a capability block frozen on message 1
-	// is rebuilt from live state (lib/context-stack.ts). Every emitter rebuilds in
-	// the same session_compact pass, which pi awaits handler by handler: storing on
-	// the next turn of the event loop batches the rebuilds that finish without I/O
-	// into one snapshot, and a later rebuild stores its own.
-	let refreshPersistQueued = false;
+	// is rebuilt from live state (lib/context-stack.ts). Persisted at once, as
+	// above: an exit right after /compact must not resume the old blocks.
 	pi.events.on(CONTEXT_CAPABILITY_REFRESH_CHANNEL, (data) => {
 		const refresh = data as ContextCapabilityRefresh | undefined;
 		if (typeof refresh?.key !== "string") return;
 		const entries: ReminderEntry[] = refresh.text ? [{ key: refresh.key, text: refresh.text, order: refresh.order, placement: "first-prepend" }] : [];
 		reminderQueue.replaceFirstPrepend([refresh.key], entries);
 		reminderQueue.cancelPendingNotices(refresh.key);
-		if (refreshPersistQueued) return;
-		refreshPersistQueued = true;
-		setImmediate(() => {
-			refreshPersistQueued = false;
-			if (alive()) persistSnapshot();
-		});
+		persistSnapshot();
 	});
 	/** The blocks the last `context` pass placed for the system message; the payload hook moves them. */
 	let moved: MovedBlock[] = [];
