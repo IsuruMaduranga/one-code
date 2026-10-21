@@ -268,7 +268,13 @@ export default function planModeExtension(pi: ExtensionAPI) {
 			recordRun(path, { ...runOnBranch(ctx, path), existed: existsSync(path) });
 			refresh(ctx);
 		}
-		const content = existsSync(path) ? readFileSync(path, "utf8") : "";
+		let content = "";
+		try {
+			content = existsSync(path) ? readFileSync(path, "utf8") : "";
+		} catch {
+			// The re-attach is best effort, like the other post-compaction restores:
+			// an unreadable path (a directory, no permission) attaches nothing.
+		}
 		if (!content.trim()) return;
 		pi.events.emit(REMINDER_CHANNEL, { text: planFileReferenceText(path, content), placement: "user-prepend", orTail: true, untilCompaction: true });
 	});

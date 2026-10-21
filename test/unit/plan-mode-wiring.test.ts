@@ -130,6 +130,18 @@ describe("plan-mode wiring", () => {
 		expect(restore?.placement).toBe("user-prepend");
 	});
 
+	it("after a compaction, an unreadable plan path (a directory) skips the re-attach instead of throwing", async () => {
+		const ctx = createFakeCtx({ cwd: stateDir, sessionManager: { getBranch: () => fake.branch } });
+		await fake.fireOne("session_start", {}, ctx);
+		fake.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "plan", paused: false });
+		const atEntry = reminders.filter((r) => r.key === "permission-mode" && !r.remove).at(-1)?.text;
+		mkdirSync(planFiles[0].path, { recursive: true });
+		await expect(fake.fireOne("session_compact", {}, ctx)).resolves.toBeUndefined();
+		// The mode block still follows the compaction; only the restore is skipped.
+		expect(reminders.filter((r) => r.key === "permission-mode" && !r.remove).at(-1)?.text).not.toBe(atEntry);
+		expect(reminders.find((r) => r.text?.startsWith("A plan file exists from plan mode at:"))).toBeUndefined();
+	});
+
 	it("re-installs the sticky plan block and announces the plan file synchronously when the mode becomes plan mid-turn", async () => {
 		await fake.fireOne("session_start", {}, createFakeCtx({ cwd: stateDir, sessionManager: { getBranch: () => fake.branch } }));
 		fake.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "plan", paused: false });
