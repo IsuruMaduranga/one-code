@@ -153,6 +153,43 @@ describe("ledger fold", () => {
 		expect(fold.told.get("tools")).toEqual(new Set(["web_fetch"]));
 	});
 
+	it("after a failed reply, keeps exactly what the epoch told before it, and tells on from there", () => {
+		const b = new Branch();
+		b.request(body([user("one")]));
+		b.record("told", { facts: [{ kind: "tools", names: ["web_fetch"], callable: true }, { kind: "mode", key: "plan", on: true }, { kind: "block", key: "menu", hash: "h1" }] });
+		b.message("assistant");
+		b.request(body([user("one"), assistant("1"), user("two")]));
+		b.record("told", { facts: [{ kind: "tools", names: ["probe_echo", "web_fetch"], callable: true }, { kind: "tools", names: ["web_fetch"], removed: true }, { kind: "mode", key: "plan", on: false }, { kind: "block", key: "menu", hash: "h2" }] });
+		b.message("assistant", "error");
+		let fold = foldBranch(b.entries, live);
+		expect(fold.lastRequest?.list).toEqual([user("one")]);
+		expect(fold.told).toEqual(new Map([["tools", new Set(["web_fetch"])], [CALLABLE_TOOLS, new Set(["web_fetch"])]]));
+		expect(fold.modes).toEqual(new Map([["plan", true]]));
+		expect(fold.blocks).toEqual(new Map([["menu", "h1"]]));
+		b.request(body([user("one"), assistant("1"), user("again")]));
+		b.record("told", { facts: [{ kind: "tools", names: ["probe_echo"] }] });
+		b.message("assistant");
+		fold = foldBranch(b.entries, live);
+		expect(fold.told.get("tools")).toEqual(new Set(["web_fetch", "probe_echo"]));
+		expect(fold.told.get(CALLABLE_TOOLS)).toEqual(new Set(["web_fetch"]));
+	});
+
+	it("after a failed model hop with no epoch record, keeps what the first model's epoch told", () => {
+		const b = new Branch();
+		b.request(body([user("one")]));
+		b.record("told", { facts: [{ kind: "tools", names: ["web_fetch"] }, { kind: "mode", key: "plan", on: true }, { kind: "block", key: "menu", hash: "h1" }] });
+		b.message("assistant");
+		b.request(body([user("one"), assistant("1"), user("two")]), { identity: { ...identity, model: "claude-haiku-4-5" } });
+		b.record("told", { facts: [{ kind: "tools", names: ["probe_echo"] }, { kind: "mode", key: "plan", on: false }, { kind: "block", key: "menu", hash: "h2" }] });
+		b.message("assistant", "aborted");
+		const fold = foldBranch(b.entries, live);
+		expect(fold.opensEpoch).toBe(false);
+		expect(fold.lastRequest?.identity.model).toBe(identity.model);
+		expect(fold.told).toEqual(new Map([["tools", new Set(["web_fetch"])]]));
+		expect(fold.modes).toEqual(new Map([["plan", true]]));
+		expect(fold.blocks).toEqual(new Map([["menu", "h1"]]));
+	});
+
 	it("takes tools told gone out of the told set, callable ones included", () => {
 		const b = new Branch();
 		b.record("told", { facts: [{ kind: "tools", names: ["mcp__a__x", "web_fetch"], callable: true }] });
