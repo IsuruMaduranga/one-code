@@ -12,6 +12,7 @@ import { MODE_CHANNEL, PLAN_FILE_CHANNEL } from "../../extensions/lib/plan-mode-
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts";
 import planModeExtension from "../../extensions/plan-mode/index.ts";
+import { buildPlanModeReminder } from "../../extensions/plan-mode/reminder.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
 describe("plan-mode wiring", () => {
@@ -78,13 +79,14 @@ describe("plan-mode wiring", () => {
 			return { forked, seen, path: paths.at(-1)! };
 		};
 
-		it("copies the plan to a new file and moves the run to it unchanged", async () => {
+		it("copies the plan to a new file, and the fork's block says the copy exists", async () => {
 			const parentPath = await planInParent();
-			const before = standing(reminders)!;
+			// The parent's run began before its plan was written.
+			expect(standing(reminders)).toBe(buildPlanModeReminder(parentPath, false));
 			const fork = await openFork([...fake.branch], "session_start");
 			expect(fork.path).not.toBe(parentPath);
 			expect(readFileSync(fork.path, "utf8")).toBe("# the plan\n");
-			expect(standing(fork.seen)).toBe(before.replaceAll(parentPath, fork.path));
+			expect(standing(fork.seen)).toBe(buildPlanModeReminder(fork.path, true));
 			writeFileSync(fork.path, "# the fork's plan\n");
 			expect(readFileSync(parentPath, "utf8")).toBe("# the plan\n");
 		});

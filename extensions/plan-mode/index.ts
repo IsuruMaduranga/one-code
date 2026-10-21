@@ -127,8 +127,9 @@ export default function planModeExtension(pi: ExtensionAPI) {
 	 * A fork's own copy of the plan another session recorded (Claude Code's
 	 * copyPlanForFork), so the two sessions never overwrite each other's plan
 	 * (decisions/modes.md). The copy this session already made of it, on any
-	 * of its branches, is reused; the run moves to the copy unchanged, so its
-	 * standing block differs only in the path.
+	 * of its branches, is reused. The run moves to the copy with the mode it
+	 * came from, and says whether the copy exists (the parent's run may have
+	 * begun before its plan did).
 	 */
 	const forkPlanFile = (ctx: ExtensionContext, parent: PlanFileRecord, sessionId: string): string => {
 		const made = planFileRecords(ctx.sessionManager.getEntries()).find((r) => r.sessionId === sessionId && r.copiedFrom === parent.path);
@@ -143,7 +144,8 @@ export default function planModeExtension(pi: ExtensionAPI) {
 		}
 		const run = runOnBranch(ctx, parent.path);
 		pi.appendEntry(PLAN_FILE_ENTRY, { path, sessionId, copiedFrom: parent.path } satisfies PlanFileRecord);
-		if (run) recordState(pi, PLAN_ENTRY_STATE, { path, ...run });
+		// The standing block names the new path anyway, so it also says whether the copy exists.
+		if (run) recordState(pi, PLAN_ENTRY_STATE, { path, ...run, existed: existsSync(path) });
 		return path;
 	};
 
