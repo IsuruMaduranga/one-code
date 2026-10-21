@@ -549,11 +549,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		const plugins = discoverPlugins(defaultDiscoverRoots(getAgentDir(), cwd));
 		return { plugins, fileSources: agentFileSources(cwd, os.homedir(), plugins.agentDirs) };
 	};
+	type AgentSources = ReturnType<typeof agentSources>;
 
-	const loadAgents = (cwd: string) => {
+	/** `sources` when the caller already resolved them (the catalog stamp). */
+	const loadAgents = (cwd: string, sources: AgentSources = agentSources(cwd)) => {
 		// The code-defined guide ranks below every agent file, so one of the same
 		// name replaces it.
-		const { plugins, fileSources } = agentSources(cwd);
+		const { plugins, fileSources } = sources;
 		// The prompt is built from the catalog it sits in, when a spawn reads it.
 		let catalog: AgentDefinition[] = [];
 		const guide = guideAgentDefinition(() => guideInput(cwd, catalog, plugins));
@@ -575,8 +577,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	/** One catalog row per agent, the shape every catalog the model reads uses. */
 	const catalogLines = (agents: AgentDefinition[]): string[] => agents.map((a) => `- ${a.name}: ${a.description || "(no description)"}${toolsClause(a)}`);
 
-	const describeAgents = (cwd: string) => {
-		const lines = catalogLines(loadAgents(cwd));
+	const describeAgents = (cwd: string, sources?: AgentSources) => {
+		const lines = catalogLines(loadAgents(cwd, sources));
 		lines.push(`- ${FORK_AGENT}: clone this conversation, with its full context, to work on a task in parallel`);
 		return lines.join("\n");
 	};
@@ -722,14 +724,17 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	 * agent types are listed in <system-reminder> messages") — without it the
 	 * model has to guess names or make a discovery call first. Rebuilt only when
 	 * the agent files changed: every run start asks, and stating the files is
-	 * cheaper than reading and parsing each one.
+	 * cheaper than reading and parsing each one. The sources are resolved once
+	 * per check (the plugin discovery behind them is a process-wide memo), and a
+	 * rebuild reads the same ones the stamp stated.
 	 */
 	const agentCatalog = (ctx: ExtensionContext) => {
-		const stamp = `${ctx.cwd}\n${agentSourcesStamp(agentSources(ctx.cwd).fileSources)}`;
+		const sources = agentSources(ctx.cwd);
+		const stamp = `${ctx.cwd}\n${agentSourcesStamp(sources.fileSources)}`;
 		if (catalogMemo?.stamp !== stamp) {
 			catalogMemo = {
 				stamp,
-				text: `Available agent types for the Agent tool:\n${describeAgents(ctx.cwd)}\n\nWhen you launch multiple agents for independent work, send them in a single message with multiple tool uses so they run concurrently.`,
+				text: `Available agent types for the Agent tool:\n${describeAgents(ctx.cwd, sources)}\n\nWhen you launch multiple agents for independent work, send them in a single message with multiple tool uses so they run concurrently.`,
 			};
 		}
 		return catalogMemo.text;
