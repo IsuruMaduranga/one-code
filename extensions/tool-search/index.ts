@@ -240,7 +240,15 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	const reconcile = (owner: SessionLike | undefined, model: typeof currentModel) => {
 		if (!alive()) return;
 		const all = pi.getAllTools();
-		if (!deferralEnabled(all)) return;
+		const registered = new Set(all.map((tool) => tool.name));
+		if (!deferralEnabled(all)) {
+			// Nothing is deferred without the loader, but a withheld tool is still
+			// never active: a /tree switch restores a loadout from before it left.
+			const active = pi.getActiveTools();
+			const next = reconcileActive(active, new Set(), new Set(), withheldNames, registered);
+			if (next !== active) pi.setActiveTools([...next]);
+			return;
+		}
 		const branch = branchOf(owner);
 		const use = branchUse(branch);
 		loads = new Map([...use.loads, ...freshLoads]);
@@ -263,7 +271,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 			});
 		}
 		const active = pi.getActiveTools();
-		const next = reconcileActive(active, deferred, callable, withheldNames, new Set(all.map((tool) => tool.name)));
+		const next = reconcileActive(active, deferred, callable, withheldNames, registered);
 		if (next !== active) pi.setActiveTools([...next]);
 	};
 	const reconcileNow = () => reconcile(session, currentModel);
@@ -333,9 +341,6 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		withheldNames.add(name);
 		if (!alive()) return;
 		reconcileNow();
-		// Not deferring: the reconciler leaves the active set alone, but a withheld tool is never active.
-		const active = pi.getActiveTools();
-		if (active.includes(name)) pi.setActiveTools(active.filter((n) => n !== name));
 		publishListing();
 	});
 
