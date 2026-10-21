@@ -24,7 +24,9 @@ type Payload = { model: string; max_tokens: number; system: string; tools: { nam
 
 export class LedgerSim {
 	entries: (EntryLike & { message?: SimMessage })[] = [];
-	model = { api: "anthropic-messages", provider: "acme", id: "m1" };
+	model: { api: string; provider: string; id: string; baseUrl?: string } = { api: "anthropic-messages", provider: "acme", id: "m1" };
+	/** The session id: a /fork copies the entries under a new one. */
+	sessionId = "s1";
 	tools: { name: string }[] = [{ name: "read" }];
 	sent: Payload[] = [];
 	/** The tail pi rendered for the last request: what a cache warm replays. */
@@ -78,7 +80,7 @@ export class LedgerSim {
 	}
 
 	ctx() {
-		return { model: this.model, hasUI: false, ui: { notify() {} }, sessionManager: { getBranch: () => this.entries, getSessionId: () => "s1" } };
+		return { model: this.model, hasUI: false, ui: { notify() {} }, sessionManager: { getBranch: () => this.entries, getSessionId: () => this.sessionId } };
 	}
 
 	add(entry: Omit<EntryLike, "id" | "parentId"> & { message?: SimMessage }) {
@@ -152,6 +154,13 @@ export class LedgerSim {
 		const payload = await this.payload(tail);
 		this.sent.push(payload);
 		return payload;
+	}
+
+	/** The headers pi-ai would send, after the extensions' header hooks. */
+	async headers(): Promise<Record<string, string>> {
+		const event = { headers: {} as Record<string, string> };
+		for (const handler of this.handlers.before_provider_headers ?? []) await handler(event, this.ctx());
+		return event.headers;
 	}
 
 	/** pi's cache warm: the last request's context through the payload hooks again, with the cap at 1. */

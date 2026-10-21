@@ -126,6 +126,24 @@ describe("a cache warm never records", () => {
 	});
 });
 
+describe("a /fork routes to its parent's cache host (R3-M22)", () => {
+	it("sends the parent's session-affinity headers while it extends the parent's record", async () => {
+		const s = new LedgerSim();
+		s.model = { api: "anthropic-messages", provider: "openrouter", id: "anthropic/claude-sonnet-5-5", baseUrl: "https://openrouter.ai/api/v1" };
+		await s.sessionStart();
+		s.message("user", "U1");
+		await s.request("A1");
+		expect(await s.headers()).toEqual({});
+		// /fork: the same entries under a new session id.
+		s.sessionId = "s2";
+		s.load();
+		await s.sessionStart("fork");
+		s.message("user", "U2");
+		await s.context();
+		expect(await s.headers()).toEqual({ "x-session-id": "s1" });
+	});
+});
+
 describe("stripMarkers", () => {
 	it("keeps a cache_control field inside a recorded tool call's input and a tool's schema", () => {
 		const call = { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "write", input: { cache_control: "keep me", nested: [{ cachePoint: { type: "default" } }] }, cache_control: { type: "ephemeral" } }] };

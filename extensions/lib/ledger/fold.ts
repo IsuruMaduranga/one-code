@@ -33,9 +33,10 @@ import type { RecordedRequest } from "./wire.ts";
 
 export type { EpochCause };
 
-/** A recorded request as the fold rebuilds it: the wire list and head, and the context messages it covered. */
+/** A recorded request as the fold rebuilds it: the wire list and head, the context messages it covered, and where it was routed. */
 export interface FoldedRequest extends RecordedRequest {
 	covers?: Coverage;
+	routing?: string;
 }
 
 export interface LedgerFold {
@@ -105,6 +106,7 @@ function rebuild(data: RequestRecordData, base: RecordedRequest | undefined, blo
 		hashes: [...(base?.hashes.slice(0, data.keep) ?? []), ...data.append],
 		headHash: data.head,
 		...(data.covers ? { covers: data.covers } : {}),
+		...(data.routing ? { routing: data.routing } : {}),
 	};
 }
 

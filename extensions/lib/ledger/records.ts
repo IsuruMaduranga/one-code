@@ -79,6 +79,12 @@ export interface RequestRecordData extends RecordBase {
 	blobs: Record<string, unknown>;
 	/** Pending ids this request carried, so the outbox drops them. */
 	consumed: string[];
+	/**
+	 * The session whose cache host the request was routed to (pi-ai's
+	 * session-affinity headers): the session that opened the epoch, so a /fork
+	 * that extends its parent's request goes where the parent's cache lives.
+	 */
+	routing?: string;
 }
 
 export type ToldFact =
@@ -201,7 +207,8 @@ const SHAPE: { [K in RecordKind]: (data: Record<string, unknown>) => boolean } =
 		isStrings(d.append) &&
 		isString(d.head) &&
 		isObject(d.blobs) &&
-		isStrings(d.consumed),
+		isStrings(d.consumed) &&
+		(d.routing === undefined || isString(d.routing)),
 	told: (d) => Array.isArray(d.facts) && d.facts.every(isToldFact),
 	state: (d) => isString(d.key) && "value" in d,
 	pending: (d) =>

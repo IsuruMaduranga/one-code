@@ -38,6 +38,7 @@ import { type EntryLike, makeRecord, RECORD, type ToldFact } from "../lib/ledger
 import { deliveredAfterRepair, repairRequest, validateRequest } from "../lib/ledger/validate.ts";
 import { settlePayload } from "../lib/ledger/layout.ts";
 import { appendPoint, encodeRequest, hasWarmCap, listKey, type RecordedRequest, recordedBody, recordedRequest, samePrefix, spliceRequest, type WirePayload, withRequestFields } from "../lib/ledger/wire.ts";
+import { type AffinityModel, affinityHeaders } from "../lib/request-replay.ts";
 import { extensionVersion } from "../lib/package-version.ts";
 
 export default function ledgerWireExtension(pi: ExtensionAPI) {
@@ -64,6 +65,21 @@ export default function ledgerWireExtension(pi: ExtensionAPI) {
 		recorded = undefined;
 		lastSent = undefined;
 		reported.clear();
+	});
+
+	/** The session the plan's request is routed for: the one that opened the epoch, recorded with its base. */
+	const routingOf = (current: RequestPlan | undefined, own: string) => (current && !current.epoch ? (current.base?.routing ?? own) : own);
+
+	// A /fork's first request extends its parent's record, and the parent's cache
+	// lives on the host the parent's session id routed to: a gateway such as
+	// OpenRouter picks it by the session-affinity headers, which pi-ai builds
+	// from the fork's own id (R3-M22). Not on Codex, where pi-ai sets its
+	// session-id header after every hook (findings §75).
+	pi.on("before_provider_headers", (event, ctx) => {
+		const own = ctx.sessionManager.getSessionId();
+		const routing = routingOf(plan, own);
+		if (routing === own) return;
+		Object.assign(event.headers, affinityHeaders(ctx.model as AffinityModel | undefined, routing));
 	});
 
 	pi.on("before_provider_request", (event, ctx) => {
@@ -113,7 +129,8 @@ export default function ledgerWireExtension(pi: ExtensionAPI) {
 		const delta = encodeRequest(current.fold.lastRequest, request, known);
 		if (delta) {
 			if (current.epoch) pi.appendEntry(RECORD.epoch, makeRecord("epoch", by, { cause: current.cause ?? "first" }));
-			pi.appendEntry(RECORD.request, makeRecord("request", by, { ...delta, covers: current.covers, consumed: delivered.consumed }));
+			const routing = routingOf(current, ctx.sessionManager.getSessionId());
+			pi.appendEntry(RECORD.request, makeRecord("request", by, { ...delta, covers: current.covers, consumed: delivered.consumed, routing }));
 			if (delivered.facts.length > 0) pi.appendEntry(RECORD.told, makeRecord("told", by, { facts: delivered.facts }));
 			recorded = { request, hashes: new Set([...(recorded?.hashes ?? []), ...Object.keys(delta.blobs)]) };
 			pi.events.emit(LEDGER_SENT_CHANNEL, { payload, model, sessionId: ctx.sessionManager.getSessionId(), plan: current } satisfies LedgerSent);
