@@ -69,9 +69,11 @@ export interface SeenFile {
  * by absolute path: the last result or post-compaction restore that showed
  * it, and the changed versions a notice named since.
  *
- * In the kept turns before the latest compaction only a `read` result counts,
- * as at the compaction itself: a kept edit or write does not show the whole
- * file. A restore counts only after the latest compaction, and there it
+ * In the kept turns before the latest compaction a `read` result counts, as
+ * at the compaction itself: a kept edit or write does not show the whole
+ * file, so it counts only for a file a kept read showed before it, where it
+ * records the version the edit left (the live tracker observes the file
+ * again after its own write, and the compaction keeps that). A restore counts only after the latest compaction, and there it
  * counts whether or not a request delivered it yet. A later compaction is
  * the only thing that drops a restore undelivered (lib/ledger/fold.ts), so
  * one recorded since the latest is either delivered or rides the next
@@ -88,7 +90,7 @@ export function filesSeenOnBranch(entries: readonly unknown[]): Map<string, Seen
 	entries.forEach((entry, index) => {
 		const result = results.get(index);
 		if (result) {
-			if (index > compaction || result.name === "read") see(result.seen);
+			if (index > compaction || result.name === "read" || files.has(result.seen.path)) see(result.seen);
 			return;
 		}
 		const record = readRecord(entry as never);

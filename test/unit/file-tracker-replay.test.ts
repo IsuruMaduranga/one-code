@@ -42,6 +42,17 @@ describe("filesSeenOnBranch", () => {
 		expect([...filesSeenOnBranch(entries).keys()]).toEqual(["/w/kept-read", "/w/restored", "/w/new"]);
 	});
 
+	it("takes a kept edit or write as the latest version of a file a kept read showed", () => {
+		const entries = [
+			assistant(call("1", "read", { path: "/w/a" }), call("2", "edit", { path: "/w/a" }), call("3", "write", { path: "/w/a" })),
+			result("1", "/w/a", { sha256: "h1" }),
+			result("2", "/w/a", { sha256: "h2" }),
+			result("3", "/w/a", { sha256: "h3" }),
+			compaction,
+		];
+		expect(filesSeenOnBranch(entries).get("/w/a")?.seen).toEqual(seen("/w/a", "h3"));
+	});
+
 	it("collects the versions a notice named after the file's last observation", () => {
 		const entries = [
 			assistant(call("1", "read", { path: "/w/a" })),
