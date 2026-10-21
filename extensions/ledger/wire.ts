@@ -81,11 +81,14 @@ export default function ledgerWireExtension(pi: ExtensionAPI) {
 	// lives on the host the parent's session id routed to: a gateway such as
 	// OpenRouter picks it by the session-affinity headers, which pi-ai builds
 	// from the fork's own id (R3-M22). Not on Codex, where pi-ai sets its
-	// session-id header after every hook (findings §75).
+	// session-id header after every hook (findings §75). With no plan in this
+	// instance (a warm after a /reload) the call resends the branch's last
+	// request, so it goes where that request was routed.
 	pi.on("before_provider_headers", (event, ctx) => {
 		call++;
 		const own = ctx.sessionManager.getSessionId();
-		const routing = routingOf(plan, own);
+		const identity = plan ? undefined : sessionIdentity(pi, ctx.model);
+		const routing = plan ? routingOf(plan, own) : ((identity && foldSession(ctx.sessionManager, identity).lastRequest?.routing) ?? own);
 		if (routing === own) return;
 		Object.assign(event.headers, affinityHeaders(ctx.model as AffinityModel | undefined, routing));
 	});

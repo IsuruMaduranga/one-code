@@ -163,6 +163,25 @@ describe("a /fork routes to its parent's cache host (R3-M22)", () => {
 		await s.context();
 		expect(await s.headers()).toEqual({ "x-session-id": "s1" });
 	});
+
+	it("sends the recorded request's affinity headers with a cache warm after a /reload of the fork", async () => {
+		const s = new LedgerSim();
+		s.model = { api: "anthropic-messages", provider: "openrouter", id: "anthropic/claude-sonnet-5-5", baseUrl: "https://openrouter.ai/api/v1" };
+		await s.sessionStart();
+		s.message("user", "U1");
+		await s.request("A1");
+		s.sessionId = "s2";
+		s.load();
+		await s.sessionStart("fork");
+		s.message("user", "U2");
+		await s.request("A2");
+		// /reload: no plan in the new instance, so the warm replays the branch's last request.
+		s.load();
+		await s.sessionStart("reload");
+		const warm = await s.warm();
+		expect(warm).toEqual({ ...s.sent.at(-1), max_tokens: 1 });
+		expect(await s.headers()).toEqual({ "x-session-id": "s1" });
+	});
 });
 
 describe("stripMarkers", () => {
