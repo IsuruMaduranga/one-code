@@ -44,7 +44,16 @@ import {
 	SCHEDULE_WAKEUP_PARAMS,
 	WAKEUP_ERRORS,
 } from "./wakeup.ts";
-import { deliveryFromState, isAutonomousSentinel, isLoopFileSentinel, LOOP_DELIVERY_STATE, readLoopFile, resolveLoopFire } from "./loop-fire.ts";
+import {
+	deliveryFromState,
+	isAutonomousSentinel,
+	isLoopFileSentinel,
+	LOOP_DELIVERY_DETAILS_KEY,
+	LOOP_DELIVERY_STATE,
+	type LoopDeliveryState,
+	readLoopFile,
+	resolveLoopFire,
+} from "./loop-fire.ts";
 import { autonomousPreamble, loopSkillPrompt } from "./loop-skill.ts";
 import {
 	CRON_CREATE_DESCRIPTION,
@@ -292,10 +301,11 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	 * of that conversation: the main session's, or a subagent's own session,
 	 * since each has its own history and compacts on its own. Read since the
 	 * last compaction, so the first fire after one resends the instructions,
-	 * as Claude Code does; written only when it changes (lifecycle grid
-	 * R3-L12).
+	 * as Claude Code does. `delivery` is the record this text makes true, set
+	 * only when it changes (lifecycle grid R3-L12); the caller writes it when
+	 * the text reaches the conversation.
 	 */
-	const expandSentinel = (prompt: string, cwd: string, conversation: FireConversation | undefined): string => {
+	const expandSentinel = (prompt: string, cwd: string, conversation: FireConversation | undefined): { text: string; delivery?: LoopDeliveryState } => {
 		let branch: readonly unknown[] = [];
 		try {
 			branch = conversation?.getBranch() ?? [];
@@ -306,14 +316,15 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		const state = { ...before };
 		const text = resolveLoopFire(state, prompt, cwd, autonomousPreamble());
 		const changed = state.autonomousPreambleDelivered !== before.autonomousPreambleDelivered || state.lastLoopFileDelivered !== before.lastLoopFileDelivered;
-		if (changed && conversation) {
-			try {
-				recordState(conversation, LOOP_DELIVERY_STATE, state);
-			} catch {
-				// Same: nothing to record into.
-			}
+		return changed ? { text, delivery: state } : { text };
+	};
+	/** Record what a delivered fire told its conversation; a torn-down one has nothing to record into. */
+	const recordDelivery = (conversation: Pick<FireConversation, "appendEntry">, delivery: LoopDeliveryState) => {
+		try {
+			recordState(conversation, LOOP_DELIVERY_STATE, delivery);
+		} catch {
+			// Same: nothing to record into.
 		}
-		return text;
 	};
 	/** The main session as a fire's conversation, while it is live. */
 	const mainConversation = (): FireConversation | undefined => {
@@ -328,14 +339,14 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	 * prompt verbatim. Both resolve in the job owner's directory: a subagent's
 	 * own, or the main session's worktree while it is in one.
 	 */
-	const fireText = (job: CronJob, conversation: FireConversation | undefined): string => {
+	const fireText = (job: CronJob, conversation: FireConversation | undefined): { text: string; delivery?: LoopDeliveryState } => {
 		const { prompt } = job;
 		const cwd = job.cwd ?? worktreeCwd ?? sessionCwd;
-		const resolved = isAutonomousSentinel(prompt) || isLoopFileSentinel(prompt) ? expandSentinel(prompt, cwd, conversation) : prompt;
-		if (resolved !== prompt || !prompt.startsWith("/")) return resolved;
+		if (isAutonomousSentinel(prompt) || isLoopFileSentinel(prompt)) return expandSentinel(prompt, cwd, conversation);
+		if (!prompt.startsWith("/")) return { text: prompt };
 		const query: SlashExpandQuery = { text: prompt, cwd };
 		pi.events.emit(SLASH_EXPAND_CHANNEL, query);
-		return query.expanded ?? prompt;
+		return { text: query.expanded ?? prompt };
 	};
 	/** Claude Code's no-op fold for the wakeup firing now (noop-fold.ts), read off the session branch. */
 	const foldDetails = (): FoldDetails => {
@@ -352,7 +363,13 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		const { job, final } = fire;
 		if (job.agentId !== undefined) {
 			// A subagent's job goes to that agent, or is dropped once it has ended.
-			const delivery: AgentCronFire = { agentId: job.agentId, jobId: job.id, text: (conversation) => fireText(job, conversation) };
+			// The agent's resident sends the text as soon as it asks for it, so the record goes with the text.
+			const text = (conversation: FireConversation | undefined) => {
+				const fired = fireText(job, conversation);
+				if (fired.delivery && conversation) recordDelivery(conversation, fired.delivery);
+				return fired.text;
+			};
+			const delivery: AgentCronFire = { agentId: job.agentId, jobId: job.id, text };
 			pi.events.emit(AGENT_CRON_FIRE_CHANNEL, delivery);
 			// The agent has ended: its job goes with it.
 			if (!delivery.delivered) cron.delete(job.id);
@@ -366,8 +383,20 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		if (job.source === "wakeup") dynamicLoop.inFlight = job.prompt;
 		// Recorded whatever way the notification goes out, so a /reload knows the fire happened.
 		pi.appendEntry(JOB_FIRED_ENTRY, { jobId: job.id, final, source: job.source });
-		notify(job.source === "wakeup" ? "wakeup" : "cron", fireText(job, mainConversation()), { jobId: job.id, cron: job.cron, source: job.source, final, ...fold });
+		// The notifier may hold the message (a coalescing window, an interrupt) and
+		// a /reload drops what it holds, so the loop's record rides the message and
+		// is written when pi delivers it (message_end below).
+		const { text, delivery } = fireText(job, mainConversation());
+		const details = { jobId: job.id, cron: job.cron, source: job.source, final, ...fold, ...(delivery ? { [LOOP_DELIVERY_DETAILS_KEY]: delivery } : {}) };
+		notify(job.source === "wakeup" ? "wakeup" : "cron", text, details);
 	};
+	// A fire's message reached the conversation: what it told the model is on the branch from here.
+	pi.on("message_end", (event) => {
+		const message = event.message as { role?: string; customType?: string; details?: unknown };
+		if (message.role !== "custom" || (message.customType !== "cron" && message.customType !== "wakeup")) return;
+		const stored = (message.details as Record<string, unknown> | undefined)?.[LOOP_DELIVERY_DETAILS_KEY];
+		if (stored !== undefined) recordDelivery(pi, deliveryFromState(stored));
+	});
 	/** Fire every due job (only while idle), then arm the one timer to the next fire. */
 	const runCron = () => {
 		if (cronTimer) clearTimeout(cronTimer);

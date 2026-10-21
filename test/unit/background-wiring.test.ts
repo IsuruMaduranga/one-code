@@ -935,7 +935,9 @@ describe("background wiring: state across /reload, /tree and compaction", () => 
 		const at = new Date(Date.now() + 60_000);
 		await cronCall(fake, "cron_create", { cron: `${at.getMinutes()} ${at.getHours()} * * *`, prompt: "<<autonomous-loop>>", recurring: false }, ctx);
 		await vi.advanceTimersByTimeAsync(60_000 + DEFAULT_COALESCE_MS);
-		await fake.fireOne("message_end", { message: { role: "custom", details: fake.sentMessages.at(-1)?.message.details } });
+		// pi delivers the fire's message (its customType and details as sent).
+		const sent = fake.sentMessages.at(-1)?.message;
+		await fake.fireOne("message_end", { message: { role: "custom", customType: sent?.customType, details: sent?.details } });
 		return firedTexts(fake).at(-1)!;
 	};
 	const isFull = (text: string) => text.startsWith("# Autonomous loop check");
@@ -984,6 +986,30 @@ describe("background wiring: state across /reload, /tree and compaction", () => 
 		// A compaction summarizes them away: the next fire sends them again.
 		reloaded.branch.push({ type: "compaction", id: "cmp", parentId: reloaded.branch.at(-1)?.id ?? null });
 		expect(isFull(await fireSentinel(reloaded, reloadedCtx))).toBe(true);
+		expect(isShort(await fireSentinel(reloaded, reloadedCtx))).toBe(true);
+	});
+
+	it("records the /loop delivery only once the fire's message is delivered: a /reload that drops a held fire resends the instructions", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2026, 8, 25, 12, 0, 0));
+		const fake = mount();
+		const ctx = liveSessionCtx({ sessionManager: { getBranch: () => fake.branch } });
+		await fake.fire("session_start", { reason: "startup" }, ctx);
+		// The fire is built, but the notifier still holds it (the coalescing window) when /reload shuts the session down.
+		const at = new Date(Date.now() + 60_000);
+		await cronCall(fake, "cron_create", { cron: `${at.getMinutes()} ${at.getHours()} * * *`, prompt: "<<autonomous-loop>>", recurring: false }, ctx);
+		await vi.advanceTimersByTimeAsync(60_000);
+		await fake.fire("session_shutdown", { reason: "reload" }, ctx);
+		await vi.advanceTimersByTimeAsync(DEFAULT_COALESCE_MS);
+		expect(firedTexts(fake)).toEqual([]);
+
+		// The next fire after the reload: the model never had the instructions, so they go out in full.
+		const reloaded = mount();
+		reloaded.branch.push(...fake.branch);
+		const reloadedCtx = liveSessionCtx({ sessionManager: { getBranch: () => reloaded.branch } });
+		await reloaded.fire("session_start", { reason: "reload" }, reloadedCtx);
+		expect(isFull(await fireSentinel(reloaded, reloadedCtx))).toBe(true);
+		// That one was delivered: the next fire is the short tick.
 		expect(isShort(await fireSentinel(reloaded, reloadedCtx))).toBe(true);
 	});
 

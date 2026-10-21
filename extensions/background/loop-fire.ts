@@ -59,6 +59,14 @@ export function freshDeliveryState(): LoopDeliveryState {
  */
 export const LOOP_DELIVERY_STATE = "loop-delivery";
 
+/**
+ * The key a main-session fire's notification details carry its record
+ * under. The record is written when pi delivers that message (its
+ * `message_end`), not when the text is built: the notifier may still hold
+ * it, and a `/reload` or `/clear` then drops it unsent.
+ */
+export const LOOP_DELIVERY_DETAILS_KEY = "loopDelivery";
+
 /** A stored record read back, or a fresh one when it is missing or malformed. */
 export function deliveryFromState(value: unknown): LoopDeliveryState {
 	const stored = value as Partial<LoopDeliveryState> | undefined;
