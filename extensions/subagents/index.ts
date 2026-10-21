@@ -813,17 +813,37 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		const live = liveUiCtx(lastCtx);
 		if (live) emitModelStatus(live);
 	});
+	/**
+	 * The main conversation's runs still going at the last compaction, and the
+	 * compaction entry they belong to: named on the next request, as far as
+	 * they are still going then.
+	 */
+	let runningAtCompaction: { entryId: string | undefined; taskIds: string[] } | undefined;
 	// A compaction opens an epoch, which renders the three blocks from live state:
 	// refresh them, so a catalog that changed on disk since is current. The calls
 	// that started the background runs went into the summary, so the runs still
 	// going are named once on the new epoch's first request. Only the main
 	// conversation's own runs: a nested run reports to the agent that spawned it.
-	pi.on("session_compact", (_event, ctx) => {
+	pi.on("session_compact", (event, ctx) => {
 		emitModelStatus(ctx);
 		emitAgentCatalog(ctx);
 		emitDelegationSteer();
-		const going = [...registry.list()]
-			.filter((record) => (record.depth ?? 0) === 0 && stillRunning(record.taskId))
+		const taskIds = [...registry.list()].filter((record) => (record.depth ?? 0) === 0 && stillRunning(record.taskId)).map((record) => record.taskId);
+		runningAtCompaction = taskIds.length > 0 ? { entryId: event?.compactionEntry?.id, taskIds } : undefined;
+	});
+	// Named when the request is built, not at the compaction: the next request can
+	// come much later (a manual /compact waits for the next prompt), and a run that
+	// finished meanwhile is not running. The run's own notification says it ended.
+	// A /tree to a branch without that compaction still shows the calls.
+	pi.on("turn_start", (_event, ctx) => {
+		const owed = runningAtCompaction;
+		if (!owed) return;
+		runningAtCompaction = undefined;
+		if (owed.entryId !== undefined && !ctx.sessionManager.getBranch().some((entry) => entry.id === owed.entryId)) return;
+		const going = owed.taskIds
+			.filter(stillRunning)
+			.map((taskId) => registry.resolve(taskId))
+			.filter((record): record is AgentRunRecord => record !== undefined)
 			.map((record) => ({ name: record.name, taskId: record.taskId }));
 		const text = runningAfterCompactionReminder(going);
 		if (text) pi.events.emit(REMINDER_CHANNEL, { text, key: "subagents-running-after-compaction", untilCompaction: true });

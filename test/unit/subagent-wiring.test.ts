@@ -743,9 +743,44 @@ describe("background agents named after a compaction", () => {
 		void nested!.execute("nested-call", { subagent_type: "explore", task: "Look", name: "looker" }, undefined, undefined, h.ctx as never);
 		await vi.advanceTimersByTimeAsync(0);
 		await h.fake.fire("session_compact", { compactionEntry: { id: "c1" } }, h.ctx);
-		await h.fake.fire("turn_start", {}, h.ctx);
+		await h.fake.fire("turn_start", {}, compacted(h));
 		expect(notices).toHaveLength(1);
 		expect(notices[0]).toContain("general-purpose-1");
 		expect(notices[0]).not.toContain("looker");
+	});
+
+	/** The session's context with the compaction entry `c1` on its branch. */
+	const compacted = (h: Awaited<ReturnType<typeof mount>>, branch: unknown[] = [{ type: "compaction", id: "c1" }]) => ({
+		...h.ctx,
+		sessionManager: { ...(h.ctx.sessionManager as object), getBranch: () => branch },
+	});
+
+	it("does not name an agent that finished between the compaction and the next request", async () => {
+		const runtime = fakeResident();
+		const h = await mount();
+		const notices = compactionNotices(h);
+		await h.call("Agent", { subagent_type: "general-purpose", task: "Count the files" });
+		await h.fake.fire("session_compact", { compactionEntry: { id: "c1" } }, h.ctx);
+		runtime.finish();
+		await vi.advanceTimersByTimeAsync(DEFAULT_COALESCE_MS + 1);
+		await h.fake.fire("turn_start", {}, compacted(h));
+		expect(notices).toEqual([]);
+	});
+
+	it("names a run once, on the first request after the compaction, and not on a branch without that compaction", async () => {
+		fakeResident();
+		const h = await mount();
+		const notices = compactionNotices(h);
+		await h.call("Agent", { subagent_type: "general-purpose", task: "Count the files" });
+		await h.fake.fire("session_compact", { compactionEntry: { id: "c1" } }, h.ctx);
+		expect(notices).toEqual([]);
+		await h.fake.fire("turn_start", {}, compacted(h));
+		await h.fake.fire("turn_start", {}, compacted(h));
+		expect(notices).toHaveLength(1);
+
+		await h.fake.fire("session_compact", { compactionEntry: { id: "c2" } }, h.ctx);
+		// A /tree to a branch that does not hold the compaction: its history still shows the call.
+		await h.fake.fire("turn_start", {}, compacted(h, [{ type: "compaction", id: "c1" }]));
+		expect(notices).toHaveLength(1);
 	});
 });
