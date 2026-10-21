@@ -54,7 +54,9 @@ import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
 import { EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_NONE, EXTERNAL_INCLUDES_SETTING, EXTERNAL_INCLUDES_YES, externalIncludesDialog, persistExternalIncludesApproval, readExternalIncludesApproval } from "../lib/claude-external-includes.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 import { consentDialog, installConsentDialogs, startupConsentReady } from "../lib/consent-dialogs.ts";
-import type { ToldFact } from "../lib/ledger/records.ts";
+import type { EntryLike, ToldFact } from "../lib/ledger/records.ts";
+import { foldBranch } from "../lib/ledger/fold.ts";
+import { requestIdentity, sessionThinkingLevel } from "../lib/anthropic-auth.ts";
 
 const REMINDER_KEY = "claude-context";
 const ONECODE_REMINDER_KEY = "one-code-context";
@@ -363,6 +365,14 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		await drainApproval();
 		if (gen !== sessionGeneration || approvalAbort.signal.aborted) return;
 		if (gitStatus !== undefined) return;
+		// A process that starts on a compacted branch before the compaction's
+		// epoch opened (/compact, then /reload) renders that epoch's message 1:
+		// the blocks are the compaction's, not the conversation start's (R3-L11).
+		const fold = foldBranch(ctx.sessionManager.getBranch() as EntryLike[], requestIdentity(ctx.model, sessionThinkingLevel(pi)));
+		if (fold.opensEpoch && fold.cause === "compaction") {
+			refreshForCompaction(ctx);
+			return;
+		}
 		gitStatus = snapshotGit(ctx.cwd);
 		if (files) {
 			const atStart = liveFingerprints(files, gitStatus, takesGitSnapshot);
@@ -409,7 +419,8 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	// All successful compactions (manual, automatic and idle) fire this hook. The
 	// summary opens an epoch, which renders these blocks: refresh them from the
 	// workspace now, in the entered worktree if any.
-	pi.on("session_compact", (_event, ctx) => {
+	pi.on("session_compact", (_event, ctx) => refreshForCompaction(ctx));
+	function refreshForCompaction(ctx: ExtensionContext) {
 		const cwd = sessionWorkCwd(entered, ctx.cwd);
 		const current = readFiles(cwd);
 		adoptFiles(current);
@@ -420,7 +431,7 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		gitStatus = snapshotGit(cwd);
 		emitContextBlock(compactionGitStatus(gitStatus), true);
 		emitDate(localDate());
-	});
+	}
 
 	// A branch switch leaves the attachments of the branch left behind; the new one may lack them.
 	pi.on("session_tree", (_event, ctx) => {

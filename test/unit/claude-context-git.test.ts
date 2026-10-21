@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import claudeContextExtension from "../../extensions/claude-context/index.ts";
 import { GIT_SNAPSHOT_OWNER_CHANNEL } from "../../extensions/lib/git-status.ts";
+import { makeRecord, RECORD } from "../../extensions/lib/ledger/records.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
@@ -25,12 +26,12 @@ describe("claude-context's git snapshot", () => {
 		rmSync(dir, { recursive: true, force: true });
 	});
 
-	async function contextBlock(owner: boolean): Promise<string | undefined> {
+	async function contextBlock(owner: boolean, branch: unknown[] = []): Promise<string | undefined> {
 		const fake = createFakePi();
 		const texts: Array<{ key?: string; text?: string }> = [];
 		fake.events.on(REMINDER_CHANNEL, (data) => texts.push(data as never));
 		claudeContextExtension(fake.pi as never);
-		const ctx = createFakeCtx({ cwd: dir });
+		const ctx = createFakeCtx({ cwd: dir, sessionManager: { getBranch: () => branch } });
 		await fake.fireOne("session_start", {}, ctx);
 		if (owner) fake.events.emit(GIT_SNAPSHOT_OWNER_CHANNEL, {});
 		await fake.fireOne("turn_start", {}, ctx);
@@ -45,5 +46,15 @@ describe("claude-context's git snapshot", () => {
 		const block = await contextBlock(false);
 		expect(block).not.toContain("# gitStatus");
 		expect(block).toContain("# userEmail");
+	});
+
+	it("is the compaction's, not the conversation start's, when a process starts before the compaction's epoch opened (R3-L11)", async () => {
+		const identity = { api: "anthropic-messages", provider: "acme", model: "m", auth: "key" };
+		const branch = [
+			{ type: "custom", id: "r1", parentId: null, customType: RECORD.request, data: makeRecord("request", "test", { identity, keep: 0, append: [], head: "h", blobs: { h: {} }, consumed: [], covers: { count: 1, role: "user", timestamp: 1 } }) },
+			{ type: "message", id: "a1", parentId: "r1", message: { role: "assistant" } },
+			{ type: "compaction", id: "c1", parentId: "a1" },
+		];
+		expect(await contextBlock(true, branch)).toContain("This is the git status at the latest compaction.");
 	});
 });
