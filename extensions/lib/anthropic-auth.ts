@@ -89,7 +89,10 @@ export function requestIdentity(model: IdentityModel | undefined, thinkingLevel?
 	return { api: model.api, provider: model.provider, model: model.id, auth: authKind(model.provider, model.baseUrl), ...(markers !== undefined ? { effortMarkers: markers } : {}) };
 }
 
-/** The session's thinking level, for `requestIdentity`; undefined where the API lacks it (a test double). */
-export function sessionThinkingLevel(pi: { getThinkingLevel?: () => string }): string | undefined {
-	return typeof pi.getThinkingLevel === "function" ? pi.getThinkingLevel() : undefined;
+/**
+ * The identity of a request this session sends to `model` now, under the
+ * session's thinking level (undefined where the API lacks it: a test double).
+ */
+export function sessionIdentity(pi: { getThinkingLevel?: () => string }, model: IdentityModel | undefined): RequestIdentity | undefined {
+	return requestIdentity(model, typeof pi.getThinkingLevel === "function" ? pi.getThinkingLevel() : undefined);
 }

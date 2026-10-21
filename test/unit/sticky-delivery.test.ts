@@ -27,7 +27,7 @@ describe("a sticky state's first delivery follows the branch", () => {
 			const plan = { epoch: false, fold: { ...foldBranch([]), blocks }, consumed: [], facts: [], carried: [], covers: { count: 1, role: "user", timestamp: 1 }, messages: [] } as unknown as RequestPlan;
 			fake.events.emit(LEDGER_PLAN_CHANNEL, plan);
 			const out = await fake.fireOne<{ messages: unknown[] } | undefined>("context", { messages: [result] }, ctx);
-			return { carried: JSON.stringify(out?.messages ?? []).includes("plan mode is on"), facts: plan.facts };
+			return { carried: JSON.stringify(out?.messages ?? []).includes("plan mode is on"), facts: plan.carried.flatMap((block) => block.facts) };
 		};
 
 		const first = await render(new Map());

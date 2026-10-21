@@ -172,10 +172,8 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 			...rendered.placed.map((shot) => ({ text: shot.text, facts: shot.facts ?? [] })),
 			...sticky.filter((entry) => stickyFacts.includes(entry.fact)).map((entry) => ({ text: entry.text, facts: [entry.fact] })),
 		].filter((block) => block.facts.length > 0);
-		const facts = carried.flatMap((block) => block.facts);
 		if (current) {
 			current.consumed.push(...consumed);
-			current.facts.push(...facts);
 			current.carried.push(...carried);
 		} else {
 			for (const id of consumed) deliveredHere.add(id);

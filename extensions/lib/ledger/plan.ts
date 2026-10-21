@@ -43,9 +43,11 @@ export interface RequestPlan {
 	fold: LedgerFold;
 	/** Pending ids this request carries (the renderer fills it). */
 	consumed: string[];
-	/** What this request's new blocks tell the model (the renderer fills it). */
-	facts: ToldFact[];
-	/** Each new block's text with the facts it carries, so a repair that drops a block drops its facts (the renderer fills it). */
+	/**
+	 * Each new block's text with the facts it tells the model, so a repair that
+	 * drops a block drops its facts (the renderer fills it). The request tells
+	 * exactly these blocks' facts, in this order.
+	 */
 	carried: CarriedFacts[];
 	/** Every context message pi built for the request, before the cut: what the whole request covers. */
 	messages: readonly CoveredMessage[];
@@ -85,7 +87,6 @@ export function planRequest(fold: LedgerFold, messages: readonly CoveredMessage[
 		covers,
 		fold,
 		consumed: [],
-		facts: [],
 		carried: [],
 		messages,
 	});

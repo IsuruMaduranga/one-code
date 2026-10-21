@@ -30,11 +30,11 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { requestIdentity, sessionThinkingLevel } from "../lib/anthropic-auth.ts";
+import { sessionIdentity } from "../lib/anthropic-auth.ts";
 import { notifyOrPrint } from "../lib/headless-output.ts";
-import { foldBranch } from "../lib/ledger/fold.ts";
+import { foldSession } from "../lib/ledger/fold-memo.ts";
 import { LEDGER_PLAN_CHANNEL, LEDGER_SENT_CHANNEL, type LedgerSent, type RequestPlan } from "../lib/ledger/plan.ts";
-import { type EntryLike, makeRecord, RECORD, type ToldFact } from "../lib/ledger/records.ts";
+import { makeRecord, RECORD, type ToldFact } from "../lib/ledger/records.ts";
 import { deliveredAfterRepair, repairRequest, validateRequest } from "../lib/ledger/validate.ts";
 import { settlePayload } from "../lib/ledger/layout.ts";
 import { appendPoint, encodeRequest, hasWarmCap, listKey, type RecordedRequest, recordedBody, recordedRequest, samePrefix, spliceRequest, type WirePayload, withBranchToolOrder, withRequestFields } from "../lib/ledger/wire.ts";
@@ -84,7 +84,7 @@ export default function ledgerWireExtension(pi: ExtensionAPI) {
 
 	pi.on("before_provider_request", (event, ctx) => {
 		const model = ctx.model;
-		const identity = requestIdentity(model, sessionThinkingLevel(pi));
+		const identity = sessionIdentity(pi, model);
 		if (!model || !identity) return undefined;
 		const api = model.api;
 		const live = event.payload as WirePayload;
@@ -93,7 +93,7 @@ export default function ledgerWireExtension(pi: ExtensionAPI) {
 		// A cache warm: the request it warms, as sent, under the warm's cap.
 		if ((!current || sent) && hasWarmCap(live)) {
 			if (lastSent) return withRequestFields(lastSent, live);
-			const base = foldBranch(ctx.sessionManager.getBranch() as EntryLike[], identity).lastRequest;
+			const base = foldSession(ctx.sessionManager, identity).lastRequest;
 			return base ? recordedBody(base, live, api) : undefined;
 		}
 		// No context pass in this instance and not a warm: leave pi's request alone.
@@ -108,7 +108,7 @@ export default function ledgerWireExtension(pi: ExtensionAPI) {
 		const spliced = payload;
 		// The final layout pass: no system message stranded before a user message (lib/ledger/layout.ts).
 		payload = settlePayload(payload, api, listKey(api), end);
-		let delivered: { consumed: string[]; facts: ToldFact[] } = { consumed: current.consumed, facts: current.facts };
+		let delivered: { consumed: string[]; facts: ToldFact[] } = { consumed: current.consumed, facts: current.carried.flatMap((block) => block.facts) };
 
 		const problems = validateRequest(payload, api);
 		if (problems.length > 0) {
