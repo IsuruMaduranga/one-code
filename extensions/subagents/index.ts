@@ -816,13 +816,14 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	// A compaction opens an epoch, which renders the three blocks from live state:
 	// refresh them, so a catalog that changed on disk since is current. The calls
 	// that started the background runs went into the summary, so the runs still
-	// going are named once on the new epoch's first request.
+	// going are named once on the new epoch's first request. Only the main
+	// conversation's own runs: a nested run reports to the agent that spawned it.
 	pi.on("session_compact", (_event, ctx) => {
 		emitModelStatus(ctx);
 		emitAgentCatalog(ctx);
 		emitDelegationSteer();
 		const going = [...registry.list()]
-			.filter((record) => stillRunning(record.taskId))
+			.filter((record) => (record.depth ?? 0) === 0 && stillRunning(record.taskId))
 			.map((record) => ({ name: record.name, taskId: record.taskId }));
 		const text = runningAfterCompactionReminder(going);
 		if (text) pi.events.emit(REMINDER_CHANNEL, { text, key: "subagents-running-after-compaction", untilCompaction: true });

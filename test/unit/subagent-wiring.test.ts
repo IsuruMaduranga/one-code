@@ -718,3 +718,34 @@ describe("subagent runs follow a /tree switch", () => {
 		expect(await names()).toEqual(["selected"]);
 	});
 });
+
+// A compaction summarizes the calls that started background agents, so the
+// next request names the ones still going.
+describe("background agents named after a compaction", () => {
+	const KEY = "subagents-running-after-compaction";
+	const compactionNotices = (h: Awaited<ReturnType<typeof mount>>) => {
+		const texts: string[] = [];
+		h.fake.events.on(REMINDER_CHANNEL, (data) => {
+			const reminder = data as { text?: string; key?: string };
+			if (reminder.key === KEY && reminder.text) texts.push(reminder.text);
+		});
+		return texts;
+	};
+
+	it("names only top-level runs, not a nested run whose result goes to the agent that spawned it", async () => {
+		const runtime = fakeResident();
+		runtime.runner.run.mockReturnValue({ result: new Promise<ChildOutcome>(() => {}), kill: vi.fn(), snapshot: () => ({ text: "", toolCalls: 0, usage: emptyUsage() }) });
+		const h = await mount();
+		h.fake.events.emit(SUBAGENT_GATE_CHANNEL, { decide: async () => undefined });
+		const notices = compactionNotices(h);
+		await h.call("Agent", { subagent_type: "general-purpose", task: "Delegate" });
+		const nested = runtime.options().extraTools?.find((tool) => tool.name === "Agent");
+		void nested!.execute("nested-call", { subagent_type: "explore", task: "Look", name: "looker" }, undefined, undefined, h.ctx as never);
+		await vi.advanceTimersByTimeAsync(0);
+		await h.fake.fire("session_compact", { compactionEntry: { id: "c1" } }, h.ctx);
+		await h.fake.fire("turn_start", {}, h.ctx);
+		expect(notices).toHaveLength(1);
+		expect(notices[0]).toContain("general-purpose-1");
+		expect(notices[0]).not.toContain("looker");
+	});
+});
