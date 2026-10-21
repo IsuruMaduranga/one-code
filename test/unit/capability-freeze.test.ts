@@ -210,4 +210,11 @@ describe("tools in use", () => {
 		expect(toolsInUse([call("b"), load("t2", ["d"])] as never[])).toEqual(new Set(["b", "d"]));
 		expect(toolsInUse([])).toEqual(new Set());
 	});
+
+	it("leave out a call the dispatcher failed as not found", () => {
+		const notFound = { type: "message", message: { role: "toolResult", toolName: "b", toolCallId: "c1", isError: true, content: [{ type: "text", text: "Tool b not found" }] } };
+		expect(toolsInUse([call("b"), notFound] as never[])).toEqual(new Set());
+		const failed = { type: "message", message: { role: "toolResult", toolName: "b", toolCallId: "c1", isError: true, content: [{ type: "text", text: "Timed out" }] } };
+		expect(toolsInUse([call("b"), failed] as never[])).toEqual(new Set(["b"]));
+	});
 });

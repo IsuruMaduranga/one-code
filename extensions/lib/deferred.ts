@@ -213,14 +213,24 @@ export function toolSearchLoads(branch: readonly SessionEntry[]): Map<string, st
 }
 const TOOL_SEARCH_NAMES: ReadonlySet<string> = new Set([TOOL_SEARCH]);
 
-/** The tools `entries` use: loaded by a `tool_search` result in them (`loads`, their `toolSearchLoads`), or called by an assistant message in them. */
+/**
+ * The tools `entries` use: loaded by a `tool_search` result in them (`loads`,
+ * their `toolSearchLoads`), or called by an assistant message in them. A call
+ * the dispatcher failed as "Tool <name> not found" does not count: the tool
+ * was not loaded, and the miss steers the model to `tool_search` to load it.
+ */
 export function toolsInUse(entries: readonly SessionEntry[], loads: ToolSearchLoads = toolSearchLoads(entries)): Set<string> {
 	const inUse = new Set([...loads.values()].flat());
+	const missed = new Set<string>();
+	for (const entry of entries) {
+		const message = entry.type === "message" ? (entry.message as { role?: string; toolCallId?: unknown; isError?: unknown }) : undefined;
+		if (message?.role === "toolResult" && message.isError === true && typeof message.toolCallId === "string" && toolNotFoundName(resultText(message))) missed.add(message.toolCallId);
+	}
 	for (const entry of entries) {
 		const message = entry.type === "message" ? (entry.message as { role?: string; content?: unknown }) : undefined;
 		if (message?.role !== "assistant" || !Array.isArray(message.content)) continue;
-		for (const block of message.content as Array<{ type?: string; name?: unknown }>) {
-			if (block?.type === "toolCall" && typeof block.name === "string") inUse.add(block.name);
+		for (const block of message.content as Array<{ type?: string; id?: unknown; name?: unknown }>) {
+			if (block?.type === "toolCall" && typeof block.name === "string" && !(typeof block.id === "string" && missed.has(block.id))) inUse.add(block.name);
 		}
 	}
 	return inUse;

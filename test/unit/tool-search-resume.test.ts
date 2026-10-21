@@ -88,4 +88,21 @@ describe("tool-search on a resumed session", () => {
 		fake.pi.fire("session_start", { type: "session_start", reason: "new" }, ctxWithBranch([]));
 		expect(fake.activeTools()).toEqual(["read"]);
 	});
+
+	it("leaves a deferred tool inactive after a direct call to it failed as not found, and activates one whose call ran", () => {
+		const callEntry = (id: string, name: string) => ({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id, name, arguments: {} }] } });
+		const resultEntry = (id: string, name: string, text: string, isError: boolean) => ({
+			type: "message",
+			message: { role: "toolResult", toolCallId: id, toolName: name, isError, content: [{ type: "text", text }] },
+		});
+		const entries = [callEntry("c1", "web_fetch"), resultEntry("c1", "web_fetch", "Tool web_fetch not found", true)];
+		const ctx = ctxWithBranch(entries);
+		fake.pi.fire("session_start", { type: "session_start", reason: "resume" }, ctx);
+		fake.pi.fire("turn_start", { type: "turn_start" }, ctx);
+		expect(fake.activeTools()).toEqual(["read"]);
+		// A call that ran (its load summarized away) keeps its tool in use.
+		entries.push(callEntry("c2", "notebook_edit"), resultEntry("c2", "notebook_edit", "Edited cell 1", false));
+		fake.pi.fire("turn_start", { type: "turn_start" }, ctx);
+		expect(fake.activeTools()).toEqual(["read", "notebook_edit"]);
+	});
 });
