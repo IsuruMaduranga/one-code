@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { McpServer, StdioServer } from "../../extensions/mcp/config.ts";
 import {
 	approveMcpServers,
@@ -208,6 +208,16 @@ describe("approveMcpServers", () => {
 		expect(out.withheld[0].reason).toBe("declined");
 		expect(d.disabled).toEqual([]);
 		expect(readStoredApproval(cwd, storePath)).toBeUndefined();
+	});
+
+	it("an Escape outlives /reload, which evaluates the module again (process state)", async () => {
+		const d = deps({ choose: undefined });
+		await approveMcpServers([projectServer("a")], new Set(), cwd, home, d.deps);
+		vi.resetModules();
+		const reloaded = await import("../../extensions/mcp/trust.ts");
+		const again = await reloaded.approveMcpServers([projectServer("a")], new Set(), cwd, home, d.deps);
+		expect(again.withheld[0]).toMatchObject({ reason: "declined" });
+		expect(d.selections).toHaveLength(1);
 	});
 
 	it("without a UI withholds unapproved project servers and says so", async () => {

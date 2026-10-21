@@ -114,8 +114,9 @@ export interface AgentLoaderOptions {
  * listener). A cached loader therefore broke the second child of the same
  * agent type, every SendMessage resume, every workflow agent after the first,
  * and any sibling still running when one was disposed
- * (LIFECYCLE-REVIEW-2026-09-06 H3, measured). A build costs ~3 ms once the
- * extension modules are in jiti's cache, so there is nothing to save.
+ * (LIFECYCLE-REVIEW-2026-09-06 H3, measured). A build costs ~3 ms once pi's
+ * factory cache holds the extensions for that directory (jiti itself runs
+ * with `moduleCache: false`, findings §8), so there is nothing to save.
  */
 export async function buildAgentLoader(options: AgentLoaderOptions): Promise<DefaultResourceLoader> {
 	const loader = new DefaultResourceLoader({

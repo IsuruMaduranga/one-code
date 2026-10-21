@@ -190,9 +190,26 @@ describe("createTaskNotifier after the session is gone (H3)", () => {
 });
 
 describe("createTaskNotifier before the first prompt (H1)", () => {
+	// pi before 1.2.0: a run sendMessage opens from idle skips before_agent_start.
+	const oldPi = { coalesceMs: 0, customRunsFireBeforeAgentStart: false };
+
+	it("on pi 1.2.0 and later sends an idle notification as a custom message at once, after a /reload too (R3-M17)", () => {
+		const { pi, sent, sentAsUser, fire } = fakePi({ prompted: false });
+		// The installed pi is 1.2.0 or later: the default follows it.
+		const notify = createTaskNotifier(pi, { coalesceMs: 0 });
+		notify("wakeup", "first tick", { noOpStreak: 2 });
+		fire("session_start", { reason: "reload" });
+		notify("wakeup", "tick after the reload", { noOpStreak: 3 });
+		expect(sentAsUser).toEqual([]);
+		expect(sent.map((s) => [s.message.customType, (s.message.details as { noOpStreak?: number }).noOpStreak])).toEqual([
+			["wakeup", 2],
+			["wakeup", 3],
+		]);
+	});
+
 	it("delivers an idle notification as a user message while no prompt() has run, then counts it delivered", () => {
 		const { pi, sent, sentAsUser, fire } = fakePi({ prompted: false });
-		const notify = createTaskNotifier(pi, { coalesceMs: 0 });
+		const notify = createTaskNotifier(pi, oldPi);
 		notify("loop", "Loop tick — run the task");
 		expect(sentAsUser).toEqual(["Loop tick — run the task"]);
 		expect(sent).toHaveLength(0);
@@ -204,7 +221,7 @@ describe("createTaskNotifier before the first prompt (H1)", () => {
 
 	it("uses the custom-message path once before_agent_start has fired, and while a run is active", () => {
 		const { pi, sent, sentAsUser, fire, deliver } = fakePi({ prompted: false });
-		const notify = createTaskNotifier(pi, { coalesceMs: 0 });
+		const notify = createTaskNotifier(pi, oldPi);
 		// A run opened by something else is in flight: a user-role prompt would be
 		// refused by pi (no streamingBehavior), so steer the custom message.
 		fire("agent_start");
@@ -222,9 +239,9 @@ describe("createTaskNotifier before the first prompt (H1)", () => {
 });
 
 describe("announcePromptOptions and the first turn a completion opens", () => {
-	it("a command's announced prompt options send the first idle notification as a custom message", () => {
+	it("a command's announced prompt options send the first idle notification as a custom message (pi before 1.2.0)", () => {
 		const { pi, sent, sentAsUser, emit, fire } = fakePi({ prompted: false });
-		const notify = createTaskNotifier(pi, { coalesceMs: 0 });
+		const notify = createTaskNotifier(pi, { coalesceMs: 0, customRunsFireBeforeAgentStart: false });
 		announcePromptOptions({ emit }, { cwd: "/p", getSystemPromptOptions: () => ({ selectedTools: ["read"] }) });
 		notify("subagent-result", "fork done");
 		expect(sentAsUser).toHaveLength(0);

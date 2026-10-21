@@ -44,7 +44,7 @@ import {
 	SCHEDULE_WAKEUP_PARAMS,
 	WAKEUP_ERRORS,
 } from "./wakeup.ts";
-import { freshDeliveryState, type LoopDeliveryState, readLoopFile, resolveLoopFire } from "./loop-fire.ts";
+import { deliveryFromState, isAutonomousSentinel, isLoopFileSentinel, LOOP_DELIVERY_STATE, readLoopFile, resolveLoopFire } from "./loop-fire.ts";
 import { autonomousPreamble, loopSkillPrompt } from "./loop-skill.ts";
 import {
 	CRON_CREATE_DESCRIPTION,
@@ -91,7 +91,7 @@ import {
 import { registerLocalCommand } from "../lib/local-command.ts";
 import { applyNoopFolds, decideFold, type FoldDetails, type FoldEntry, foldSuffix } from "./noop-fold.ts";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, formatNotOwner } from "../lib/agent-cron.ts";
+import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, type FireConversation, formatNotOwner } from "../lib/agent-cron.ts";
 import { SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../lib/skill-body.ts";
 import { BUNDLED_SKILLS_DIR } from "../lib/skill-scan.ts";
 import { createWriteStream, mkdirSync, type WriteStream } from "node:fs";
@@ -101,6 +101,8 @@ import { SESSION_WORK_CHANNEL, sessionBackgroundTask, sessionCron, type SessionW
 import { WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
 import { queueNotice } from "../lib/notices.ts";
 import { makeRecord, RECORD } from "../lib/ledger/records.ts";
+import { recordState, stateSinceCompaction } from "../lib/ledger/state.ts";
+import { processState } from "../lib/process-state.ts";
 import { extensionVersion } from "../lib/package-version.ts";
 
 /** Claude Code's `task_output` limit (`TASK_MAX_OUTPUT_DEFAULT`). */
@@ -120,15 +122,16 @@ function tail(text: string, cap: number): string {
 }
 
 /**
- * `/clear`, `/new` and `/resume` stop every background task with the session
- * they belong to (the notifier that would report them is inert by then, and
- * the new session has no handle on them). Say so, once, in the NEW session:
- * the old session's UI is torn down right after `session_shutdown`, so a
- * notice printed there is lost. Module scope on purpose — jiti keeps this
- * module across the factory re-run that builds the new instance, which is the
- * only thing that survives the swap (LIFECYCLE-REVIEW-2026-09-06 L3).
+ * `/clear`, `/new`, `/resume` and `/reload` stop every background task with
+ * the session they belong to (the notifier that would report them is inert by
+ * then, and the new instance has no handle on them). Say so, once, in the NEW
+ * session: the old session's UI is torn down right after `session_shutdown`,
+ * so a notice printed there is lost (LIFECYCLE-REVIEW-2026-09-06 L3). The
+ * notice is process state (lib/process-state.ts): module scope would lose it
+ * wherever pi evaluates this module again, at `/reload` and at a `/resume`
+ * into another directory (lifecycle grid R3-L13).
  */
-let pendingShutdownNotice: string | undefined;
+const shutdownNotice = () => processState<{ text?: string }>("background:shutdown-notice", () => ({}));
 
 /**
  * `<sessionDir>/monitor/<taskId>/output.log`, beside background shells'
@@ -193,16 +196,6 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	let lastCtx: ExtensionContext | undefined;
 	const cron = new CronStore();
 	const dynamicLoop = new DynamicLoop(cron);
-	// What the no-prompt /loop sentinels already delivered, per recipient (the
-	// main session, or a subagent by task id): each conversation has its own
-	// record. The main session's compaction resets its own (loop-fire.ts).
-	const MAIN_OWNER = "main";
-	const loopDelivery = new Map<string, LoopDeliveryState>();
-	const deliveryFor = (owner: string): LoopDeliveryState => {
-		let state = loopDelivery.get(owner);
-		if (!state) loopDelivery.set(owner, (state = freshDeliveryState()));
-		return state;
-	};
 	let sessionCwd = process.cwd();
 	// The main session's worktree while it is in one (enter_worktree), where its fires resolve.
 	let worktreeCwd: string | undefined;
@@ -260,7 +253,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		const live = liveUiCtx(lastCtx);
 		if (!live) return;
 		// Every running task and scheduled job, panel-owned ones included: the
-		// line is the warning that /clear, /reload or quitting stops them (switch-guard.ts).
+		// line is the warning of what /clear, /reload or quitting stops (switch-guard.ts).
 		const line = workWidgetLine(registry.running().length, cron.list().length);
 		live.ui.setWidget("cc-background", line ? [line] : undefined);
 	};
@@ -294,16 +287,51 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	const notify = createTaskNotifier(pi, { withdrawOnDelivery: true });
 
 	/**
+	 * A no-prompt /loop sentinel's text (loop-fire.ts), against what the
+	 * conversation it lands in was already sent. That record is branch state
+	 * of that conversation: the main session's, or a subagent's own session,
+	 * since each has its own history and compacts on its own. Read since the
+	 * last compaction, so the first fire after one resends the instructions,
+	 * as Claude Code does; written only when it changes (lifecycle grid
+	 * R3-L12).
+	 */
+	const expandSentinel = (prompt: string, cwd: string, conversation: FireConversation | undefined): string => {
+		let branch: readonly unknown[] = [];
+		try {
+			branch = conversation?.getBranch() ?? [];
+		} catch {
+			// A torn-down session reads as one that was sent nothing.
+		}
+		const before = deliveryFromState(stateSinceCompaction(branch, LOOP_DELIVERY_STATE));
+		const state = { ...before };
+		const text = resolveLoopFire(state, prompt, cwd, autonomousPreamble());
+		const changed = state.autonomousPreambleDelivered !== before.autonomousPreambleDelivered || state.lastLoopFileDelivered !== before.lastLoopFileDelivered;
+		if (changed && conversation) {
+			try {
+				recordState(conversation, LOOP_DELIVERY_STATE, state);
+			} catch {
+				// Same: nothing to record into.
+			}
+		}
+		return text;
+	};
+	/** The main session as a fire's conversation, while it is live. */
+	const mainConversation = (): FireConversation | undefined => {
+		const ctx = lastCtx;
+		return ctx ? { getBranch: () => ctx.sessionManager.getBranch(), appendEntry: (customType, data) => pi.appendEntry(customType, data) } : undefined;
+	};
+
+	/**
 	 * The text a fired prompt delivers, as Claude Code's queue would run it: a
 	 * no-prompt /loop sentinel expands (loop-fire.ts), and a slash command that
 	 * names a skill runs that skill (lib/skill-body.ts); anything else is the
 	 * prompt verbatim. Both resolve in the job owner's directory: a subagent's
 	 * own, or the main session's worktree while it is in one.
 	 */
-	const fireText = (job: CronJob): string => {
+	const fireText = (job: CronJob, conversation: FireConversation | undefined): string => {
 		const { prompt } = job;
 		const cwd = job.cwd ?? worktreeCwd ?? sessionCwd;
-		const resolved = resolveLoopFire(deliveryFor(job.agentId ?? MAIN_OWNER), prompt, cwd, autonomousPreamble());
+		const resolved = isAutonomousSentinel(prompt) || isLoopFileSentinel(prompt) ? expandSentinel(prompt, cwd, conversation) : prompt;
 		if (resolved !== prompt || !prompt.startsWith("/")) return resolved;
 		const query: SlashExpandQuery = { text: prompt, cwd };
 		pi.events.emit(SLASH_EXPAND_CHANNEL, query);
@@ -324,13 +352,10 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		const { job, final } = fire;
 		if (job.agentId !== undefined) {
 			// A subagent's job goes to that agent, or is dropped once it has ended.
-			const delivery: AgentCronFire = { agentId: job.agentId, jobId: job.id, prompt: fireText(job) };
+			const delivery: AgentCronFire = { agentId: job.agentId, jobId: job.id, text: (conversation) => fireText(job, conversation) };
 			pi.events.emit(AGENT_CRON_FIRE_CHANNEL, delivery);
-			if (!delivery.delivered) {
-				// The agent has ended: its job and what it was sent go with it.
-				cron.delete(job.id);
-				loopDelivery.delete(job.agentId);
-			}
+			// The agent has ended: its job goes with it.
+			if (!delivery.delivered) cron.delete(job.id);
 			return;
 		}
 		const fold = job.source === "wakeup" ? foldDetails() : {};
@@ -341,7 +366,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		if (job.source === "wakeup") dynamicLoop.inFlight = job.prompt;
 		// Recorded whatever way the notification goes out, so a /reload knows the fire happened.
 		pi.appendEntry(JOB_FIRED_ENTRY, { jobId: job.id, final, source: job.source });
-		notify(job.source === "wakeup" ? "wakeup" : "cron", fireText(job), { jobId: job.id, cron: job.cron, source: job.source, final, ...fold });
+		notify(job.source === "wakeup" ? "wakeup" : "cron", fireText(job, mainConversation()), { jobId: job.id, cron: job.cron, source: job.source, final, ...fold });
 	};
 	/** Fire every due job (only while idle), then arm the one timer to the next fire. */
 	const runCron = () => {
@@ -904,9 +929,10 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		// scheduled jobs come back from the branch (design.md section 13); a new
 		// process ends them, as Claude Code's session-only jobs end.
 		if (event.reason === "reload") armFromBranch(ctx);
-		if (pendingShutdownNotice) {
-			const notice = pendingShutdownNotice;
-			pendingShutdownNotice = undefined;
+		const pending = shutdownNotice();
+		if (pending.text) {
+			const notice = pending.text;
+			pending.text = undefined;
 			if (ctx.hasUI) queueNotice(pi.events, ctx, "info", notice);
 		}
 	});
@@ -928,11 +954,6 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		const messages = applyNoopFolds(event.messages as Array<AgentMessage & { role: string }>, (text, timestamp) => ({ role: "user", content: [{ type: "text", text }], timestamp }) as AgentMessage & { role: string });
 		return messages ? { messages } : undefined;
 	});
-	// The first fire after a compaction resends the full loop instructions, as in Claude Code.
-	pi.on("session_compact", () => {
-		loopDelivery.delete(MAIN_OWNER);
-	});
-
 	// A switch stops everything below, so ask first. pi can cancel a switch but
 	// not a quit; the widget line covers quitting (switch-guard.ts).
 	const confirmSwitch = async (ctx: ExtensionContext, action: string): Promise<{ cancel: true } | undefined> => {
@@ -954,7 +975,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	pi.on("session_shutdown", (event) => {
 		// Fires on /clear, /new, /resume and /reload too (findings §8). Everything
 		// running dies with this instance — the replacement instance has no handle
-		// on it — and the replacement is told (see pendingShutdownNotice); a quit
+		// on it — and the replacement is told (see shutdownNotice); a quit
 		// needs no note. A reload keeps the conversation, so its note says so.
 		const running = registry.running();
 		// A reload re-arms the jobs from the branch: only the tasks stop.
@@ -970,7 +991,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				const names = jobs.map((j) => `${j.id} (${describeCadence(j.cron)})`).join(", ");
 				notices.push(`Cancelled ${jobs.length} scheduled job${jobs.length === 1 ? "" : "s"} ${when}: ${names}.`);
 			}
-			pendingShutdownNotice = notices.join(" ");
+			shutdownNotice().text = notices.join(" ");
 		}
 		registry.stopAll();
 		cron.clear();

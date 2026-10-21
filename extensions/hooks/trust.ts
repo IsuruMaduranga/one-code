@@ -20,6 +20,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { boundConsentItems } from "../lib/consent-preview.ts";
 import { consentStorePath } from "../lib/consent-stores.ts";
+import { processState } from "../lib/process-state.ts";
 import type { HooksSource } from "./settings.ts";
 
 interface ApprovalStore {
@@ -107,8 +108,13 @@ export interface TrustDecisionDeps {
 	noPrompt?: boolean;
 }
 
-/** Process-lifetime memory of declined/approved hashes per project, so a dispatch storm asks once. */
-const sessionDecisions = new Map<string, boolean>();
+/**
+ * Process-lifetime memory of declined/approved hashes per project, so a
+ * dispatch storm asks once and a "No" holds until the process ends. Process
+ * state (lib/process-state.ts), not module scope: pi evaluates this module
+ * again at `/reload`, which asked again (lifecycle grid R3-L13).
+ */
+const sessionDecisions = () => processState("hooks:trust-decisions", () => new Map<string, boolean>());
 /** Undefined: the dispatch that opened the prompt aborted, so nobody decided. */
 const pendingPrompts = new Map<string, Promise<boolean | undefined>>();
 
@@ -127,15 +133,15 @@ export async function projectHooksApproved(
 	const configHash = hashProjectHooks(projectSources);
 	const key = `${projectRoot}:${configHash}`;
 
-	const remembered = sessionDecisions.get(key);
+	const remembered = sessionDecisions().get(key);
 	if (remembered !== undefined) return remembered;
 	if (readStoredApproval(projectRoot, deps.storePath) === configHash) {
-		sessionDecisions.set(key, true);
+		sessionDecisions().set(key, true);
 		return true;
 	}
 	if (deps.noPrompt) return false;
 	if (!deps.hasUI) {
-		sessionDecisions.set(key, false);
+		sessionDecisions().set(key, false);
 		deps.notify("Project hooks skipped: not yet approved and no UI to ask (user/managed hooks still run).");
 		return false;
 	}
@@ -150,7 +156,7 @@ export async function projectHooksApproved(
 				)) === true;
 			// An interrupted dialog is no trust decision, even if a reply raced abort.
 			if (deps.signal?.aborted) return undefined;
-			sessionDecisions.set(key, approved);
+			sessionDecisions().set(key, approved);
 			if (approved) persistApproval(projectRoot, configHash, deps.storePath);
 			else deps.notify("Project hooks disabled for this session (user/managed hooks still run).");
 			return approved;
@@ -165,6 +171,6 @@ export async function projectHooksApproved(
 
 /** Test seam. */
 export function resetTrustSessionState(): void {
-	sessionDecisions.clear();
+	sessionDecisions().clear();
 	pendingPrompts.clear();
 }

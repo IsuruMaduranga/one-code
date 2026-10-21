@@ -675,6 +675,14 @@ export class SubagentRuntime {
 				await session.steer(message);
 				return "steered";
 			},
+			// The background extension is not loaded in a child, so the parent's
+			// cron fires record what they sent straight into the child's session.
+			conversation: {
+				getBranch: () => session.sessionManager.getBranch(),
+				appendEntry: (customType, data) => {
+					session.sessionManager.appendCustomEntry(customType, data);
+				},
+			},
 			busy: () => turnActive || !session.isIdle,
 			exited: () => exited,
 			kill: () => {

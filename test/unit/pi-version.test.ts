@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
 	compareVersions,
 	parseVersion,
+	piFiresBeforeAgentStartForCustomRuns,
 	piVersionWarning,
 	TESTED_PI_MAX_EXCLUSIVE,
 	TESTED_PI_MIN,
@@ -20,6 +21,17 @@ describe("parseVersion", () => {
 		expect(parseVersion("^0.84.0")).toBeUndefined();
 		expect(parseVersion("")).toBeUndefined();
 		expect(parseVersion("a.b.c")).toBeUndefined();
+	});
+});
+
+describe("piFiresBeforeAgentStartForCustomRuns", () => {
+	it("is true from pi 1.2.0, false before it or for a version it cannot read", () => {
+		expect(piFiresBeforeAgentStartForCustomRuns("1.2.0")).toBe(true);
+		expect(piFiresBeforeAgentStartForCustomRuns("1.3.0")).toBe(true);
+		expect(piFiresBeforeAgentStartForCustomRuns("1.1.0")).toBe(false);
+		expect(piFiresBeforeAgentStartForCustomRuns("1.0.4")).toBe(false);
+		expect(piFiresBeforeAgentStartForCustomRuns("1.2.0-beta.1")).toBe(false);
+		expect(piFiresBeforeAgentStartForCustomRuns(undefined)).toBe(false);
 	});
 });
 

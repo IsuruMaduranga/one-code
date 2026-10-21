@@ -165,8 +165,9 @@ function terminateRememberedGroups(): void {
  * Remember a detached background tree from spawn until its group becomes empty.
  * Register before awaiting its leader, so even immediate process exit covers
  * running work. The unref'd reaper cannot keep a print run alive. No session
- * shutdown handler touches this set; process listeners keep its module instance
- * alive even when jiti builds a new extension instance after /clear.
+ * shutdown handler touches this set; the process listeners keep this module
+ * instance alive, and reach its set, even after pi evaluates the module again
+ * (a /reload, a /resume into another directory: findings §8).
  */
 export function rememberProcessGroup(child: ChildProcess): void {
 	if (child.pid == null || rememberedGroups.has(child)) return;

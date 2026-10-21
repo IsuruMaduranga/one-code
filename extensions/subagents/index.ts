@@ -1625,7 +1625,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		if (!resident || resident.handle.exited()) return;
 		fire.delivered = true;
 		// A send that fails after all ends the job, as a fire to an ended agent does.
-		void resident.handle.send(fire.prompt).catch(() => {
+		void resident.handle.send(fire.text(resident.handle.conversation)).catch(() => {
 			pi.events.emit(AGENT_CRON_CHANNEL, { op: "delete", agentId: fire.agentId, id: fire.jobId } satisfies AgentCronRequest);
 		});
 	});
