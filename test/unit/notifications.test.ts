@@ -194,8 +194,8 @@ describe("createTaskNotifier before the first prompt (H1)", () => {
 
 	it("on pi 1.2.0 and later sends an idle notification as a custom message at once, after a /reload too (R3-M17)", () => {
 		const { pi, sent, sentAsUser, fire } = fakePi({ prompted: false });
-		// The installed pi is 1.2.0 or later: the default follows it.
-		const notify = createTaskNotifier(pi, { coalesceMs: 0 });
+		// A pi of 1.2.0 or later, whatever pi is installed.
+		const notify = createTaskNotifier(pi, { coalesceMs: 0, customRunsFireBeforeAgentStart: true });
 		notify("wakeup", "first tick", { noOpStreak: 2 });
 		fire("session_start", { reason: "reload" });
 		notify("wakeup", "tick after the reload", { noOpStreak: 3 });

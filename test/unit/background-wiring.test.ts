@@ -26,11 +26,13 @@ vi.mock("node:fs", async (importOriginal) => {
 			actual.createWriteStream(spool.fail ? join(dirname(path), "missing", "output.log") : path, options as never)) as typeof actual.createWriteStream,
 	};
 });
-// A pi before 1.2.0, where a notification before the first prompt goes out as a user message.
-const olderPi = vi.hoisted(() => ({ on: false }));
+// The pi a test models, whatever pi is installed: before 1.2.0 (false) a
+// notification before the first prompt goes out as a user message; from 1.2.0
+// (true) it is a custom message. Unset, the installed pi decides.
+const piModel = vi.hoisted(() => ({ customRunsFireBeforeAgentStart: undefined as boolean | undefined }));
 vi.mock("../../extensions/lib/pi-version.ts", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../../extensions/lib/pi-version.ts")>();
-	return { ...actual, piFiresBeforeAgentStartForCustomRuns: (version: string | undefined) => !olderPi.on && actual.piFiresBeforeAgentStartForCustomRuns(version) };
+	return { ...actual, piFiresBeforeAgentStartForCustomRuns: (version: string | undefined) => piModel.customRunsFireBeforeAgentStart ?? actual.piFiresBeforeAgentStartForCustomRuns(version) };
 });
 import backgroundExtension from "../../extensions/background/index.ts";
 import { MONITOR_BATCH_MAX_LINES } from "../../extensions/background/monitor-batch.ts";
@@ -953,20 +955,26 @@ describe("background wiring: state across /reload, /tree and compaction", () => 
 		vi.useFakeTimers();
 		vi.setSystemTime(new Date(2026, 8, 25, 12, 0, 0));
 		const now = Date.now();
-		// The factory re-run of a /reload: no prompt() has run in this instance.
-		const fake = createFakePi();
-		backgroundExtension(fake.pi as never);
-		const branch = [
-			{ type: "custom_message", customType: "wakeup", timestamp: new Date(now - 60_000).toISOString(), details: {} },
-			{ type: "message", message: { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id: "w1", name: "schedule_wakeup", arguments: { delaySeconds: 60, prompt: "poll the deploy", reason: "r", noop: true } }] } },
-			{ type: "message", message: { role: "toolResult", toolCallId: "w1", toolName: "schedule_wakeup", content: [], details: { scheduledFor: now + 60_000, jobId: "abc12345", startedAt: now - 60_000 }, timestamp: now } },
-		];
-		await fake.fire("session_start", { reason: "reload" }, liveSessionCtx({ sessionManager: { getBranch: () => branch } }));
-		await vi.advanceTimersByTimeAsync(60_000 + DEFAULT_COALESCE_MS);
-		expect(fake.sentUserMessages).toEqual([]);
-		const wakeups = fake.sentMessages.filter((m) => m.message.customType === "wakeup");
-		expect(wakeups).toHaveLength(1);
-		expect(wakeups[0].message.details).toMatchObject({ jobId: "abc12345", noOpStreak: 1 });
+		// A pi of 1.2.0 or later, whatever pi is installed.
+		piModel.customRunsFireBeforeAgentStart = true;
+		try {
+			// The factory re-run of a /reload: no prompt() has run in this instance.
+			const fake = createFakePi();
+			backgroundExtension(fake.pi as never);
+			const branch = [
+				{ type: "custom_message", customType: "wakeup", timestamp: new Date(now - 60_000).toISOString(), details: {} },
+				{ type: "message", message: { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id: "w1", name: "schedule_wakeup", arguments: { delaySeconds: 60, prompt: "poll the deploy", reason: "r", noop: true } }] } },
+				{ type: "message", message: { role: "toolResult", toolCallId: "w1", toolName: "schedule_wakeup", content: [], details: { scheduledFor: now + 60_000, jobId: "abc12345", startedAt: now - 60_000 }, timestamp: now } },
+			];
+			await fake.fire("session_start", { reason: "reload" }, liveSessionCtx({ sessionManager: { getBranch: () => branch } }));
+			await vi.advanceTimersByTimeAsync(60_000 + DEFAULT_COALESCE_MS);
+			expect(fake.sentUserMessages).toEqual([]);
+			const wakeups = fake.sentMessages.filter((m) => m.message.customType === "wakeup");
+			expect(wakeups).toHaveLength(1);
+			expect(wakeups[0].message.details).toMatchObject({ jobId: "abc12345", noOpStreak: 1 });
+		} finally {
+			piModel.customRunsFireBeforeAgentStart = undefined;
+		}
 	});
 
 	it("R3-L12: the main session's /loop delivery follows its branch: kept across /reload, resent after a /tree to a branch without it and after a compaction", async () => {
@@ -998,7 +1006,7 @@ describe("background wiring: state across /reload, /tree and compaction", () => 
 	it("on a pi before 1.2.0 records the /loop delivery of a first fire that went out as a user message", async () => {
 		vi.useFakeTimers();
 		vi.setSystemTime(new Date(2026, 8, 25, 12, 0, 0));
-		olderPi.on = true;
+		piModel.customRunsFireBeforeAgentStart = false;
 		try {
 			// No prompt has run: the session's first input was the /loop itself.
 			const fake = createFakePi();
@@ -1016,7 +1024,7 @@ describe("background wiring: state across /reload, /tree and compaction", () => 
 			await fake.fire("agent_settled", {}, ctx);
 			expect(isShort(await fireSentinel(fake, ctx))).toBe(true);
 		} finally {
-			olderPi.on = false;
+			piModel.customRunsFireBeforeAgentStart = undefined;
 		}
 	});
 
