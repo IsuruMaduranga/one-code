@@ -89,6 +89,23 @@ describe("ledger fold", () => {
 		expect(foldBranch(b.entries, live).opensEpoch).toBe(true);
 	});
 
+	it("names a compaction as the cause when no request settled before it", () => {
+		const b = new Branch();
+		b.message("user");
+		b.request(body([user("one")]));
+		// The only request failed (a context overflow), and the compaction ran before its retry.
+		b.message("assistant", "error");
+		b.compaction();
+		expect(foldBranch(b.entries, live).cause).toBe("compaction");
+		// A session with no recorded request at all, compacted.
+		const c = new Branch();
+		c.message("user");
+		c.message("assistant");
+		c.compaction();
+		expect(foldBranch(c.entries, live).cause).toBe("compaction");
+		expect(foldBranch([], live).cause).toBe("first");
+	});
+
 	it("lets the latest state entry per key win", () => {
 		const b = new Branch();
 		b.record("state", { key: "permission-mode", value: "plan" });
