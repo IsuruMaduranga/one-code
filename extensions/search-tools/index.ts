@@ -27,6 +27,8 @@ export default function searchToolsExtension(pi: ExtensionAPI) {
 
 	pi.on("session_start", apply);
 	pi.on("model_select", apply);
+	// pi restores the selected branch's tool loadout at a /tree switch.
+	pi.on("session_tree", apply);
 
 	// Overlapping context windows repeat lines (grep-merge.ts); without context
 	// lines there are no windows to overlap.

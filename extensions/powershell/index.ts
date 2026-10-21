@@ -91,4 +91,6 @@ export function powershellTool(pi: ExtensionAPI, { announce }: { announce: boole
 
 	pi.on("session_start", (_event, ctx) => reconcile(ctx));
 	pi.on("model_select", () => reconcile());
+	// pi restores the selected branch's tool loadout at a /tree switch.
+	pi.on("session_tree", () => reconcile());
 }
