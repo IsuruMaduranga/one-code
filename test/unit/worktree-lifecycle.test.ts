@@ -247,5 +247,17 @@ describe("worktree lifecycle safety", () => {
 			expect((await swap("new", [], root)).location()).toBeNull();
 			expect((await swap("resume")).location()).toBeNull();
 		});
+
+		it("restores a recorded carry only in the directory the worktree was entered from", async () => {
+			await start();
+			const cleared = await swap("new");
+			resetProcessStateForTest();
+			// The cleared branch run from another directory (a fork into another project).
+			const elsewhere = await swap("startup", cleared.branch(), root);
+			expect(elsewhere.location()).toBeNull();
+			const input = { path: "a.txt" };
+			await elsewhere.next.fire("tool_call", { toolName: "read", toolCallId: "r", input }, createFakeCtx({ cwd: root }));
+			expect(input.path).toBe("a.txt");
+		});
 	});
 });

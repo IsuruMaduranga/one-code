@@ -129,11 +129,14 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 	 * follows them instead (they come after the carry).
 	 */
 	const carriedState = (ctx: ExtensionContext, reason: string | undefined): WorktreeState | undefined => {
+		// A recorded carry holds only in the directory it was entered from, as
+		// the live one does: a branch forked into another project, or continued
+		// after its directory went away, starts outside the worktree.
+		const enteredHere = (s: WorktreeState) => comparablePath(tryRealpath(s.originalCwd) ?? s.originalCwd) === comparablePath(tryRealpath(ctx.cwd) ?? ctx.cwd);
 		const recorded = readState(ctx, CARRIED_STATE);
-		if (isWorktreeState(recorded)) return recorded;
+		if (isWorktreeState(recorded)) return enteredHere(recorded) ? recorded : undefined;
 		const live = liveWorktree().state;
-		if (reason !== "new" || !live || !existsSync(live.path)) return undefined;
-		if (comparablePath(tryRealpath(live.originalCwd) ?? live.originalCwd) !== comparablePath(tryRealpath(ctx.cwd) ?? ctx.cwd)) return undefined;
+		if (reason !== "new" || !live || !existsSync(live.path) || !enteredHere(live)) return undefined;
 		recordState(pi, CARRIED_STATE, live);
 		return live;
 	};
