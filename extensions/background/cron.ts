@@ -418,6 +418,12 @@ type BranchEntry = { type?: string; timestamp?: string; customType?: string; det
  * message (no turn prompted since a /reload) carries no details.
  */
 export const JOB_FIRED_ENTRY = "one-code:job-fired";
+
+/**
+ * The custom entry the loop's keepalive writes when it arms a wakeup itself
+ * (`{ id, prompt, fireAt }`): no `schedule_wakeup` result records that one.
+ */
+export const WAKEUP_ARMED_ENTRY = "one-code:wakeup-armed";
 type Message = { role?: string; toolName?: string; toolCallId?: string; isError?: boolean; details?: unknown; content?: unknown; timestamp?: number };
 
 /**
@@ -433,6 +439,14 @@ export function scheduledJobsOnBranch(branch: readonly BranchEntry[]): RecordedJ
 		for (const [id, job] of jobs) if (job.source === "wakeup") jobs.delete(id);
 	};
 	for (const entry of branch) {
+		if (entry.type === "custom" && entry.customType === WAKEUP_ARMED_ENTRY) {
+			const armed = entry.data as { id?: unknown; prompt?: unknown; fireAt?: unknown } | undefined;
+			if (typeof armed?.id !== "string" || typeof armed.prompt !== "string" || typeof armed.fireAt !== "number") continue;
+			dropWakeups();
+			const target = new Date(armed.fireAt);
+			jobs.set(armed.id, { id: armed.id, cron: `${target.getMinutes()} ${target.getHours()} * * *`, prompt: armed.prompt, recurring: false, source: "wakeup", createdAt: Date.parse(entry.timestamp ?? "") || 0, fireAt: armed.fireAt });
+			continue;
+		}
 		const fired = entry.type === "custom" && entry.customType === JOB_FIRED_ENTRY;
 		if (fired || (entry.type === "custom_message" && (entry.customType === "wakeup" || entry.customType === "cron"))) {
 			const details = (fired ? entry.data : entry.details) as { jobId?: unknown; final?: unknown; source?: unknown } | undefined;
@@ -464,9 +478,9 @@ export function scheduledJobsOnBranch(branch: readonly BranchEntry[]): RecordedJ
 		} else if (message.toolName === "cron_delete" && typeof details.jobId === "string") {
 			jobs.delete(details.jobId);
 		} else if (message.toolName === "schedule_wakeup") {
-			if (details.stopped === true) dropWakeups();
-			else if (typeof details.scheduledFor === "number" && details.scheduledFor > 0 && typeof args.prompt === "string") {
-				dropWakeups();
+			// A schedule replaces the pending wakeup; one past the loop's age (scheduledFor 0) cancels it.
+			if (details.stopped === true || typeof details.scheduledFor === "number") dropWakeups();
+			if (typeof details.scheduledFor === "number" && details.scheduledFor > 0 && typeof args.prompt === "string") {
 				const target = new Date(details.scheduledFor);
 				jobs.set(`w-${message.toolCallId}`, { id: `w-${message.toolCallId}`, cron: `${target.getMinutes()} ${target.getHours()} * * *`, prompt: args.prompt, recurring: false, source: "wakeup", createdAt: at, fireAt: details.scheduledFor });
 			}

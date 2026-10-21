@@ -60,7 +60,7 @@ import { inContextEntries } from "../lib/compaction-boundary.ts";
 import { CALLABLE_TOOLS, foldBranch } from "../lib/ledger/fold.ts";
 import { declaredToolNames } from "../lib/ledger/wire.ts";
 import { MCP_TOOLS_CHANNEL } from "../lib/mcp-share.ts";
-import { requestIdentity } from "../lib/anthropic-auth.ts";
+import { authKind, requestIdentity } from "../lib/anthropic-auth.ts";
 import type { EntryLike } from "../lib/ledger/records.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../lib/reminders.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
@@ -93,7 +93,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	 */
 	let epochAt: { at: string; opens: boolean } | undefined;
 	const opensEpoch = (branch: EntryLike[], model: { provider?: string; api?: string; id?: string } | undefined): boolean => {
-		const at = `${branch.length}\0${branch.at(-1)?.id}\0${model?.provider}/${model?.api}/${model?.id}`;
+		const at = `${branch.length}\0${branch.at(-1)?.id}\0${model?.provider}/${model?.api}/${model?.id}/${authKind(model?.provider)}`;
 		if (epochAt?.at !== at) epochAt = { at, opens: foldBranch(branch, requestIdentity(model)).opensEpoch };
 		return epochAt.opens;
 	};

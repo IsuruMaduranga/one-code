@@ -163,4 +163,13 @@ describe("repairRequest", () => {
 		);
 		expect(delivered).toEqual({ consumed: ["kept"], facts: [{ kind: "tools", names: ["listed"] }] });
 	});
+
+	it("does not count a dropped reminder as sent because the same text sits earlier in the recorded history", () => {
+		const note = (text: string) => ({ role: "system", content: [{ type: "text", text }] });
+		const earlier = user("<system-reminder>mode is plan</system-reminder>");
+		const payload = { tools: [tool("read")], messages: [earlier, assistant("1"), user("two"), note("mode is plan"), user("three")] };
+		const repaired = repairRequest(payload, identity.api, validateRequest(payload, identity.api));
+		const delivered = deliveredAfterRepair(repaired, identity.api, { consumed: ["p1"], facts: [] }, [{ id: "p1", text: "mode is plan" }], new Set([contentHash(earlier), contentHash(assistant("1"))]));
+		expect(delivered.consumed).toEqual([]);
+	});
 });

@@ -640,7 +640,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	/** The live text of each block; null when the block is absent. */
 	const liveBlocks: Record<SubagentBlockKey, string | null> = { "subagent-models": null, "subagent-agents": null, "subagent-delegation": null };
 	/** A model the account refused since the menu was last told: its narrow correction stands in for the whole menu. */
-	let refusal: { refused: string; replacement: Model<Api> | undefined } | undefined;
+	let refusal: { refused: string[]; replacement: Model<Api> | undefined } | undefined;
 	const publishBlock = (key: SubagentBlockKey, text: string | null) => {
 		liveBlocks[key] = text;
 		if (text === null) pi.events.emit(REMINDER_CHANNEL, { key, remove: true });
@@ -660,7 +660,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			if (told === fact.hash || (text === null && told === undefined)) continue;
 			const facts = [fact];
 			if (text === null) request.blocks.push({ text: "The subagent delegation guidance previously shown for this conversation is no longer active.", facts });
-			else if (key === "subagent-models" && refusal) request.blocks.push({ text: refusedModelNote(refusal.refused, refusal.replacement), facts });
+			else if (key === "subagent-models" && refusal) request.blocks.push({ text: refusal.refused.map((model) => refusedModelNote(model, refusal?.replacement)).join("\n"), facts });
 			else request.blocks.push({ text, facts });
 		}
 		refusal = undefined;
@@ -691,7 +691,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				notifyModelOnce(ctx, `${warning.text} ${warning.fix}`);
 			}
 		}
-		if (refused !== undefined) refusal = { refused, replacement: resolution.model };
+		// Every refusal since the menu was last told, each named; the latest default stands.
+		if (refused !== undefined) refusal = { refused: [...(refusal?.refused ?? []).filter((model) => model !== refused), refused], replacement: resolution.model };
 		publishBlock("subagent-models", text);
 		pi.events.emit(SUBAGENT_STATUS_CHANNEL, subagentStatusModel(configured, resolution));
 	};
@@ -784,10 +785,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	});
 	// The selected branch's runs: the abandoned branch's finished ones are not
 	// addressable from it (SendMessage, list_agents), as on a resume. A run still
-	// going and a nested run (recorded only in memory) stay reachable, and so
-	// do names held for spawns in flight.
+	// going, a resident between turns and a nested run (recorded only in memory)
+	// stay reachable, and so do names held for spawns in flight.
 	pi.on("session_tree", (_event, ctx) => {
-		registry.retain((record) => liveRuns.get(record.taskId)?.status === "running" || parentTaskOf.has(record.taskId));
+		registry.retain((record) => liveRuns.get(record.taskId)?.status === "running" || residents.has(record.taskId) || parentTaskOf.has(record.taskId));
 		reconstructRuns(ctx);
 	});
 	pi.on("session_shutdown", async () => {

@@ -399,7 +399,10 @@ export class SubagentRuntime {
 	 * agent's own prompt and toolset.
 	 */
 	private async buildChildSession(spec: ChildSessionSpec, handback: HandbackSlot): Promise<{ session: Session; note?: string }> {
-		const [loader, mcpTools] = await Promise.all([buildAgentLoader(this.childLoaderOptions(spec, handback)), this.getMcpTools()]);
+		// The MCP wait first: the loader takes the parent's deferrals, which a server
+		// connecting during the wait adds to (it is instant once the connects settled).
+		const mcpTools = await this.getMcpTools();
+		const loader = await buildAgentLoader(this.childLoaderOptions(spec, handback));
 		const newSessionManager = () => newChildSessionManager(spec);
 		// A fork keeps the parent's toolset; only a named agent carries tool lists.
 		const agent = spec.forkFrom ? undefined : spec.agent;

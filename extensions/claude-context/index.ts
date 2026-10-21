@@ -54,6 +54,7 @@ import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
 import { EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_NONE, EXTERNAL_INCLUDES_SETTING, EXTERNAL_INCLUDES_YES, externalIncludesDialog, persistExternalIncludesApproval, readExternalIncludesApproval } from "../lib/claude-external-includes.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 import { consentDialog, installConsentDialogs, startupConsentReady } from "../lib/consent-dialogs.ts";
+import type { ToldFact } from "../lib/ledger/records.ts";
 
 const REMINDER_KEY = "claude-context";
 const ONECODE_REMINDER_KEY = "one-code-context";
@@ -155,6 +156,12 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	let approvalAbort = new AbortController();
 	let sessionGeneration = 0;
 
+	/**
+	 * The instructions facts while no instructions block renders (no CLAUDE.md,
+	 * no memory index): they ride the date block, so an epoch still tells the
+	 * absence and a resume notices a file that appeared since.
+	 */
+	let absentInstructionFacts: ToldFact[] = [];
 	const emitDate = (date: string) => {
 		blockDate = date;
 		pi.events.emit(REMINDER_CHANNEL, {
@@ -162,7 +169,7 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 			key: DATE_REMINDER_KEY,
 			placement: "first-prepend",
 			order: CONTEXT_ORDER.date,
-			facts: [toldBlockFact(FACT_KEYS.date, date)],
+			facts: [toldBlockFact(FACT_KEYS.date, date), ...absentInstructionFacts],
 		});
 	};
 
@@ -228,6 +235,11 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 				facts: instructionFacts(contextFingerprints(current)),
 			});
 		} else pi.events.emit(REMINDER_CHANNEL, { remove: true, key: REMINDER_KEY });
+		const absent = instructions ? [] : instructionFacts(contextFingerprints(current));
+		if (JSON.stringify(absent) !== JSON.stringify(absentInstructionFacts)) {
+			absentInstructionFacts = absent;
+			if (blockDate) emitDate(blockDate);
+		}
 		// One Code's own instructions ride in a separate block AFTER the instructions
 		// block, so they take precedence over CLAUDE.md (higher order = closer to the user text).
 		if (current.oneCode) {

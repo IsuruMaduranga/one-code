@@ -3,7 +3,7 @@
  * keeps running, so the session's crons and wakeups come back from the branch.
  */
 import { describe, expect, it } from "vitest";
-import { CronStore, JOB_FIRED_ENTRY, scheduledJobsOnBranch } from "../../extensions/background/cron.ts";
+import { CronStore, JOB_FIRED_ENTRY, scheduledJobsOnBranch, WAKEUP_ARMED_ENTRY } from "../../extensions/background/cron.ts";
 
 const call = (id: string, name: string, args: Record<string, unknown>) => ({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id, name, arguments: args }] } });
 const result = (toolCallId: string, toolName: string, details: Record<string, unknown>, timestamp = 1_000) => ({ type: "message", message: { role: "toolResult", toolCallId, toolName, content: [], details, timestamp } });
@@ -36,6 +36,13 @@ describe("scheduledJobsOnBranch", () => {
 			{ type: "custom", customType: JOB_FIRED_ENTRY, data: { jobId: "j2", final: false, source: "model" }, timestamp: "2026-10-21T10:00:00.000Z" },
 		];
 		expect(scheduledJobsOnBranch(branch).map((job) => [job.id, job.lastFiredAt])).toEqual([["j2", Date.parse("2026-10-21T10:00:00.000Z")]]);
+	});
+
+	it("cancels the pending wakeup at a schedule past the loop's age, and re-arms the keepalive's own", () => {
+		const wakeup = (id: string, prompt: string, scheduledFor: number) => [call(id, "schedule_wakeup", { delaySeconds: 60, prompt, reason: "r", noop: false }), result(id, "schedule_wakeup", { scheduledFor })];
+		expect(scheduledJobsOnBranch([...wakeup("w1", "tick", 61_000), ...wakeup("w2", "tick", 0)])).toEqual([]);
+		const keepalive = { type: "custom", customType: WAKEUP_ARMED_ENTRY, data: { id: "k1", prompt: "tick", fireAt: 900_000 } };
+		expect(scheduledJobsOnBranch([...wakeup("w1", "tick", 61_000), fire("wakeup", "x", false), keepalive]).map((job) => [job.id, job.fireAt])).toEqual([["k1", 900_000]]);
 	});
 
 	it("keeps only the latest wakeup, until it fires or the loop stops", () => {

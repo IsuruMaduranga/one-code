@@ -102,7 +102,9 @@ describe("runHookCommand", () => {
 		const ready = join(dir, "abort-ready");
 		const survived = join(dir, "abort-survived");
 		const controller = new AbortController();
-		const pending = runHookCommand(`touch "${ready}"; (sleep 2; touch "${survived}") & wait`, "{}", {
+		// The descendant itself signals ready: touched before the fork, an abort could
+		// list the tree before the subshell existed and leave it running.
+		const pending = runHookCommand(`(touch "${ready}"; sleep 2; touch "${survived}") & wait`, "{}", {
 			cwd: dir,
 			...{ signal: controller.signal },
 		});

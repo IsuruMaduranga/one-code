@@ -168,6 +168,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 	pi.on("session_tree", (_event, ctx) => {
 		lastCtx = ctx;
 		planFilePath = undefined;
+		planExistedAtEntry = undefined;
 		if (currentMode === "plan") refresh(ctx);
 	});
 

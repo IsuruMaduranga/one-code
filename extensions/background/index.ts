@@ -64,6 +64,7 @@ import {
 	formatUnknownJob,
 	JOB_FIRED_ENTRY,
 	scheduledJobsOnBranch,
+	WAKEUP_ARMED_ENTRY,
 } from "./cron.ts";
 import {
 	createTaskNotifier,
@@ -901,8 +902,12 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	});
 	pi.on("agent_settled", () => {
 		agentBusy = false;
-		// Claude Code's keepalive: a wakeup's turn that scheduled no next one gets one fallback.
-		dynamicLoop.settle(Date.now());
+		// Claude Code's keepalive: a wakeup's turn that scheduled no next one gets
+		// one fallback, recorded so a /reload re-arms it (no tool result does).
+		if (dynamicLoop.settle(Date.now()) === "armed") {
+			const armed = cron.list().find((job) => job.source === "wakeup");
+			if (armed) pi.appendEntry(WAKEUP_ARMED_ENTRY, { id: armed.id, prompt: armed.prompt, fireAt: armed.nextFireAt });
+		}
 		runCron();
 	});
 	// Folded no-op ticks leave the model's context (noop-fold.ts); the note stands in for them.

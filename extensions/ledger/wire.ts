@@ -35,13 +35,20 @@ export default function ledgerWireExtension(pi: ExtensionAPI) {
 	/** The plan of the last `context` pass; a warm or a retry re-runs only this hook and reuses it. */
 	let plan: RequestPlan | undefined;
 	/** What this hook recorded under `plan`: the branch past the plan's fold, so a warm compares with it without folding again. */
-	let recorded: { request: RecordedRequest; hashes: Set<string> } | undefined;
+	let recorded: { request?: RecordedRequest; hashes: Set<string> } | undefined;
 	/** Problems already reported this session, so a recurring bug is one notice. */
 	const reported = new Set<string>();
 
 	pi.events.on(LEDGER_PLAN_CHANNEL, (data) => {
 		plan = data as RequestPlan;
 		recorded = undefined;
+	});
+	// A failed or aborted reply: the fold rebuilds the next record against the
+	// request before it (the plan's base), so a re-send under the same plan must
+	// encode against that one too, not the failed request.
+	pi.on("message_end", (event) => {
+		const message = event.message as { role?: string; stopReason?: string };
+		if (recorded && message.role === "assistant" && (message.stopReason === "error" || message.stopReason === "aborted")) recorded = { hashes: recorded.hashes };
 	});
 	pi.on("session_start", () => {
 		plan = undefined;
@@ -68,7 +75,7 @@ export default function ledgerWireExtension(pi: ExtensionAPI) {
 			if (fresh.length > 0) notifyOrPrint(ctx, `One Code: the request had ${problems.length} problem(s) the ledger ${process.env.ONE_CODE_LEDGER_STRICT === "1" ? "left in place" : "removed"}: ${fresh.join(", ")}`, "warning");
 			if (process.env.ONE_CODE_LEDGER_STRICT !== "1") {
 				payload = repairRequest(payload, api, problems);
-				delivered = deliveredAfterRepair(payload, api, delivered, current.fold.pending);
+				delivered = deliveredAfterRepair(payload, api, delivered, current.fold.pending, new Set(current.base?.hashes ?? []));
 			}
 		}
 

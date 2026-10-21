@@ -39,6 +39,11 @@ describe("ledger validate", () => {
 		expect(validateRequest(body([user("one"), addition("probe_echo"), countdown, assistant("1")]), api)).toEqual([]);
 	});
 
+	it("flags a tool_search result's reference, spelled tool_name, to a tool the request does not declare", () => {
+		const loaded = { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: [{ type: "tool_reference", tool_name: "gone" }] }] };
+		expect(validateRequest(body([user("one"), assistant("1"), loaded]), api)).toEqual([{ kind: "undeclared", name: "gone", index: 2 }]);
+	});
+
 	it("checks only references on non-Anthropic shapes, which take a system message anywhere", () => {
 		const responses = { model: "gpt-6", instructions: "x", tools: [], input: [{ role: "developer", content: "note" }, { role: "user", content: "hi" }] };
 		expect(validateRequest(responses, "openai-responses")).toEqual([]);

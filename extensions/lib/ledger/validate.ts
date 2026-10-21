@@ -7,7 +7,7 @@
  * Pure: no pi imports.
  */
 import { isObject, type ToldFact } from "./records.ts";
-import { declaredToolNames, listKey, type WirePayload } from "./wire.ts";
+import { contentHash, declaredToolNames, listKey, type WirePayload } from "./wire.ts";
 
 export type Problem =
 	/** A tool_reference, tool_addition or tool_removal names a tool `tools` does not declare. */
@@ -104,7 +104,8 @@ export function repairRequest(payload: WirePayload, api: string, problems: reado
 /**
  * What a repaired request still delivers, so its record does not count a
  * dropped block as sent: the consumed pending items whose text is still in
- * the payload, and the callable-tool facts without a tool whose
+ * the payload's new elements (not `prefix`, the recorded ones by hash, where
+ * an earlier copy of the same text may sit), and the callable-tool facts without a tool whose
  * `tool_addition` was dropped (a listing for tool_search names tools the
  * request need not declare).
  */
@@ -113,8 +114,10 @@ export function deliveredAfterRepair(
 	api: string,
 	delivered: { consumed: readonly string[]; facts: readonly ToldFact[] },
 	pending: readonly { id: string; text: string }[],
+	prefix: ReadonlySet<string> = new Set(),
 ): { consumed: string[]; facts: ToldFact[] } {
-	const sent = JSON.stringify(payload);
+	const list = payload[listKey(api)];
+	const sent = JSON.stringify(Array.isArray(list) ? list.filter((element) => !prefix.has(contentHash(element))) : []);
 	const texts = new Map(pending.map((item) => [item.id, item.text]));
 	// The repair left only references to declared tools.
 	const referenced = referencedNames(payload[listKey(api)], new Set());

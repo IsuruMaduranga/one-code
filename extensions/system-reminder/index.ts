@@ -60,8 +60,6 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 	let early: ReminderPayload[] | undefined = [];
 	/** Without the ledger (a test harness, a session that does not load it): the pending ids this instance delivered. */
 	const deliveredHere = new Set<string>();
-	/** Without the ledger: the sticky states' delivery facts this instance told (key to hash), in place of the fold's blocks. */
-	const toldHere = new Map<string, string>();
 
 	const persist = (payload: ReminderPayload) => {
 		const data = makeRecord("pending", by, {
@@ -122,7 +120,7 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 		];
 		const stack = live.stackEntries();
 		// A sticky state's first delivery is told, so a failed request's revokes and an epoch renders it again.
-		const toldBlocks = epoch ? new Map<string, string>() : current ? fold.blocks : toldHere;
+		const toldBlocks = epoch ? new Map<string, string>() : fold.blocks;
 		const sticky = live.stickyEntries().map((entry) => {
 			const fact = stickyFact(entry);
 			return { ...entry, fact, delivered: toldBlocks.get(fact.key) === fact.hash };
@@ -141,7 +139,6 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 			current.facts.push(...facts);
 		} else {
 			for (const id of consumed) deliveredHere.add(id);
-			for (const fact of stickyFacts) toldHere.set(fact.key, fact.hash);
 		}
 
 		moved = rendered.moved;

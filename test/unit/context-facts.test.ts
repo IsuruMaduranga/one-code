@@ -85,6 +85,17 @@ describe("claude-context's resumed-session check", () => {
 		expect(resumed.render(told).filter((text) => text.startsWith("Since the saved context snapshot"))).toHaveLength(0);
 	});
 
+	it("tells the absence of instructions, so a CLAUDE.md added between sessions is noticed on resume", async () => {
+		rmSync(join(cwd, "CLAUDE.md"));
+		rmSync(memory);
+		const told = (await open()).facts;
+		expect(told.some((fact) => fact.kind === "block" && fact.key === FACT_KEYS.instructions)).toBe(true);
+		writeFileSync(join(cwd, "CLAUDE.md"), "new instructions\n");
+		const notices = (await open()).render(told).filter((text) => text.startsWith("Since the saved context snapshot"));
+		expect(notices).toHaveLength(1);
+		expect(notices[0]).toContain("CLAUDE.md-family instructions changed");
+	});
+
 	it("says nothing when nothing changed", async () => {
 		const told = (await open()).facts;
 		expect((await open()).render(told).filter((text) => text.startsWith("Since the saved context snapshot"))).toEqual([]);

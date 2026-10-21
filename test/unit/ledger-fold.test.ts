@@ -118,6 +118,39 @@ describe("ledger fold", () => {
 		expect(fold.modes.size).toBe(0);
 	});
 
+	it("opens an epoch at an api or provider change with the same model id and auth", () => {
+		const b = new Branch();
+		b.request(body([user("one")]));
+		b.message("assistant");
+		expect(foldBranch(b.entries, { ...live, provider: "openrouter" }).cause).toBe("model");
+		expect(foldBranch(b.entries, { ...live, api: "openai-completions" }).cause).toBe("model");
+	});
+
+	it("opens an epoch at an epoch record, with nothing told", () => {
+		const b = new Branch();
+		b.request(body([user("one")]));
+		b.record("told", { facts: [{ kind: "tools", names: ["web_fetch"] }] });
+		b.message("assistant");
+		b.record("epoch", { cause: "fold" });
+		const fold = foldBranch(b.entries, live);
+		expect(fold.opensEpoch).toBe(true);
+		expect(fold.cause).toBe("fold");
+		expect(fold.told.size).toBe(0);
+	});
+
+	it("after a failed model hop, opens an epoch back on the first model rather than extending its last request with nothing told", () => {
+		const b = new Branch();
+		b.request(body([user("one")]));
+		b.message("assistant");
+		b.record("epoch", { cause: "model" });
+		b.request(body([user("one"), assistant("1"), user("two")]), { identity: { ...identity, model: "claude-haiku-4-5" } });
+		b.message("assistant", "error");
+		const fold = foldBranch(b.entries, live);
+		expect(fold.opensEpoch).toBe(true);
+		expect(fold.lastRequest?.list).toEqual([user("one")]);
+		expect(fold.told.size).toBe(0);
+	});
+
 	it("takes tools told gone out of the told set, callable ones included", () => {
 		const b = new Branch();
 		b.record("told", { facts: [{ kind: "tools", names: ["mcp__a__x", "web_fetch"], callable: true }] });
