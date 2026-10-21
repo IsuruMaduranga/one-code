@@ -255,6 +255,20 @@ describe("hooks wiring", () => {
 		expect(reminders).toEqual([hookContextText("UserPromptSubmit", "for first"), hookContextText("UserPromptSubmit", "for /tpl")]);
 	});
 
+	it("an idle prompt's context never goes to a queued message delivered before it whose hook added none", async () => {
+		const hookPrompt = script("hook-some.sh", `#!/bin/sh\nif grep -q '"prompt":"first"'; then exit 0; fi\necho '{"hookSpecificOutput":{"additionalContext":"for the template"}}'\n`);
+		writeUserHooks({ UserPromptSubmit: [{ hooks: [{ type: "command", command: hookPrompt }] }] });
+		const reminders: Array<{ text: string }> = [];
+		fake.events.on(REMINDER_CHANNEL, (payload) => reminders.push(payload as { text: string }));
+		mount();
+		await fake.fireOne("input", { source: "interactive", text: "first", streamingBehavior: "followUp" }, ctx());
+		await fake.fireOne("input", { source: "interactive", text: "/tpl" }, ctx());
+		await fake.fireOne("message_start", { message: { role: "user", content: [{ type: "text", text: "first" }] } }, ctx());
+		expect(reminders).toHaveLength(0);
+		await fake.fireOne("message_start", { message: { role: "user", content: [{ type: "text", text: "template body" }] } }, ctx());
+		expect(reminders.map((r) => r.text)).toEqual([hookContextText("UserPromptSubmit", "for the template")]);
+	});
+
 	it("an idle prompt a later handler takes keeps no context for the next prompt an extension sends", async () => {
 		const hookPrompt = script("hook-taken.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"additionalContext":"for the agent message"}}'\n`);
 		writeUserHooks({ UserPromptSubmit: [{ hooks: [{ type: "command", command: hookPrompt }] }] });
