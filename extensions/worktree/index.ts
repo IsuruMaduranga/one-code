@@ -7,7 +7,9 @@
  * at creation, so the move is enforced on the tool_call hook: bash commands
  * are prefixed with `cd`, relative paths resolve against the worktree (see
  * rewrite.ts), and an every-turn reminder keeps the model oriented. State
- * rides in tool-result details so a resumed or branched session restores it.
+ * rides in tool-result details so a resumed or branched session restores it;
+ * a /clear or /new keeps the worktree, as Claude Code does, by recording it on
+ * the new branch.
  */
 
 import { execFile } from "node:child_process";
@@ -34,7 +36,8 @@ import { rewriteToolInput, validateWorktreeName } from "./rewrite.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 import { findProjectRoot, HARNESS_GIT_CONFIG, HARNESS_GIT_NO_HOOKS, repositoryWorktrees } from "../lib/git.ts";
 import { projectConfigDir, projectConfigDirName } from "../lib/config-mode.ts";
-import { readStringsState, recordState } from "../lib/ledger/state.ts";
+import { readState, readStringsState, recordState } from "../lib/ledger/state.ts";
+import { processState } from "../lib/process-state.ts";
 
 const run = promisify(execFile);
 const REMINDER_KEY = "cc-worktree-session";
@@ -78,6 +81,22 @@ const ISOLATION_NOTE = "Git commands aimed at the main checkout or another workt
 /** The `one-code:state` key of the worktree paths the branch was already told are gone. */
 const MISSING_REPORTED_STATE = "worktree:missing-reported";
 
+/** The `one-code:state` key of the worktree a /clear or /new carried onto its new branch. */
+const CARRIED_STATE = "worktree:carried";
+
+/**
+ * The worktree the session is in, as process state (lib/process-state.ts): a
+ * /clear or /new starts an empty branch, and Claude Code keeps the session in
+ * its worktree across that (decisions/tools.md). Children never load this
+ * extension, so only the main session writes it.
+ */
+const liveWorktree = () => processState<{ state?: WorktreeState }>("worktree:live", () => ({}));
+
+function isWorktreeState(value: unknown): value is WorktreeState {
+	const s = value as Partial<WorktreeState> | null | undefined;
+	return typeof s?.path === "string" && typeof s.originalCwd === "string" && typeof s.sharedRoot === "string" && typeof s.createdByUs === "boolean";
+}
+
 export default function worktreeExtension(pi: ExtensionAPI) {
 	let state: WorktreeState | undefined;
 
@@ -88,6 +107,7 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 
 	const applyState = (next: WorktreeState | undefined, toolCallId?: string) => {
 		state = next;
+		liveWorktree().state = next;
 		const location: WorktreeLocation | null = next ? { path: next.path, branch: next.branch, sharedRoot: next.sharedRoot } : null;
 		pi.events.emit(WORKTREE_CHANNEL, location);
 		if (next) {
@@ -102,9 +122,28 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 		}
 	};
 
-	const reconstructState = (ctx: ExtensionContext) => {
+	/**
+	 * The worktree a /clear or /new keeps: the one this process was in, when it
+	 * belongs to this directory and still exists, recorded on the new branch so
+	 * a resume of it reads it back. A branch with its own worktree tool results
+	 * follows them instead (they come after the carry).
+	 */
+	const carriedState = (ctx: ExtensionContext, reason: string | undefined): WorktreeState | undefined => {
+		// A recorded carry holds only in the directory it was entered from, as
+		// the live one does: a branch forked into another project, or continued
+		// after its directory went away, starts outside the worktree.
+		const enteredHere = (s: WorktreeState) => comparablePath(tryRealpath(s.originalCwd) ?? s.originalCwd) === comparablePath(tryRealpath(ctx.cwd) ?? ctx.cwd);
+		const recorded = readState(ctx, CARRIED_STATE);
+		if (isWorktreeState(recorded)) return enteredHere(recorded) ? recorded : undefined;
+		const live = liveWorktree().state;
+		if (reason !== "new" || !live || !existsSync(live.path) || !enteredHere(live)) return undefined;
+		recordState(pi, CARRIED_STATE, live);
+		return live;
+	};
+
+	const reconstructState = (ctx: ExtensionContext, reason?: string) => {
 		const details = restoreLatestDetails<WorktreeDetails>(ctx.sessionManager.getBranch(), WORKTREE_TOOLS, (d) => d?.worktreeState !== undefined);
-		let restored = details?.worktreeState ?? undefined;
+		let restored = details ? (details.worktreeState ?? undefined) : carriedState(ctx, reason);
 		if (restored && !existsSync(restored.path)) {
 			// Nothing in the tool details records that the session left, so every
 			// later restore finds the same stale state; tell the branch once, and
@@ -123,7 +162,7 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 		applyState(restored);
 	};
 
-	pi.on("session_start", (_event, ctx) => reconstructState(ctx));
+	pi.on("session_start", (event, ctx) => reconstructState(ctx, event.reason));
 	pi.on("session_tree", (_event, ctx) => reconstructState(ctx));
 
 	/** The repository's worktrees for a git command's target check; undefined when git cannot list them. */

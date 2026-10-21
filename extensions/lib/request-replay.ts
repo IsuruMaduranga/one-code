@@ -22,7 +22,7 @@
 import type { Message } from "@earendil-works/pi-ai";
 import { settleSystemMessages } from "./ledger/layout.ts";
 import { isObject } from "./ledger/records.ts";
-import { listKey, stripMarkers, toolName } from "./ledger/wire.ts";
+import { appendPoint, listKey, stripMarkers, toolName } from "./ledger/wire.ts";
 import { estimateMessageTokens } from "./pi-ai-estimate.ts";
 
 /** The compaction extension publishes a RequestCapture here, or undefined when none is valid. */
@@ -334,7 +334,7 @@ export function forkRequestPayload(capture: RequestCapture, child: Record<string
 	const key = listKey(capture.api);
 	const base = capture.payload[key] as unknown[];
 	const tail = (Array.isArray(child[key]) ? (child[key] as WireMessage[]) : []).filter((entry) => entry.role !== "system" && entry.role !== "developer");
-	const out: Record<string, unknown> = { ...capture.payload, [key]: capture.api === "anthropic-messages" ? settleSystemMessages(joinUserTurns(base, tail), capture.api, base.length) : [...base, ...tail] };
+	const out: Record<string, unknown> = { ...capture.payload, [key]: capture.api === "anthropic-messages" ? settleSystemMessages(appendTurns(base, tail), capture.api, base.length) : [...base, ...tail] };
 	const tools = forkTools(capture.payload.tools, child.tools, baseline, tail);
 	if (tools) out.tools = tools;
 	const capKey = CAP_PATHS[capture.api].find((path) => capAt(capture.payload, path) !== undefined);
@@ -389,12 +389,25 @@ function referencedTools(value: unknown, found = new Set<string>()): Set<string>
 	return found;
 }
 
-/** Anthropic needs alternating roles: a tail that opens with a user turn joins the captured last one. */
-function joinUserTurns(base: unknown[], tail: unknown[]): unknown[] {
+/**
+ * `tail` after a captured Anthropic list, with the capture kept a byte
+ * prefix. A tail that opens with a user turn joins the captured last one, so
+ * the roles alternate. A capture that ends in a content system run (a
+ * `<total_tokens>` countdown, a context message) took no clean reply: a user
+ * turn after it would strand the run, and the layout pass would move the run
+ * behind it, rewriting what the session cached there (findings §73). A text
+ * turn goes in as a system message instead, so the run stays where its cache
+ * entry was written. A side prompt opens its tail that way, and so does a fork
+ * taken before the capture's reply landed (a `/btw` fork while it streams).
+ */
+function appendTurns(base: unknown[], tail: unknown[]): unknown[] {
 	const last = base.at(-1) as WireMessage | undefined;
 	const first = tail[0] as WireMessage | undefined;
 	if (last?.role === "user" && first?.role === "user") {
 		return [...base.slice(0, -1), { ...last, content: [...blocksOf(last.content), ...blocksOf(first.content)] }, ...tail.slice(1)];
+	}
+	if (first?.role === "user" && endsInSystemRun(base) && blocksOf(first.content).every((block) => block.type === "text")) {
+		return [...base, { role: "system", content: blocksOf(first.content) }, ...tail.slice(1)];
 	}
 	return [...base, ...tail];
 }
@@ -477,10 +490,13 @@ function appendAnthropic(base: unknown[], extra: unknown[]): unknown[] {
 		const content = replyBlocks.map((block, index) => (index === anchor ? { ...block, cache_control: markers.at(-1) } : block));
 		return [...base.slice(0, -1), lastUnmarked, { ...first, content }, ...extra.slice(1)];
 	}
-	if (last && last.role === "user" && first.role === "user") {
-		return [...base.slice(0, -1), { ...last, content: [...blocksOf(last.content), ...blocksOf(first.content)] }, ...extra.slice(1)];
-	}
-	return [...base, ...extra];
+	return appendTurns(base, extra);
+}
+
+/** Whether the list, past its trailing directives, ends in a system message with content. */
+function endsInSystemRun(list: unknown[]): boolean {
+	const last = list[appendPoint(list, "anthropic-messages") - 1] as WireMessage | undefined;
+	return last?.role === "system" && blocksOf(last.content).length > 0;
 }
 
 function blocksOf(content: unknown): Block[] {

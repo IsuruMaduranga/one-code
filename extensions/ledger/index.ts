@@ -8,7 +8,8 @@
  *
  * Its `context` hook runs right after kept-thinking, before anything injects:
  *
- * - it folds the branch (lib/ledger/fold.ts) and decides whether this request
+ * - it folds the branch (lib/ledger/fold.ts, through the shared memo in
+ *   lib/ledger/fold-memo.ts) and decides whether this request
  *   opens an epoch (lib/ledger/plan.ts planRequest);
  * - inside an epoch it cuts the messages the last request covered, so pi and
  *   every later `context` hook see only the tail, and the payload side puts
@@ -23,10 +24,10 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { requestIdentity, sessionThinkingLevel } from "../lib/anthropic-auth.ts";
-import { foldBranch } from "../lib/ledger/fold.ts";
+import { sessionIdentity } from "../lib/anthropic-auth.ts";
+import { foldSession } from "../lib/ledger/fold-memo.ts";
 import { LEDGER_PLAN_CHANNEL, planRequest } from "../lib/ledger/plan.ts";
-import { type EntryLike, makeRecord, RECORD } from "../lib/ledger/records.ts";
+import { makeRecord, RECORD } from "../lib/ledger/records.ts";
 import { extensionVersion } from "../lib/package-version.ts";
 
 export default function ledgerExtension(pi: ExtensionAPI) {
@@ -37,7 +38,7 @@ export default function ledgerExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("context", (event, ctx) => {
-		const fold = foldBranch(ctx.sessionManager.getBranch() as EntryLike[], requestIdentity(ctx.model, sessionThinkingLevel(pi)));
+		const fold = foldSession(ctx.sessionManager, sessionIdentity(pi, ctx.model));
 		const { plan, tailStart } = planRequest(fold, event.messages as Array<{ role: string; timestamp?: number }>);
 		pi.events.emit(LEDGER_PLAN_CHANNEL, plan);
 		return tailStart > 0 ? { messages: event.messages.slice(tailStart) } : undefined;

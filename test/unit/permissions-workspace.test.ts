@@ -139,6 +139,14 @@ describe("workspace directories in the gate", () => {
 		expect(announced).toEqual([[shared]]);
 	});
 
+	it("announces a directory added mid-session, so the next epoch's environment block lists it (R3-L4)", async () => {
+		await start();
+		expect(announced).toEqual([[]]);
+		selectAnswer = "Yes, for this session";
+		await fake.commands.get("add-dir")!.handler(shared, ctx as never);
+		expect(announced.at(-1)).toEqual([shared]);
+	});
+
 	it("ignores the filesystem root and the home directory in settings, and says so", async () => {
 		mkdirSync(join(home, ".claude"), { recursive: true });
 		writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ permissions: { additionalDirectories: ["/", "~", "../shared"] } }));

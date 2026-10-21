@@ -6,6 +6,7 @@
  *
  * Pure: no pi imports (the session API is taken structurally).
  */
+import { latestCompaction } from "../compaction-boundary.ts";
 import { extensionVersion } from "../package-version.ts";
 import { type EntryLike, makeRecord, RECORD, stateOnBranch } from "./records.ts";
 
@@ -27,6 +28,16 @@ export function recordState(pi: EntryAppender, key: string, value: unknown): voi
 /** The branch's latest state for `key`, or undefined when none is recorded. */
 export function readState(ctx: BranchReader, key: string): unknown {
 	return stateOnBranch(ctx.sessionManager.getBranch() as EntryLike[], key);
+}
+
+/**
+ * The latest state for `key` on `branch` since its last compaction, or
+ * undefined when none is recorded after it. For state a compaction resets
+ * (design.md section 4.3 fold rules): what the summary replaced is out of the
+ * model's view, so what was told before it counts as untold.
+ */
+export function stateSinceCompaction(branch: readonly unknown[], key: string): unknown {
+	return stateOnBranch(branch.slice((latestCompaction(branch)?.index ?? -1) + 1) as EntryLike[], key);
 }
 
 /** The branch's latest state for `key` as a list of strings (other items dropped), or an empty list. */

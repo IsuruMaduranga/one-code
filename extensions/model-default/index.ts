@@ -21,18 +21,24 @@
  * sessions", and since persisting is what this extension does, the claim is
  * true here too (a failed write announces the switch without it). pi handles
  * `/model` before any extension sees the text, so `model_select` — which also
- * covers ctrl+p cycling — is the one signal. The breadcrumb is queued at each
- * `model_select` under keys a later switch replaces (pending entries with the
- * same key supersede each other until a request carries one), so only the
- * model the user settles on is announced. It is queued at once, not after the
- * write's quiet period: system-reminder stops persisting one-shots in its
- * `session_shutdown` handler, which runs before this extension's, so a
- * breadcrumb flushed there was lost on a quit, /reload, /new or /resume. Only
- * the settings write waits for the quiet period.
+ * covers ctrl+p cycling — is the one signal.
+ *
+ * The write and the breadcrumb wait for the model the user settles on: the
+ * quiet period after the last switch, or the next prompt, whichever comes
+ * first. So a ctrl+p cycle through ten models writes the settings once and
+ * queues one breadcrumb, which names the write's real outcome. A quit,
+ * /reload, /new or /resume inside the quiet period still writes the settings,
+ * but cannot queue the breadcrumb: system-reminder stops persisting one-shots
+ * in its `session_shutdown` handler, which runs before this extension's. The
+ * choice is recorded on the branch instead, and the next session on that
+ * branch (the reload, a resume) announces it while its model is still the
+ * one chosen.
  */
 
 import { join } from "node:path";
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { isObject } from "../lib/ledger/records.ts";
+import { readState, recordState } from "../lib/ledger/state.ts";
 import { announceLocalCommand } from "../lib/local-command.ts";
 import { readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
 
@@ -50,66 +56,105 @@ export function modelSwitchStdout(displayName: string, saved: boolean): string {
 	return `Set model to \`${displayName}\`${saved ? " and saved as your default for new sessions" : ""}`;
 }
 
-/** Quiet period after the last switch before it is written (ctrl+p cycles fire one event per step). */
+/** Quiet period after the last switch before it is written and announced (ctrl+p cycles fire one event per step). */
 export const PERSIST_DEBOUNCE_MS = 400;
 
 /** The `/model` breadcrumb's pending-entry key: a later switch's breadcrumb replaces an undelivered one. */
 const BREADCRUMB_KEY = "local-command:model";
 
+/**
+ * The `one-code:state` key of a switch not yet announced: recorded at every
+ * switch (`saved` unset until the settings write), so the branch, not this
+ * process's timer, says a breadcrumb is owed; null once announced or dropped.
+ */
+const UNANNOUNCED_STATE = "model-breadcrumb";
+
+/** A settled switch, as announced. */
+interface Settled {
+	provider: string;
+	id: string;
+	name: string;
+	saved: boolean;
+}
+
+/** A switch the branch records, as `model_select` or a shutdown left it. */
+type Unannounced = Omit<Settled, "saved"> & { saved?: boolean };
+
 export default function modelDefaultExtension(pi: ExtensionAPI) {
-	let pending: { provider: string; id: string; name: string; saved: boolean; notify: (message: string) => void } | undefined;
+	let pending: { provider: string; id: string; name: string; notify: (message: string) => void } | undefined;
 	let timer: ReturnType<typeof setTimeout> | undefined;
-	const settingsPath = () => join(getAgentDir(), "settings.json");
 	const announce = (name: string, saved: boolean) => announceLocalCommand(pi, { name: "model", stdout: modelSwitchStdout(name, saved), key: BREADCRUMB_KEY });
 
-	const flush = () => {
+	/** Save `provider/id` as the default model, and say whether it was saved. */
+	const save = (provider: string, id: string, notify: (message: string) => void): boolean => {
+		const path = join(getAgentDir(), "settings.json");
+		try {
+			writeSettings(path, applyDefaultModel(readSettingsForWrite(path), provider, id));
+			return true;
+		} catch (error) {
+			// Persisting a preference must not break the model switch itself, but
+			// say why it will be forgotten.
+			notify(`Could not save ${provider}/${id} as the default model: ${(error as Error).message}`);
+			return false;
+		}
+	};
+
+	/** Write the switch the user settled on, if any, and say whether it was saved. */
+	const settle = (): Settled | undefined => {
 		if (timer !== undefined) clearTimeout(timer);
 		timer = undefined;
 		const choice = pending;
 		pending = undefined;
-		if (!choice) return;
-		const path = settingsPath();
-		try {
-			writeSettings(path, applyDefaultModel(readSettingsForWrite(path), choice.provider, choice.id));
-		} catch (error) {
-			// Persisting a preference must not break the model switch itself, but
-			// say why it will be forgotten, and take back the breadcrumb's claim
-			// that it was saved.
-			choice.notify(`Could not save ${choice.provider}/${choice.id} as the default model: ${(error as Error).message}`);
-			if (choice.saved) announce(choice.name, false);
-		}
+		if (!choice) return undefined;
+		return { provider: choice.provider, id: choice.id, name: choice.name, saved: save(choice.provider, choice.id, choice.notify) };
+	};
+	const flush = () => {
+		const settled = settle();
+		if (!settled) return;
+		announce(settled.name, settled.saved);
+		recordState(pi, UNANNOUNCED_STATE, null);
 	};
 
-	// The write is debounced: a ctrl+p cycle emits model_select per step, and
-	// only the model the user settles on should hit the disk (last one wins).
 	pi.on("model_select", (event, ctx) => {
 		const model = event.model as { provider?: string; id?: string; name?: string } | undefined;
 		if (!model?.provider || !model.id) return;
-		// The usual reason the write fails, a settings file that does not parse,
-		// is known now; a failure only the write meets corrects the claim then.
-		let saved = true;
-		try {
-			readSettingsForWrite(settingsPath());
-		} catch {
-			saved = false;
-		}
 		pending = {
 			provider: model.provider,
 			id: model.id,
 			name: model.name || model.id,
-			saved,
 			notify: (message) => {
 				if (ctx.hasUI) ctx.ui.notify(message, "warning");
 			},
 		};
-		announce(pending.name, saved);
+		// Owed from now on, whatever happens to this process: a fresh one on a
+		// copy of the branch owes the same breadcrumb (lifecycle-grid-hunt oracle).
+		recordState(pi, UNANNOUNCED_STATE, { provider: model.provider, id: model.id, name: pending.name } satisfies Unannounced);
 		if (timer !== undefined) clearTimeout(timer);
 		timer = setTimeout(flush, PERSIST_DEBOUNCE_MS);
 		timer.unref?.();
 	});
 
-	// A quit inside the quiet period must not lose the choice, and a prompt sent
-	// inside it must not carry a saved claim the write then breaks.
-	pi.on("session_shutdown", () => flush());
+	// A prompt sent inside the quiet period carries the switch's breadcrumb, not the request after it.
 	pi.on("before_agent_start", () => flush());
+
+	// A quit inside the quiet period must not lose the choice: the write happens
+	// now, and the breadcrumb waits on the branch for the next session.
+	pi.on("session_shutdown", () => {
+		const settled = settle();
+		if (settled) recordState(pi, UNANNOUNCED_STATE, settled);
+	});
+	// A switch the branch still owes a breadcrumb: announced here when the
+	// session runs that model, saved first if its own process never got to it.
+	pi.on("session_start", (_event, ctx) => {
+		const stored = readState(ctx, UNANNOUNCED_STATE);
+		if (!isObject(stored)) return;
+		recordState(pi, UNANNOUNCED_STATE, null);
+		const { provider, id, name, saved } = stored;
+		if (typeof provider !== "string" || typeof id !== "string" || typeof name !== "string") return;
+		if (ctx.model?.provider !== provider || ctx.model?.id !== id) return;
+		const notify = (message: string) => {
+			if (ctx.hasUI) ctx.ui.notify(message, "warning");
+		};
+		announce(name, typeof saved === "boolean" ? saved : save(provider, id, notify));
+	});
 }

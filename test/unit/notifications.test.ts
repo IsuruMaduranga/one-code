@@ -6,7 +6,6 @@ import {
 	frameForDelivery,
 	TASK_OUTPUT_DELIVERED_CHANNEL,
 	handBackPointer,
-	isNotificationDetails,
 	mergeNotificationTexts,
 	NOTIFICATION_BATCH_KEY,
 	NOTIFICATION_ID_KEY,
@@ -60,8 +59,8 @@ function fakePi(options: { prompted?: boolean; sendThrows?: boolean } = {}) {
 	};
 	/** Simulate pi draining a queued custom message: message_end carrying its details. */
 	const deliver = (index: number) => {
-		const details = sent[index]?.message.details;
-		fire("message_end", { message: { role: "custom", details } });
+		const { customType, details } = sent[index]?.message ?? {};
+		fire("message_end", { message: { role: "custom", customType, details } });
 	};
 	return { pi: pi as never, sent, sentAsUser, fire, deliver, primed, emit: pi.events.emit };
 }
@@ -190,9 +189,26 @@ describe("createTaskNotifier after the session is gone (H3)", () => {
 });
 
 describe("createTaskNotifier before the first prompt (H1)", () => {
+	// pi before 1.2.0: a run sendMessage opens from idle skips before_agent_start.
+	const oldPi = { coalesceMs: 0, customRunsFireBeforeAgentStart: false };
+
+	it("on pi 1.2.0 and later sends an idle notification as a custom message at once, after a /reload too (R3-M17)", () => {
+		const { pi, sent, sentAsUser, fire } = fakePi({ prompted: false });
+		// A pi of 1.2.0 or later, whatever pi is installed.
+		const notify = createTaskNotifier(pi, { coalesceMs: 0, customRunsFireBeforeAgentStart: true });
+		notify("wakeup", "first tick", { noOpStreak: 2 });
+		fire("session_start", { reason: "reload" });
+		notify("wakeup", "tick after the reload", { noOpStreak: 3 });
+		expect(sentAsUser).toEqual([]);
+		expect(sent.map((s) => [s.message.customType, (s.message.details as { noOpStreak?: number }).noOpStreak])).toEqual([
+			["wakeup", 2],
+			["wakeup", 3],
+		]);
+	});
+
 	it("delivers an idle notification as a user message while no prompt() has run, then counts it delivered", () => {
 		const { pi, sent, sentAsUser, fire } = fakePi({ prompted: false });
-		const notify = createTaskNotifier(pi, { coalesceMs: 0 });
+		const notify = createTaskNotifier(pi, oldPi);
 		notify("loop", "Loop tick — run the task");
 		expect(sentAsUser).toEqual(["Loop tick — run the task"]);
 		expect(sent).toHaveLength(0);
@@ -202,9 +218,28 @@ describe("createTaskNotifier before the first prompt (H1)", () => {
 		expect(sentAsUser).toHaveLength(1);
 	});
 
+	it("reports a delivery on both paths: at the send for a user message, at message_end for its own custom message", () => {
+		const { pi, sent, fire, deliver } = fakePi({ prompted: false });
+		const delivered: Array<[string, Record<string, unknown>]> = [];
+		const notify = createTaskNotifier(pi, { ...oldPi, onDelivered: (customType, details) => delivered.push([customType, details]) });
+		notify("cron", "first fire", { loopDelivery: { autonomousPreambleDelivered: true } });
+		expect(delivered).toEqual([["cron", { loopDelivery: { autonomousPreambleDelivered: true } }]]);
+		fire("before_agent_start");
+		fire("agent_settled");
+		notify("cron", "second fire", { jobId: "j2" });
+		// Sent, not yet delivered.
+		expect(delivered).toHaveLength(1);
+		deliver(0);
+		expect(delivered.at(-1)).toEqual(["cron", expect.objectContaining({ jobId: "j2" })]);
+		// Another producer's message is not this notifier's delivery.
+		fire("message_end", { message: { role: "custom", customType: "cron", details: { [NOTIFICATION_ID_KEY]: "other-1" } } });
+		expect(delivered).toHaveLength(2);
+		expect(sent).toHaveLength(1);
+	});
+
 	it("uses the custom-message path once before_agent_start has fired, and while a run is active", () => {
 		const { pi, sent, sentAsUser, fire, deliver } = fakePi({ prompted: false });
-		const notify = createTaskNotifier(pi, { coalesceMs: 0 });
+		const notify = createTaskNotifier(pi, oldPi);
 		// A run opened by something else is in flight: a user-role prompt would be
 		// refused by pi (no streamingBehavior), so steer the custom message.
 		fire("agent_start");
@@ -222,9 +257,9 @@ describe("createTaskNotifier before the first prompt (H1)", () => {
 });
 
 describe("announcePromptOptions and the first turn a completion opens", () => {
-	it("a command's announced prompt options send the first idle notification as a custom message", () => {
+	it("a command's announced prompt options send the first idle notification as a custom message (pi before 1.2.0)", () => {
 		const { pi, sent, sentAsUser, emit, fire } = fakePi({ prompted: false });
-		const notify = createTaskNotifier(pi, { coalesceMs: 0 });
+		const notify = createTaskNotifier(pi, { coalesceMs: 0, customRunsFireBeforeAgentStart: false });
 		announcePromptOptions({ emit }, { cwd: "/p", getSystemPromptOptions: () => ({ selectedTools: ["read"] }) });
 		notify("subagent-result", "fork done");
 		expect(sentAsUser).toHaveLength(0);
@@ -249,13 +284,6 @@ describe("announcePromptOptions and the first turn a completion opens", () => {
 		expect(seen).toEqual([]);
 		announcePromptOptions(events, { cwd: "/p", getSystemPromptOptions: () => ({ skills: [] }) });
 		expect(seen).toEqual([{ channel: PROMPT_OPTIONS_CHANNEL, data: { options: { skills: [] }, cwd: "/p" } }]);
-	});
-
-	it("isNotificationDetails recognises one notification and a coalesced batch, nothing else", () => {
-		expect(isNotificationDetails({ [NOTIFICATION_ID_KEY]: "1-a" })).toBe(true);
-		expect(isNotificationDetails({ [NOTIFICATION_BATCH_KEY]: [] })).toBe(true);
-		expect(isNotificationDetails({ taskId: "t" })).toBe(false);
-		expect(isNotificationDetails(undefined)).toBe(false);
 	});
 });
 

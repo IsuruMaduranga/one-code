@@ -146,4 +146,37 @@ describe("/btw's standalone context follows the current branch", () => {
 		expect(sent).toContain("Remember APPLE");
 		expect(sent).not.toContain("BANANA");
 	});
+
+	it("keeps a side exchange only on branches that hold the point it was asked from", async () => {
+		const fake = createFakePi();
+		btwExtension(fake.pi as never);
+		const entry = (id: string, text: string, timestamp: number) => ({ type: "message", id, message: { role: "user", content: text, timestamp } });
+		const root = entry("e1", "Remember APPLE", 1);
+		const banana = entry("e2", "Now remember BANANA", 2);
+		let branch: unknown[] = [root, banana];
+		const ctx = createFakeCtx({
+			mode: "rpc",
+			hasUI: true,
+			model: { api: "anthropic-messages", provider: "anthropic", id: "test" },
+			modelRegistry: { getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test" }) },
+			sessionManager: { getSessionId: () => "s", getBranch: () => branch },
+		});
+		await fake.fire("session_start", {}, ctx);
+		const ask = (question: string) => fake.commands.get("btw")!.handler(question, ctx);
+		complete.mockResolvedValueOnce(answer("You said BANANA last.")).mockResolvedValue(answer("Another answer."));
+		await ask("Which word came last?");
+
+		// A /tree to a later point on the same path keeps it.
+		branch = [root, banana, entry("e3", "Go on", 3)];
+		await fake.fire("session_tree", {}, ctx);
+		await ask("Still there?");
+		expect(JSON.stringify(complete.mock.calls[1]?.[1].messages)).toContain("You said BANANA last.");
+
+		// A /tree back before the point it was asked from drops it.
+		branch = [root];
+		await fake.fire("session_tree", {}, ctx);
+		await ask("Which word came last?");
+		const sent = JSON.stringify(complete.mock.calls[2]?.[1].messages);
+		expect(sent).not.toContain("BANANA");
+	});
 });

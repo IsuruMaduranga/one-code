@@ -19,8 +19,8 @@
  * that prompt. before_agent_start also re-announces the existing state.
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { registerFormTool } from "../lib/tool-variants.ts";
 import { Type } from "typebox";
@@ -36,8 +36,16 @@ import { buildPlanModeReminder } from "./reminder.ts";
 import { randomSlug } from "./slug.ts";
 import { readState, recordState } from "../lib/ledger/state.ts";
 
-/** The branch's record of whether the plan file existed when the current plan-mode run began. */
-const PLAN_ENTRY_STATE = "plan-mode:entry";
+/** A plan file larger than this is named after a compaction, not inlined: the model reads it when it needs it. */
+const PLAN_REFERENCE_CHARS = 40_000;
+
+/** The plan the summary replaced, re-attached after a compaction. */
+function planFileReferenceText(path: string, content: string): string {
+	if (content.length > PLAN_REFERENCE_CHARS) return `A plan file exists from plan mode at: ${path}\n\nIt is too large to include here (${content.length.toLocaleString("en-US")} characters); read it before continuing.\n\nIf this plan is relevant to the current work and not already complete, continue working on it.`;
+	return `A plan file exists from plan mode at: ${path}\n\nPlan contents:\n\n${content}\n\nIf this plan is relevant to the current work and not already complete, continue working on it.`;
+}
+
+import { PLAN_ENTRY_STATE, parsePlanRun, type PlanRun } from "./run-state.ts";
 import {
 	approvedPlanText,
 	ENTER_PLAN_MODE_DESCRIPTION,
@@ -60,7 +68,7 @@ import {
 	selectPlanChoice,
 } from "./viewer.ts";
 
-import { MODE_CHANNEL, PLAN_FILE_CHANNEL, PLAN_FILE_ENTRY, planFileOnBranch } from "../lib/plan-mode-channels.ts";
+import { MODE_CHANNEL, PLAN_FILE_CHANNEL, PLAN_FILE_ENTRY, planFileOnBranch, planFileRecords, type PlanFileRecord } from "../lib/plan-mode-channels.ts";
 import { panelUi } from "../lib/panel-focus.ts";
 export { MODE_CHANNEL, PLAN_FILE_CHANNEL };
 
@@ -87,6 +95,8 @@ export default function planModeExtension(pi: ExtensionAPI) {
 	 * own value, since the live mode before it belongs to the abandoned branch.
 	 */
 	let enteredFrom: PermissionMode | undefined;
+	/** Whether the session can enter bypassPermissions, as permissions last said: the exit offers it back only then. */
+	let bypassAvailable = false;
 
 	/**
 	 * The current run as the branch recorded it when plan mode came on: its plan
@@ -99,29 +109,67 @@ export default function planModeExtension(pi: ExtensionAPI) {
 	 * exit could only escalate: a default-mode session that planned was offered
 	 * auto (PERMISSIONS-REVIEW-2026-09-05 M4).
 	 */
-	const runOnBranch = (ctx: ExtensionContext, path: string): { existed: boolean; modeBeforePlan?: PermissionMode } | undefined => {
-		const stored = readState(ctx, PLAN_ENTRY_STATE) as { path?: unknown; existed?: unknown; modeBeforePlan?: unknown } | undefined;
-		if (stored?.path !== path || typeof stored.existed !== "boolean") return undefined;
-		const before = typeof stored.modeBeforePlan === "string" && stored.modeBeforePlan in MODE_NAMES && stored.modeBeforePlan !== "plan" ? (stored.modeBeforePlan as PermissionMode) : undefined;
-		return { existed: stored.existed, ...(before ? { modeBeforePlan: before } : {}) };
-	};
+	const runOnBranch = (ctx: ExtensionContext, path: string): PlanRun | undefined => parsePlanRun(readState(ctx, PLAN_ENTRY_STATE), path);
+	/** Record the current run on the branch, for `runOnBranch` to read back. */
+	const recordRun = (path: string, run: PlanRun) => recordState(pi, PLAN_ENTRY_STATE, { path, ...run });
 
-	/**
-	 * The branch's plan file, else a fresh slug recorded on the branch. Never
-	 * cached: on /tree, permissions' session_tree switches the mode (and this
-	 * extension refreshes) before this extension's own session_tree runs, so a
-	 * cached path would be the abandoned branch's.
-	 */
-	const ensurePlanFile = (ctx: ExtensionContext): string => {
-		const onBranch = planFileOnBranch(ctx.sessionManager.getBranch());
-		if (onBranch) return onBranch;
-
+	const freshPlanPath = (): string => {
 		let path = join(PLANS_DIR(), `${randomSlug()}.md`);
 		for (let attempt = 0; attempt < 5 && existsSync(path); attempt++) {
 			path = join(PLANS_DIR(), `${randomSlug()}.md`);
 		}
-		pi.appendEntry(PLAN_FILE_ENTRY, { path });
 		return path;
+	};
+
+	/**
+	 * A fork's own copy of the plan another session recorded, as Claude Code
+	 * gives a forked session, so the two sessions never overwrite each other's plan
+	 * (decisions/modes.md). The copy this session already made of it, on any
+	 * of its branches, is reused. The run moves to the copy with the mode it
+	 * came from, and says whether the copy exists (the parent's run may have
+	 * begun before its plan did).
+	 */
+	const forkPlanFile = (ctx: ExtensionContext, parent: PlanFileRecord, sessionId: string): string => {
+		const made = planFileRecords(ctx.sessionManager.getEntries()).find((r) => r.sessionId === sessionId && r.copiedFrom === parent.path);
+		const path = made?.path ?? freshPlanPath();
+		if (!made && existsSync(parent.path)) {
+			try {
+				mkdirSync(dirname(path), { recursive: true });
+				copyFileSync(parent.path, path);
+			} catch (error) {
+				if (ctx.hasUI) ctx.ui.notify(`Could not copy the plan at ${parent.path} for this fork (${(error as Error).message}); its plan starts empty at ${path}.`, "warning");
+			}
+		}
+		const run = runOnBranch(ctx, parent.path);
+		pi.appendEntry(PLAN_FILE_ENTRY, { path, sessionId, copiedFrom: parent.path } satisfies PlanFileRecord);
+		// The standing block names the new path anyway, so it also says whether the copy exists.
+		if (run) recordRun(path, { ...run, existed: existsSync(path) });
+		return path;
+	};
+
+	/**
+	 * The branch's plan file, else a fresh slug recorded on the branch. A
+	 * record another session made (a fork copies its parent's entries) gets
+	 * this session's own copy, and so does a record that names no session (an
+	 * older session's): only a record this session made is its own.
+	 * Never cached: on /tree, permissions' session_tree switches the mode (and
+	 * this extension refreshes) before this extension's own session_tree runs,
+	 * so a cached path would be the abandoned branch's.
+	 */
+	const ensurePlanFile = (ctx: ExtensionContext, onBranch = planFileRecords(ctx.sessionManager.getBranch()).at(-1)): string => {
+		const sessionId = ctx.sessionManager.getSessionId();
+		if (onBranch?.sessionId === sessionId) return onBranch.path;
+		if (onBranch) return forkPlanFile(ctx, onBranch, sessionId);
+
+		const path = freshPlanPath();
+		pi.appendEntry(PLAN_FILE_ENTRY, { path, sessionId } satisfies PlanFileRecord);
+		return path;
+	};
+
+	/** A branch that names a plan file owns it before anything reads it: a fork copies its parent's now. */
+	const ownPlanFile = (ctx: ExtensionContext) => {
+		const onBranch = planFileRecords(ctx.sessionManager.getBranch()).at(-1);
+		if (onBranch?.path) ensurePlanFile(ctx, onBranch);
 	};
 
 	/** Re-announce path + reminder; a re-emit replaces the sticky state by key. */
@@ -131,7 +179,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 		if (!run) {
 			// A run begins: record what it began with.
 			run = { existed: existsSync(path), ...(enteredFrom ? { modeBeforePlan: enteredFrom } : {}) };
-			recordState(pi, PLAN_ENTRY_STATE, { path, ...run });
+			recordRun(path, run);
 		}
 		pi.events.emit(PLAN_FILE_CHANNEL, { path });
 		pi.events.emit(REMINDER_CHANNEL, {
@@ -168,6 +216,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 		if (typeof status?.mode !== "string") return;
 		const previous = currentMode;
 		currentMode = status.mode;
+		bypassAvailable = status.bypassAvailable === true;
 		// Unknown for a session that STARTED in plan mode (the first status seen
 		// is plan itself): a run it begins offers the fixed list on exit.
 		if (currentMode === "plan" && previous !== "plan") enteredFrom = previous as PermissionMode | undefined;
@@ -184,18 +233,44 @@ export default function planModeExtension(pi: ExtensionAPI) {
 
 	pi.on("session_start", (_event, ctx) => {
 		lastCtx = ctx;
+		ownPlanFile(ctx);
 		if (currentMode === "plan") refresh(ctx);
 	});
 	// The plan file and its run follow the branch (both are read from it): a
 	// /tree switch takes the selected branch's, or allocates one there.
 	pi.on("session_tree", (_event, ctx) => {
 		lastCtx = ctx;
+		ownPlanFile(ctx);
 		if (currentMode === "plan") refresh(ctx);
 	});
 
 	pi.on("before_agent_start", (_event, ctx) => {
 		lastCtx = ctx;
 		if (currentMode === "plan") refresh(ctx);
+	});
+
+	// A compaction summarizes the plan away and opens an epoch, where nothing
+	// above has to stay byte-stable (R3-M20). The plan file is re-attached
+	// whenever one exists, plan mode or not, as Claude Code does; in plan mode
+	// the run is recorded again, so the new epoch's block says whether the file
+	// exists now.
+	pi.on("session_compact", (_event, ctx) => {
+		lastCtx = ctx;
+		const path = planFileOnBranch(ctx.sessionManager.getBranch());
+		if (!path) return;
+		if (currentMode === "plan") {
+			recordRun(path, { ...runOnBranch(ctx, path), existed: existsSync(path) });
+			refresh(ctx);
+		}
+		let content = "";
+		try {
+			content = existsSync(path) ? readFileSync(path, "utf8") : "";
+		} catch {
+			// The re-attach is best effort, like the other post-compaction restores:
+			// an unreadable path (a directory, no permission) attaches nothing.
+		}
+		if (!content.trim()) return;
+		pi.events.emit(REMINDER_CHANNEL, { text: planFileReferenceText(path, content), placement: "user-prepend", orTail: true, untilCompaction: true });
 	});
 
 	/**
@@ -290,12 +365,15 @@ export default function planModeExtension(pi: ExtensionAPI) {
 			// The mode the session was in before planning leads the list (Claude
 			// Code restores it), then auto mode when a classifier model is reachable —
 			// the same gate the mode cycle uses (permissions/index.ts autoInCycle) —
-			// and the fixed choices. Each approving choice carries the mode it
-			// switches to; the final "Keep planning" choice has none and leaves the
-			// session in plan mode.
+			// and the fixed choices. A bypass before planning is offered back only
+			// when this session can grant it (a resume without the bypass flag
+			// cannot, and the request would land in default). Each approving
+			// choice carries the mode it switches to; the final "Keep planning"
+			// choice has none and leaves the session in plan mode.
 			const autoAvailable = ctx.modelRegistry.getAvailable().length > 0;
 			const modeBeforePlan = runOnBranch(ctx, path)?.modeBeforePlan;
-			const restore = modeBeforePlan && (modeBeforePlan !== "auto" || autoAvailable) ? modeBeforePlan : undefined;
+			const offerable = (mode: PermissionMode) => (mode !== "auto" || autoAvailable) && (mode !== "bypassPermissions" || bypassAvailable);
+			const restore = modeBeforePlan && offerable(modeBeforePlan) ? modeBeforePlan : undefined;
 			const fixedModes: PermissionMode[] = [...(autoAvailable ? (["auto"] as const) : []), "acceptEdits", "default"];
 			const options: { label: string; mode?: PermissionMode; restore?: boolean }[] = [
 				...(restore ? [{ label: `Approve — back to ${MODE_NAMES[restore]} (the mode before planning)`, mode: restore, restore: true }] : []),

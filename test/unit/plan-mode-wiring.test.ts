@@ -5,13 +5,14 @@
  * were denied "see the plan-mode reminder" (STEERING-REVIEW-2026-09-05 M3).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MODE_CHANNEL, PLAN_FILE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts";
 import planModeExtension from "../../extensions/plan-mode/index.ts";
+import { buildPlanModeReminder } from "../../extensions/plan-mode/reminder.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
 describe("plan-mode wiring", () => {
@@ -51,6 +52,104 @@ describe("plan-mode wiring", () => {
 		await reloaded.fireOne("session_start", { reason: "reload" }, createFakeCtx({ cwd: stateDir, sessionManager: { getBranch: () => [...entries, ...reloaded.branch] } }));
 		reloaded.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "plan", paused: false });
 		expect(after.filter((r) => r.key === "permission-mode" && !r.remove).at(-1)?.text).toBe(before);
+	});
+
+	describe("a fork gets its own copy of the plan (R3-M19)", () => {
+		const standing = (list: Array<{ key?: string; text?: string; remove?: boolean }>) => list.filter((r) => r.key === "permission-mode" && !r.remove).at(-1)?.text;
+		/** The parent session: in plan mode, its plan written. */
+		const planInParent = async () => {
+			await fake.fireOne("session_start", {}, createFakeCtx({ cwd: stateDir, sessionManager: { getSessionId: () => "parent", getBranch: () => fake.branch } }));
+			fake.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "plan", paused: false });
+			const path = planFiles[0].path;
+			mkdirSync(join(path, ".."), { recursive: true });
+			writeFileSync(path, "# the plan\n");
+			return path;
+		};
+		/** A new instance in session `fork` on `entries` (a fork copies the parent's), still in plan mode. */
+		const openFork = async (entries: FakePi["branch"], event: string, all: FakePi["branch"] = entries) => {
+			const forked = createFakePi();
+			const seen: Array<{ key?: string; text?: string; remove?: boolean }> = [];
+			const paths: string[] = [];
+			forked.events.on(REMINDER_CHANNEL, (data) => seen.push(data as never));
+			forked.events.on(PLAN_FILE_CHANNEL, (data) => paths.push((data as { path: string }).path));
+			planModeExtension(forked.pi as never);
+			const ctx = createFakeCtx({ cwd: stateDir, sessionManager: { getSessionId: () => "fork", getBranch: () => [...entries, ...forked.branch], getEntries: () => [...all, ...forked.branch] } });
+			await forked.fireOne(event, { reason: "fork" }, ctx);
+			forked.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "plan", paused: false });
+			return { forked, seen, path: paths.at(-1)! };
+		};
+
+		it("copies the plan to a new file, and the fork's block says the copy exists", async () => {
+			const parentPath = await planInParent();
+			// The parent's run began before its plan was written.
+			expect(standing(reminders)).toBe(buildPlanModeReminder(parentPath, false));
+			const fork = await openFork([...fake.branch], "session_start");
+			expect(fork.path).not.toBe(parentPath);
+			expect(readFileSync(fork.path, "utf8")).toBe("# the plan\n");
+			expect(standing(fork.seen)).toBe(buildPlanModeReminder(fork.path, true));
+			writeFileSync(fork.path, "# the fork's plan\n");
+			expect(readFileSync(parentPath, "utf8")).toBe("# the plan\n");
+		});
+
+		it("a /tree in the fork to a node before the copy takes the same copy, not another", async () => {
+			const parentPath = await planInParent();
+			const parentEntries = [...fake.branch];
+			const fork = await openFork(parentEntries, "session_start");
+			writeFileSync(fork.path, "# the fork's plan\n");
+			const tree = await openFork(parentEntries, "session_tree", [...parentEntries, ...fork.forked.branch]);
+			expect(tree.path).toBe(fork.path);
+			expect(readFileSync(fork.path, "utf8")).toBe("# the fork's plan\n");
+			expect(tree.path).not.toBe(parentPath);
+		});
+
+		it("a resume of the parent keeps its own file", async () => {
+			const parentPath = await planInParent();
+			const resumed = createFakePi();
+			const paths: string[] = [];
+			resumed.events.on(PLAN_FILE_CHANNEL, (data) => paths.push((data as { path: string }).path));
+			planModeExtension(resumed.pi as never);
+			const entries = [...fake.branch];
+			await resumed.fireOne("session_start", { reason: "startup" }, createFakeCtx({ cwd: stateDir, sessionManager: { getSessionId: () => "parent", getBranch: () => [...entries, ...resumed.branch] } }));
+			resumed.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "plan", paused: false });
+			expect(paths.at(-1)).toBe(parentPath);
+		});
+
+		it("a record that names no session, as older sessions wrote, gets a copy rather than the shared file", async () => {
+			const parentPath = await planInParent();
+			const legacy = fake.branch.map((entry) => (entry.customType === "one-code:plan-mode-file" ? { ...entry, data: { path: parentPath } } : entry));
+			const fork = await openFork(legacy, "session_start");
+			expect(fork.path).not.toBe(parentPath);
+			expect(readFileSync(fork.path, "utf8")).toBe("# the plan\n");
+			writeFileSync(fork.path, "# the fork's plan\n");
+			expect(readFileSync(parentPath, "utf8")).toBe("# the plan\n");
+		});
+	});
+
+	it("after a compaction, re-attaches the plan and says the file exists now (R3-M20)", async () => {
+		const ctx = createFakeCtx({ cwd: stateDir, sessionManager: { getBranch: () => fake.branch } });
+		await fake.fireOne("session_start", {}, ctx);
+		fake.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "plan", paused: false });
+		const atEntry = reminders.filter((r) => r.key === "permission-mode" && !r.remove).at(-1)?.text;
+		mkdirSync(join(planFiles[0].path, ".."), { recursive: true });
+		writeFileSync(planFiles[0].path, "# the plan\n1. Step one.\n");
+		await fake.fireOne("session_compact", {}, ctx);
+		const standing = reminders.filter((r) => r.key === "permission-mode" && !r.remove).at(-1)?.text;
+		expect(standing).not.toBe(atEntry);
+		const restore = reminders.find((r) => r.text?.startsWith("A plan file exists from plan mode at:"));
+		expect(restore?.text).toContain("1. Step one.");
+		expect(restore?.placement).toBe("user-prepend");
+	});
+
+	it("after a compaction, an unreadable plan path (a directory) skips the re-attach instead of throwing", async () => {
+		const ctx = createFakeCtx({ cwd: stateDir, sessionManager: { getBranch: () => fake.branch } });
+		await fake.fireOne("session_start", {}, ctx);
+		fake.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "plan", paused: false });
+		const atEntry = reminders.filter((r) => r.key === "permission-mode" && !r.remove).at(-1)?.text;
+		mkdirSync(planFiles[0].path, { recursive: true });
+		await expect(fake.fireOne("session_compact", {}, ctx)).resolves.toBeUndefined();
+		// The mode block still follows the compaction; only the restore is skipped.
+		expect(reminders.filter((r) => r.key === "permission-mode" && !r.remove).at(-1)?.text).not.toBe(atEntry);
+		expect(reminders.find((r) => r.text?.startsWith("A plan file exists from plan mode at:"))).toBeUndefined();
 	});
 
 	it("re-installs the sticky plan block and announces the plan file synchronously when the mode becomes plan mid-turn", async () => {
@@ -169,6 +268,29 @@ describe("exit_plan_mode and the mode before planning (PERMISSIONS-REVIEW-2026-0
 		// The fixed choice for the same mode is not listed twice; auto is still offered.
 		expect(text.match(/auto-accept edits/g)).toHaveLength(1);
 		expect(text).toContain("Approve — auto mode");
+	});
+
+	it.each([
+		{ available: true, offered: true },
+		{ available: false, offered: false },
+	])("offers bypass back as the mode before planning only when the session can grant it (bypassAvailable: $available)", async ({ available, offered: expected }) => {
+		const offered: string[][] = [];
+		const ctx = createFakeCtx({
+			cwd: stateDir,
+			sessionManager: { getBranch: () => fake.branch },
+			hasUI: true,
+			modelRegistry: { getAvailable: () => [{ provider: "anthropic", id: "claude-haiku" }] },
+			ui: { custom: confirmPreselected(offered) },
+		});
+		await fake.fireOne("session_start", {}, ctx);
+		fake.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "bypassPermissions", paused: false, bypassAvailable: true });
+		await enterPlanWithPlanText(ctx);
+		// A resume without the bypass flag: the branch's run still says bypass came before.
+		fake.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "plan", paused: false, bypassAvailable: available });
+		modeRequests.length = 0;
+		await fake.tools.get("exit_plan_mode")!.execute("t3", {}, undefined, undefined, ctx);
+		expect(offered[0].join("\n").includes("back to bypass permissions")).toBe(expected);
+		expect(modeRequests).toEqual([{ mode: expected ? "bypassPermissions" : "default", toolCallId: "t3" }]);
 	});
 
 	it("a session that STARTED in plan mode has no pre-plan mode: the fixed list, manual approvals pre-selected", async () => {

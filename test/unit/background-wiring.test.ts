@@ -26,6 +26,14 @@ vi.mock("node:fs", async (importOriginal) => {
 			actual.createWriteStream(spool.fail ? join(dirname(path), "missing", "output.log") : path, options as never)) as typeof actual.createWriteStream,
 	};
 });
+// The pi a test models, whatever pi is installed: before 1.2.0 (false) a
+// notification before the first prompt goes out as a user message; from 1.2.0
+// (true) it is a custom message. Unset, the installed pi decides.
+const piModel = vi.hoisted(() => ({ customRunsFireBeforeAgentStart: undefined as boolean | undefined }));
+vi.mock("../../extensions/lib/pi-version.ts", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../extensions/lib/pi-version.ts")>();
+	return { ...actual, piFiresBeforeAgentStartForCustomRuns: (version: string | undefined) => piModel.customRunsFireBeforeAgentStart ?? actual.piFiresBeforeAgentStartForCustomRuns(version) };
+});
 import backgroundExtension from "../../extensions/background/index.ts";
 import { MONITOR_BATCH_MAX_LINES } from "../../extensions/background/monitor-batch.ts";
 import { TASK_REGISTER_CHANNEL } from "../../extensions/background/registry.ts";
@@ -39,6 +47,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
 import { createFakeCtx, createFakePi, type FakePi, flushNotices } from "./helpers/fake-pi.ts";
+import { resetProcessStateForTest } from "../../extensions/lib/process-state.ts";
 
 function mount(): FakePi {
 	const fake = createFakePi();
@@ -439,7 +448,8 @@ describe("background wiring: cron tools", () => {
 		const fires: AgentCronFire[] = [];
 		fake.events.on(AGENT_CRON_FIRE_CHANNEL, (data) => fires.push(data as AgentCronFire));
 		await vi.advanceTimersByTimeAsync(60_000 + DEFAULT_COALESCE_MS);
-		expect(fires).toMatchObject([{ agentId: "a1", jobId, prompt: "agent check" }]);
+		expect(fires).toMatchObject([{ agentId: "a1", jobId }]);
+		expect(fires[0].text(undefined)).toBe("agent check");
 		// Nothing reached the main conversation.
 		expect(cronFires(fake)).toHaveLength(0);
 	});
@@ -450,10 +460,17 @@ describe("background wiring: cron tools", () => {
 		const fake = mount();
 		const ctx = liveSessionCtx();
 		const agentTexts: string[] = [];
+		const childBranch: unknown[] = [];
+		const conversation = {
+			getBranch: () => childBranch,
+			appendEntry: (customType: string, data: unknown) => {
+				childBranch.push({ type: "custom", customType, data });
+			},
+		};
 		fake.events.on(AGENT_CRON_FIRE_CHANNEL, (data) => {
 			const fire = data as AgentCronFire;
 			fire.delivered = true;
-			agentTexts.push(fire.prompt);
+			agentTexts.push(fire.text(conversation));
 		});
 		await cronCall(fake, "cron_create", { cron: "1 12 * * *", prompt: "<<autonomous-loop>>", recurring: false }, ctx);
 		for (const minute of [2, 3]) {
@@ -479,6 +496,12 @@ describe("background wiring: cron tools", () => {
 		fake.events.on(SLASH_EXPAND_CHANNEL, (data) => {
 			const query = data as SlashExpandQuery;
 			cwds[query.text] = query.cwd;
+		});
+		// The subagents extension resolves an agent's fire as it sends it.
+		fake.events.on(AGENT_CRON_FIRE_CHANNEL, (data) => {
+			const fire = data as AgentCronFire;
+			fire.delivered = true;
+			fire.text(undefined);
 		});
 		const ctx = liveSessionCtx({ cwd: "/project" });
 		await cronCall(fake, "cron_create", { cron: "1 12 * * *", prompt: "/main-before", recurring: false }, ctx);
@@ -899,5 +922,182 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 		await fake.tools.get("monitor")!.execute("c1", { command: "sleep 30", description: "x" }, undefined, undefined, ctx);
 		await fake.fire("session_shutdown", { reason: "quit" }, ctx);
 		expect(await freshSessionNotify("startup")).not.toHaveBeenCalled();
+	});
+});
+
+/**
+ * Lifecycle grid round 3 (R3-M17, R3-L12, R3-L13): what a /reload, a /tree, a
+ * compaction and pi's re-evaluation of the module leave behind.
+ */
+describe("background wiring: state across /reload, /tree and compaction", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	const cronCall = (fake: FakePi, name: string, params: Record<string, unknown>, ctx: unknown) =>
+		fake.tools.get(name)!.execute("c", params, undefined, undefined, ctx) as Promise<ToolResult>;
+	const firedTexts = (fake: FakePi) =>
+		fake.sentMessages.filter((m) => m.message.customType === "cron").map((m) => (m.message.content as Array<{ text: string }>)[0].text);
+	/** One sentinel fire one minute from now, on the session whose branch `ctx` reads. */
+	const fireSentinel = async (fake: FakePi, ctx: unknown) => {
+		const at = new Date(Date.now() + 60_000);
+		await cronCall(fake, "cron_create", { cron: `${at.getMinutes()} ${at.getHours()} * * *`, prompt: "<<autonomous-loop>>", recurring: false }, ctx);
+		await vi.advanceTimersByTimeAsync(60_000 + DEFAULT_COALESCE_MS);
+		// pi delivers the fire's message (its customType and details as sent).
+		const sent = fake.sentMessages.at(-1)?.message;
+		await fake.fireOne("message_end", { message: { role: "custom", customType: sent?.customType, details: sent?.details } });
+		return firedTexts(fake).at(-1)!;
+	};
+	const isFull = (text: string) => text.startsWith("# Autonomous loop check");
+	const isShort = (text: string) => text.startsWith("# Autonomous loop tick");
+
+	it("R3-M17: after /reload a re-armed wakeup goes out as a wakeup message carrying its fold, not as a user message", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2026, 8, 25, 12, 0, 0));
+		const now = Date.now();
+		// A pi of 1.2.0 or later, whatever pi is installed.
+		piModel.customRunsFireBeforeAgentStart = true;
+		try {
+			// The factory re-run of a /reload: no prompt() has run in this instance.
+			const fake = createFakePi();
+			backgroundExtension(fake.pi as never);
+			const branch = [
+				{ type: "custom_message", customType: "wakeup", timestamp: new Date(now - 60_000).toISOString(), details: {} },
+				{ type: "message", message: { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id: "w1", name: "schedule_wakeup", arguments: { delaySeconds: 60, prompt: "poll the deploy", reason: "r", noop: true } }] } },
+				{ type: "message", message: { role: "toolResult", toolCallId: "w1", toolName: "schedule_wakeup", content: [], details: { scheduledFor: now + 60_000, jobId: "abc12345", startedAt: now - 60_000 }, timestamp: now } },
+			];
+			await fake.fire("session_start", { reason: "reload" }, liveSessionCtx({ sessionManager: { getBranch: () => branch } }));
+			await vi.advanceTimersByTimeAsync(60_000 + DEFAULT_COALESCE_MS);
+			expect(fake.sentUserMessages).toEqual([]);
+			const wakeups = fake.sentMessages.filter((m) => m.message.customType === "wakeup");
+			expect(wakeups).toHaveLength(1);
+			expect(wakeups[0].message.details).toMatchObject({ jobId: "abc12345", noOpStreak: 1 });
+		} finally {
+			piModel.customRunsFireBeforeAgentStart = undefined;
+		}
+	});
+
+	it("R3-L12: the main session's /loop delivery follows its branch: kept across /reload, resent after a /tree to a branch without it and after a compaction", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2026, 8, 25, 12, 0, 0));
+		const fake = mount();
+		const ctx = liveSessionCtx({ sessionManager: { getBranch: () => fake.branch } });
+		expect(isFull(await fireSentinel(fake, ctx))).toBe(true);
+		expect(isShort(await fireSentinel(fake, ctx))).toBe(true);
+
+		// /reload: a new instance over the same branch.
+		const reloaded = mount();
+		reloaded.branch.push(...fake.branch);
+		const reloadedCtx = liveSessionCtx({ sessionManager: { getBranch: () => reloaded.branch } });
+		await reloaded.fire("session_start", { reason: "reload" }, reloadedCtx);
+		expect(isShort(await fireSentinel(reloaded, reloadedCtx))).toBe(true);
+
+		// /tree to a branch that never got the instructions.
+		reloaded.branch.length = 0;
+		await reloaded.fire("session_tree", {}, reloadedCtx);
+		expect(isFull(await fireSentinel(reloaded, reloadedCtx))).toBe(true);
+
+		// A compaction summarizes them away: the next fire sends them again.
+		reloaded.branch.push({ type: "compaction", id: "cmp", parentId: reloaded.branch.at(-1)?.id ?? null });
+		expect(isFull(await fireSentinel(reloaded, reloadedCtx))).toBe(true);
+		expect(isShort(await fireSentinel(reloaded, reloadedCtx))).toBe(true);
+	});
+
+	it("on a pi before 1.2.0 records the /loop delivery of a first fire that went out as a user message", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2026, 8, 25, 12, 0, 0));
+		piModel.customRunsFireBeforeAgentStart = false;
+		try {
+			// No prompt has run: the session's first input was the /loop itself.
+			const fake = createFakePi();
+			backgroundExtension(fake.pi as never);
+			const ctx = liveSessionCtx({ sessionManager: { getBranch: () => fake.branch } });
+			await fake.fire("session_start", { reason: "startup" }, ctx);
+			const at = new Date(Date.now() + 60_000);
+			await cronCall(fake, "cron_create", { cron: `${at.getMinutes()} ${at.getHours()} * * *`, prompt: "<<autonomous-loop>>", recurring: false }, ctx);
+			await vi.advanceTimersByTimeAsync(60_000 + DEFAULT_COALESCE_MS);
+			expect(fake.sentUserMessages).toHaveLength(1);
+			expect(isFull(fake.sentUserMessages[0].content as string)).toBe(true);
+			// pi runs that message as a prompt: the next fire goes the custom-message way.
+			await fake.fire("before_agent_start", {}, ctx);
+			await fake.fire("agent_start", {}, ctx);
+			await fake.fire("agent_settled", {}, ctx);
+			expect(isShort(await fireSentinel(fake, ctx))).toBe(true);
+		} finally {
+			piModel.customRunsFireBeforeAgentStart = undefined;
+		}
+	});
+
+	it("records the /loop delivery only once the fire's message is delivered: a /reload that drops a held fire resends the instructions", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2026, 8, 25, 12, 0, 0));
+		const fake = mount();
+		const ctx = liveSessionCtx({ sessionManager: { getBranch: () => fake.branch } });
+		await fake.fire("session_start", { reason: "startup" }, ctx);
+		// The fire is built, but the notifier still holds it (the coalescing window) when /reload shuts the session down.
+		const at = new Date(Date.now() + 60_000);
+		await cronCall(fake, "cron_create", { cron: `${at.getMinutes()} ${at.getHours()} * * *`, prompt: "<<autonomous-loop>>", recurring: false }, ctx);
+		await vi.advanceTimersByTimeAsync(60_000);
+		await fake.fire("session_shutdown", { reason: "reload" }, ctx);
+		await vi.advanceTimersByTimeAsync(DEFAULT_COALESCE_MS);
+		expect(firedTexts(fake)).toEqual([]);
+
+		// The next fire after the reload: the model never had the instructions, so they go out in full.
+		const reloaded = mount();
+		reloaded.branch.push(...fake.branch);
+		const reloadedCtx = liveSessionCtx({ sessionManager: { getBranch: () => reloaded.branch } });
+		await reloaded.fire("session_start", { reason: "reload" }, reloadedCtx);
+		expect(isFull(await fireSentinel(reloaded, reloadedCtx))).toBe(true);
+		// That one was delivered: the next fire is the short tick.
+		expect(isShort(await fireSentinel(reloaded, reloadedCtx))).toBe(true);
+	});
+
+	it("R3-L12: a subagent's /loop delivery follows its own conversation, so its own compaction resets it", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2026, 8, 25, 12, 0, 0));
+		const fake = mount();
+		// The agent's session, as the subagents extension hands it to the fire.
+		const childBranch: Array<Record<string, unknown>> = [];
+		const conversation = {
+			getBranch: () => childBranch,
+			appendEntry: (customType: string, data: unknown) => {
+				childBranch.push({ type: "custom", customType, data });
+			},
+		};
+		const agentTexts: string[] = [];
+		fake.events.on(AGENT_CRON_FIRE_CHANNEL, (data) => {
+			const fire = data as AgentCronFire;
+			fire.delivered = true;
+			agentTexts.push(fire.text(conversation));
+		});
+		for (const minute of [1, 2, 3, 4]) {
+			fake.events.emit(AGENT_CRON_CHANNEL, { op: "create", agentId: "a1", cwd: "/project", cron: `${minute} 12 * * *`, prompt: "<<autonomous-loop>>", recurring: false } satisfies AgentCronRequest);
+		}
+		await vi.advanceTimersByTimeAsync(2 * 60_000 + 1_000);
+		childBranch.push({ type: "compaction" });
+		await vi.advanceTimersByTimeAsync(2 * 60_000);
+		expect(agentTexts.map((text) => (isFull(text) ? "full" : isShort(text) ? "short" : text))).toEqual(["full", "short", "full", "short"]);
+		// The main session's branch holds none of it.
+		expect(fake.branch).toEqual([]);
+	});
+
+	it("R3-L13: the notice of the tasks a /reload stopped reaches the reloaded instance, whose module pi evaluates again", async () => {
+		resetProcessStateForTest();
+		const fake = mount();
+		const ctx = liveSessionCtx();
+		const start = (await fake.tools.get("monitor")!.execute("c1", { command: "sleep 30", description: "dev server" }, undefined, undefined, ctx)) as {
+			details: { taskId: string };
+		};
+		await fake.fire("session_shutdown", { reason: "reload" }, ctx);
+
+		vi.resetModules();
+		const { default: reloadedExtension } = await import("../../extensions/background/index.ts");
+		const next = createFakePi();
+		reloadedExtension(next.pi as never);
+		const notify = vi.fn();
+		await next.fire("session_start", { reason: "reload" }, createFakeCtx({ hasUI: true, mode: "tui", ui: { notify } }));
+		await flushNotices();
+		expect(notify).toHaveBeenCalledTimes(1);
+		expect(notify.mock.calls[0][0]).toBe(`Stopped 1 background task on reload: ${start.details.taskId} (dev server).`);
 	});
 });

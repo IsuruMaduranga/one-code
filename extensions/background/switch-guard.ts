@@ -1,10 +1,12 @@
 /**
  * What a session switch or quit would stop (pure). Running background tasks and
- * scheduled jobs belong to the session: `/clear`, `/new`, `/resume` and a fork
- * stop them, and so do `/reload` and quitting. pi lets an extension cancel a
- * switch (`session_before_switch`, `session_before_fork`), so a switch asks
- * first; reloading and quitting have no such hook, so the standing widget line
- * says it up front.
+ * scheduled jobs belong to the session: `/clear`, `/new`, `/resume`, a fork and
+ * quitting stop them. A `/reload` stops the running tasks only: it keeps the
+ * conversation, so the scheduled jobs come back from the branch
+ * (background/index.ts `armFromBranch`). pi lets an extension cancel a switch
+ * (`session_before_switch`, `session_before_fork`), so a switch asks first;
+ * reloading and quitting have no such hook, so the standing widget line says
+ * it up front.
  */
 
 /** A running task or scheduled job, as the dialog and widget name it. */
@@ -48,5 +50,7 @@ export function switchWarning(tasks: readonly SessionWork[], jobs: readonly Sess
 /** The standing widget line while anything runs, or undefined when nothing does. */
 export function workWidgetLine(tasks: number, jobs: number): string | undefined {
 	if (tasks === 0 && jobs === 0) return undefined;
-	return ` ${counts(tasks, jobs)} · stopped by /clear, /reload or quitting${tasks > 0 ? " · /tasks to manage" : ""}`;
+	// A /reload stops only the running tasks; the jobs re-arm from the branch.
+	const stoppedBy = jobs === 0 ? "/clear, /reload or quitting" : tasks === 0 ? "/clear or quitting" : "/clear or quitting, the tasks by /reload too";
+	return ` ${counts(tasks, jobs)} · stopped by ${stoppedBy}${tasks > 0 ? " · /tasks to manage" : ""}`;
 }

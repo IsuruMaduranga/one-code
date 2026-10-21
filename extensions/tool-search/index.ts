@@ -60,10 +60,11 @@ import {
 import { looksLikeAnthropicRequest, MID_CONVERSATION_SYSTEM_BETA, withBetas } from "../lib/anthropic-payload.ts";
 import { liftAddenda, supportsToolAdditions, TOOL_ADDITION_BETAS, withToolAdditions } from "../lib/tool-additions.ts";
 import { inContextEntries } from "../lib/compaction-boundary.ts";
-import { CALLABLE_TOOLS, foldBranch, type LedgerFold } from "../lib/ledger/fold.ts";
+import { CALLABLE_TOOLS } from "../lib/ledger/fold.ts";
+import { foldOnce, sameEntries } from "../lib/ledger/fold-memo.ts";
 import { declaredToolNames } from "../lib/ledger/wire.ts";
 import { MCP_TOOLS_CHANNEL } from "../lib/mcp-share.ts";
-import { requestIdentity, sessionThinkingLevel } from "../lib/anthropic-auth.ts";
+import { sessionIdentity } from "../lib/anthropic-auth.ts";
 import type { EntryLike } from "../lib/ledger/records.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../lib/reminders.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
@@ -73,6 +74,10 @@ import { registerLocalCommand } from "../lib/local-command.ts";
 
 /** The told mode for "this epoch's message 1 lists deferred tools this run cannot load", said once per epoch. */
 const UNAVAILABLE_MODE = "deferred-unavailable";
+
+/** A session manager as far as the reconciler reads it (a test double may lack `getBranch`). */
+type SessionLike = { getBranch?: () => unknown[] };
+const branchOf = (session: SessionLike | undefined) => (session?.getBranch?.() ?? []) as EntryLike[];
 
 export default function toolSearchExtension(pi: ExtensionAPI) {
 	// Owned here (see lib/deferred.ts): the only instance, fed over DEFER_CHANNEL.
@@ -87,27 +92,21 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	// After session_shutdown every pi.* call throws (the runner is invalidated,
 	// findings §8): an event that lands then must do nothing (LIFECYCLE-REVIEW L1).
 	const alive = sessionAlive(pi);
-	/** The session's branch, for folding what the current epoch has told and loaded. */
-	let branchOf: (() => EntryLike[]) | undefined;
-	/**
-	 * The branch's fold with the live identity, so a model or auth switch counts.
-	 * Kept by leaf and identity: a server's connect defers its tools in a burst
-	 * with nothing appended between.
-	 */
-	let foldAt: { at: string; fold: LedgerFold } | undefined;
-	const foldOf = (branch: EntryLike[], model: Parameters<typeof requestIdentity>[0]): LedgerFold => {
-		const identity = requestIdentity(model, sessionThinkingLevel(pi));
-		const at = `${branch.length}\0${branch.at(-1)?.id}\0${JSON.stringify(identity)}`;
-		if (foldAt?.at !== at) foldAt = { at, fold: foldBranch(branch, identity) };
-		return foldAt.fold;
-	};
+	/** The session's manager, for folding what the current epoch has told and loaded outside a hook that carries one. */
+	let session: SessionLike | undefined;
 	/** The session's model, for a decision made outside a hook that carries one. */
 	let currentModel: { provider?: string; api?: string; id?: string; compat?: unknown } | undefined;
+	/**
+	 * The branch's fold with the live identity, so a model or auth switch
+	 * counts. Shared with the ledger (lib/ledger/fold-memo.ts): the fold this
+	 * turn_start takes serves the request's `context` hook, and a server's
+	 * connect defers its tools in a burst with nothing appended between.
+	 */
+	const foldOf = (owner: SessionLike | undefined, branch: EntryLike[], model: typeof currentModel) => foldOnce(owner, branch, sessionIdentity(pi, model));
 
 	/** Whether tool_search is registered; a `--tools` list without it turns deferral off (lib/deferred.ts). */
 	const deferring = () => deferralEnabled(pi.getAllTools());
-	const searchableTools = () => {
-		const all = pi.getAllTools();
+	const searchableTools = (all = pi.getAllTools()) => {
 		if (!deferralEnabled(all)) return [];
 		return all
 			.filter((tool) => deferredRegistry.has(tool.name))
@@ -207,6 +206,24 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	/** Loads `tool_search` made since the last turn started: their results reach the branch when the batch ends. */
 	const freshLoads = new Map<string, string[]>();
 
+	/** What the branch's in-context history loaded and uses, for the branch it was read from. */
+	let used: { entries: readonly EntryLike[]; loads: ReadonlyMap<string, string[]>; inUse: ReadonlySet<string> } | undefined;
+	/**
+	 * The branch's in-context loads and tools in use, read again only when the
+	 * branch changed (lib/ledger/fold-memo.ts `sameEntries`): the reconciler runs
+	 * at every turn, model switch, defer and withhold, and a server's connect
+	 * defers its tools in a burst with nothing appended between. Both are pure
+	 * functions of the entries; the registry, the model and this turn's loads
+	 * are applied on top at each run.
+	 */
+	const branchUse = (branch: EntryLike[]) => {
+		if (used && sameEntries(used.entries, branch)) return used;
+		const inContext = inContextEntries(branch) as SessionEntry[];
+		const loads = toolSearchLoads(inContext);
+		used = { entries: [...branch], loads, inUse: toolsInUse(inContext, loads) };
+		return used;
+	};
+
 	/**
 	 * The one place deferred tools are activated and deactivated (lib/deferred.ts
 	 * callableDeferredTools): a deferred tool is active exactly when the branch
@@ -220,28 +237,44 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	 * withheld tool is never active. Run before pi fixes a turn's tools
 	 * (turn_start) and whenever the inputs change.
 	 */
-	const reconcile = (branch: EntryLike[], model: { provider?: string; api?: string; id?: string; compat?: unknown } | undefined) => {
-		if (!alive() || !deferring()) return;
-		const fold = foldOf(branch, model);
-		const inContext = inContextEntries(branch) as SessionEntry[];
-		loads = new Map([...toolSearchLoads(inContext), ...freshLoads]);
-		const inUse = toolsInUse(inContext);
-		for (const names of freshLoads.values()) for (const name of names) inUse.add(name);
-		const head = fold.lastRequest?.head;
-		const told = fold.told.get("tools") ?? new Set<string>();
-		const announcing = supportsToolAdditions(model) && !fold.opensEpoch ? new Set(searchableTools().map((tool) => tool.name).filter((name) => !told.has(name))) : new Set<string>();
+	const reconcile = (owner: SessionLike | undefined, model: typeof currentModel) => {
+		if (!alive()) return;
+		const all = pi.getAllTools();
+		const registered = new Set(all.map((tool) => tool.name));
+		if (!deferralEnabled(all)) {
+			// Nothing is deferred without the loader, but a withheld tool is still
+			// never active: a /tree switch restores a loadout from before it left.
+			const active = pi.getActiveTools();
+			const next = reconcileActive(active, new Set(), new Set(), withheldNames, registered);
+			if (next !== active) pi.setActiveTools([...next]);
+			return;
+		}
+		const branch = branchOf(owner);
+		const use = branchUse(branch);
+		loads = new Map([...use.loads, ...freshLoads]);
 		const deferred = new Set(deferredRegistry.names);
-		const callable = callableDeferredTools(deferred, {
-			inUse,
-			toldCallable: fold.told.get(CALLABLE_TOOLS) ?? new Set(),
-			declaredEager: head ? declaredToolNames(head, { eager: true }) : new Set(),
-			announcing,
-		});
+		// With nothing deferred no deferred tool is callable: the active set
+		// loses only withheld tools, and the branch's fold has nothing to decide.
+		let callable = new Set<string>();
+		if (deferred.size > 0) {
+			const fold = foldOf(owner, branch, model);
+			const inUse = new Set(use.inUse);
+			for (const names of freshLoads.values()) for (const name of names) inUse.add(name);
+			const head = fold.lastRequest?.head;
+			const told = fold.told.get("tools") ?? new Set<string>();
+			const announcing = supportsToolAdditions(model) && !fold.opensEpoch ? new Set(searchableTools(all).map((tool) => tool.name).filter((name) => !told.has(name))) : new Set<string>();
+			callable = callableDeferredTools(deferred, {
+				inUse,
+				toldCallable: fold.told.get(CALLABLE_TOOLS) ?? new Set(),
+				declaredEager: head ? declaredToolNames(head, { eager: true }) : new Set(),
+				announcing,
+			});
+		}
 		const active = pi.getActiveTools();
-		const next = reconcileActive(active, deferred, callable, withheldNames, new Set(pi.getAllTools().map((tool) => tool.name)));
+		const next = reconcileActive(active, deferred, callable, withheldNames, registered);
 		if (next !== active) pi.setActiveTools([...next]);
 	};
-	const reconcileNow = () => reconcile(branchOf?.() ?? [], currentModel);
+	const reconcileNow = () => reconcile(session, currentModel);
 
 	// On models that take client-side tool references (first-party Claude >= 4.5,
 	// not Haiku) every deferred tool rides every Anthropic request as a
@@ -308,9 +341,6 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		withheldNames.add(name);
 		if (!alive()) return;
 		reconcileNow();
-		// Not deferring: the reconciler leaves the active set alone, but a withheld tool is never active.
-		const active = pi.getActiveTools();
-		if (active.includes(name)) pi.setActiveTools(active.filter((n) => n !== name));
 		publishListing();
 	});
 
@@ -319,14 +349,13 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	// and referenced there.
 	pi.on("session_tree", (_event, ctx) => {
 		freshLoads.clear();
-		reconcile((ctx?.sessionManager?.getBranch?.() ?? []) as EntryLike[], ctx?.model ?? currentModel);
+		reconcile(ctx?.sessionManager, ctx?.model ?? currentModel);
 	});
 
 	pi.on("session_start", (_event, ctx) => {
 		sessionStarted = true;
 		currentModel = ctx?.model;
-		const sessionManager = ctx?.sessionManager;
-		branchOf = sessionManager ? () => sessionManager.getBranch() as EntryLike[] : undefined;
+		session = ctx?.sessionManager;
 		freshLoads.clear();
 		reconcileNow();
 		publishListing();
@@ -349,7 +378,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	// Code declares a deferred tool only while a reference to it is in the
 	// history), unless the reconciler keeps it.
 	pi.on("session_compact", (_event, ctx) => {
-		reconcile((ctx?.sessionManager?.getBranch?.() ?? []) as EntryLike[], ctx?.model ?? currentModel);
+		reconcile(ctx?.sessionManager, ctx?.model ?? currentModel);
 		publishListing();
 	});
 
@@ -381,7 +410,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 				key: `deferred-miss-${name}`,
 				text: withheldMissReminderText(name),
 			});
-		} else if (branchOf && declaredToolNames(foldOf(branchOf(), currentModel).lastRequest?.head ?? {}).has(name)) {
+		} else if (session && declaredToolNames(foldOf(session, branchOf(session), currentModel).lastRequest?.head ?? {}).has(name)) {
 			// The epoch's recorded tools stay declared after the tool left the
 			// session (a setting turned it off): the call cannot be salvaged, and
 			// the model must not keep trying it.

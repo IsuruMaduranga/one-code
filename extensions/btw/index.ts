@@ -23,7 +23,8 @@
  *
  * Like Claude Code, the session keeps a side history: each answered question
  * is threaded into the next one and listed in the panel, where it can be
- * browsed and cleared. `f` forks the current answer into a background fork
+ * browsed and cleared. A /tree keeps only the exchanges asked from a point
+ * the selected branch holds. `f` forks the current answer into a background fork
  * subagent through the subagents extension (lib/btw-fork.ts).
  */
 
@@ -33,6 +34,7 @@ import {
 	copyToClipboard,
 	type ExtensionAPI,
 	type ExtensionCommandContext,
+	type ExtensionContext,
 	getAgentDir,
 	SettingsManager,
 	UserMessageComponent,
@@ -91,8 +93,19 @@ export default function btwExtension(pi: ExtensionAPI) {
 	const exchange = followLastExchange(pi);
 
 	// The session's answered side questions, oldest first: sent before each new
-	// question and listed in the panel. `x` in the panel clears them.
-	let history: BtwExchange[] = [];
+	// question and listed in the panel. `x` in the panel clears them. Each one
+	// keeps the entry the conversation stood at when it was asked, since it was
+	// answered from the conversation up to there.
+	let history: Array<BtwExchange & { askedAt: string | undefined }> = [];
+	/** The entry the branch ends at: where a side question is asked from (undefined in an empty session). */
+	const leafOf = (ctx: ExtensionContext): string | undefined => ctx.sessionManager.getBranch().at(-1)?.id;
+	/** Whether the selected branch holds the point a side question was asked from. */
+	const onBranch = (ctx: ExtensionContext, askedAt: string | undefined): boolean =>
+		askedAt === undefined || ctx.sessionManager.getBranch().some((entry) => entry.id === askedAt);
+	/** Thread an answer into the side history, unless a /tree since left the point it was asked from. */
+	const keep = (ctx: ExtensionContext, exchange: BtwExchange, askedAt: string | undefined) => {
+		if (exchange.answer && onBranch(ctx, askedAt)) history.push({ ...exchange, askedAt });
+	};
 
 	// The controller for an open panel's in-flight call. Aborted when the session
 	// is replaced or torn down, so a late resolve cannot repaint a disposed `tui`
@@ -118,6 +131,12 @@ export default function btwExtension(pi: ExtensionAPI) {
 		inFlight?.abort();
 		inFlight = undefined;
 		releaseSideCalls(ctx.sessionManager.getSessionId());
+	});
+	// A /tree keeps the side exchanges asked from a point the selected branch
+	// holds; the others were answered from the abandoned branch's conversation.
+	pi.on("session_tree", (_event, ctx) => {
+		const ids = new Set(ctx.sessionManager.getBranch().map((entry) => entry.id));
+		history = history.filter((exchange) => exchange.askedAt === undefined || ids.has(exchange.askedAt));
 	});
 
 	// The answer renders as Markdown, like the transcript; plain wrapped text
@@ -188,6 +207,7 @@ export default function btwExtension(pi: ExtensionAPI) {
 				ctx.ui.notify("Ask a side question: /btw <question>", "info");
 				return;
 			}
+			const askedAt = leafOf(ctx);
 			// The panel can fork a background agent whose completion opens the
 			// session's first turn; this context carries the options that turn
 			// is built from (lib/prompt-options.ts).
@@ -202,7 +222,7 @@ export default function btwExtension(pi: ExtensionAPI) {
 				try {
 					const answer = await ask(ctx, question, history, controller.signal);
 					if (controller.signal.aborted) return;
-					if (answer) history.push({ question, answer });
+					keep(ctx, { question, answer }, askedAt);
 					if (ctx.mode === "rpc") ctx.ui.notify(answer || "(no answer)", "info");
 					else printAnswer(ctx, answer || "(no answer)");
 				} catch (error) {
@@ -253,7 +273,7 @@ export default function btwExtension(pi: ExtensionAPI) {
 						const answer = await ask(ctx, question, earlier, controller.signal);
 						if (controller.signal.aborted) return;
 						view.answer = answer;
-						if (answer) history.push({ question, answer });
+						keep(ctx, { question, answer }, askedAt);
 					} catch (error) {
 						if (controller.signal.aborted) return;
 						view.error = error instanceof Error ? error.message : String(error);

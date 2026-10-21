@@ -60,6 +60,18 @@ export function piVersionWarning(runningPiVersion: string | undefined): string |
 }
 
 /**
+ * Whether the running pi fires `before_agent_start` for a run an extension
+ * opens from idle with `sendMessage(…, { triggerTurn: true })`. pi 1.2.0
+ * added it (its changelog, "before_agent_start for extension-triggered
+ * runs"); before, only `prompt()` fired the event. A version check, not a
+ * feature test: nothing tells the two apart before such a run starts, and an
+ * unparseable version reads as no, the older and safer behavior.
+ */
+export function piFiresBeforeAgentStartForCustomRuns(runningPiVersion: string | undefined): boolean {
+	return piAtLeast(runningPiVersion, "1.2.0");
+}
+
+/**
  * Whether the running pi ships built-in extensions that can replace ours'
  * names (`builtin:tool-search`, `builtin:mcp`; lib/replaced-builtins.mjs).
  * A version check, not a feature test: nothing an extension can see tells a
@@ -67,7 +79,12 @@ export function piVersionWarning(runningPiVersion: string | undefined): string |
  * as no.
  */
 export function piHasBuiltinExtensions(runningPiVersion: string | undefined, firstVersion: string): boolean {
+	return piAtLeast(runningPiVersion, firstVersion);
+}
+
+/** Whether the running pi is `min` or later; a missing or unparseable version reads as no. */
+function piAtLeast(runningPiVersion: string | undefined, min: string): boolean {
 	if (!runningPiVersion) return false;
-	const order = compareVersions(runningPiVersion, firstVersion);
+	const order = compareVersions(runningPiVersion, min);
 	return order !== undefined && order >= 0;
 }

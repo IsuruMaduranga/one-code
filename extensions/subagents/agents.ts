@@ -14,7 +14,7 @@
  * Subdirectories are searched recursively.
  */
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, type Stats, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
@@ -42,30 +42,52 @@ export interface AgentDefinition {
 	source: string;
 }
 
-function collectMarkdownFiles(dir: string, out: string[] = []): string[] {
+/** Visit every `.md` file under `dir`, at any depth, with its stats. */
+function walkMarkdownFiles(dir: string, visit: (path: string, stats: Stats) => void): void {
 	let entries: string[];
 	try {
 		entries = readdirSync(dir);
 	} catch {
-		return out; // missing or unreadable directory: nothing to discover
+		return; // missing or unreadable directory: nothing to discover
 	}
 	for (const entry of entries) {
 		const full = join(dir, entry);
 		// A dangling symlink or an unreadable entry must not take the whole
 		// catalog (and every Agent call) down with it — skip it (review L1).
-		let isDirectory: boolean;
+		let stats: Stats;
 		try {
-			isDirectory = statSync(full).isDirectory();
+			stats = statSync(full);
 		} catch {
 			continue;
 		}
-		if (isDirectory) {
-			collectMarkdownFiles(full, out);
+		if (stats.isDirectory()) {
+			walkMarkdownFiles(full, visit);
 		} else if (entry.endsWith(".md")) {
-			out.push(full);
+			visit(full, stats);
 		}
 	}
+}
+
+function collectMarkdownFiles(dir: string): string[] {
+	const out: string[] = [];
+	walkMarkdownFiles(dir, (path) => out.push(path));
 	return out;
+}
+
+/**
+ * A stamp of the agent files `discoverAgents` would read from these sources:
+ * each source, then each file's path, times and size. It changes when a file
+ * is added, removed, renamed or written, so a catalog built from the sources
+ * can be reused while the stamp holds, without reading or parsing any file.
+ */
+export function agentSourcesStamp(sources: Array<string | AgentSource>): string {
+	const parts: string[] = [];
+	for (const source of sources) {
+		const { dir, namespace } = typeof source === "string" ? { dir: source, namespace: undefined } : source;
+		parts.push(`${namespace ?? ""}@${dir}`);
+		walkMarkdownFiles(dir, (path, stats) => parts.push(`${path}:${stats.mtimeMs}:${stats.ctimeMs}:${stats.size}`));
+	}
+	return parts.join("\n");
 }
 
 /**

@@ -19,7 +19,7 @@
  * Pure: no pi imports.
  */
 import { isObject } from "./records.ts";
-import { isTrailer } from "./wire.ts";
+import { appendPoint } from "./wire.ts";
 
 const roleOf = (element: unknown) => (isObject(element) ? element.role : undefined);
 
@@ -58,9 +58,7 @@ export function settleSystemMessages<T>(list: readonly T[], api: string, from = 
 		out.push(element);
 	}
 	if (held.length > 0) {
-		let end = out.length;
-		while (end > start && isTrailer(out[end - 1], api)) end--;
-		out.splice(end, 0, ...held);
+		out.splice(Math.max(start, appendPoint(out, api)), 0, ...held);
 	}
 	return out;
 }

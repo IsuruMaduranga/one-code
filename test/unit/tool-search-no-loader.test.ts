@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFER_CHANNEL, deferralEnabled, loaderUnavailableReminderText } from "../../extensions/lib/deferred.ts";
+import { DEFER_CHANNEL, deferralEnabled, loaderUnavailableReminderText, WITHHOLD_CHANNEL } from "../../extensions/lib/deferred.ts";
 import toolSearchExtension from "../../extensions/tool-search/index.ts";
 import { makeToolSearchFakePi } from "./helpers/tool-search-fake-pi.ts";
 
@@ -44,6 +44,15 @@ describe("tool-search without its own registration", () => {
 		expect(fake.activeTools()).toContain("mcp__fixture__late");
 		expect(fake.reminders).toHaveLength(0);
 		expect(fake.render({ told: { tools: ["mcp__fixture__lookup_ticket"] }, modes: { "deferred-unavailable": true } })).toEqual([]);
+	});
+
+	it("keeps a withheld tool inactive when a branch switch restores a loadout that held it", () => {
+		fake.pi.events.emit(WITHHOLD_CHANNEL, { name: "mcp__fixture__lookup_ticket" });
+		expect(fake.activeTools()).toEqual(["read", "bash"]);
+		// pi restores the selected branch's tools, from before the tool was withheld.
+		fake.setActive(["read", "bash", "mcp__fixture__lookup_ticket"]);
+		fake.pi.fire("session_tree", {}, { sessionManager: { getBranch: () => [] } });
+		expect(fake.activeTools()).toEqual(["read", "bash"]);
 	});
 
 	it("sends an Anthropic request without defer_loading definitions", () => {

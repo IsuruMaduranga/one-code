@@ -314,7 +314,7 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 		// the tool resolved: a file that changed since is stale, never taken as
 		// read in its current form (round-2 review H1), and a gone one untracked.
 		const files = filesSeenOnBranch(entries);
-		const changed: { path: string; sha256: string }[] = [];
+		const changed: Pick<FileObservation, "path" | "sha256">[] = [];
 		for (const [path, { seen, notified }] of files) {
 			const stamp = statIfPresent(path);
 			const current = readIfPresent(path);
@@ -462,11 +462,25 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 			const candidates = restoreCandidates(before, (path) => shown(path) || !allowed(path));
 			const read = createReadToolDefinition(ctx.cwd);
 			const reads: RestoredRead[] = await Promise.all(candidates.map(async (path) => ({ path, text: await readAgain(read, path, ctx) })));
+			const shownText = new Map(reads.map(({ path, text }) => [path, text]));
 			const { blocks, restored } = restoreBlocks(reads, estimateTextTokens);
 			// The block that shows a file records what it showed, so a reload or a
 			// resume counts the file read exactly where the branch holds the block
-			// (replay.ts filesSeenOnBranch).
-			const seen = new Map(restored.map((path) => [path, touch(path)]));
+			// (replay.ts filesSeenOnBranch). The file counts as read only when the
+			// disk now holds exactly what the block shows: one that changed while
+			// it was read back (even back to where it started) fails safe, and a
+			// fresh read is asked for instead of passing the stale-edit guard.
+			const seen = new Map(
+				restored.map((path) => {
+					const observed = touch(path);
+					const text = shownText.get(path);
+					if (observed && (text === undefined || sha256(text) !== observed.sha256)) {
+						tracker.forget(path);
+						return [path, undefined] as const;
+					}
+					return [path, observed] as const;
+				}),
+			);
 			for (const { text, restores } of blocks) {
 				const observation = restores ? seen.get(restores) : undefined;
 				pi.events.emit(REMINDER_CHANNEL, { text, placement: "user-prepend", orTail: true, untilCompaction: true, ...(observation ? { observations: [observation] } : {}) } satisfies ReminderPayload);
@@ -514,8 +528,8 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 	const reportExternalChanges = () => {
 		// Each notice records the versions it names on its pending entry, so a
 		// reload or a resume does not announce them again (replay.ts).
-		const detailed: { text: string; notified?: { path: string; sha256: string } }[] = [];
-		const overflow: { path: string; sha256: string }[] = [];
+		const detailed: { text: string; notified?: Pick<FileObservation, "path" | "sha256"> }[] = [];
+		const overflow: Pick<FileObservation, "path" | "sha256">[] = [];
 		for (const path of tracker.tracked) {
 			// Undefined for a file tracked without content (oversized); an empty
 			// file is compared like any other.

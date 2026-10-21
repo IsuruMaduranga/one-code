@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HooksSource } from "../../extensions/hooks/settings.ts";
 import {
 	describeProjectHooks,
@@ -119,6 +119,21 @@ describe("projectHooksApproved", () => {
 		expect(await projectHooksApproved("/proj", [source("x")], d)).toBe(false);
 		expect(prompts).toBe(1);
 		expect(readStoredApproval("/proj", storePath)).toBeUndefined();
+	});
+
+	it("a decline outlives /reload, which evaluates the module again (process state)", async () => {
+		let prompts = 0;
+		const d = deps({
+			confirm: async () => {
+				prompts += 1;
+				return false;
+			},
+		});
+		expect(await projectHooksApproved("/proj", [source("x")], d)).toBe(false);
+		vi.resetModules();
+		const reloaded = await import("../../extensions/hooks/trust.ts");
+		expect(await reloaded.projectHooksApproved("/proj", [source("x")], d)).toBe(false);
+		expect(prompts).toBe(1);
 	});
 
 	it("headless without stored approval skips with a notice", async () => {

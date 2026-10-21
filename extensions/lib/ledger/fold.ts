@@ -29,7 +29,7 @@
  * Pure: no pi imports.
  */
 import { type Coverage, type EntryLike, type EpochCause, type PendingRecordData, readRecord, type RequestIdentity, type RequestRecordData, sameIdentity, type ToldFact } from "./records.ts";
-import type { RecordedRequest } from "./wire.ts";
+import { declaredToolNames, type RecordedRequest } from "./wire.ts";
 
 export type { EpochCause };
 
@@ -48,6 +48,8 @@ export interface LedgerFold {
 	lastRequest: FoldedRequest | undefined;
 	/** Every element hash already stored on the branch. */
 	knownHashes: Set<string>;
+	/** Every tool the branch's counted requests declared, in the order of its first declaration: the order an epoch renders (ledger/wire.ts). */
+	toolOrder: string[];
 	/** Told facts in the current epoch: kind ("tools", "skills", `CALLABLE_TOOLS`) to names. */
 	told: Map<string, Set<string>>;
 	/** Modes told in the current epoch, by key: on or off as last told. */
@@ -110,18 +112,18 @@ function rebuild(data: RequestRecordData, base: RecordedRequest | undefined, blo
 	};
 }
 
-/** What a request that does not count takes back: the told state, the epoch cause and the identity from before it. */
+/**
+ * What a request that does not count takes back: the told state, the epoch
+ * cause and the identity from before it. The told state is held by reference,
+ * not copied: nothing tells into it while a checkpoint is live (an epoch or a
+ * changed identity replaces it, and told records riding a request wait in its
+ * `facts` until it counts, when its checkpoint is dropped).
+ */
 interface FoldCheckpoint {
 	told: ToldState;
 	resetSinceBase: EpochCause | undefined;
 	lastIdentity: RequestIdentity | undefined;
 }
-
-const copyTold = (state: ToldState): ToldState => ({
-	told: new Map([...state.told].map(([kind, names]) => [kind, new Set(names)])),
-	modes: new Map(state.modes),
-	blocks: new Map(state.blocks),
-});
 
 /** The ids of the entries pi omitted from the model's view: a `context_edit` with no replacement. */
 function omittedIds(branch: readonly EntryLike[]): Set<string> {
@@ -140,6 +142,9 @@ export function foldBranch(branch: readonly EntryLike[], identity?: RequestIdent
 	/** The index of the last compaction on the branch: an older `untilCompaction` pending item is stale. */
 	let lastCompaction = -1;
 	let base: FoldedRequest | undefined;
+	const toolOrder = new Set<string>();
+	/** The head hash of the last counted request, whose declarations `toolOrder` holds. */
+	let orderedHead: string | undefined;
 	/** A compaction or `epoch` record after the base: the next request renders everything again. */
 	let resetSinceBase: EpochCause | undefined;
 	let lastIdentity: RequestIdentity | undefined;
@@ -149,8 +154,8 @@ export function foldBranch(branch: readonly EntryLike[], identity?: RequestIdent
 	let open: { request: FoldedRequest | undefined; consumed: string[]; facts: ToldFact[]; checkpoint: FoldCheckpoint } | undefined;
 
 	const tell = (facts: readonly ToldFact[]) => tellFacts(told, facts);
-	const checkpoint = (): FoldCheckpoint => ({ told: copyTold(told), resetSinceBase, lastIdentity });
-	/** A new epoch starts with nothing told. */
+	const checkpoint = (): FoldCheckpoint => ({ told, resetSinceBase, lastIdentity });
+	/** A new epoch starts with nothing told: a new state, so a checkpoint keeps the one it holds. */
 	const resetTold = () => {
 		told = toldOf([]);
 	};
@@ -163,6 +168,9 @@ export function foldBranch(branch: readonly EntryLike[], identity?: RequestIdent
 			if (open.request) {
 				base = open.request;
 				resetSinceBase = undefined;
+				// Requests mostly share their head: the last counted one's adds no name.
+				if (open.request.headHash !== orderedHead) for (const name of declaredToolNames(open.request.head)) toolOrder.add(name);
+				orderedHead = open.request.headHash;
 			}
 		} else {
 			({ told, resetSinceBase, lastIdentity } = open.checkpoint);
@@ -235,12 +243,15 @@ export function foldBranch(branch: readonly EntryLike[], identity?: RequestIdent
 				: b.effortMarkers !== live.effortMarkers
 					? "effort"
 					: undefined;
-	const cause: EpochCause | undefined = !base ? "first" : (resetSinceBase ?? (identity ? changed(base.identity, identity) : undefined));
+	// A compaction with no settled request before it (the only request failed, a
+	// session recorded before the ledger) still opens the compaction's epoch.
+	const cause: EpochCause | undefined = resetSinceBase ?? (!base ? "first" : identity ? changed(base.identity, identity) : undefined);
 	return {
 		opensEpoch: cause !== undefined,
 		...(cause ? { cause } : {}),
 		lastRequest: base,
 		knownHashes: new Set(blobs.keys()),
+		toolOrder: [...toolOrder],
 		...told,
 		pending,
 	};

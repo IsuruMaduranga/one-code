@@ -344,15 +344,21 @@ export default function workflowExtension(pi: ExtensionAPI) {
 	// comes back if a later session turns it on) and the keyword arms nothing.
 	let workflowsEnabled = true;
 	let workflowWithheld = false;
+	/** Take the tool out of the active set while workflows are off; true when it was active. */
+	const withholdIfOff = (): boolean => {
+		const active = pi.getActiveTools();
+		if (workflowsEnabled || !active.includes("workflow")) return false;
+		pi.setActiveTools(active.filter((name) => name !== "workflow"));
+		return true;
+	};
 	const applyWorkflowSettings = (cwd: string) => {
 		const settings = readWorkflowSettings(cwd, os.homedir());
 		workflowsEnabled = settings.enabled;
 		setWorkflowDescription(workflowDescription(settings.sizeGuideline, settings.sizeConfigured));
-		const active = pi.getActiveTools();
-		if (!settings.enabled && active.includes("workflow")) {
-			pi.setActiveTools(active.filter((name) => name !== "workflow"));
+		if (withholdIfOff()) {
 			workflowWithheld = true;
 		} else if (settings.enabled && workflowWithheld) {
+			const active = pi.getActiveTools();
 			if (!active.includes("workflow")) pi.setActiveTools([...active, "workflow"]);
 			workflowWithheld = false;
 		}
@@ -517,8 +523,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 	});
 	// pi restores the selected branch's tool loadout at a /tree switch: turned off, the tool stays out.
 	pi.on("session_tree", () => {
-		const active = pi.getActiveTools();
-		if (!workflowsEnabled && active.includes("workflow")) pi.setActiveTools(active.filter((name) => name !== "workflow"));
+		withholdIfOff();
 	});
 
 	// The permission-mode badge is a below-editor widget too, re-set on every

@@ -20,13 +20,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../extensions/auto-mode/actions.ts";
 import { classify } from "../../extensions/auto-mode/classifier.ts";
 import { CONSECUTIVE_BLOCK_LIMIT } from "../../extensions/auto-mode/pause.ts";
-import { makeRecord, RECORD } from "../../extensions/lib/ledger/records.ts";
+import { RECORD } from "../../extensions/lib/ledger/records.ts";
 import { MODE_ENV } from "../../extensions/lib/permission-gate.ts";
 import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
 import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
+import { stateEntry } from "./helpers/state-entry.ts";
 
 vi.mock("../../extensions/auto-mode/classifier.ts", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../../extensions/auto-mode/classifier.ts")>()),
@@ -36,7 +37,6 @@ vi.mock("../../extensions/auto-mode/classifier.ts", async (importOriginal) => ({
 type GateResult = { block?: boolean; reason?: string } | undefined;
 type Mode = "default" | "auto" | "dontAsk";
 
-const stateEntry = (key: string, value: unknown) => ({ type: "custom", id: `s-${key}`, parentId: null, customType: RECORD.state, data: makeRecord("state", "0.6.0", { key, value }) });
 
 let root: string;
 let home: string;
@@ -223,5 +223,17 @@ describe("the classifier reads the instructions the agent reads (R3-M26)", () =>
 		const review = vi.mocked(classify).mock.calls.findIndex(([input]) => (input as { toolName: string }).toolName === "subagent-review");
 		expect(review).toBeGreaterThanOrEqual(0);
 		expect(claudeMdOf(review)).toContain("Worktree rule.");
+	});
+});
+
+describe("a mode another extension asks for", () => {
+	it("is never bypass in a session without bypass: a stored pre-plan bypass returns to the default mode", async () => {
+		const s = await session([], "startup", "default");
+		s.fake.events.emit(MODE_CHANNEL, { mode: "bypassPermissions" });
+		const modes = s.branch().flatMap((entry) => {
+			const data = (entry as { customType?: string; data?: { key?: string; value?: unknown } }).data;
+			return (entry as { customType?: string }).customType === RECORD.state && data?.key === "permission-mode" ? [data.value] : [];
+		});
+		expect(modes.at(-1)).toBe("default");
 	});
 });

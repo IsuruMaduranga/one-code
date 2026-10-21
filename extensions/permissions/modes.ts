@@ -128,6 +128,9 @@ function badgeBase(mode: PermissionMode, opts?: { paused?: boolean; classifier?:
  */
 export const PERMISSION_STATUS_CHANNEL = "one-code:permission-status";
 
+/** The `one-code:state` key the permission mode is recorded under on the branch; a fork's file carries the parent's. */
+export const PERMISSION_MODE_STATE = "permission-mode";
+
 export interface PermissionStatus {
 	mode: string;
 	paused: boolean;
@@ -137,6 +140,8 @@ export interface PermissionStatus {
 	classifier?: string;
 	/** Whether `classifier` is pinned by a real call, or still the planned first candidate. */
 	pinned?: boolean;
+	/** Whether this session can enter bypassPermissions (it started in it); a request for it otherwise lands in default. */
+	bypassAvailable?: boolean;
 }
 
 /**

@@ -27,7 +27,9 @@ import { CLEAR_AT_BETA, MID_CONVERSATION_SYSTEM_BETA, reseatMessageMark, withBet
 import { emptyToolResultContent } from "../lib/empty-tool-result.ts";
 import { foldBranch } from "../lib/ledger/fold.ts";
 import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../lib/ledger/plan.ts";
-import { type EntryLike, makeRecord, type PendingRecordData, RECORD } from "../lib/ledger/records.ts";
+import { type EntryLike, makeRecord, type PendingRecordData, RECORD, stateOnBranch } from "../lib/ledger/records.ts";
+import { recordState } from "../lib/ledger/state.ts";
+import { contentHash } from "../lib/ledger/wire.ts";
 import { claudeFamily } from "../lib/model-tier.ts";
 import { extensionVersion } from "../lib/package-version.ts";
 import { LiveReminders, type OneShot, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, renderReminders, type ReminderPayload, stickyFact } from "../lib/reminders.ts";
@@ -50,6 +52,9 @@ function oneShotOf(item: PendingRecordData): OneShot {
 		...(item.orTail ? { orTail: true } : {}),
 	};
 }
+
+/** The `one-code:state` key prefix of a sticky state's recorded start. */
+const STICKY_START_PREFIX = "sticky-start:";
 
 export default function systemReminderExtension(pi: ExtensionAPI) {
 	const alive = sessionAlive(pi);
@@ -79,13 +84,45 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 		pi.appendEntry(RECORD.pending, data);
 	};
 
+	/** The session's branch: the sticky states' starts it recorded. */
+	let branchOf: (() => EntryLike[]) | undefined;
+	/**
+	 * When each sticky state started, as the branch recorded it. An owner that
+	 * runs again (a resume, /reload, /tree) emits its state without a start, so
+	 * the renderer takes the branch's start for the same key and text: an epoch
+	 * that renders the conversation again (a model switch) then places the block
+	 * where the original requests did, and its first delivery stays told. A
+	 * removal records the run's end (null), so nothing carries past it.
+	 */
+	const stickyStart = (key: string): { since: number; hash: string } | undefined => {
+		const stored = branchOf ? (stateOnBranch(branchOf(), `${STICKY_START_PREFIX}${key}`) as { since?: unknown; hash?: unknown } | undefined) : undefined;
+		return typeof stored?.since === "number" && typeof stored.hash === "string" ? { since: stored.since, hash: stored.hash } : undefined;
+	};
+
 	pi.events.on(REMINDER_CHANNEL, (data) => {
-		const payload = data as ReminderPayload | undefined;
-		if (!payload || live.apply(payload) !== "one-shot") return;
+		let payload = data as ReminderPayload | undefined;
+		if (!payload) return;
+		const sticky = payload.placement === "sticky-append" && !payload.remove && typeof payload.text === "string";
+		const key = payload.key ?? payload.text ?? "";
+		const recorded = sticky ? stickyStart(key) : undefined;
+		if (sticky && payload.since === undefined && recorded?.hash === contentHash(payload.text)) payload = { ...payload, since: recorded.since };
+		// A removal ends the state's run: switched on again, even with the same
+		// text, it is a new state that rides the switching call's result, not the
+		// old run's start, whose first delivery the branch already told.
+		if (payload.remove && payload.key && branchOf && alive() && stickyStart(payload.key)) recordState(pi, `${STICKY_START_PREFIX}${payload.key}`, null);
+		const applied = live.apply(payload);
+		if (sticky && applied === "live" && branchOf && alive()) {
+			const entry = live.stickyEntries().find((state) => state.key === key);
+			const hash = entry ? contentHash(entry.text) : undefined;
+			if (entry && entry.since > 0 && (recorded?.since !== entry.since || recorded?.hash !== hash)) recordState(pi, `${STICKY_START_PREFIX}${key}`, { since: entry.since, hash });
+		}
+		if (applied !== "one-shot") return;
 		if (early) early.push(payload);
 		else if (alive()) persist(payload);
 	});
-	pi.on("session_start", () => {
+	pi.on("session_start", (_event, ctx) => {
+		const sessionManager = ctx?.sessionManager;
+		branchOf = sessionManager ? () => sessionManager.getBranch() as EntryLike[] : undefined;
 		const queued = early ?? [];
 		early = undefined;
 		for (const payload of queued) persist(payload);
@@ -140,10 +177,8 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 			...rendered.placed.map((shot) => ({ text: shot.text, facts: shot.facts ?? [] })),
 			...sticky.filter((entry) => stickyFacts.includes(entry.fact)).map((entry) => ({ text: entry.text, facts: [entry.fact] })),
 		].filter((block) => block.facts.length > 0);
-		const facts = carried.flatMap((block) => block.facts);
 		if (current) {
 			current.consumed.push(...consumed);
-			current.facts.push(...facts);
 			current.carried.push(...carried);
 		} else {
 			for (const id of consumed) deliveredHere.add(id);

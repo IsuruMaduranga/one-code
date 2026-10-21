@@ -5,7 +5,7 @@
  * cases for round-1 H4 (the permission mode came back as the settings default)
  * and H3 (a resume revived ultracode's standing block while the mode was off).
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -16,7 +16,9 @@ import { REMINDER_CHANNEL, type ReminderPayload } from "../../extensions/lib/rem
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../extensions/permissions/modes.ts";
 import { MODE_ENV } from "../../extensions/lib/permission-gate.ts";
-import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import type { ToldFact } from "../../extensions/lib/ledger/records.ts";
+import { createFakeCtx, createFakePi, renderRequest } from "./helpers/fake-pi.ts";
+import { stateEntry } from "./helpers/state-entry.ts";
 
 /** A request recorded on the branch: its model was told the mode in force. */
 const requestEntry = {
@@ -26,7 +28,6 @@ const requestEntry = {
 	customType: RECORD.request,
 	data: makeRecord("request", "0.6.0", { identity: { api: "anthropic-messages", provider: "anthropic", model: "claude-haiku", auth: "key" }, keep: 0, append: [], head: "h", blobs: {}, consumed: [] }),
 };
-const stateEntry = (key: string, value: unknown) => ({ type: "custom", id: `s-${key}`, parentId: null, customType: RECORD.state, data: makeRecord("state", "0.6.0", { key, value }) });
 
 describe("the permission mode follows the branch (H4)", () => {
 	let dir: string;
@@ -113,17 +114,30 @@ describe("the permission mode follows the branch (H4)", () => {
 });
 
 describe("ultracode follows the branch (H3)", () => {
+	/** The told fact of the standing block's first delivery: what a request that carried it records. */
+	const standingTold: ToldFact = { kind: "block", key: "sticky:ultracode-mode", hash: "standing-delivered" };
+	const isOffNotice = (text: string | undefined) => !!text?.startsWith("Ultracode mode is off now");
+
 	async function start(branch: unknown[], level = "xhigh") {
 		const fake = createFakePi();
-		(fake.pi.getThinkingLevel as ReturnType<typeof vi.fn>).mockReturnValue(level);
+		let current = level;
+		fake.pi.getThinkingLevel = vi.fn(() => current);
+		fake.pi.setThinkingLevel = vi.fn((next: string) => {
+			current = next;
+		});
 		const reminders: ReminderPayload[] = [];
 		fake.events.on(REMINDER_CHANNEL, (data) => reminders.push(data as ReminderPayload));
 		effortExtension(fake.pi as never);
 		const ctx = createFakeCtx({ sessionManager: { getBranch: () => branch } });
 		await fake.fire("session_start", {}, ctx);
 		const standing = () => reminders.filter((r) => r.key === "ultracode-mode").at(-1);
-		const offNotices = () => reminders.filter((r) => r.key === "ultracode-mode-change");
-		return { fake, ctx, standing, offNotices };
+		/** The next request, its epoch having told `facts`: the off notices it carries, queued or rendered. */
+		const offNotices = (facts: readonly ToldFact[] = [standingTold]) => [
+			...reminders.filter((r) => !r.remove && (r.placement ?? "last-append") === "last-append" && isOffNotice(r.text)),
+			...renderRequest(fake.events, { facts }).filter((block) => isOffNotice(block.text)),
+		];
+		const effort = (args: string) => fake.commands.get("effort")!.handler(args, ctx);
+		return { fake, ctx, standing, offNotices, effort };
 	}
 
 	it("comes back on with its standing block when the branch recorded it on at pi's restored level", async () => {
@@ -139,8 +153,77 @@ describe("ultracode follows the branch (H3)", () => {
 
 	it("tells the model ultracode ended when the branch's model saw it on and a resume's level moved (R3-M21)", async () => {
 		expect((await start([stateEntry("ultracode", { on: true, level: "xhigh" })], "high")).offNotices()).toHaveLength(1);
-		expect((await start([stateEntry("ultracode", { on: false })])).offNotices()).toEqual([]);
-		expect((await start([])).offNotices()).toEqual([]);
+		expect((await start([stateEntry("ultracode", { on: false })])).offNotices([])).toEqual([]);
+		expect((await start([])).offNotices([])).toEqual([]);
+	});
+
+	it("withdraws the off notice when ultracode comes back on before the next request", async () => {
+		const run = await start([], "medium");
+		await run.effort("ultracode");
+		await run.effort("high");
+		await run.effort("ultracode");
+		expect(run.standing()).toMatchObject({ placement: "sticky-append" });
+		expect(run.offNotices()).toEqual([]);
+	});
+
+	it("says nothing about ultracode ending when the model never saw it on", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "ultracode-workflows-"));
+		vi.stubEnv("ONECODE_STATE_DIR", dir);
+		writeFileSync(join(dir, "settings.json"), JSON.stringify({ disableWorkflows: true }));
+		try {
+			const run = await start([], "medium");
+			await run.effort("ultracode");
+			await run.effort("high");
+			// Workflows off: the standing block was never sent, so no request told it.
+			expect(run.offNotices([])).toEqual([]);
+		} finally {
+			vi.unstubAllEnvs();
+			rmSync(dir, { recursive: true, force: true });
+		}
+		// Switched on and off again before any request carried the block.
+		const quick = await start([], "medium");
+		await quick.effort("ultracode");
+		await quick.effort("high");
+		expect(quick.offNotices([])).toEqual([]);
+	});
+
+	it("tells the off notice once: a request that carried it keeps a /reload from repeating it", async () => {
+		const branch = [stateEntry("ultracode", { on: true, level: "xhigh" })];
+		const first = await start(branch, "high");
+		const blocks = renderRequest(first.fake.events, { facts: [standingTold] });
+		const notice = blocks.find((block) => isOffNotice(block.text));
+		expect(notice?.facts?.length).toBeGreaterThan(0);
+		// The /reload: a new instance on the same branch, whose epoch now also holds what that request told.
+		const reloaded = await start(branch, "high");
+		expect(reloaded.offNotices([standingTold, ...(notice?.facts ?? [])])).toEqual([]);
+	});
+
+	it("tells a second off after ultracode came back on and the model saw it again", async () => {
+		const run = await start([], "medium");
+		await run.effort("ultracode");
+		await run.effort("high");
+		const offTold = renderRequest(run.fake.events, { facts: [standingTold] }).flatMap((block) => (isOffNotice(block.text) ? (block.facts ?? []) : []));
+		expect(offTold.length).toBeGreaterThan(0);
+		await run.effort("ultracode");
+		// Back on: nothing to say, whatever the epoch told.
+		expect(renderRequest(run.fake.events, { facts: [standingTold, ...offTold] }).filter((block) => isOffNotice(block.text))).toEqual([]);
+		await run.effort("high");
+		// Off before the standing block went out again: the model last read "off".
+		expect(renderRequest(run.fake.events, { facts: [standingTold, ...offTold] }).filter((block) => isOffNotice(block.text))).toEqual([]);
+		// Off after a request carried the standing block again.
+		expect(renderRequest(run.fake.events, { facts: [standingTold, ...offTold, { ...standingTold, hash: "standing-again" }] }).filter((block) => isOffNotice(block.text))).toHaveLength(1);
+	});
+
+	it("leaves the standing block out while workflows are turned off (R3-M21)", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "ultracode-workflows-"));
+		vi.stubEnv("ONECODE_STATE_DIR", dir);
+		writeFileSync(join(dir, "settings.json"), JSON.stringify({ disableWorkflows: true }));
+		try {
+			expect((await start([stateEntry("ultracode", { on: true, level: "xhigh" })])).standing()).toMatchObject({ remove: true });
+		} finally {
+			vi.unstubAllEnvs();
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	it("puts the branch's level back at a /tree switch, where pi restores none, and keeps ultracode on (R3-M21)", async () => {

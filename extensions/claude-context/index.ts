@@ -54,9 +54,9 @@ import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
 import { EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_NONE, EXTERNAL_INCLUDES_SETTING, EXTERNAL_INCLUDES_YES, externalIncludesDialog, persistExternalIncludesApproval, readExternalIncludesApproval } from "../lib/claude-external-includes.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 import { consentDialog, installConsentDialogs, startupConsentReady } from "../lib/consent-dialogs.ts";
-import type { EntryLike, ToldFact } from "../lib/ledger/records.ts";
-import { foldBranch } from "../lib/ledger/fold.ts";
-import { requestIdentity, sessionThinkingLevel } from "../lib/anthropic-auth.ts";
+import type { ToldFact } from "../lib/ledger/records.ts";
+import { foldSession } from "../lib/ledger/fold-memo.ts";
+import { sessionIdentity } from "../lib/anthropic-auth.ts";
 
 const REMINDER_KEY = "claude-context";
 const ONECODE_REMINDER_KEY = "one-code-context";
@@ -368,7 +368,8 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		// A process that starts on a compacted branch before the compaction's
 		// epoch opened (/compact, then /reload) renders that epoch's message 1:
 		// the blocks are the compaction's, not the conversation start's (R3-L11).
-		const fold = foldBranch(ctx.sessionManager.getBranch() as EntryLike[], requestIdentity(ctx.model, sessionThinkingLevel(pi)));
+		// The fold is shared with tool-search and the ledger: one fold per branch state (lib/ledger/fold-memo.ts).
+		const fold = foldSession(ctx.sessionManager, sessionIdentity(pi, ctx.model));
 		if (fold.opensEpoch && fold.cause === "compaction") {
 			refreshForCompaction(ctx);
 			return;

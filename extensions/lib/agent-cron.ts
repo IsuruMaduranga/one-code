@@ -38,10 +38,26 @@ export interface AgentCronResult {
 	details?: Record<string, unknown>;
 }
 
+/**
+ * The conversation a fire lands in: its branch to read, and entries to
+ * append to it. A no-prompt `/loop` sentinel records there what it already
+ * sent, so the record follows that conversation (its `/tree`, its resume,
+ * its own compaction), not the session that owns the job store.
+ */
+export interface FireConversation {
+	getBranch(): readonly unknown[];
+	appendEntry(customType: string, data?: unknown): void;
+}
+
 export interface AgentCronFire {
 	agentId: string;
 	jobId: string;
-	prompt: string;
+	/**
+	 * The text to send, resolved against the agent's own conversation (a
+	 * sentinel reads and records its delivery there; undefined resolves as a
+	 * conversation that was sent nothing). Call it once, for the send.
+	 */
+	text(conversation: FireConversation | undefined): string;
 	/** Set by the subagents extension when a live agent received it. */
 	delivered?: boolean;
 }

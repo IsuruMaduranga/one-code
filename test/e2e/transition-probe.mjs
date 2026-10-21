@@ -23,14 +23,24 @@
  *
  * Each step records which dumped requests it produced, the request it must
  * extend (`base`), whether it opens an epoch, and the assistant usages and
- * errors pi reported. Output: <work>/steps.json, wire.jsonl, wire.meta.jsonl,
+ * errors pi reported.
+ *
+ * With --oracle, each step after the first is also sent once by a fresh
+ * process opened on a copy of the session file as it stood before the step
+ * (the request is a pure function of the branch): its first request must
+ * equal the live process's, byte for byte (`oracle` in steps.json, checked by
+ * transition-check.mjs). The fresh process has the late tool while the live
+ * one does (PROBE_LATE_TOOL, transition-fixture.ts). It costs one more short
+ * request per step.
+ *
+ * Output: <work>/steps.json, wire.jsonl, wire.meta.jsonl,
  * events-<n>.jsonl, stderr-<n>.log. From a sandboxed shell run it inside tmux
  * (findings §10). The user's MCP servers are kept out unless --keep-mcp
  * (CLAUDE_CONFIG_DIR points at an empty folder). Costs about a dozen short
  * requests on the main model.
  */
 import { spawn, spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -46,6 +56,7 @@ const flag = (name, fallback) => {
 const MODEL = flag("--model", "anthropic/claude-sonnet-5-5");
 const HOP = flag("--hop", "anthropic/claude-haiku-4-5");
 const KEEP_MCP = args.includes("--keep-mcp");
+const ORACLE = args.includes("--oracle");
 const WORK = flag("--work", undefined) ?? mkdtempSync(join(tmpdir(), "transition-probe-"));
 mkdirSync(WORK, { recursive: true });
 const PROJECT = join(WORK, "project");
@@ -71,7 +82,7 @@ const wireCount = () => (existsSync(WIRE) ? readFileSync(WIRE, "utf8").split("\n
 
 /** One pi process in RPC mode, with request/response matching and an event log. */
 class Pi {
-	constructor(index, extraArgs) {
+	constructor(index, extraArgs, envOverrides = {}, model = MODEL) {
 		this.index = index;
 		this.nextId = 0;
 		this.waiters = new Map();
@@ -84,9 +95,10 @@ class Pi {
 			CC_RECAP: "0",
 			CC_SESSION_TITLE: "0",
 			...(KEEP_MCP ? {} : { CLAUDE_CONFIG_DIR: CONFIG }),
+			...envOverrides,
 		};
 		this.child = spawn(process.execPath, [PI_BIN, "--mode", "rpc", "-e", join(REPO, "test/e2e/dump-requests.ts"),
-			"-e", join(REPO, "test/e2e/transition-fixture.ts"), "--model", MODEL, ...extraArgs], {
+			"-e", join(REPO, "test/e2e/transition-fixture.ts"), "--model", model, ...extraArgs], {
 			cwd: PROJECT, env, stdio: ["pipe", "pipe", "pipe"],
 		});
 		this.child.stderr.on("data", (chunk) => appendFileSync(join(WORK, `stderr-${index}.log`), chunk));
@@ -203,13 +215,46 @@ class Pi {
 const steps = [];
 let pi = new Pi(0, []);
 let processes = 1;
+/** Whether the live process has the late tool registered (from late-tool until a factory re-run drops it). */
+let lateToolLive = false;
 
-async function step(label, { base, epoch = false, before, message }) {
+/**
+ * The fresh-process oracle: a new process on a copy of the session file sends
+ * `message`; its first request is what the live process's must equal.
+ */
+async function oracleRequest(label, message) {
+	const { sessionFile, model, thinkingLevel } = await pi.request({ type: "get_state" });
+	if (!sessionFile || !existsSync(sessionFile)) return { error: "no session file" };
+	const copy = join(WORK, `oracle-${label}.session.jsonl`);
+	copyFileSync(sessionFile, copy);
+	const wire = join(WORK, `oracle-${label}.wire.jsonl`);
+	const fresh = new Pi(
+		`oracle-${label}`,
+		["--session", copy, ...(thinkingLevel ? ["--thinking", thinkingLevel] : [])],
+		{ WIRE_DUMP: wire, WIRE_DUMP_META: `${wire}.meta`, ...(lateToolLive ? { PROBE_LATE_TOOL: "1" } : {}) },
+		model ? `${model.provider}/${model.id}` : MODEL,
+	);
+	try {
+		await fresh.idle();
+		await fresh.prompt(message);
+	} finally {
+		await fresh.quit();
+	}
+	const first = existsSync(wire) ? readFileSync(wire, "utf8").split("\n").find((line) => line.trim()) : undefined;
+	return first ? { request: first } : { error: "the fresh process sent nothing" };
+}
+
+async function step(label, { base, epoch = false, before, message, oracle = ORACLE }) {
 	const record = { label, base: base ?? null, epoch, pid: processes - 1, wireStart: 0, wireEnd: 0, ends: [], error: null };
 	try {
 		if (before) await before();
+		const expected = oracle ? await oracleRequest(label, message) : undefined;
 		record.wireStart = wireCount();
 		record.ends = await pi.prompt(message);
+		if (expected) {
+			const live = readFileSync(WIRE, "utf8").split("\n").filter((line) => line.trim())[record.wireStart];
+			record.oracle = expected.error ? { error: expected.error } : { equal: live === expected.request, file: `oracle-${label}.wire.jsonl` };
+		}
 		record.wireEnd = wireCount();
 		const { leafId, lastUser } = await pi.leaf();
 		record.leafId = leafId;
@@ -232,12 +277,26 @@ console.log(`model:   ${MODEL} (hop ${HOP})`);
 console.log(`workdir: ${WORK}`);
 try {
 	await pi.idle();
-	await step("open", { epoch: true, message: `Use the read tool to read notes.txt. Then ${answer("one").toLowerCase()}` });
+	await step("open", { epoch: true, oracle: false, message: `Use the read tool to read notes.txt. Then ${answer("one").toLowerCase()}` });
 	await step("second", { base: "open", message: answer("two") });
-	await step("late-tool", { base: "second", before: () => pi.prompt("/probe-late-tool"), message: answer("three") });
+	await step("late-tool", {
+		base: "second",
+		before: async () => {
+			await pi.prompt("/probe-late-tool");
+			lateToolLive = true;
+		},
+		message: answer("three"),
+	});
 	await step("compact", { epoch: true, before: () => pi.request({ type: "compact" }), message: answer("four") });
 	await step("tree", { base: "late-tool", before: () => pi.prompt(`/probe-tree ${byLabel("late-tool").leafId}`), message: answer("five") });
-	await step("reload", { base: "tree", before: () => pi.prompt("/probe-reload"), message: answer("six") });
+	await step("reload", {
+		base: "tree",
+		before: async () => {
+			await pi.prompt("/probe-reload");
+			lateToolLive = false;
+		},
+		message: answer("six"),
+	});
 	await step("fork", { base: "tree", before: () => pi.request({ type: "fork", entryId: byLabel("reload").userEntryId }), message: answer("seven") });
 	await step("resume", {
 		base: "fork",
@@ -250,7 +309,7 @@ try {
 	});
 	await step("hop-out", { epoch: true, before: () => pi.request({ type: "set_model", ...splitModel(HOP) }), message: answer("nine") });
 	await step("hop-back", { epoch: true, before: () => pi.request({ type: "set_model", ...splitModel(MODEL) }), message: answer("ten") });
-	await step("clear", { epoch: true, before: () => pi.request({ type: "new_session" }), message: answer("eleven") });
+	await step("clear", { epoch: true, oracle: false, before: () => pi.request({ type: "new_session" }), message: answer("eleven") });
 } finally {
 	await pi.quit();
 }

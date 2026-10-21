@@ -1,8 +1,8 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { agentDirs, childToolAllowlist, discoverAgents, parseAgentFile, parseToolList, usableAllowlistedTools } from "../../extensions/subagents/agents.ts";
+import { agentDirs, agentSourcesStamp, childToolAllowlist, discoverAgents, parseAgentFile, parseToolList, usableAllowlistedTools } from "../../extensions/subagents/agents.ts";
 
 describe("parseAgentFile", () => {
 	it("reads name, description, tools and model from frontmatter", () => {
@@ -149,6 +149,26 @@ describe("discoverAgents", () => {
 		writeFileSync(join(root, "bundled", "notes.txt"), "not an agent");
 		writeFileSync(join(root, "bundled", "empty.md"), "---\nname: empty\n---\n");
 		expect(discoverAgents([join(root, "bundled"), join(root, "does-not-exist")])).toEqual([]);
+	});
+
+	it("stamps the sources so that adding, editing or removing an agent file changes the stamp", () => {
+		const user = join(root, "user");
+		const sources = [join(root, "bundled"), { dir: user, namespace: "p" }];
+		writeAgent(join(user, "nested"), "plan", "first");
+		const first = agentSourcesStamp(sources);
+		expect(agentSourcesStamp(sources)).toBe(first);
+		writeAgent(user, "review", "added");
+		const added = agentSourcesStamp(sources);
+		expect(added).not.toBe(first);
+		// An edit in place leaves the directory's own mtime alone: the file's stats carry it.
+		const file = join(user, "nested", "plan.md");
+		writeFileSync(file, readFileSync(file, "utf8").replace("first", "edits"));
+		utimesSync(file, new Date(), new Date(Date.now() + 5_000));
+		const edited = agentSourcesStamp(sources);
+		expect(edited).not.toBe(added);
+		rmSync(join(user, "review.md"));
+		expect(agentSourcesStamp(sources)).not.toBe(edited);
+		expect(agentSourcesStamp([join(root, "bundled"), { dir: user }])).not.toBe(agentSourcesStamp(sources));
 	});
 });
 

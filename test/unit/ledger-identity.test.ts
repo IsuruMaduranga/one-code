@@ -11,6 +11,7 @@ import { requestIdentity } from "../../extensions/lib/anthropic-auth.ts";
 import { foldBranch } from "../../extensions/lib/ledger/fold.ts";
 import { makeRecord, RECORD, type RequestIdentity } from "../../extensions/lib/ledger/records.ts";
 import { mergeDeclarations } from "../../extensions/lib/ledger/wire.ts";
+import { LedgerSim } from "./helpers/ledger-sim.ts";
 
 const sonnet = { api: "anthropic-messages", provider: "anthropic", id: "claude-sonnet-5-5", reasoning: true, compat: { supportsMidConvoEffort: true } };
 const gpt = { api: "openai-responses", provider: "openai", id: "gpt-6.1-sol", baseUrl: "https://api.openai.com/v1" };
@@ -70,5 +71,43 @@ describe("mergeDeclarations", () => {
 		const recorded = tool("v1", { id: { type: "string" } }, { defer_loading: true });
 		const live = tool("v2", { id: { type: "string" }, project: { type: "string" } });
 		expect(mergeDeclarations([recorded], [live])).toEqual([{ ...live, defer_loading: true }]);
+	});
+});
+
+// Transition probe, deepseek-v4-flash to qwen3.6-27b and back: pi's tools come
+// from the transcript's tool deltas, where a changed definition is a removal
+// and an addition, so the tier-dependent bash moved to the end at the hop and
+// stayed there on the hop back, which read 0 of 20,306 cached.
+describe("the tools order at an epoch", () => {
+	const names = (payload: { tools: { name: string }[] }) => payload.tools.map((tool) => tool.name);
+	/** A declaration whose text follows the tier, as bash's does. */
+	const tool = (name: string, description?: string): { name: string } => (description ? { name, description } : { name }) as { name: string };
+
+	it("follows the order the branch first declared, so a hop back renders the first request's tools again", async () => {
+		const s = new LedgerSim();
+		// `deferred` stands for a tool the hop model does not declare (pi's deferred placeholder on a model without tool references).
+		s.tools = [{ name: "read" }, tool("bash", "cheap"), { name: "edit" }, { name: "deferred" }];
+		s.message("user", "one");
+		const first = await s.request("a");
+		s.model = { ...s.model, id: "m2" };
+		s.tools = [{ name: "read" }, { name: "edit" }, tool("bash", "tiny"), { name: "grep" }];
+		s.message("user", "two");
+		expect(names(await s.request("b"))).toEqual(["read", "bash", "edit", "grep"]);
+		s.model = { ...s.model, id: "m1" };
+		s.tools = [{ name: "read" }, { name: "edit" }, tool("bash", "cheap"), { name: "deferred" }];
+		s.message("user", "three");
+		expect((await s.request("c")).tools).toEqual(first.tools);
+	});
+
+	it("is the same in a fresh process on the branch", async () => {
+		const s = new LedgerSim();
+		s.tools = [{ name: "read" }, { name: "bash" }, { name: "edit" }];
+		s.message("user", "one");
+		await s.request("a");
+		s.load();
+		s.model = { ...s.model, id: "m2" };
+		s.tools = [{ name: "read" }, { name: "edit" }, tool("bash", "tiny")];
+		s.message("user", "two");
+		expect(names(await s.request("b"))).toEqual(["read", "bash", "edit"]);
 	});
 });
