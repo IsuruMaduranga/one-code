@@ -22,7 +22,7 @@
 import type { Message } from "@earendil-works/pi-ai";
 import { settleSystemMessages } from "./ledger/layout.ts";
 import { isObject } from "./ledger/records.ts";
-import { isTrailer, listKey, stripMarkers, toolName } from "./ledger/wire.ts";
+import { appendPoint, listKey, stripMarkers, toolName } from "./ledger/wire.ts";
 import { estimateMessageTokens } from "./pi-ai-estimate.ts";
 
 /** The compaction extension publishes a RequestCapture here, or undefined when none is valid. */
@@ -492,9 +492,7 @@ function appendAnthropic(base: unknown[], extra: unknown[]): unknown[] {
 
 /** Whether the list, past its trailing directives, ends in a system message with content. */
 function endsInSystemRun(list: unknown[]): boolean {
-	let end = list.length;
-	while (end > 0 && isTrailer(list[end - 1], "anthropic-messages")) end--;
-	const last = list[end - 1] as WireMessage | undefined;
+	const last = list[appendPoint(list, "anthropic-messages") - 1] as WireMessage | undefined;
 	return last?.role === "system" && blocksOf(last.content).length > 0;
 }
 
