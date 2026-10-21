@@ -29,7 +29,7 @@
  * Pure: no pi imports.
  */
 import { type Coverage, type EntryLike, type EpochCause, type PendingRecordData, readRecord, type RequestIdentity, type RequestRecordData, sameIdentity, type ToldFact } from "./records.ts";
-import type { RecordedRequest } from "./wire.ts";
+import { declaredToolNames, type RecordedRequest } from "./wire.ts";
 
 export type { EpochCause };
 
@@ -48,6 +48,8 @@ export interface LedgerFold {
 	lastRequest: FoldedRequest | undefined;
 	/** Every element hash already stored on the branch. */
 	knownHashes: Set<string>;
+	/** Every tool the branch's counted requests declared, in the order of its first declaration: the order an epoch renders (ledger/wire.ts). */
+	toolOrder: string[];
 	/** Told facts in the current epoch: kind ("tools", "skills", `CALLABLE_TOOLS`) to names. */
 	told: Map<string, Set<string>>;
 	/** Modes told in the current epoch, by key: on or off as last told. */
@@ -140,6 +142,7 @@ export function foldBranch(branch: readonly EntryLike[], identity?: RequestIdent
 	/** The index of the last compaction on the branch: an older `untilCompaction` pending item is stale. */
 	let lastCompaction = -1;
 	let base: FoldedRequest | undefined;
+	const toolOrder = new Set<string>();
 	/** A compaction or `epoch` record after the base: the next request renders everything again. */
 	let resetSinceBase: EpochCause | undefined;
 	let lastIdentity: RequestIdentity | undefined;
@@ -163,6 +166,7 @@ export function foldBranch(branch: readonly EntryLike[], identity?: RequestIdent
 			if (open.request) {
 				base = open.request;
 				resetSinceBase = undefined;
+				for (const name of declaredToolNames(open.request.head)) toolOrder.add(name);
 			}
 		} else {
 			({ told, resetSinceBase, lastIdentity } = open.checkpoint);
@@ -241,6 +245,7 @@ export function foldBranch(branch: readonly EntryLike[], identity?: RequestIdent
 		...(cause ? { cause } : {}),
 		lastRequest: base,
 		knownHashes: new Set(blobs.keys()),
+		toolOrder: [...toolOrder],
 		...told,
 		pending,
 	};

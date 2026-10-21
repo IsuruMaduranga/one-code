@@ -287,6 +287,48 @@ export function mergeDeclarations(recorded: readonly unknown[], live: readonly u
 }
 
 /**
+ * An epoch's live declarations in the order the branch first declared them
+ * (`LedgerFold.toolOrder`), then the ones it never declared in pi's order;
+ * nameless trailing markers stay last. pi derives its tools from the
+ * transcript's tool deltas, where a changed definition is a removal and an
+ * addition (pi-ai `getCurrentTools`), so a tool whose text follows the model
+ * tier (bash, the description-form tools) moved to the end at every hop, and a
+ * hop back to the earlier model missed the prefix it had cached. The bytes stay
+ * pi's: only the order comes from the branch.
+ */
+export function orderLikeBranch<T extends readonly unknown[]>(order: readonly string[], live: T): T | unknown[] {
+	const rank = new Map(order.map((name, index) => [name, index]));
+	let trailing = live.length;
+	while (trailing > 0 && toolName(live[trailing - 1]) === undefined) trailing--;
+	const named = live.slice(0, trailing).filter((tool) => toolName(tool) !== undefined);
+	const known = named.filter((tool) => rank.has(toolName(tool)!)).sort((a, b) => rank.get(toolName(a)!)! - rank.get(toolName(b)!)!);
+	const ordered = [...known, ...named.filter((tool) => !rank.has(toolName(tool)!))];
+	if (ordered.length === trailing && ordered.every((tool, index) => tool === live[index])) return live;
+	return [...withToolsMarker(ordered, live), ...live.slice(trailing)];
+}
+
+/** `payload` with its declarations in the branch's order (`orderLikeBranch`), in any API's shape. */
+export function withBranchToolOrder(payload: WirePayload, order: readonly string[], api: string): WirePayload {
+	if (order.length === 0) return payload;
+	if (api.startsWith("google-")) {
+		const live = isObject(payload.config) ? payload.config : undefined;
+		if (!live || !Array.isArray(live.tools)) return payload;
+		const groups = live.tools;
+		const tools = groups.map((group) => (isObject(group) && Array.isArray(group.functionDeclarations) ? { ...group, functionDeclarations: orderLikeBranch(order, group.functionDeclarations) } : group));
+		return tools.every((group, index) => !isObject(group) || !isObject(groups[index]) || group.functionDeclarations === (groups[index] as Record<string, unknown>).functionDeclarations) ? payload : { ...payload, config: { ...live, tools } };
+	}
+	if (api === "bedrock-converse-stream") {
+		const live = isObject(payload.toolConfig) ? payload.toolConfig : undefined;
+		if (!live || !Array.isArray(live.tools)) return payload;
+		const tools = orderLikeBranch(order, live.tools);
+		return tools === live.tools ? payload : { ...payload, toolConfig: { ...live, tools } };
+	}
+	if (!Array.isArray(payload.tools)) return payload;
+	const tools = orderLikeBranch(order, payload.tools);
+	return tools === payload.tools ? payload : { ...payload, tools };
+}
+
+/**
  * The merged declarations with pi's tools cache marker on the last one that is
  * not deferred, where pi puts it: the merge can make another tool last, and
  * Anthropic rejects a marker on a `defer_loading` tool.

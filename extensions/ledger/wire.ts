@@ -37,7 +37,7 @@ import { LEDGER_PLAN_CHANNEL, LEDGER_SENT_CHANNEL, type LedgerSent, type Request
 import { type EntryLike, makeRecord, RECORD, type ToldFact } from "../lib/ledger/records.ts";
 import { deliveredAfterRepair, repairRequest, validateRequest } from "../lib/ledger/validate.ts";
 import { settlePayload } from "../lib/ledger/layout.ts";
-import { appendPoint, encodeRequest, hasWarmCap, listKey, type RecordedRequest, recordedBody, recordedRequest, samePrefix, spliceRequest, type WirePayload, withRequestFields } from "../lib/ledger/wire.ts";
+import { appendPoint, encodeRequest, hasWarmCap, listKey, type RecordedRequest, recordedBody, recordedRequest, samePrefix, spliceRequest, type WirePayload, withBranchToolOrder, withRequestFields } from "../lib/ledger/wire.ts";
 import { type AffinityModel, affinityHeaders } from "../lib/request-replay.ts";
 import { extensionVersion } from "../lib/package-version.ts";
 
@@ -103,6 +103,8 @@ export default function ledgerWireExtension(pi: ExtensionAPI) {
 		const base = current.epoch ? undefined : current.base;
 		const end = base ? appendPoint(base.list, api) : 0;
 		if (base) payload = spliceRequest(base, payload, api);
+		// An epoch renders pi's tools again, in the order the branch first declared them.
+		else payload = withBranchToolOrder(payload, current.fold.toolOrder, api);
 		const spliced = payload;
 		// The final layout pass: no system message stranded before a user message (lib/ledger/layout.ts).
 		payload = settlePayload(payload, api, listKey(api), end);
