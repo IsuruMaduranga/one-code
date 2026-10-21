@@ -15,8 +15,9 @@
  * floor are checked before any grant (working-docs/decisions/auto-mode.md,
  * "Approving a denied call").
  *
- * The store lives in the permissions extension's memory for one session. It is
- * never persisted, and a new session starts empty.
+ * The store lives in the permissions extension's process state for one
+ * session, which a /reload keeps. It is never persisted, and a new session
+ * starts empty.
  */
 
 /** Claude Code's `MAX_DENIALS`. */

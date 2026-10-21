@@ -77,7 +77,8 @@ import { canShowCustomUi, rpcReadOnlyText } from "../lib/headless-output.ts";
 import { sessionResultsDir } from "../lib/persisted-output.ts";
 import { privateSessionScratchpadDir } from "../lib/scratchpad.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
-import { readState, recordState } from "../lib/ledger/state.ts";
+import { readState, readStringsState, recordState } from "../lib/ledger/state.ts";
+import { processState } from "../lib/process-state.ts";
 import { type EntryLike, readRecord } from "../lib/ledger/records.ts";
 import {
 	decide,
@@ -267,6 +268,24 @@ const denyReason = (result: { cause?: string; rule?: { raw?: string } }): string
 const STANDING_REMINDER_MODES: ReadonlySet<PermissionMode> = new Set<PermissionMode>(["plan", "auto"]);
 /** The `one-code:state` key the permission mode is recorded under on the branch. */
 const PERMISSION_MODE_STATE = "permission-mode";
+/** The `one-code:state` key for the directories added to the workspace for this session. */
+const WORKSPACE_DIRS_STATE = "workspace-dirs";
+
+/**
+ * What the user granted "for this session" and what auto mode's loop-breaker
+ * counted. This is process state (lib/process-state.ts): pi re-runs this
+ * factory at a /reload, which is the same conversation and keeps them
+ * (decisions/modes.md), and every other session start clears them. Only the
+ * main session loads this extension (children reach it through the bridge),
+ * so one slot per process is one per conversation.
+ */
+interface SessionGate {
+	/** Rules minted by "Yes, and don't ask again … this session" (session-grant.ts). */
+	allows: PermissionRule[];
+	pause: PauseTracker;
+	/** Classifier denials, and the one-shot grants `/permissions` mints from them. */
+	denials: DenialStore;
+}
 
 const YES = "Yes";
 const NO = "No, tell the agent what to do differently";
@@ -351,9 +370,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	 * Rules minted by "Yes, and don't ask again … this session" (session-grant.ts).
 	 * Never applied in auto mode: there the classifier is the boundary and a
 	 * standing grant would be a bypass of it (PERMISSIONS-REVIEW-2026-09-05 M2).
-	 * Cleared with the session (L1).
+	 * Cleared with the session (L1), kept by a reload (SessionGate).
 	 */
-	const sessionAllows: PermissionRule[] = [];
+	const sessionGate = processState<SessionGate>("permissions:session-gate", () => ({ allows: [], pause: new PauseTracker(), denials: new DenialStore() }));
+	const sessionAllows = sessionGate.allows;
 	const activeSessionAllows = () => (mode === "auto" ? [] : sessionAllows);
 	let unparsableRules: string[] = [];
 	let warnedUnparsable = "";
@@ -396,6 +416,11 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	 */
 	let settingsWorkspaceDirs: SourcedDirectory[] = [];
 	let flagWorkspaceDirs: string[] = [];
+	/**
+	 * Added for this session. This is branch state: the /add-dir breadcrumb told
+	 * the branch's model they are in its workspace. Recorded on every change and
+	 * read back, validated again, at every session start and /tree switch.
+	 */
 	const sessionWorkspaceDirs: string[] = [];
 	/** The workspace directories in force, as real paths: what the user and the system prompt see. */
 	let workspacePaths: string[] = [];
@@ -410,6 +435,21 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		workspacePaths = [...new Set([...trusted, ...flagWorkspaceDirs, ...sessionWorkspaceDirs].map((dir) => tryRealpath(dir) ?? dir))];
 		workspaceDirs = [...new Set(workspacePaths.map(resolvedOrSelf))];
 		readableRoots = [...harnessReadableRoots, ...docsDirPaths, ...workspaceDirs];
+	};
+	const recordSessionWorkspace = () => recordState(pi, WORKSPACE_DIRS_STATE, [...sessionWorkspaceDirs]);
+	/**
+	 * Take the branch's session directories. Each is validated again, as a live
+	 * /add-dir is: the stored list says only that the user once added it, so a
+	 * directory that is gone, or one too broad for a workspace, is not applied.
+	 */
+	const restoreSessionWorkspace = (ctx: ExtensionContext) => {
+		const restored: string[] = [];
+		for (const dir of readStringsState(ctx, WORKSPACE_DIRS_STATE)) {
+			const checked = validateWorkspaceDirectory(dir, ctx.cwd, os.homedir(), restored);
+			if ("path" in checked) restored.push(checked.path);
+			else if (ctx.hasUI) ctx.ui.notify(`${dir}, added earlier in this conversation, is no longer in the workspace: ${checked.error}`, "warning");
+		}
+		sessionWorkspaceDirs.splice(0, sessionWorkspaceDirs.length, ...restored);
 	};
 
 	/**
@@ -506,7 +546,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	};
 	// Keyed by cwd: a worktree-isolated child classifies against ITS checkout's
 	// CLAUDE.md/AGENTS.md, and must not poison the cache the main agent's own
-	// calls (a different cwd) read for the rest of the session.
+	// calls (a different cwd) read for the rest of the session. The main
+	// session's calls read the entered worktree's. Dropped where the agent's own
+	// instructions are read again: a session start and a compaction.
 	const projectInstructionsByCwd = new Map<string, string | undefined>();
 	const instructionsFor = (cwd: string): string | undefined => {
 		if (!projectInstructionsByCwd.has(cwd)) {
@@ -514,9 +556,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		}
 		return projectInstructionsByCwd.get(cwd);
 	};
-	const pauseTracker = new PauseTracker();
-	/** Classifier denials this session, and the one-shot grants `/permissions` mints from them. */
-	const denials = new DenialStore();
+	const pauseTracker = sessionGate.pause;
+	const denials = sessionGate.denials;
 	/**
 	 * Which model the classifier settled on. Held here so the choice is pinned for
 	 * the session rather than re-resolved per call, and so a model that turns out
@@ -996,8 +1037,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		});
 		// A new session (`/clear`, `/resume`, a fork) starts with a clean gate: the
 		// previous conversation's user messages are not intent evidence for this
-		// one, its "don't ask again" grants and its pause state do not carry over
-		// (PERMISSIONS-REVIEW-2026-09-05 L1). A reload keeps them — same conversation.
+		// one, and its "don't ask again" grants, approved denials and pause state
+		// do not carry over (PERMISSIONS-REVIEW-2026-09-05 L1). A reload keeps
+		// them, the same conversation: they are process state (SessionGate),
+		// which the factory pi re-runs there does not reset.
 		if (event.reason !== "reload") {
 			sessionAllows.length = 0;
 			currentMainToolCallId = undefined;
@@ -1005,8 +1048,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			pendingInputs.length = 0;
 			pauseTracker.reset();
 			denials.reset();
-			sessionWorkspaceDirs.length = 0;
 		}
+		// The directories this branch was told it added follow it, so a reload, a
+		// resume and a fork keep them and a /clear starts without.
+		restoreSessionWorkspace(ctx);
 		// With auto-memory off the folder is nobody's working space: no grant.
 		memoryDirPath = autoMemoryEnabled(ctx.cwd) ? projectMemoryDir(ctx.cwd) : undefined;
 		// Working space only when it is private to this user: another local user
@@ -1046,10 +1091,21 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	// take it, as a resume would, without announcing a switch. A stored
 	// bypassPermissions is never taken.
 	pi.on("session_tree", (_event, ctx) => {
+		// The selected branch's model was told its own session directories.
+		restoreSessionWorkspace(ctx);
+		refreshWorkspace();
 		const onBranch = normalizePermissionMode(readState(ctx, PERMISSION_MODE_STATE));
 		if (!onBranch || onBranch === "bypassPermissions" || onBranch === mode) return;
 		branchMode = onBranch;
 		setMode(onBranch, true);
+	});
+
+	// claude-context re-reads the instruction files at a compaction, and the
+	// summary's epoch renders them, so the classifier judges against the same
+	// set from then on. Unchanged files give the same bytes, so its cache holds;
+	// an edit costs one classifier cache write at this boundary.
+	pi.on("session_compact", () => {
+		projectInstructionsByCwd.clear();
 	});
 
 	// The published bridge stays: aborted, it denies every call a retained child
@@ -1966,7 +2022,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			reloadRules(ctx);
 			return `Added directory ${path} to workspace and saved to ${tildify(target, home)}`;
 		}
-		if (!sessionWorkspaceDirs.includes(path)) sessionWorkspaceDirs.push(path);
+		if (!sessionWorkspaceDirs.includes(path)) {
+			sessionWorkspaceDirs.push(path);
+			recordSessionWorkspace();
+		}
 		refreshWorkspace();
 		return `Added directory ${path} to workspace for this session`;
 	};
@@ -2051,7 +2110,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				const [source, settingsPath, raw] = key.split("\0");
 				if (source === "session") {
 					const index = sessionWorkspaceDirs.indexOf(raw);
-					if (index >= 0) sessionWorkspaceDirs.splice(index, 1);
+					if (index >= 0) {
+						sessionWorkspaceDirs.splice(index, 1);
+						recordSessionWorkspace();
+					}
 					refreshWorkspace();
 				} else if (source === ("onecode-user" satisfies RuleSource) || source === ("onecode-project" satisfies RuleSource)) {
 					if (!removeWorkspaceDirectory(raw, settingsPath)) throw new Error(`${raw} is no longer in ${tildify(settingsPath, home)}.`);
@@ -2220,7 +2282,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				toolName: "subagent-review",
 				transcript: [...transcript, ...childEntries],
 				userMessages: [...userMessages],
-				claudeMd: instructionsFor(ctx.cwd),
+				// The main session's instructions, read where its own calls read them.
+				claudeMd: instructionsFor(workCwd(ctx.cwd)),
 				username: classifierUsername,
 				environment: autoConfig.environment,
 				// AutoModeConfig is structurally a RuleExtras; the user's own deny rules
