@@ -18,7 +18,8 @@
  * (round-2 review H1).
  */
 
-import { readRecord } from "../lib/ledger/records.ts";
+import { latestCompaction } from "../lib/compaction-boundary.ts";
+import { type FileVersion, isFileVersion, readRecord } from "../lib/ledger/records.ts";
 import { shownInFull } from "./shell-reads.ts";
 
 interface ToolCallBlock {
@@ -30,19 +31,10 @@ interface ToolCallBlock {
 
 type BranchMessage = { role?: string; content?: unknown; toolCallId?: string; toolName?: string; isError?: boolean; details?: { oneCodeFile?: unknown } };
 
-/** What a read or write result saw of its file, recorded in its details as `oneCodeFile`. */
-export interface FileObservation {
-	/** Absolute, as the tool resolved it (worktree included). */
-	path: string;
-	size: number;
-	mtimeMs: number;
-	sha256: string;
-}
+/** What a read or write result saw of its file, recorded in its details as `oneCodeFile`: a version with its size and modification time. */
+export type FileObservation = Required<FileVersion>;
 
-const isObservation = (value: unknown): value is FileObservation => {
-	const v = value as Partial<FileObservation> | undefined;
-	return typeof v?.path === "string" && typeof v.size === "number" && typeof v.mtimeMs === "number" && typeof v.sha256 === "string";
-};
+const isObservation = (value: unknown): value is FileObservation => isFileVersion(value) && value.size !== undefined && value.mtimeMs !== undefined;
 
 /**
  * Every successful tool result on the branch that recorded what it saw of a
@@ -89,10 +81,7 @@ export interface SeenFile {
  * pending, and announcing the same version again would repeat it.
  */
 export function filesSeenOnBranch(entries: readonly unknown[]): Map<string, SeenFile> {
-	let compaction = -1;
-	entries.forEach((entry, index) => {
-		if ((entry as { type?: string })?.type === "compaction") compaction = index;
-	});
+	const compaction = latestCompaction(entries)?.index ?? -1;
 	const results = new Map([...fileResults(entries)].map((result) => [result.index, result]));
 	const files = new Map<string, SeenFile>();
 	const see = (seen: FileObservation) => files.set(seen.path, { seen, notified: new Set() });

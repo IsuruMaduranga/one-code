@@ -139,8 +139,9 @@ export interface PendingRecordData extends RecordBase {
 	notified?: FileVersion[];
 }
 
-/** A file's version as a pending item records it: the absolute path and content hash, with the size and modification time when known. */
+/** A file's version as a pending item or a tool result records it: the absolute path and content hash, with the size and modification time when known. */
 export interface FileVersion {
+	/** Absolute, as the tool resolved it (worktree included). */
 	path: string;
 	sha256: string;
 	size?: number;
@@ -190,9 +191,9 @@ export const isObject = (value: unknown): value is Record<string, unknown> => ty
 const isString = (value: unknown): value is string => typeof value === "string";
 const isStrings = (value: unknown): value is string[] => Array.isArray(value) && value.every(isString);
 
-const isFileVersions = (value: unknown): boolean =>
-	Array.isArray(value) &&
-	value.every((file) => isObject(file) && isString(file.path) && isString(file.sha256) && (file.size === undefined || typeof file.size === "number") && (file.mtimeMs === undefined || typeof file.mtimeMs === "number"));
+export const isFileVersion = (file: unknown): file is FileVersion =>
+	isObject(file) && isString(file.path) && isString(file.sha256) && (file.size === undefined || typeof file.size === "number") && (file.mtimeMs === undefined || typeof file.mtimeMs === "number");
+const isFileVersions = (value: unknown): boolean => Array.isArray(value) && value.every(isFileVersion);
 
 const isCoverage = (value: unknown): boolean =>
 	isObject(value) && Number.isInteger(value.count) && (value.count as number) >= 0 && isString(value.role) && typeof value.timestamp === "number";

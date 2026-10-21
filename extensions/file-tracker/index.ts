@@ -314,7 +314,7 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 		// the tool resolved: a file that changed since is stale, never taken as
 		// read in its current form (round-2 review H1), and a gone one untracked.
 		const files = filesSeenOnBranch(entries);
-		const changed: { path: string; sha256: string }[] = [];
+		const changed: Pick<FileObservation, "path" | "sha256">[] = [];
 		for (const [path, { seen, notified }] of files) {
 			const stamp = statIfPresent(path);
 			const current = readIfPresent(path);
@@ -528,8 +528,8 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 	const reportExternalChanges = () => {
 		// Each notice records the versions it names on its pending entry, so a
 		// reload or a resume does not announce them again (replay.ts).
-		const detailed: { text: string; notified?: { path: string; sha256: string } }[] = [];
-		const overflow: { path: string; sha256: string }[] = [];
+		const detailed: { text: string; notified?: Pick<FileObservation, "path" | "sha256"> }[] = [];
+		const overflow: Pick<FileObservation, "path" | "sha256">[] = [];
 		for (const path of tracker.tracked) {
 			// Undefined for a file tracked without content (oversized); an empty
 			// file is compared like any other.

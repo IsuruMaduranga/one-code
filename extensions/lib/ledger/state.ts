@@ -6,8 +6,9 @@
  *
  * Pure: no pi imports (the session API is taken structurally).
  */
+import { latestCompaction } from "../compaction-boundary.ts";
 import { extensionVersion } from "../package-version.ts";
-import { type EntryLike, makeRecord, RECORD, readRecord, stateOnBranch } from "./records.ts";
+import { type EntryLike, makeRecord, RECORD, stateOnBranch } from "./records.ts";
 
 /** The slice of the extension API that appends an entry. */
 export interface EntryAppender {
@@ -36,13 +37,7 @@ export function readState(ctx: BranchReader, key: string): unknown {
  * model's view, so what was told before it counts as untold.
  */
 export function stateSinceCompaction(branch: readonly unknown[], key: string): unknown {
-	const entries = branch as readonly EntryLike[];
-	for (let i = entries.length - 1; i >= 0; i--) {
-		if (entries[i]?.type === "compaction") return undefined;
-		const record = readRecord(entries[i]);
-		if (record?.kind === "state" && record.data.key === key) return record.data.value;
-	}
-	return undefined;
+	return stateOnBranch(branch.slice((latestCompaction(branch)?.index ?? -1) + 1) as EntryLike[], key);
 }
 
 /** The branch's latest state for `key` as a list of strings (other items dropped), or an empty list. */
