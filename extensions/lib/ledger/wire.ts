@@ -353,6 +353,16 @@ export function withRecordedHead(payload: WirePayload, head: Record<string, unkn
 	return out;
 }
 
+/** Whether `b`'s list starts with the same first `count` elements as `a`'s, element for element. */
+export function samePrefix(a: WirePayload, b: WirePayload, key: string, count: number): boolean {
+	if (a === b) return true;
+	const left = a[key];
+	const right = b[key];
+	if (!Array.isArray(left) || !Array.isArray(right) || right.length < count) return false;
+	for (let i = 0; i < count; i++) if (left[i] !== right[i]) return false;
+	return true;
+}
+
 /** The append point of a recorded list: its length without the trailing directives the next request replaces (`isTrailer`). */
 export function appendPoint(list: readonly unknown[], api: string): number {
 	let end = list.length;

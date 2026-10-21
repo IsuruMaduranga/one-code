@@ -7,7 +7,8 @@
  * 1. Inside an epoch it splices: the base request's recorded list, then pi's
  *    rendering of the tail, under the recorded system prompt and tools, with
  *    tools added mid-epoch appended (lib/ledger/wire.ts spliceRequest).
- * 2. It validates the request (lib/ledger/validate.ts): no reference to an
+ * 2. It settles the layout (lib/ledger/layout.ts: no system message stranded
+ *    before a user message) and validates the request (lib/ledger/validate.ts): no reference to an
  *    undeclared tool, no system message stranded before a user message. A
  *    problem is a bug; it is dropped and reported, so it costs one block,
  *    never a 400. ONE_CODE_LEDGER_STRICT=1 sends it unrepaired instead, for
@@ -35,7 +36,8 @@ import { foldBranch } from "../lib/ledger/fold.ts";
 import { LEDGER_PLAN_CHANNEL, LEDGER_SENT_CHANNEL, type LedgerSent, type RequestPlan } from "../lib/ledger/plan.ts";
 import { type EntryLike, makeRecord, RECORD, type ToldFact } from "../lib/ledger/records.ts";
 import { deliveredAfterRepair, repairRequest, validateRequest } from "../lib/ledger/validate.ts";
-import { appendPoint, encodeRequest, hasWarmCap, type RecordedRequest, recordedBody, recordedRequest, spliceRequest, type WirePayload, withRequestFields } from "../lib/ledger/wire.ts";
+import { settlePayload } from "../lib/ledger/layout.ts";
+import { appendPoint, encodeRequest, hasWarmCap, listKey, type RecordedRequest, recordedBody, recordedRequest, samePrefix, spliceRequest, type WirePayload, withRequestFields } from "../lib/ledger/wire.ts";
 import { extensionVersion } from "../lib/package-version.ts";
 
 export default function ledgerWireExtension(pi: ExtensionAPI) {
@@ -82,8 +84,12 @@ export default function ledgerWireExtension(pi: ExtensionAPI) {
 		if (!current) return undefined;
 
 		let payload = live;
-		if (!current.epoch && current.base) payload = spliceRequest(current.base, payload, api);
+		const base = current.epoch ? undefined : current.base;
+		const end = base ? appendPoint(base.list, api) : 0;
+		if (base) payload = spliceRequest(base, payload, api);
 		const spliced = payload;
+		// The final layout pass: no system message stranded before a user message (lib/ledger/layout.ts).
+		payload = settlePayload(payload, api, listKey(api), end);
 		let delivered: { consumed: string[]; facts: ToldFact[] } = { consumed: current.consumed, facts: current.facts };
 
 		const problems = validateRequest(payload, api);
@@ -97,9 +103,8 @@ export default function ledgerWireExtension(pi: ExtensionAPI) {
 			}
 		}
 
-		// The recorded prefix is known, unless a repair moved its elements.
-		const base = current.base;
-		const request = recordedRequest(payload, identity, base && payload === spliced ? { base, end: appendPoint(base.list, api) } : undefined);
+		// The recorded prefix is known, unless the layout pass or a repair moved its elements.
+		const request = recordedRequest(payload, identity, base && samePrefix(spliced, payload, listKey(api), end) ? { base, end } : undefined);
 		lastSent = payload;
 		sent = true;
 		// The same request again under this plan (pi-ai re-sending an identical body) records nothing new.
