@@ -225,3 +225,15 @@ describe("the classifier reads the instructions the agent reads (R3-M26)", () =>
 		expect(claudeMdOf(review)).toContain("Worktree rule.");
 	});
 });
+
+describe("a mode another extension asks for", () => {
+	it("is never bypass in a session without bypass: a stored pre-plan bypass returns to the default mode", async () => {
+		const s = await session([], "startup", "default");
+		s.fake.events.emit(MODE_CHANNEL, { mode: "bypassPermissions" });
+		const modes = s.branch().flatMap((entry) => {
+			const data = (entry as { customType?: string; data?: { key?: string; value?: unknown } }).data;
+			return (entry as { customType?: string }).customType === RECORD.state && data?.key === "permission-mode" ? [data.value] : [];
+		});
+		expect(modes.at(-1)).toBe("default");
+	});
+});

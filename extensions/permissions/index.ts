@@ -1168,7 +1168,12 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	pi.events.on(MODE_CHANNEL, (data) => {
 		const request = data as { mode?: unknown; toolCallId?: unknown } | undefined;
 		const requested = normalizePermissionMode(request?.mode);
-		if (requested) setMode(requested, false, typeof request?.toolCallId === "string" ? request.toolCallId : undefined);
+		if (!requested) return;
+		// Another extension asks (plan mode's exit restores the mode it came from,
+		// read from the branch). A stored value never grants a permission by
+		// itself: bypass only where this session has it, else the default mode.
+		const allowed = requested === "bypassPermissions" && !bypassInCycle ? "default" : requested;
+		setMode(allowed, false, typeof request?.toolCallId === "string" ? request.toolCallId : undefined);
 	});
 
 	// The plan-mode extension announces the plan file on PLAN_FILE_CHANNEL;
