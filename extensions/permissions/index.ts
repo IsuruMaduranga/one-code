@@ -435,6 +435,21 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		workspacePaths = [...new Set([...trusted, ...flagWorkspaceDirs, ...sessionWorkspaceDirs].map((dir) => tryRealpath(dir) ?? dir))];
 		workspaceDirs = [...new Set(workspacePaths.map(resolvedOrSelf))];
 		readableRoots = [...harnessReadableRoots, ...docsDirPaths, ...workspaceDirs];
+		if (sessionStarted) announceWorkspace();
+	};
+	/** What the system prompt was last told the workspace is (lib/workspace-channel.ts). */
+	let announcedWorkspace: string | undefined;
+	let sessionStarted = false;
+	/**
+	 * The environment block lists the workspace: a change mid-session reaches
+	 * the next epoch's message 1 (a compaction), while inside the epoch the
+	 * /add-dir output already told the model (R3-L4).
+	 */
+	const announceWorkspace = () => {
+		const key = workspacePaths.join("\0");
+		if (key === announcedWorkspace) return;
+		announcedWorkspace = key;
+		pi.events.emit(WORKSPACE_CHANNEL, { dirs: workspacePaths } satisfies WorkspaceAnnouncement);
 	};
 	const recordSessionWorkspace = () => recordState(pi, WORKSPACE_DIRS_STATE, [...sessionWorkspaceDirs]);
 	/**
@@ -1081,7 +1096,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		reloadSettings(ctx, event.reason === "startup", carried);
 		if (!STANDING_REMINDER_MODES.has(mode)) setMode(mode, true);
 		// The system prompt lists the workspace as the session starts (lib/workspace-channel.ts).
-		pi.events.emit(WORKSPACE_CHANNEL, { dirs: workspacePaths } satisfies WorkspaceAnnouncement);
+		sessionStarted = true;
+		announcedWorkspace = undefined;
+		announceWorkspace();
 		resetClassifierChoice(ctx.model, "batched");
 		// The bridge reads live mode/rules, but belongs to this parent session only.
 		pi.events.emit(SUBAGENT_GATE_CHANNEL, { decide: sessionPermissionBridge(evaluateChildToolCall, childPermissionSession.signal) });
