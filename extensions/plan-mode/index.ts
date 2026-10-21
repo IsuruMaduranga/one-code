@@ -40,7 +40,7 @@ import { readState, recordState } from "../lib/ledger/state.ts";
 /** A plan file larger than this is named after a compaction, not inlined: the model reads it when it needs it. */
 const PLAN_REFERENCE_CHARS = 40_000;
 
-/** Claude Code's plan_file_reference attachment (utils/messages.ts), the plan the summary replaced. */
+/** The plan the summary replaced, re-attached after a compaction. */
 function planFileReferenceText(path: string, content: string): string {
 	if (content.length > PLAN_REFERENCE_CHARS) return `A plan file exists from plan mode at: ${path}\n\nIt is too large to include here (${content.length.toLocaleString("en-US")} characters); read it before continuing.\n\nIf this plan is relevant to the current work and not already complete, continue working on it.`;
 	return `A plan file exists from plan mode at: ${path}\n\nPlan contents:\n\n${content}\n\nIf this plan is relevant to the current work and not already complete, continue working on it.`;
@@ -130,8 +130,8 @@ export default function planModeExtension(pi: ExtensionAPI) {
 	};
 
 	/**
-	 * A fork's own copy of the plan another session recorded (Claude Code's
-	 * copyPlanForFork), so the two sessions never overwrite each other's plan
+	 * A fork's own copy of the plan another session recorded, as Claude Code
+	 * gives a forked session, so the two sessions never overwrite each other's plan
 	 * (decisions/modes.md). The copy this session already made of it, on any
 	 * of its branches, is reused. The run moves to the copy with the mode it
 	 * came from, and says whether the copy exists (the parent's run may have
@@ -256,10 +256,10 @@ export default function planModeExtension(pi: ExtensionAPI) {
 	});
 
 	// A compaction summarizes the plan away and opens an epoch, where nothing
-	// above has to stay byte-stable (R3-M20). Claude Code re-attaches the plan
-	// file whenever one exists, plan mode or not (compact.ts
-	// createPlanAttachmentIfNeeded); in plan mode the run is recorded again, so
-	// the new epoch's block says whether the file exists now.
+	// above has to stay byte-stable (R3-M20). The plan file is re-attached
+	// whenever one exists, plan mode or not, as Claude Code does; in plan mode
+	// the run is recorded again, so the new epoch's block says whether the file
+	// exists now.
 	pi.on("session_compact", (_event, ctx) => {
 		lastCtx = ctx;
 		const path = planFileOnBranch(ctx.sessionManager.getBranch());

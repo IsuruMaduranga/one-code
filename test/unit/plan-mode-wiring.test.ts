@@ -54,7 +54,7 @@ describe("plan-mode wiring", () => {
 		expect(after.filter((r) => r.key === "permission-mode" && !r.remove).at(-1)?.text).toBe(before);
 	});
 
-	describe("a fork gets its own copy of the plan (R3-M19, Claude Code's copyPlanForFork)", () => {
+	describe("a fork gets its own copy of the plan (R3-M19)", () => {
 		const standing = (list: Array<{ key?: string; text?: string; remove?: boolean }>) => list.filter((r) => r.key === "permission-mode" && !r.remove).at(-1)?.text;
 		/** The parent session: in plan mode, its plan written. */
 		const planInParent = async () => {
