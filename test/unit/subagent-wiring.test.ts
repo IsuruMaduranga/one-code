@@ -544,6 +544,29 @@ describe("fork runs in a one-shot session", () => {
 		expect(JSON.stringify(nested!.parameters)).toBe(JSON.stringify(h.fake.tools.get("Agent")!.parameters));
 	});
 
+	// The fork's wire carries the parent's Agent declaration, which offers these
+	// options; a nested run cannot honor them, so the result names the fix.
+	it("refuses the parent's options a nested run cannot honor, naming the fix, and runs the call without them", async () => {
+		const { h, run } = await mountFork();
+		h.fake.events.emit(SUBAGENT_GATE_CHANNEL, { decide: async () => undefined });
+		await h.call("Agent", { subagent_type: "fork", name: "historian", task: "Read the git history" });
+		const nested = (run.mock.calls[0][0] as { extraTools?: Array<{ name: string; execute: (...args: unknown[]) => Promise<Result> }> }).extraTools!.find((tool) => tool.name === "Agent")!;
+		const call = (params: Record<string, unknown>) => nested.execute("nested-call", { subagent_type: "explore", task: "Look", ...params }, undefined, undefined, h.ctx);
+		for (const option of [{ model: "gpt-5-flash-text" }, { thinking: "high" }, { isolation: "worktree" }]) {
+			const refused = await call(option);
+			expect(refused.isError).toBe(true);
+			expect(refused.content[0].text).toContain(`\`${Object.keys(option)[0]}\``);
+			expect(refused.content[0].text).toContain("Call again without it");
+		}
+		const forked = await call({ subagent_type: "fork" });
+		expect(forked.isError).toBe(true);
+		expect(forked.content[0].text).toContain("pick a named agent");
+		expect(run).toHaveBeenCalledTimes(1);
+		const plain = await call({});
+		expect(plain.isError).toBe(false);
+		expect(run).toHaveBeenCalledTimes(2);
+	});
+
 	// The same rule for every tool a fork is handed: one whose schema differs
 	// from the parent's tool of that name replaces the parent's recorded
 	// declaration, and the fork misses the parent's cache from there on.
