@@ -296,6 +296,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		const mode = (data as Partial<PermissionStatus> | undefined)?.mode;
 		if (typeof mode === "string") permissionMode = mode;
 	});
+	/** The mode a fork's calls are checked in, read live at each of its requests (parent-mode.ts). */
+	const parentMode = () => permissionMode;
 	/**
 	 * Task ids with a blocking child (nested spawn or SendMessage resume) currently
 	 * running (SendMessage must wait for these). Keyed by task id, like `residents`:
@@ -1402,12 +1404,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	 * can resume it later. Undefined for a named agent.
 	 */
 	const forkInputs = (request: RunRequest, record: AgentRunRecord, ctx: ExtensionContext) => {
-		if (!request.fork) return { parentSystemPrompt: undefined, parentRequest: undefined };
+		if (!request.fork) return { parentSystemPrompt: undefined, parentRequest: undefined, parentMode: undefined };
 		const parentSystemPrompt = forkSystemPrompt(ctx);
 		persistForkPrompt(record, parentSystemPrompt);
 		const parentRequest = forkRequest(ctx);
 		if (parentRequest) persistForkRequest(record, parentRequest);
-		return { parentSystemPrompt, parentRequest };
+		return { parentSystemPrompt, parentRequest, parentMode };
 	};
 	const readForkPrompt = (record: AgentRunRecord): string | undefined => {
 		if (!record.sessionSearchDir) return undefined;
@@ -1692,7 +1694,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 		runningIds.add(record.taskId);
 		const live = trackLiveRun(record, request, parent);
-		const { parentSystemPrompt: forkPrompt, parentRequest } = forkInputs(request, record, ctx);
+		const { parentSystemPrompt: forkPrompt, parentRequest, parentMode: forkMode } = forkInputs(request, record, ctx);
 		const handle = runtime.run({
 			name: request.name,
 			agent: agentDef,
@@ -1701,6 +1703,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			forkFrom: request.fork ? forkFrom : undefined,
 			parentSystemPrompt: forkPrompt,
 			parentRequest,
+			parentMode: forkMode,
 			sessionDir: record.sessionSearchDir || undefined,
 			model: request.model,
 			fallbackModel: request.fallbackModel,
@@ -1862,7 +1865,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			}, RESIDENT_IDLE_MS);
 			reaper.unref?.();
 		};
-		const { parentSystemPrompt: forkPrompt, parentRequest } = forkInputs(p.request, p.record, ctx);
+		const { parentSystemPrompt: forkPrompt, parentRequest, parentMode: forkMode } = forkInputs(p.request, p.record, ctx);
 		// No `signal` here on purpose: a resident outlives the spawning turn and
 		// is stopped through task_stop / the panel, not by the turn ending (S15).
 		const started = await runtime.runResident({
@@ -1873,6 +1876,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			forkMessages: p.request.fork ? forkMessages : undefined,
 			parentSystemPrompt: forkPrompt,
 			parentRequest,
+			parentMode: forkMode,
 			sessionDir: p.record.sessionSearchDir || undefined,
 			model: p.request.model,
 			fallbackModel: p.request.fallbackModel,
@@ -2623,6 +2627,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			sessionFile,
 			parentSystemPrompt: forkPrompt,
 			parentRequest: record.agent === FORK_AGENT ? readForkRequest(record) : undefined,
+			parentMode: record.agent === FORK_AGENT ? parentMode : undefined,
 			// Blocking, so the call's own abort stops it; a background turn is stopped by task_stop.
 			signal: oneShot ? signal : undefined,
 			model: record.model,

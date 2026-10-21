@@ -29,6 +29,7 @@ import { CHILD_EXTENSION_PATHS } from "../lib/child-extensions.ts";
 import { type HandbackSlot, SUBAGENT_HANDBACK, subagentHandbackExtension } from "../lib/subagent-handback.ts";
 import type { RequestCapture } from "../lib/request-replay.ts";
 import { forkCacheExtension } from "./fork-cache.ts";
+import { parentModeExtension } from "./parent-mode.ts";
 import { type DeferRequest, deferLikeParentExtension, injectedByParent } from "../lib/deferred.ts";
 import type { ChildHandle, ChildOutcome, RpcChildHandle } from "./outcome.ts";
 import { sendToMainTool } from "./send-to-main-tool.ts";
@@ -84,6 +85,8 @@ interface ChildSessionSpec {
 	 * built from it so the fork reads the parent's prompt cache (fork-cache.ts).
 	 */
 	parentRequest?: RequestCapture;
+	/** The main session's live permission mode, for a fork: told to it when it differs from what it was told (parent-mode.ts). */
+	parentMode?: () => string;
 	/** Existing persisted session to resume (SendMessage to a finished agent). */
 	sessionFile?: string;
 	/** Where a new run's persisted session lands; falls back to an in-memory session. */
@@ -285,6 +288,7 @@ export class SubagentRuntime {
 				// tools) are deferred as the parent defers them: their owners run there.
 				deferLikeParentExtension(this.getParentDeferred(), injectedByParent(spec.extraTools ?? [])),
 				subagentHandbackExtension(handback, { deferred: fork }),
+				...(fork && spec.parentMode ? [parentModeExtension(spec.parentMode)] : []),
 				...(fork && spec.parentRequest ? [forkCacheExtension(spec.parentRequest)] : []),
 			],
 			// claude-context (above) injects the CLAUDE.md instructions on the child's session_start;
