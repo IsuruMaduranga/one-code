@@ -782,10 +782,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		emitAgentCatalog(ctx);
 		emitDelegationSteer();
 	});
-	// The selected branch's runs only: the abandoned branch's are not
-	// addressable from it (SendMessage, list_agents), as on a resume.
+	// The selected branch's runs: the abandoned branch's finished ones are not
+	// addressable from it (SendMessage, list_agents), as on a resume. A run still
+	// going and a nested run (recorded only in memory) stay reachable, and so
+	// do names held for spawns in flight.
 	pi.on("session_tree", (_event, ctx) => {
-		registry.clear();
+		registry.retain((record) => liveRuns.get(record.taskId)?.status === "running" || parentTaskOf.has(record.taskId));
 		reconstructRuns(ctx);
 	});
 	pi.on("session_shutdown", async () => {

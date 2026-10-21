@@ -16,10 +16,11 @@ const recorded = (payload: Record<string, unknown>, api = identity.api) => recor
 
 describe("planRequest", () => {
 	const messages = [{ role: "user", timestamp: 1 }, { role: "assistant", timestamp: 2 }, { role: "user", timestamp: 3 }];
-	const branchWith = (covers: { count: number; role: string; timestamp: number }) => {
+	const branchWith = (covers: { count: number; role: string; timestamp: number }, answered = true) => {
 		const { list, head, hashes, headHash } = recorded({ model: identity.model, system: "s", messages: [user("one")] });
 		const blobs = Object.fromEntries([...list.map((m, i) => [hashes[i], m]), [headHash, head]]);
-		return [{ type: "custom", id: "r1", parentId: null, customType: RECORD.request, data: makeRecord("request", "0.6.0", { identity, keep: 0, append: hashes, head: headHash, blobs, consumed: [], covers }) }];
+		const request = { type: "custom", id: "r1", parentId: null, customType: RECORD.request, data: makeRecord("request", "0.6.0", { identity, keep: 0, append: hashes, head: headHash, blobs, consumed: [], covers }) };
+		return answered ? [request, { type: "message", id: "a1", parentId: "r1", message: { role: "assistant" } }] : [request];
 	};
 
 	it("opens an epoch on an empty branch, covering every message", () => {
@@ -41,6 +42,13 @@ describe("planRequest", () => {
 		expect(planRequest(foldBranch(branchWith({ count: 1, role: "user", timestamp: 9 })), messages).plan.cause).toBe("coverage");
 		expect(planRequest(foldBranch(branchWith({ count: 5, role: "user", timestamp: 1 })), messages).plan.cause).toBe("coverage");
 		expect(planRequest(foldBranch(branchWith({ count: 3, role: "user", timestamp: 3 })), messages).plan.cause).toBe("empty");
+	});
+
+	it("opens an epoch over a base no reply followed (a process that died mid-stream), whose list may end in system messages", () => {
+		const { plan, tailStart } = planRequest(foldBranch(branchWith({ count: 1, role: "user", timestamp: 1 }, false)), messages);
+		expect(plan.epoch).toBe(true);
+		expect(plan.cause).toBe("coverage");
+		expect(tailStart).toBe(0);
 	});
 });
 

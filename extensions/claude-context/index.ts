@@ -382,6 +382,8 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		const toldDate = request.toldBlocks.get(FACT_KEYS.date);
 		if (blockDate && toldDate !== undefined && toldDate !== dateFingerprint(today)) {
 			request.blocks.push({ text: dateChangeReminder(today), facts: [toldBlockFact(FACT_KEYS.date, today)] });
+			// The live block too, so a later epoch (a model switch, a fold) renders today's date on message 1.
+			emitDate(today);
 		}
 		if (!resumeCheck || !livePrints) return;
 		resumeCheck = false;

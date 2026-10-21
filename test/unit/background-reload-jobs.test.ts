@@ -3,7 +3,7 @@
  * keeps running, so the session's crons and wakeups come back from the branch.
  */
 import { describe, expect, it } from "vitest";
-import { CronStore, scheduledJobsOnBranch } from "../../extensions/background/cron.ts";
+import { CronStore, JOB_FIRED_ENTRY, scheduledJobsOnBranch } from "../../extensions/background/cron.ts";
 
 const call = (id: string, name: string, args: Record<string, unknown>) => ({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id, name, arguments: args }] } });
 const result = (toolCallId: string, toolName: string, details: Record<string, unknown>, timestamp = 1_000) => ({ type: "message", message: { role: "toolResult", toolCallId, toolName, content: [], details, timestamp } });
@@ -24,6 +24,18 @@ describe("scheduledJobsOnBranch", () => {
 			fire("cron", "j1", false),
 		];
 		expect(scheduledJobsOnBranch(branch)).toEqual([{ id: "j1", cron: "*/5 * * * *", prompt: "check the build", recurring: true, source: "model", createdAt: 1_000 }]);
+	});
+
+	it("reads a fire from its own record, which a fire sent as a plain user message after a /reload still writes", () => {
+		const branch = [
+			call("c1", "cron_create", { cron: "30 14 21 10 *", prompt: "once", recurring: false }),
+			result("c1", "cron_create", { jobId: "j1", cron: "30 14 21 10 *", recurring: false }),
+			call("c2", "cron_create", { cron: "*/5 * * * *", prompt: "tick" }),
+			result("c2", "cron_create", { jobId: "j2", cron: "*/5 * * * *", recurring: true }),
+			{ type: "custom", customType: JOB_FIRED_ENTRY, data: { jobId: "j1", final: true, source: "model" } },
+			{ type: "custom", customType: JOB_FIRED_ENTRY, data: { jobId: "j2", final: false, source: "model" }, timestamp: "2026-10-21T10:00:00.000Z" },
+		];
+		expect(scheduledJobsOnBranch(branch).map((job) => [job.id, job.lastFiredAt])).toEqual([["j2", Date.parse("2026-10-21T10:00:00.000Z")]]);
 	});
 
 	it("keeps only the latest wakeup, until it fires or the loop stops", () => {

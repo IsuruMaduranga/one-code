@@ -151,6 +151,13 @@ describe("renderReminders: sticky states", () => {
 		expect(blockTexts(result.messages[1])).toEqual(["ran", wrapReminder("auto")]);
 	});
 
+	it("never pins a state on from the start (since 0) to a tool result: the constant budget line rides user messages only", () => {
+		const budget = sticky("<total_tokens>200000 tokens left</total_tokens>", 0, { raw: true, skipStackCarrier: true });
+		const result = render([assistant(1), toolResult("ran", 2)], { sticky: [budget] });
+		expect(result.stickyPlaced).toEqual([]);
+		expect(JSON.stringify(result.messages)).not.toContain("200000 tokens left");
+	});
+
 	it("skipStackCarrier keeps it off the message that carries the stack, on an epoch only", () => {
 		const marker = sticky("<total_tokens>1 tokens left</total_tokens>", 0, { raw: true, skipStackCarrier: true });
 		const messages = [user("one", 1), assistant(2), user("two", 3)];

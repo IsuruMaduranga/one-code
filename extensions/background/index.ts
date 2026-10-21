@@ -62,6 +62,7 @@ import {
 	formatDeleteResult,
 	formatJobList,
 	formatUnknownJob,
+	JOB_FIRED_ENTRY,
 	scheduledJobsOnBranch,
 } from "./cron.ts";
 import {
@@ -337,6 +338,8 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		// and renders the folded context whole, once.
 		if (fold.noOpStreak !== undefined) pi.appendEntry(RECORD.epoch, makeRecord("epoch", extensionVersion(), { cause: "fold" }));
 		if (job.source === "wakeup") dynamicLoop.inFlight = job.prompt;
+		// Recorded whatever way the notification goes out, so a /reload knows the fire happened.
+		pi.appendEntry(JOB_FIRED_ENTRY, { jobId: job.id, final, source: job.source });
 		notify(job.source === "wakeup" ? "wakeup" : "cron", fireText(job), { jobId: job.id, cron: job.cron, source: job.source, final, ...fold });
 	};
 	/** Fire every due job (only while idle), then arm the one timer to the next fire. */

@@ -348,7 +348,9 @@ export function renderReminders(messages: readonly AgentMessage[], input: Render
 			if (state.skipStackCarrier && input.epoch && index === firstUser) return;
 			carriers.push(index);
 		});
-		if (!state.delivered) {
+		// The pin is for a state switched on mid-turn; one on from the start
+		// (`since: 0`, the constant budget line) rides user messages only.
+		if (!state.delivered && state.since > 0) {
 			const first = firstResultAfter(messages, state);
 			if (first !== -1 && !carriers.includes(first)) carriers.unshift(first);
 		}

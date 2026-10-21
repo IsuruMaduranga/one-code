@@ -14,7 +14,8 @@
  * A request's consumed pending ids and the told records written after it
  * count unless its reply failed: a failed request's tail is rendered again,
  * so what it carried is neither delivered nor told. A request with no reply
- * yet counts and is the base (the turn in flight, or a quit mid-stream).
+ * yet counts and is the base (the turn in flight, or a quit mid-stream),
+ * marked unanswered: the next request does not extend it (lib/ledger/plan.ts).
  *
  * The rebuilt request shares its elements with the branch's entries: clone
  * before mutating (`spliceRequest` does).
@@ -29,6 +30,8 @@ export type { EpochCause };
 /** A recorded request as the fold rebuilds it: the wire list and head, and the context messages it covered. */
 export interface FoldedRequest extends RecordedRequest {
 	covers?: Coverage;
+	/** False when no reply followed it on the branch: the turn in flight, or a process that died mid-stream. */
+	answered?: boolean;
 }
 
 export interface LedgerFold {
@@ -121,14 +124,14 @@ export function foldBranch(branch: readonly EntryLike[], identity?: RequestIdent
 		told.modes.clear();
 		told.blocks.clear();
 	};
-	/** Count what the open request carried and make it the base, unless its reply failed. */
-	const settle = (failed: boolean) => {
+	/** Count what the open request carried and make it the base, unless its reply failed; `answered`: a reply settled it. */
+	const settle = (failed: boolean, answered = true) => {
 		if (!open) return;
 		if (!failed) {
 			for (const id of open.consumed) consumed.add(id);
 			tell(open.facts);
 			if (open.request) {
-				base = open.request;
+				base = answered ? open.request : { ...open.request, answered: false };
 				resetSinceBase = undefined;
 			}
 		}
@@ -173,7 +176,7 @@ export function foldBranch(branch: readonly EntryLike[], identity?: RequestIdent
 				return;
 		}
 	});
-	settle(false);
+	settle(false, false);
 
 	const latestByKey = new Map<string, number>();
 	for (const { item, index } of produced) if (item.key !== undefined) latestByKey.set(item.key, index);

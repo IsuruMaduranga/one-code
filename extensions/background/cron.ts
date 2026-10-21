@@ -410,7 +410,14 @@ export interface RecordedJob {
 	lastFiredAt?: number;
 }
 
-type BranchEntry = { type?: string; timestamp?: string; customType?: string; details?: unknown; message?: unknown };
+type BranchEntry = { type?: string; timestamp?: string; customType?: string; details?: unknown; data?: unknown; message?: unknown };
+
+/**
+ * The custom entry a main-session job's fire writes (`{ jobId, final, source }`),
+ * whatever way its notification is then delivered: a fire sent as a plain user
+ * message (no turn prompted since a /reload) carries no details.
+ */
+export const JOB_FIRED_ENTRY = "one-code:job-fired";
 type Message = { role?: string; toolName?: string; toolCallId?: string; isError?: boolean; details?: unknown; content?: unknown; timestamp?: number };
 
 /**
@@ -426,15 +433,17 @@ export function scheduledJobsOnBranch(branch: readonly BranchEntry[]): RecordedJ
 		for (const [id, job] of jobs) if (job.source === "wakeup") jobs.delete(id);
 	};
 	for (const entry of branch) {
-		if (entry.type === "custom_message" && (entry.customType === "wakeup" || entry.customType === "cron")) {
-			const details = entry.details as { jobId?: unknown; final?: unknown } | undefined;
+		const fired = entry.type === "custom" && entry.customType === JOB_FIRED_ENTRY;
+		if (fired || (entry.type === "custom_message" && (entry.customType === "wakeup" || entry.customType === "cron"))) {
+			const details = (fired ? entry.data : entry.details) as { jobId?: unknown; final?: unknown; source?: unknown } | undefined;
+			const wakeup = fired ? details?.source === "wakeup" : entry.customType === "wakeup";
 			if (details?.final !== true) {
 				const job = typeof details?.jobId === "string" ? jobs.get(details.jobId) : undefined;
 				const at = Date.parse(entry.timestamp ?? "");
 				if (job && !Number.isNaN(at)) job.lastFiredAt = at;
 				continue;
 			}
-			if (entry.customType === "wakeup") dropWakeups();
+			if (wakeup) dropWakeups();
 			else if (typeof details.jobId === "string") jobs.delete(details.jobId);
 			continue;
 		}

@@ -79,9 +79,10 @@ describe("claude-context date wiring", () => {
 		const blocks = render("2026-09-26");
 		expect(blocks).toEqual([{ text: dateChangeReminder("2026-09-27"), facts: [{ kind: "block", key: FACT_KEYS.date, hash: dateFingerprint("2026-09-27") }] }]);
 		expect(blocks[0].text).toBe("The date has changed. Today's date is now 2026-09-27. No need to announce the new date — the user's own clock shows it.");
-		// Once told, not again.
+		// Once told, not again; and the live block now says the new date, for a later epoch's message 1.
 		expect(render("2026-09-27")).toEqual([]);
-		expect(block()).toHaveLength(1);
+		expect(block()).toHaveLength(2);
+		expect(block().at(-1)?.text).toContain("2026-09-27");
 	});
 
 	it("refreshes the live date block at a compaction, for the epoch it opens", async () => {

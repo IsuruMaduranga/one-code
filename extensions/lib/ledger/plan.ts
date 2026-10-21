@@ -82,6 +82,9 @@ export function planRequest(fold: LedgerFold, messages: readonly CoveredMessage[
 	});
 	const base = fold.lastRequest;
 	if (fold.opensEpoch || !base) return { plan: plan(true, fold.cause ?? "first"), tailStart: 0 };
+	// No reply followed the base (the process died mid-stream): its list may end
+	// in system messages that expected one, so render everything again.
+	if (base.answered === false) return { plan: plan(true, "coverage"), tailStart: 0 };
 	const at = base.covers;
 	const last = at && at.count > 0 ? messages[at.count - 1] : undefined;
 	if (!at || at.count > messages.length || (at.count > 0 && (last?.role !== at.role || (last?.timestamp ?? 0) !== at.timestamp))) {
