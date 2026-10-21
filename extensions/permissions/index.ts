@@ -331,6 +331,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	let autoInCycle = false;
 	/** The mode the branch's latest `one-code:state` entry holds: the mode follows the branch. */
 	let branchMode: PermissionMode | undefined;
+	/** /clear and /new open an empty branch in this process: the mode the last session ended in, carried over. */
+	let carriedMode: PermissionMode | undefined;
 	let deny: PermissionRule[] = [];
 	let ask: PermissionRule[] = [];
 	let allow: PermissionRule[] = [];
@@ -915,7 +917,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// The branch's own mode comes after the flags and before the settings'
 		// default: the mode follows the branch (a resume, a fork, /reload), and a
 		// stored bypassPermissions is never restored, it needs its flag again.
-		const restored = branchMode === "bypassPermissions" ? undefined : branchMode;
+		const fromBranch = branchMode ?? carriedMode;
+		const restored = fromBranch === "bypassPermissions" ? undefined : fromBranch;
 		const startup = resolveStartupMode(
 			[
 				pi.getFlag("dangerously-skip-permissions") === true ? "bypassPermissions" : undefined,
@@ -1023,6 +1026,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		protectedDirs = runtimeProtectedDirs();
 		secretPaths = runtimeSecretPaths(os.homedir());
 		branchMode = normalizePermissionMode(readState(ctx, PERMISSION_MODE_STATE));
+		// Claude Code keeps the mode across /clear: the new branch starts from the
+		// mode this process last published (MODE_ENV), and records it.
+		carriedMode = event.reason === "new" && !branchMode ? normalizePermissionMode(process.env[MODE_ENV]) : undefined;
 		reloadSettings(ctx);
 		if (!STANDING_REMINDER_MODES.has(mode)) setMode(mode, true);
 		// The system prompt lists the workspace as the session starts (lib/workspace-channel.ts).

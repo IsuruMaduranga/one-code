@@ -252,8 +252,8 @@ function recordedValue(recorded: unknown, live: unknown): unknown {
 }
 
 /**
- * The payload with the epoch's recorded system prompt and tools in place of
- * pi's rendering, keeping every other field as pi built it. Tools pi declares
+ * The payload with the epoch's recorded system prompt, tools and cache key
+ * (OpenAI's `prompt_cache_key`) in place of pi's rendering, keeping every other field as pi built it. Tools pi declares
  * that the record lacks are appended (a tool added mid-epoch); a recorded one
  * pi no longer declares stays (Claude Code never removes a tool mid-conversation).
  */
@@ -284,7 +284,13 @@ export function withRecordedHead(payload: WirePayload, head: Record<string, unkn
 		}
 		return out;
 	}
-	for (const field of ["system", "instructions"]) if (field in head) out[field] = recordedValue(head[field], payload[field]);
+	// The cache key routes to the host holding the record's cache: a fork child,
+	// or a /fork, extends a request recorded under the parent session's key. Not
+	// on Codex, where pi-ai also sends the session's own id as the `session-id`
+	// header after every extension hook; a body key that disagrees with it read
+	// nothing live (findings §75).
+	const fields = api === "openai-codex-responses" ? ["system", "instructions"] : ["system", "instructions", "prompt_cache_key"];
+	for (const field of fields) if (field in head) out[field] = recordedValue(head[field], payload[field]);
 	if ("tools" in head) out.tools = merge(head.tools, payload.tools);
 	// A beta an earlier request needed (a mid-conversation system message, a
 	// tool_addition) is still needed: that request's messages are in this one.

@@ -15,6 +15,7 @@ import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
 import { REMINDER_CHANNEL, type ReminderPayload } from "../../extensions/lib/reminders.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../extensions/permissions/modes.ts";
+import { MODE_ENV } from "../../extensions/lib/permission-gate.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 const stateEntry = (key: string, value: unknown) => ({ type: "custom", id: `s-${key}`, parentId: null, customType: RECORD.state, data: makeRecord("state", "0.6.0", { key, value }) });
@@ -25,13 +26,14 @@ describe("the permission mode follows the branch (H4)", () => {
 		dir = mkdtempSync(join(tmpdir(), "mode-follows-"));
 		vi.stubEnv("ONECODE_STATE_DIR", join(dir, ".onecode"));
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(dir, "agent"));
+		vi.stubEnv(MODE_ENV, "");
 	});
 	afterEach(() => {
 		vi.unstubAllEnvs();
 		rmSync(dir, { recursive: true, force: true });
 	});
 
-	async function start(branch: unknown[], flags: Record<string, string | boolean> = {}) {
+	async function start(branch: unknown[], flags: Record<string, string | boolean> = {}, reason = "startup") {
 		const fake = createFakePi();
 		for (const [name, value] of Object.entries(flags)) fake.flags.set(name, value);
 		const modes: string[] = [];
@@ -42,7 +44,7 @@ describe("the permission mode follows the branch (H4)", () => {
 			modelRegistry: { getAvailable: () => [{ provider: "anthropic", id: "claude-haiku" }] },
 			sessionManager: { getSessionId: () => "s", getSessionDir: () => join(dir, "session"), getBranch: () => [...branch, ...fake.branch] },
 		});
-		await fake.fire("session_start", { reason: "startup" }, ctx);
+		await fake.fire("session_start", { reason }, ctx);
 		return { fake, ctx, modes, mode: () => modes.at(-1) };
 	}
 
@@ -51,6 +53,18 @@ describe("the permission mode follows the branch (H4)", () => {
 		first.fake.events.emit(MODE_CHANNEL, { mode: "acceptEdits" });
 		const resumed = await start(first.fake.branch);
 		expect(resumed.mode()).toBe("acceptEdits");
+	});
+
+	it("keeps the mode across /clear, recorded on the new branch, but never a bypass", async () => {
+		const first = await start([]);
+		first.fake.events.emit(MODE_CHANNEL, { mode: "acceptEdits" });
+		const cleared = await start([], {}, "new");
+		expect(cleared.mode()).toBe("acceptEdits");
+		expect(cleared.fake.branch.at(-1)?.data).toMatchObject({ key: "permission-mode", value: "acceptEdits" });
+		// A fresh process does not inherit it: only /clear and /new in the same process carry it.
+		expect((await start([])).mode()).not.toBe("acceptEdits");
+		process.env[MODE_ENV] = "bypassPermissions";
+		expect((await start([], {}, "new")).mode()).not.toBe("bypassPermissions");
 	});
 
 	it("never restores a stored bypassPermissions: it needs its flag again", async () => {

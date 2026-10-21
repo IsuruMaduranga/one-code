@@ -94,6 +94,14 @@ describe("the recorded head", () => {
 		expect(merged).toEqual([tool("read", { cache_control: mark }), tool("probe", { defer_loading: true })]);
 	});
 
+	it("keeps the recorded prompt_cache_key, so a fork extending its parent's request routes to the parent's cache", () => {
+		const head = payloadHead({ instructions: "p", prompt_cache_key: "parent-session", input: [] }, "openai-responses");
+		expect(withRecordedHead({ instructions: "p", prompt_cache_key: "fork-session" }, head, "openai-responses").prompt_cache_key).toBe("parent-session");
+		// Codex sends the session's own id as a header too: the key must agree with it.
+		const codex = payloadHead({ instructions: "p", prompt_cache_key: "parent-session", input: [] }, "openai-codex-responses");
+		expect(withRecordedHead({ instructions: "p", prompt_cache_key: "fork-session" }, codex, "openai-codex-responses").prompt_cache_key).toBe("fork-session");
+	});
+
 	it("keeps every beta an earlier request needed", () => {
 		const head = payloadHead({ system: "s", betas: ["mid-conversation-system"] }, identity.api);
 		expect(withRecordedHead({ system: "s", betas: ["other"] }, head, identity.api).betas).toEqual(["mid-conversation-system", "other"]);

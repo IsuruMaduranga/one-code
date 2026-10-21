@@ -43,7 +43,7 @@ describe("modelDefaultExtension", () => {
 		const ctx = { hasUI: false };
 		const select = (provider: string, id: string, name?: string) => handlers.get("model_select")?.({ model: { provider, id, name } }, ctx);
 		const read = () => JSON.parse(readFileSync(join(dir, "settings.json"), "utf8")) as Record<string, unknown>;
-		return { select, read, shutdown: () => handlers.get("session_shutdown")?.({}, ctx), dir, emitted };
+		return { select, read, shutdown: () => handlers.get("session_shutdown")?.({}, ctx), startRun: () => handlers.get("before_agent_start")?.({}, ctx), dir, emitted };
 	}
 
 	it("announces the settled switch to the model as Claude Code's /model breadcrumb, once", () => {
@@ -69,6 +69,16 @@ describe("modelDefaultExtension", () => {
 		expect(() => readFileSync(join(dir, "settings.json"))).toThrow();
 		vi.advanceTimersByTime(1);
 		expect(read()).toMatchObject({ defaultProvider: "openai", defaultModel: "c" });
+	});
+
+	it("announces a switch on the prompt sent inside the quiet period, not the request after it", () => {
+		vi.useFakeTimers();
+		const { select, startRun, emitted } = mount();
+		select("anthropic", "claude-haiku-4-5", "Claude Haiku 4.5");
+		startRun();
+		expect(emitted.at(-1)?.text).toContain("Set model to `Claude Haiku 4.5`");
+		vi.advanceTimersByTime(PERSIST_DEBOUNCE_MS);
+		expect(emitted.filter((e) => e.text?.includes("Set model to"))).toHaveLength(1);
 	});
 
 	it("flushes a pending choice on shutdown", () => {
