@@ -55,6 +55,8 @@ import { looksLikeAnthropicRequest, MID_CONVERSATION_SYSTEM_BETA, withBetas } fr
 import { liftAddenda, supportsToolAdditions, TOOL_ADDITION_BETAS, withToolAdditions } from "../lib/tool-additions.ts";
 import { inContextEntries } from "../lib/compaction-boundary.ts";
 import { CALLABLE_TOOLS, foldBranch } from "../lib/ledger/fold.ts";
+import { eagerToolNames } from "../lib/ledger/wire.ts";
+import { requestIdentity } from "../lib/anthropic-auth.ts";
 import type { EntryLike } from "../lib/ledger/records.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../lib/reminders.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
@@ -80,12 +82,16 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	const alive = sessionAlive(pi);
 	/** The session's branch, for folding what the current epoch has told and loaded. */
 	let branchOf: (() => EntryLike[]) | undefined;
-	/** The last fold's answer, by the branch's leaf: a server's connect defers its tools in a burst with nothing appended between. */
-	let epochAt: { leaf: string | undefined; length: number; opens: boolean } | undefined;
-	const opensEpoch = (branch: EntryLike[]): boolean => {
-		const leaf = branch.at(-1)?.id;
-		if (epochAt !== undefined && epochAt.leaf === leaf && epochAt.length === branch.length) return epochAt.opens;
-		epochAt = { leaf, length: branch.length, opens: foldBranch(branch).opensEpoch };
+	/**
+	 * Whether the next request opens an epoch: a fold with the live identity, so
+	 * a model or auth switch counts. Kept by leaf and identity: a server's
+	 * connect defers its tools in a burst with nothing appended between.
+	 */
+	let epochAt: { at: string; opens: boolean } | undefined;
+	const opensEpoch = (branch: EntryLike[], model: { provider?: string; api?: string; id?: string } | undefined): boolean => {
+		const identity = model?.provider && model.api && model.id ? requestIdentity({ provider: model.provider, api: model.api, id: model.id }) : undefined;
+		const at = JSON.stringify([branch.length, branch.at(-1)?.id, identity]);
+		if (epochAt?.at !== at) epochAt = { at, opens: foldBranch(branch, identity).opensEpoch };
 		return epochAt.opens;
 	};
 	/** The session's model, for a decision made outside a hook that carries one. */
@@ -246,7 +252,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		// fixes that turn's tools.
 		if (sessionStarted && request?.name && deferring() && alive()) {
 			const active = pi.getActiveTools();
-			const announceCallable = supportsToolAdditions(currentModel) && branchOf !== undefined && !opensEpoch(branchOf());
+			const announceCallable = supportsToolAdditions(currentModel) && branchOf !== undefined && !opensEpoch(branchOf(), currentModel);
 			if (announceCallable) activate([request.name]);
 			else if (active.includes(request.name) && !loadedTools.has(request.name)) pi.setActiveTools(active.filter((name) => name !== request.name));
 			publishListing();
@@ -302,11 +308,15 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	// loads that named a loaded tool went with the summary: the tool goes back to
 	// deferred, so the new epoch declares it the way it declares the rest (Claude
 	// Code declares a deferred tool only while a reference to it is in the
-	// history). A tool the kept turns still call or load stays.
+	// history). A tool the kept turns still call or load stays, and so does one
+	// the last request declared eagerly (no native deferral, OAuth-renamed
+	// tools): it is in `tools` already, and removing it would be the miss.
 	pi.on("session_compact", (_event, ctx) => {
 		const branch = (ctx?.sessionManager?.getBranch?.() ?? []) as EntryLike[];
 		const kept = inContextEntries(branch) as SessionEntry[];
-		const redefer = new Set(toolsToRedefer([...loadedTools].filter((name) => deferredRegistry.has(name)), kept));
+		const head = foldBranch(branch).lastRequest?.head;
+		const eager = head ? eagerToolNames(head) : new Set<string>();
+		const redefer = new Set(toolsToRedefer([...loadedTools].filter((name) => deferredRegistry.has(name) && !eager.has(name)), kept));
 		loads = toolSearchLoads(kept);
 		for (const name of redefer) loadedTools.delete(name);
 		const active = pi.getActiveTools();

@@ -45,4 +45,24 @@ describe("CronStore.restore", () => {
 		expect(store.restore({ id: "w", cron: "3 10 * * *", prompt: "wake", recurring: false, source: "wakeup", createdAt: now, fireAt: now + 60_000 }, now)).toBe(true);
 		expect(store.get("w")?.nextFireAt).toBe(now + 60_000);
 	});
+
+	it("makes a fire missed during the reload due at once, counting from the job's last fire on the branch", () => {
+		const store = new CronStore({ jitter: false, maxAgeMs: 3_600_000 });
+		const now = Date.parse("2026-10-21T10:07:00");
+		// Created at 9:58, last fired at 10:00; the 10:05 fire fell during the reload.
+		store.restore({ id: "j1", cron: "*/5 * * * *", prompt: "p", recurring: true, source: "model", createdAt: Date.parse("2026-10-21T09:58:00"), lastFiredAt: Date.parse("2026-10-21T10:00:00") }, now);
+		expect(store.get("j1")?.nextFireAt).toBe(Date.parse("2026-10-21T10:05:00"));
+		// A one-shot due during the reload.
+		store.restore({ id: "j2", cron: "6 10 21 10 *", prompt: "once", recurring: false, source: "model", createdAt: Date.parse("2026-10-21T10:01:00") }, now);
+		expect(store.get("j2")?.nextFireAt).toBe(Date.parse("2026-10-21T10:06:00"));
+	});
+
+	it("reads a recurring job's last fire from the branch", () => {
+		const branch = [
+			call("c1", "cron_create", { cron: "*/5 * * * *", prompt: "check the build" }),
+			result("c1", "cron_create", { jobId: "j1", cron: "*/5 * * * *", recurring: true }),
+			{ ...fire("cron", "j1", false), timestamp: "2026-10-21T10:00:00.000Z" },
+		];
+		expect(scheduledJobsOnBranch(branch)[0]?.lastFiredAt).toBe(Date.parse("2026-10-21T10:00:00.000Z"));
+	});
 });

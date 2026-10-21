@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { foldBranch } from "../../extensions/lib/ledger/fold.ts";
 import { planRequest } from "../../extensions/lib/ledger/plan.ts";
 import { makeRecord, RECORD } from "../../extensions/lib/ledger/records.ts";
-import { repairRequest, validateRequest } from "../../extensions/lib/ledger/validate.ts";
-import { contentHash, isTrailer, mergeDeclarations, payloadHead, preludeLength, recordedRequest, spliceRequest, withRecordedHead } from "../../extensions/lib/ledger/wire.ts";
+import { deliveredAfterRepair, repairRequest, validateRequest } from "../../extensions/lib/ledger/validate.ts";
+import { contentHash, eagerToolNames, isTrailer, mergeDeclarations, payloadHead, preludeLength, recordedRequest, spliceRequest, withRecordedHead } from "../../extensions/lib/ledger/wire.ts";
 
 const identity = { api: "anthropic-messages", provider: "anthropic", model: "claude-sonnet-5-5", auth: "key" };
 const mark = { type: "ephemeral" };
@@ -99,6 +99,12 @@ describe("the recorded head", () => {
 		expect(withRecordedHead({ system: "s", betas: ["other"] }, head, identity.api).betas).toEqual(["mid-conversation-system", "other"]);
 	});
 
+	it("keeps pi's Bedrock cache point after a recorded system prompt that differs from the live one", () => {
+		const head = payloadHead({ messages: [], system: [{ text: "old prompt" }, { cachePoint: { type: "default" } }] }, "bedrock-converse-stream");
+		const out = withRecordedHead({ system: [{ text: "new prompt" }, { cachePoint: { type: "default" } }] }, head, "bedrock-converse-stream");
+		expect(out.system).toEqual([{ text: "old prompt" }, { cachePoint: { type: "default" } }]);
+	});
+
 	it("merges Google's function declarations and Bedrock's tool specs by name", () => {
 		const googleHead = payloadHead({ contents: [], config: { systemInstruction: "s", tools: [{ functionDeclarations: [{ name: "a" }] }] } }, "google-generative-ai");
 		const google = withRecordedHead({ config: { systemInstruction: "changed", tools: [{ functionDeclarations: [{ name: "b" }] }], abortSignal: "live" } }, googleHead, "google-generative-ai");
@@ -106,6 +112,15 @@ describe("the recorded head", () => {
 		const bedrockHead = payloadHead({ messages: [], toolConfig: { tools: [{ toolSpec: { name: "a" } }] } }, "bedrock-converse-stream");
 		const bedrock = withRecordedHead({ toolConfig: { tools: [{ toolSpec: { name: "b" } }, { cachePoint: { type: "default" } }] } }, bedrockHead, "bedrock-converse-stream");
 		expect((bedrock.toolConfig as { tools: unknown[] }).tools).toEqual([{ toolSpec: { name: "a" } }, { toolSpec: { name: "b" } }, { cachePoint: { type: "default" } }]);
+	});
+});
+
+describe("eagerToolNames", () => {
+	it("names the tools a recorded head declares eagerly, in any API's shape, never a deferred one", () => {
+		expect(eagerToolNames({ tools: [tool("read"), tool("cron_list", { defer_loading: true })] })).toEqual(new Set(["read"]));
+		expect(eagerToolNames({ tools: [{ type: "function", function: { name: "cron_list" } }] })).toEqual(new Set(["cron_list"]));
+		expect(eagerToolNames({ toolConfig: { tools: [{ toolSpec: { name: "a" } }, { cachePoint: { type: "default" } }] } })).toEqual(new Set(["a"]));
+		expect(eagerToolNames({ config: { tools: [{ functionDeclarations: [{ name: "g" }] }] } })).toEqual(new Set(["g"]));
 	});
 });
 
@@ -118,5 +133,18 @@ describe("repairRequest", () => {
 		const repaired = repairRequest(payload, identity.api, problems);
 		expect(validateRequest(repaired, identity.api)).toEqual([]);
 		expect(repaired.messages).toEqual([user("one"), user("two")]);
+	});
+
+	it("records as delivered only what the repaired request still carries", () => {
+		const addition = (name: string) => ({ role: "system", content: [{ type: "tool_addition", tool: { type: "tool_reference", name } }] });
+		const payload = { tools: [tool("read"), tool("probe")], messages: [user("one"), addition("probe"), user("note: <system-reminder>a file changed</system-reminder>")] };
+		const repaired = repairRequest(payload, identity.api, validateRequest(payload, identity.api));
+		const delivered = deliveredAfterRepair(
+			repaired,
+			identity.api,
+			{ consumed: ["kept", "dropped"], facts: [{ kind: "tools", names: ["probe"], callable: true }, { kind: "tools", names: ["listed"] }] },
+			[{ id: "kept", text: "a file changed" }, { id: "dropped", text: "only on the stranded message" }],
+		);
+		expect(delivered).toEqual({ consumed: ["kept"], facts: [{ kind: "tools", names: ["listed"] }] });
 	});
 });

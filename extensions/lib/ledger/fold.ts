@@ -5,8 +5,8 @@
  *
  * Rules: told facts are a union within the
  * epoch and start empty at its start; pending items are those no request
- * consumed; the last request is the last one whose reply did not fail (pi
- * omits a failed reply before the next request); pi's `usage` entries (a
+ * consumed; the last request is the last one whose reply did not fail or
+ * abort (pi omits such a reply before the next request); pi's `usage` entries (a
  * cache warm) are skipped. An epoch starts at the first request, after a
  * compaction entry or an `epoch` record, and at a request whose identity (api,
  * provider, model, auth) differs.
@@ -135,7 +135,8 @@ export function foldBranch(branch: readonly EntryLike[], identity?: RequestIdent
 
 	branch.forEach((entry, index) => {
 		if (entry.type === "message") {
-			if (entry.message?.role === "assistant") settle(entry.message.stopReason === "error");
+			// pi drops an errored or aborted reply from the next request (transform-messages.js).
+			if (entry.message?.role === "assistant") settle(entry.message.stopReason === "error" || entry.message.stopReason === "aborted");
 			return;
 		}
 		if (entry.type === "compaction") {

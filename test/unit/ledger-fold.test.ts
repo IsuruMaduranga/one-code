@@ -60,12 +60,12 @@ describe("ledger fold", () => {
 		expect(fold.knownHashes.size).toBeGreaterThanOrEqual(4);
 	});
 
-	it("skips a request whose reply failed: the next request extends the last answered one", () => {
+	it.each(["error", "aborted"])("skips a request whose reply ended %s: the next request extends the last answered one", (stopReason) => {
 		const b = new Branch();
 		b.request(body([user("one")]));
 		b.message("assistant");
 		b.request(body([user("one"), assistant("1"), user("two")]));
-		b.message("assistant", "error");
+		b.message("assistant", stopReason);
 		expect(foldBranch(b.entries, live).lastRequest?.list).toEqual([user("one")]);
 	});
 

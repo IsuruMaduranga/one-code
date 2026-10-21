@@ -166,8 +166,13 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		});
 	};
 
-	/** The live workspace's fingerprints, taken at this process's first turn, for the resumed-session check. */
-	let livePrints: (ContextFingerprints & { git?: string }) | undefined;
+	/**
+	 * The live workspace's fingerprints, taken at this process's first turn, for
+	 * the resumed-session check, in each directory the epoch's facts may have
+	 * been read in: the session's own at its start, the entered worktree at a
+	 * compaction (session_compact reads there).
+	 */
+	let livePrints: { atStart: ContextFingerprints & { git?: string }; atCompaction: ContextFingerprints & { git?: string } } | undefined;
 	/** True until this process's first request inside an epoch has compared the epoch's facts with the live workspace. */
 	let resumeCheck = true;
 	const readFiles = (cwd: string) => {
@@ -350,7 +355,12 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		if (gen !== sessionGeneration || approvalAbort.signal.aborted) return;
 		if (gitStatus !== undefined) return;
 		gitStatus = snapshotGit(ctx.cwd);
-		if (files) livePrints = { ...contextFingerprints(files), ...(takesGitSnapshot ? { git: gitFingerprint(gitStatus) } : {}) };
+		if (files) {
+			const prints = (current: ReturnType<typeof readFiles>, git: string | null) => ({ ...contextFingerprints(current), ...(takesGitSnapshot ? { git: gitFingerprint(git) } : {}) });
+			const atStart = prints(files, gitStatus);
+			const workCwd = sessionWorkCwd(entered, ctx.cwd);
+			livePrints = { atStart, atCompaction: workCwd === ctx.cwd ? atStart : prints(readFiles(workCwd), snapshotGit(workCwd)) };
+		}
 		emitContextBlock(gitStatus, false);
 	});
 
@@ -373,7 +383,8 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		}
 		if (!resumeCheck || !livePrints) return;
 		resumeCheck = false;
-		const notice = resumeFactsNotice(request.toldBlocks, request.modes.get(FACT_KEYS.compaction) ?? false, livePrints);
+		const atCompaction = request.modes.get(FACT_KEYS.compaction) ?? false;
+		const notice = resumeFactsNotice(request.toldBlocks, atCompaction, atCompaction ? livePrints.atCompaction : livePrints.atStart);
 		if (notice) request.blocks.push(notice);
 	});
 

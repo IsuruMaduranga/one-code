@@ -88,14 +88,13 @@ function payloadList(payload: WirePayload, api: string): unknown[] {
 
 /**
  * `payload` as the ledger records it: its list and head, markers stripped,
- * and their hashes. `prefixHashes` are the known hashes of the list's first
- * elements (a splice's recorded prefix), so only the rest is hashed.
+ * and their hashes. `prefix` is the recorded list and hashes the payload's
+ * list starts with (a splice's), so only the rest is stripped and hashed.
  */
-export function recordedRequest(payload: WirePayload, identity: RequestIdentity, prefixHashes: readonly string[] = []): RecordedRequest {
-	const list = stripMarkers(payloadList(payload, identity.api));
+export function recordedRequest(payload: WirePayload, identity: RequestIdentity, prefix: { list: readonly unknown[]; hashes: readonly string[] } = { list: [], hashes: [] }): RecordedRequest {
+	const tail = stripMarkers(payloadList(payload, identity.api).slice(prefix.list.length));
 	const head = payloadHead(payload, identity.api);
-	const hashes = [...prefixHashes, ...list.slice(prefixHashes.length).map(contentHash)];
-	return { identity, list, head, hashes, headHash: contentHash(head) };
+	return { identity, list: [...prefix.list, ...tail], head, hashes: [...prefix.hashes, ...tail.map(contentHash)], headHash: contentHash(head) };
 }
 
 /**
@@ -163,6 +162,24 @@ export function functionDeclarations(groups: readonly unknown[]): unknown[] {
 	return groups.flatMap((group) => (isObject(group) && Array.isArray(group.functionDeclarations) ? group.functionDeclarations : []));
 }
 
+/** Every declaration in a payload or head: `tools`, Bedrock `toolConfig.tools`, Google's function declarations. */
+export function declarationsOf(payload: WirePayload): unknown[] {
+	const config = isObject(payload.config) ? payload.config : undefined;
+	const toolConfig = isObject(payload.toolConfig) ? payload.toolConfig : undefined;
+	const google = Array.isArray(config?.tools) ? functionDeclarations(config.tools) : [];
+	return [...(Array.isArray(payload.tools) ? payload.tools : []), ...(Array.isArray(toolConfig?.tools) ? toolConfig.tools : []), ...google];
+}
+
+/** The tools a payload or head declares eagerly: by name, every declaration not marked `defer_loading`. */
+export function eagerToolNames(payload: WirePayload): Set<string> {
+	const names = new Set<string>();
+	for (const tool of declarationsOf(payload)) {
+		const name = isObject(tool) && tool.defer_loading !== true ? toolName(tool) : undefined;
+		if (name !== undefined) names.add(name);
+	}
+	return names;
+}
+
 /**
  * The recorded declarations in their recorded order and bytes, then the live
  * ones the record lacks. A live declaration equal to its recorded one is kept
@@ -214,17 +231,24 @@ function withToolsMarker(tools: unknown[], live: readonly unknown[]): unknown[] 
 	return out;
 }
 
-/** `recorded` in place of `live` unless they match, then `live` (with pi's cache markers); the live last block's marker carries over. */
+/**
+ * `recorded` in place of `live` unless they match, then `live` (with pi's
+ * cache markers). pi's breakpoint carries over: the live last block's
+ * `cache_control`, or Bedrock's trailing `{ cachePoint }` blocks.
+ */
 function recordedValue(recorded: unknown, live: unknown): unknown {
 	if (recorded === undefined) return live;
 	if (live !== undefined && contentHash(recorded) === contentHash(live)) return live;
 	const copy = structuredClone(recorded);
-	if (Array.isArray(copy) && Array.isArray(live)) {
-		const mark = isObject(live.at(-1)) ? (live.at(-1) as Record<string, unknown>).cache_control : undefined;
-		const last = copy.at(-1);
-		if (mark !== undefined && isObject(last)) last.cache_control = mark;
-	}
-	return copy;
+	if (!Array.isArray(copy) || !Array.isArray(live)) return copy;
+	let content = live.length;
+	while (content > 0 && isCachePoint(live[content - 1])) content--;
+	const points = live.slice(content);
+	const lastLive = live[content - 1];
+	const mark = isObject(lastLive) ? lastLive.cache_control : undefined;
+	const last = copy.at(-1);
+	if (mark !== undefined && isObject(last)) last.cache_control = mark;
+	return [...copy, ...points];
 }
 
 /**

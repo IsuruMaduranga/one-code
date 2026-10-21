@@ -6,8 +6,8 @@
  *
  * Pure: no pi imports.
  */
-import { isObject } from "./records.ts";
-import { functionDeclarations, listKey, toolName, type WirePayload } from "./wire.ts";
+import { isObject, type ToldFact } from "./records.ts";
+import { declarationsOf, listKey, toolName, type WirePayload } from "./wire.ts";
 
 export type Problem =
 	/** A tool_reference, tool_addition or tool_removal names a tool `tools` does not declare. */
@@ -15,18 +15,10 @@ export type Problem =
 	/** Anthropic: a system message with content followed by something other than an assistant message (findings §52). */
 	| { kind: "stranded-system"; index: number };
 
-/** Every declaration list in the payload: `tools`, Bedrock `toolConfig.tools`, Google's function declarations. */
-function declarations(payload: WirePayload): unknown[] {
-	const config = isObject(payload.config) ? payload.config : undefined;
-	const toolConfig = isObject(payload.toolConfig) ? payload.toolConfig : undefined;
-	const google = Array.isArray(config?.tools) ? functionDeclarations(config.tools) : [];
-	return [...(Array.isArray(payload.tools) ? payload.tools : []), ...(Array.isArray(toolConfig?.tools) ? toolConfig.tools : []), ...google];
-}
-
 /** The names the payload declares, in any API's shape. */
 function declaredNames(payload: WirePayload): Set<string> {
 	const names = new Set<string>();
-	for (const tool of declarations(payload)) {
+	for (const tool of declarationsOf(payload)) {
 		const name = toolName(tool);
 		if (name !== undefined) names.add(name);
 	}
@@ -117,4 +109,35 @@ export function repairRequest(payload: WirePayload, api: string, problems: reado
 		);
 	}
 	return { ...payload, [key]: list };
+}
+
+/**
+ * What a repaired request still delivers, so its record does not count a
+ * dropped block as sent: the consumed pending items whose text is still in
+ * the payload, and the callable-tool facts without a tool whose
+ * `tool_addition` was dropped (a listing for tool_search names tools the
+ * request need not declare).
+ */
+export function deliveredAfterRepair(
+	payload: WirePayload,
+	api: string,
+	delivered: { consumed: readonly string[]; facts: readonly ToldFact[] },
+	pending: readonly { id: string; text: string }[],
+): { consumed: string[]; facts: ToldFact[] } {
+	const sent = JSON.stringify(payload);
+	const texts = new Map(pending.map((item) => [item.id, item.text]));
+	const referenced = referencedNames(payload[listKey(api)], new Set());
+	const declared = declaredNames(payload);
+	const facts = delivered.facts.flatMap((fact): ToldFact[] => {
+		if (fact.kind !== "tools" || !fact.callable) return [fact];
+		const names = fact.names.filter((name) => declared.has(name) && referenced.has(name));
+		return names.length > 0 ? [{ ...fact, names }] : [];
+	});
+	return {
+		consumed: delivered.consumed.filter((id) => {
+			const text = texts.get(id);
+			return text === undefined || sent.includes(JSON.stringify(text).slice(1, -1));
+		}),
+		facts,
+	};
 }

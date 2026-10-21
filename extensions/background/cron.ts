@@ -388,7 +388,8 @@ export class CronStore {
 		if (!fields || this.jobs.has(job.id)) return false;
 		if (job.recurring && now - job.createdAt >= this.maxAgeMs) return false;
 		const base = { id: job.id, cron: job.cron, recurring: job.recurring, fields };
-		const nextFireAt = job.fireAt ?? this.fireAfter(base, Math.max(now, job.createdAt));
+		// Due after the job's last fire on the branch (or its creation), so one missed during the reload is due now.
+		const nextFireAt = job.fireAt ?? this.fireAfter(base, Math.max(job.lastFiredAt ?? 0, job.createdAt));
 		if (nextFireAt === null) return false;
 		this.jobs.set(job.id, { ...base, prompt: job.prompt, source: job.source, createdAt: job.createdAt, nextFireAt });
 		return true;
@@ -405,6 +406,8 @@ export interface RecordedJob {
 	createdAt: number;
 	/** A wakeup's exact fire time. */
 	fireAt?: number;
+	/** A recurring job's last fire on the branch: the next one is due after it. */
+	lastFiredAt?: number;
 }
 
 type BranchEntry = { type?: string; timestamp?: string; customType?: string; details?: unknown; message?: unknown };
@@ -425,7 +428,12 @@ export function scheduledJobsOnBranch(branch: readonly BranchEntry[]): RecordedJ
 	for (const entry of branch) {
 		if (entry.type === "custom_message" && (entry.customType === "wakeup" || entry.customType === "cron")) {
 			const details = entry.details as { jobId?: unknown; final?: unknown } | undefined;
-			if (details?.final !== true) continue;
+			if (details?.final !== true) {
+				const job = typeof details?.jobId === "string" ? jobs.get(details.jobId) : undefined;
+				const at = Date.parse(entry.timestamp ?? "");
+				if (job && !Number.isNaN(at)) job.lastFiredAt = at;
+				continue;
+			}
 			if (entry.customType === "wakeup") dropWakeups();
 			else if (typeof details.jobId === "string") jobs.delete(details.jobId);
 			continue;

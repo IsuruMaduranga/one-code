@@ -10,6 +10,7 @@ import {
 	renderReminders,
 	type StackEntry,
 	type StickyEntry,
+	stickyFact,
 	toldBlockFact,
 	wrapReminder,
 } from "../../extensions/lib/reminders.ts";
@@ -49,16 +50,18 @@ describe("LiveReminders", () => {
 		expect(live.stickyEntries()).toEqual([]);
 	});
 
-	it("keeps a sticky state's start and delivery while its text is unchanged, and starts a new one when it changes", () => {
+	it("keeps a sticky state's start, and so its told delivery, while its text is unchanged, and starts a new one when it changes", () => {
 		let now = 10;
 		const live = new LiveReminders(() => now);
 		live.apply({ text: "plan", key: "mode", placement: "sticky-append" });
-		live.markDelivered(["mode"]);
+		const delivered = stickyFact(live.stickyEntries()[0]);
 		now = 20;
 		live.apply({ text: "plan", key: "mode", placement: "sticky-append" });
-		expect(live.stickyEntries()).toEqual([{ key: "mode", text: "plan", since: 10, delivered: true }]);
+		expect(live.stickyEntries()).toEqual([{ key: "mode", text: "plan", since: 10, delivered: false }]);
+		expect(stickyFact(live.stickyEntries()[0])).toEqual(delivered);
 		live.apply({ text: "auto", key: "mode", placement: "sticky-append" });
 		expect(live.stickyEntries()).toEqual([{ key: "mode", text: "auto", since: 20, delivered: false }]);
+		expect(stickyFact(live.stickyEntries()[0]).hash).not.toBe(delivered.hash);
 		live.apply({ key: "mode", remove: true });
 		expect(live.stickyEntries()).toEqual([]);
 	});

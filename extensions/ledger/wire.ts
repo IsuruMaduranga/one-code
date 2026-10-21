@@ -25,8 +25,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { requestIdentity } from "../lib/anthropic-auth.ts";
 import { notifyOrPrint } from "../lib/headless-output.ts";
 import { LEDGER_PLAN_CHANNEL, LEDGER_SENT_CHANNEL, type LedgerSent, type RequestPlan } from "../lib/ledger/plan.ts";
-import { makeRecord, RECORD } from "../lib/ledger/records.ts";
-import { repairRequest, validateRequest } from "../lib/ledger/validate.ts";
+import { makeRecord, RECORD, type ToldFact } from "../lib/ledger/records.ts";
+import { deliveredAfterRepair, repairRequest, validateRequest } from "../lib/ledger/validate.ts";
 import { appendPoint, encodeRequest, type RecordedRequest, recordedRequest, spliceRequest, type WirePayload } from "../lib/ledger/wire.ts";
 import { extensionVersion } from "../lib/package-version.ts";
 
@@ -58,25 +58,30 @@ export default function ledgerWireExtension(pi: ExtensionAPI) {
 		let payload = event.payload as WirePayload;
 		if (!current.epoch && current.base) payload = spliceRequest(current.base, payload, api);
 		const spliced = payload;
+		let delivered: { consumed: string[]; facts: ToldFact[] } = { consumed: current.consumed, facts: current.facts };
 
 		const problems = validateRequest(payload, api);
 		if (problems.length > 0) {
 			const fresh = problems.map((problem) => JSON.stringify(problem)).filter((key) => !reported.has(key));
 			for (const key of fresh) reported.add(key);
 			if (fresh.length > 0) notifyOrPrint(ctx, `One Code: the request had ${problems.length} problem(s) the ledger ${process.env.ONE_CODE_LEDGER_STRICT === "1" ? "left in place" : "removed"}: ${fresh.join(", ")}`, "warning");
-			if (process.env.ONE_CODE_LEDGER_STRICT !== "1") payload = repairRequest(payload, api, problems);
+			if (process.env.ONE_CODE_LEDGER_STRICT !== "1") {
+				payload = repairRequest(payload, api, problems);
+				delivered = deliveredAfterRepair(payload, api, delivered, current.fold.pending);
+			}
 		}
 
-		// The recorded prefix's hashes are known, unless a repair moved its elements.
+		// The recorded prefix is known, unless a repair moved its elements.
 		const base = current.base;
-		const prefixHashes = base && payload === spliced ? base.hashes.slice(0, appendPoint(base.list, api)) : [];
-		const request = recordedRequest(payload, requestIdentity(model), prefixHashes);
+		const end = base && payload === spliced ? appendPoint(base.list, api) : 0;
+		const prefix = { list: base?.list.slice(0, end) ?? [], hashes: base?.hashes.slice(0, end) ?? [] };
+		const request = recordedRequest(payload, requestIdentity(model), prefix);
 		const known = { has: (hash: string) => current.fold.knownHashes.has(hash) || recorded?.hashes.has(hash) === true };
 		const delta = encodeRequest(recorded?.request ?? current.fold.lastRequest, request, known);
 		if (delta) {
 			if (current.epoch) pi.appendEntry(RECORD.epoch, makeRecord("epoch", by, { cause: current.cause ?? "first" }));
-			pi.appendEntry(RECORD.request, makeRecord("request", by, { ...delta, covers: current.covers, consumed: current.consumed }));
-			if (current.facts.length > 0) pi.appendEntry(RECORD.told, makeRecord("told", by, { facts: current.facts }));
+			pi.appendEntry(RECORD.request, makeRecord("request", by, { ...delta, covers: current.covers, consumed: delivered.consumed }));
+			if (delivered.facts.length > 0) pi.appendEntry(RECORD.told, makeRecord("told", by, { facts: delivered.facts }));
 			recorded = { request, hashes: new Set([...(recorded?.hashes ?? []), ...Object.keys(delta.blobs)]) };
 			// A warm or a retry is the same request again: the side calls keep the one they have.
 			pi.events.emit(LEDGER_SENT_CHANNEL, { payload, model, sessionId: ctx.sessionManager.getSessionId(), plan: current } satisfies LedgerSent);

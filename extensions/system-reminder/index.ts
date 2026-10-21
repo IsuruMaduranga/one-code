@@ -30,7 +30,7 @@ import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../lib/ledger/plan.ts";
 import { type EntryLike, makeRecord, type PendingRecordData, RECORD } from "../lib/ledger/records.ts";
 import { claudeFamily } from "../lib/model-tier.ts";
 import { extensionVersion } from "../lib/package-version.ts";
-import { LiveReminders, type OneShot, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, renderReminders, type ReminderPayload } from "../lib/reminders.ts";
+import { LiveReminders, type OneShot, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, renderReminders, type ReminderPayload, stickyFact } from "../lib/reminders.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { instructionRole, messagesKey, type MovedBlock, systemRoleLayout, wireShape, withSystemRoleContext } from "../lib/system-role.ts";
 import { resolveCountdowns, withTurnBudgetMessages } from "../lib/turn-budget-layout.ts";
@@ -58,8 +58,9 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 	let plan: RequestPlan | undefined;
 	/** One-shots emitted before the session started (an extension's load): persisted at session_start. */
 	let early: ReminderPayload[] | undefined = [];
-	/** Without the ledger (a test harness, a session that does not load it): the pending ids this instance delivered. */
+	/** Without the ledger (a test harness, a session that does not load it): the pending ids and sticky facts this instance delivered. */
 	const deliveredHere = new Set<string>();
+	const toldHere = new Map<string, string>();
 
 	const persist = (payload: ReminderPayload) => {
 		const data = makeRecord("pending", by, {
@@ -119,19 +120,27 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 			...request.blocks.map((block) => ({ text: block.text, placement: "last-append" as const, ...(block.facts ? { facts: block.facts } : {}) })),
 		];
 		const stack = live.stackEntries();
-		const rendered = renderReminders(event.messages, { epoch, layout: layout !== undefined, stack, sticky: live.stickyEntries(), oneShots });
-		live.markDelivered(rendered.stickyPlaced);
+		// A sticky state's first delivery is told, so a failed request's revokes and an epoch renders it again.
+		const toldBlocks = epoch ? new Map<string, string>() : current ? fold.blocks : toldHere;
+		const sticky = live.stickyEntries().map((entry) => {
+			const fact = stickyFact(entry);
+			return { ...entry, delivered: toldBlocks.get(fact.key) === fact.hash };
+		});
+		const rendered = renderReminders(event.messages, { epoch, layout: layout !== undefined, stack, sticky, oneShots });
+		const stickyFacts = sticky.filter((entry) => !entry.delivered && rendered.stickyPlaced.includes(entry.key)).map(stickyFact);
 
 		const consumed = rendered.placed.flatMap((shot) => (shot.id ? [shot.id] : []));
 		const facts = [
 			...(epoch && rendered.stackPlaced ? stack.filter((entry) => layout !== undefined || !entry.systemRoleOnly).flatMap((entry) => entry.facts ?? []) : []),
 			...rendered.placed.flatMap((shot) => shot.facts ?? []),
+			...stickyFacts,
 		];
 		if (current) {
 			current.consumed.push(...consumed);
 			current.facts.push(...facts);
 		} else {
 			for (const id of consumed) deliveredHere.add(id);
+			for (const fact of stickyFacts) toldHere.set(fact.key, fact.hash);
 		}
 
 		moved = rendered.moved;

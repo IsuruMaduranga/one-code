@@ -177,7 +177,10 @@ export interface StickyEntry {
 	since: number;
 	toolCallId?: string;
 	skipStackCarrier?: boolean;
-	/** True once a request carried it: a tool-result pin is only for its first delivery. */
+	/**
+	 * True once an answered request in the epoch carried it (a told fact,
+	 * `stickyFact`): a tool-result pin is only for its first delivery.
+	 */
 	delivered: boolean;
 }
 
@@ -278,13 +281,11 @@ export class LiveReminders {
 		return [...this.sticky.values()];
 	}
 
-	/** Record that a request carried these sticky states. */
-	markDelivered(keys: readonly string[]): void {
-		for (const key of keys) {
-			const entry = this.sticky.get(key);
-			if (entry) entry.delivered = true;
-		}
-	}
+}
+
+/** The told fact of a sticky state's first delivery: it follows the branch, and a failed request's is revoked. */
+export function stickyFact(entry: Pick<StickyEntry, "key" | "text" | "since">): BlockFact {
+	return toldBlockFact(`sticky:${entry.key}`, { since: entry.since, text: entry.text });
 }
 
 export interface RenderInput {
