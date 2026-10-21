@@ -255,6 +255,20 @@ describe("hooks wiring", () => {
 		expect(reminders).toEqual([hookContextText("UserPromptSubmit", "for first"), hookContextText("UserPromptSubmit", "for /tpl")]);
 	});
 
+	it("an idle prompt a later handler takes keeps no context for the next prompt an extension sends", async () => {
+		const hookPrompt = script("hook-taken.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"additionalContext":"for the agent message"}}'\n`);
+		writeUserHooks({ UserPromptSubmit: [{ hooks: [{ type: "command", command: hookPrompt }] }] });
+		const reminders: unknown[] = [];
+		fake.events.on(REMINDER_CHANNEL, (payload) => reminders.push(payload));
+		mount();
+		// Typed while an agent's view is open: an extension after this one takes it, so pi delivers nothing and no run opens.
+		await fake.fireOne("input", { source: "interactive", text: "look at the failing test" }, ctx());
+		// A command then starts a prompt of its own (pi runs the input handlers for it too, idle and from an extension).
+		await fake.fireOne("input", { source: "extension", text: "Analyze this codebase" }, ctx());
+		await fake.fireOne("message_start", { message: { role: "user", content: [{ type: "text", text: "Analyze this codebase" }] } }, ctx());
+		expect(reminders).toHaveLength(0);
+	});
+
 	it("drops a queued message's context when the turn settles without delivering it", async () => {
 		const hookPrompt = script("hook-undelivered.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"additionalContext":"orphan"}}'\n`);
 		writeUserHooks({ UserPromptSubmit: [{ hooks: [{ type: "command", command: hookPrompt }] }] });

@@ -395,15 +395,17 @@ export default function hooksExtension(pi: ExtensionAPI) {
 
 	// ---- UserPromptSubmit ---------------------------------------------------
 	pi.on("input", async (event, ctx) => {
+		// A new idle prompt means an earlier idle one was delivered or never will
+		// be (an extension after this one handled it): its context is stale. An
+		// extension's prompt (a command's sendUserMessage) counts too, or its
+		// message would take that context as its own.
+		if (!event.streamingBehavior) idlePromptContext = [];
 		if (event.source === "extension") return undefined;
 		// Set for a message queued mid-turn (pi 0.86+ fires `input` for
 		// steer/followUp). The Stop latch is reset in before_agent_start, where a
 		// turn really starts: pi re-checks streaming after these handlers, so a
 		// queued message whose turn ended during the hook opens a new turn.
 		const gen = sessionGen;
-		// A new idle prompt means an earlier idle one was delivered or never will
-		// be (an extension after this one handled it): its context is stale.
-		if (!event.streamingBehavior) idlePromptContext = [];
 		// Drain the backgrounded SessionStart dispatch before this prompt's own
 		// UserPromptSubmit context, so their order in the first turn is unchanged
 		// (SessionStart context precedes UserPromptSubmit). before_agent_start is
