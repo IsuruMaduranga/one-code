@@ -62,7 +62,11 @@ export const PERSIST_DEBOUNCE_MS = 400;
 /** The `/model` breadcrumb's pending-entry key: a later switch's breadcrumb replaces an undelivered one. */
 const BREADCRUMB_KEY = "local-command:model";
 
-/** The `one-code:state` key of a switch settled at a shutdown, not yet announced; null once announced or dropped. */
+/**
+ * The `one-code:state` key of a switch not yet announced: recorded at every
+ * switch (`saved` unset until the settings write), so the branch, not this
+ * process's timer, says a breadcrumb is owed; null once announced or dropped.
+ */
 const UNANNOUNCED_STATE = "model-breadcrumb";
 
 /** A settled switch, as announced. */
@@ -73,10 +77,27 @@ interface Settled {
 	saved: boolean;
 }
 
+/** A switch the branch records, as `model_select` or a shutdown left it. */
+type Unannounced = Omit<Settled, "saved"> & { saved?: boolean };
+
 export default function modelDefaultExtension(pi: ExtensionAPI) {
 	let pending: { provider: string; id: string; name: string; notify: (message: string) => void } | undefined;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	const announce = (name: string, saved: boolean) => announceLocalCommand(pi, { name: "model", stdout: modelSwitchStdout(name, saved), key: BREADCRUMB_KEY });
+
+	/** Save `provider/id` as the default model, and say whether it was saved. */
+	const save = (provider: string, id: string, notify: (message: string) => void): boolean => {
+		const path = join(getAgentDir(), "settings.json");
+		try {
+			writeSettings(path, applyDefaultModel(readSettingsForWrite(path), provider, id));
+			return true;
+		} catch (error) {
+			// Persisting a preference must not break the model switch itself, but
+			// say why it will be forgotten.
+			notify(`Could not save ${provider}/${id} as the default model: ${(error as Error).message}`);
+			return false;
+		}
+	};
 
 	/** Write the switch the user settled on, if any, and say whether it was saved. */
 	const settle = (): Settled | undefined => {
@@ -85,21 +106,13 @@ export default function modelDefaultExtension(pi: ExtensionAPI) {
 		const choice = pending;
 		pending = undefined;
 		if (!choice) return undefined;
-		const path = join(getAgentDir(), "settings.json");
-		let saved = true;
-		try {
-			writeSettings(path, applyDefaultModel(readSettingsForWrite(path), choice.provider, choice.id));
-		} catch (error) {
-			// Persisting a preference must not break the model switch itself, but
-			// say why it will be forgotten.
-			saved = false;
-			choice.notify(`Could not save ${choice.provider}/${choice.id} as the default model: ${(error as Error).message}`);
-		}
-		return { provider: choice.provider, id: choice.id, name: choice.name, saved };
+		return { provider: choice.provider, id: choice.id, name: choice.name, saved: save(choice.provider, choice.id, choice.notify) };
 	};
 	const flush = () => {
 		const settled = settle();
-		if (settled) announce(settled.name, settled.saved);
+		if (!settled) return;
+		announce(settled.name, settled.saved);
+		recordState(pi, UNANNOUNCED_STATE, null);
 	};
 
 	pi.on("model_select", (event, ctx) => {
@@ -113,6 +126,9 @@ export default function modelDefaultExtension(pi: ExtensionAPI) {
 				if (ctx.hasUI) ctx.ui.notify(message, "warning");
 			},
 		};
+		// Owed from now on, whatever happens to this process: a fresh one on a
+		// copy of the branch owes the same breadcrumb (lifecycle-grid-hunt oracle).
+		recordState(pi, UNANNOUNCED_STATE, { provider: model.provider, id: model.id, name: pending.name } satisfies Unannounced);
 		if (timer !== undefined) clearTimeout(timer);
 		timer = setTimeout(flush, PERSIST_DEBOUNCE_MS);
 		timer.unref?.();
@@ -127,12 +143,18 @@ export default function modelDefaultExtension(pi: ExtensionAPI) {
 		const settled = settle();
 		if (settled) recordState(pi, UNANNOUNCED_STATE, settled);
 	});
+	// A switch the branch still owes a breadcrumb: announced here when the
+	// session runs that model, saved first if its own process never got to it.
 	pi.on("session_start", (_event, ctx) => {
 		const stored = readState(ctx, UNANNOUNCED_STATE);
 		if (!isObject(stored)) return;
 		recordState(pi, UNANNOUNCED_STATE, null);
 		const { provider, id, name, saved } = stored;
-		if (ctx.model?.provider !== provider || ctx.model?.id !== id || typeof name !== "string") return;
-		announce(name, saved === true);
+		if (typeof provider !== "string" || typeof id !== "string" || typeof name !== "string") return;
+		if (ctx.model?.provider !== provider || ctx.model?.id !== id) return;
+		const notify = (message: string) => {
+			if (ctx.hasUI) ctx.ui.notify(message, "warning");
+		};
+		announce(name, typeof saved === "boolean" ? saved : save(provider, id, notify));
 	});
 }

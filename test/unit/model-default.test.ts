@@ -135,6 +135,21 @@ describe("modelDefaultExtension with system-reminder (the breadcrumb reaches the
 		expect(again.fake.branch.length).toBe(reloaded.fake.branch.length);
 	});
 
+	it("owes the breadcrumb on the branch at once: a fresh process on a copy taken inside the quiet period announces it too", async () => {
+		vi.useFakeTimers();
+		const { fake, select } = await mountWired();
+		await select("anthropic", "claude-sonnet-5", "Claude Sonnet 5");
+		// The transition probe's oracle: the session file copied before the timer fires.
+		const fresh = await mountWired([...fake.branch], { provider: "anthropic", id: "claude-sonnet-5" });
+		expect(fresh.pendingTexts().filter((text) => text.includes("Set model to"))).toEqual([sonnetStdout]);
+		// The live process announces the same once its quiet period ends, and the branch no longer owes it.
+		vi.advanceTimersByTime(PERSIST_DEBOUNCE_MS);
+		const settled = [...fake.branch];
+		const after = await mountWired(settled, { provider: "anthropic", id: "claude-sonnet-5" });
+		expect(after.pendingTexts().filter((text) => text.includes("Set model to"))).toEqual([sonnetStdout]);
+		expect(after.fake.branch.slice(settled.length).filter((entry) => entry.customType === RECORD.pending)).toHaveLength(0);
+	});
+
 	it("drops a switch saved at a quit when the resumed session runs another model", async () => {
 		vi.useFakeTimers();
 		const { fake, ctx, select } = await mountWired();
