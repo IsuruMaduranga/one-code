@@ -124,6 +124,27 @@ describe("a cache warm never records", () => {
 		const warm = await s.warm();
 		expect(texts(warm)).toEqual(["user:U1"]);
 	});
+
+	it("records pi-ai's strict-tools fallback even when the request's cap was clamped to the warm cap near the end of the window", async () => {
+		const s = new LedgerSim();
+		await s.sessionStart();
+		s.message("user", "U1");
+		await s.request("A1");
+		s.message("user", "U2");
+		const records = s.records("request").length;
+		// pi-ai clamps max_tokens to the window's room (clampMaxTokensToContext), as low as 1; its
+		// fallback sends each tool again in the same call with its non-strict input schema.
+		const lenient = [{ name: "read", input_schema: { type: "object" } }];
+		const sent = await s.request("A2", "stop", 2, 12, (payload) => ({ ...payload, tools: lenient }));
+		expect(sent.tools).toEqual(lenient);
+		expect(sent.max_tokens).toBe(12);
+		expect(s.records("request").length).toBe(records + 2);
+		expect(s.fold().lastRequest?.head.tools).toEqual(lenient);
+		// A warm after it is its own provider call: still a warm, resending the fallback.
+		const warm = await s.warm();
+		expect(s.records("request").length).toBe(records + 2);
+		expect({ ...warm, max_tokens: sent.max_tokens }).toEqual(sent);
+	});
 });
 
 describe("a /fork routes to its parent's cache host (R3-M22)", () => {

@@ -90,7 +90,7 @@ function outputCaps(payload: WirePayload): number[] {
 	return caps;
 }
 
-/** Whether `payload` carries pi's cache-warm output cap (a real session request asks for more, except an over-window one, which comes with a fresh plan). */
+/** Whether `payload` carries pi's cache-warm output cap. A real request can too (pi-ai clamps its cap to the window's room), so the caller also checks it is a call of its own. */
 export function hasWarmCap(payload: WirePayload): boolean {
 	const caps = outputCaps(payload);
 	return caps.length > 0 && caps.every((cap) => cap <= WARM_CAP);
