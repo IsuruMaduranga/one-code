@@ -226,7 +226,13 @@ export function foldBranch(branch: readonly EntryLike[], identity?: RequestIdent
 		.map(({ item }) => item);
 
 	const changed = (b: RequestIdentity, live: RequestIdentity): EpochCause | undefined =>
-		b.model !== live.model || b.api !== live.api || b.provider !== live.provider ? "model" : b.auth !== live.auth ? "auth" : undefined;
+		b.model !== live.model || b.api !== live.api || b.provider !== live.provider
+			? "model"
+			: b.auth !== live.auth
+				? "auth"
+				: b.effortMarkers !== live.effortMarkers
+					? "effort"
+					: undefined;
 	const cause: EpochCause | undefined = !base ? "first" : (resetSinceBase ?? (identity ? changed(base.identity, identity) : undefined));
 	return {
 		opensEpoch: cause !== undefined,

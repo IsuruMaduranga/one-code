@@ -55,6 +55,7 @@ import {
 	type DeferredQuery,
 	deferredRemovedText,
 	withheldMissReminderText,
+	unavailableToolReminderText,
 } from "../lib/deferred.ts";
 import { looksLikeAnthropicRequest, MID_CONVERSATION_SYSTEM_BETA, withBetas } from "../lib/anthropic-payload.ts";
 import { liftAddenda, supportsToolAdditions, TOOL_ADDITION_BETAS, withToolAdditions } from "../lib/tool-additions.ts";
@@ -62,7 +63,7 @@ import { inContextEntries } from "../lib/compaction-boundary.ts";
 import { CALLABLE_TOOLS, foldBranch, type LedgerFold } from "../lib/ledger/fold.ts";
 import { declaredToolNames } from "../lib/ledger/wire.ts";
 import { MCP_TOOLS_CHANNEL } from "../lib/mcp-share.ts";
-import { authKind, requestIdentity } from "../lib/anthropic-auth.ts";
+import { requestIdentity, sessionThinkingLevel } from "../lib/anthropic-auth.ts";
 import type { EntryLike } from "../lib/ledger/records.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../lib/reminders.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
@@ -94,9 +95,10 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	 * with nothing appended between.
 	 */
 	let foldAt: { at: string; fold: LedgerFold } | undefined;
-	const foldOf = (branch: EntryLike[], model: { provider?: string; api?: string; id?: string } | undefined): LedgerFold => {
-		const at = `${branch.length}\0${branch.at(-1)?.id}\0${model?.provider}/${model?.api}/${model?.id}/${authKind(model?.provider)}`;
-		if (foldAt?.at !== at) foldAt = { at, fold: foldBranch(branch, requestIdentity(model)) };
+	const foldOf = (branch: EntryLike[], model: Parameters<typeof requestIdentity>[0]): LedgerFold => {
+		const identity = requestIdentity(model, sessionThinkingLevel(pi));
+		const at = `${branch.length}\0${branch.at(-1)?.id}\0${JSON.stringify(identity)}`;
+		if (foldAt?.at !== at) foldAt = { at, fold: foldBranch(branch, identity) };
 		return foldAt.fold;
 	};
 	/** The session's model, for a decision made outside a hook that carries one. */
@@ -378,6 +380,14 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				key: `deferred-miss-${name}`,
 				text: withheldMissReminderText(name),
+			});
+		} else if (branchOf && declaredToolNames(foldOf(branchOf(), currentModel).lastRequest?.head ?? {}).has(name)) {
+			// The epoch's recorded tools stay declared after the tool left the
+			// session (a setting turned it off): the call cannot be salvaged, and
+			// the model must not keep trying it.
+			pi.events.emit(REMINDER_CHANNEL, {
+				key: `deferred-miss-${name}`,
+				text: unavailableToolReminderText(name),
 			});
 		}
 	});

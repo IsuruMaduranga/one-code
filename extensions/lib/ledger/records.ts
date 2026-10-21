@@ -44,11 +44,14 @@ export interface RequestIdentity {
 	api: string;
 	provider: string;
 	model: string;
-	/** "api-key" | "oauth" | …: OAuth renames tools, so a change opens an epoch. */
+	/** "key" | "oauth" | "chatgpt": OAuth renames tools, ChatGPT sign-in drops fields, so a change opens an epoch. */
 	auth: string;
+	/** Whether pi-ai puts its per-message effort markers in the list; absent on a model without them. */
+	effortMarkers?: boolean;
 }
 
-export const sameIdentity = (a: RequestIdentity, b: RequestIdentity): boolean => a.api === b.api && a.provider === b.provider && a.model === b.model && a.auth === b.auth;
+export const sameIdentity = (a: RequestIdentity, b: RequestIdentity): boolean =>
+	a.api === b.api && a.provider === b.provider && a.model === b.model && a.auth === b.auth && a.effortMarkers === b.effortMarkers;
 
 /**
  * Which of the session's context messages a request covers: the first `count`
@@ -121,9 +124,9 @@ export interface PendingRecordData extends RecordBase {
 	untilCompaction?: boolean;
 }
 
-const EPOCH_CAUSES = ["first", "compaction", "model", "auth", "fold", "coverage", "empty"] as const;
+const EPOCH_CAUSES = ["first", "compaction", "model", "auth", "effort", "fold", "coverage", "empty"] as const;
 
-/** Why an epoch opened: no request yet, a compaction, a model or auth switch, a history fold, a base that cannot be extended, or nothing new since it. */
+/** Why an epoch opened: no request yet, a compaction, a model or auth switch, thinking turned off or on where pi marks effort per message, a history fold, a base that cannot be extended, or nothing new since it. */
 export type EpochCause = (typeof EPOCH_CAUSES)[number];
 
 export interface EpochRecordData extends RecordBase {
@@ -192,6 +195,7 @@ const SHAPE: { [K in RecordKind]: (data: Record<string, unknown>) => boolean } =
 		isString(d.identity.provider) &&
 		isString(d.identity.model) &&
 		isString(d.identity.auth) &&
+		(d.identity.effortMarkers === undefined || typeof d.identity.effortMarkers === "boolean") &&
 		Number.isInteger(d.keep) &&
 		(d.keep as number) >= 0 &&
 		isStrings(d.append) &&

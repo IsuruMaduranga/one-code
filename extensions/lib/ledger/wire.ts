@@ -232,11 +232,31 @@ export function declaredToolNames(payload: WirePayload, { eager = false } = {}):
 	return names;
 }
 
+/** A declaration's input schema, in any API's shape: what pi validates a call's arguments against. */
+function inputSchemaOf(tool: unknown): unknown {
+	if (!isObject(tool)) return undefined;
+	if (isObject(tool.function)) return tool.function.parameters;
+	if (isObject(tool.toolSpec)) return tool.toolSpec.inputSchema;
+	return tool.input_schema ?? tool.parameters ?? tool.parametersJsonSchema;
+}
+
+/** The live declaration with the recorded one's `defer_loading`: a load or a deferral moves that flag, never the tool. */
+function withRecordedDeferral(live: unknown, recorded: unknown): unknown {
+	if (!isObject(live) || !isObject(recorded)) return live;
+	const { defer_loading: _live, ...rest } = live;
+	return recorded.defer_loading === undefined ? rest : { ...rest, defer_loading: recorded.defer_loading };
+}
+
 /**
  * The recorded declarations in their recorded order and bytes, then the live
  * ones the record lacks. A live declaration equal to its recorded one is kept
- * as pi built it (its cache marker included); a changed one takes the recorded
- * bytes. Nameless markers that end the live list (Bedrock `cachePoint`) end it.
+ * as pi built it (its cache marker included); one that differs only in its
+ * text or its deferral takes the recorded bytes, so a description variant or a
+ * load never moves the tools array. One whose input schema changed (an
+ * upgrade, an MCP server's new schema, a fork's own spawn tool) takes the live
+ * declaration, with the recorded deferral: pi validates and runs a call
+ * against the live schema, so the wire must offer that one. Nameless markers
+ * that end the live list (Bedrock `cachePoint`) end it.
  */
 export function mergeDeclarations(recorded: readonly unknown[], live: readonly unknown[], declaredElsewhere: ReadonlySet<string> = new Set()): unknown[] {
 	const liveByName = new Map<string, unknown>();
@@ -251,7 +271,9 @@ export function mergeDeclarations(recorded: readonly unknown[], live: readonly u
 		if (name === undefined) continue;
 		seen.add(name);
 		const current = liveByName.get(name);
-		out.push(current !== undefined && contentHash(current) === contentHash(tool) ? current : structuredClone(tool));
+		if (current !== undefined && contentHash(current) === contentHash(tool)) out.push(current);
+		else if (current !== undefined && contentHash(inputSchemaOf(current)) !== contentHash(inputSchemaOf(tool))) out.push(withRecordedDeferral(current, tool));
+		else out.push(structuredClone(tool));
 	}
 	for (const tool of live) {
 		const name = toolName(tool);

@@ -30,7 +30,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { requestIdentity } from "../lib/anthropic-auth.ts";
+import { requestIdentity, sessionThinkingLevel } from "../lib/anthropic-auth.ts";
 import { notifyOrPrint } from "../lib/headless-output.ts";
 import { foldBranch } from "../lib/ledger/fold.ts";
 import { LEDGER_PLAN_CHANNEL, LEDGER_SENT_CHANNEL, type LedgerSent, type RequestPlan } from "../lib/ledger/plan.ts";
@@ -68,7 +68,7 @@ export default function ledgerWireExtension(pi: ExtensionAPI) {
 
 	pi.on("before_provider_request", (event, ctx) => {
 		const model = ctx.model;
-		const identity = requestIdentity(model);
+		const identity = requestIdentity(model, sessionThinkingLevel(pi));
 		if (!model || !identity) return undefined;
 		const api = model.api;
 		const live = event.payload as WirePayload;

@@ -633,6 +633,15 @@ export function withheldMissReminderText(name: string): string {
 	return `\`${name}\` failed with "Tool ${name} not found" because it was withdrawn for the current model — it is not a deferred tool you can load with tool_search. Do not retry it; continue without it.`;
 }
 
+/**
+ * A call to a tool the conversation still declares (the epoch's recorded
+ * tools stay declared, decisions/caching.md "record once") that this session
+ * no longer runs: a setting turned it off, or an extension stopped offering it.
+ */
+export function unavailableToolReminderText(name: string): string {
+	return `\`${name}\` failed with "Tool ${name} not found" because it is no longer available in this session, although it is still declared. Do not retry it; continue without it.`;
+}
+
 export interface SearchMatch {
 	name: string;
 	score: number;

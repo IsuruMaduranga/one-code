@@ -143,6 +143,16 @@ describe("tool-search listing and render-time addenda", () => {
 		expect(fake.activeTools()).not.toContain("web_fetch");
 	});
 
+	it("tells the model a recorded tool this session no longer runs is unavailable, when a call to it fails (R3-M4)", () => {
+		const fake = makeFakePi();
+		toolSearchExtension(fake.pi as never);
+		const branch = epochBranch([]);
+		(branch[0].data as { blobs: Record<string, unknown> }).blobs.h = { system: "s", tools: [{ name: "workflow", input_schema: { type: "object" } }] };
+		fake.pi.fire("session_start", {}, { model: additionsModel, sessionManager: { getBranch: () => branch } });
+		fake.pi.fire("tool_execution_end", { isError: true, result: { content: [{ type: "text", text: "Tool workflow not found" }] } });
+		expect(fake.reminders.find((r) => r.key === "deferred-miss-workflow")?.text).toContain("no longer available in this session");
+	});
+
 	it("says once per epoch that this run cannot load the deferred tools the epoch listed", () => {
 		const fake = mount();
 		fake.unregister("tool_search");
