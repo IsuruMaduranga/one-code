@@ -36,7 +36,7 @@ import { REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
 import { resolveToolPath } from "../lib/tool-path.ts";
 import { parseRules, ruleMatches } from "../permissions/matcher.ts";
 import { loadPermissionSettings } from "../permissions/settings.ts";
-import { type FileObservation, keptReadPaths, keptShellReadPaths, lastTouchesOnBranch, observationsOnBranch, pathsReadOnBranch, shellCallsOnBranch } from "./replay.ts";
+import { type FileObservation, filesSeenOnBranch, keptReadPaths, keptShellReadPaths, shellCallsOnBranch } from "./replay.ts";
 import { type RestoredRead, restoreBlocks, restoreCandidates } from "./restore.ts";
 import { fileToolResultContent } from "./results.ts";
 import { shellReadPaths, shownInFull } from "./shell-reads.ts";
@@ -195,9 +195,9 @@ function pathOf(input: unknown, cwd: string): string | undefined {
  * The files the context still shows after a compaction, as comparable paths:
  * the context stack (the CLAUDE.md family as claude-context discovers it, what
  * they `@`-import, and the auto-memory index), the plan file, the files a
- * `read` in the kept turns returned (`kept`, as written) and the files a kept
- * bash call showed in full (`keptShell`, absolute). Claude Code's restore
- * skips them; they stay read.
+ * `read` in the kept turns returned (`kept`) and the files a kept bash call
+ * showed in full (`keptShell`), both absolute as recorded. Claude Code's
+ * restore skips them; they stay read.
  */
 function inContextFiles(ctx: ExtensionContext, branch: readonly { type: string; customType?: string; data?: unknown }[], kept: string[], keptShell: string[]): Set<string> {
 	const home = homedir();
@@ -207,7 +207,7 @@ function inContextFiles(ctx: ExtensionContext, branch: readonly { type: string; 
 		includeExternal: readExternalIncludesApproval(ctx.cwd, home).approved,
 	}).flatMap((file) => [file.path, ...(file.imported ?? [])]);
 	return new Set(
-		[...stack, autoMemoryEnabled(ctx.cwd) ? join(projectMemoryDir(ctx.cwd, home), "MEMORY.md") : undefined, planFileOnBranch(branch), ...kept.map((path) => resolveToolPath(path, ctx.cwd)), ...keptShell]
+		[...stack, autoMemoryEnabled(ctx.cwd) ? join(projectMemoryDir(ctx.cwd, home), "MEMORY.md") : undefined, planFileOnBranch(branch), ...kept, ...keptShell]
 			.filter((path): path is string => typeof path === "string")
 			.map(comparablePath),
 	);
@@ -267,8 +267,8 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 	let sessionId: string | undefined;
 	/**
 	 * Every file a read or write touched on this branch, with its modification
-	 * time as stat'ed then (the transcript time for one replayed after a resume):
-	 * the post-compaction restore's order.
+	 * time as stat'ed then (as the result recorded it, for one replayed after a
+	 * resume): the post-compaction restore's order.
 	 */
 	let touched = new Map<string, number>();
 	/**
@@ -289,11 +289,13 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 		return seen;
 	};
 
-	// A resumed session (or a session_tree switch) carries reads the model did
-	// earlier in the transcript; rebuild the tracker from the part of the branch
-	// still in context (since the latest compaction's kept tail) so post-resume
-	// edits are not refused as "never read" (replay.ts). A new session id starts
-	// from an empty tracker.
+	// A resumed session (or a /reload, a fork, a session_tree switch) carries
+	// reads the model did earlier in the transcript; rebuild the tracker from
+	// the part of the branch still in context (since the latest compaction's
+	// kept tail) so later edits are not refused as "never read" (replay.ts).
+	// Everything comes from the branch, as the results and pending entries
+	// recorded it, never from this instance: pi runs the factory again on each
+	// of those. A new session id starts from an empty tracker.
 	const reconstruct = (ctx: ExtensionContext, fresh = false) => {
 		const id = ctx.sessionManager.getSessionId?.() ?? undefined;
 		if (fresh || id !== sessionId) {
@@ -308,23 +310,30 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 		} catch {
 			return;
 		}
-		// What each result saw, recorded at the time: a file that changed since is
-		// stale, never taken as read in its current form (round-2 review H1).
-		const observed = observationsOnBranch(entries);
-		const changed: string[] = [];
-		for (const raw of pathsReadOnBranch(entries)) {
-			const path = resolveToolPath(raw, ctx.cwd);
-			const seen = observed.get(path);
-			const current = seen ? readIfPresent(path) : undefined;
-			if (seen && current !== undefined && sha256(current) !== seen.sha256) {
-				tracker.observeChanged(path, Date.now());
-				changed.push(path);
-			} else observeFromDisk(tracker, path);
+		// What each result or restore saw, recorded at the time and by the path
+		// the tool resolved: a file that changed since is stale, never taken as
+		// read in its current form (round-2 review H1), and a gone one untracked.
+		const files = filesSeenOnBranch(entries);
+		const changed: { path: string; sha256: string }[] = [];
+		for (const [path, { seen, notified }] of files) {
+			const stamp = statIfPresent(path);
+			const current = readIfPresent(path);
+			if (current === undefined) continue;
+			const hash = sha256(current);
+			if (hash === seen.sha256) {
+				tracker.observe(path, current, Date.now(), stamp);
+				continue;
+			}
+			tracker.observeChanged(path, Date.now());
+			// A version a notice already named is not announced again (round-3 review L9).
+			if (!notified.has(hash)) changed.push({ path, sha256: hash });
 		}
 		if (changed.length > 0) {
+			// Unkeyed: a key would let this notice replace an undelivered earlier one
+			// whose versions the branch already counts as told.
 			pi.events.emit(REMINDER_CHANNEL, {
-				key: "file-tracker:changed-since-read",
-				text: `These files changed on disk since you last read them in this conversation: ${changed.join(", ")}. Read them again before editing them.`,
+				text: `These files changed on disk since you last read them in this conversation: ${changed.map((file) => file.path).join(", ")}. Read them again before editing them.`,
+				notified: changed,
 			} satisfies ReminderPayload);
 		}
 		// Shell reads need the bash grammar, which may still be loading this early.
@@ -338,7 +347,7 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 				for (const call of shellCalls) recordShellReads(call.id, observeShellReads(target, shellReadSnapshot(call.command, sessionWorkCwd(entered, ctx.cwd)), call.output));
 			});
 		}
-		touched = new Map([...lastTouchesOnBranch(entries)].map(([raw, at]) => [resolveToolPath(raw, ctx.cwd), at]));
+		touched = new Map([...files].map(([path, { seen }]) => [path, seen.mtimeMs]));
 	};
 	pi.on("session_start", (_event, ctx) => reconstruct(ctx));
 	// A branch switch keeps the session id, but the reads of the branch left
@@ -422,7 +431,8 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 	 * the summary no longer holds those files, so an edit needs a fresh read.
 	 * A file the context still shows stays read (a kept turn's read or whole-file
 	 * shell read, the context stack, the plan file), and a restored file counts
-	 * as read and as touched for the next compaction's restore; a note never
+	 * as read and as touched for the next compaction's restore, here and after
+	 * a reload or a resume (its block records what it showed); a note never
 	 * marks its file read. Contents come back only for a file the gate would
 	 * let through without a question (`restoreAllowed`).
 	 */
@@ -453,8 +463,14 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 			const read = createReadToolDefinition(ctx.cwd);
 			const reads: RestoredRead[] = await Promise.all(candidates.map(async (path) => ({ path, text: await readAgain(read, path, ctx) })));
 			const { blocks, restored } = restoreBlocks(reads, estimateTextTokens);
-			for (const text of blocks) pi.events.emit(REMINDER_CHANNEL, { text, placement: "user-prepend", orTail: true, untilCompaction: true } satisfies ReminderPayload);
-			for (const path of restored) touch(path);
+			// The block that shows a file records what it showed, so a reload or a
+			// resume counts the file read exactly where the branch holds the block
+			// (replay.ts filesSeenOnBranch).
+			const seen = new Map(restored.map((path) => [path, touch(path)]));
+			for (const { text, restores } of blocks) {
+				const observation = restores ? seen.get(restores) : undefined;
+				pi.events.emit(REMINDER_CHANNEL, { text, placement: "user-prepend", orTail: true, untilCompaction: true, ...(observation ? { observations: [observation] } : {}) } satisfies ReminderPayload);
+			}
 		} catch {
 			// The restore is best effort: nothing comes back, and an edit needs a fresh read.
 			tracker = new FileTracker();
@@ -496,8 +512,10 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 	 *   runs only once the batch has fully drained.
 	 */
 	const reportExternalChanges = () => {
-		const detailed: string[] = [];
-		const overflow: string[] = [];
+		// Each notice records the versions it names on its pending entry, so a
+		// reload or a resume does not announce them again (replay.ts).
+		const detailed: { text: string; notified?: { path: string; sha256: string } }[] = [];
+		const overflow: { path: string; sha256: string }[] = [];
 		for (const path of tracker.tracked) {
 			// Undefined for a file tracked without content (oversized); an empty
 			// file is compared like any other.
@@ -514,7 +532,7 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 			const current = stamp ? readIfPresent(path) : undefined;
 			if (stamp === undefined || current === undefined) {
 				tracker.forget(path);
-				detailed.push(`${path} no longer exists; it was deleted or moved after you last read or wrote it.`);
+				detailed.push({ text: `${path} no longer exists; it was deleted or moved after you last read or wrote it.` });
 				continue;
 			}
 			tracker.recordStamp(path, stamp);
@@ -522,22 +540,24 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 			// Don't repeat the same warning every turn…
 			if (tracker.alreadyNotified(path, current)) continue;
 
+			const version = { path, sha256: sha256(current) };
 			if (detailed.length < DETAILED_CHANGE_REMINDERS_PER_TURN) {
 				const excerpt = describeChanges(previous, current);
-				if (excerpt) detailed.push(byChild ? CHILD_CHANGE_REMINDER(path, childAgent, excerpt) : EXTERNAL_CHANGE_REMINDER(path, excerpt));
+				if (excerpt) detailed.push({ text: byChild ? CHILD_CHANGE_REMINDER(path, childAgent, excerpt) : EXTERNAL_CHANGE_REMINDER(path, excerpt), notified: version });
 			} else {
-				overflow.push(path);
+				overflow.push(version);
 			}
 			// …but deliberately do NOT record the new content as seen: the file must
 			// stay stale so the edit guard still forces a re-read. Marking it read
 			// here would announce the change and then permit the clobbering edit.
 			tracker.markNotified(path, current);
 		}
-		for (const text of detailed) pi.events.emit(REMINDER_CHANNEL, { text });
+		for (const { text, notified } of detailed) pi.events.emit(REMINDER_CHANNEL, { text, ...(notified ? { notified: [notified] } : {}) } satisfies ReminderPayload);
 		if (overflow.length > 0) {
 			pi.events.emit(REMINDER_CHANNEL, {
-				text: `${overflow.length} more file(s) you read earlier changed on disk since: ${overflow.join(", ")}. Re-read any of them before editing it.`,
-			});
+				text: `${overflow.length} more file(s) you read earlier changed on disk since: ${overflow.map((file) => file.path).join(", ")}. Re-read any of them before editing it.`,
+				notified: overflow,
+			} satisfies ReminderPayload);
 		}
 	};
 	/**

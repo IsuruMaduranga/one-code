@@ -73,6 +73,8 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 			...(payload.once ? { once: true } : {}),
 			...(payload.orTail ? { orTail: true } : {}),
 			...(payload.untilCompaction ? { untilCompaction: true } : {}),
+			...(payload.observations?.length ? { observations: payload.observations } : {}),
+			...(payload.notified?.length ? { notified: payload.notified } : {}),
 		});
 		pi.appendEntry(RECORD.pending, data);
 	};

@@ -51,7 +51,7 @@
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
-import type { BlockFact, ToldFact } from "./ledger/records.ts";
+import type { BlockFact, FileVersion, ToldFact } from "./ledger/records.ts";
 import { contentHash } from "./ledger/wire.ts";
 import type { MovedBlock } from "./system-role.ts";
 
@@ -141,6 +141,10 @@ export interface ReminderPayload {
 	orTail?: boolean;
 	/** A one-shot dropped, undelivered, at a later compaction (a post-compaction restore). */
 	untilCompaction?: boolean;
+	/** A one-shot only: the files whose whole content it shows, recorded on its pending entry (`PendingRecordData.observations`). */
+	observations?: FileVersion[];
+	/** A one-shot only: the changed file versions it names, recorded on its pending entry (`PendingRecordData.notified`). */
+	notified?: FileVersion[];
 	/**
 	 * `sticky-append` only: the state is on from this timestamp instead of now.
 	 * `0` puts it on every user message (the `<total_tokens>` line rides every

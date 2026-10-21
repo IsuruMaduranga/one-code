@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { keptReadPaths, lastTouchesOnBranch } from "../../extensions/file-tracker/replay.ts";
 import {
 	readCallBlock,
 	readResultBlock,
@@ -29,13 +28,14 @@ describe("restoreBlocks", () => {
 			],
 			tokens,
 		);
-		expect(blocks).toEqual([tooLargeNote("/w/big.txt"), readCallBlock("/w/small.txt"), readResultBlock("one\ntwo")]);
+		// The result block is the one that puts the file back in context.
+		expect(blocks).toEqual([{ text: tooLargeNote("/w/big.txt") }, { text: readCallBlock("/w/small.txt") }, { text: readResultBlock("one\ntwo"), restores: "/w/small.txt" }]);
 		expect(restored).toEqual(["/w/small.txt"]);
-		expect(blocks[0]).toBe(
+		expect(blocks[0].text).toBe(
 			"Note: /w/big.txt was read before the last conversation was summarized, but the contents are too large to include. Use read tool if you need to access it.",
 		);
-		expect(blocks[1]).toBe('Called the read tool with the following input: {"path":"/w/small.txt"}');
-		expect(blocks[2]).toBe("Result of calling the read tool:\none\ntwo");
+		expect(blocks[1].text).toBe('Called the read tool with the following input: {"path":"/w/small.txt"}');
+		expect(blocks[2].text).toBe("Result of calling the read tool:\none\ntwo");
 	});
 
 	it("skips a file whose blocks would take the total past 50,000 tokens and keeps going", () => {
@@ -45,32 +45,5 @@ describe("restoreBlocks", () => {
 		expect(restored.length).toBe(10);
 		const withSmall = restoreBlocks([...reads, { path: "/w/tiny", text: "t" }], tokens);
 		expect(withSmall.restored.at(-1)).toBe("/w/tiny");
-	});
-});
-
-const call = (id: string, name: string, path: string) => ({ type: "toolCall", id, name, arguments: { path } });
-const assistant = (...content: unknown[]) => ({ type: "message", message: { role: "assistant", content } });
-const result = (toolCallId: string, timestamp: number, isError = false) => ({ type: "message", message: { role: "toolResult", toolCallId, isError, timestamp } });
-
-describe("keptReadPaths", () => {
-	it("lists files a successful read in the kept turns returned, whichever path field names them", () => {
-		const fileRead = { type: "toolCall", id: "4", name: "read", arguments: { file_path: "d.ts" } };
-		const kept = [assistant(call("1", "read", "a.ts"), call("2", "read", "b.ts"), call("3", "edit", "c.ts"), fileRead), result("1", 1), result("2", 2, true), result("3", 3), result("4", 4)];
-		expect(keptReadPaths(kept)).toEqual(["a.ts", "d.ts"]);
-	});
-});
-
-describe("lastTouchesOnBranch", () => {
-	it("keeps each read or written file's last successful result time", () => {
-		const branch = [
-			assistant(call("1", "read", "a.ts"), call("2", "write", "b.ts"), call("3", "bash", "c.ts")),
-			result("1", 10),
-			result("2", 20),
-			result("3", 30),
-			assistant(call("4", "edit", "a.ts"), call("5", "read", "b.ts")),
-			result("4", 40),
-			result("5", 50, true),
-		];
-		expect(lastTouchesOnBranch(branch)).toEqual(new Map([["a.ts", 40], ["b.ts", 20]]));
 	});
 });

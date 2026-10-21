@@ -33,22 +33,25 @@ export function restoreCandidates(touched: ReadonlyMap<string, number>, skip: (p
 /** What reading a candidate again gave: its text as the read tool returns it, or nothing (gone, unreadable, an image). */
 export type RestoredRead = { path: string; text: string | undefined };
 
+/** One `<system-reminder>` block of a restore; `restores` names the file whose contents it puts back in context. */
+export type RestoreBlock = { text: string; restores?: string };
+
 /**
- * The reminder texts (one per `<system-reminder>` block) for the reads, in
- * order: two blocks for a file within the per-file cap, one note for a larger
- * one, nothing for a file that could not be read. A file's blocks are kept only
- * while the running total stays within the overall cap. `restored` lists the
- * files whose contents went back into context.
+ * The reminder blocks for the reads, in order: two blocks for a file within
+ * the per-file cap (the result block `restores` it), one note for a larger
+ * one, nothing for a file that could not be read. A file's blocks are kept
+ * only while the running total stays within the overall cap. `restored` lists
+ * the files whose contents went back into context.
  */
-export function restoreBlocks(reads: RestoredRead[], estimateTokens: (text: string) => number): { blocks: string[]; restored: string[] } {
-	const blocks: string[] = [];
+export function restoreBlocks(reads: RestoredRead[], estimateTokens: (text: string) => number): { blocks: RestoreBlock[]; restored: string[] } {
+	const blocks: RestoreBlock[] = [];
 	const restored: string[] = [];
 	let total = 0;
 	for (const { path, text } of reads) {
 		if (text === undefined) continue;
 		const fits = estimateTokens(text) <= RESTORE_FILE_MAX_TOKENS;
-		const fileBlocks = fits ? [readCallBlock(path), readResultBlock(text)] : [tooLargeNote(path)];
-		const tokens = fileBlocks.reduce((sum, block) => sum + estimateTokens(block), 0);
+		const fileBlocks: RestoreBlock[] = fits ? [{ text: readCallBlock(path) }, { text: readResultBlock(text), restores: path }] : [{ text: tooLargeNote(path) }];
+		const tokens = fileBlocks.reduce((sum, block) => sum + estimateTokens(block.text), 0);
 		if (total + tokens > RESTORE_TOTAL_MAX_TOKENS) continue;
 		total += tokens;
 		blocks.push(...fileBlocks);

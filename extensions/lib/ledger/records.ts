@@ -128,6 +128,23 @@ export interface PendingRecordData extends RecordBase {
 	orTail?: boolean;
 	/** Dropped, undelivered, at a later compaction: it belongs to the epoch the compaction before it opened (a post-compaction restore). */
 	untilCompaction?: boolean;
+	/**
+	 * Files whose whole content the item shows the model (a post-compaction
+	 * restore), as they were when it was produced. The item and this record
+	 * are one entry, so file-tracker's replay counts the files read exactly
+	 * where the branch holds the item.
+	 */
+	observations?: FileVersion[];
+	/** The changed versions of files the item names without showing them (a changed-on-disk notice): never a read. */
+	notified?: FileVersion[];
+}
+
+/** A file's version as a pending item records it: the absolute path and content hash, with the size and modification time when known. */
+export interface FileVersion {
+	path: string;
+	sha256: string;
+	size?: number;
+	mtimeMs?: number;
 }
 
 const EPOCH_CAUSES = ["first", "compaction", "model", "auth", "effort", "fold", "coverage", "empty"] as const;
@@ -172,6 +189,10 @@ const KIND_BY_TYPE = new Map<string, RecordKind>(Object.entries(RECORD).map(([ki
 export const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const isString = (value: unknown): value is string => typeof value === "string";
 const isStrings = (value: unknown): value is string[] => Array.isArray(value) && value.every(isString);
+
+const isFileVersions = (value: unknown): boolean =>
+	Array.isArray(value) &&
+	value.every((file) => isObject(file) && isString(file.path) && isString(file.sha256) && (file.size === undefined || typeof file.size === "number") && (file.mtimeMs === undefined || typeof file.mtimeMs === "number"));
 
 const isCoverage = (value: unknown): boolean =>
 	isObject(value) && Number.isInteger(value.count) && (value.count as number) >= 0 && isString(value.role) && typeof value.timestamp === "number";
@@ -220,7 +241,9 @@ const SHAPE: { [K in RecordKind]: (data: Record<string, unknown>) => boolean } =
 		(d.toolCallId === undefined || isString(d.toolCallId)) &&
 		(d.once === undefined || typeof d.once === "boolean") &&
 		(d.orTail === undefined || typeof d.orTail === "boolean") &&
-		(d.untilCompaction === undefined || typeof d.untilCompaction === "boolean"),
+		(d.untilCompaction === undefined || typeof d.untilCompaction === "boolean") &&
+		(d.observations === undefined || isFileVersions(d.observations)) &&
+		(d.notified === undefined || isFileVersions(d.notified)),
 	epoch: (d) => (EPOCH_CAUSES as readonly unknown[]).includes(d.cause),
 	branch: (d) => isString(d.fromLeafId),
 };
