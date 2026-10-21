@@ -361,3 +361,37 @@ describe("affinityHeaders: pi-ai's session-affinity headers, for a fork to send 
 		expect(affinityHeaders({ api: "anthropic-messages", provider: "x", baseUrl: "https://x", id: "m", compat: { sendSessionAffinityHeaders: true } }, "S")).toEqual({ "x-session-affinity": "S" });
 	});
 });
+
+describe("extendPayload after a request that took no clean reply (Anthropic)", () => {
+	const trailer = { role: "system", content: [], output_config: { effort: "high" } };
+	const countdown = { role: "system", content: [{ type: "text", text: "<total_tokens>15000000 tokens left</total_tokens>", cache_control: marker }] };
+	const capture = () =>
+		captureRequest(anthropic, {
+			model: "claude-sonnet-5",
+			system: [{ type: "text", text: "prompt", cache_control: marker }],
+			messages: [
+				{ role: "user", content: [{ type: "text", text: "read it" }] },
+				{ role: "assistant", content: [{ type: "tool_use", id: "t1", name: "read", input: {} }] },
+				{ role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "x" }] },
+				countdown,
+				trailer,
+			],
+			max_tokens: 64000,
+		})!;
+
+	it("keeps every captured element in place, so the side call reads the entry on the trailing system run", () => {
+		const base = capture();
+		const list = base.payload.messages as unknown[];
+		const out = extendPayload(base, { messages: [{ role: "user", content: [{ type: "text", text: "Summarize the conversation." }] }, trailer] });
+		const messages = out.messages as unknown[];
+		list.forEach((element, index) => expect(messages[index]).toBe(element));
+		expect(messages.slice(list.length)).toEqual([{ role: "system", content: [{ type: "text", text: "Summarize the conversation." }] }, trailer]);
+	});
+
+	it("still appends a user prompt after a capture that ends in a user message", () => {
+		const base = capture();
+		const list = (base.payload.messages as unknown[]).slice(0, 3);
+		const out = extendPayload({ ...base, payload: { ...base.payload, messages: list } }, { messages: [{ role: "user", content: [{ type: "text", text: "q" }] }] });
+		expect((out.messages as Array<{ role: string }>).map((message) => message.role)).toEqual(["user", "assistant", "user"]);
+	});
+});

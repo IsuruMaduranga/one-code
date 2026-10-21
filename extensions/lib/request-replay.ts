@@ -22,7 +22,7 @@
 import type { Message } from "@earendil-works/pi-ai";
 import { settleSystemMessages } from "./ledger/layout.ts";
 import { isObject } from "./ledger/records.ts";
-import { listKey, stripMarkers, toolName } from "./ledger/wire.ts";
+import { isTrailer, listKey, stripMarkers, toolName } from "./ledger/wire.ts";
 import { estimateMessageTokens } from "./pi-ai-estimate.ts";
 
 /** The compaction extension publishes a RequestCapture here, or undefined when none is valid. */
@@ -480,7 +480,22 @@ function appendAnthropic(base: unknown[], extra: unknown[]): unknown[] {
 	if (last && last.role === "user" && first.role === "user") {
 		return [...base.slice(0, -1), { ...last, content: [...blocksOf(last.content), ...blocksOf(first.content)] }, ...extra.slice(1)];
 	}
+	// A capture that ends in a content system run (a `<total_tokens>` countdown, a context message) took no
+	// clean reply. A user prompt after it would strand the run, and moving the run behind the prompt rewrites
+	// what the session cached there; a text prompt goes in as a system message instead, so the capture stays
+	// a byte prefix and the run stays where its cache entry was written.
+	if (first.role === "user" && endsInSystemRun(base) && blocksOf(first.content).every((block) => block.type === "text")) {
+		return [...base, { role: "system", content: blocksOf(first.content) }, ...extra.slice(1)];
+	}
 	return [...base, ...extra];
+}
+
+/** Whether the list, past its trailing directives, ends in a system message with content. */
+function endsInSystemRun(list: unknown[]): boolean {
+	let end = list.length;
+	while (end > 0 && isTrailer(list[end - 1], "anthropic-messages")) end--;
+	const last = list[end - 1] as WireMessage | undefined;
+	return last?.role === "system" && blocksOf(last.content).length > 0;
 }
 
 function blocksOf(content: unknown): Block[] {
