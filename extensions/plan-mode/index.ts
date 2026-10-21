@@ -32,7 +32,6 @@ import { ccToolRenderers, safeThemePaint } from "../lib/tui-render.ts";
 import { userDenialText } from "../lib/user-denial.ts";
 import type { PermissionMode } from "../permissions/matcher.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../permissions/modes.ts";
-import { normalizePermissionMode } from "../permissions/settings.ts";
 import { buildPlanModeReminder } from "./reminder.ts";
 import { randomSlug } from "./slug.ts";
 import { readState, recordState } from "../lib/ledger/state.ts";
@@ -46,10 +45,7 @@ function planFileReferenceText(path: string, content: string): string {
 	return `A plan file exists from plan mode at: ${path}\n\nPlan contents:\n\n${content}\n\nIf this plan is relevant to the current work and not already complete, continue working on it.`;
 }
 
-/** The branch's record of whether the plan file existed when the current plan-mode run began. */
-const PLAN_ENTRY_STATE = "plan-mode:entry";
-/** A plan-mode run as the branch records it, beside its plan file's path. */
-type PlanRun = { existed: boolean; modeBeforePlan?: PermissionMode };
+import { PLAN_ENTRY_STATE, parsePlanRun, type PlanRun } from "./run-state.ts";
 import {
 	approvedPlanText,
 	ENTER_PLAN_MODE_DESCRIPTION,
@@ -111,13 +107,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 	 * exit could only escalate: a default-mode session that planned was offered
 	 * auto (PERMISSIONS-REVIEW-2026-09-05 M4).
 	 */
-	const runOnBranch = (ctx: ExtensionContext, path: string): PlanRun | undefined => {
-		const stored = readState(ctx, PLAN_ENTRY_STATE) as { path?: unknown; existed?: unknown; modeBeforePlan?: unknown } | undefined;
-		if (stored?.path !== path || typeof stored.existed !== "boolean") return undefined;
-		const mode = normalizePermissionMode(stored.modeBeforePlan);
-		const before = mode !== "plan" ? mode : undefined;
-		return { existed: stored.existed, ...(before ? { modeBeforePlan: before } : {}) };
-	};
+	const runOnBranch = (ctx: ExtensionContext, path: string): PlanRun | undefined => parsePlanRun(readState(ctx, PLAN_ENTRY_STATE), path);
 	/** Record the current run on the branch, for `runOnBranch` to read back. */
 	const recordRun = (path: string, run: PlanRun) => recordState(pi, PLAN_ENTRY_STATE, { path, ...run });
 
