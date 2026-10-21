@@ -135,8 +135,22 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	let stopHookBlocks = 0;
 	/** Prompt, session and compaction hook context, as a one-shot the next request carries (lib/reminders.ts). */
 	const deliverContext = (event: CcHookEvent, text: string) => pi.events.emit(REMINDER_CHANNEL, { text: hookContextText(event, text), placement: "last-append" });
-	/** UserPromptSubmit context, held until pi delivers the prompt it belongs to (lib/queued-delivery.ts). */
+	/** UserPromptSubmit context for a message queued mid-turn, held until pi delivers it (lib/queued-delivery.ts). */
 	const queuedPromptContext = new QueuedDelivery<string>();
+	/**
+	 * UserPromptSubmit context for a prompt typed while idle. pi expands it
+	 * after the input handlers (a prompt template, a `/skill:` no extension
+	 * took), and a later handler may transform it, so its message rarely
+	 * carries the typed text. It is the next prompt pi delivers, though: the
+	 * first user message no queued entry claims takes it.
+	 */
+	let idlePromptContext: Array<{ text: string; payload: string }> = [];
+	/** The context held for an idle prompt delivered with this text: the one typed so, else the oldest (`exact`: only the one typed so). */
+	const releaseIdle = (text: string, exact = false): string | undefined => {
+		const at = idlePromptContext.findIndex((entry) => entry.text === text);
+		const index = at === -1 && !exact && idlePromptContext.length > 0 ? 0 : at;
+		return index === -1 ? undefined : idlePromptContext.splice(index, 1)[0].payload;
+	};
 	/** The last context seen, for bridged child calls (dispatched parent-side). */
 	let lastCtx: ExtensionContext | undefined;
 	/**
@@ -387,6 +401,9 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		// turn really starts: pi re-checks streaming after these handlers, so a
 		// queued message whose turn ended during the hook opens a new turn.
 		const gen = sessionGen;
+		// A new idle prompt means an earlier idle one was delivered or never will
+		// be (an extension after this one handled it): its context is stale.
+		if (!event.streamingBehavior) idlePromptContext = [];
 		// Drain the backgrounded SessionStart dispatch before this prompt's own
 		// UserPromptSubmit context, so their order in the first turn is unchanged
 		// (SessionStart context precedes UserPromptSubmit). before_agent_start is
@@ -404,7 +421,9 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		// The context waits for pi to deliver this prompt (message_start below),
 		// queued mid-turn or not, so it rides the prompt's own request and never a
 		// run a notification opens first.
-		queuedPromptContext.hold(event.text, hookContextText("UserPromptSubmit", outcome.additionalContext));
+		const text = hookContextText("UserPromptSubmit", outcome.additionalContext);
+		if (event.streamingBehavior) queuedPromptContext.hold(event.text, text);
+		else idlePromptContext.push({ text: event.text, payload: text });
 		return undefined;
 	});
 
@@ -416,8 +435,11 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		const message = event.message;
 		const emit = (text: string) => pi.events.emit(REMINDER_CHANNEL, { text, placement: "last-append" });
 		if (message.role === "user") {
-			if (queuedPromptContext.isEmpty) return;
-			const text = queuedPromptContext.release(contentText(message.content, ""));
+			if (queuedPromptContext.isEmpty && idlePromptContext.length === 0) return;
+			// A queued message delivers as typed, so an exact match is its own; the
+			// idle prompt's message may carry its expansion instead.
+			const delivered = contentText(message.content, "");
+			const text = queuedPromptContext.release(delivered) ?? releaseIdle(delivered);
 			if (text) emit(text);
 			return;
 		}
@@ -427,10 +449,10 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		// request is rendered.
 		await drainSessionStart();
 		// A `/skill:` command the skill extension took over arrives as its hidden
-		// message, carrying the typed text: a queued one's context rides it.
-		if (message.customType !== SKILL_INVOCATION_TYPE || queuedPromptContext.isEmpty) return;
+		// message, carrying the typed text: that prompt's context rides it.
+		if (message.customType !== SKILL_INVOCATION_TYPE || (queuedPromptContext.isEmpty && idlePromptContext.length === 0)) return;
 		const input = (message.details as Partial<SkillInvocationDetails> | undefined)?.input;
-		const queued = typeof input === "string" ? queuedPromptContext.release(input) : undefined;
+		const queued = typeof input === "string" ? (queuedPromptContext.release(input) ?? releaseIdle(input, true)) : undefined;
 		if (gen === sessionGen && queued) emit(queued);
 	});
 
@@ -474,6 +496,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		lastCtx = ctx;
 		const gen = ++sessionGen;
 		queuedPromptContext.clear();
+		idlePromptContext = [];
 		sessionStartPending = undefined;
 		stopHookBlocks = 0;
 		// Publish the child hook bridge (subagent-bridge.ts). The closures read
@@ -603,8 +626,11 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	pi.on("agent_settled", async (_event, ctx) => {
 		const gen = sessionGen;
 		// A queued message pi never delivered as typed (expanded, or taken over by
-		// an extension) keeps no context for a later, unrelated prompt.
+		// an extension) keeps no context for a later, unrelated prompt; an idle
+		// prompt that opened no run of its own (one handled after this extension)
+		// keeps none either.
 		queuedPromptContext.clear();
+		idlePromptContext = [];
 		// CC skips Stop when the turn ended on an API error (a blocking hook would
 		// spiral: error → block → retry → error) or on a user interrupt (its query
 		// loop returns on the abort signal before the stop-hook step). An empty latch

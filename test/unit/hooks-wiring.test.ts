@@ -224,6 +224,37 @@ describe("hooks wiring", () => {
 		expect(await fake.fireOne<{ message?: unknown }>("before_agent_start", { prompt: "next" }, ctx())).toBeUndefined();
 	});
 
+	it("UserPromptSubmit context for an idle prompt pi expands (a template, an unclaimed /skill:) rides the prompt's expanded message", async () => {
+		const hookPrompt = script("hook-expanded.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"additionalContext":"expanded context"}}'\n`);
+		writeUserHooks({ UserPromptSubmit: [{ hooks: [{ type: "command", command: hookPrompt }] }] });
+		const reminders: unknown[] = [];
+		fake.events.on(REMINDER_CHANNEL, (payload) => reminders.push(payload));
+		mount();
+		await fake.fireOne("input", { source: "interactive", text: "/review foo" }, ctx());
+		expect(reminders).toHaveLength(0);
+		// pi expands the template after the input handlers, so the message carries other text.
+		await fake.fireOne("before_agent_start", { messageType: "user", prompt: "Review the change in foo carefully." }, ctx());
+		await fake.fireOne("message_start", { message: { role: "user", content: [{ type: "text", text: "Review the change in foo carefully." }] } }, ctx());
+		expect(reminders).toEqual([{ text: hookContextText("UserPromptSubmit", "expanded context"), placement: "last-append" }]);
+		await fake.fireOne("message_start", { message: { role: "user", content: [{ type: "text", text: "Review the change in foo carefully." }] } }, ctx());
+		expect(reminders).toHaveLength(1);
+	});
+
+	it("an idle prompt's context never goes to a queued message delivered before it, and the queued one keeps its own", async () => {
+		const hookPrompt = script("hook-echo.sh", `#!/bin/sh\nprompt=$(sed -n 's/.*"prompt":"\\([^"]*\\)".*/\\1/p')\necho "{\\"hookSpecificOutput\\":{\\"additionalContext\\":\\"for $prompt\\"}}"\n`);
+		writeUserHooks({ UserPromptSubmit: [{ hooks: [{ type: "command", command: hookPrompt }] }] });
+		const reminders: string[] = [];
+		fake.events.on(REMINDER_CHANNEL, (payload) => reminders.push((payload as { text: string }).text));
+		mount();
+		// A run a notification opened is streaming: "first" is queued, then "/tpl" is
+		// typed while pi still reports idle to its input handlers and ends up queued too.
+		await fake.fireOne("input", { source: "interactive", text: "first", streamingBehavior: "followUp" }, ctx());
+		await fake.fireOne("input", { source: "interactive", text: "/tpl" }, ctx());
+		await fake.fireOne("message_start", { message: { role: "user", content: [{ type: "text", text: "first" }] } }, ctx());
+		await fake.fireOne("message_start", { message: { role: "user", content: [{ type: "text", text: "template body" }] } }, ctx());
+		expect(reminders).toEqual([hookContextText("UserPromptSubmit", "for first"), hookContextText("UserPromptSubmit", "for /tpl")]);
+	});
+
 	it("drops a queued message's context when the turn settles without delivering it", async () => {
 		const hookPrompt = script("hook-undelivered.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"additionalContext":"orphan"}}'\n`);
 		writeUserHooks({ UserPromptSubmit: [{ hooks: [{ type: "command", command: hookPrompt }] }] });
