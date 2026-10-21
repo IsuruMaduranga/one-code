@@ -21,8 +21,14 @@
  * sessions", and since persisting is what this extension does, the claim is
  * true here too (a failed write announces the switch without it). pi handles
  * `/model` before any extension sees the text, so `model_select` — which also
- * covers ctrl+p cycling — is the one signal; the debounce means only the model
- * the user settles on is announced.
+ * covers ctrl+p cycling — is the one signal. The breadcrumb is queued at each
+ * `model_select` under keys a later switch replaces (pending entries with the
+ * same key supersede each other until a request carries one), so only the
+ * model the user settles on is announced. It is queued at once, not after the
+ * write's quiet period: system-reminder stops persisting one-shots in its
+ * `session_shutdown` handler, which runs before this extension's, so a
+ * breadcrumb flushed there was lost on a quit, /reload, /new or /resume. Only
+ * the settings write waits for the quiet period.
  */
 
 import { join } from "node:path";
@@ -47,9 +53,14 @@ export function modelSwitchStdout(displayName: string, saved: boolean): string {
 /** Quiet period after the last switch before it is written (ctrl+p cycles fire one event per step). */
 export const PERSIST_DEBOUNCE_MS = 400;
 
+/** The `/model` breadcrumb's pending-entry key: a later switch's breadcrumb replaces an undelivered one. */
+const BREADCRUMB_KEY = "local-command:model";
+
 export default function modelDefaultExtension(pi: ExtensionAPI) {
-	let pending: { provider: string; id: string; name: string; notify: (message: string) => void } | undefined;
+	let pending: { provider: string; id: string; name: string; saved: boolean; notify: (message: string) => void } | undefined;
 	let timer: ReturnType<typeof setTimeout> | undefined;
+	const settingsPath = () => join(getAgentDir(), "settings.json");
+	const announce = (name: string, saved: boolean) => announceLocalCommand(pi, { name: "model", stdout: modelSwitchStdout(name, saved), key: BREADCRUMB_KEY });
 
 	const flush = () => {
 		if (timer !== undefined) clearTimeout(timer);
@@ -57,39 +68,48 @@ export default function modelDefaultExtension(pi: ExtensionAPI) {
 		const choice = pending;
 		pending = undefined;
 		if (!choice) return;
-		const path = join(getAgentDir(), "settings.json");
-		let saved = true;
+		const path = settingsPath();
 		try {
 			writeSettings(path, applyDefaultModel(readSettingsForWrite(path), choice.provider, choice.id));
 		} catch (error) {
 			// Persisting a preference must not break the model switch itself, but
-			// say why it will be forgotten (typically a malformed settings.json).
-			saved = false;
+			// say why it will be forgotten, and take back the breadcrumb's claim
+			// that it was saved.
 			choice.notify(`Could not save ${choice.provider}/${choice.id} as the default model: ${(error as Error).message}`);
+			if (choice.saved) announce(choice.name, false);
 		}
-		announceLocalCommand(pi, { name: "model", stdout: modelSwitchStdout(choice.name, saved) });
 	};
 
-	// Debounced: a ctrl+p cycle emits model_select per step, and only the model
-	// the user settles on should hit the disk (last one wins).
+	// The write is debounced: a ctrl+p cycle emits model_select per step, and
+	// only the model the user settles on should hit the disk (last one wins).
 	pi.on("model_select", (event, ctx) => {
 		const model = event.model as { provider?: string; id?: string; name?: string } | undefined;
 		if (!model?.provider || !model.id) return;
+		// The usual reason the write fails, a settings file that does not parse,
+		// is known now; a failure only the write meets corrects the claim then.
+		let saved = true;
+		try {
+			readSettingsForWrite(settingsPath());
+		} catch {
+			saved = false;
+		}
 		pending = {
 			provider: model.provider,
 			id: model.id,
 			name: model.name || model.id,
+			saved,
 			notify: (message) => {
 				if (ctx.hasUI) ctx.ui.notify(message, "warning");
 			},
 		};
+		announce(pending.name, saved);
 		if (timer !== undefined) clearTimeout(timer);
 		timer = setTimeout(flush, PERSIST_DEBOUNCE_MS);
 		timer.unref?.();
 	});
 
 	// A quit inside the quiet period must not lose the choice, and a prompt sent
-	// inside it must carry the switch's breadcrumb, not the request after it.
+	// inside it must not carry a saved claim the write then breaks.
 	pi.on("session_shutdown", () => flush());
 	pi.on("before_agent_start", () => flush());
 }

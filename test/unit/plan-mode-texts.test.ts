@@ -115,21 +115,21 @@ describe("plan-mode wiring of the texts", () => {
 
 	it("re-registers enter_plan_mode with the session model's tier text, and only when that text changes", async () => {
 		const register = vi.spyOn(fake.pi as { registerTool: (tool: unknown) => void }, "registerTool");
-		await fake.fireOne("session_start", {}, createFakeCtx({ cwd: stateDir, model: OPUS }));
+		await fake.fireOne("session_start", {}, createFakeCtx({ cwd: stateDir, sessionManager: { getBranch: () => fake.branch }, model: OPUS }));
 		expect(fake.tools.get("enter_plan_mode")!.description).toBe(ENTER_PLAN_MODE_DESCRIPTION);
 		// The load-time registration already carried the frontier text: nothing re-registered.
 		expect(register).not.toHaveBeenCalled();
 
-		await fake.fireOne("model_select", { model: HAIKU }, createFakeCtx({ cwd: stateDir, model: HAIKU }));
+		await fake.fireOne("model_select", { model: HAIKU }, createFakeCtx({ cwd: stateDir, sessionManager: { getBranch: () => fake.branch }, model: HAIKU }));
 		expect(fake.tools.get("enter_plan_mode")!.description).toBe(ENTER_PLAN_MODE_DESCRIPTION_WEAK);
 		expect(register).toHaveBeenCalledTimes(1);
 
-		await fake.fireOne("model_select", { model: HAIKU }, createFakeCtx({ cwd: stateDir, model: HAIKU }));
+		await fake.fireOne("model_select", { model: HAIKU }, createFakeCtx({ cwd: stateDir, sessionManager: { getBranch: () => fake.branch }, model: HAIKU }));
 		expect(register).toHaveBeenCalledTimes(1);
 	});
 
 	it("freezes the Plan File Info line at entry, so the standing block does not change once the plan is written", async () => {
-		const ctx = createFakeCtx({ cwd: stateDir });
+		const ctx = createFakeCtx({ cwd: stateDir, sessionManager: { getBranch: () => fake.branch } });
 		await fake.fireOne("session_start", {}, ctx);
 		fake.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "plan", paused: false });
 		const first = reminders.find((r) => r.key === "permission-mode")!.text!;
@@ -161,7 +161,7 @@ describe("plan-mode wiring of the texts", () => {
 		});
 
 	const planned = async (custom: ReturnType<typeof answer>) => {
-		const ctx = createFakeCtx({ cwd: stateDir, hasUI: true, modelRegistry: { getAvailable: () => [] }, ui: { custom } });
+		const ctx = createFakeCtx({ cwd: stateDir, sessionManager: { getBranch: () => fake.branch }, hasUI: true, modelRegistry: { getAvailable: () => [] }, ui: { custom } });
 		await fake.fireOne("session_start", {}, ctx);
 		fake.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "plan", paused: false });
 		const entered = (await fake.tools.get("enter_plan_mode")!.execute("t1", {}, undefined, undefined, ctx)) as {

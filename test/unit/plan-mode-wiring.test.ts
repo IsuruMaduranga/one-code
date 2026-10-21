@@ -54,7 +54,7 @@ describe("plan-mode wiring", () => {
 	});
 
 	it("re-installs the sticky plan block and announces the plan file synchronously when the mode becomes plan mid-turn", async () => {
-		await fake.fireOne("session_start", {}, createFakeCtx({ cwd: stateDir }));
+		await fake.fireOne("session_start", {}, createFakeCtx({ cwd: stateDir, sessionManager: { getBranch: () => fake.branch } }));
 		fake.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "plan", paused: false });
 
 		expect(planFiles).toHaveLength(1);
@@ -72,14 +72,14 @@ describe("plan-mode wiring", () => {
 
 	it("installs startup plan state before the first prompt can be stamped", async () => {
 		fake.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "plan", paused: false });
-		await fake.fireOne("session_start", {}, createFakeCtx({ cwd: stateDir }));
+		await fake.fireOne("session_start", {}, createFakeCtx({ cwd: stateDir, sessionManager: { getBranch: () => fake.branch } }));
 		expect(reminders.find((r) => r.key === "permission-mode")?.placement).toBe("sticky-append");
 	});
 
 	it("without a context yet (a session that starts in plan mode), before_agent_start installs the block", async () => {
 		fake.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "plan", paused: false });
 		expect(reminders).toHaveLength(0);
-		await fake.fireOne("before_agent_start", {}, createFakeCtx({ cwd: stateDir }));
+		await fake.fireOne("before_agent_start", {}, createFakeCtx({ cwd: stateDir, sessionManager: { getBranch: () => fake.branch } }));
 		expect(reminders.find((r) => r.key === "permission-mode")?.placement).toBe("sticky-append");
 	});
 });
@@ -126,7 +126,7 @@ describe("exit_plan_mode and the mode before planning (PERMISSIONS-REVIEW-2026-0
 		});
 
 	it("headless: refuses to leave plan mode and points at the plan file (the model used to exit by itself)", async () => {
-		const ctx = createFakeCtx({ cwd: stateDir, hasUI: false });
+		const ctx = createFakeCtx({ cwd: stateDir, sessionManager: { getBranch: () => fake.branch }, hasUI: false });
 		await fake.fireOne("session_start", {}, ctx);
 		const planFile = await enterPlanWithPlanText(ctx);
 		modeRequests.length = 0;
@@ -147,6 +147,7 @@ describe("exit_plan_mode and the mode before planning (PERMISSIONS-REVIEW-2026-0
 		const offered: string[][] = [];
 		const ctx = createFakeCtx({
 			cwd: stateDir,
+			sessionManager: { getBranch: () => fake.branch },
 			hasUI: true,
 			modelRegistry: { getAvailable: () => [{ provider: "anthropic", id: "claude-haiku" }] },
 			ui: { custom: confirmPreselected(offered) },
@@ -172,7 +173,7 @@ describe("exit_plan_mode and the mode before planning (PERMISSIONS-REVIEW-2026-0
 
 	it("a session that STARTED in plan mode has no pre-plan mode: the fixed list, manual approvals pre-selected", async () => {
 		const offered: string[][] = [];
-		const ctx = createFakeCtx({ cwd: stateDir, hasUI: true, modelRegistry: { getAvailable: () => [] }, ui: { custom: confirmPreselected(offered) } });
+		const ctx = createFakeCtx({ cwd: stateDir, sessionManager: { getBranch: () => fake.branch }, hasUI: true, modelRegistry: { getAvailable: () => [] }, ui: { custom: confirmPreselected(offered) } });
 		await fake.fireOne("session_start", {}, ctx);
 		await enterPlanWithPlanText(ctx); // the first status seen is plan itself
 		modeRequests.length = 0;
@@ -195,7 +196,7 @@ describe("exit_plan_mode and the mode before planning (PERMISSIONS-REVIEW-2026-0
 
 	it("keep planning asks what to change and sends the words back; the turn goes on in plan mode", async () => {
 		const input = vi.fn(async () => "name it greet.txt instead");
-		const ctx = createFakeCtx({ cwd: stateDir, hasUI: true, modelRegistry: { getAvailable: () => [] }, ui: { custom: pressEach(["3"]), input } });
+		const ctx = createFakeCtx({ cwd: stateDir, sessionManager: { getBranch: () => fake.branch }, hasUI: true, modelRegistry: { getAvailable: () => [] }, ui: { custom: pressEach(["3"]), input } });
 		await fake.fireOne("session_start", {}, ctx);
 		await enterPlanWithPlanText(ctx);
 		modeRequests.length = 0;
@@ -212,7 +213,7 @@ describe("exit_plan_mode and the mode before planning (PERMISSIONS-REVIEW-2026-0
 
 	it("Esc on the approval rejects without words and stops the turn once the result is recorded", async () => {
 		const input = vi.fn(async () => "unused");
-		const ctx = createFakeCtx({ cwd: stateDir, hasUI: true, modelRegistry: { getAvailable: () => [] }, ui: { custom: pressEach(["\x1b"]), input } });
+		const ctx = createFakeCtx({ cwd: stateDir, sessionManager: { getBranch: () => fake.branch }, hasUI: true, modelRegistry: { getAvailable: () => [] }, ui: { custom: pressEach(["\x1b"]), input } });
 		await fake.fireOne("session_start", {}, ctx);
 		await enterPlanWithPlanText(ctx);
 		modeRequests.length = 0;
@@ -240,7 +241,7 @@ describe("exit_plan_mode and the mode before planning (PERMISSIONS-REVIEW-2026-0
 					controller.abort();
 				}),
 		);
-		const ctx = createFakeCtx({ cwd: stateDir, hasUI: true, modelRegistry: { getAvailable: () => [] }, ui: { custom } });
+		const ctx = createFakeCtx({ cwd: stateDir, sessionManager: { getBranch: () => fake.branch }, hasUI: true, modelRegistry: { getAvailable: () => [] }, ui: { custom } });
 		await fake.fireOne("session_start", {}, ctx);
 		await enterPlanWithPlanText(ctx);
 		modeRequests.length = 0;
@@ -251,7 +252,7 @@ describe("exit_plan_mode and the mode before planning (PERMISSIONS-REVIEW-2026-0
 
 	it("a blank keep-planning answer reopens the approval", async () => {
 		const custom = pressEach(["3", "2"]);
-		const ctx = createFakeCtx({ cwd: stateDir, hasUI: true, modelRegistry: { getAvailable: () => [] }, ui: { custom, input: vi.fn(async () => "") } });
+		const ctx = createFakeCtx({ cwd: stateDir, sessionManager: { getBranch: () => fake.branch }, hasUI: true, modelRegistry: { getAvailable: () => [] }, ui: { custom, input: vi.fn(async () => "") } });
 		await fake.fireOne("session_start", {}, ctx);
 		await enterPlanWithPlanText(ctx);
 		modeRequests.length = 0;
@@ -275,7 +276,7 @@ describe("exit_plan_mode and the mode before planning (PERMISSIONS-REVIEW-2026-0
 			component.handleInput("\r");
 			return picked;
 		});
-		const ctx = createFakeCtx({ cwd: stateDir, hasUI: true, modelRegistry: { getAvailable: () => [] }, ui: { custom } });
+		const ctx = createFakeCtx({ cwd: stateDir, sessionManager: { getBranch: () => fake.branch }, hasUI: true, modelRegistry: { getAvailable: () => [] }, ui: { custom } });
 		await fake.fireOne("session_start", {}, ctx);
 		await enterPlanWithPlanText(ctx);
 		await fake.tools.get("exit_plan_mode")!.execute("t5", {}, undefined, undefined, ctx);

@@ -86,6 +86,7 @@ describe("RPC tool dialog cancellation", () => {
 		const shown = new Promise<void>((resolve) => { opened = resolve; });
 		const ctx = createFakeCtx({
 			cwd: root, mode: "rpc", hasUI: true, signal: abort.signal,
+			sessionManager: { getBranch: () => fake.branch },
 			modelRegistry: { getAvailable: () => [] },
 			ui: { select: (_title: string, _rows: string[], options?: { signal?: AbortSignal }) => { opened(); return rpcDialog(options); } },
 		});

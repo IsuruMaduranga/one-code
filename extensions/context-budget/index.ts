@@ -22,7 +22,8 @@
  *
  * A turn starts at the first `agent_start` after a settle (whoever opened it: a
  * prompt or a harness notification) and its baseline is pi's context estimate
- * at that moment. CC_TOTAL_TOKENS=0 turns all three off.
+ * at that moment; a compaction rebases it (budget.ts). CC_TOTAL_TOKENS=0 turns
+ * all three off.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -65,6 +66,12 @@ export default function contextBudgetExtension(pi: ExtensionAPI) {
 	});
 	pi.on("agent_settled", () => {
 		busy = false;
+	});
+	// A compaction (an auto one mid-turn, an overflow retry) drops the context
+	// below the turn's baseline; pi knows its new size only after the next reply,
+	// so the first size it reports becomes the baseline.
+	pi.on("session_compact", (_event, ctx) => {
+		budget.rebase(ctx.getContextUsage()?.tokens);
 	});
 
 	pi.on("tool_result", (event, ctx) => {

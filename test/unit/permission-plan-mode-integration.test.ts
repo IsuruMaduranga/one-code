@@ -55,7 +55,7 @@ describe("permission mode cycle with plan-mode mounted", () => {
 		const ctx = createFakeCtx({
 			cwd: stateDir,
 			modelRegistry: { getAvailable: () => [] },
-			sessionManager: { getSessionId: () => "s1", getSessionDir: () => stateDir, getBranch: () => [] },
+			sessionManager: { getSessionId: () => "s1", getSessionDir: () => stateDir, getBranch: () => fake.branch },
 		});
 		await fake.fire("session_start", {}, ctx);
 		await fake.tools.get("enter_plan_mode")!.execute("enter-plan", {}, undefined, undefined, ctx);
@@ -70,7 +70,7 @@ describe("permission mode cycle with plan-mode mounted", () => {
 			cwd: stateDir,
 			hasUI: true,
 			modelRegistry: { getAvailable: () => [{ provider: "anthropic", id: "claude-haiku" }] },
-			sessionManager: { getSessionId: () => "s1", getSessionDir: () => stateDir, getBranch: () => [] },
+			sessionManager: { getSessionId: () => "s1", getSessionDir: () => stateDir, getBranch: () => fake.branch },
 			ui: { custom: async () => 1 }, // auto follows the pre-plan bypass mode
 		});
 		await fake.fire("session_start", {}, ctx);
@@ -90,7 +90,7 @@ describe("permission mode cycle with plan-mode mounted", () => {
 		const ctx = createFakeCtx({
 			cwd: stateDir,
 			modelRegistry: { getAvailable: () => [{ provider: "anthropic", id: "claude-haiku" }] },
-			sessionManager: { getSessionId: () => "s1", getSessionDir: () => stateDir, getBranch: () => [] },
+			sessionManager: { getSessionId: () => "s1", getSessionDir: () => stateDir, getBranch: () => fake.branch },
 		});
 		await fake.fire("session_start", {}, ctx);
 		fake.events.emit(MODE_CHANNEL, { mode: from });
@@ -105,7 +105,7 @@ describe("permission mode cycle with plan-mode mounted", () => {
 		const ctx = createFakeCtx({
 			cwd: stateDir,
 			modelRegistry: { getAvailable: () => [] },
-			sessionManager: { getSessionId: () => "s1", getSessionDir: () => stateDir, getBranch: () => [] },
+			sessionManager: { getSessionId: () => "s1", getSessionDir: () => stateDir, getBranch: () => fake.branch },
 		});
 		await fake.fire("session_start", {}, ctx);
 		fake.events.emit(MODE_CHANNEL, { mode: "plan" });
@@ -120,7 +120,7 @@ describe("permission mode cycle with plan-mode mounted", () => {
 			cwd: stateDir,
 			modelRegistry: { getAvailable: () => [{ provider: "anthropic", id: "claude-haiku", cost: { input: 1, output: 1 } }] },
 			model: { provider: "anthropic", id: "claude-sonnet", cost: { input: 3, output: 15 } },
-			sessionManager: { getSessionId: () => "s1", getSessionDir: () => stateDir, getBranch: () => [] },
+			sessionManager: { getSessionId: () => "s1", getSessionDir: () => stateDir, getBranch: () => fake.branch },
 			hasUI: true,
 		});
 		await fake.fire("session_start", {}, ctx);
@@ -142,5 +142,110 @@ describe("permission mode cycle with plan-mode mounted", () => {
 		const oneShots = outbox().filter((entry) => entry.key === "permission-mode-change");
 		expect(oneShots).toHaveLength(1);
 		expect(oneShots[0].text).toContain('now "plan"');
+	});
+});
+
+describe("plan mode follows the branch across /tree (permissions' session_tree runs first)", () => {
+	type Entry = { type: string; id: string; parentId: string | null; customType?: string; data?: unknown };
+	let fake: FakePi;
+	let stateDir: string;
+	let branch: Entry[];
+	const reminders: ReminderPayload[] = [];
+	const modeRequests: Array<{ mode?: string }> = [];
+
+	beforeEach(() => {
+		stateDir = mkdtempSync(join(tmpdir(), "plan-tree-"));
+		vi.stubEnv("ONECODE_STATE_DIR", stateDir);
+		fake = createFakePi();
+		branch = [];
+		reminders.length = 0;
+		// A session tree: appends extend the current branch, a /tree swaps it.
+		let next = 0;
+		fake.pi.appendEntry = (customType: string, data?: unknown) => {
+			branch = [...branch, { type: "custom", id: `e${++next}`, parentId: branch.at(-1)?.id ?? null, customType, data }];
+		};
+		fake.events.on(REMINDER_CHANNEL, (data) => reminders.push(data as ReminderPayload));
+		permissionsExtension(fake.pi as never);
+		planModeExtension(fake.pi as never);
+		fake.events.on(MODE_CHANNEL, (data) => modeRequests.push(data as { mode?: string }));
+	});
+	afterEach(() => {
+		vi.unstubAllEnvs();
+		rmSync(stateDir, { recursive: true, force: true });
+	});
+
+	it("keeps the selected branch's plan file, its entry-time wording and the mode it entered plan mode from", async () => {
+		const ctx = createFakeCtx({
+			cwd: stateDir,
+			hasUI: true,
+			modelRegistry: { getAvailable: () => [{ provider: "anthropic", id: "claude-haiku" }] },
+			sessionManager: { getSessionId: () => "s1", getSessionDir: () => stateDir, getBranch: () => branch },
+			ui: { custom: async () => 0 }, // the first choice
+		});
+		const tree = async (to: Entry[]) => {
+			branch = to;
+			await fake.fire("session_tree", {}, ctx);
+		};
+		const standing = () => reminders.filter((r) => r.key === "permission-mode" && !r.remove && r.placement === "sticky-append").at(-1)?.text ?? "";
+		await fake.fire("session_start", {}, ctx);
+		fake.events.emit(MODE_CHANNEL, { mode: "acceptEdits" });
+		const root = branch;
+
+		// Branch B: plan mode entered from acceptEdits, the plan not written yet.
+		fake.events.emit(MODE_CHANNEL, { mode: "plan" });
+		const planB = /at (\S+\.md)/.exec(standing())![1];
+		expect(standing()).toContain("No plan file exists yet");
+		const leafB = branch;
+
+		// Branch A: back before B, plan mode from default (a plan file of its own), then out to default.
+		await tree(root);
+		fake.events.emit(MODE_CHANNEL, { mode: "default" });
+		fake.events.emit(MODE_CHANNEL, { mode: "plan" });
+		const planA = /at (\S+\.md)/.exec(standing())![1];
+		expect(planA).not.toBe(planB);
+		fake.events.emit(MODE_CHANNEL, { mode: "default" });
+
+		// The model writes B's plan on disk since; then /tree back to B's leaf.
+		mkdirSync(join(stateDir, "plans"), { recursive: true });
+		writeFileSync(planB, "# Plan B\n1. Do it.\n");
+		await tree(leafB);
+
+		expect(standing()).toContain(planB);
+		// The run on B began with no plan file: its block keeps that wording.
+		expect(standing()).toContain("No plan file exists yet");
+		const entryStates = branch.filter((e) => e.customType === "one-code:state" && (e.data as { key?: string }).key === "plan-mode:entry");
+		expect(JSON.stringify(entryStates)).not.toContain(planA);
+
+		// The approval offers B's mode before planning, acceptEdits, first.
+		modeRequests.length = 0;
+		await fake.tools.get("exit_plan_mode")!.execute("approve", {}, undefined, undefined, ctx);
+		expect(modeRequests).toEqual([{ mode: "acceptEdits", toolCallId: "approve" }]);
+	});
+
+	it("restores the mode before planning after a /reload inside the run", async () => {
+		const ctx = createFakeCtx({
+			cwd: stateDir,
+			hasUI: true,
+			modelRegistry: { getAvailable: () => [{ provider: "anthropic", id: "claude-haiku" }] },
+			sessionManager: { getSessionId: () => "s1", getSessionDir: () => stateDir, getBranch: () => branch },
+			ui: { custom: async () => 0 },
+		});
+		await fake.fire("session_start", {}, ctx);
+		fake.events.emit(MODE_CHANNEL, { mode: "acceptEdits" });
+		fake.events.emit(MODE_CHANNEL, { mode: "plan" });
+		const plan = /at (\S+\.md)/.exec(reminders.filter((r) => r.key === "permission-mode" && r.text).at(-1)!.text!)![1];
+		mkdirSync(join(stateDir, "plans"), { recursive: true });
+		writeFileSync(plan, "# Plan\n1. Do it.\n");
+
+		// /reload: fresh instances on the same branch, which says plan mode.
+		const reloaded = createFakePi();
+		reloaded.pi.appendEntry = fake.pi.appendEntry;
+		const requests: Array<{ mode?: string }> = [];
+		permissionsExtension(reloaded.pi as never);
+		planModeExtension(reloaded.pi as never);
+		reloaded.events.on(MODE_CHANNEL, (data) => requests.push(data as { mode?: string }));
+		await reloaded.fire("session_start", { reason: "reload" }, ctx);
+		await reloaded.tools.get("exit_plan_mode")!.execute("approve", {}, undefined, undefined, ctx);
+		expect(requests).toEqual([{ mode: "acceptEdits", toolCallId: "approve" }]);
 	});
 });

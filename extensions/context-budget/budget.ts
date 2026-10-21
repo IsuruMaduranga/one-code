@@ -32,17 +32,31 @@ function finite(n: number | null | undefined): number | undefined {
  * from; `left` takes the size now and returns what remains of the budget. The
  * value never rises within a turn (as CC's does not), the first known size
  * becomes the baseline when the turn started without an estimate, and an
- * unknown size repeats the last value.
+ * unknown size repeats the last value. A compaction inside the turn shrinks
+ * the context below the baseline, so `rebase` measures growth from the
+ * smaller context on top of what the turn had already spent; without it the
+ * countdown stood still until the context regrew past the turn's start.
  */
 export class TurnBudget {
 	private start: number | undefined;
+	/** Spent since `start`. */
 	private spent = 0;
+	/** Spent before the last rebase. */
+	private banked = 0;
 
 	constructor(readonly budget: number) {}
 
 	startTurn(contextTokens: number | null | undefined): void {
 		this.start = finite(contextTokens);
 		this.spent = 0;
+		this.banked = 0;
+	}
+
+	/** Measure from `contextTokens` (or the next known size) on, keeping what the turn spent so far. */
+	rebase(contextTokens: number | null | undefined): void {
+		this.banked += this.spent;
+		this.spent = 0;
+		this.start = finite(contextTokens);
 	}
 
 	left(contextTokens: number | null | undefined): number {
@@ -51,7 +65,7 @@ export class TurnBudget {
 			if (this.start === undefined) this.start = now;
 			this.spent = Math.max(this.spent, now - this.start);
 		}
-		return Math.max(0, this.budget - this.spent);
+		return Math.max(0, this.budget - this.banked - this.spent);
 	}
 }
 

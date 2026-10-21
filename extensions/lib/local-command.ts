@@ -65,6 +65,12 @@ export interface LocalCommand {
 	args?: string;
 	/** The command's printed result; "" (the default) is what `/clear` shows. */
 	stdout?: string;
+	/**
+	 * Keys the breadcrumb's pending entries (`<key>:caveat`, `<key>:command`,
+	 * `<key>:stdout`), so a later announcement under the same key replaces an
+	 * undelivered one instead of joining it.
+	 */
+	key?: string;
 }
 
 /** CC's `formatCommandInputTags` — the command breadcrumb, indentation included. */
@@ -76,6 +82,9 @@ export function commandInputBlock(name: string, args = ""): string {
 export function commandStdoutBlock(stdout = ""): string {
 	return `<local-command-stdout>${escapeXml(stdout)}</local-command-stdout>\n`;
 }
+
+/** The pending-entry key suffix of each block, in `localCommandBlocks` order. */
+const BLOCK_KEYS = ["caveat", "command", "stdout"] as const;
 
 /** The three bare text blocks a local command leaves for the model, in CC's order. */
 export function localCommandBlocks(command: LocalCommand): string[] {
@@ -92,7 +101,13 @@ export function announceLocalCommand(pi: ReminderEmitter, command: LocalCommand)
 	localCommandBlocks(command).forEach((text, index) => {
 		// The caveat heads a RUN of commands: a second command before the next
 		// prompt joins the first caveat instead of repeating it.
-		const payload: ReminderPayload = { text, placement: "user-prepend", raw: true, ...(index === 0 ? { once: true } : {}) };
+		const payload: ReminderPayload = {
+			text,
+			placement: "user-prepend",
+			raw: true,
+			...(index === 0 ? { once: true } : {}),
+			...(command.key ? { key: `${command.key}:${BLOCK_KEYS[index]}` } : {}),
+		};
 		pi.events.emit(REMINDER_CHANNEL, payload);
 	});
 }

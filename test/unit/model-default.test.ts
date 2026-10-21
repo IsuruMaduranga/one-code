@@ -1,8 +1,11 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { foldBranch } from "../../extensions/lib/ledger/fold.ts";
 import modelDefaultExtension, { applyDefaultModel, PERSIST_DEBOUNCE_MS } from "../../extensions/model-default/index.ts";
+import systemReminderExtension from "../../extensions/system-reminder/index.ts";
+import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 describe("applyDefaultModel", () => {
 	it("sets the default model while preserving every other key", () => {
@@ -46,15 +49,17 @@ describe("modelDefaultExtension", () => {
 		return { select, read, shutdown: () => handlers.get("session_shutdown")?.({}, ctx), startRun: () => handlers.get("before_agent_start")?.({}, ctx), dir, emitted };
 	}
 
-	it("announces the settled switch to the model as Claude Code's /model breadcrumb, once", () => {
+	it("announces each switch as Claude Code's /model breadcrumb, keyed so the next switch replaces it", () => {
 		vi.useFakeTimers();
 		const { select, emitted } = mount();
 		select("anthropic", "claude-haiku-4-5", "Claude Haiku 4.5");
 		select("anthropic", "claude-sonnet-5", "Claude Sonnet 5");
 		vi.advanceTimersByTime(PERSIST_DEBOUNCE_MS);
-		expect(emitted.map((e) => e.placement)).toEqual(["user-prepend", "user-prepend", "user-prepend"]);
-		expect(emitted[1].text).toBe("<command-name>/model</command-name>\n            <command-message>model</command-message>\n            <command-args></command-args>\n");
-		expect(emitted[2].text).toBe(
+		const keys = ["local-command:model:caveat", "local-command:model:command", "local-command:model:stdout"];
+		expect(emitted.map((e) => (e as { key?: string }).key)).toEqual([...keys, ...keys]);
+		expect(emitted.map((e) => e.placement)).toEqual(Array(6).fill("user-prepend"));
+		expect(emitted[4].text).toBe("<command-name>/model</command-name>\n            <command-message>model</command-message>\n            <command-args></command-args>\n");
+		expect(emitted[5].text).toBe(
 			"<local-command-stdout>Set model to `Claude Sonnet 5` and saved as your default for new sessions</local-command-stdout>\n",
 		);
 	});
@@ -87,5 +92,61 @@ describe("modelDefaultExtension", () => {
 		select("anthropic", "z");
 		shutdown();
 		expect(read()).toMatchObject({ defaultProvider: "anthropic", defaultModel: "z" });
+	});
+});
+
+describe("modelDefaultExtension with system-reminder (the breadcrumb reaches the branch)", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.unstubAllEnvs();
+	});
+
+	/** Both extensions in package.json's order (system-reminder loads first), on one branch. */
+	async function mountWired() {
+		const dir = mkdtempSync(join(tmpdir(), "onecode-model-default-wired-"));
+		vi.stubEnv("PI_CODING_AGENT_DIR", dir);
+		const fake = createFakePi();
+		systemReminderExtension(fake.pi as never);
+		modelDefaultExtension(fake.pi as never);
+		const ctx = createFakeCtx({ sessionManager: { getSessionId: () => "s", getBranch: () => fake.branch } });
+		await fake.fire("session_start", {}, ctx);
+		const select = (provider: string, id: string, name?: string) => fake.fire("model_select", { model: { provider, id, name } }, ctx);
+		const pendingTexts = () => foldBranch(fake.branch as never).pending.map((item) => item.text);
+		return { fake, ctx, select, pendingTexts, dir };
+	}
+
+	it("keeps a switch chosen right before a quit or /reload: system-reminder stops persisting first", async () => {
+		vi.useFakeTimers();
+		const { fake, ctx, select, pendingTexts } = await mountWired();
+		await select("anthropic", "claude-sonnet-5", "Claude Sonnet 5");
+		await fake.fire("session_shutdown", { reason: "reload" }, ctx);
+		vi.advanceTimersByTime(PERSIST_DEBOUNCE_MS);
+		expect(pendingTexts().filter((text) => text.includes("Set model to"))).toEqual([
+			"<local-command-stdout>Set model to `Claude Sonnet 5` and saved as your default for new sessions</local-command-stdout>\n",
+		]);
+	});
+
+	it("leaves one breadcrumb on the branch for a ctrl+p cycle, naming the model it settled on", async () => {
+		vi.useFakeTimers();
+		const { select, pendingTexts } = await mountWired();
+		await select("anthropic", "a", "Model A");
+		await select("anthropic", "b", "Model B");
+		await select("openai", "c", "Model C");
+		vi.advanceTimersByTime(PERSIST_DEBOUNCE_MS);
+		const texts = pendingTexts();
+		expect(texts.filter((text) => text.startsWith("<local-command-caveat>"))).toHaveLength(1);
+		expect(texts.filter((text) => text.startsWith("<command-name>/model"))).toHaveLength(1);
+		expect(texts.filter((text) => text.includes("Set model to"))).toEqual([
+			"<local-command-stdout>Set model to `Model C` and saved as your default for new sessions</local-command-stdout>\n",
+		]);
+	});
+
+	it("drops the saved claim when the settings file cannot take the write", async () => {
+		vi.useFakeTimers();
+		const { select, pendingTexts, dir } = await mountWired();
+		writeFileSync(join(dir, "settings.json"), "{ not json");
+		await select("anthropic", "a", "Model A");
+		vi.advanceTimersByTime(PERSIST_DEBOUNCE_MS);
+		expect(pendingTexts().filter((text) => text.includes("Set model to"))).toEqual(["<local-command-stdout>Set model to `Model A`</local-command-stdout>\n"]);
 	});
 });

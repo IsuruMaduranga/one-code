@@ -71,20 +71,22 @@ function inlineReference(kind: "btw" | "recap" | "reader", model: Model<Api>): [
 	return [{ ...model, baseUrl: auth.baseUrl } as Model<Api>, options];
 }
 
-function baseCtx(model: Model<Api>) {
-	return createFakeCtx({
-		mode: "rpc",
-		hasUI: true,
-		model,
-		sessionManager: { getSessionId: () => SESSION, getBranch: () => [] },
-		modelRegistry: { getAvailable: () => [model], getApiKeyAndHeaders: async () => auth },
-	});
-}
-
 const history = [
 	{ role: "user", content: "Earlier question about the build.", timestamp: 1 },
 	{ role: "assistant", content: [{ type: "text", text: "Earlier answer: run the tests first." }], api: "anthropic-messages", provider: "anthropic", model: "claude-wire", usage: {}, stopReason: "stop", timestamp: 2 },
 ];
+
+/** The session's branch holds `history`; the standalone side calls read it from there. */
+function baseCtx(model: Model<Api>) {
+	const branch = history.map((message, index) => ({ type: "message", id: `m${index}`, parentId: index === 0 ? null : `m${index - 1}`, message }));
+	return createFakeCtx({
+		mode: "rpc",
+		hasUI: true,
+		model,
+		sessionManager: { getSessionId: () => SESSION, getBranch: () => branch },
+		modelRegistry: { getAvailable: () => [model], getApiKeyAndHeaders: async () => auth },
+	});
+}
 
 async function drive(kind: "btw" | "recap" | "reader", model: Model<Api>): Promise<void> {
 	const fake = createFakePi();

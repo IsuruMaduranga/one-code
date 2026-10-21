@@ -121,3 +121,29 @@ describe("/btw in RPC", () => {
 		expect(t.ui.notify).not.toHaveBeenCalled();
 	});
 });
+
+describe("/btw's standalone context follows the current branch", () => {
+	it("answers from the branch /tree selected, not the messages the last request carried", async () => {
+		const fake = createFakePi();
+		btwExtension(fake.pi as never);
+		const apple = { role: "user", content: "Remember APPLE", timestamp: 1 };
+		const banana = { role: "user", content: "Now remember BANANA", timestamp: 2 };
+		let branchMessages: unknown[] = [apple, banana];
+		const ctx = createFakeCtx({
+			mode: "rpc",
+			hasUI: true,
+			model: { api: "anthropic-messages", provider: "anthropic", id: "test" },
+			modelRegistry: { getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test" }) },
+			sessionManager: { getSessionId: () => "s", getBranch: () => [], buildSessionProjection: () => ({ messages: branchMessages }) },
+		});
+		await fake.fire("session_start", {}, ctx);
+		await fake.fire("context", { messages: [apple, banana] }, ctx);
+		// /tree back to before the BANANA prompt: pi fires no context event.
+		branchMessages = [apple];
+		complete.mockResolvedValue(answer("APPLE."));
+		await fake.commands.get("btw")!.handler("Which word did I ask you to remember last?", ctx);
+		const sent = JSON.stringify(complete.mock.calls[0]?.[1].messages);
+		expect(sent).toContain("Remember APPLE");
+		expect(sent).not.toContain("BANANA");
+	});
+});

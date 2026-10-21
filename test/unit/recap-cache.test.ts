@@ -28,6 +28,7 @@ afterEach(() => {
 async function scheduleRecap(model = { api: "anthropic-messages", provider: "anthropic", id: "test" }) {
 	const fake = createFakePi();
 	recapExtension(fake.pi as never);
+	const earlier = { role: "user", content: "Earlier conversation.", timestamp: 1 };
 	const ctx = createFakeCtx({
 		hasUI: true,
 		model,
@@ -35,9 +36,10 @@ async function scheduleRecap(model = { api: "anthropic-messages", provider: "ant
 			getAvailable: () => [model],
 			getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test" }),
 		},
+		sessionManager: { getBranch: () => [{ type: "message", id: "m1", parentId: null, message: earlier }] },
 	});
 	await fake.fire("session_start", {}, ctx);
-	await fake.fire("context", { messages: [{ role: "user", content: "Earlier conversation.", timestamp: 1 }] }, ctx);
+	await fake.fire("context", { messages: [earlier] }, ctx);
 	await fake.fire("agent_settled", {}, ctx);
 	await vi.advanceTimersByTimeAsync(1000);
 	await vi.waitFor(() => expect(complete).toHaveBeenCalled());
@@ -92,5 +94,33 @@ describe("standalone recap cache wiring", () => {
 		for (const [, , options] of complete.mock.calls) expect(options?.sessionId).toBe("fake-session:recap");
 		expect(logSideCall).toHaveBeenCalledTimes(2);
 		expect(logSideCall).toHaveBeenNthCalledWith(1, expect.objectContaining({ kind: "recap", sessionId: "fake-session:recap" }), expect.objectContaining({ stopReason: "error" }));
+	});
+});
+
+describe("the standalone recap follows the current branch", () => {
+	it("summarizes the branch /tree selected, not the messages the last request carried", async () => {
+		complete.mockResolvedValue(answer("A recap."));
+		const model = { api: "anthropic-messages", provider: "anthropic", id: "test" };
+		const fake = createFakePi();
+		recapExtension(fake.pi as never);
+		const apple = { role: "user", content: "Remember APPLE", timestamp: 1 };
+		const banana = { role: "user", content: "Now remember BANANA", timestamp: 2 };
+		let branchMessages: unknown[] = [apple, banana];
+		const ctx = createFakeCtx({
+			hasUI: true,
+			model,
+			modelRegistry: { getAvailable: () => [model], getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test" }) },
+			sessionManager: { getSessionId: () => "s", getBranch: () => [], buildSessionProjection: () => ({ messages: branchMessages }) },
+		});
+		await fake.fire("session_start", {}, ctx);
+		await fake.fire("context", { messages: [apple, banana] }, ctx);
+		await fake.fire("agent_settled", {}, ctx);
+		// /tree back to before the BANANA prompt while the idle timer runs: pi fires no context event.
+		branchMessages = [apple];
+		await vi.advanceTimersByTimeAsync(1000);
+		await vi.waitFor(() => expect(complete).toHaveBeenCalled());
+		const sent = JSON.stringify(complete.mock.calls[0]?.[1].messages);
+		expect(sent).toContain("Remember APPLE");
+		expect(sent).not.toContain("BANANA");
 	});
 });

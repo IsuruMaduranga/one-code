@@ -27,6 +27,17 @@ export function toolStubs(names: readonly string[], reason = "Unavailable for th
 }
 
 /**
+ * The messages the current branch holds, as pi builds a request from them
+ * (compaction-aware), read when the side call runs. A copy kept from the last
+ * `context` event goes stale at a `/tree` or a compaction, which fire no
+ * `context` event, and the fallback then answered from the abandoned branch or
+ * the whole pre-compaction history.
+ */
+export function branchMessages<M>(ctx: { sessionManager: { buildSessionProjection(): { messages: M[] } } }): M[] {
+	return ctx.sessionManager.buildSessionProjection().messages;
+}
+
+/**
  * Trim a message history forward to the first clean turn boundary — a `user`
  * prompt or an `assistant` reply. A raw history can begin mid-exchange with a
  * leading `tool_result` message whose matching `assistant` `tool_use` is absent,
