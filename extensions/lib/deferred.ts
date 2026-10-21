@@ -57,15 +57,24 @@ export function queryDeferred(events: { emit(channel: string, data: unknown): vo
 }
 
 /**
- * An inline child extension that defers, at load, the parent's deferral of each
- * tool injected into the child (`injected`: the shared MCP tools, the cron
- * tools), whose owners run only in the parent. A tool the child's own
- * extensions own stays theirs to defer or withhold per the child's model.
+ * The tools a child gets from its parent rather than its own extensions: the
+ * shared MCP tools (`mcp__*`, which no child extension owns) and `extra`, the
+ * ones the caller injects by name (the spawn and cron tools).
  */
-export function deferLikeParentExtension(parentDeferred: readonly DeferRequest[], injected: Iterable<string>) {
-	const names = new Set(injected);
+export function injectedByParent(extra: readonly { name: string }[]): (name: string) => boolean {
+	const names = new Set(extra.map((tool) => tool.name));
+	return (name) => name.startsWith("mcp__") || names.has(name);
+}
+
+/**
+ * An inline child extension that defers, at load, the parent's deferral of each
+ * tool `injected` names, whose owners run only in the parent. A tool the
+ * child's own extensions own stays theirs to defer or withhold per the child's
+ * model.
+ */
+export function deferLikeParentExtension(parentDeferred: readonly DeferRequest[], injected: (name: string) => boolean) {
 	return (pi: { events: { emit(channel: string, data: unknown): void } }) => {
-		for (const request of parentDeferred) if (names.has(request.name)) pi.events.emit(DEFER_CHANNEL, request);
+		for (const request of parentDeferred) if (injected(request.name)) pi.events.emit(DEFER_CHANNEL, request);
 	};
 }
 
@@ -143,9 +152,6 @@ export function deferredAddendumText(added: readonly string[]): string {
 export function deferredRemovedText(removed: readonly string[]): string {
 	return ["The following deferred tools are no longer available. tool_search cannot load them and calls to them fail; do not use them:", ...removed].join("\n");
 }
-
-/** The told mode that a deferred tool was announced gone (`<prefix><name>`); a later addendum turns it off. */
-export const REMOVED_TOOL_MODE = "tool-removed:";
 
 /** The loader every deferred tool sits behind. */
 export const TOOL_SEARCH = "tool_search";

@@ -79,8 +79,12 @@ export interface RequestRecordData extends RecordBase {
 }
 
 export type ToldFact =
-	/** `callable`: announced by a `tool_addition` the model may call at once, not only listed for tool_search. */
-	| { kind: "tools"; names: string[]; callable?: boolean }
+	/**
+	 * `callable`: announced by a `tool_addition` the model may call at once, not
+	 * only listed for tool_search. `removed`: announced gone, so the epoch no
+	 * longer holds them told.
+	 */
+	| { kind: "tools"; names: string[]; callable?: boolean; removed?: boolean }
 	| { kind: "skills"; names: string[] }
 	| { kind: "mode"; key: string; on: boolean }
 	/** A whole-text block (a menu, a catalog): the content hash of the text last told under `key`. */
@@ -160,7 +164,7 @@ function isToldFact(fact: unknown): boolean {
 	if (!isObject(fact)) return false;
 	switch (fact.kind) {
 		case "tools":
-			return isStrings(fact.names) && (fact.callable === undefined || typeof fact.callable === "boolean");
+			return isStrings(fact.names) && (fact.callable === undefined || typeof fact.callable === "boolean") && (fact.removed === undefined || typeof fact.removed === "boolean");
 		case "skills":
 			return isStrings(fact.names);
 		case "mode":

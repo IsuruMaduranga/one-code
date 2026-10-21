@@ -52,14 +52,13 @@ import {
 	DEFERRED_QUERY_CHANNEL,
 	type DeferredQuery,
 	deferredRemovedText,
-	REMOVED_TOOL_MODE,
 	withheldMissReminderText,
 } from "../lib/deferred.ts";
 import { looksLikeAnthropicRequest, MID_CONVERSATION_SYSTEM_BETA, withBetas } from "../lib/anthropic-payload.ts";
 import { liftAddenda, supportsToolAdditions, TOOL_ADDITION_BETAS, withToolAdditions } from "../lib/tool-additions.ts";
 import { inContextEntries } from "../lib/compaction-boundary.ts";
 import { CALLABLE_TOOLS, foldBranch } from "../lib/ledger/fold.ts";
-import { eagerToolNames } from "../lib/ledger/wire.ts";
+import { declaredToolNames } from "../lib/ledger/wire.ts";
 import { MCP_TOOLS_CHANNEL } from "../lib/mcp-share.ts";
 import { requestIdentity } from "../lib/anthropic-auth.ts";
 import type { EntryLike } from "../lib/ledger/records.ts";
@@ -94,9 +93,8 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	 */
 	let epochAt: { at: string; opens: boolean } | undefined;
 	const opensEpoch = (branch: EntryLike[], model: { provider?: string; api?: string; id?: string } | undefined): boolean => {
-		const identity = model?.provider && model.api && model.id ? requestIdentity({ provider: model.provider, api: model.api, id: model.id }) : undefined;
-		const at = JSON.stringify([branch.length, branch.at(-1)?.id, identity]);
-		if (epochAt?.at !== at) epochAt = { at, opens: foldBranch(branch, identity).opensEpoch };
+		const at = `${branch.length}\0${branch.at(-1)?.id}\0${model?.provider}/${model?.api}/${model?.id}`;
+		if (epochAt?.at !== at) epochAt = { at, opens: foldBranch(branch, requestIdentity(model)).opensEpoch };
 		return epochAt.opens;
 	};
 	/** The session's model, for a decision made outside a hook that carries one. */
@@ -170,28 +168,22 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 			}
 			return;
 		}
-		// A tool told gone and back since counts as new. One told and missing now
-		// is announced gone once its absence is known: this process saw it leave,
-		// or it is an MCP tool and the MCP connects have settled (a resume sends
-		// its first request before a slow server registers, and a fork never had
-		// the parent's own tools). A tool withdrawn for the model is not gone: a
-		// call to it says so.
-		const gone = (name: string) => request.modes.get(REMOVED_TOOL_MODE + name) === true;
+		// A tool told and missing now is announced gone once its absence is known
+		// (the fold then holds it untold, so a return is announced as new): this
+		// process saw it leave, or it is an MCP tool and the MCP connects have
+		// settled (a resume sends its first request before a slow server
+		// registers, and a fork never had the parent's own tools). A tool
+		// withdrawn for the model is not gone: a call to it says so.
 		const loadable = new Set(searchableTools().map((tool) => tool.name));
 		for (const name of loadable) seenHere.add(name);
 		const absent = (name: string) => seenHere.has(name) || (name.startsWith("mcp__") && mcpSettled);
-		const removed = [...told].filter((name) => !loadable.has(name) && !withheldNames.has(name) && !gone(name) && absent(name));
-		if (removed.length > 0) {
-			request.blocks.push({ text: deferredRemovedText(removed), facts: removed.map((name) => ({ kind: "mode" as const, key: REMOVED_TOOL_MODE + name, on: true })) });
-		}
-		const added = [...loadable].filter((name) => !told.has(name) || gone(name));
+		const removed = [...told].filter((name) => !loadable.has(name) && !withheldNames.has(name) && absent(name));
+		if (removed.length > 0) request.blocks.push({ text: deferredRemovedText(removed), facts: [{ kind: "tools", names: removed, removed: true }] });
+		const added = [...loadable].filter((name) => !told.has(name));
 		if (added.length === 0) return;
 		const callable = supportsToolAdditions(request.model);
 		if (callable) activate(added);
-		request.blocks.push({
-			text: deferredAddendumText(added),
-			facts: [{ kind: "tools", names: added, ...(callable ? { callable: true } : {}) }, ...added.filter(gone).map((name) => ({ kind: "mode" as const, key: REMOVED_TOOL_MODE + name, on: false }))],
-		});
+		request.blocks.push({ text: deferredAddendumText(added), facts: [{ kind: "tools", names: added, ...(callable ? { callable: true } : {}) }] });
 	});
 
 	/** The addenda the last `context` pass lifted off tool results, by call id (lib/tool-additions.ts). */
@@ -350,7 +342,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		const branch = (ctx?.sessionManager?.getBranch?.() ?? []) as EntryLike[];
 		const kept = inContextEntries(branch) as SessionEntry[];
 		const head = foldBranch(branch).lastRequest?.head;
-		const eager = head ? eagerToolNames(head) : new Set<string>();
+		const eager = head ? declaredToolNames(head, { eager: true }) : new Set<string>();
 		const redefer = new Set(toolsToRedefer([...loadedTools].filter((name) => deferredRegistry.has(name) && !eager.has(name)), kept));
 		loads = toolSearchLoads(kept);
 		for (const name of redefer) loadedTools.delete(name);

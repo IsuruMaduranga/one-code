@@ -58,8 +58,9 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 	let plan: RequestPlan | undefined;
 	/** One-shots emitted before the session started (an extension's load): persisted at session_start. */
 	let early: ReminderPayload[] | undefined = [];
-	/** Without the ledger (a test harness, a session that does not load it): the pending ids and sticky facts this instance delivered. */
+	/** Without the ledger (a test harness, a session that does not load it): the pending ids this instance delivered. */
 	const deliveredHere = new Set<string>();
+	/** Without the ledger: the sticky states' delivery facts this instance told (key to hash), in place of the fold's blocks. */
 	const toldHere = new Map<string, string>();
 
 	const persist = (payload: ReminderPayload) => {
@@ -124,10 +125,10 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 		const toldBlocks = epoch ? new Map<string, string>() : current ? fold.blocks : toldHere;
 		const sticky = live.stickyEntries().map((entry) => {
 			const fact = stickyFact(entry);
-			return { ...entry, delivered: toldBlocks.get(fact.key) === fact.hash };
+			return { ...entry, fact, delivered: toldBlocks.get(fact.key) === fact.hash };
 		});
 		const rendered = renderReminders(event.messages, { epoch, layout: layout !== undefined, stack, sticky, oneShots });
-		const stickyFacts = sticky.filter((entry) => !entry.delivered && rendered.stickyPlaced.includes(entry.key)).map(stickyFact);
+		const stickyFacts = sticky.filter((entry) => !entry.delivered && rendered.stickyPlaced.includes(entry.key)).map((entry) => entry.fact);
 
 		const consumed = rendered.placed.flatMap((shot) => (shot.id ? [shot.id] : []));
 		const facts = [

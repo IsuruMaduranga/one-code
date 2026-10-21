@@ -88,13 +88,16 @@ function payloadList(payload: WirePayload, api: string): unknown[] {
 
 /**
  * `payload` as the ledger records it: its list and head, markers stripped,
- * and their hashes. `prefix` is the recorded list and hashes the payload's
- * list starts with (a splice's), so only the rest is stripped and hashed.
+ * and their hashes. `prefix`: the payload's list starts with `base`'s first
+ * `end` elements (a splice's), so only the rest is stripped and hashed.
  */
-export function recordedRequest(payload: WirePayload, identity: RequestIdentity, prefix: { list: readonly unknown[]; hashes: readonly string[] } = { list: [], hashes: [] }): RecordedRequest {
-	const tail = stripMarkers(payloadList(payload, identity.api).slice(prefix.list.length));
+export function recordedRequest(payload: WirePayload, identity: RequestIdentity, prefix?: { base: RecordedRequest; end: number }): RecordedRequest {
+	const end = prefix?.end ?? 0;
+	const tail = stripMarkers(payloadList(payload, identity.api).slice(end));
 	const head = payloadHead(payload, identity.api);
-	return { identity, list: [...prefix.list, ...tail], head, hashes: [...prefix.hashes, ...tail.map(contentHash)], headHash: contentHash(head) };
+	const list = prefix ? prefix.base.list.slice(0, end).concat(tail) : tail;
+	const hashes = (prefix ? prefix.base.hashes.slice(0, end) : []).concat(tail.map(contentHash));
+	return { identity, list, head, hashes, headHash: contentHash(head) };
 }
 
 /**
@@ -170,11 +173,11 @@ export function declarationsOf(payload: WirePayload): unknown[] {
 	return [...(Array.isArray(payload.tools) ? payload.tools : []), ...(Array.isArray(toolConfig?.tools) ? toolConfig.tools : []), ...google];
 }
 
-/** The tools a payload or head declares eagerly: by name, every declaration not marked `defer_loading`. */
-export function eagerToolNames(payload: WirePayload): Set<string> {
+/** The names a payload or head declares, in any API's shape; `eager` keeps only declarations not marked `defer_loading`. */
+export function declaredToolNames(payload: WirePayload, { eager = false } = {}): Set<string> {
 	const names = new Set<string>();
 	for (const tool of declarationsOf(payload)) {
-		const name = isObject(tool) && tool.defer_loading !== true ? toolName(tool) : undefined;
+		const name = eager && isObject(tool) && tool.defer_loading === true ? undefined : toolName(tool);
 		if (name !== undefined) names.add(name);
 	}
 	return names;

@@ -177,12 +177,10 @@ export interface StickyEntry {
 	since: number;
 	toolCallId?: string;
 	skipStackCarrier?: boolean;
-	/**
-	 * True once an answered request in the epoch carried it (a told fact,
-	 * `stickyFact`): a tool-result pin is only for its first delivery.
-	 */
-	delivered: boolean;
 }
+
+/** A sticky state as a render places it: `delivered` once an answered request in the epoch carried it (its `stickyFact` is told), so a tool-result pin is only for its first delivery. */
+export type StickyToPlace = StickyEntry & { delivered: boolean };
 
 /** A one-shot to place on this request: a pending entry, or a block an owner rendered for it. */
 export interface OneShot {
@@ -263,7 +261,7 @@ export class LiveReminders {
 		// Re-emitting an unchanged standing state keeps its start and delivery; a
 		// changed one is a new state from now.
 		if (same && (payload.since === undefined || payload.since === previous.since)) return "live";
-		const entry: StickyEntry = { key, text, since: payload.since ?? this.now(), delivered: false };
+		const entry: StickyEntry = { key, text, since: payload.since ?? this.now() };
 		if (payload.raw) entry.raw = true;
 		if (payload.skipStackCarrier) entry.skipStackCarrier = true;
 		if (payload.toolCallId) entry.toolCallId = payload.toolCallId;
@@ -280,7 +278,6 @@ export class LiveReminders {
 	stickyEntries(): StickyEntry[] {
 		return [...this.sticky.values()];
 	}
-
 }
 
 /** The told fact of a sticky state's first delivery: it follows the branch, and a failed request's is revoked. */
@@ -294,7 +291,7 @@ export interface RenderInput {
 	/** The model takes a mid-conversation system message (`systemRoleOnly` blocks render, `moved` is filled). */
 	layout: boolean;
 	stack: readonly StackEntry[];
-	sticky: readonly StickyEntry[];
+	sticky: readonly StickyToPlace[];
 	oneShots: readonly OneShot[];
 }
 

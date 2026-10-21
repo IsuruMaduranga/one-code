@@ -467,6 +467,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				if (lastCtx) emitModelStatus(lastCtx, lastCtx.model, model);
 			},
 			(path, agent) => pi.events.emit(CHILD_WROTE_CHANNEL, { path, ...(agent ? { agent } : {}) } satisfies ChildWrote),
+			() => queryDeferred(pi.events),
 		).catch((error: unknown) => {
 			runtimePromise = undefined;
 			throw error;
@@ -1696,7 +1697,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			onMessageToMain: (message, summary) =>
 				parent ? relayToParent(parent.taskId, record.taskId, request.name, message, summary) : notifyAgentMessage(record.taskId, request.name, message),
 			extraTools: spawnToolsFor(record),
-			parentDeferred: queryDeferred(pi.events),
 			mainToolCallId: () => mainCallOf(record.taskId),
 		});
 		liveHandles.set(record.taskId, handle);
@@ -1874,7 +1874,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			sink: live.sink,
 			onMessageToMain: (message) => notifyAgentMessage(p.record.taskId, p.record.name, message),
 			extraTools: spawnToolsFor(p.record, { resident: true }),
-			parentDeferred: queryDeferred(pi.events),
 			mainToolCallId: () => mainCallOf(p.record.taskId),
 			onTurnEnd: (outcome) => {
 				registry.sessionFileFor(p.record);
@@ -2621,7 +2620,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			sink: live.sink,
 			onMessageToMain: (message) => notifyAgentMessage(record.taskId, record.name, message),
 			extraTools: spawnToolsFor(record),
-			parentDeferred: queryDeferred(pi.events),
 			mainToolCallId: () => mainCallOf(record.taskId),
 		});
 		liveHandles.set(record.taskId, handle);

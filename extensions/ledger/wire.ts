@@ -52,7 +52,8 @@ export default function ledgerWireExtension(pi: ExtensionAPI) {
 	pi.on("before_provider_request", (event, ctx) => {
 		const model = ctx.model;
 		// No context pass in this instance (a warm that outlived a /reload): leave pi's request alone.
-		if (!model || !plan) return undefined;
+		const identity = requestIdentity(model);
+		if (!model || !identity || !plan) return undefined;
 		const api = model.api;
 		const current = plan;
 		let payload = event.payload as WirePayload;
@@ -73,9 +74,7 @@ export default function ledgerWireExtension(pi: ExtensionAPI) {
 
 		// The recorded prefix is known, unless a repair moved its elements.
 		const base = current.base;
-		const end = base && payload === spliced ? appendPoint(base.list, api) : 0;
-		const prefix = { list: base?.list.slice(0, end) ?? [], hashes: base?.hashes.slice(0, end) ?? [] };
-		const request = recordedRequest(payload, requestIdentity(model), prefix);
+		const request = recordedRequest(payload, identity, base && payload === spliced ? { base, end: appendPoint(base.list, api) } : undefined);
 		const known = { has: (hash: string) => current.fold.knownHashes.has(hash) || recorded?.hashes.has(hash) === true };
 		const delta = encodeRequest(recorded?.request ?? current.fold.lastRequest, request, known);
 		if (delta) {

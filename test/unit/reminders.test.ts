@@ -9,7 +9,7 @@ import {
 	type RenderInput,
 	renderReminders,
 	type StackEntry,
-	type StickyEntry,
+	type StickyToPlace,
 	stickyFact,
 	toldBlockFact,
 	wrapReminder,
@@ -25,7 +25,7 @@ const compaction = (summary = "what happened", timestamp = 0) => ({ role: "compa
 const blockTexts = (m: any) => (typeof m.content === "string" ? [m.content] : m.content.map((b: any) => b.text));
 
 const stack = (text: string, order = 0, extra: Partial<StackEntry> = {}): StackEntry => ({ key: text, text, order, ...extra });
-const sticky = (text: string, since = 0, extra: Partial<StickyEntry> = {}): StickyEntry => ({ key: text, text, since, delivered: false, ...extra });
+const sticky = (text: string, since = 0, extra: Partial<StickyToPlace> = {}): StickyToPlace => ({ key: text, text, since, delivered: false, ...extra });
 const shot = (text: string, extra: Partial<OneShot> = {}): OneShot => ({ text, placement: "last-append", ...extra });
 const render = (messages: any[], input: Partial<RenderInput>) =>
 	renderReminders(messages, { epoch: false, layout: false, stack: [], sticky: [], oneShots: [], ...input });
@@ -57,10 +57,10 @@ describe("LiveReminders", () => {
 		const delivered = stickyFact(live.stickyEntries()[0]);
 		now = 20;
 		live.apply({ text: "plan", key: "mode", placement: "sticky-append" });
-		expect(live.stickyEntries()).toEqual([{ key: "mode", text: "plan", since: 10, delivered: false }]);
+		expect(live.stickyEntries()).toEqual([{ key: "mode", text: "plan", since: 10 }]);
 		expect(stickyFact(live.stickyEntries()[0])).toEqual(delivered);
 		live.apply({ text: "auto", key: "mode", placement: "sticky-append" });
-		expect(live.stickyEntries()).toEqual([{ key: "mode", text: "auto", since: 20, delivered: false }]);
+		expect(live.stickyEntries()).toEqual([{ key: "mode", text: "auto", since: 20 }]);
 		expect(stickyFact(live.stickyEntries()[0]).hash).not.toBe(delivered.hash);
 		live.apply({ key: "mode", remove: true });
 		expect(live.stickyEntries()).toEqual([]);

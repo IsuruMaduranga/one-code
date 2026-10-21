@@ -37,6 +37,13 @@ export function contextFingerprints(input: { contextFiles: ContextFile[]; memory
 }
 
 export const gitFingerprint = (gitStatus: string | null): string => fingerprint(gitStatus);
+
+/** The live workspace's fingerprints for the resumed-session check: the instructions, the memory index and, when a git snapshot is taken, the git status. */
+export type LiveFingerprints = ContextFingerprints & { git?: string };
+
+export function liveFingerprints(files: Parameters<typeof contextFingerprints>[0], gitStatus: string | null, withGit: boolean): LiveFingerprints {
+	return { ...contextFingerprints(files), ...(withGit ? { git: gitFingerprint(gitStatus) } : {}) };
+}
 export const dateFingerprint = (date: string): string => fingerprint(date);
 
 /** The facts the instructions block tells. */

@@ -3,7 +3,7 @@ import { foldBranch } from "../../extensions/lib/ledger/fold.ts";
 import { planRequest } from "../../extensions/lib/ledger/plan.ts";
 import { makeRecord, RECORD } from "../../extensions/lib/ledger/records.ts";
 import { deliveredAfterRepair, repairRequest, validateRequest } from "../../extensions/lib/ledger/validate.ts";
-import { contentHash, eagerToolNames, isTrailer, mergeDeclarations, payloadHead, preludeLength, recordedRequest, spliceRequest, withRecordedHead } from "../../extensions/lib/ledger/wire.ts";
+import { contentHash, declaredToolNames, isTrailer, mergeDeclarations, payloadHead, preludeLength, recordedRequest, spliceRequest, withRecordedHead } from "../../extensions/lib/ledger/wire.ts";
 
 const identity = { api: "anthropic-messages", provider: "anthropic", model: "claude-sonnet-5-5", auth: "key" };
 const mark = { type: "ephemeral" };
@@ -123,12 +123,12 @@ describe("the recorded head", () => {
 	});
 });
 
-describe("eagerToolNames", () => {
+describe("declaredToolNames", () => {
 	it("names the tools a recorded head declares eagerly, in any API's shape, never a deferred one", () => {
-		expect(eagerToolNames({ tools: [tool("read"), tool("cron_list", { defer_loading: true })] })).toEqual(new Set(["read"]));
-		expect(eagerToolNames({ tools: [{ type: "function", function: { name: "cron_list" } }] })).toEqual(new Set(["cron_list"]));
-		expect(eagerToolNames({ toolConfig: { tools: [{ toolSpec: { name: "a" } }, { cachePoint: { type: "default" } }] } })).toEqual(new Set(["a"]));
-		expect(eagerToolNames({ config: { tools: [{ functionDeclarations: [{ name: "g" }] }] } })).toEqual(new Set(["g"]));
+		expect(declaredToolNames({ tools: [tool("read"), tool("cron_list", { defer_loading: true })] }, { eager: true })).toEqual(new Set(["read"]));
+		expect(declaredToolNames({ tools: [{ type: "function", function: { name: "cron_list" } }] }, { eager: true })).toEqual(new Set(["cron_list"]));
+		expect(declaredToolNames({ toolConfig: { tools: [{ toolSpec: { name: "a" } }, { cachePoint: { type: "default" } }] } }, { eager: true })).toEqual(new Set(["a"]));
+		expect(declaredToolNames({ config: { tools: [{ functionDeclarations: [{ name: "g" }] }] } }, { eager: true })).toEqual(new Set(["g"]));
 	});
 });
 

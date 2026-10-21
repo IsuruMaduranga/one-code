@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { foldBranch } from "../../extensions/lib/ledger/fold.ts";
+import { CALLABLE_TOOLS, foldBranch } from "../../extensions/lib/ledger/fold.ts";
 import { type EntryLike, makeRecord, RECORD, type RecordData, type RecordKind, stateOnBranch } from "../../extensions/lib/ledger/records.ts";
 import { encodeRequest, recordedRequest, type WirePayload } from "../../extensions/lib/ledger/wire.ts";
 
@@ -116,6 +116,15 @@ describe("ledger fold", () => {
 		fold = foldBranch(b.entries, live);
 		expect(fold.told.get("tools") ?? new Set()).toEqual(new Set());
 		expect(fold.modes.size).toBe(0);
+	});
+
+	it("takes tools told gone out of the told set, callable ones included", () => {
+		const b = new Branch();
+		b.record("told", { facts: [{ kind: "tools", names: ["mcp__a__x", "web_fetch"], callable: true }] });
+		b.record("told", { facts: [{ kind: "tools", names: ["mcp__a__x"], removed: true }] });
+		const fold = foldBranch(b.entries, live);
+		expect(fold.told.get("tools")).toEqual(new Set(["web_fetch"]));
+		expect(fold.told.get(CALLABLE_TOOLS)).toEqual(new Set(["web_fetch"]));
 	});
 
 	it("keeps pending items until a request consumes them, latest per key", () => {

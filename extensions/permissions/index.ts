@@ -78,7 +78,7 @@ import { sessionResultsDir } from "../lib/persisted-output.ts";
 import { privateSessionScratchpadDir } from "../lib/scratchpad.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
 import { readState, recordState } from "../lib/ledger/state.ts";
-import { type EntryLike, RECORD } from "../lib/ledger/records.ts";
+import { type EntryLike, readRecord } from "../lib/ledger/records.ts";
 import {
 	decide,
 	extractSubject,
@@ -334,8 +334,6 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	let branchMode: PermissionMode | undefined;
 	/** Whether a request went out on this branch: only then was its model told the branch's mode. */
 	let requestOnBranch = false;
-	/** /clear and /new open an empty branch in this process: the mode the last session ended in, carried over. */
-	let carriedMode: PermissionMode | undefined;
 	let deny: PermissionRule[] = [];
 	let ask: PermissionRule[] = [];
 	let allow: PermissionRule[] = [];
@@ -909,8 +907,11 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		return settings;
 	};
 
-	/** `launching`: the process is starting (reason "startup"), when its flags pick the mode. */
-	const reloadSettings = (ctx: ExtensionContext, launching: boolean) => {
+	/**
+	 * `launching`: the process is starting (reason "startup"), when its flags
+	 * pick the mode. `carried`: the mode a /clear or /new carries onto its empty branch.
+	 */
+	const reloadSettings = (ctx: ExtensionContext, launching: boolean, carried: PermissionMode | undefined) => {
 		const settings = reloadRules(ctx);
 		projectAllowDeclined = false;
 		// Dropped so edited autoMode rules and instruction files are picked up on
@@ -927,8 +928,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// A stored bypassPermissions is never restored by itself: it needs its flag.
 		const bypassFlag = pi.getFlag("dangerously-skip-permissions") === true ? ("bypassPermissions" as const) : undefined;
 		const modeFlag = normalizePermissionMode(pi.getFlag("permission-mode"));
-		const fromBranch = branchMode ?? carriedMode;
-		const restored = fromBranch === "bypassPermissions" ? (bypassFlag ?? (modeFlag === "bypassPermissions" ? modeFlag : undefined)) : fromBranch;
+		const fromBranch = branchMode ?? carried;
+		const restored = fromBranch === "bypassPermissions" ? undefined : fromBranch;
 		const startup = resolveStartupMode(launching ? [bypassFlag, modeFlag, restored, settings.defaultMode] : [restored, bypassFlag, modeFlag, settings.defaultMode], settings);
 		if (startup.mode) mode = startup.mode;
 		if (startup.bypassRefused && ctx.hasUI) ctx.ui.notify("Bypass permissions mode was disabled by settings", "warning");
@@ -1028,11 +1029,11 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		protectedDirs = runtimeProtectedDirs();
 		secretPaths = runtimeSecretPaths(os.homedir());
 		branchMode = normalizePermissionMode(readState(ctx, PERMISSION_MODE_STATE));
-		requestOnBranch = (ctx.sessionManager.getBranch() as EntryLike[]).some((entry) => entry.customType === RECORD.request);
+		requestOnBranch = (ctx.sessionManager.getBranch() as EntryLike[]).some((entry) => readRecord(entry)?.kind === "request");
 		// Claude Code keeps the mode across /clear: the new branch starts from the
 		// mode this process last published (MODE_ENV), and records it.
-		carriedMode = event.reason === "new" && !branchMode ? normalizePermissionMode(process.env[MODE_ENV]) : undefined;
-		reloadSettings(ctx, event.reason === "startup");
+		const carried = event.reason === "new" && !branchMode ? normalizePermissionMode(process.env[MODE_ENV]) : undefined;
+		reloadSettings(ctx, event.reason === "startup", carried);
 		if (!STANDING_REMINDER_MODES.has(mode)) setMode(mode, true);
 		// The system prompt lists the workspace as the session starts (lib/workspace-channel.ts).
 		pi.events.emit(WORKSPACE_CHANNEL, { dirs: workspacePaths } satisfies WorkspaceAnnouncement);

@@ -41,7 +41,7 @@ import { withoutUnusable } from "../lib/model-unusable.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "../subagents/worktree.ts";
 import type { AgentCallOptions, AgentCallResult, AgentEffort, AgentRunUpdate, KeptWorktree } from "./types.ts";
 import { WorkflowScriptError } from "./types.ts";
-import { type DeferRequest, deferLikeParentExtension } from "../lib/deferred.ts";
+import { type DeferRequest, deferLikeParentExtension, injectedByParent } from "../lib/deferred.ts";
 
 const MAX_SCHEMA_RETRIES = 2;
 const OUTPUT_CAP = 50_000;
@@ -302,7 +302,7 @@ export class AgentRunner {
 				extraExtensionPaths: CHILD_EXTENSION_PATHS,
 				// claude-context (a child extension) injects the CLAUDE.md instructions itself.
 				noContextFiles: true,
-				extraFactories: [deferLikeParentExtension(this.options.getParentDeferred?.() ?? [], mcpTools.map((tool) => tool.name)), ...(handback ? [subagentHandbackExtension(handback)] : [])],
+				extraFactories: [deferLikeParentExtension(this.options.getParentDeferred?.() ?? [], injectedByParent([])), ...(handback ? [subagentHandbackExtension(handback)] : [])],
 				getPermissionBridge: this.options.getPermissionBridge,
 				getHookBridge: this.options.getHookBridge,
 			},

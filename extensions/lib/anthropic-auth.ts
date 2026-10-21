@@ -37,7 +37,8 @@ export function authKind(provider: string | undefined): "oauth" | "key" {
 	return provider === "anthropic" && isAnthropicOAuth() ? "oauth" : "key";
 }
 
-/** Who a request to `model` goes to, as the ledger records it; a change opens an epoch. */
-export function requestIdentity(model: { api: string; provider: string; id: string }): RequestIdentity {
+/** Who a request to `model` goes to, as the ledger records it; a change opens an epoch. Undefined without a full model. */
+export function requestIdentity(model: { api?: string; provider?: string; id?: string } | undefined): RequestIdentity | undefined {
+	if (!model?.api || !model.provider || !model.id) return undefined;
 	return { api: model.api, provider: model.provider, model: model.id, auth: authKind(model.provider) };
 }

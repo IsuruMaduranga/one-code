@@ -37,7 +37,7 @@ export default function ledgerExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("context", (event, ctx) => {
-		const fold = foldBranch(ctx.sessionManager.getBranch() as EntryLike[], ctx.model ? requestIdentity(ctx.model) : undefined);
+		const fold = foldBranch(ctx.sessionManager.getBranch() as EntryLike[], requestIdentity(ctx.model));
 		const { plan, tailStart } = planRequest(fold, event.messages as Array<{ role: string; timestamp?: number }>);
 		pi.events.emit(LEDGER_PLAN_CHANNEL, plan);
 		return tailStart > 0 ? { messages: event.messages.slice(tailStart) } : undefined;

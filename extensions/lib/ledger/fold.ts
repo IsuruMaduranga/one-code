@@ -60,12 +60,14 @@ export interface ToldState {
 	blocks: Map<string, string>;
 }
 
-/** Add `facts` to what the epoch told: a mode or block as last told, names as a union (callable tools also under `CALLABLE_TOOLS`). */
+/** Add `facts` to what the epoch told: a mode or block as last told, names as a union (callable tools also under `CALLABLE_TOOLS`), tools told gone taken out. */
 export function tellFacts(into: ToldState, facts: readonly ToldFact[]): void {
 	for (const fact of facts) {
 		if (fact.kind === "mode") into.modes.set(fact.key, fact.on);
 		else if (fact.kind === "block") into.blocks.set(fact.key, fact.hash);
-		else {
+		else if (fact.kind === "tools" && fact.removed) {
+			for (const kind of ["tools", CALLABLE_TOOLS]) for (const name of fact.names) into.told.get(kind)?.delete(name);
+		} else {
 			const kinds = fact.kind === "tools" && fact.callable ? ["tools", CALLABLE_TOOLS] : [fact.kind];
 			for (const kind of kinds) {
 				const set = into.told.get(kind) ?? new Set<string>();

@@ -46,7 +46,7 @@ import { readMemoryIndex } from "../lib/memory-index.ts";
 import { claudeConfigDir, oneCodeStateDir, tryRealpath } from "../lib/paths.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, toldBlockFact } from "../lib/reminders.ts";
 import { inContextEntries } from "../lib/compaction-boundary.ts";
-import { compactionGitStatus, contextBlockFacts, type ContextFingerprints, contextFingerprints, dateFingerprint, FACT_KEYS, gitFingerprint, instructionFacts, resumeFactsNotice } from "../lib/context-facts.ts";
+import { compactionGitStatus, contextBlockFacts, contextFingerprints, dateFingerprint, FACT_KEYS, instructionFacts, liveFingerprints, type LiveFingerprints, resumeFactsNotice } from "../lib/context-facts.ts";
 import { resolveToolPath } from "../lib/tool-path.ts";
 import { sessionWorkCwd, WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
 import { pathArgument } from "../auto-mode/paths.ts";
@@ -172,7 +172,7 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	 * been read in: the session's own at its start, the entered worktree at a
 	 * compaction (session_compact reads there).
 	 */
-	let livePrints: { atStart: ContextFingerprints & { git?: string }; atCompaction: ContextFingerprints & { git?: string } } | undefined;
+	let livePrints: { atStart: LiveFingerprints; atCompaction: () => LiveFingerprints } | undefined;
 	/** True until this process's first request inside an epoch has compared the epoch's facts with the live workspace. */
 	let resumeCheck = true;
 	const readFiles = (cwd: string) => {
@@ -356,10 +356,12 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		if (gitStatus !== undefined) return;
 		gitStatus = snapshotGit(ctx.cwd);
 		if (files) {
-			const prints = (current: ReturnType<typeof readFiles>, git: string | null) => ({ ...contextFingerprints(current), ...(takesGitSnapshot ? { git: gitFingerprint(git) } : {}) });
-			const atStart = prints(files, gitStatus);
+			const atStart = liveFingerprints(files, gitStatus, takesGitSnapshot);
 			const workCwd = sessionWorkCwd(entered, ctx.cwd);
-			livePrints = { atStart, atCompaction: workCwd === ctx.cwd ? atStart : prints(readFiles(workCwd), snapshotGit(workCwd)) };
+			// The entered worktree's, read only if the epoch's facts came from a compaction there.
+			let inWorktree: LiveFingerprints | undefined;
+			const atCompaction = () => (inWorktree ??= liveFingerprints(readFiles(workCwd), snapshotGit(workCwd), takesGitSnapshot));
+			livePrints = { atStart, atCompaction: workCwd === ctx.cwd ? () => atStart : atCompaction };
 		}
 		emitContextBlock(gitStatus, false);
 	});
@@ -384,7 +386,7 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		if (!resumeCheck || !livePrints) return;
 		resumeCheck = false;
 		const atCompaction = request.modes.get(FACT_KEYS.compaction) ?? false;
-		const notice = resumeFactsNotice(request.toldBlocks, atCompaction, atCompaction ? livePrints.atCompaction : livePrints.atStart);
+		const notice = resumeFactsNotice(request.toldBlocks, atCompaction, atCompaction ? livePrints.atCompaction() : livePrints.atStart);
 		if (notice) request.blocks.push(notice);
 	});
 

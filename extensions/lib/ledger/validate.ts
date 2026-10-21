@@ -7,23 +7,13 @@
  * Pure: no pi imports.
  */
 import { isObject, type ToldFact } from "./records.ts";
-import { declarationsOf, listKey, toolName, type WirePayload } from "./wire.ts";
+import { declaredToolNames, listKey, type WirePayload } from "./wire.ts";
 
 export type Problem =
 	/** A tool_reference, tool_addition or tool_removal names a tool `tools` does not declare. */
 	| { kind: "undeclared"; name: string; index: number }
 	/** Anthropic: a system message with content followed by something other than an assistant message (findings §52). */
 	| { kind: "stranded-system"; index: number };
-
-/** The names the payload declares, in any API's shape. */
-function declaredNames(payload: WirePayload): Set<string> {
-	const names = new Set<string>();
-	for (const tool of declarationsOf(payload)) {
-		const name = toolName(tool);
-		if (name !== undefined) names.add(name);
-	}
-	return names;
-}
 
 /** The tool a `tool_reference` block names: `name` in a `tool_addition`, `tool_name` in a tool result. */
 function referenceName(block: Record<string, unknown>): string | undefined {
@@ -67,7 +57,7 @@ export function validateRequest(payload: WirePayload, api: string): Problem[] {
 	const value = payload[listKey(api)];
 	const list: unknown[] = Array.isArray(value) ? value : [];
 
-	const declared = declaredNames(payload);
+	const declared = declaredToolNames(payload);
 	list.forEach((element, index) => {
 		for (const name of referencedNames(element, new Set())) if (!declared.has(name)) problems.push({ kind: "undeclared", name, index });
 	});
@@ -126,11 +116,11 @@ export function deliveredAfterRepair(
 ): { consumed: string[]; facts: ToldFact[] } {
 	const sent = JSON.stringify(payload);
 	const texts = new Map(pending.map((item) => [item.id, item.text]));
+	// The repair left only references to declared tools.
 	const referenced = referencedNames(payload[listKey(api)], new Set());
-	const declared = declaredNames(payload);
 	const facts = delivered.facts.flatMap((fact): ToldFact[] => {
 		if (fact.kind !== "tools" || !fact.callable) return [fact];
-		const names = fact.names.filter((name) => declared.has(name) && referenced.has(name));
+		const names = fact.names.filter((name) => referenced.has(name));
 		return names.length > 0 ? [{ ...fact, names }] : [];
 	});
 	return {
