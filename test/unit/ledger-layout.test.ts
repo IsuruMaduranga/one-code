@@ -65,4 +65,12 @@ describe("side calls and forks append after a captured request", () => {
 		const out = forkRequestPayload(capture, body([user("fork task")]), new Set());
 		expect(validateRequest(out, api)).toEqual([]);
 	});
+
+	it("a /btw fork taken while the capture's reply streams keeps every captured element in place", () => {
+		// The reply is not on the branch yet, so the fork's tail opens with the side question, not an assistant message.
+		const out = forkRequestPayload(capture, body([user("btw Q"), assistant("btw A"), user("fork task")]), new Set());
+		expect(validateRequest(out, api)).toEqual([]);
+		expect((out.messages as unknown[]).slice(0, captured.messages.length)).toEqual(captured.messages);
+		expect((out.messages as unknown[]).slice(captured.messages.length)).toEqual([system("btw Q"), assistant("btw A"), user("fork task")]);
+	});
 });
