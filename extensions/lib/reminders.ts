@@ -394,14 +394,15 @@ function stamp(message: AgentMessage): number {
 
 /**
  * Where a state switched on mid-turn first shows: its switching call's result
- * when the request carries it, else the first tool result stamped after the
- * switch, but never one after a user message that already carries it. With no
- * carrier at all (an overflow compaction kept only a reply and its results),
- * the request's tail.
+ * when the request carries it, else (that result compacted away, or no call
+ * named) the first tool result stamped after the switch, but never one after a
+ * user message that already carries it. With no carrier at all (an overflow
+ * compaction kept only a reply and its results), the request's tail.
  */
 function firstResultAfter(messages: readonly AgentMessage[], state: StickyEntry): number {
 	if (state.toolCallId !== undefined) {
-		return messages.findIndex((m) => m.role === "toolResult" && (m as { toolCallId?: string }).toolCallId === state.toolCallId);
+		const own = messages.findIndex((m) => m.role === "toolResult" && (m as { toolCallId?: string }).toolCallId === state.toolCallId);
+		if (own !== -1) return own;
 	}
 	for (let i = 0; i < messages.length; i++) {
 		const message = messages[i];

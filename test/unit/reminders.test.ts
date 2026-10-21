@@ -151,6 +151,12 @@ describe("renderReminders: sticky states", () => {
 		expect(blockTexts(result.messages[1])).toEqual(["ran", wrapReminder("auto")]);
 	});
 
+	it("still pins a state whose switching result was compacted away, to the first later tool result", () => {
+		const result = render([assistant(10), toolResult("later", 12)], { sticky: [sticky("plan", 5, { toolCallId: "gone" })] });
+		expect(result.stickyPlaced).toEqual(["plan"]);
+		expect(JSON.stringify(result.messages[1])).toContain("plan");
+	});
+
 	it("never pins a state on from the start (since 0) to a tool result: the constant budget line rides user messages only", () => {
 		const budget = sticky("<total_tokens>200000 tokens left</total_tokens>", 0, { raw: true, skipStackCarrier: true });
 		const result = render([assistant(1), toolResult("ran", 2)], { sticky: [budget] });
