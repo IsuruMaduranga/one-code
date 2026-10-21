@@ -65,4 +65,30 @@ describe("a sticky state's start follows the branch", () => {
 		};
 		expect(JSON.stringify((await render())?.messages ?? [])).toContain("auto mode is on");
 	});
+
+	it("ends with a removal: the same state switched on again starts anew and rides the switching call's result", async () => {
+		const fake = createFakePi();
+		systemReminderExtension(fake.pi as never);
+		const ctx = createFakeCtx({ sessionManager: { getBranch: () => fake.branch } });
+		await fake.fire("session_start", {}, ctx);
+		/** Render the tail [`call`'s result] inside an epoch whose fold told `blocks`. */
+		const render = async (call: string, blocks: Map<string, string>) => {
+			const plan = { epoch: false, fold: { ...foldBranch([]), blocks }, consumed: [], facts: [], carried: [], covers: { count: 1, role: "user", timestamp: 1 }, messages: [] } as unknown as RequestPlan;
+			fake.events.emit(LEDGER_PLAN_CHANNEL, plan);
+			const out = await fake.fireOne<{ messages: unknown[] } | undefined>("context", { messages: [{ ...result, toolCallId: call }] }, ctx);
+			return { carried: JSON.stringify(out?.messages ?? []).includes("auto mode is on"), facts: plan.carried.flatMap((block) => block.facts) as { key: string; hash: string }[] };
+		};
+		fake.events.emit(REMINDER_CHANNEL, { text: "auto mode is on", key: "permission-mode", placement: "sticky-append", toolCallId: "call-1" });
+		const first = await render("call-1", new Map());
+		expect(first.carried).toBe(true);
+		const told = new Map(first.facts.map((fact) => [fact.key, fact.hash]));
+		// Switched off, then on again with the same text from another call.
+		fake.events.emit(REMINDER_CHANNEL, { key: "permission-mode", remove: true });
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		fake.events.emit(REMINDER_CHANNEL, { text: "auto mode is on", key: "permission-mode", placement: "sticky-append", toolCallId: "call-2" });
+		const again = await render("call-2", told);
+		expect(again.carried).toBe(true);
+		expect(again.facts).toHaveLength(1);
+		expect(again.facts[0]?.hash).not.toBe(told.get(again.facts[0]?.key ?? ""));
+	});
 });

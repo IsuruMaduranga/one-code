@@ -91,7 +91,8 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 	 * runs again (a resume, /reload, /tree) emits its state without a start, so
 	 * the renderer takes the branch's start for the same key and text: an epoch
 	 * that renders the conversation again (a model switch) then places the block
-	 * where the original requests did, and its first delivery stays told.
+	 * where the original requests did, and its first delivery stays told. A
+	 * removal records the run's end (null), so nothing carries past it.
 	 */
 	const stickyStart = (key: string): { since: number; hash: string } | undefined => {
 		const stored = branchOf ? (stateOnBranch(branchOf(), `${STICKY_START_PREFIX}${key}`) as { since?: unknown; hash?: unknown } | undefined) : undefined;
@@ -105,6 +106,10 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 		const key = payload.key ?? payload.text ?? "";
 		const recorded = sticky ? stickyStart(key) : undefined;
 		if (sticky && payload.since === undefined && recorded?.hash === contentHash(payload.text)) payload = { ...payload, since: recorded.since };
+		// A removal ends the state's run: switched on again, even with the same
+		// text, it is a new state that rides the switching call's result, not the
+		// old run's start, whose first delivery the branch already told.
+		if (payload.remove && payload.key && branchOf && alive() && stickyStart(payload.key)) recordState(pi, `${STICKY_START_PREFIX}${payload.key}`, null);
 		const applied = live.apply(payload);
 		if (sticky && applied === "live" && branchOf && alive()) {
 			const entry = live.stickyEntries().find((state) => state.key === key);
