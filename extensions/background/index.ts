@@ -293,7 +293,15 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 
 	// A monitor's end the model already read through task_output is withdrawn
 	// like a shell's (lib/notifications.ts).
-	const notify = createTaskNotifier(pi, { withdrawOnDelivery: true });
+	const notify = createTaskNotifier(pi, {
+		withdrawOnDelivery: true,
+		// A fire's message reached the conversation: what it told the model is on the branch from here.
+		onDelivered: (customType, details) => {
+			if (customType !== "cron" && customType !== "wakeup") return;
+			const stored = details[LOOP_DELIVERY_DETAILS_KEY];
+			if (stored !== undefined) recordDelivery(pi, deliveryFromState(stored));
+		},
+	});
 
 	/**
 	 * A no-prompt /loop sentinel's text (loop-fire.ts), against what the
@@ -385,18 +393,11 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		pi.appendEntry(JOB_FIRED_ENTRY, { jobId: job.id, final, source: job.source });
 		// The notifier may hold the message (a coalescing window, an interrupt) and
 		// a /reload drops what it holds, so the loop's record rides the message and
-		// is written when pi delivers it (message_end below).
+		// is written when it is delivered (the notifier's onDelivered above).
 		const { text, delivery } = fireText(job, mainConversation());
 		const details = { jobId: job.id, cron: job.cron, source: job.source, final, ...fold, ...(delivery ? { [LOOP_DELIVERY_DETAILS_KEY]: delivery } : {}) };
 		notify(job.source === "wakeup" ? "wakeup" : "cron", text, details);
 	};
-	// A fire's message reached the conversation: what it told the model is on the branch from here.
-	pi.on("message_end", (event) => {
-		const message = event.message as { role?: string; customType?: string; details?: unknown };
-		if (message.role !== "custom" || (message.customType !== "cron" && message.customType !== "wakeup")) return;
-		const stored = (message.details as Record<string, unknown> | undefined)?.[LOOP_DELIVERY_DETAILS_KEY];
-		if (stored !== undefined) recordDelivery(pi, deliveryFromState(stored));
-	});
 	/** Fire every due job (only while idle), then arm the one timer to the next fire. */
 	const runCron = () => {
 		if (cronTimer) clearTimeout(cronTimer);

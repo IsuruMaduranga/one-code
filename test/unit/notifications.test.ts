@@ -59,8 +59,8 @@ function fakePi(options: { prompted?: boolean; sendThrows?: boolean } = {}) {
 	};
 	/** Simulate pi draining a queued custom message: message_end carrying its details. */
 	const deliver = (index: number) => {
-		const details = sent[index]?.message.details;
-		fire("message_end", { message: { role: "custom", details } });
+		const { customType, details } = sent[index]?.message ?? {};
+		fire("message_end", { message: { role: "custom", customType, details } });
 	};
 	return { pi: pi as never, sent, sentAsUser, fire, deliver, primed, emit: pi.events.emit };
 }
@@ -216,6 +216,25 @@ describe("createTaskNotifier before the first prompt (H1)", () => {
 		fire("agent_settled");
 		expect(sent).toHaveLength(0);
 		expect(sentAsUser).toHaveLength(1);
+	});
+
+	it("reports a delivery on both paths: at the send for a user message, at message_end for its own custom message", () => {
+		const { pi, sent, fire, deliver } = fakePi({ prompted: false });
+		const delivered: Array<[string, Record<string, unknown>]> = [];
+		const notify = createTaskNotifier(pi, { ...oldPi, onDelivered: (customType, details) => delivered.push([customType, details]) });
+		notify("cron", "first fire", { loopDelivery: { autonomousPreambleDelivered: true } });
+		expect(delivered).toEqual([["cron", { loopDelivery: { autonomousPreambleDelivered: true } }]]);
+		fire("before_agent_start");
+		fire("agent_settled");
+		notify("cron", "second fire", { jobId: "j2" });
+		// Sent, not yet delivered.
+		expect(delivered).toHaveLength(1);
+		deliver(0);
+		expect(delivered.at(-1)).toEqual(["cron", expect.objectContaining({ jobId: "j2" })]);
+		// Another producer's message is not this notifier's delivery.
+		fire("message_end", { message: { role: "custom", customType: "cron", details: { [NOTIFICATION_ID_KEY]: "other-1" } } });
+		expect(delivered).toHaveLength(2);
+		expect(sent).toHaveLength(1);
 	});
 
 	it("uses the custom-message path once before_agent_start has fired, and while a run is active", () => {

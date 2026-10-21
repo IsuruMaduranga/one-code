@@ -537,6 +537,17 @@ export interface TaskNotifierOptions {
 	 * version; tests set it to model an older pi.
 	 */
 	customRunsFireBeforeAgentStart?: boolean;
+	/**
+	 * Runs once a notification this notifier sent reaches the conversation,
+	 * with its customType and the details it was sent with: at its
+	 * `message_end`, or at the send for one delivered as a user message (see
+	 * "First turn of a session"), whose message carries no details for pi to
+	 * hand back. A producer whose message makes something true for the model
+	 * (a `/loop` fire's instructions) records that here, not when it calls the
+	 * notifier: the notifier may still hold the message, and a `/reload`
+	 * drops it.
+	 */
+	onDelivered?: (customType: string, details: Record<string, unknown>) => void;
 }
 
 /**
@@ -714,6 +725,7 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 				// followUp: pi 1.2.0 counts a starting run as busy and rejects a
 				// bare send there; when idle, the option changes nothing.
 				pi.sendUserMessage(frameForDelivery(entry.text, "opens-turn"), { deliverAs: "followUp" });
+				options.onDelivered?.(entry.customType, entry.details);
 				return;
 			}
 			pi.sendMessage(
@@ -821,10 +833,14 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 	};
 
 	pi.on("message_end", (event) => {
-		const message = event.message as { role?: string; details?: unknown };
+		const message = event.message as { role?: string; customType?: string; details?: unknown };
 		if (message.role !== "custom") return;
-		const id = (message.details as Record<string, unknown> | undefined)?.[NOTIFICATION_ID_KEY];
-		if (typeof id === "string") pending.delete(id);
+		const details = message.details as Record<string, unknown> | undefined;
+		const id = details?.[NOTIFICATION_ID_KEY];
+		if (typeof id !== "string") return;
+		pending.delete(id);
+		// Every notifier hears every message_end: only its own ids are its deliveries.
+		if (details && id.startsWith(`${producerId}-`)) options.onDelivered?.(message.customType ?? "", details);
 	});
 	pi.on("agent_end", (event, ctx) => {
 		outcome.record(event.messages, ctx.signal?.aborted);

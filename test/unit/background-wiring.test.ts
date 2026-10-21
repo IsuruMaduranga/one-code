@@ -26,6 +26,12 @@ vi.mock("node:fs", async (importOriginal) => {
 			actual.createWriteStream(spool.fail ? join(dirname(path), "missing", "output.log") : path, options as never)) as typeof actual.createWriteStream,
 	};
 });
+// A pi before 1.2.0, where a notification before the first prompt goes out as a user message.
+const olderPi = vi.hoisted(() => ({ on: false }));
+vi.mock("../../extensions/lib/pi-version.ts", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../extensions/lib/pi-version.ts")>();
+	return { ...actual, piFiresBeforeAgentStartForCustomRuns: (version: string | undefined) => !olderPi.on && actual.piFiresBeforeAgentStartForCustomRuns(version) };
+});
 import backgroundExtension from "../../extensions/background/index.ts";
 import { MONITOR_BATCH_MAX_LINES } from "../../extensions/background/monitor-batch.ts";
 import { TASK_REGISTER_CHANNEL } from "../../extensions/background/registry.ts";
@@ -987,6 +993,31 @@ describe("background wiring: state across /reload, /tree and compaction", () => 
 		reloaded.branch.push({ type: "compaction", id: "cmp", parentId: reloaded.branch.at(-1)?.id ?? null });
 		expect(isFull(await fireSentinel(reloaded, reloadedCtx))).toBe(true);
 		expect(isShort(await fireSentinel(reloaded, reloadedCtx))).toBe(true);
+	});
+
+	it("on a pi before 1.2.0 records the /loop delivery of a first fire that went out as a user message", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2026, 8, 25, 12, 0, 0));
+		olderPi.on = true;
+		try {
+			// No prompt has run: the session's first input was the /loop itself.
+			const fake = createFakePi();
+			backgroundExtension(fake.pi as never);
+			const ctx = liveSessionCtx({ sessionManager: { getBranch: () => fake.branch } });
+			await fake.fire("session_start", { reason: "startup" }, ctx);
+			const at = new Date(Date.now() + 60_000);
+			await cronCall(fake, "cron_create", { cron: `${at.getMinutes()} ${at.getHours()} * * *`, prompt: "<<autonomous-loop>>", recurring: false }, ctx);
+			await vi.advanceTimersByTimeAsync(60_000 + DEFAULT_COALESCE_MS);
+			expect(fake.sentUserMessages).toHaveLength(1);
+			expect(isFull(fake.sentUserMessages[0].content as string)).toBe(true);
+			// pi runs that message as a prompt: the next fire goes the custom-message way.
+			await fake.fire("before_agent_start", {}, ctx);
+			await fake.fire("agent_start", {}, ctx);
+			await fake.fire("agent_settled", {}, ctx);
+			expect(isShort(await fireSentinel(fake, ctx))).toBe(true);
+		} finally {
+			olderPi.on = false;
+		}
 	});
 
 	it("records the /loop delivery only once the fire's message is delivered: a /reload that drops a held fire resends the instructions", async () => {
