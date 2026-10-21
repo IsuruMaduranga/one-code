@@ -228,6 +228,15 @@ const SubagentParams = Type.Object({
 });
 
 
+/** The Agent tool's schema inside a non-fork child: the nested run's options only. */
+const NESTED_AGENT_PARAMS = Type.Object({
+	subagent_type: Type.Optional(Type.String({ description: "An agent name from the list in this tool's description (default: general-purpose)" })),
+	task: Type.String({ description: "The task — a complete, self-contained instruction" }),
+	prompt: Type.Optional(Type.String({ description: "Alias of `task` (Claude Code's name for it)." })),
+	description: Type.Optional(Type.String({ description: "A short (3-5 word) description of the task." })),
+	name: Type.Optional(Type.String({ description: "Name for this run (default: <agent>-<n>)" })),
+});
+
 /**
  * The anti-fabrication sentence, carried by the tool RESULT of a background
  * spawn and not only by the Agent tool's description. Claude Code puts it in the
@@ -1486,17 +1495,17 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			// accepted as `task`, `description` is tolerated, and the agent name is
 			// matched case-insensitively — a nested subagent is just as likely to be
 			// CC-trained.
-			parameters: Type.Object({
-				subagent_type: Type.Optional(Type.String({ description: "An agent name from the list in this tool's description (default: general-purpose)" })),
-				task: Type.String({ description: "The task — a complete, self-contained instruction" }),
-				prompt: Type.Optional(Type.String({ description: "Alias of `task` (Claude Code's name for it)." })),
-				description: Type.Optional(Type.String({ description: "A short (3-5 word) description of the task." })),
-				name: Type.Optional(Type.String({ description: "Name for this run (default: <agent>-<n>)" })),
-			}) as never,
+			// A fork inherits the parent's tools block byte for byte (its first request
+			// extends the parent's recorded one, decisions/caching.md), so its spawn
+			// tool takes the parent's Agent schema: the ledger keeps the recorded
+			// declaration only while the live schema matches it, and pi validates the
+			// call against the live one. The options a nested run lacks are refused in
+			// execute() with the fix named.
+			parameters: (parentRecord.agent === FORK_AGENT ? SubagentParams : NESTED_AGENT_PARAMS) as never,
 			prepareArguments: prepareAgentArguments as never,
 			async execute(_toolCallId: string, params: unknown, signal?: AbortSignal) {
 				const ctx = lastCtx;
-				const p = (params ?? {}) as { subagent_type?: unknown; task?: unknown; prompt?: unknown; name?: unknown; description?: unknown };
+				const p = (params ?? {}) as { subagent_type?: unknown; task?: unknown; prompt?: unknown; name?: unknown; description?: unknown; model?: unknown; thinking?: unknown; isolation?: unknown; action?: unknown };
 				const description = typeof p.description === "string" && p.description.trim() ? p.description.trim() : undefined;
 				const agentName = typeof p.subagent_type === "string" ? p.subagent_type : "";
 				const taskInput = typeof p.task === "string" ? p.task : typeof p.prompt === "string" ? p.prompt : "";
@@ -1505,6 +1514,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				if (!ctx) return err("The host session is not ready to spawn agents — retry shortly.");
 				if (agentName.toLowerCase() === FORK_AGENT) return err('"fork" is only available to the main conversation — pick a named agent instead.');
 				const agents = loadAgents(parentRecord.cwd);
+				// Only a fork's schema (the parent's) offers these; a nested run has none of them.
+				if (p.action === "list") return { content: [{ type: "text" as const, text: `Available agents:\n${agents.map((a) => `- ${a.name}: ${a.description || "(no description)"}${toolsClause(a)}`).join("\n")}` }], details: {} };
+				const unsupported = (["model", "thinking", "isolation"] as const).filter((key) => p[key] != null);
+				if (unsupported.length > 0) return err(`${unsupported.map((key) => `\`${key}\``).join(", ")} ${unsupported.length === 1 ? "is" : "are"} not available to an Agent call made inside a subagent: a nested agent runs blocking, in this agent's directory, on its definition's model. Call again without ${unsupported.length === 1 ? "it" : "them"}.`);
 				const agentDef = agents.find((a) => a.name.toLowerCase() === agentName.toLowerCase());
 				if (!agentDef) {
 					const catalog = agents.map((a) => `- ${a.name}: ${a.description || "(no description)"}${toolsClause(a)}`).join("\n");

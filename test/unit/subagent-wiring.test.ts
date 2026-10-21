@@ -530,6 +530,27 @@ describe("fork runs in a one-shot session", () => {
 		expect(retried.content[0].text).not.toContain("already used");
 		expect(retried.details!.agentRuns![0].name).toBe("truncate-check");
 	});
+
+	// A fork's first request extends the parent's recorded one, tools block
+	// included; the ledger keeps a recorded declaration only while the live
+	// schema matches (lib/ledger/wire.ts mergeDeclarations), so a fork's spawn
+	// tool with its own schema replaced the parent's Agent mid-array and the fork
+	// missed the parent's cache from there on.
+	it("gives a fork a spawn tool with the parent's Agent schema", async () => {
+		const { h, run } = await mountFork();
+		await h.call("Agent", { subagent_type: "fork", name: "historian", task: "Read the git history" });
+		const nested = (run.mock.calls[0][0] as { extraTools?: Array<{ name: string; parameters: unknown }> }).extraTools?.find((tool) => tool.name === "Agent");
+		expect(JSON.stringify(nested!.parameters)).toBe(JSON.stringify(h.fake.tools.get("Agent")!.parameters));
+	});
+
+	it.each([{ model: "gpt-5-flash-text" }, { isolation: "worktree" }, { thinking: "high" }])("refuses a fork's nested call with a run option it cannot honor (%o)", async (option) => {
+		const { h, run } = await mountFork();
+		await h.call("Agent", { subagent_type: "fork", name: "historian", task: "Read the git history" });
+		const nested = (run.mock.calls[0][0] as { extraTools?: Array<{ name: string; execute: (...args: unknown[]) => Promise<Result> }> }).extraTools!.find((tool) => tool.name === "Agent")!;
+		const result = await nested.execute("nested", { subagent_type: "general-purpose", task: "Look", ...option }, undefined, undefined, h.ctx);
+		expect(result.isError).toBe(true);
+		expect(result.content[0].text).toContain(`\`${Object.keys(option)[0]}\``);
+	});
 });
 
 // SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M1: a long report is persisted with a

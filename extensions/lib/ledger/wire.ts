@@ -253,7 +253,7 @@ function withRecordedDeferral(live: unknown, recorded: unknown): unknown {
  * as pi built it (its cache marker included); one that differs only in its
  * text or its deferral takes the recorded bytes, so a description variant or a
  * load never moves the tools array. One whose input schema changed (an
- * upgrade, an MCP server's new schema, a fork's own spawn tool) takes the live
+ * upgrade, an MCP server's new schema) takes the live
  * declaration, with the recorded deferral: pi validates and runs a call
  * against the live schema, so the wire must offer that one. Nameless markers
  * that end the live list (Bedrock `cachePoint`) end it.
