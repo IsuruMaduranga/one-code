@@ -22,27 +22,30 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { authKind } from "../lib/anthropic-auth.ts";
+import { requestIdentity } from "../lib/anthropic-auth.ts";
 import { notifyOrPrint } from "../lib/headless-output.ts";
-import { foldBranch } from "../lib/ledger/fold.ts";
 import { LEDGER_PLAN_CHANNEL, LEDGER_SENT_CHANNEL, type LedgerSent, type RequestPlan } from "../lib/ledger/plan.ts";
-import { type EntryLike, makeRecord, RECORD } from "../lib/ledger/records.ts";
+import { makeRecord, RECORD } from "../lib/ledger/records.ts";
 import { repairRequest, validateRequest } from "../lib/ledger/validate.ts";
-import { encodeRequest, spliceRequest, type WirePayload } from "../lib/ledger/wire.ts";
+import { appendPoint, encodeRequest, type RecordedRequest, recordedRequest, spliceRequest, type WirePayload } from "../lib/ledger/wire.ts";
 import { extensionVersion } from "../lib/package-version.ts";
 
 export default function ledgerWireExtension(pi: ExtensionAPI) {
 	const by = extensionVersion();
 	/** The plan of the last `context` pass; a warm or a retry re-runs only this hook and reuses it. */
 	let plan: RequestPlan | undefined;
+	/** What this hook recorded under `plan`: the branch past the plan's fold, so a warm compares with it without folding again. */
+	let recorded: { request: RecordedRequest; hashes: Set<string> } | undefined;
 	/** Problems already reported this session, so a recurring bug is one notice. */
 	const reported = new Set<string>();
 
 	pi.events.on(LEDGER_PLAN_CHANNEL, (data) => {
 		plan = data as RequestPlan;
+		recorded = undefined;
 	});
 	pi.on("session_start", () => {
 		plan = undefined;
+		recorded = undefined;
 		reported.clear();
 	});
 
@@ -51,8 +54,10 @@ export default function ledgerWireExtension(pi: ExtensionAPI) {
 		// No context pass in this instance (a warm that outlived a /reload): leave pi's request alone.
 		if (!model || !plan) return undefined;
 		const api = model.api;
+		const current = plan;
 		let payload = event.payload as WirePayload;
-		if (!plan.epoch && plan.base) payload = spliceRequest(plan.base, payload, api);
+		if (!current.epoch && current.base) payload = spliceRequest(current.base, payload, api);
+		const spliced = payload;
 
 		const problems = validateRequest(payload, api);
 		if (problems.length > 0) {
@@ -62,15 +67,19 @@ export default function ledgerWireExtension(pi: ExtensionAPI) {
 			if (process.env.ONE_CODE_LEDGER_STRICT !== "1") payload = repairRequest(payload, api, problems);
 		}
 
-		const identity = { api, provider: model.provider, model: model.id, auth: authKind(model.provider) };
-		const fold = foldBranch(ctx.sessionManager.getBranch() as EntryLike[]);
-		const delta = encodeRequest(fold.lastRequest, payload, identity, fold.knownHashes);
+		// The recorded prefix's hashes are known, unless a repair moved its elements.
+		const base = current.base;
+		const prefixHashes = base && payload === spliced ? base.hashes.slice(0, appendPoint(base.list, api)) : [];
+		const request = recordedRequest(payload, requestIdentity(model), prefixHashes);
+		const known = { has: (hash: string) => current.fold.knownHashes.has(hash) || recorded?.hashes.has(hash) === true };
+		const delta = encodeRequest(recorded?.request ?? current.fold.lastRequest, request, known);
 		if (delta) {
-			if (plan.epoch) pi.appendEntry(RECORD.epoch, makeRecord("epoch", by, { cause: plan.cause ?? "first" }));
-			pi.appendEntry(RECORD.request, makeRecord("request", by, { ...delta, covers: plan.covers, consumed: plan.consumed }));
-			if (plan.facts.length > 0) pi.appendEntry(RECORD.told, makeRecord("told", by, { facts: plan.facts }));
+			if (current.epoch) pi.appendEntry(RECORD.epoch, makeRecord("epoch", by, { cause: current.cause ?? "first" }));
+			pi.appendEntry(RECORD.request, makeRecord("request", by, { ...delta, covers: current.covers, consumed: current.consumed }));
+			if (current.facts.length > 0) pi.appendEntry(RECORD.told, makeRecord("told", by, { facts: current.facts }));
+			recorded = { request, hashes: new Set([...(recorded?.hashes ?? []), ...Object.keys(delta.blobs)]) };
 			// A warm or a retry is the same request again: the side calls keep the one they have.
-			pi.events.emit(LEDGER_SENT_CHANNEL, { payload, model, sessionId: ctx.sessionManager.getSessionId(), plan } satisfies LedgerSent);
+			pi.events.emit(LEDGER_SENT_CHANNEL, { payload, model, sessionId: ctx.sessionManager.getSessionId(), plan: current } satisfies LedgerSent);
 		}
 		return payload === event.payload ? undefined : payload;
 	});

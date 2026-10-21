@@ -348,7 +348,7 @@ describe("permissionsExtension model_select updates classifier", () => {
 			if (status.mode === "plan") {
 				// What plan-mode's refresh does inside the broadcast.
 				fake.pi.events.emit("one-code:plan-file-path", { path: "/home/u/.onecode/plans/brisk-otter-map.md" });
-				fake.pi.events.emit("one-code:system-reminder", { text: "plan block", scope: "every-turn", key: "permission-mode", placement: "sticky-append" });
+				fake.pi.events.emit("one-code:system-reminder", { text: "plan block", key: "permission-mode", placement: "sticky-append" });
 			}
 		});
 		permissionsExtension(fake.pi as any);

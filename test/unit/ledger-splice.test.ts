@@ -3,7 +3,7 @@ import { foldBranch } from "../../extensions/lib/ledger/fold.ts";
 import { planRequest } from "../../extensions/lib/ledger/plan.ts";
 import { makeRecord, RECORD } from "../../extensions/lib/ledger/records.ts";
 import { repairRequest, validateRequest } from "../../extensions/lib/ledger/validate.ts";
-import { contentHash, isTrailer, mergeDeclarations, payloadHead, preludeLength, type RecordedRequest, spliceRequest, stripMarkers, withRecordedHead } from "../../extensions/lib/ledger/wire.ts";
+import { contentHash, isTrailer, mergeDeclarations, payloadHead, preludeLength, recordedRequest, spliceRequest, withRecordedHead } from "../../extensions/lib/ledger/wire.ts";
 
 const identity = { api: "anthropic-messages", provider: "anthropic", model: "claude-sonnet-5-5", auth: "key" };
 const mark = { type: "ephemeral" };
@@ -12,20 +12,14 @@ const assistant = (text: string) => ({ role: "assistant", content: [{ type: "tex
 const directive = { role: "system", content: [], output_config: { effort: "high" } };
 const tool = (name: string, extra: Record<string, unknown> = {}) => ({ name, input_schema: { type: "object" }, ...extra });
 
-function recorded(payload: Record<string, unknown>, api = identity.api): RecordedRequest {
-	const list = stripMarkers((payload.messages ?? payload.input) as unknown[]);
-	const head = payloadHead(payload, api);
-	return { identity: { ...identity, api }, list, head, hashes: list.map(contentHash), headHash: contentHash(head) };
-}
+const recorded = (payload: Record<string, unknown>, api = identity.api) => recordedRequest(payload, { ...identity, api });
 
 describe("planRequest", () => {
 	const messages = [{ role: "user", timestamp: 1 }, { role: "assistant", timestamp: 2 }, { role: "user", timestamp: 3 }];
 	const branchWith = (covers: { count: number; role: string; timestamp: number }) => {
-		const base = { model: identity.model, system: "s", messages: [user("one")] };
-		const list = stripMarkers(base.messages);
-		const head = payloadHead(base, identity.api);
-		const blobs = Object.fromEntries([...list.map((m) => [contentHash(m), m]), [contentHash(head), head]]);
-		return [{ type: "custom", id: "r1", parentId: null, customType: RECORD.request, data: makeRecord("request", "0.6.0", { identity, keep: 0, append: list.map(contentHash), head: contentHash(head), blobs, consumed: [], covers }) }];
+		const { list, head, hashes, headHash } = recorded({ model: identity.model, system: "s", messages: [user("one")] });
+		const blobs = Object.fromEntries([...list.map((m, i) => [hashes[i], m]), [headHash, head]]);
+		return [{ type: "custom", id: "r1", parentId: null, customType: RECORD.request, data: makeRecord("request", "0.6.0", { identity, keep: 0, append: hashes, head: headHash, blobs, consumed: [], covers }) }];
 	};
 
 	it("opens an epoch on an empty branch, covering every message", () => {

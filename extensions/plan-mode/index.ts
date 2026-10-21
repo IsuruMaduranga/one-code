@@ -109,14 +109,13 @@ export default function planModeExtension(pi: ExtensionAPI) {
 		return path;
 	};
 
-	/** Re-announce path + reminder; every-turn re-emits replace by key. */
+	/** Re-announce path + reminder; a re-emit replaces the sticky state by key. */
 	const refresh = (ctx: ExtensionContext, toolCallId?: string) => {
 		const path = ensurePlanFile(ctx);
 		planExistedAtEntry ??= existsSync(path);
 		pi.events.emit(PLAN_FILE_CHANNEL, { path });
 		pi.events.emit(REMINDER_CHANNEL, {
 			text: buildPlanModeReminder(path, planExistedAtEntry),
-			scope: "every-turn",
 			key: "permission-mode",
 			placement: "sticky-append",
 			toolCallId,

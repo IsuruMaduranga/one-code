@@ -427,7 +427,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 	pi.on("input", (event) => {
 		if (!workflowsEnabled || ultracodeMode || !/\bultracode\b/i.test(event.text)) return undefined;
 		if (event.streamingBehavior) queuedKeyword.hold(event.text, true);
-		else pi.events.emit(REMINDER_CHANNEL, { text: ULTRACODE_REMINDER, scope: "next-turn" });
+		else pi.events.emit(REMINDER_CHANNEL, { text: ULTRACODE_REMINDER });
 		return undefined;
 	});
 	pi.on("message_start", (event) => {

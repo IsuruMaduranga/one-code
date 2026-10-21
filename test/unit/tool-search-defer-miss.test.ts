@@ -41,7 +41,7 @@ describe("tool-search deferred-miss steering", () => {
 
 		const correction = correctionFor(fake.reminders, "web_fetch");
 		expect(correction).toBeDefined();
-		expect(correction?.scope).toBe("next-turn");
+		expect(correction?.placement).toBeUndefined();
 		expect(correction?.text).toContain("tool_search");
 		expect(correction?.text).toContain("select:web_fetch");
 	});

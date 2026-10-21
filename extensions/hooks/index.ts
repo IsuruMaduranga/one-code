@@ -39,8 +39,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { type EntryLike, makeRecord, RECORD, stateOnBranch } from "../lib/ledger/records.ts";
-import { extensionVersion } from "../lib/package-version.ts";
+import { readState, recordState } from "../lib/ledger/state.ts";
 import { contentText } from "@earendil-works/pi-ai";
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { RunOutcomeLatch } from "../lib/interrupt.ts";
@@ -146,11 +145,11 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	const setPending = (next: PendingContext[]) => {
 		const changed = next.length !== pendingPromptContext.length || next.some((entry, i) => entry !== pendingPromptContext[i]);
 		pendingPromptContext = next;
-		if (changed) pi.appendEntry(RECORD.state, makeRecord("state", extensionVersion(), { key: PENDING_CONTEXT_STATE, value: next }));
+		if (changed) recordState(pi, PENDING_CONTEXT_STATE, next);
 	};
 	/** The branch's recorded queue. */
 	const pendingOnBranch = (ctx: ExtensionContext): PendingContext[] => {
-		const stored = stateOnBranch(ctx.sessionManager.getBranch() as EntryLike[], PENDING_CONTEXT_STATE);
+		const stored = readState(ctx, PENDING_CONTEXT_STATE);
 		return Array.isArray(stored) ? stored.filter((entry): entry is PendingContext => typeof entry?.event === "string" && typeof entry?.text === "string") : [];
 	};
 	/**

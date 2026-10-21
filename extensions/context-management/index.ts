@@ -115,8 +115,6 @@ export function withClearThinking(payload: Record<string, unknown>): Record<stri
 	};
 }
 
-export { isAnthropicOAuth } from "../lib/anthropic-auth.ts";
-
 interface AnthropicishModel {
 	api?: string;
 	provider?: string;

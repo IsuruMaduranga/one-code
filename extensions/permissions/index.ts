@@ -77,8 +77,7 @@ import { canShowCustomUi, rpcReadOnlyText } from "../lib/headless-output.ts";
 import { sessionResultsDir } from "../lib/persisted-output.ts";
 import { privateSessionScratchpadDir } from "../lib/scratchpad.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
-import { type EntryLike, makeRecord, RECORD, stateOnBranch } from "../lib/ledger/records.ts";
-import { extensionVersion } from "../lib/package-version.ts";
+import { readState, recordState } from "../lib/ledger/state.ts";
 import {
 	decide,
 	extractSubject,
@@ -812,7 +811,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// The mode follows the branch: recorded on every change, so a resume, a
 		// fork, /reload or a /tree switch starts from it (decisions/modes.md).
 		if (mode !== branchMode) {
-			pi.appendEntry(RECORD.state, makeRecord("state", extensionVersion(), { key: PERMISSION_MODE_STATE, value: mode }));
+			recordState(pi, PERMISSION_MODE_STATE, mode);
 			branchMode = mode;
 		}
 		applyBadge(undefined, toolCallId);
@@ -843,7 +842,6 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 					"Auto mode is active: your tool calls run without per-action prompts, but each one is screened by an approval classifier that blocks anything irreversible, destructive, or aimed outside this environment. " +
 					"Work normally — do not narrate the classifier or try to phrase calls to get past it. If a call is blocked, take the block at face value: do not retry it, and do not reach the same result another way. Continue with work that does not depend on it, or explain what you were trying to do and let the user decide. " +
 					"Attempting to weaken this gate (editing permission settings, changing the mode, or routing work around it) is itself blocked.",
-				scope: "every-turn",
 				key: "permission-mode",
 				// Session state: rides every user message since auto mode came on, so
 				// the cached prefix holds turn to turn (lib/reminders.ts).
@@ -957,7 +955,6 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		}
 		pi.events.emit(REMINDER_CHANNEL, {
 			text: note,
-			scope: "every-turn",
 			key: "auto-mode-note",
 			placement: "first-prepend",
 			order: CONTEXT_ORDER.autoModeNote,
@@ -1025,7 +1022,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		oneCodeProjectSettingsFile = oneCodeProjectSettingsPath(ctx.cwd, os.homedir());
 		protectedDirs = runtimeProtectedDirs();
 		secretPaths = runtimeSecretPaths(os.homedir());
-		branchMode = normalizePermissionMode(stateOnBranch(ctx.sessionManager.getBranch() as EntryLike[], PERMISSION_MODE_STATE));
+		branchMode = normalizePermissionMode(readState(ctx, PERMISSION_MODE_STATE));
 		reloadSettings(ctx);
 		if (!STANDING_REMINDER_MODES.has(mode)) setMode(mode, true);
 		// The system prompt lists the workspace as the session starts (lib/workspace-channel.ts).
@@ -1039,7 +1036,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	// take it, as a resume would, without announcing a switch. A stored
 	// bypassPermissions is never taken.
 	pi.on("session_tree", (_event, ctx) => {
-		const onBranch = normalizePermissionMode(stateOnBranch(ctx.sessionManager.getBranch() as EntryLike[], PERMISSION_MODE_STATE));
+		const onBranch = normalizePermissionMode(readState(ctx, PERMISSION_MODE_STATE));
 		if (!onBranch || onBranch === "bypassPermissions" || onBranch === mode) return;
 		branchMode = onBranch;
 		setMode(onBranch, true);

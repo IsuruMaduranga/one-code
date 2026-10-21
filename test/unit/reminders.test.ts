@@ -11,7 +11,6 @@ import {
 	type StackEntry,
 	type StickyEntry,
 	toldBlockFact,
-	toldBlockIs,
 	wrapReminder,
 } from "../../extensions/lib/reminders.ts";
 
@@ -33,9 +32,9 @@ const render = (messages: any[], input: Partial<RenderInput>) =>
 describe("LiveReminders", () => {
 	it("keeps the first-prepend stack as live state, in Claude Code's order, replaced by key", () => {
 		const live = new LiveReminders();
-		expect(live.apply({ text: "claudeMd", placement: "first-prepend", order: 50, key: "md", scope: "every-turn" })).toBe("live");
-		live.apply({ text: "env", placement: "first-prepend", order: 1, key: "env", scope: "every-turn" });
-		live.apply({ text: "env 2", placement: "first-prepend", order: 1, key: "env", scope: "every-turn" });
+		expect(live.apply({ text: "claudeMd", placement: "first-prepend", order: 50, key: "md" })).toBe("live");
+		live.apply({ text: "env", placement: "first-prepend", order: 1, key: "env" });
+		live.apply({ text: "env 2", placement: "first-prepend", order: 1, key: "env" });
 		expect(live.stackEntries().map((entry) => entry.text)).toEqual(["env 2", "claudeMd"]);
 		live.apply({ key: "md", remove: true });
 		expect(live.stackEntries().map((entry) => entry.text)).toEqual(["env 2"]);
@@ -53,12 +52,12 @@ describe("LiveReminders", () => {
 	it("keeps a sticky state's start and delivery while its text is unchanged, and starts a new one when it changes", () => {
 		let now = 10;
 		const live = new LiveReminders(() => now);
-		live.apply({ text: "plan", key: "mode", placement: "sticky-append", scope: "every-turn" });
+		live.apply({ text: "plan", key: "mode", placement: "sticky-append" });
 		live.markDelivered(["mode"]);
 		now = 20;
-		live.apply({ text: "plan", key: "mode", placement: "sticky-append", scope: "every-turn" });
+		live.apply({ text: "plan", key: "mode", placement: "sticky-append" });
 		expect(live.stickyEntries()).toEqual([{ key: "mode", text: "plan", since: 10, delivered: true }]);
-		live.apply({ text: "auto", key: "mode", placement: "sticky-append", scope: "every-turn" });
+		live.apply({ text: "auto", key: "mode", placement: "sticky-append" });
 		expect(live.stickyEntries()).toEqual([{ key: "mode", text: "auto", since: 20, delivered: false }]);
 		live.apply({ key: "mode", remove: true });
 		expect(live.stickyEntries()).toEqual([]);
@@ -203,10 +202,8 @@ describe("renderReminders: one-shots", () => {
 });
 
 describe("whole-text block facts", () => {
-	it("tell whether the epoch's last told text for a key is the live one", () => {
-		const fact = toldBlockFact("menu", "A");
-		const request = { toldBlocks: new Map([[fact.key, fact.hash]]) };
-		expect(toldBlockIs(request, "menu", "A")).toBe(true);
-		expect(toldBlockIs(request, "menu", "B")).toBe(false);
+	it("hash the told text, so the same text is the same fact and another is not", () => {
+		expect(toldBlockFact("menu", "A")).toEqual(toldBlockFact("menu", "A"));
+		expect(toldBlockFact("menu", "A").hash).not.toBe(toldBlockFact("menu", "B").hash);
 	});
 });

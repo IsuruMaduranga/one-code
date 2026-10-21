@@ -104,7 +104,6 @@ export function subagentHandbackExtension(slot: HandbackSlot, options: { deferre
 		pi.on("session_start", () => {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text: options.deferred ? `${SUBAGENT_HANDBACK_LOAD_FIRST}\n${SUBAGENT_HANDBACK_REMINDER}` : SUBAGENT_HANDBACK_REMINDER,
-				scope: "every-turn",
 				key: "subagent-handback",
 				placement: "sticky-append",
 			} satisfies ReminderPayload);

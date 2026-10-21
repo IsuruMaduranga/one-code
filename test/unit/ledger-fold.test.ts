@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { foldBranch } from "../../extensions/lib/ledger/fold.ts";
-import { type EntryLike, makeRecord, RECORD, type RecordData, type RecordKind } from "../../extensions/lib/ledger/records.ts";
-import { encodeRequest, type WirePayload } from "../../extensions/lib/ledger/wire.ts";
+import { type EntryLike, makeRecord, RECORD, type RecordData, type RecordKind, stateOnBranch } from "../../extensions/lib/ledger/records.ts";
+import { encodeRequest, recordedRequest, type WirePayload } from "../../extensions/lib/ledger/wire.ts";
 
 const identity = { api: "anthropic-messages", provider: "anthropic", model: "claude-sonnet-5-5", auth: "api-key" };
-const live = { model: identity.model, auth: identity.auth };
+const live = identity;
 const user = (text: string) => ({ role: "user", content: [{ type: "text", text }] });
 const assistant = (text: string) => ({ role: "assistant", content: [{ type: "text", text }] });
 const body = (messages: unknown[]): WirePayload => ({ model: identity.model, max_tokens: 64000, system: "One Code", tools: [], messages });
@@ -23,7 +23,7 @@ class Branch {
 	/** A request as the core would record it, against everything recorded so far. */
 	request(payload: WirePayload, opts: { identity?: typeof identity; consumed?: string[] } = {}) {
 		const fold = foldBranch(this.entries, live);
-		const delta = encodeRequest(fold.lastRequest, payload, opts.identity ?? identity, fold.knownHashes);
+		const delta = encodeRequest(fold.lastRequest, recordedRequest(payload, opts.identity ?? identity), fold.knownHashes);
 		if (!delta) throw new Error("test request added nothing");
 		return this.record("request", { ...delta, consumed: opts.consumed ?? [] });
 	}
@@ -93,16 +93,15 @@ describe("ledger fold", () => {
 		b.record("state", { key: "permission-mode", value: "plan" });
 		b.record("state", { key: "ultracode", value: true });
 		b.record("state", { key: "permission-mode", value: "acceptEdits" });
-		const fold = foldBranch(b.entries, live);
-		expect(fold.state.get("permission-mode")).toBe("acceptEdits");
-		expect(fold.state.get("ultracode")).toBe(true);
+		expect(stateOnBranch(b.entries, "permission-mode")).toBe("acceptEdits");
+		expect(stateOnBranch(b.entries, "ultracode")).toBe(true);
 	});
 
 	it("keeps durable state across a compaction", () => {
 		const b = new Branch();
 		b.record("state", { key: "permission-mode", value: "plan" });
 		b.compaction();
-		expect(foldBranch(b.entries, live).state.get("permission-mode")).toBe("plan");
+		expect(stateOnBranch(b.entries, "permission-mode")).toBe("plan");
 	});
 
 	it("unions told facts within the epoch and starts them empty after a compaction", () => {
@@ -121,20 +120,11 @@ describe("ledger fold", () => {
 
 	it("keeps pending items until a request consumes them, latest per key", () => {
 		const b = new Branch();
-		b.record("pending", { id: "p1", source: "hook:SessionStart", text: "hook said hi" });
-		b.record("pending", { id: "p2", source: "local-command", key: "model", text: "/model a" });
-		b.record("pending", { id: "p3", source: "local-command", key: "model", text: "/model b" });
+		b.record("pending", { id: "p1", text: "hook said hi" });
+		b.record("pending", { id: "p2", key: "model", text: "/model a" });
+		b.record("pending", { id: "p3", key: "model", text: "/model b" });
 		expect(foldBranch(b.entries, live).pending.map((p) => p.id)).toEqual(["p1", "p3"]);
 		b.request(body([user("one")]), { consumed: ["p1"] });
-		expect(foldBranch(b.entries, live).pending.map((p) => p.id)).toEqual(["p3"]);
-	});
-
-	it("drops file restores and PostCompact context produced before the latest compaction", () => {
-		const b = new Branch();
-		b.record("pending", { id: "p1", source: "file-restore", text: "old restore" });
-		b.record("pending", { id: "p2", source: "hook:PostCompact", text: "old hook" });
-		b.record("pending", { id: "p3", source: "notification", text: "a task finished" });
-		b.compaction();
 		expect(foldBranch(b.entries, live).pending.map((p) => p.id)).toEqual(["p3"]);
 	});
 
@@ -143,16 +133,15 @@ describe("ledger fold", () => {
 		b.record("state", { key: "permission-mode", value: "plan" });
 		const fork = b.entries.slice();
 		b.record("state", { key: "permission-mode", value: "acceptEdits" });
-		b.record("pending", { id: "p1", source: "notification", text: "only on the abandoned branch" });
-		const fold = foldBranch(fork, live);
-		expect(fold.state.get("permission-mode")).toBe("plan");
-		expect(fold.pending).toEqual([]);
+		b.record("pending", { id: "p1", text: "only on the abandoned branch" });
+		expect(stateOnBranch(fork, "permission-mode")).toBe("plan");
+		expect(foldBranch(fork, live).pending).toEqual([]);
 	});
 
 	it("ignores records of another format version", () => {
 		const b = new Branch();
 		b.record("state", { key: "permission-mode", value: "plan" });
 		(b.entries[0].data as { v: number }).v = 99;
-		expect(foldBranch(b.entries, live).state.has("permission-mode")).toBe(false);
+		expect(stateOnBranch(b.entries, "permission-mode")).toBeUndefined();
 	});
 });

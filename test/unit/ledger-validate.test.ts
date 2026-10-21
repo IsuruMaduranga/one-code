@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { validateRequest } from "../../extensions/lib/ledger/validate.ts";
-import { contentHash, payloadHead, type RecordedRequest, stripMarkers } from "../../extensions/lib/ledger/wire.ts";
 
 const api = "anthropic-messages";
 const user = (text: string) => ({ role: "user", content: [{ type: "text", text }] });
@@ -16,12 +15,6 @@ const body = (messages: unknown[], tools = ["read", "probe_echo"]) => ({
 	tools: tools.map((name) => ({ name, input_schema: { type: "object" }, ...(name === "probe_echo" ? { defer_loading: true } : {}) })),
 	messages,
 });
-const recorded = (payload: Record<string, unknown>): RecordedRequest => {
-	const list = stripMarkers(payload.messages as unknown[]);
-	const head = payloadHead(payload, api);
-	return { identity: { api, provider: "anthropic", model: "claude-sonnet-5-5", auth: "api-key" }, list, head, hashes: list.map(contentHash), headHash: contentHash(head) };
-};
-
 describe("ledger validate", () => {
 	it("accepts a well-formed request", () => {
 		expect(validateRequest(body([user("one"), addition("probe_echo"), directive]), api)).toEqual([]);
@@ -44,13 +37,6 @@ describe("ledger validate", () => {
 	it("allows system messages to follow each other before the reply", () => {
 		const countdown = { role: "system", content: [{ type: "text", text: "<total_tokens>9 tokens left</total_tokens>" }] };
 		expect(validateRequest(body([user("one"), addition("probe_echo"), countdown, assistant("1")]), api)).toEqual([]);
-	});
-
-	it("flags any element above the append point that differs from the record", () => {
-		const sent = body([user("one"), assistant("1")]);
-		const next = body([user("one, rewritten"), assistant("1"), user("two")]);
-		expect(validateRequest(next, api, recorded(sent))).toEqual([{ kind: "prefix", index: 0 }]);
-		expect(validateRequest(body([user("one"), assistant("1"), user("two")]), api, recorded(sent))).toEqual([]);
 	});
 
 	it("checks only references on non-Anthropic shapes, which take a system message anywhere", () => {

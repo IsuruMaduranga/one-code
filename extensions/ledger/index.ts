@@ -23,7 +23,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { authKind } from "../lib/anthropic-auth.ts";
+import { requestIdentity } from "../lib/anthropic-auth.ts";
 import { foldBranch } from "../lib/ledger/fold.ts";
 import { LEDGER_PLAN_CHANNEL, planRequest } from "../lib/ledger/plan.ts";
 import { type EntryLike, makeRecord, RECORD } from "../lib/ledger/records.ts";
@@ -37,9 +37,7 @@ export default function ledgerExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("context", (event, ctx) => {
-		const model = ctx.model;
-		const identity = model ? { model: model.id, auth: authKind(model.provider), api: model.api, provider: model.provider } : undefined;
-		const fold = foldBranch(ctx.sessionManager.getBranch() as EntryLike[], identity);
+		const fold = foldBranch(ctx.sessionManager.getBranch() as EntryLike[], ctx.model ? requestIdentity(ctx.model) : undefined);
 		const { plan, tailStart } = planRequest(fold, event.messages as Array<{ role: string; timestamp?: number }>);
 		pi.events.emit(LEDGER_PLAN_CHANNEL, plan);
 		return tailStart > 0 ? { messages: event.messages.slice(tailStart) } : undefined;

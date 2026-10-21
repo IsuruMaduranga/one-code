@@ -91,7 +91,7 @@ describe("worktree state announcements", () => {
 		});
 		await resumed.fire("session_start", {}, ctx);
 		expect(reminders).toContainEqual({ key: "cc-worktree-session", remove: true });
-		const notice = reminders.find((entry) => entry.text && entry.scope !== "every-turn");
+		const notice = reminders.find((entry) => entry.text && entry.placement === undefined);
 		expect(notice?.text).toContain(`back in ${repo}`);
 		expect(notice?.text).toContain(missingPath);
 		expect(notice?.text).toContain("no longer exists");

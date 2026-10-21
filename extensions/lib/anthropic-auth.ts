@@ -7,6 +7,7 @@
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import type { RequestIdentity } from "./ledger/records.ts";
 
 /** mtime cache: this runs on every provider request, the hottest path there is. */
 let authCache: { mtimeMs: number; oauth: boolean } | undefined;
@@ -34,4 +35,9 @@ export function isAnthropicOAuth(): boolean {
 /** The auth kind a request to `provider` goes out with: "oauth" for an Anthropic subscription login, else "key". */
 export function authKind(provider: string | undefined): "oauth" | "key" {
 	return provider === "anthropic" && isAnthropicOAuth() ? "oauth" : "key";
+}
+
+/** Who a request to `model` goes to, as the ledger records it; a change opens an epoch. */
+export function requestIdentity(model: { api: string; provider: string; id: string }): RequestIdentity {
+	return { api: model.api, provider: model.provider, model: model.id, auth: authKind(model.provider) };
 }

@@ -4,7 +4,10 @@
  * set. Shared by tool-search-defer-miss.test.ts and tool-search-announce.test.ts.
  */
 import { DEFER_CHANNEL } from "../../../extensions/lib/deferred.ts";
-import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderedBlock, type RenderRequest } from "../../../extensions/lib/reminders.ts";
+import { CALLABLE_TOOLS } from "../../../extensions/lib/ledger/fold.ts";
+import type { ToldFact } from "../../../extensions/lib/ledger/records.ts";
+import { REMINDER_CHANNEL, type RenderedBlock, type RenderRequest } from "../../../extensions/lib/reminders.ts";
+import { renderRequest } from "./fake-pi.ts";
 
 export interface Reminder {
 	scope?: string;
@@ -81,16 +84,11 @@ export function makeToolSearchFakePi(initialActive: string[] = []) {
 	 * `told` (fact kind → names), unless `epoch`. Returns the blocks owners added.
 	 */
 	const render = (opts: { epoch?: boolean; told?: Record<string, string[]>; modes?: Record<string, boolean>; model?: RenderRequest["model"] } = {}): RenderedBlock[] => {
-		const request: RenderRequest = {
-			epoch: opts.epoch ?? false,
-			told: new Map(Object.entries(opts.told ?? {}).map(([kind, names]) => [kind, new Set(names)])),
-			modes: new Map(Object.entries(opts.modes ?? {})),
-			toldBlocks: new Map(),
-			model: opts.model,
-			blocks: [],
-		};
-		pi.events.emit(RENDER_CHANNEL, request);
-		return request.blocks;
+		const facts: ToldFact[] = [
+			...Object.entries(opts.told ?? {}).map(([kind, names]) => (kind === CALLABLE_TOOLS ? { kind: "tools" as const, names, callable: true } : { kind: kind as "tools" | "skills", names })),
+			...Object.entries(opts.modes ?? {}).map(([key, on]) => ({ kind: "mode" as const, key, on })),
+		];
+		return renderRequest(pi.events, { facts, ...(opts.epoch ? { epoch: true } : {}), model: opts.model });
 	};
 
 	return { pi, reminders, allTools, setActive: (n: string[]) => (active = n), activeTools: () => active, addDeferred, runTool, unregister, render };

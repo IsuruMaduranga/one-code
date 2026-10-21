@@ -6,25 +6,20 @@
  *
  * Pure: no pi imports.
  */
-import { contentHash, listKey, type RecordedRequest, toolName, type WirePayload } from "./wire.ts";
+import { isObject } from "./records.ts";
+import { functionDeclarations, listKey, toolName, type WirePayload } from "./wire.ts";
 
 export type Problem =
 	/** A tool_reference, tool_addition or tool_removal names a tool `tools` does not declare. */
 	| { kind: "undeclared"; name: string; index: number }
 	/** Anthropic: a system message with content followed by something other than an assistant message (findings §52). */
-	| { kind: "stranded-system"; index: number }
-	/** An element above the append point differs from the record. */
-	| { kind: "prefix"; index: number };
-
-const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+	| { kind: "stranded-system"; index: number };
 
 /** Every declaration list in the payload: `tools`, Bedrock `toolConfig.tools`, Google's function declarations. */
 function declarations(payload: WirePayload): unknown[] {
 	const config = isObject(payload.config) ? payload.config : undefined;
 	const toolConfig = isObject(payload.toolConfig) ? payload.toolConfig : undefined;
-	const google = Array.isArray(config?.tools)
-		? config.tools.flatMap((group) => (isObject(group) && Array.isArray(group.functionDeclarations) ? group.functionDeclarations : []))
-		: [];
+	const google = Array.isArray(config?.tools) ? functionDeclarations(config.tools) : [];
 	return [...(Array.isArray(payload.tools) ? payload.tools : []), ...(Array.isArray(toolConfig?.tools) ? toolConfig.tools : []), ...google];
 }
 
@@ -75,7 +70,7 @@ function strandedSystems(list: readonly unknown[]): number[] {
 	return stranded;
 }
 
-export function validateRequest(payload: WirePayload, api: string, recorded?: RecordedRequest): Problem[] {
+export function validateRequest(payload: WirePayload, api: string): Problem[] {
 	const problems: Problem[] = [];
 	const value = payload[listKey(api)];
 	const list: unknown[] = Array.isArray(value) ? value : [];
@@ -86,12 +81,6 @@ export function validateRequest(payload: WirePayload, api: string, recorded?: Re
 	});
 
 	if (api === "anthropic-messages") for (const index of strandedSystems(list)) problems.push({ kind: "stranded-system", index });
-
-	if (recorded) {
-		for (let index = 0; index < recorded.list.length; index++) {
-			if (index >= list.length || contentHash(list[index]) !== recorded.hashes[index]) problems.push({ kind: "prefix", index });
-		}
-	}
 	return problems;
 }
 
@@ -113,8 +102,7 @@ function withoutReferences(value: unknown, names: ReadonlySet<string>): unknown 
 /**
  * The payload with every flagged problem removed, for a production request
  * (a test treats any problem as fatal instead): references to undeclared
- * tools are dropped, and so is a stranded system message. A prefix problem is
- * not repairable here; the caller's splice prevents it.
+ * tools are dropped, and so is a stranded system message.
  */
 export function repairRequest(payload: WirePayload, api: string, problems: readonly Problem[]): WirePayload {
 	const key = listKey(api);

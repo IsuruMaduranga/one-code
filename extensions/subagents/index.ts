@@ -66,7 +66,7 @@ import { projectConfigDirName } from "../lib/config-mode.ts";
 import { pendingClaimReminder } from "./pending-claim.ts";
 import { watchPermissionBridge } from "../permissions/subagent-gate.ts";
 import { watchHookBridge } from "../hooks/subagent-bridge.ts";
-import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, type ReminderPayload, toldBlockFact, toldBlockIs } from "../lib/reminders.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, type ReminderPayload, toldBlockFact } from "../lib/reminders.ts";
 import { type BackgroundTask, generateTaskId, TASK_REGISTER_CHANNEL } from "../background/registry.ts";
 import { type ChildAction } from "../auto-mode/actions.ts";
 import { type ChildOutcome, forkTaskMessage, OUTPUT_CAP, type RpcChildHandle } from "./outcome.ts";
@@ -112,7 +112,7 @@ import { createMarkdownProse } from "./prose.ts";
 import { asScrollableViewport, ViewportMirror } from "./viewport-mirror.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 import { extendingCompletions } from "../lib/argument-hints.ts";
-import { makeRecord, RECORD, stateOnBranch, type EntryLike } from "../lib/ledger/records.ts";
+import { readStringsState, recordState } from "../lib/ledger/state.ts";
 import { panelUi } from "../lib/panel-focus.ts";
 import { dockRowsReporter, trackDockRows } from "../lib/dock-rows.ts";
 
@@ -421,7 +421,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		unusableModels.add(model);
 		// A refusal is a durable fact of the account, not UI prose: a resumed
 		// session must not pick the same model and announce it again.
-		pi.appendEntry(RECORD.state, makeRecord("state", extensionVersion(), { key: REFUSED_MODELS_STATE, value: [...unusableModels] }));
+		recordState(pi, REFUSED_MODELS_STATE, [...unusableModels]);
 		return true;
 	};
 	pi.events.on(MODEL_UNUSABLE_CHANNEL, (data) => {
@@ -643,7 +643,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	const publishBlock = (key: SubagentBlockKey, text: string | null) => {
 		liveBlocks[key] = text;
 		if (text === null) pi.events.emit(REMINDER_CHANNEL, { key, remove: true });
-		else pi.events.emit(REMINDER_CHANNEL, { text, scope: "every-turn", key, placement: "first-prepend", order: BLOCK_ORDER[key], facts: [toldBlockFact(key, text)] });
+		else pi.events.emit(REMINDER_CHANNEL, { text, key, placement: "first-prepend", order: BLOCK_ORDER[key], facts: [toldBlockFact(key, text)] });
 	};
 	pi.events.on(RENDER_CHANNEL, (data) => {
 		const request = data as RenderRequest;
@@ -653,9 +653,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		}
 		for (const key of Object.keys(liveBlocks) as SubagentBlockKey[]) {
 			const text = liveBlocks[key];
+			// An absent block is told as its empty text; one never told needs no withdrawal.
 			const told = request.toldBlocks.get(key);
-			if (text === null ? told === undefined || told === toldBlockFact(key, "").hash : toldBlockIs(request, key, text)) continue;
-			const facts = [toldBlockFact(key, text ?? "")];
+			const fact = toldBlockFact(key, text ?? "");
+			if (told === fact.hash || (text === null && told === undefined)) continue;
+			const facts = [fact];
 			if (text === null) request.blocks.push({ text: "The subagent delegation guidance previously shown for this conversation is no longer active.", facts });
 			else if (key === "subagent-models" && refusal) request.blocks.push({ text: refusedModelNote(refusal.refused, refusal.replacement), facts });
 			else request.blocks.push({ text, facts });
@@ -746,8 +748,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		// The account's refusals follow the branch: restore the selection floor
 		// before building the menu, or this process picks the refused model again.
-		const refusedOnBranch = stateOnBranch(ctx.sessionManager.getBranch() as EntryLike[], REFUSED_MODELS_STATE);
-		if (Array.isArray(refusedOnBranch)) for (const model of refusedOnBranch) if (typeof model === "string") unusableModels.add(model);
+		for (const model of readStringsState(ctx, REFUSED_MODELS_STATE)) unusableModels.add(model);
 		lastCtx = ctx;
 		// A replaced session (/clear, /new, /resume) never reaches this instance
 		// with the old one's agents: pi emits `session_shutdown` (reason "new" /

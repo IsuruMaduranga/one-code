@@ -44,7 +44,7 @@ import {
 import { collectGitStatus, GIT_SNAPSHOT_OWNER_CHANNEL } from "../lib/git-status.ts";
 import { readMemoryIndex } from "../lib/memory-index.ts";
 import { claudeConfigDir, oneCodeStateDir, tryRealpath } from "../lib/paths.ts";
-import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../lib/reminders.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, toldBlockFact } from "../lib/reminders.ts";
 import { inContextEntries } from "../lib/compaction-boundary.ts";
 import { compactionGitStatus, contextBlockFacts, type ContextFingerprints, contextFingerprints, dateFingerprint, FACT_KEYS, gitFingerprint, instructionFacts, resumeFactsNotice } from "../lib/context-facts.ts";
 import { resolveToolPath } from "../lib/tool-path.ts";
@@ -159,11 +159,10 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		blockDate = date;
 		pi.events.emit(REMINDER_CHANNEL, {
 			text: dateBlock(date),
-			scope: "every-turn",
 			key: DATE_REMINDER_KEY,
 			placement: "first-prepend",
 			order: CONTEXT_ORDER.date,
-			facts: [{ kind: "block", key: FACT_KEYS.date, hash: dateFingerprint(date) }],
+			facts: [toldBlockFact(FACT_KEYS.date, date)],
 		});
 	};
 
@@ -218,7 +217,6 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		if (instructions) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text: instructions,
-				scope: "every-turn",
 				key: REMINDER_KEY,
 				placement: "first-prepend",
 				order: CONTEXT_ORDER.claudeMd,
@@ -230,7 +228,6 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		if (current.oneCode) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text: current.oneCode,
-				scope: "every-turn",
 				key: ONECODE_REMINDER_KEY,
 				placement: "first-prepend",
 				order: CONTEXT_ORDER.oneCodeMd,
@@ -245,7 +242,6 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		}
 		pi.events.emit(REMINDER_CHANNEL, {
 			text: context,
-			scope: "every-turn",
 			key: CONTEXT_REMINDER_KEY,
 			placement: "first-prepend",
 			order: CONTEXT_ORDER.context,
@@ -373,7 +369,7 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		const today = localDate();
 		const toldDate = request.toldBlocks.get(FACT_KEYS.date);
 		if (blockDate && toldDate !== undefined && toldDate !== dateFingerprint(today)) {
-			request.blocks.push({ text: dateChangeReminder(today), facts: [{ kind: "block", key: FACT_KEYS.date, hash: dateFingerprint(today) }] });
+			request.blocks.push({ text: dateChangeReminder(today), facts: [toldBlockFact(FACT_KEYS.date, today)] });
 		}
 		if (!resumeCheck || !livePrints) return;
 		resumeCheck = false;

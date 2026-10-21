@@ -27,8 +27,7 @@ import { getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
 import { getAgentDir, SettingsManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { effortSetMessage, isPersistedEffort, type PersistedEffort } from "./settings.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
-import { type EntryLike, makeRecord, RECORD, stateOnBranch } from "../lib/ledger/records.ts";
-import { extensionVersion } from "../lib/package-version.ts";
+import { readState, recordState } from "../lib/ledger/state.ts";
 import { dimRightAlignedWidget, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import {
 	acceptedEffortArgs,
@@ -129,11 +128,10 @@ export default function effortExtension(pi: ExtensionAPI) {
 		ultracodeLevel = on ? level : undefined;
 		if (changed) pi.events.emit(ULTRACODE_MODE_CHANNEL, { active: on });
 		// Ultracode follows the branch: recorded on every change.
-		if (changed && record) pi.appendEntry(RECORD.state, makeRecord("state", extensionVersion(), { key: ULTRACODE_STATE, value: on ? { on, level } : { on } }));
+		if (changed && record) recordState(pi, ULTRACODE_STATE, on ? { on, level } : { on });
 		if (on) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text: ULTRACODE_STANDING_REMINDER,
-				scope: "every-turn",
 				key: REMINDER_KEY,
 				placement: "sticky-append",
 			});
@@ -315,7 +313,7 @@ export default function effortExtension(pi: ExtensionAPI) {
 	 * branch itself, is still the level ultracode settled on.
 	 */
 	const followBranch = (ctx: ExtensionContext) => {
-		const stored = stateOnBranch(ctx.sessionManager.getBranch() as EntryLike[], ULTRACODE_STATE) as { on?: unknown; level?: unknown } | undefined;
+		const stored = readState(ctx, ULTRACODE_STATE) as { on?: unknown; level?: unknown } | undefined;
 		const on = stored?.on === true && typeof stored.level === "string" && stored.level === pi.getThinkingLevel();
 		setUltracode(on, on ? (stored?.level as ThinkingLevel) : undefined, false);
 		applyStatus(ctx);

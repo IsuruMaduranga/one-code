@@ -9,7 +9,7 @@
  * Pure: no pi imports.
  */
 import { createHash } from "node:crypto";
-import type { RequestIdentity, RequestRecordData } from "./records.ts";
+import { isObject, type RequestIdentity, type RequestRecordData, sameIdentity } from "./records.ts";
 
 /** A provider request body as pi-ai built it. */
 export type WirePayload = Record<string, unknown>;
@@ -31,8 +31,6 @@ export function listKey(api: string): "messages" | "input" | "contents" {
 	return "messages";
 }
 
-const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
-
 /** A Bedrock Converse `{ cachePoint }` block: a marker that is a whole list element. */
 const isCachePoint = (value: unknown): boolean => isObject(value) && Object.keys(value).length === 1 && "cachePoint" in value;
 
@@ -45,12 +43,12 @@ export function stripMarkers<T>(value: T): T {
 	return out as T;
 }
 
-/** JSON with sorted keys, so key order never changes a hash; `undefined` fields drop out as in JSON. */
+/** JSON with sorted keys and without cache markers, so neither key order nor a marker changes a hash; `undefined` fields drop out as in JSON. */
 function canonical(value: unknown): string {
-	if (Array.isArray(value)) return `[${value.map((item) => (item === undefined ? "null" : canonical(item))).join(",")}]`;
+	if (Array.isArray(value)) return `[${value.filter((item) => !isCachePoint(item)).map((item) => (item === undefined ? "null" : canonical(item))).join(",")}]`;
 	if (!isObject(value)) return JSON.stringify(value) ?? "null";
 	const fields = Object.keys(value)
-		.filter((key) => value[key] !== undefined)
+		.filter((key) => key !== "cache_control" && value[key] !== undefined)
 		.sort()
 		.map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`);
 	return `{${fields.join(",")}}`;
@@ -58,7 +56,7 @@ function canonical(value: unknown): string {
 
 /** A stable content hash of `value`: object key order does not matter, cache markers are ignored. */
 export function contentHash(value: unknown): string {
-	return createHash("sha256").update(canonical(stripMarkers(value))).digest("hex");
+	return createHash("sha256").update(canonical(value)).digest("hex");
 }
 
 /** Top-level output caps: a cache warm sends the same body with the cap at 1. */
@@ -88,25 +86,30 @@ function payloadList(payload: WirePayload, api: string): unknown[] {
 	return Array.isArray(list) ? list : [];
 }
 
-const sameIdentity = (a: RequestIdentity, b: RequestIdentity) => a.api === b.api && a.provider === b.provider && a.model === b.model && a.auth === b.auth;
+/**
+ * `payload` as the ledger records it: its list and head, markers stripped,
+ * and their hashes. `prefixHashes` are the known hashes of the list's first
+ * elements (a splice's recorded prefix), so only the rest is hashed.
+ */
+export function recordedRequest(payload: WirePayload, identity: RequestIdentity, prefixHashes: readonly string[] = []): RecordedRequest {
+	const list = stripMarkers(payloadList(payload, identity.api));
+	const head = payloadHead(payload, identity.api);
+	const hashes = [...prefixHashes, ...list.slice(prefixHashes.length).map(contentHash)];
+	return { identity, list, head, hashes, headHash: contentHash(head) };
+}
 
 /**
- * The record for `payload`, or undefined when it adds nothing: the same list
+ * The record for `current`, or undefined when it adds nothing: the same list
  * and head as `previous` (a pi cache warm or a provider retry re-running the
- * hooks). `known` is every hash already on the branch, so `blobs` carries only
- * new bodies.
+ * hooks). `known` holds every hash already on the branch, so `blobs` carries
+ * only new bodies.
  */
 export function encodeRequest(
 	previous: RecordedRequest | undefined,
-	payload: WirePayload,
-	identity: RequestIdentity,
-	known: ReadonlySet<string>,
+	current: RecordedRequest,
+	known: { has(hash: string): boolean },
 ): Omit<RequestRecordData, "v" | "by" | "consumed"> | undefined {
-	const list = stripMarkers(payloadList(payload, identity.api));
-	const hashes = list.map(contentHash);
-	const head = payloadHead(payload, identity.api);
-	const headHash = contentHash(head);
-
+	const { identity, list, head, hashes, headHash } = current;
 	let keep = 0;
 	if (previous) while (keep < hashes.length && keep < previous.hashes.length && hashes[keep] === previous.hashes[keep]) keep++;
 	const unchanged = previous && keep === hashes.length && keep === previous.hashes.length && headHash === previous.headHash && sameIdentity(identity, previous.identity);
@@ -116,26 +119,6 @@ export function encodeRequest(
 	for (let i = keep; i < list.length; i++) if (!known.has(hashes[i])) blobs[hashes[i]] = list[i];
 	if (!known.has(headHash)) blobs[headHash] = head;
 	return { identity, keep, append: hashes.slice(keep), head: headHash, blobs };
-}
-
-/**
- * The payload with every element up to `recorded.list.length` taken from the
- * record, and the indexes where pi's own serialization differed. The tail
- * past the record is left as pi built it; the head is untouched (a new epoch
- * renders it). An element pi serialized identically keeps pi's cache markers.
- * A recorded element past the end of pi's list is not added back; the
- * validator reports it.
- */
-export function enforcePrefix(recorded: RecordedRequest, payload: WirePayload, api: string): { payload: WirePayload; replaced: number[] } {
-	const list = payloadList(payload, api).slice();
-	const replaced: number[] = [];
-	const end = Math.min(recorded.list.length, list.length);
-	for (let i = 0; i < end; i++) {
-		if (contentHash(list[i]) === recorded.hashes[i]) continue;
-		list[i] = structuredClone(recorded.list[i]);
-		replaced.push(i);
-	}
-	return { payload: replaced.length ? { ...payload, [listKey(api)]: list } : payload, replaced };
 }
 
 /** APIs whose list starts with the system prompt as an instruction message (Chat Completions, Responses but not Codex, Mistral). */
@@ -173,6 +156,11 @@ export function toolName(tool: unknown): string | undefined {
 	if (isObject(tool.function) && typeof tool.function.name === "string") return tool.function.name;
 	if (isObject(tool.toolSpec) && typeof tool.toolSpec.name === "string") return tool.toolSpec.name;
 	return typeof tool.type === "string" && !("cachePoint" in tool) ? `type:${tool.type}` : undefined;
+}
+
+/** Google's function declarations, flattened out of its tool groups. */
+export function functionDeclarations(groups: readonly unknown[]): unknown[] {
+	return groups.flatMap((group) => (isObject(group) && Array.isArray(group.functionDeclarations) ? group.functionDeclarations : []));
 }
 
 /**
@@ -257,10 +245,9 @@ export function withRecordedHead(payload: WirePayload, head: Record<string, unkn
 		const recordedGroups = Array.isArray(recorded.tools) ? recorded.tools : undefined;
 		const liveGroups = Array.isArray(live.tools) ? live.tools : [];
 		if (recordedGroups) {
-			const declarations = (groups: unknown[]) => groups.flatMap((group) => (isObject(group) && Array.isArray(group.functionDeclarations) ? group.functionDeclarations : []));
-			const others = (groups: unknown[]) => groups.filter((group) => !(isObject(group) && Array.isArray(group.functionDeclarations)));
-			const merged = mergeDeclarations(declarations(recordedGroups), declarations(liveGroups));
-			config.tools = [...(merged.length ? [{ functionDeclarations: merged }] : []), ...others(recordedGroups)];
+			const merged = mergeDeclarations(functionDeclarations(recordedGroups), functionDeclarations(liveGroups));
+			const others = recordedGroups.filter((group) => !(isObject(group) && Array.isArray(group.functionDeclarations)));
+			config.tools = [...(merged.length ? [{ functionDeclarations: merged }] : []), ...others];
 		}
 		out.config = config;
 		return out;
@@ -284,20 +271,25 @@ export function withRecordedHead(payload: WirePayload, head: Record<string, unkn
 	return out;
 }
 
+/** The append point of a recorded list: its length without the trailing directives the next request replaces (`isTrailer`). */
+export function appendPoint(list: readonly unknown[], api: string): number {
+	let end = list.length;
+	while (end > 0 && isTrailer(list[end - 1], api)) end--;
+	return end;
+}
+
 /**
- * The request that extends `base` inside its epoch: the base's list (without
- * its trailing directives), then pi's rendering of only the messages after
- * the base's coverage (without the prompt element some APIs put first), under
- * the recorded head. Elements above the append point come from the record, so
+ * The request that extends `base` inside its epoch: the base's list up to its
+ * append point, then pi's rendering of only the messages after the base's
+ * coverage (without the prompt element some APIs put first), under the
+ * recorded head. Elements above the append point come from the record, so
  * nothing pi or an extension would render differently can change them.
  */
 export function spliceRequest(base: RecordedRequest, payload: WirePayload, api: string): WirePayload {
-	const key = listKey(api);
 	const list = payloadList(payload, api);
 	const tail = list.slice(preludeLength(list, api));
-	let end = base.list.length;
-	while (end > 0 && isTrailer(base.list[end - 1], api)) end--;
-	return { ...withRecordedHead(payload, base.head, api, loadedInList(base.list)), [key]: [...structuredClone(base.list.slice(0, end)), ...tail] };
+	const prefix = structuredClone(base.list.slice(0, appendPoint(base.list, api)));
+	return { ...withRecordedHead(payload, base.head, api, loadedInList(base.list)), [listKey(api)]: [...prefix, ...tail] };
 }
 
 /**

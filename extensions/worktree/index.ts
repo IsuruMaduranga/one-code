@@ -34,8 +34,7 @@ import { rewriteToolInput, validateWorktreeName } from "./rewrite.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 import { findProjectRoot, HARNESS_GIT_CONFIG, HARNESS_GIT_NO_HOOKS, repositoryWorktrees } from "../lib/git.ts";
 import { projectConfigDir, projectConfigDirName } from "../lib/config-mode.ts";
-import { type EntryLike, makeRecord, RECORD, stateOnBranch } from "../lib/ledger/records.ts";
-import { extensionVersion } from "../lib/package-version.ts";
+import { readStringsState, recordState } from "../lib/ledger/state.ts";
 
 const run = promisify(execFile);
 const REMINDER_KEY = "cc-worktree-session";
@@ -94,7 +93,6 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 		if (next) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text: reminderFor(next),
-				scope: "every-turn",
 				key: REMINDER_KEY,
 				placement: "sticky-append",
 				toolCallId,
@@ -111,11 +109,9 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 			// Nothing in the tool details records that the session left, so every
 			// later restore finds the same stale state; tell the branch once, and
 			// record that it was told (a resume, /reload or /tree reads it back).
-			const branch = ctx.sessionManager.getBranch() as EntryLike[];
-			const stored = stateOnBranch(branch, MISSING_REPORTED_STATE);
-			const reported = Array.isArray(stored) ? stored.filter((path): path is string => typeof path === "string") : [];
+			const reported = readStringsState(ctx, MISSING_REPORTED_STATE);
 			if (!reported.includes(restored.path)) {
-				pi.appendEntry(RECORD.state, makeRecord("state", extensionVersion(), { key: MISSING_REPORTED_STATE, value: [...reported, restored.path] }));
+				recordState(pi, MISSING_REPORTED_STATE, [...reported, restored.path]);
 				pi.events.emit(REMINDER_CHANNEL, {
 					text: `Left worktree session; back in ${restored.originalCwd}. The worktree at ${restored.path} no longer exists.`,
 				});

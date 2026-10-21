@@ -80,6 +80,14 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	const alive = sessionAlive(pi);
 	/** The session's branch, for folding what the current epoch has told and loaded. */
 	let branchOf: (() => EntryLike[]) | undefined;
+	/** The last fold's answer, by the branch's leaf: a server's connect defers its tools in a burst with nothing appended between. */
+	let epochAt: { leaf: string | undefined; length: number; opens: boolean } | undefined;
+	const opensEpoch = (branch: EntryLike[]): boolean => {
+		const leaf = branch.at(-1)?.id;
+		if (epochAt !== undefined && epochAt.leaf === leaf && epochAt.length === branch.length) return epochAt.opens;
+		epochAt = { leaf, length: branch.length, opens: foldBranch(branch).opensEpoch };
+		return epochAt.opens;
+	};
 	/** The session's model, for a decision made outside a hook that carries one. */
 	let currentModel: { provider?: string; api?: string; id?: string; compat?: unknown } | undefined;
 
@@ -106,11 +114,10 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		if (!alive()) return;
 		const available = searchableTools();
 		if (available.length === 0) {
-			pi.events.emit(REMINDER_CHANNEL, { scope: "every-turn", key: "deferred-tools", remove: true });
+			pi.events.emit(REMINDER_CHANNEL, { key: "deferred-tools", remove: true });
 			return;
 		}
 		pi.events.emit(REMINDER_CHANNEL, {
-			scope: "every-turn",
 			key: "deferred-tools",
 			text: deferredReminderText(available),
 			placement: "first-prepend",
@@ -239,7 +246,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		// fixes that turn's tools.
 		if (sessionStarted && request?.name && deferring() && alive()) {
 			const active = pi.getActiveTools();
-			const announceCallable = supportsToolAdditions(currentModel) && branchOf !== undefined && !foldBranch(branchOf()).opensEpoch;
+			const announceCallable = supportsToolAdditions(currentModel) && branchOf !== undefined && !opensEpoch(branchOf());
 			if (announceCallable) activate([request.name]);
 			else if (active.includes(request.name) && !loadedTools.has(request.name)) pi.setActiveTools(active.filter((name) => name !== request.name));
 			publishListing();
@@ -295,7 +302,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	// loads that named a loaded tool went with the summary: the tool goes back to
 	// deferred, so the new epoch declares it the way it declares the rest (Claude
 	// Code declares a deferred tool only while a reference to it is in the
-	// history). A tool the kept turns still call, load or announce stays.
+	// history). A tool the kept turns still call or load stays.
 	pi.on("session_compact", (_event, ctx) => {
 		const branch = (ctx?.sessionManager?.getBranch?.() ?? []) as EntryLike[];
 		const kept = inContextEntries(branch) as SessionEntry[];
@@ -324,7 +331,6 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		// Without tool_search there is nothing to steer a deferred-tool miss to.
 		if (deferredRegistry.has(name) && deferring()) {
 			pi.events.emit(REMINDER_CHANNEL, {
-				scope: "next-turn",
 				key: `deferred-miss-${name}`,
 				text: deferredMissReminderText(name),
 			});
@@ -333,7 +339,6 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 			// the ordinary steer above would send the model to tool_search for a
 			// name that will not be found there either.
 			pi.events.emit(REMINDER_CHANNEL, {
-				scope: "next-turn",
 				key: `deferred-miss-${name}`,
 				text: withheldMissReminderText(name),
 			});

@@ -5,9 +5,10 @@
  * first request of a resumed process compares them with the live files and git
  * status, and says what changed once. The historical blocks stay as sent.
  */
-import { createHash } from "node:crypto";
 import { buildClaudeMdBlock, type ContextFile } from "./claude-context.ts";
 import type { ToldFact } from "./ledger/records.ts";
+import { contentHash } from "./ledger/wire.ts";
+import { toldBlockFact } from "./reminders.ts";
 
 /** The told keys of the fingerprints (whole-text block facts) and of the compaction flag (a mode). */
 export const FACT_KEYS = {
@@ -19,7 +20,8 @@ export const FACT_KEYS = {
 	compaction: "context-facts:compaction",
 } as const;
 
-const fingerprint = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+/** A told block's hash (`toldBlockFact`): for a string or null it is the sha256 of its JSON. */
+const fingerprint = contentHash;
 
 /** Fingerprints of only what the model was shown, not unshown file tails or filesystem mtimes. */
 export interface ContextFingerprints {
@@ -48,7 +50,7 @@ export function instructionFacts(prints: ContextFingerprints): ToldFact[] {
 /** The facts the context block tells: its git snapshot, and whether a compaction took it. */
 export function contextBlockFacts(gitStatus: string | null, atCompaction: boolean): ToldFact[] {
 	return [
-		{ kind: "block", key: FACT_KEYS.git, hash: gitFingerprint(gitStatus) },
+		toldBlockFact(FACT_KEYS.git, gitStatus),
 		{ kind: "mode", key: FACT_KEYS.compaction, on: atCompaction },
 	];
 }

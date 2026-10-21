@@ -12,7 +12,7 @@
  * that entry directly. It costs nothing: the entry exists, so the mark reads.
  */
 
-import { isTrailer } from "./ledger/wire.ts";
+import { appendPoint } from "./ledger/wire.ts";
 import { MAX_CACHE_MARKERS } from "./request-replay.ts";
 
 type Block = Record<string, unknown> & { cache_control?: unknown };
@@ -91,8 +91,7 @@ export function withPreviousMark<T extends Record<string, unknown>>(payload: T, 
  */
 export function baseMark(messages: unknown, baseList: readonly unknown[], api: string): MessageMark | undefined {
 	if (!Array.isArray(messages)) return undefined;
-	let end = baseList.length;
-	while (end > 0 && isTrailer(baseList[end - 1], api)) end--;
+	const end = appendPoint(baseList, api);
 	const tail = lastMessageMark(messages);
 	if (end === 0 || !tail || tail.message < end) return undefined;
 	const blocks = blocksOf(messages[end - 1]);

@@ -11,7 +11,7 @@ import claudeContextExtension from "../../extensions/claude-context/index.ts";
 import { dateChangeReminder, localDate } from "../../extensions/lib/claude-context.ts";
 import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/reminders.ts";
 import { dateFingerprint, FACT_KEYS } from "../../extensions/lib/context-facts.ts";
-import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { createFakeCtx, createFakePi, type FakePi, renderRequest } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 
 describe("localDate", () => {
@@ -60,9 +60,7 @@ describe("claude-context date wiring", () => {
 	const block = () => reminders.filter((r) => r.key === "claude-context-date");
 	/** Render a request inside an epoch whose message 1 told `toldDate`; the texts claude-context adds. */
 	const render = (toldDate: string) => {
-		const request: RenderRequest = { epoch: false, told: new Map(), modes: new Map(), toldBlocks: new Map([[FACT_KEYS.date, dateFingerprint(toldDate)]]), model: undefined, blocks: [] };
-		fake.events.emit(RENDER_CHANNEL, request);
-		return request.blocks;
+		return renderRequest(fake.events, { facts: [{ kind: "block", key: FACT_KEYS.date, hash: dateFingerprint(toldDate) }] });
 	};
 
 	it("stamps the local date, with the date it tells as a fact", async () => {
