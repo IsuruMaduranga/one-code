@@ -135,6 +135,8 @@ export function foldBranch(branch: readonly EntryLike[], identity?: RequestIdent
 	const produced: { item: PendingRecordData; index: number }[] = [];
 	const consumed = new Set<string>();
 	const omitted = omittedIds(branch);
+	/** The index of the last compaction on the branch: an older `untilCompaction` pending item is stale. */
+	let lastCompaction = -1;
 	let base: FoldedRequest | undefined;
 	/** A compaction or `epoch` record after the base: the next request renders everything again. */
 	let resetSinceBase: EpochCause | undefined;
@@ -180,6 +182,7 @@ export function foldBranch(branch: readonly EntryLike[], identity?: RequestIdent
 			return;
 		}
 		if (entry.type === "compaction") {
+			lastCompaction = index;
 			settle(false);
 			resetTold();
 			resetSinceBase = "compaction";
@@ -219,7 +222,7 @@ export function foldBranch(branch: readonly EntryLike[], identity?: RequestIdent
 	for (const { item, index } of produced) if (item.key !== undefined) latestByKey.set(item.key, index);
 	const pending = produced
 		.filter(({ item, index }) => item.key === undefined || latestByKey.get(item.key) === index)
-		.filter(({ item }) => !consumed.has(item.id))
+		.filter(({ item, index }) => !consumed.has(item.id) && !(item.untilCompaction && index < lastCompaction))
 		.map(({ item }) => item);
 
 	const changed = (b: RequestIdentity, live: RequestIdentity): EpochCause | undefined =>

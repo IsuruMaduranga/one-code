@@ -173,6 +173,17 @@ describe("ledger fold", () => {
 		expect(foldBranch(b.entries, live).pending.map((p) => p.id)).toEqual(["p3"]);
 	});
 
+	it("drops an undelivered `untilCompaction` item (a post-compaction restore) at a later compaction, and keeps the others", () => {
+		const b = new Branch();
+		b.compaction();
+		b.record("pending", { id: "restore-1", text: "a.ts as it was", untilCompaction: true });
+		b.record("pending", { id: "hook", text: "PostCompact context" });
+		expect(foldBranch(b.entries, live).pending.map((p) => p.id)).toEqual(["restore-1", "hook"]);
+		b.compaction();
+		b.record("pending", { id: "restore-2", text: "a.ts as it is", untilCompaction: true });
+		expect(foldBranch(b.entries, live).pending.map((p) => p.id)).toEqual(["hook", "restore-2"]);
+	});
+
 	it("sees only the branch it is given: an abandoned branch's records are simply absent", () => {
 		const b = new Branch();
 		b.record("state", { key: "permission-mode", value: "plan" });

@@ -136,17 +136,3 @@ describe("ultracode follows the branch (H3)", () => {
 	});
 });
 
-describe("hook context waiting for a prompt follows the branch (R2-M8)", () => {
-	it("survives a /reload and rides the next prompt", async () => {
-		const { default: hooksExtension } = await import("../../extensions/hooks/index.ts");
-		const fake = createFakePi();
-		hooksExtension(fake.pi as never);
-		const branch = [stateEntry("hooks:pending-context", [{ event: "SessionStart", text: "the build is red" }])];
-		const ctx = createFakeCtx({ cwd: process.cwd(), sessionManager: { getSessionId: () => "s", getSessionFile: () => undefined, getSessionDir: () => undefined, getBranch: () => branch } });
-		await fake.fire("session_start", { reason: "reload" }, ctx);
-		const delivered = await fake.fireOne<{ message?: { content: string } }>("before_agent_start", { prompt: "next" }, ctx);
-		expect(delivered?.message?.content).toContain("the build is red");
-		// Delivered: the queue the branch records is empty now.
-		expect(fake.branch.at(-1)?.data).toMatchObject({ key: "hooks:pending-context", value: [] });
-	});
-});

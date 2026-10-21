@@ -412,9 +412,11 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 
 	/**
 	 * Claude Code's post-compaction file restore (`restore.ts`). The
-	 * blocks open the next user message (`user-prepend`); an overflow compaction
-	 * that retries the turn has no such message, so they ride the request's tail
-	 * instead.
+	 * blocks open the next user message (`user-prepend`); a request that opens
+	 * with none (the rest of a run after a mid-turn compaction, an overflow
+	 * retry) carries them on its tail (`orTail`), so the model sees a restored
+	 * file before it can edit it. A later compaction drops an undelivered one
+	 * (`untilCompaction`): it restores for the epoch the one before it opened.
 	 *
 	 * Like Claude Code, the compaction also clears what the session has read:
 	 * the summary no longer holds those files, so an edit needs a fresh read.
@@ -451,8 +453,7 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 			const read = createReadToolDefinition(ctx.cwd);
 			const reads: RestoredRead[] = await Promise.all(candidates.map(async (path) => ({ path, text: await readAgain(read, path, ctx) })));
 			const { blocks, restored } = restoreBlocks(reads, estimateTextTokens);
-			const placement = event.willRetry ? "last-append" : "user-prepend";
-			for (const text of blocks) pi.events.emit(REMINDER_CHANNEL, { text, placement } satisfies ReminderPayload);
+			for (const text of blocks) pi.events.emit(REMINDER_CHANNEL, { text, placement: "user-prepend", orTail: true, untilCompaction: true } satisfies ReminderPayload);
 			for (const path of restored) touch(path);
 		} catch {
 			// The restore is best effort: nothing comes back, and an edit needs a fresh read.

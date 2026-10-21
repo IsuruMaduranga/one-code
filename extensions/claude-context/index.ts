@@ -110,8 +110,6 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	let attachedNested = new Set<string>();
 	/** Where a nested instruction actually landed: a persisted result or a pinned request tail. */
 	const shownByResult = new Map<string, Set<string>>();
-	/** Nested files queued on a read's result, not yet sent in a request. */
-	const pendingNested = new Map<string, string[]>();
 	const remember = (toolCallId: string | undefined, keys: Iterable<string>) => {
 		if (!toolCallId) return;
 		const shown = shownByResult.get(toolCallId) ?? new Set<string>();
@@ -344,7 +342,6 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		// rides its own higher-precedence block.
 		refreshInstructions(ctx.cwd);
 		email = resolveEmail(ctx.cwd);
-		pendingNested.clear();
 		attachedNested = new Set();
 		if (files) adoptShown(files);
 		restoreAttachments(ctx);
@@ -428,7 +425,6 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	// A branch switch leaves the attachments of the branch left behind; the new one may lack them.
 	pi.on("session_tree", (_event, ctx) => {
 		restoreAttachments(ctx);
-		pendingNested.clear();
 	});
 
 	// A successful read attaches nested instruction files and matching path rules
@@ -465,16 +461,9 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 			}
 			pi.events.emit(REMINDER_CHANNEL, { text: nestedInstructionText(file), toolCallId: event.toolCallId });
 		}
-		if (shown.length > 0) pendingNested.set(event.toolCallId, shown);
-	});
-
-	// Recorded once the request carrying the read's result goes out, so a reload
-	// before then (the queued text is not persisted) leaves them unshown.
-	pi.on("context", (event) => {
-		for (const [toolCallId, keys] of pendingNested) {
-			if (!event.messages.some((m) => m.role === "toolResult" && m.toolCallId === toolCallId)) continue;
-			remember(toolCallId, keys);
-			pendingNested.delete(toolCallId);
-		}
+		// Recorded with the queued text: both are on the branch now (the text as a
+		// pending one-shot bound to this result), so a quit before the request
+		// keeps them in step, and an abandoned /tree branch takes both away.
+		remember(event.toolCallId, shown);
 	});
 }

@@ -47,6 +47,7 @@ function oneShotOf(item: PendingRecordData): OneShot {
 		...(item.raw ? { raw: true } : {}),
 		...(item.toolCallId ? { toolCallId: item.toolCallId } : {}),
 		...(item.once ? { once: true } : {}),
+		...(item.orTail ? { orTail: true } : {}),
 	};
 }
 
@@ -70,6 +71,8 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 			...(payload.raw ? { raw: true } : {}),
 			...(payload.toolCallId ? { toolCallId: payload.toolCallId } : {}),
 			...(payload.once ? { once: true } : {}),
+			...(payload.orTail ? { orTail: true } : {}),
+			...(payload.untilCompaction ? { untilCompaction: true } : {}),
 		});
 		pi.appendEntry(RECORD.pending, data);
 	};

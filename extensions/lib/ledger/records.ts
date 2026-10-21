@@ -115,6 +115,10 @@ export interface PendingRecordData extends RecordBase {
 	toolCallId?: string;
 	/** `user-prepend` only: placed once per request, however many are pending (the shared caveat). */
 	once?: boolean;
+	/** `user-prepend` only: on a request that does not open with a prompt, it rides the tail instead of waiting for one. */
+	orTail?: boolean;
+	/** Dropped, undelivered, at a later compaction: it belongs to the epoch the compaction before it opened (a post-compaction restore). */
+	untilCompaction?: boolean;
 }
 
 const EPOCH_CAUSES = ["first", "compaction", "model", "auth", "fold", "coverage", "empty"] as const;
@@ -203,7 +207,9 @@ const SHAPE: { [K in RecordKind]: (data: Record<string, unknown>) => boolean } =
 		(d.placement === undefined || d.placement === "last-append" || d.placement === "user-prepend") &&
 		(d.raw === undefined || typeof d.raw === "boolean") &&
 		(d.toolCallId === undefined || isString(d.toolCallId)) &&
-		(d.once === undefined || typeof d.once === "boolean"),
+		(d.once === undefined || typeof d.once === "boolean") &&
+		(d.orTail === undefined || typeof d.orTail === "boolean") &&
+		(d.untilCompaction === undefined || typeof d.untilCompaction === "boolean"),
 	epoch: (d) => (EPOCH_CAUSES as readonly unknown[]).includes(d.cause),
 	branch: (d) => isString(d.fromLeafId),
 };

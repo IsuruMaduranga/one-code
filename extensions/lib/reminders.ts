@@ -137,6 +137,10 @@ export interface ReminderPayload {
 	skipStackCarrier?: boolean;
 	/** `user-prepend` only: placed once per request, however many are pending (the shared caveat). */
 	once?: boolean;
+	/** `user-prepend` only: on a request that does not open with a prompt (mid-turn, an overflow retry), the tail carries it instead. */
+	orTail?: boolean;
+	/** A one-shot dropped, undelivered, at a later compaction (a post-compaction restore). */
+	untilCompaction?: boolean;
 	/**
 	 * `sticky-append` only: the state is on from this timestamp instead of now.
 	 * `0` puts it on every user message (the `<total_tokens>` line rides every
@@ -191,6 +195,7 @@ export interface OneShot {
 	placement: "last-append" | "user-prepend";
 	toolCallId?: string;
 	once?: boolean;
+	orTail?: boolean;
 	facts?: ToldFact[];
 }
 
@@ -363,7 +368,7 @@ export function renderReminders(messages: readonly AgentMessage[], input: Render
 	const opening = last >= 0 && isUserLike(messages[last]) ? last : -1;
 	const placedOnce = new Set<string>();
 	for (const shot of input.oneShots) {
-		if (shot.placement === "user-prepend") {
+		if (shot.placement === "user-prepend" && (opening !== -1 || !shot.orTail)) {
 			if (opening === -1) continue;
 			placed.push(shot);
 			if (shot.once && placedOnce.has(shot.text)) continue;
