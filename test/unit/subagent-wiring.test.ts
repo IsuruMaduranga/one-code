@@ -648,3 +648,17 @@ describe("hand-back shape by permission mode", () => {
 		expect(out).not.toContain("[Subagent hand-back]");
 	});
 });
+
+// design.md section 14: a /tree switch used to add the selected branch's runs
+// to the abandoned branch's, which stayed addressable by SendMessage and list_agents.
+describe("subagent runs follow a /tree switch", () => {
+	it("lists only the selected branch's runs", async () => {
+		const run = (name: string): AgentRunRecord => ({ taskId: `id-${name}`, name, agent: "general-purpose", cwd: dir, sessionFile: join(dir, `${name}.jsonl`), sessionSearchDir: dir });
+		const h = await mount([run("abandoned")]);
+		const names = async () => ((await h.call("list_agents", {})) as { details: { agents: Array<{ name: string }> } }).details.agents.map((a) => a.name);
+		expect(await names()).toContain("abandoned");
+		const selected = [{ type: "message", message: { role: "toolResult", toolName: "Agent", details: { agentRuns: [run("selected")] } } }];
+		await h.fake.fire("session_tree", {}, { ...h.ctx, sessionManager: { ...(h.ctx.sessionManager as object), getBranch: () => selected } });
+		expect(await names()).toEqual(["selected"]);
+	});
+});

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { deferredAddendumText, stabilizeDeferredTools } from "../../extensions/lib/deferred.ts";
 import { wrapReminder } from "../../extensions/lib/reminders.ts";
-import { addendumNames, addendumNamesOnBranch, liftAddenda, supportsToolAdditions, TOOLS_AVAILABLE, withToolAdditions } from "../../extensions/lib/tool-additions.ts";
+import { addendumNames, liftAddenda, supportsToolAdditions, TOOLS_AVAILABLE, withToolAdditions } from "../../extensions/lib/tool-additions.ts";
 
 const framed = wrapReminder(deferredAddendumText(["mcp__s__a", "mcp__s__b"]));
 
@@ -56,10 +56,9 @@ describe("liftAddenda and withToolAdditions", () => {
 		expect(withToolAdditions({ messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }] }, new Map())).toBeUndefined();
 	});
 
-	it("reads the names back from a resumed branch, whole blocks only", () => {
+	it("reads the names of a whole framed addendum block only", () => {
 		expect(addendumNames(framed)).toEqual(["mcp__s__a", "mcp__s__b"]);
-		const branch = [{ type: "message", message: { role: "toolResult", content: [{ type: "text", text: "done" }, { type: "text", text: framed }] } }];
-		expect(addendumNamesOnBranch(branch)).toEqual(["mcp__s__a", "mcp__s__b"]);
+		expect(addendumNames(`note\n${framed}`)).toBeUndefined();
 	});
 
 	it("is declared deferred in tools once added, even though pi rendered it eager", () => {

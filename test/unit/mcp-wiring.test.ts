@@ -21,8 +21,17 @@ import mcpExtension from "../../extensions/mcp/index.ts";
 import { noMcpServersMessage } from "../../extensions/mcp/config.ts";
 import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/mcp-share.ts";
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../../extensions/lib/mcp-status.ts";
-import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
-import { CONTEXT_BASELINE_CHANNEL, CONTEXT_RESTORE_CHANNEL } from "../../extensions/lib/context-stack.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/reminders.ts";
+import { mcpFacts, type McpSnapshot } from "../../extensions/mcp/announce.ts";
+
+/** Render one request inside an epoch whose message 1 described `told`; the blocks MCP adds to its tail. */
+function renderInEpoch(events: { emit(channel: string, data: unknown): void }, told: McpSnapshot): string[] {
+	const toldBlocks = new Map<string, string>();
+	for (const fact of mcpFacts(told)) if (fact.kind === "block") toldBlocks.set(fact.key, fact.hash);
+	const request: RenderRequest = { epoch: false, told: new Map(), modes: new Map(), toldBlocks, model: undefined, blocks: [] };
+	events.emit(RENDER_CHANNEL, request);
+	return request.blocks.map((block) => block.text);
+}
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { localCommandBlocks } from "../../extensions/lib/local-command.ts";
 import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
@@ -215,26 +224,13 @@ describe("mcp wiring", () => {
 		expect(instructions!.order).toBe(CONTEXT_ORDER.mcp);
 	});
 
-	it("a resumed removed MCP configuration stays frozen and announces the dropped server at the tail", async () => {
-		const reminders: Array<{ key?: string; text?: string }> = [];
-		const baselines: unknown[] = [];
-		fake.events.on(CONTEXT_RESTORE_CHANNEL, (request) => {
-			(request as { restored?: unknown }).restored = {
-				version: 1, stack: [], sticky: [],
-				baselines: { mcp: { instructed: [["gone", "Use the old server."]], failed: [] } },
-			};
-		});
-		fake.events.on(REMINDER_CHANNEL, (data) => reminders.push(data as { key?: string; text?: string }));
-		fake.events.on(CONTEXT_BASELINE_CHANNEL, (data) => baselines.push(data));
-
+	it("a resumed epoch that told a server whose configuration was removed hears it dropped at the tail", async () => {
 		await boot(); // no config is deliberately written
-
-		expect(reminders.some((r) => r.key === "mcp-instructions" || r.key === "mcp-failures")).toBe(false);
-		expect(reminders.map((r) => r.text).join("\n")).toContain("gone disconnected");
-		expect(baselines.at(-1)).toMatchObject({ key: "mcp", value: { instructed: [], failed: [] } });
+		const notices = renderInEpoch(fake.events, { connected: [{ name: "gone", instructions: "Use the old server." }], failed: [] });
+		expect(notices.join("\n")).toContain("gone disconnected");
 	});
 
-	it("does not announce a restored server as disconnected while startup connections are still settling", async () => {
+	it("does not announce a told server as disconnected while startup connections are still settling", async () => {
 		writeUserServers({ fast: { command: "fast-server" }, slow: { command: "slow-server" } });
 		let releaseSlow!: () => void;
 		state.fixtures.set("fast", { instructions: "Use fast." });
@@ -242,27 +238,19 @@ describe("mcp wiring", () => {
 			instructions: "Use slow.",
 			connectGate: new Promise<void>((resolve) => { releaseSlow = resolve; }),
 		});
-		const reminders: Array<{ key?: string; text?: string }> = [];
-		fake.events.on(CONTEXT_RESTORE_CHANNEL, (request) => {
-			(request as { restored?: unknown }).restored = {
-				version: 1, stack: [], sticky: [],
-				baselines: { mcp: { instructed: [["slow", "Use slow."]], failed: [] } },
-			};
-		});
-		fake.events.on(REMINDER_CHANNEL, (data) => reminders.push(data as { key?: string; text?: string }));
 		mcpExtension(fake.pi as never);
 		const starting = fake.fireOne("session_start", { reason: "startup" }, createFakeCtx({ cwd, hasUI: false }));
 		await vi.waitFor(() => expect(state.connectCalls).toEqual(expect.arrayContaining(["fast", "slow"])));
 
-		// `fast` has connected but `slow` has not. A partial snapshot would report
-		// the saved slow server as disconnected; no model-facing delta is emitted
-		// until the Promise.all startup barrier has settled.
-		expect(reminders).toEqual([]);
+		// `fast` has connected but `slow` has not: a request now must not report
+		// the told slow server as disconnected.
+		const told = { connected: [{ name: "slow", instructions: "Use slow." }], failed: [] };
+		const early = renderInEpoch(fake.events, told).join("\n");
+		expect(early).not.toContain("slow disconnected");
+		expect(early).toContain("fast connected after this conversation started");
 		releaseSlow();
 		await starting;
-		expect(reminders.some((r) => r.key === "mcp-instructions" || r.key === "mcp-failures")).toBe(false);
-		expect(reminders.map((r) => r.text).join("\n")).not.toContain("slow disconnected");
-		expect(reminders.map((r) => r.text).join("\n")).toContain("fast connected after this conversation started");
+		expect(renderInEpoch(fake.events, told).join("\n")).not.toContain("slow");
 	});
 
 	it("execute() on a registered MCP tool calls through the live connection", async () => {
@@ -288,7 +276,6 @@ describe("mcp wiring", () => {
 		const reminders: Array<{ key?: string; text?: string }> = [];
 		fake.events.on(REMINDER_CHANNEL, (data) => reminders.push(data as typeof reminders[number]));
 		await boot();
-		await fake.fire("context", { messages: [] });
 		reminders.length = 0;
 		const original = fake.tools.get("mcp__demo__foo");
 		const live = await vi.mocked(mcpClient.connect).mock.results.at(-1)!.value;
@@ -507,29 +494,16 @@ describe("mcp wiring", () => {
 		expect(removed).toBeDefined();
 	});
 
-	it("after the first request, a dropped connection leaves message 1 alone and notifies as a one-shot", async () => {
+	it("inside an epoch, a dropped connection is announced on the next request's tail", async () => {
 		writeUserServers({ demo: { command: "demo-server" } });
 		state.fixtures.set("demo", { tools: [{ name: "foo" }], instructions: "Use foo wisely." });
-		const reminders: unknown[] = [];
-		fake.events.on(REMINDER_CHANNEL, (data) => reminders.push(data));
 		await boot();
-
-		// The first request goes out: message 1 (with the instructions block) is now cached.
-		await fake.fire("context", { messages: [] });
-		reminders.length = 0;
 		const connectMock = mcpClient.connect as unknown as ReturnType<typeof vi.fn>;
 		const liveConnection = await connectMock.mock.results.at(-1)!.value;
 		liveConnection.client.onclose();
-
-		// No keyed first-prepend change of any kind …
-		expect(reminders.some((r) => (r as { key?: string }).key === "mcp-instructions")).toBe(false);
-		expect(reminders.some((r) => (r as { key?: string }).key === "mcp-failures")).toBe(false);
-		// … just an unkeyed one-shot the model reads where it is.
-		const notice = reminders.find((r) => (r as { group?: string }).group === "mcp-instructions") as { text: string; scope?: string } | undefined;
-		expect(notice).toBeDefined();
-		expect(notice!.text).toContain("demo");
-		expect(notice!.text).toContain("connection closed by the server");
-		expect(notice!.scope).toBeUndefined();
+		const notices = renderInEpoch(fake.events, { connected: [{ name: "demo", instructions: "Use foo wisely." }], failed: [] }).join("\n");
+		expect(notices).toContain("demo");
+		expect(notices).toContain("connection closed by the server");
 	});
 
 	it("registers resource tools once a connected server exposes resources, and they read through the connection", async () => {

@@ -54,6 +54,8 @@ export interface FakePi {
 	sentMessages: SentMessage[];
 	sentUserMessages: Array<{ content: unknown; options?: unknown }>;
 	appendedEntries: Array<{ customType: string; data?: unknown }>;
+	/** The session branch `appendEntry` writes to, as `getBranch()` returns it: pass `sessionManager: { getBranch: () => fake.branch }`. */
+	branch: Array<{ type: string; id: string; parentId: string | null; customType?: string; data?: unknown; message?: unknown }>;
 	notified: string[];
 	flags: Map<string, boolean | string>;
 	getActiveTools: () => string[];
@@ -75,6 +77,7 @@ export function createFakePi(): FakePi {
 	const sentMessages: SentMessage[] = [];
 	const sentUserMessages: Array<{ content: unknown; options?: unknown }> = [];
 	const appendedEntries: Array<{ customType: string; data?: unknown }> = [];
+	const branch: FakePi["branch"] = [];
 	const notified: string[] = [];
 	const flags = new Map<string, boolean | string>();
 	let activeTools: string[] = [];
@@ -114,6 +117,7 @@ export function createFakePi(): FakePi {
 		},
 		appendEntry: (customType: string, data?: unknown) => {
 			appendedEntries.push({ customType, data });
+			branch.push({ type: "custom", id: `e${branch.length + 1}`, parentId: branch.at(-1)?.id ?? null, customType, data });
 		},
 		setSessionName: vi.fn(),
 		getSessionName: vi.fn(() => undefined),
@@ -150,6 +154,7 @@ export function createFakePi(): FakePi {
 		sentMessages,
 		sentUserMessages,
 		appendedEntries,
+		branch,
 		notified,
 		flags,
 		getActiveTools: () => activeTools,

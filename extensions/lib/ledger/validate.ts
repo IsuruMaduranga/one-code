@@ -1,12 +1,12 @@
 /**
  * The last step before a request goes out (design.md section 5, step 6). Each
  * returned problem is a bug: tests treat any as fatal; at runtime the caller
- * drops the offending block and logs it, so a bookkeeping bug costs one stale
- * announcement, never a 400.
+ * drops the offending block (`repairRequest`) and logs it, so a bookkeeping
+ * bug costs one stale announcement, never a 400.
  *
  * Pure: no pi imports.
  */
-import { contentHash, listKey, type RecordedRequest, type WirePayload } from "./wire.ts";
+import { contentHash, listKey, type RecordedRequest, toolName, type WirePayload } from "./wire.ts";
 
 export type Problem =
 	/** A tool_reference, tool_addition or tool_removal names a tool `tools` does not declare. */
@@ -18,23 +18,39 @@ export type Problem =
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** The names `tools` declares: Anthropic and Responses `name`, Chat Completions `function.name`. */
-function declaredNames(tools: unknown): Set<string> {
+/** Every declaration list in the payload: `tools`, Bedrock `toolConfig.tools`, Google's function declarations. */
+function declarations(payload: WirePayload): unknown[] {
+	const config = isObject(payload.config) ? payload.config : undefined;
+	const toolConfig = isObject(payload.toolConfig) ? payload.toolConfig : undefined;
+	const google = Array.isArray(config?.tools)
+		? config.tools.flatMap((group) => (isObject(group) && Array.isArray(group.functionDeclarations) ? group.functionDeclarations : []))
+		: [];
+	return [...(Array.isArray(payload.tools) ? payload.tools : []), ...(Array.isArray(toolConfig?.tools) ? toolConfig.tools : []), ...google];
+}
+
+/** The names the payload declares, in any API's shape. */
+function declaredNames(payload: WirePayload): Set<string> {
 	const names = new Set<string>();
-	if (!Array.isArray(tools)) return names;
-	for (const tool of tools) {
-		if (!isObject(tool)) continue;
-		const name = typeof tool.name === "string" ? tool.name : isObject(tool.function) ? tool.function.name : undefined;
-		if (typeof name === "string") names.add(name);
+	for (const tool of declarations(payload)) {
+		const name = toolName(tool);
+		if (name !== undefined) names.add(name);
 	}
 	return names;
+}
+
+/** The tool a `tool_reference` block names: `name` in a `tool_addition`, `tool_name` in a tool result. */
+function referenceName(block: Record<string, unknown>): string | undefined {
+	if (block.type !== "tool_reference") return undefined;
+	const name = block.name ?? block.tool_name;
+	return typeof name === "string" ? name : undefined;
 }
 
 /** Every tool name a block references, at any depth: `tool_addition` and `tool_removal` wrap a `tool_reference`. */
 function referencedNames(value: unknown, into: Set<string>): Set<string> {
 	if (Array.isArray(value)) for (const item of value) referencedNames(item, into);
 	else if (isObject(value)) {
-		if (value.type === "tool_reference" && typeof value.name === "string") into.add(value.name);
+		const name = referenceName(value);
+		if (name !== undefined) into.add(name);
 		for (const item of Object.values(value)) referencedNames(item, into);
 	}
 	return into;
@@ -64,7 +80,7 @@ export function validateRequest(payload: WirePayload, api: string, recorded?: Re
 	const value = payload[listKey(api)];
 	const list: unknown[] = Array.isArray(value) ? value : [];
 
-	const declared = declaredNames(payload.tools);
+	const declared = declaredNames(payload);
 	list.forEach((element, index) => {
 		for (const name of referencedNames(element, new Set())) if (!declared.has(name)) problems.push({ kind: "undeclared", name, index });
 	});
@@ -77,4 +93,40 @@ export function validateRequest(payload: WirePayload, api: string, recorded?: Re
 		}
 	}
 	return problems;
+}
+
+/** `value` without the `tool_reference` blocks naming `names` (and the `tool_addition` wrapping one); undefined when a container would empty. */
+function withoutReferences(value: unknown, names: ReadonlySet<string>): unknown {
+	if (Array.isArray(value)) {
+		return value.flatMap((item) => {
+			if (isObject(item) && (item.type === "tool_addition" || item.type === "tool_removal") && referencedNames(item, new Set()).size > 0 && [...referencedNames(item, new Set())].every((name) => names.has(name))) return [];
+			if (isObject(item) && names.has(referenceName(item) ?? "")) return [];
+			return [withoutReferences(item, names)];
+		});
+	}
+	if (!isObject(value)) return value;
+	const out: Record<string, unknown> = {};
+	for (const [key, item] of Object.entries(value)) out[key] = withoutReferences(item, names);
+	return out;
+}
+
+/**
+ * The payload with every flagged problem removed, for a production request
+ * (a test treats any problem as fatal instead): references to undeclared
+ * tools are dropped, and so is a stranded system message. A prefix problem is
+ * not repairable here; the caller's splice prevents it.
+ */
+export function repairRequest(payload: WirePayload, api: string, problems: readonly Problem[]): WirePayload {
+	const key = listKey(api);
+	const value = payload[key];
+	if (!Array.isArray(value) || problems.length === 0) return payload;
+	const undeclared = new Set(problems.flatMap((problem) => (problem.kind === "undeclared" ? [problem.name] : [])));
+	const stranded = new Set(problems.flatMap((problem) => (problem.kind === "stranded-system" ? [problem.index] : [])));
+	let list = value.filter((_, index) => !stranded.has(index));
+	if (undeclared.size > 0) {
+		list = (withoutReferences(list, undeclared) as unknown[]).filter(
+			(element) => !(isObject(element) && element.role === "system" && Array.isArray(element.content) && element.content.length === 0 && element.output_config === undefined),
+		);
+	}
+	return { ...payload, [key]: list };
 }

@@ -25,7 +25,6 @@ import { WEB_FETCH_LONG_DESCRIPTION, WEB_FETCH_SHORT_DESCRIPTION } from "../../e
 import webFetchExtension from "../../extensions/web-fetch/index.ts";
 import { ENTER_WORKTREE_DESCRIPTION, EXIT_WORKTREE_DESCRIPTION } from "../../extensions/worktree/descriptions.ts";
 import { descriptionForm, registerVariantTool } from "../../extensions/lib/tool-variants.ts";
-import { CONTEXT_BASELINE_CHANNEL, CONTEXT_RESTORE_CHANNEL } from "../../extensions/lib/context-stack.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
 const sha = (text: string) => createHash("sha256").update(text).digest("hex").slice(0, 16);
@@ -118,46 +117,17 @@ function countRegistrations(fake: FakePi): Map<string, number> {
 }
 
 describe("switching forms mid-session", () => {
-	it.each([["plan", "auto"], ["auto", "plan"]])("bash keeps its request prefix on a %s → %s switch", async (from, to) => {
+	it.each([["plan", "auto"], ["auto", "plan"]])("bash follows a %s → %s switch: an epoch renders the live form, and inside one the ledger keeps the recorded definition", async (from, to) => {
+		vi.stubEnv("CC_PROMPT_TIER", "workhorse");
 		const fake = createFakePi();
-		const counts = countRegistrations(fake);
 		bashExtension(fake.pi as never);
 		fake.events.emit(PERMISSION_STATUS_CHANNEL, { mode: from, paused: false });
 		await fake.fire("session_start", {}, createFakeCtx({ model: someModel }));
-		await fake.fire("turn_start", {}, createFakeCtx({ model: someModel }));
-		const before = fake.tools.get("bash")!;
-		const registrations = counts.get("bash");
+		const before = fake.tools.get("bash")!.description;
 		fake.events.emit(PERMISSION_STATUS_CHANNEL, { mode: to, paused: false });
-		await fake.fire("before_agent_start", {}, createFakeCtx({ model: someModel }));
-		expect(fake.tools.get("bash")).toBe(before);
-		expect(counts.get("bash")).toBe(registrations);
-	});
-
-	it("bash restores the first-request variant when resuming into a different live permission mode", async () => {
-		vi.stubEnv("CC_PROMPT_TIER", "workhorse");
-		const initial = createFakePi();
-		const baselines: Record<string, unknown> = {};
-		initial.events.on(CONTEXT_BASELINE_CHANNEL, (data) => {
-			const baseline = data as { key: string; value: unknown };
-			baselines[baseline.key] = baseline.value;
-		});
-		bashExtension(initial.pi as never);
-		initial.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "plan", paused: false });
-		await initial.fire("session_start", {}, createFakeCtx({ model: someModel }));
-		await initial.fire("turn_start", {}, createFakeCtx({ model: someModel }));
-		const before = initial.tools.get("bash")!.description;
-
-		const resumed = createFakePi();
-		const counts = countRegistrations(resumed);
-		resumed.events.on(CONTEXT_RESTORE_CHANNEL, (data) => Object.assign(data as object, { restored: { version: 1, stack: [], sticky: [], baselines } }));
-		bashExtension(resumed.pi as never);
-		resumed.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "auto", paused: false });
-		await resumed.fire("session_start", {}, createFakeCtx({ model: someModel }));
-		await resumed.fire("turn_start", {}, createFakeCtx({ model: someModel }));
-		expect(resumed.tools.get("bash")!.description).toBe(before);
-		// A temporary auto registration followed by restoring plan would still
-		// move bash to the end of pi's tool list, invalidating the prefix.
-		expect(counts.get("bash")).toBe(1);
+		expect(fake.tools.get("bash")!.description).not.toBe(before);
+		expect(fake.tools.get("bash")!.description).toBe(bashDescription("short", to === "auto"));
+		vi.unstubAllEnvs();
 	});
 
 	it("bash follows the tier and the initial permission mode, and re-registers only on a change", async () => {

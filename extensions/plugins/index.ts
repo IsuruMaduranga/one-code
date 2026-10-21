@@ -16,6 +16,7 @@
  * ~/.claude is read-only here, always.
  */
 
+import { randomUUID } from "node:crypto";
 import { readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
@@ -569,11 +570,13 @@ function registerPluginCommand(pi: ExtensionAPI, plugin: Plugin, name: string, p
 			// user turn: persist it past the cap so the model gets a preview plus
 			// the path, never a wall of text (review L3).
 			const dir = sessionResultsDir(ctx);
+			const runId = randomUUID();
 			let expanded: string;
 			try {
 				// Placeholders run where the session works: an entered worktree, not the checkout it left.
 				expanded = await expandTemplate(body, args, workCwd(ctx.cwd), {
-					persist: (text, index) => persistIfLarge(text, { dir, id: `plugin-cmd-${name}-${index}` }),
+					// A unique id per run: the directory is shared across sessions and processes.
+					persist: (text, index) => persistIfLarge(text, { dir, id: `plugin-cmd-${name}-${runId}-${index}` }),
 					run: async (command, cwd) => {
 						const decide = getPermissionBridge();
 						if (!decide) throw new Error("The permission gate is unavailable. Load the permissions extension before running shell placeholders.");

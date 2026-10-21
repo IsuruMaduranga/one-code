@@ -39,13 +39,13 @@ describe("compareVersions", () => {
 describe("piVersionWarning", () => {
 	it("is silent inside the tested range", () => {
 		expect(piVersionWarning(TESTED_PI_MIN)).toBeUndefined();
-		expect(piVersionWarning("0.85.1")).toBeUndefined();
+		expect(piVersionWarning("1.2.1")).toBeUndefined();
 	});
 
 	it("warns below and at/above the range", () => {
 		expect(piVersionWarning("0.82.9")).toContain("tested against");
-		// 0.83.0 through 0.84.2 lack createPowerShellToolDefinition: the extension set does not load there.
-		expect(piVersionWarning("0.84.2")).toContain("tested against");
+		// Below 1.0.0 the record-once request path has no pi to build on.
+		expect(piVersionWarning("0.99.2")).toContain("tested against");
 		expect(piVersionWarning(TESTED_PI_MAX_EXCLUSIVE)).toContain(`tested against pi ${TESTED_PI_MIN}`);
 		expect(piVersionWarning(TESTED_PI_MAX_EXCLUSIVE)).toContain(`running pi ${TESTED_PI_MAX_EXCLUSIVE}`);
 	});

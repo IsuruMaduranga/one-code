@@ -57,6 +57,7 @@ import { looksLikeAnthropicRequest } from "../lib/anthropic-payload.ts";
 import { forcedReasoningLevel } from "../lib/model-policy.ts";
 import { captureRequest, extendPayload, LAST_REQUEST_CHANNEL, LastExchange, lastCovered, type RequestCapture, replayOutputCap } from "../lib/request-replay.ts";
 import { withoutSystemMessages } from "../lib/side-call.ts";
+import { LEDGER_PLAN_CHANNEL, LEDGER_SENT_CHANNEL, type LedgerSent, type RequestPlan } from "../lib/ledger/plan.ts";
 import { claudeCodeCut, type CutEntry, doomedMessages } from "./cut.ts";
 import { fitToBudget, replayFits, withoutUsage } from "./fit.ts";
 import { withoutThinking } from "./kept-thinking.ts";
@@ -110,25 +111,34 @@ export default function compactionExtension(pi: ExtensionAPI) {
 	 * (findings §27).
 	 */
 	let captured: { messages: AgentMessage[]; systemPrompt: string; model: string | undefined } | undefined;
+	// The ledger (extensions/ledger) cuts a request inside an epoch to its tail
+	// before this hook runs; the whole conversation the request covers comes
+	// with its plan.
+	let planned: readonly AgentMessage[] | undefined;
+	pi.events.on(LEDGER_PLAN_CHANNEL, (data) => {
+		planned = (data as RequestPlan).messages as readonly AgentMessage[];
+	});
 	pi.on("context", (event, ctx) => {
-		captured = { messages: event.messages, systemPrompt: ctx.getSystemPrompt(), model: modelKey(ctx.model) };
+		captured = { messages: [...(planned ?? event.messages)], systemPrompt: ctx.getSystemPrompt(), model: modelKey(ctx.model) };
+		planned = undefined;
 	});
 
 	/**
-	 * The same request as pi put it on the wire, and the reply that answered it
-	 * (lib/request-replay.ts). This extension loads after every extension that
-	 * edits the payload (tool-search, context-management), so the body it sees
-	 * is final; it is published for the btw and recap side calls too.
+	 * The same request as it went on the wire, and the reply that answered it
+	 * (lib/request-replay.ts): the body the ledger's payload hook publishes once
+	 * it has spliced and validated it, so it is final; it is published for the
+	 * btw and recap side calls too.
 	 */
 	const exchange = new LastExchange<AgentMessage & { role: string }>();
 	const publish = (capture: ReturnType<typeof captureRequest>) => {
 		exchange.setCapture(capture);
 		pi.events.emit(LAST_REQUEST_CHANNEL, capture);
 	};
-	pi.on("before_provider_request", (event, ctx) => {
+	pi.events.on(LEDGER_SENT_CHANNEL, (data) => {
+		const sent = data as LedgerSent;
 		// The context this body was built from ends where a fork's own messages start.
 		const covers = captured ? lastCovered(captured.messages as { role: string; timestamp?: number }[]) : undefined;
-		publish(captureRequest(ctx.model as { api?: string; provider?: string; id?: string } | undefined, event.payload, covers, ctx.sessionManager.getSessionId()));
+		publish(captureRequest(sent.model, sent.payload, covers, sent.sessionId));
 	});
 	pi.on("message_end", (event) => {
 		exchange.noteMessage(event.message as AgentMessage & { role: string });

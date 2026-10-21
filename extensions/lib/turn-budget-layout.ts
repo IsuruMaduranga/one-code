@@ -73,6 +73,8 @@ export interface TurnBudgetOptions {
 	nudge?: boolean;
 	/** False when the budget is off: no prompt carries a marker, so a user's own tag stays text. */
 	markers?: boolean;
+	/** False when the list is a request's tail: its first user message is a later prompt, not the stack carrier. Defaults to true. */
+	stackCarrier?: boolean;
 }
 
 /** The call ids a wire message answers: Anthropic `tool_result` blocks, an OpenAI output item or tool message. */
@@ -85,6 +87,16 @@ function answeredCalls(message: WireMessage): string[] {
 	return [];
 }
 
+/** Whether the next message after `index` that is not a system message is a user message. */
+function followedByUser(messages: readonly unknown[], index: number): boolean {
+	for (let i = index + 1; i < messages.length; i++) {
+		const role = (messages[i] as WireMessage | undefined)?.role;
+		if (role === "system" || role === "developer") continue;
+		return role === "user" && !answeredCalls(messages[i] as WireMessage).length;
+	}
+	return false;
+}
+
 export function withTurnBudgetMessages(payload: Record<string, unknown>, opts: TurnBudgetOptions): Record<string, unknown> | undefined {
 	const key = messagesKey(opts.shape);
 	const messages = payload[key];
@@ -94,7 +106,7 @@ export function withTurnBudgetMessages(payload: Record<string, unknown>, opts: T
 	/** The lowest countdown of the tool results not yet followed by their message. */
 	let pending: number | undefined;
 	/** The first user message carries the context stack, never a marker (context-budget's `skipStackCarrier`). */
-	let stackCarrierSeen = false;
+	let stackCarrierSeen = opts.stackCarrier === false;
 	for (let i = 0; i < messages.length; i++) {
 		let message = messages[i] as WireMessage;
 		const after: WireMessage[] = [];
@@ -111,7 +123,10 @@ export function withTurnBudgetMessages(payload: Record<string, unknown>, opts: T
 			const rest = at === -1 ? undefined : withoutParts(parts, (_, index) => index === at);
 			if (rest) {
 				const line = parts[at].text as string;
-				if (opts.systemRole) {
+				// A system message must reach an assistant message: before another
+				// user message (a prompt whose request failed, pi having dropped the
+				// error reply) the line stays on the prompt, framed (findings §52).
+				if (opts.systemRole && !followedByUser(messages, i)) {
 					message = { ...message, content: rest };
 					after.push(systemMessage(opts.shape, opts.role, line));
 				} else {
@@ -127,6 +142,7 @@ export function withTurnBudgetMessages(payload: Record<string, unknown>, opts: T
 			// On the OpenAI APIs a batch of results is a run of items; one message follows the run.
 			const next = messages[i + 1] as WireMessage | undefined;
 			const runContinues = opts.shape !== "anthropic" && (next?.type === "function_call_output" || next?.role === "tool");
+			if (pending !== undefined && !runContinues && followedByUser(messages, i)) pending = undefined;
 			if (pending !== undefined && !runContinues) {
 				after.push(systemMessage(opts.shape, opts.role, `<total_tokens>${pending} tokens left</total_tokens>`));
 				if (opts.nudge) {

@@ -2,13 +2,13 @@
  * What to tell the model when the skill set changes (pure).
  *
  * The skills listing is a `first-prepend` reminder on message 1, so once a
- * request has gone out it is part of every later request's cached prefix, and
- * rewriting it also breaks the binding of every earlier signed thinking block
- * (findings §46). So it is FROZEN after the first request, as the deferred-tools
- * listing is (tool-search/announce.ts). As in Claude Code, a skill that
- * becomes listable later is announced in a one-shot under the listing's own
- * header, and a skill that leaves the listing is not announced: the skill tool
- * refuses it by name. A compaction starts a new prefix and re-lists every skill.
+ * request has gone out it is the record every later request in the epoch
+ * replays (extensions/ledger); rewriting it would also break the binding of
+ * every earlier signed thinking block (findings §46). As in Claude Code, a
+ * skill that becomes listable later is announced on the request's tail under
+ * the listing's own header, and a skill that leaves the listing is not
+ * announced: the skill tool refuses it by name. A compaction opens an epoch
+ * and re-lists every skill.
  */
 
 import { skillListingVisibility } from "../lib/skill-overrides.ts";
@@ -27,20 +27,4 @@ export function listableSkillNames(skills: ReadonlyArray<ListedSkill & { path?: 
 		.filter((skill) => !skill.disableModelInvocation && skillListingVisibility(skill.state) !== "hidden")
 		.filter((skill) => !readable || (!skill.kind && skill.path))
 		.map((skill) => skill.name);
-}
-
-/**
- * The names in a stored listing, for a session saved before the baseline
- * existed. A line is `- <name>`, `- <name>: <description>` or, in the
- * read-the-file framing, `- <name> (<path>)`; a plugin skill's name has a
- * colon of its own (`<plugin>:<skill>`), never followed by a space.
- */
-export function skillNamesFromListing(text: string | undefined): string[] | undefined {
-	if (!text) return undefined;
-	const names = text
-		.split("\n")
-		.filter((line) => line.startsWith("- "))
-		.map((line) => line.slice(2).split(/: | \(/)[0].trim())
-		.filter(Boolean);
-	return names.length > 0 ? names : undefined;
 }

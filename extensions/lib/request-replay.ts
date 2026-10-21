@@ -26,20 +26,65 @@ import { estimateMessageTokens } from "./pi-ai-estimate.ts";
 export const LAST_REQUEST_CHANNEL = "one-code:last-request";
 
 /** The provider APIs whose request body can be extended by appending to one list. */
-export type ReplayApi = "anthropic-messages" | "openai-completions" | "openai-responses";
+export type ReplayApi =
+	| "anthropic-messages"
+	| "openai-completions"
+	| "openai-responses"
+	| "azure-openai-responses"
+	| "openai-codex-responses"
+	| "bedrock-converse-stream"
+	| "google-generative-ai"
+	| "google-vertex";
 
 const LIST_KEY: Record<ReplayApi, string> = {
 	"anthropic-messages": "messages",
 	"openai-completions": "messages",
 	"openai-responses": "input",
+	"azure-openai-responses": "input",
+	"openai-codex-responses": "input",
+	"bedrock-converse-stream": "messages",
+	"google-generative-ai": "contents",
+	"google-vertex": "contents",
 };
 
-/** The output cap's field, first match in the captured body wins. */
-const MAX_TOKEN_KEYS: Record<ReplayApi, readonly string[]> = {
-	"anthropic-messages": ["max_tokens"],
-	"openai-completions": ["max_completion_tokens", "max_tokens"],
-	"openai-responses": ["max_output_tokens"],
+/**
+ * Where the output cap lives, first match in the captured body wins: a
+ * top-level field, or one level down (Bedrock's `inferenceConfig.maxTokens`,
+ * Google's `config.maxOutputTokens`). Codex sends none.
+ */
+const CAP_PATHS: Record<ReplayApi, ReadonlyArray<readonly string[]>> = {
+	"anthropic-messages": [["max_tokens"]],
+	"openai-completions": [["max_completion_tokens"], ["max_tokens"]],
+	"openai-responses": [["max_output_tokens"]],
+	"azure-openai-responses": [["max_output_tokens"]],
+	"openai-codex-responses": [],
+	"bedrock-converse-stream": [["inferenceConfig", "maxTokens"]],
+	"google-generative-ai": [["config", "maxOutputTokens"]],
+	"google-vertex": [["config", "maxOutputTokens"]],
 };
+
+const REPLAY_APIS: ReadonlySet<string> = new Set(Object.keys(LIST_KEY));
+
+/** The value at `path` in `payload`, when it is a number. */
+function capAt(payload: Record<string, unknown>, path: readonly string[]): number | undefined {
+	let value: unknown = payload;
+	for (const key of path) value = isRecord(value) ? value[key] : undefined;
+	return typeof value === "number" ? value : undefined;
+}
+
+/** The path of the cap `payload` carries for `api`, or the first one the API takes. */
+function capPath(api: ReplayApi, payload: Record<string, unknown>): readonly string[] | undefined {
+	const paths = CAP_PATHS[api];
+	return paths.find((path) => capAt(payload, path) !== undefined) ?? paths[0];
+}
+
+/** `payload` with `value` at `path`, copying only the objects on the way. */
+function withCap(payload: Record<string, unknown>, path: readonly string[], value: number): Record<string, unknown> {
+	const [head, ...rest] = path;
+	if (rest.length === 0) return { ...payload, [head]: value };
+	const inner = isRecord(payload[head]) ? (payload[head] as Record<string, unknown>) : {};
+	return { ...payload, [head]: withCap(inner, rest, value) };
+}
 
 /** The session's last provider request body, and the model it went to. */
 export interface RequestCapture {
@@ -68,9 +113,9 @@ interface ModelRef {
 /** A capture of `payload` for `model`, or undefined when its API cannot be replayed. */
 export function captureRequest(model: ModelRef | undefined, payload: unknown, covers?: CoveredThrough, sessionId?: string): RequestCapture | undefined {
 	const api = model?.api;
-	if (api !== "anthropic-messages" && api !== "openai-completions" && api !== "openai-responses") return undefined;
-	if (!model?.provider || !model.id || !isRecord(payload) || !Array.isArray(payload[LIST_KEY[api]])) return undefined;
-	return { api, provider: model.provider, modelId: model.id, payload, ...(covers ? { covers } : {}), ...(sessionId ? { sessionId } : {}) };
+	if (!api || !REPLAY_APIS.has(api)) return undefined;
+	if (!model?.provider || !model.id || !isRecord(payload) || !Array.isArray(payload[LIST_KEY[api as ReplayApi]])) return undefined;
+	return { api: api as ReplayApi, provider: model.provider, modelId: model.id, payload, ...(covers ? { covers } : {}), ...(sessionId ? { sessionId } : {}) };
 }
 
 /** The model fields pi-ai reads to choose its session-affinity headers. */
@@ -178,21 +223,44 @@ export class LastExchange<Reply extends MessageLike = MessageLike> {
 export function extendPayload(capture: RequestCapture, tail: Record<string, unknown>, maxTokens?: number): Record<string, unknown> {
 	const key = LIST_KEY[capture.api];
 	const base = capture.payload[key] as unknown[];
-	const extra = withoutCacheControl(Array.isArray(tail[key]) ? (tail[key] as unknown[]) : []) as unknown[];
-	const list = capture.api === "anthropic-messages" ? appendAnthropic(base, extra) : [...base, ...extra];
-	const out: Record<string, unknown> = { ...capture.payload, [key]: list };
-	if (maxTokens !== undefined) {
-		const keys = MAX_TOKEN_KEYS[capture.api];
-		out[keys.find((k) => k in capture.payload) ?? keys[0]] = maxTokens;
+	// The tail's own markers are dropped: the capture's mark the entry the session wrote.
+	const extra = withoutCachePoints(withoutCacheControl(Array.isArray(tail[key]) ? (tail[key] as unknown[]) : [])) as unknown[];
+	const list =
+		capture.api === "anthropic-messages"
+			? appendAnthropic(base, extra)
+			: capture.api === "bedrock-converse-stream" || capture.api.startsWith("google-")
+				? joinTurns(base, extra, capture.api.startsWith("google-") ? "parts" : "content")
+				: [...base, ...extra];
+	let out: Record<string, unknown> = { ...capture.payload, [key]: list };
+	// Google's config carries the request's live abort signal: the side call's own, never the session's.
+	if (capture.api.startsWith("google-") && isRecord(out.config)) {
+		const { abortSignal: _session, ...config } = out.config;
+		const own = isRecord(tail.config) ? tail.config.abortSignal : undefined;
+		out = { ...out, config: own === undefined ? config : { ...config, abortSignal: own } };
 	}
-	return out;
+	const path = maxTokens === undefined ? undefined : capPath(capture.api, capture.payload);
+	return path && maxTokens !== undefined ? withCap(out, path, maxTokens) : out;
+}
+
+/**
+ * The tail appended so turns still alternate: a tail that opens with a user
+ * turn joins a captured trailing user turn (Bedrock and Google reject two in
+ * a row). `field` is where a turn keeps its blocks (`parts` on Google).
+ */
+function joinTurns(base: unknown[], tail: unknown[], field: "content" | "parts"): unknown[] {
+	const last = base.at(-1) as Record<string, unknown> | undefined;
+	const first = tail[0] as Record<string, unknown> | undefined;
+	if (last?.role === "user" && first?.role === "user" && Array.isArray(last[field]) && Array.isArray(first[field])) {
+		return [...base.slice(0, -1), { ...last, [field]: [...(last[field] as unknown[]), ...(first[field] as unknown[])] }, ...tail.slice(1)];
+	}
+	return [...base, ...tail];
 }
 
 /** The output cap the captured body carries, if any. */
 function capturedMaxTokens(capture: RequestCapture): number | undefined {
-	for (const key of MAX_TOKEN_KEYS[capture.api]) {
-		const value = capture.payload[key];
-		if (typeof value === "number") return value;
+	for (const path of CAP_PATHS[capture.api]) {
+		const value = capAt(capture.payload, path);
+		if (value !== undefined) return value;
 	}
 	return undefined;
 }
@@ -268,18 +336,19 @@ export function forkRequestPayload(capture: RequestCapture, child: Record<string
 	const out: Record<string, unknown> = { ...capture.payload, [key]: capture.api === "anthropic-messages" ? joinUserTurns(base, tail) : [...base, ...tail] };
 	const tools = forkTools(capture.payload.tools, child.tools, baseline, tail);
 	if (tools) out.tools = tools;
-	const capKey = MAX_TOKEN_KEYS[capture.api].find((k) => typeof capture.payload[k] === "number");
+	const capKey = CAP_PATHS[capture.api].find((path) => capAt(capture.payload, path) !== undefined);
 	// Appended tool schemas spend room too; the parent's own tools are already in its cap.
 	const appended = Array.isArray(tools) && Array.isArray(capture.payload.tools) ? tools.slice(capture.payload.tools.length) : [];
 	const tailRoom = forkOutputRoom(capture, tail);
 	const room = tailRoom === undefined ? undefined : tailRoom - (appended.length > 0 ? Math.ceil(JSON.stringify(appended).length / 4) : 0);
+	let result = out;
 	if (capKey && room !== undefined) {
 		// Never above the room: the fork chose the fallback before this when too little was left.
-		const own = typeof child[capKey] === "number" ? (child[capKey] as number) : room;
-		out[capKey] = Math.max(1, Math.min(own, room));
+		const own = capAt(child, capKey) ?? room;
+		result = withCap(out, capKey, Math.max(1, Math.min(own, room)));
 	}
-	capCacheMarkers(out, key, capture, tail);
-	return out;
+	capCacheMarkers(result, key, capture, tail);
+	return result;
 }
 
 /**
@@ -289,8 +358,8 @@ export function forkRequestPayload(capture: RequestCapture, child: Record<string
  * `MIN_REPLAY_OUTPUT_TOKENS` must not be spliced: it goes out whole instead.
  */
 export function forkOutputRoom(capture: RequestCapture, tail: unknown): number | undefined {
-	const capKey = MAX_TOKEN_KEYS[capture.api].find((k) => typeof capture.payload[k] === "number");
-	return capKey === undefined ? undefined : (capture.payload[capKey] as number) - Math.ceil(JSON.stringify(tail).length / 4);
+	const cap = capturedMaxTokens(capture);
+	return cap === undefined ? undefined : cap - Math.ceil(JSON.stringify(tail).length / 4);
 }
 
 /** The names a body's tool list declares (Anthropic, Chat Completions and Responses shapes). */
@@ -422,6 +491,13 @@ function appendAnthropic(base: unknown[], extra: unknown[]): unknown[] {
 function blocksOf(content: unknown): Block[] {
 	if (typeof content === "string") return [{ type: "text", text: content }];
 	return Array.isArray(content) ? (content as Block[]) : [];
+}
+
+/** `value` without Bedrock's `{ cachePoint }` marker blocks, at any depth. */
+function withoutCachePoints(value: unknown): unknown {
+	if (Array.isArray(value)) return value.filter((entry) => !(isRecord(entry) && Object.keys(entry).length === 1 && "cachePoint" in entry)).map(withoutCachePoints);
+	if (!isRecord(value)) return value;
+	return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, withoutCachePoints(entry)]));
 }
 
 function withoutCacheControl(value: unknown): unknown {

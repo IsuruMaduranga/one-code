@@ -7,7 +7,7 @@ import {
 } from "../../extensions/context-budget/budget.ts";
 import contextBudgetExtension from "../../extensions/context-budget/index.ts";
 import systemReminderExtension from "../../extensions/system-reminder/index.ts";
-import { appendReminderBlocks, REMINDER_CHANNEL, ReminderQueue } from "../../extensions/lib/reminders.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 describe("turnTokenBudget", () => {
@@ -59,16 +59,6 @@ describe("TurnBudget", () => {
 describe("totalTokensBlock", () => {
 	it("is Claude Code's bare block, byte for byte", () => {
 		expect(totalTokensBlock(14_832_967)).toBe("<total_tokens>14832967 tokens left</total_tokens>");
-	});
-
-	it("rides a tool result unframed when queued as a raw one-shot", () => {
-		const q = new ReminderQueue();
-		q.enqueue(totalTokensBlock(100), { placement: "last-append", raw: true });
-		const content = appendReminderBlocks([{ type: "text", text: "ok" }], q.takeOneShots());
-		expect(content).toEqual([
-			{ type: "text", text: "ok" },
-			{ type: "text", text: "<total_tokens>100 tokens left</total_tokens>" },
-		]);
 	});
 });
 
@@ -133,26 +123,23 @@ describe("context-budget wiring", () => {
 		for (const r of reminders) expect(r).toMatchObject({ placement: "last-append", raw: true });
 	});
 
-	it("gives each of several parallel tool results its own single countdown", async () => {
+	it("gives each of several parallel tool results its own single countdown, unframed", async () => {
 		// pi finalizes a parallel batch concurrently, so the results' tool_result
-		// handler chains interleave: the second result's countdown is queued
-		// before the first result's system-reminder hook takes the one-shots.
+		// handler chains interleave; each countdown is bound to its own call.
 		const fake = createFakePi();
 		contextBudgetExtension(fake.pi as never);
 		systemReminderExtension(fake.pi as never);
-		await fake.fireOne("agent_start", {}, createFakeCtx(usage(10_000)));
-		// system-reminder's handler, the second, returns the result's new content.
-		const result = async (toolCallId: string, tokens: number) =>
-			(
-				await fake.fire<{ content: Array<{ text: string }> } | undefined>(
-					"tool_result",
-					{ toolCallId, content: [{ type: "text", text: `ran ${toolCallId}` }] },
-					createFakeCtx(usage(tokens)),
-				)
-			)[1];
-		const [a, b] = await Promise.all([result("call-a", 10_100), result("call-b", 10_200)]);
-		expect(a?.content.map((c) => c.text)).toEqual(["ran call-a", "<total_tokens>14999900 tokens left</total_tokens>"]);
-		expect(b?.content.map((c) => c.text)).toEqual(["ran call-b", "<total_tokens>14999800 tokens left</total_tokens>"]);
+		const session = (tokens?: number) => createFakeCtx({ ...usage(tokens), sessionManager: { getSessionId: () => "s", getBranch: () => fake.branch } });
+		await fake.fire("session_start", {}, session());
+		await fake.fireOne("agent_start", {}, session(10_000));
+		const result = (toolCallId: string, tokens: number) =>
+			fake.fire("tool_result", { toolCallId, content: [{ type: "text", text: `ran ${toolCallId}` }] }, session(tokens));
+		await Promise.all([result("call-a", 10_100), result("call-b", 10_200)]);
+		// The next request places each on its own result (system-reminder renders the pending entries).
+		const results = ["call-a", "call-b"].map((toolCallId) => ({ role: "toolResult", toolCallId, toolName: "bash", content: [{ type: "text", text: `ran ${toolCallId}` }], timestamp: 1 }));
+		const [rendered] = await fake.fire<{ messages: Array<{ content: Array<{ text: string }> }> }>("context", { messages: [{ role: "user", content: "go", timestamp: 0 }, ...results] }, session());
+		expect(rendered.messages[1].content.map((c) => c.text)).toEqual(["ran call-a", "<total_tokens>14999900 tokens left</total_tokens>"]);
+		expect(rendered.messages[2].content.map((c) => c.text)).toEqual(["ran call-b", "<total_tokens>14999800 tokens left</total_tokens>"]);
 	});
 
 	it("is off entirely under CC_TOTAL_TOKENS=0", async () => {

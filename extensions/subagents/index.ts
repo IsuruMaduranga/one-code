@@ -66,7 +66,7 @@ import { projectConfigDirName } from "../lib/config-mode.ts";
 import { pendingClaimReminder } from "./pending-claim.ts";
 import { watchPermissionBridge } from "../permissions/subagent-gate.ts";
 import { watchHookBridge } from "../hooks/subagent-bridge.ts";
-import { CONTEXT_ORDER, REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, type ReminderPayload, toldBlockFact, toldBlockIs } from "../lib/reminders.ts";
 import { type BackgroundTask, generateTaskId, TASK_REGISTER_CHANNEL } from "../background/registry.ts";
 import { type ChildAction } from "../auto-mode/actions.ts";
 import { type ChildOutcome, forkTaskMessage, OUTPUT_CAP, type RpcChildHandle } from "./outcome.ts";
@@ -112,8 +112,7 @@ import { createMarkdownProse } from "./prose.ts";
 import { asScrollableViewport, ViewportMirror } from "./viewport-mirror.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 import { extendingCompletions } from "../lib/argument-hints.ts";
-import { CONTEXT_BASELINE_CHANNEL, CONTEXT_CAPABILITY_REFRESH_CHANNEL, restoredContext } from "../lib/context-stack.ts";
-import { emptySubagentBaseline, planSubagentAnnouncement, subagentBaseline, subagentBaselineFromStack, type SubagentBaseline } from "./announce.ts";
+import { makeRecord, RECORD, stateOnBranch, type EntryLike } from "../lib/ledger/records.ts";
 import { panelUi } from "../lib/panel-focus.ts";
 import { dockRowsReporter, trackDockRows } from "../lib/dock-rows.ts";
 
@@ -274,6 +273,16 @@ function residentPending(resident: Resident): boolean {
 	return !resident.handle.exited() && (resident.handle.busy() || resident.turnHandlers.length > 0 || resident.reviewing > 0);
 }
 
+/** The three capability blocks subagents owns on message 1. */
+type SubagentBlockKey = "subagent-models" | "subagent-agents" | "subagent-delegation";
+const BLOCK_ORDER: Record<SubagentBlockKey, number> = {
+	"subagent-models": CONTEXT_ORDER.subagentModels,
+	"subagent-agents": CONTEXT_ORDER.agents,
+	"subagent-delegation": CONTEXT_ORDER.delegation,
+};
+/** The `one-code:state` key of the models this account refused (lib/model-unusable.ts). */
+const REFUSED_MODELS_STATE = "subagents:refused-models";
+
 export default function subagentsExtension(pi: ExtensionAPI) {
 	const requestTier = sessionModelTier(pi);
 	const registry = new RunRegistry();
@@ -410,6 +419,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	const rememberUnusable = (model: string) => {
 		if (unusableModels.has(model)) return false;
 		unusableModels.add(model);
+		// A refusal is a durable fact of the account, not UI prose: a resumed
+		// session must not pick the same model and announce it again.
+		pi.appendEntry(RECORD.state, makeRecord("state", extensionVersion(), { key: REFUSED_MODELS_STATE, value: [...unusableModels] }));
 		return true;
 	};
 	pi.events.on(MODEL_UNUSABLE_CHANNEL, (data) => {
@@ -619,27 +631,42 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		return resolution;
 	};
 
-	// Message 1 is frozen once a request has gone out (decisions/caching.md):
-	// after that, a model the account refused, a /model or a /subagent change
-	// rides a one-shot, never a rewrite of the menu that would re-cache the
-	// conversation and drop its earlier thinking (findings §46). A compaction
-	// starts a new prefix and rebuilds all three blocks.
-	let requestSent = false;
-	let capabilityBaseline: SubagentBaseline = emptySubagentBaseline();
-	const publishCapabilityBaseline = (baseline: SubagentBaseline) => {
-		pi.events.emit(CONTEXT_BASELINE_CHANNEL, { key: "subagents", value: baseline });
+	// The three blocks are live state: what an epoch's message 1 says. Inside an
+	// epoch message 1 is the record (extensions/ledger), so a refused model, a
+	// /model or a /subagent change rides the request's tail, decided at render
+	// time from the text the epoch last told, never a rewrite of the menu that
+	// would re-cache the conversation and drop its earlier thinking (findings §46).
+	/** The live text of each block; null when the block is absent. */
+	const liveBlocks: Record<SubagentBlockKey, string | null> = { "subagent-models": null, "subagent-agents": null, "subagent-delegation": null };
+	/** A model the account refused since the menu was last told: its narrow correction stands in for the whole menu. */
+	let refusal: { refused: string; replacement: Model<Api> | undefined } | undefined;
+	const publishBlock = (key: SubagentBlockKey, text: string | null) => {
+		liveBlocks[key] = text;
+		if (text === null) pi.events.emit(REMINDER_CHANNEL, { key, remove: true });
+		else pi.events.emit(REMINDER_CHANNEL, { text, scope: "every-turn", key, placement: "first-prepend", order: BLOCK_ORDER[key], facts: [toldBlockFact(key, text)] });
 	};
-	pi.on("context", () => {
-		requestSent = true;
+	pi.events.on(RENDER_CHANNEL, (data) => {
+		const request = data as RenderRequest;
+		if (request.epoch) {
+			refusal = undefined;
+			return;
+		}
+		for (const key of Object.keys(liveBlocks) as SubagentBlockKey[]) {
+			const text = liveBlocks[key];
+			const told = request.toldBlocks.get(key);
+			if (text === null ? told === undefined || told === toldBlockFact(key, "").hash : toldBlockIs(request, key, text)) continue;
+			const facts = [toldBlockFact(key, text ?? "")];
+			if (text === null) request.blocks.push({ text: "The subagent delegation guidance previously shown for this conversation is no longer active.", facts });
+			else if (key === "subagent-models" && refusal) request.blocks.push({ text: refusedModelNote(refusal.refused, refusal.replacement), facts });
+			else request.blocks.push({ text, facts });
+		}
+		refusal = undefined;
 	});
 
 	/**
 	 * The every-turn menu reminder and the banner's subagent-default status.
-	 * Every-turn because reminders are transient per-request injections — that
-	 * scope survives compaction by construction — and keyed so a model change
-	 * replaces it: the very next LLM call, even mid-turn, carries the update.
-	 * `refused` names a model the account just refused: once a request has gone
-	 * out, that change rides a one-shot instead.
+	 * `refused` names a model the account just refused: inside an epoch that
+	 * change rides a narrow correction instead of the whole menu.
 	 */
 	const modelMenu = (ctx: ExtensionContext, sessionModel = ctx.model) => {
 		const available = usableModels(ctx);
@@ -661,64 +688,21 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				notifyModelOnce(ctx, `${warning.text} ${warning.fix}`);
 			}
 		}
-		// Keep the established narrow refusal correction: it does not claim the
-		// entire menu was reprinted, and it remains useful on restored sessions.
-		if (refused !== undefined && requestSent) {
-			// The narrow correction is all the model needs now, but persist the
-			// corrected complete menu as announcement history. Otherwise the next
-			// process would compare the stale menu with the same live catalog and
-			// append a spurious full-menu correction on every resume.
-			capabilityBaseline = {
-				...capabilityBaseline,
-				models: text,
-				refusedModels: [...new Set([...capabilityBaseline.refusedModels, refused])],
-			};
-			publishCapabilityBaseline(capabilityBaseline);
-			pi.events.emit(REMINDER_CHANNEL, { text: refusedModelNote(refused, resolution.model), group: "subagent-models" });
-			pi.events.emit(SUBAGENT_STATUS_CHANNEL, subagentStatusModel(configured, resolution));
-			return;
-		}
-		const plan = planSubagentAnnouncement({ frozen: requestSent, baseline: capabilityBaseline, capability: "models", text });
-		capabilityBaseline = plan.baseline;
-		if (plan.kind !== "none") publishCapabilityBaseline(capabilityBaseline);
-		if (plan.kind === "addendum") pi.events.emit(REMINDER_CHANNEL, { text: plan.text, group: "subagent-models" });
-		else if (!requestSent) pi.events.emit(REMINDER_CHANNEL, {
-			text, scope: "every-turn", key: "subagent-models", placement: "first-prepend", order: CONTEXT_ORDER.subagentModels,
-		});
+		if (refused !== undefined) refusal = { refused, replacement: resolution.model };
+		publishBlock("subagent-models", text);
 		pi.events.emit(SUBAGENT_STATUS_CHANNEL, subagentStatusModel(configured, resolution));
 	};
 
 	/**
 	 * The agent catalog as an every-turn reminder, as Claude Code does ("Available
 	 * agent types are listed in <system-reminder> messages") — without it the
-	 * model has to guess names or make a discovery call first. Keyed and
-	 * byte-stable within a session, so it costs nothing in prompt-cache terms.
+	 * model has to guess names or make a discovery call first.
 	 */
 	const agentCatalog = (ctx: ExtensionContext) =>
 		`Available agent types for the Agent tool:\n${describeAgents(ctx.cwd)}\n\nWhen you launch multiple agents for independent work, send them in a single message with multiple tool uses so they run concurrently.`;
-	const emitAgentCatalog = (ctx: ExtensionContext) => {
-		const text = agentCatalog(ctx);
-		const plan = planSubagentAnnouncement({ frozen: requestSent, baseline: capabilityBaseline, capability: "agents", text });
-		capabilityBaseline = plan.baseline;
-		if (plan.kind !== "none") publishCapabilityBaseline(capabilityBaseline);
-		if (plan.kind === "addendum") pi.events.emit(REMINDER_CHANNEL, { text: plan.text, group: "subagent-agents" });
-		else if (!requestSent) pi.events.emit(REMINDER_CHANNEL, {
-			scope: "every-turn", key: "subagent-agents", text, placement: "first-prepend", order: CONTEXT_ORDER.agents,
-		});
-	};
+	const emitAgentCatalog = (ctx: ExtensionContext) => publishBlock("subagent-agents", agentCatalog(ctx));
 
-	const delegationSteer = () => (requestTier() === "tiny" ? DELEGATION_STEER : null);
-	const emitDelegationSteer = () => {
-		const text = delegationSteer();
-		const plan = planSubagentAnnouncement({ frozen: requestSent, baseline: capabilityBaseline, capability: "delegation", text });
-		capabilityBaseline = plan.baseline;
-		if (plan.kind !== "none") publishCapabilityBaseline(capabilityBaseline);
-		if (plan.kind === "addendum") pi.events.emit(REMINDER_CHANNEL, { text: plan.text, group: "subagent-delegation" });
-		else if (!requestSent && text !== null) pi.events.emit(REMINDER_CHANNEL, {
-			scope: "every-turn", key: "subagent-delegation", text, placement: "first-prepend", order: CONTEXT_ORDER.delegation,
-		});
-		else if (!requestSent) pi.events.emit(REMINDER_CHANNEL, { key: "subagent-delegation", remove: true });
-	};
+	const emitDelegationSteer = () => publishBlock("subagent-delegation", requestTier() === "tiny" ? DELEGATION_STEER : null);
 
 	let shuttingDown = false;
 
@@ -760,16 +744,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_start", (_event, ctx) => {
-		const restored = restoredContext(pi.events);
-		requestSent = restored !== undefined;
-		// New snapshots carry exact structured text; old v1 snapshots can still
-		// seed from their locked first-prepend blocks without rewriting them.
-		capabilityBaseline = subagentBaseline(restored?.baselines.subagents)
-			?? subagentBaselineFromStack(restored?.stack ?? []);
-		// A refusal correction is a real capability fact, not merely UI prose.
-		// Restore its selection floor before rebuilding the menu, otherwise this
-		// process can choose the same refused model and reissue a false correction.
-		for (const model of capabilityBaseline.refusedModels) unusableModels.add(model);
+		// The account's refusals follow the branch: restore the selection floor
+		// before building the menu, or this process picks the refused model again.
+		const refusedOnBranch = stateOnBranch(ctx.sessionManager.getBranch() as EntryLike[], REFUSED_MODELS_STATE);
+		if (Array.isArray(refusedOnBranch)) for (const model of refusedOnBranch) if (typeof model === "string") unusableModels.add(model);
 		lastCtx = ctx;
 		// A replaced session (/clear, /new, /resume) never reaches this instance
 		// with the old one's agents: pi emits `session_shutdown` (reason "new" /
@@ -795,18 +773,19 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		const live = liveUiCtx(lastCtx);
 		if (live) emitModelStatus(live);
 	});
-	// A compaction starts a new prefix: rebuild the three blocks from live state.
+	// A compaction opens an epoch, which renders the three blocks from live state:
+	// refresh them, so a catalog that changed on disk since is current.
 	pi.on("session_compact", (_event, ctx) => {
-		const models = modelMenu(ctx).text;
-		const agents = agentCatalog(ctx);
-		const delegation = delegationSteer();
-		capabilityBaseline = { ...capabilityBaseline, models, agents, delegation };
-		publishCapabilityBaseline(capabilityBaseline);
-		pi.events.emit(CONTEXT_CAPABILITY_REFRESH_CHANNEL, { key: "subagent-models", text: models, order: CONTEXT_ORDER.subagentModels });
-		pi.events.emit(CONTEXT_CAPABILITY_REFRESH_CHANNEL, { key: "subagent-agents", text: agents, order: CONTEXT_ORDER.agents });
-		pi.events.emit(CONTEXT_CAPABILITY_REFRESH_CHANNEL, { key: "subagent-delegation", text: delegation, order: CONTEXT_ORDER.delegation });
+		emitModelStatus(ctx);
+		emitAgentCatalog(ctx);
+		emitDelegationSteer();
 	});
-	pi.on("session_tree", (_event, ctx) => reconstructRuns(ctx));
+	// The selected branch's runs only: the abandoned branch's are not
+	// addressable from it (SendMessage, list_agents), as on a resume.
+	pi.on("session_tree", (_event, ctx) => {
+		registry.clear();
+		reconstructRuns(ctx);
+	});
 	pi.on("session_shutdown", async () => {
 		// Teardown — at process exit AND on /clear, /new, /resume (pi replaces the
 		// session and re-runs this factory; afterwards every use of this

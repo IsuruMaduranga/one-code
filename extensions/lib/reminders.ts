@@ -1,89 +1,78 @@
 /**
- * System-reminder queue — the steering mechanism shared by all One Code
- * extensions. Reminders are injected transiently into the outgoing request via
- * pi's `context` event. Context and sticky snapshots are stored as hidden custom
- * entries by the owner, never as rendered transcript messages.
+ * System reminders: the steering blocks One Code adds to a request, rendered
+ * once and then kept as sent (working-docs/features/lifecycle-grid-hunt/design.md
+ * section 5). The ledger (extensions/ledger) sends through pi only the
+ * messages after the last request's coverage, the tail, and takes everything
+ * above it from that request's record. So a reminder is rendered only onto the
+ * tail, rides the request that first carried it, and stays in the record
+ * byte for byte; nothing here is restored or re-rendered later.
  *
  * Cross-extension contract: emit on the event bus channel
- * `one-code:system-reminder` with `{ text, scope?, placement? }` to enqueue from
- * any extension (including third-party ones). The queue instance itself lives
- * in the system-reminder extension; do not import one from here (jiti gives
- * every extension its own module instance, so a shared export steers nothing).
+ * `one-code:system-reminder` with `{ text, scope?, placement? }`. The live
+ * state lives in the system-reminder extension; do not import one from here
+ * (jiti gives every extension its own module instance, so a shared export
+ * steers nothing).
  *
- * Three placements, chosen by what kind of fact the reminder is:
+ * Four placements, chosen by what kind of fact the reminder is:
  *
- * - `first-prepend` — SESSION CONTEXT that never changes mid-session (deferred
- *   tools, agent catalog, MCP instructions, skills, `# claudeMd`). Front of the
- *   FIRST user message, before the user's text, ordered by `order`, exactly
- *   Claude Code's first-message stack. Byte-stable, so the cached prefix holds.
- * - `sticky-append` — SESSION STATE that switches on and off (auto mode, plan
- *   mode, a worktree session, ultracode). Appended to EVERY user message
- *   stamped after the state switched on (`since`). Mid-turn it first rides the
- *   switching call's tool result (`toolCallId` → `tailPin`), or the first
- *   carrier after the switch, never the already-cached turn opener. That pin
- *   and every later user carrier keep identical bytes. Switching off CLOSES
- *   the lifetime (`until`) and freezes its actual user carriers (`userPins`),
- *   so queued input cannot acquire past state. It never removes blocks from
- *   history. Re-entry opens a separate lifetime. Closed lifetimes
- *   are persisted alongside open ones and dropped only when all their carriers
- *   leave the context (compaction/fork). They never migrate onto a compaction
- *   summary; retained messages still carry their historical blocks. Legacy
- *   `opener` anchors are honored on resume, but never created for new states.
- * - `last-append` — ONE-SHOT STEERING about what just happened (a deferred tool
- *   miss, a file changed under the model, a mode change). Delivered where the
- *   model reads next, and then KEPT there so the message never changes again:
- *   a one-shot pending when a tool result is stored is written INTO that result
- *   (`takeOneShots` from the `tool_result` hook — Claude Code persists its
- *   mid-turn reminders the same way, so the transcript carries them and no
- *   request ever re-caches the result); a one-shot still pending when a request
- *   goes out is `pin`ned to the request's tail (the trailing tool result by call
- *   id, else the last user message by timestamp) and re-attached to that same
- *   message on every later request, byte-identical. Pins are persisted with
- *   sticky lifetimes so a resume also preserves the switch announcements.
- * - `user-prepend` — LOCAL-COMMAND BREADCRUMBS (`/clear`, `/model`, a panel
- *   command): what Claude Code shows the model when the user ran a slash
- *   command. Bare text blocks placed BEFORE the user's text on the next user
- *   message that opens a request (after the `first-prepend` stack on message
- *   one), then pinned there like a delivered one-shot. They never ride a tool
- *   result — a command run mid-turn waits for the next prompt. The caveat
- *   block is queued `once` per pending run (a second command joins the first
- *   caveat); the command and stdout blocks are never collapsed.
- *   `lib/local-command.ts` builds the blocks.
+ * - `first-prepend`: SESSION CONTEXT (environment, deferred tools, agent
+ *   catalog, MCP instructions, skills, `# claudeMd`). Live state, kept current
+ *   by its owner; rendered only on a request that opens an epoch, in front of
+ *   the first user message and ordered by `order`: Claude Code's first-message
+ *   stack. Inside an epoch message 1 is the record, so a change is not
+ *   rendered; its owner announces the difference at render time
+ *   (RENDER_CHANNEL: live minus what the epoch told).
+ * - `sticky-append`: SESSION STATE that switches on and off (auto mode, plan
+ *   mode, a worktree session, ultracode). Appended to every user message of
+ *   the tail stamped at or after the state switched on (`since`). Switched on
+ *   mid-turn, it first rides the switching call's result (`toolCallId`), or
+ *   the first result after the switch, never the already-sent turn opener.
+ *   Removing it closes it: later messages stop carrying it, and the ones
+ *   already sent keep it in the record.
+ * - `last-append`: ONE-SHOT steering about what just happened (a deferred
+ *   tool miss, a file changed under the model, a mode change). Persisted when
+ *   emitted as a `one-code:pending` entry, so it survives `/reload` and quit
+ *   and is gone with an abandoned `/tree` branch; delivered on the tail of the
+ *   next request (the call's own result when `toolCallId` names one in the
+ *   tail, else the trailing tool result, else the last user message), and
+ *   recorded as consumed by that request.
+ * - `user-prepend`: LOCAL-COMMAND BREADCRUMBS (`/clear`, `/model`, a panel
+ *   command): pending like a one-shot, but placed only before the text of a
+ *   prompt that opens a request; mid-turn it waits. The caveat block is
+ *   queued `once` per run (a second command joins the first caveat); the
+ *   command and stdout blocks are never collapsed. `lib/local-command.ts`
+ *   builds them.
  *
- * Persisted or pinned is decided by WHEN the one-shot is emitted, which is a
- * load-order rule: system-reminder's `tool_result` hook takes the one-shots
- * pending at that moment, so only an extension whose own `tool_result` handler
- * runs BEFORE it (listed before `system-reminder` in `package.json`
- * `pi.extensions`, like `context-budget`) or that emits from `tool_call` gets
- * its block written into the result. Emitting from a later `tool_result`
- * handler, or from `tool_execution_end` (pi runs it AFTER the `tool_result`
- * hooks, findings §3), lands the block on the same result but as a pin. Same
- * wording on the wire, so this only matters for `--resume` and for ordering
- * after the `<total_tokens>` line.
- *
- * A compaction summary counts as a user message for anchoring (pi renders it as
- * one), so the context stack survives a compaction that left no user turn. So
- * does a `custom` harness message (task notification, wakeup, hook context):
- * pi sends it as a user message, and a turn it opens has no other user turn.
- *
- * Retry safety falls out of this: pi re-runs the `context` transform per LLM
- * attempt, and both a persisted and a pinned one-shot are present on every
- * attempt by construction.
+ * A compaction summary counts as a user message for the stack (pi renders it
+ * as one), and so does a `custom` harness message (task notification, wakeup,
+ * hook context): pi sends it as a user message, and a turn it opens has no
+ * other user turn.
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
+import type { BlockFact, ToldFact } from "./ledger/records.ts";
+import { contentHash } from "./ledger/wire.ts";
+import type { MovedBlock } from "./system-role.ts";
 
 export const REMINDER_CHANNEL = "one-code:system-reminder";
+
+/**
+ * Emitted by the system-reminder extension once per request, while it renders
+ * the tail (a `RenderRequest`). An owner of a capability block subscribes and
+ * adds the blocks this request needs from live state and what the epoch has
+ * told: on a request inside an epoch, the names live now that the epoch has
+ * not told yet. Computed when the request goes out, never when a change is
+ * queued, so a capability that came and went before the request is never
+ * announced.
+ */
+export const RENDER_CHANNEL = "one-code:render";
 
 /** "next-turn" fires once on the next LLM call; "every-turn" fires on every call until removed. */
 export type ReminderScope = "next-turn" | "every-turn";
 
 /** See the module header for which placement fits which kind of reminder. */
 export type ReminderPlacement = "first-prepend" | "sticky-append" | "last-append" | "user-prepend";
-
-/** Where a delivered one-shot stays: a tool result (by call id) or a user turn (by timestamp). */
-export type PinAnchor = { kind: "toolResult"; toolCallId: string } | { kind: "user"; timestamp: number };
 
 /**
  * `order` values for the `first-prepend` context stack, matching Claude Code's
@@ -133,552 +122,310 @@ export function movesToSystemRole(order: number): boolean {
 	return order < CONTEXT_ORDER.claudeMd || order === CONTEXT_ORDER.date;
 }
 
-/** A drained reminder with everything the injector needs to place it. */
-export interface ReminderEntry {
-	/** Present in session snapshots; not rendered into the request. */
-	key?: string;
-	text: string;
-	placement: ReminderPlacement;
-	order: number;
-	/**
-	 * Literal text appended AFTER the closing `</system-reminder>` tag. Claude
-	 * Code's `# claudeMd` block ends `</system-reminder>\n\n` on the wire; this
-	 * reproduces that byte-for-byte. Defaults to "".
-	 */
-	suffix?: string;
-	/**
-	 * `sticky-append` only: when the state switched on. Every user message
-	 * stamped at or after it carries the block while open. Closing freezes the
-	 * actual carriers in `userPins`; legacy snapshots use `until` as the end.
-	 */
-	since?: number;
-	/** `sticky-append` only: exclusive end of a closed lifetime; absent while active. */
-	until?: number;
-	/** Actual user carriers of the last request; frozen on close, so queued input cannot acquire old state. */
-	userPins?: number[];
-	/** Pending sticky activation belongs to this call, not another result in its parallel batch. */
-	toolCallId?: string;
-	/**
-	 * Legacy `sticky-append` anchor from older snapshots. Honored to keep their
-	 * bytes stable on resume; new lifetimes use null, never an earlier opener.
-	 */
-	opener?: number | null;
-	/**
-	 * `sticky-append` only: its first mid-turn tool result, or the tail of a
-	 * request without any user carrier (overflow compaction). Once chosen it
-	 * stays on that message, even after later user turns arrive or state closes.
-	 */
-	tailPin?: PinAnchor;
-	/** Set on a pinned one-shot: the exact message it rides on every request. */
-	pin?: PinAnchor;
-	/**
-	 * Emit `text` as-is instead of inside a `<system-reminder>` frame — for the
-	 * few Claude Code blocks that ride bare, like `<total_tokens>` after a tool
-	 * result. Defaults to false.
-	 */
-	raw?: boolean;
-	/**
-	 * `first-prepend` only: sent only inside the mid-conversation system
-	 * message, never on the user message of a model without one (Claude Code's
-	 * auto-mode note).
-	 */
-	systemRoleOnly?: boolean;
-	/**
-	 * `sticky-append` only: never on the message that carries the context
-	 * stack, which already says the same (the first prompt's `<total_tokens>`).
-	 */
-	skipStackCarrier?: boolean;
-}
-
 export interface ReminderPayload {
 	text?: string;
 	scope?: ReminderScope;
-	/** Key so a reminder can be replaced (next-turn) or replaced/removed (every-turn). */
+	/** Key so a reminder can be replaced (a pending one-shot, a live block) or removed (a live block). */
 	key?: string;
-	/** Close a sticky lifetime under `key`; remove other every-turn reminders. */
+	/** Remove the live block or close the sticky state under `key`. */
 	remove?: boolean;
 	/** Where in the message stack this reminder lands. Defaults to `last-append`. */
 	placement?: ReminderPlacement;
 	/** Sort key among `first-prepend` reminders (Claude Code order). Defaults to 0. */
 	order?: number;
-	/** Literal text appended after the closing `</system-reminder>` tag. Defaults to "". */
-	suffix?: string;
 	/** Emit the text bare, with no `<system-reminder>` frame. */
 	raw?: boolean;
-	/** `first-prepend` only: sent only inside the mid-conversation system message (see ReminderEntry). */
+	/** `first-prepend` only: sent only inside the mid-conversation system message, never on a user message. */
 	systemRoleOnly?: boolean;
-	/** `sticky-append` only: never on the message that carries the context stack (see ReminderEntry). */
+	/** `sticky-append` only: never on the message that carries the context stack, which already says the same. */
 	skipStackCarrier?: boolean;
-	/** `user-prepend` only: skip when the same text is already pending (the shared caveat). */
+	/** `user-prepend` only: placed once per request, however many are pending (the shared caveat). */
 	once?: boolean;
 	/**
-	 * `sticky-append` only: anchor the block from this timestamp instead of now —
-	 * `0` puts it on every user message in the session, including ones a resume
-	 * brought back (the `<total_tokens>` line rides every user message in CC).
+	 * `sticky-append` only: the state is on from this timestamp instead of now.
+	 * `0` puts it on every user message (the `<total_tokens>` line rides every
+	 * user message in Claude Code).
 	 */
 	since?: number;
 	/**
-	 * The tool call whose result this reminder belongs to. For `last-append`,
-	 * only that result's `tool_result` hook takes the one-shot. For a new sticky
-	 * lifetime, that result is its first pin. Both avoid attaching a switch or
-	 * countdown to another call in a parallel batch.
+	 * The tool call whose result this reminder belongs to. A one-shot rides that
+	 * result when the request carries it; a sticky state rides it first. Both
+	 * avoid attaching a switch or countdown to another call in a parallel batch.
 	 */
 	toolCallId?: string;
-	/**
-	 * `last-append` only: the capability block (its `first-prepend` key) this
-	 * notice is about. A compaction's rebuild of that block cancels the notice
-	 * while it is undelivered (lib/context-stack.ts CONTEXT_CAPABILITY_REFRESH_CHANNEL).
-	 */
+	/** A one-shot about a capability block (its `first-prepend` key): an epoch's rebuild of the block supersedes it. */
 	group?: string;
+	/** `first-prepend` only: what the block tells the model, recorded when an epoch sends it. */
+	facts?: ToldFact[];
+	/** Who produced a one-shot, for the pending record (default "reminder"). */
+	source?: string;
 }
 
-interface StoredReminder extends ReminderEntry {
-	key?: string;
-	group?: string;
+/** The fact that the whole-text block `key` told `text`. */
+export function toldBlockFact(key: string, text: string): BlockFact {
+	return { kind: "block", key, hash: contentHash(text) };
 }
 
-type EnqueueOptions = {
-	scope?: ReminderScope;
-	key?: string;
-	placement?: ReminderPlacement;
-	order?: number;
-	suffix?: string;
+/** True when the epoch's last told text for `key` is `text`. */
+export function toldBlockIs(request: Pick<RenderRequest, "toldBlocks">, key: string, text: string): boolean {
+	return request.toldBlocks.get(key) === contentHash(text);
+}
+
+/** A live `first-prepend` block. */
+export interface StackEntry {
+	key: string;
+	text: string;
+	order: number;
 	raw?: boolean;
 	systemRoleOnly?: boolean;
-	skipStackCarrier?: boolean;
-	/** Test seam / explicit anchor for `sticky-append`; defaults to now. */
-	since?: number;
-	/** `user-prepend` only: skip when the same text is already pending. */
-	once?: boolean;
-	/** The switching tool result, or the hook that takes a one-shot (see ReminderPayload). */
-	toolCallId?: string;
-	/** The capability block a notice is about (see ReminderPayload). */
-	group?: string;
-};
+	facts?: ToldFact[];
+}
 
-export class ReminderQueue {
-	private nextTurn: StoredReminder[] = [];
-	/** Delivered one-shots, each fixed to the message it first rode (see `pin`). */
-	private pinned: StoredReminder[] = [];
-	private everyTurn = new Map<string, StoredReminder>();
-	/** Open and closed lifetimes in original insertion order, independent of live keys. */
-	private sticky: StoredReminder[] = [];
+/** A live `sticky-append` state. */
+export interface StickyEntry {
+	key: string;
+	text: string;
+	raw?: boolean;
+	/** When it switched on: user messages stamped at or after it carry it. */
+	since: number;
+	toolCallId?: string;
+	skipStackCarrier?: boolean;
+	/** True once a request carried it: a tool-result pin is only for its first delivery. */
+	delivered: boolean;
+}
+
+/** A one-shot to place on this request: a pending entry, or a block an owner rendered for it. */
+export interface OneShot {
+	/** The pending entry's id; absent on a render-time block. */
+	id?: string;
+	text: string;
+	raw?: boolean;
+	placement: "last-append" | "user-prepend";
+	toolCallId?: string;
+	once?: boolean;
+	facts?: ToldFact[];
+}
+
+/** What a capability owner adds on RENDER_CHANNEL. */
+export interface RenderedBlock {
+	text: string;
+	raw?: boolean;
+	/** What the block tells the model, recorded with the request that carries it. */
+	facts?: ToldFact[];
+}
+
+/** The RENDER_CHANNEL payload. */
+export interface RenderRequest {
+	/** True when the request opens an epoch: the live stack is rendered, so owners add nothing. */
+	epoch: boolean;
+	/** What the epoch has told the model so far, by fact kind. */
+	told: ReadonlyMap<string, ReadonlySet<string>>;
+	/** Modes the epoch has told, by key: on or off as last told. */
+	modes: ReadonlyMap<string, boolean>;
+	/** Whole-text blocks the epoch has told, by key: the content hash of the text last told (`toldBlockFact`). */
+	toldBlocks: ReadonlyMap<string, string>;
+	/** The request's model. */
+	model: { provider?: string; api?: string; id?: string; compat?: unknown } | undefined;
+	/** Blocks for the tail of this request. */
+	blocks: RenderedBlock[];
+}
+
+/**
+ * The live reminder state: the `first-prepend` stack and the open sticky
+ * states, as their owners last emitted them. One-shots are not held here:
+ * they are persisted as pending entries when emitted.
+ */
+export class LiveReminders {
+	private stack = new Map<string, StackEntry>();
+	/** Open states in the order they switched on. */
+	private sticky = new Map<string, StickyEntry>();
 	private readonly now: () => number;
-	/** Only restored keys are protected; fresh sessions retain their existing emitter behavior. */
-	private restoredKeys = new Set<string>();
-	private pendingCapabilities = new Set<string>();
-	private changes = 0;
 
 	constructor(now: () => number = Date.now) {
 		this.now = now;
 	}
 
 	/**
-	 * Moves on every change to what the queue holds (a drain only when it
-	 * re-anchored, pinned or dropped something), so the owner can skip
-	 * serializing a snapshot that cannot have changed.
+	 * Apply one reminder payload. Returns "one-shot" for a `last-append` or
+	 * `user-prepend` reminder, which the caller persists as a pending entry.
 	 */
-	get version(): number {
-		return this.changes;
-	}
-
-	enqueue(text: string, opts?: EnqueueOptions): void {
-		if (!text.trim()) return;
-		const placement = opts?.placement ?? "last-append";
-		if (placement === "first-prepend" && opts?.key) {
-			if (this.restoredKeys.has(opts.key)) return;
-			this.pendingCapabilities.delete(opts.key);
+	apply(payload: ReminderPayload): "live" | "one-shot" | "ignored" {
+		const placement = payload.placement ?? "last-append";
+		if (payload.remove) {
+			if (!payload.key) return "ignored";
+			this.stack.delete(payload.key);
+			this.sticky.delete(payload.key);
+			return "live";
 		}
-		const entry: StoredReminder = {
-			text,
-			placement,
-			order: opts?.order ?? 0,
-			suffix: opts?.suffix,
-			key: opts?.key,
-			raw: opts?.raw,
-			toolCallId: opts?.toolCallId,
-		};
-		if (opts?.systemRoleOnly) entry.systemRoleOnly = true;
-		if (opts?.skipStackCarrier) entry.skipStackCarrier = true;
-		if (opts?.group) entry.group = opts.group;
-		const key = opts?.key ?? text;
-		const previous = this.everyTurn.get(key);
-		if (placement === "sticky-append") {
-			// Re-emitting an unchanged standing fact keeps both its anchors and its
-			// position among other blocks. A changed fact opens a new lifetime.
-			const same = previous?.placement === placement && previous.text === text &&
-				previous.suffix === entry.suffix && previous.raw === entry.raw &&
-				previous.skipStackCarrier === entry.skipStackCarrier && previous.order === entry.order ? previous : undefined;
-			entry.since = opts?.since ?? same?.since ?? this.now();
-			entry.userPins = [];
-			if (same && same.since === entry.since && opts?.scope === "every-turn") return;
+		const text = payload.text;
+		if (typeof text !== "string" || !text.trim()) return "ignored";
+		if (placement === "last-append" || placement === "user-prepend") return "one-shot";
+		const key = payload.key ?? text;
+		if (placement === "first-prepend") {
+			const entry: StackEntry = { key, text, order: payload.order ?? 0 };
+			if (payload.raw) entry.raw = true;
+			if (payload.systemRoleOnly) entry.systemRoleOnly = true;
+			if (payload.facts) entry.facts = payload.facts;
+			this.stack.set(key, entry);
+			return "live";
 		}
-		this.changes++;
-		if (opts?.scope === "every-turn") {
-			if (previous?.placement === "sticky-append") this.remove(key);
-			this.everyTurn.set(key, entry);
-			if (placement === "sticky-append") {
-				entry.key = key;
-				this.sticky.push(entry);
-			}
-			return;
+		const previous = this.sticky.get(key);
+		const same = previous && previous.text === text && !!previous.raw === !!payload.raw && !!previous.skipStackCarrier === !!payload.skipStackCarrier;
+		// Re-emitting an unchanged standing state keeps its start and delivery; a
+		// changed one is a new state from now.
+		if (same && (payload.since === undefined || payload.since === previous.since)) return "live";
+		const entry: StickyEntry = { key, text, since: payload.since ?? this.now(), delivered: false };
+		if (payload.raw) entry.raw = true;
+		if (payload.skipStackCarrier) entry.skipStackCarrier = true;
+		if (payload.toolCallId) entry.toolCallId = payload.toolCallId;
+		this.sticky.delete(key);
+		this.sticky.set(key, entry);
+		return "live";
+	}
+
+	/** The stack in Claude Code's order (`order`, then emission order). */
+	stackEntries(): StackEntry[] {
+		return [...this.stack.values()].map((entry, i) => ({ entry, i })).sort((a, b) => a.entry.order - b.entry.order || a.i - b.i).map((x) => x.entry);
+	}
+
+	stickyEntries(): StickyEntry[] {
+		return [...this.sticky.values()];
+	}
+
+	/** Record that a request carried these sticky states. */
+	markDelivered(keys: readonly string[]): void {
+		for (const key of keys) {
+			const entry = this.sticky.get(key);
+			if (entry) entry.delivered = true;
 		}
-		// A breadcrumb run shares one caveat block (`once`): the same text pending
-		// twice would show the model two identical blocks in a row. Only the
-		// announcer's caveat asks for this — two commands with the same (empty)
-		// stdout are two commands, and both stay.
-		if (placement === "user-prepend" && opts?.once && this.nextTurn.some((r) => r.placement === placement && r.text === text)) return;
-		// A keyed next-turn reminder replaces its predecessor, so a rapidly
-		// re-emitted state change (cycling permission modes) announces only
-		// where it settled.
-		if (opts?.key) this.nextTurn = this.nextTurn.filter((r) => r.key !== opts.key);
-		this.nextTurn.push(entry);
-	}
-
-	remove(key: string): void {
-		this.changes++;
-		if (!this.restoredKeys.has(key)) {
-			const entry = this.everyTurn.get(key);
-			if (entry?.placement === "sticky-append") entry.until = this.now();
-			this.everyTurn.delete(key);
-		}
-		this.pendingCapabilities.delete(key);
-	}
-
-	/** Seed before startup emitters. Earlier hooks (context-budget) may already have emitted. */
-	restore(stack: readonly ReminderEntry[], sticky: readonly ReminderEntry[], frozenKeys: ReadonlySet<string>, liveKeys: ReadonlySet<string> = new Set(), pinned: readonly ReminderEntry[] = []): void {
-		this.changes++;
-		const early = [...this.everyTurn.values()];
-		this.everyTurn.clear();
-		this.sticky = [];
-		this.pinned = structuredClone([...pinned]);
-		this.restoredKeys = new Set(frozenKeys);
-		this.pendingCapabilities = new Set(stack.flatMap((entry) => entry.key && liveKeys.has(entry.key) ? [entry.key] : []));
-		for (const source of [...stack, ...sticky]) {
-			const entry = structuredClone(source);
-			if (entry.placement === "sticky-append") this.sticky.push(entry);
-			if (entry.until === undefined) this.everyTurn.set(entry.key ?? entry.text, entry);
-		}
-		for (const entry of early) this.enqueue(entry.text, { ...entry, scope: "every-turn" });
-	}
-
-	/**
-	 * A session start with no snapshot (`/clear` after a resume): the previous
-	 * session's resume locks must not keep the new session's emitters out.
-	 */
-	releaseRestore(): void {
-		this.restoredKeys.clear();
-		this.pendingCapabilities.clear();
-	}
-
-	/** The first request has seen all startup/turn emitters. An absent capability is gone. */
-	finishRestore(): void {
-		if (this.pendingCapabilities.size > 0) this.changes++;
-		for (const key of this.pendingCapabilities) this.everyTurn.delete(key);
-		this.pendingCapabilities.clear();
-	}
-
-	/** A compaction replaces these facts atomically, bypassing only their resume locks. */
-	replaceFirstPrepend(keys: readonly string[], entries: readonly ReminderEntry[]): void {
-		this.changes++;
-		const replaced = new Set(keys);
-		for (const key of replaced) this.everyTurn.delete(key);
-		this.nextTurn = this.nextTurn.filter((entry) => !entry.key || !replaced.has(entry.key));
-		for (const entry of entries) {
-			if (entry.key && replaced.has(entry.key) && entry.placement === "first-prepend") {
-				this.everyTurn.set(entry.key, structuredClone(entry));
-			}
-		}
-	}
-
-	/**
-	 * A `/tree` switch to a branch whose last snapshot is `snapshot`: its
-	 * session facts (`factKeys`, an absent one included), its sticky lifetimes
-	 * and its pins come back, so its messages keep the bytes they were sent
-	 * with. Live state stays live: other first-prepend blocks keep their
-	 * current text, and a lifetime open on the branch stays open only while its
-	 * owner still holds it, else it closes on its recorded carriers. A live
-	 * lifetime the branch shows closed goes on as a new one from now. What the
-	 * branch left behind put here stays until a drain finds its carriers gone.
-	 */
-	restoreBranch(snapshot: { stack: readonly ReminderEntry[]; sticky: readonly ReminderEntry[]; pinned?: readonly ReminderEntry[] }, factKeys: readonly string[]): void {
-		this.replaceFirstPrepend(factKeys, snapshot.stack);
-		const same = (a: ReminderEntry, b: ReminderEntry) => a.key === b.key && a.text === b.text && a.since === b.since;
-		const restored: StoredReminder[] = structuredClone([...snapshot.sticky]);
-		const now = this.now();
-		for (const entry of restored) {
-			if (entry.until !== undefined) continue;
-			const live = this.sticky.find((current) => current.until === undefined && same(current, entry));
-			if (live?.key !== undefined && this.everyTurn.get(live.key) === live) this.everyTurn.set(live.key, entry);
-			else entry.until = now;
-		}
-		this.sticky = [...restored, ...this.sticky.filter((current) => !restored.some((entry) => same(entry, current)))];
-		// The branch's carriers keep their closed copy of a lifetime still live here.
-		for (const [key, live] of this.everyTurn) {
-			if (live.placement !== "sticky-append" || live.until !== undefined || this.sticky.includes(live)) continue;
-			const { toolCallId: _call, tailPin: _pin, opener: _opener, ...state } = live;
-			const reopened: StoredReminder = { ...state, key, since: now, userPins: [] };
-			this.everyTurn.set(key, reopened);
-			this.sticky.push(reopened);
-		}
-		const pinned: StoredReminder[] = structuredClone([...(snapshot.pinned ?? [])]);
-		const known = new Set(pinned.map((entry) => JSON.stringify(strip(entry))));
-		this.pinned = [...pinned, ...this.pinned.filter((entry) => !known.has(JSON.stringify(strip(entry))))];
-		this.changes++;
-	}
-
-	/** A rebuilt capability block supersedes its undelivered notices (their `group`). */
-	cancelPendingNotices(group: string): void {
-		this.dropPending((entry) => entry.group === group);
-	}
-
-	/** A new snapshot supersedes undelivered notices about its old facts. Delivered pins stay history. */
-	cancelPending(keys: readonly string[]): void {
-		const cancelled = new Set(keys);
-		this.dropPending((entry) => entry.key !== undefined && cancelled.has(entry.key));
-	}
-
-	private dropPending(cancelled: (entry: StoredReminder) => boolean): void {
-		const before = this.nextTurn.length;
-		this.nextTurn = this.nextTurn.filter((entry) => !cancelled(entry));
-		if (this.nextTurn.length !== before) this.changes++;
-	}
-
-	/** Hidden session metadata, preserving keys and insertion order without changing drain's API. */
-	persistentEntries(placement: "first-prepend" | "sticky-append"): ReminderEntry[] {
-		return [
-			...(placement === "sticky-append" ? this.sticky.map((entry) => ({ ...strip(entry), key: entry.key })) :
-				[...this.everyTurn.entries()].filter(([, entry]) => entry.placement === placement).map(([key, entry]) => ({ ...strip(entry), key }))),
-			...this.nextTurn.filter((entry) => entry.placement === placement).map((entry) => ({ ...strip(entry), key: entry.key })),
-		];
-	}
-
-	/** Delivered steering is history too, especially the notice that closes a sticky state. */
-	persistentPins(): ReminderEntry[] {
-		return this.pinned.map(strip);
-	}
-
-	/**
-	 * Take the pending `last-append` one-shots out of the queue — for the
-	 * `tool_result` hook, which writes them into the stored result. A one-shot
-	 * bound to another call's result stays queued for that result's hook. Other
-	 * placements stay queued for the next request.
-	 */
-	takeOneShots(toolCallId?: string): ReminderEntry[] {
-		const { matching, rest } = partition(
-			this.nextTurn,
-			(r) => r.placement === "last-append" && (r.toolCallId === undefined || r.toolCallId === toolCallId),
-		);
-		this.nextTurn = rest;
-		if (matching.length > 0) this.changes++;
-		return matching.map(strip);
-	}
-
-	/**
-	 * Fix the pending one-shots of `placement` to `anchor` — the message they
-	 * ride on this request — so every later request re-attaches them there
-	 * unchanged. Called by the owner at `context` time, after it has decided the
-	 * tail: `last-append` goes on the tail (`tailAnchor`), `user-prepend` only
-	 * on a request that ends in a user-like message (`openingUserAnchor`) —
-	 * mid-turn, breadcrumbs stay queued.
-	 */
-	pin(anchor: PinAnchor, placement: "last-append" | "user-prepend" = "last-append", messages?: readonly AgentMessage[]): void {
-		const { matching, rest } = partition(this.nextTurn, (r) => r.placement === placement);
-		for (const entry of matching) {
-			// A one-shot bound to a call whose result hook already ran (a read's nested
-			// instructions) rides that call's result, not whichever result ended the batch.
-			const own = entry.toolCallId !== undefined && messages ? ownResultAnchor(messages, entry.toolCallId) : undefined;
-			this.pinned.push({ ...entry, pin: own ?? anchor });
-		}
-		this.nextTurn = rest;
-		if (matching.length > 0) this.changes++;
-	}
-
-	/**
-	 * Everything to inject on this request: every-turn state, pinned one-shots,
-	 * then whatever is still pending. A `user-prepend` breadcrumb leaves the
-	 * queue only through `pin(anchor, "user-prepend")` (it must land on a user
-	 * message, not a tool result), so an unpinned one stays for the next request. `messages` is the request being built:
-	 * pins whose anchor is no longer in it (compacted away, or left behind on
-	 * another branch) are dropped here, as part of draining, so no caller can
-	 * forget the step. Nothing else is ever evicted: a pin is one small object,
-	 * and removing a pin whose message is still in context would change that
-	 * message and re-cache everything after it — the old "oldest past 400" cap
-	 * did exactly that (CACHE-REVIEW-2026-09-04 M3).
-	 */
-	drain(messages: AgentMessage[]): ReminderEntry[] {
-		const locate = pinLocator(messages);
-		const stackCarrier = messages.findIndex(isUserLike);
-		let changed = false;
-		for (const entry of this.sticky) {
-			if (entry.until !== undefined) continue;
-			if (entry.opener === undefined) {
-				entry.opener = null;
-				changed = true;
-			}
-			// Only live states may find a new carrier after compaction. A closed
-			// state's missing pin must never move to the summary or a later turn.
-			const tailPin = entry.tailPin;
-			if (entry.tailPin && locate(entry.tailPin) === -1) entry.tailPin = undefined;
-			if (entry.tailPin === undefined) entry.tailPin = firstStickyPin(messages, entry);
-			if (!samePin(tailPin, entry.tailPin)) changed = true;
-			// Timestamps alone cannot close a lifetime: a steer typed while it was
-			// active can remain queued until after the switch. Keep only messages
-			// that actually rode the block, including across a startup-time close.
-			const userPins = messages.flatMap((m, index) => carriesSticky(m, entry) &&
-				(!entry.skipStackCarrier || index !== stackCarrier) ? [m.timestamp] : []);
-			// The same array stays while its carriers do, so its lookup set (`carrierSet`) is reused.
-			if (!entry.userPins || entry.userPins.length !== userPins.length || entry.userPins.some((stamp, i) => stamp !== userPins[i])) {
-				entry.userPins = userPins;
-				changed = true;
-			}
-			if ((entry.tailPin || entry.userPins.length > 0) && entry.toolCallId !== undefined) {
-				delete entry.toolCallId;
-				changed = true;
-			}
-		}
-		const sticky = this.sticky.length;
-		this.sticky = this.sticky.filter((entry) => entry.until === undefined ||
-			messages.some((m) => carriesSticky(m, entry)) || (entry.tailPin !== undefined && locate(entry.tailPin) !== -1));
-		const pinned = this.pinned.length;
-		if (this.pinned.length > 0) this.pinned = this.pinned.filter((entry) => locate(entry.pin as PinAnchor) !== -1);
-		const { matching: held, rest: pending } = partition(this.nextTurn, (r) => r.placement === "user-prepend");
-		this.nextTurn = held;
-		if (changed || pending.length > 0 || this.sticky.length !== sticky || this.pinned.length !== pinned) this.changes++;
-		return [...[...this.everyTurn.values()].filter((entry) => entry.placement !== "sticky-append").map(strip),
-			...this.sticky.map(strip), ...this.pinned.map(strip), ...pending.map(strip)];
-	}
-
-	get size(): number {
-		return [...this.everyTurn.values()].filter((entry) => entry.placement !== "sticky-append").length +
-			this.sticky.length + this.nextTurn.length + this.pinned.length;
-	}
-
-	/** True when a one-shot of `placement` is waiting to be delivered (the owner decides where). */
-	hasPending(placement: "last-append" | "user-prepend"): boolean {
-		return this.nextTurn.some((r) => r.placement === placement);
-	}
-
-	/** `hasPending("last-append")` — kept for the existing callers and tests. */
-	get hasPendingOneShots(): boolean {
-		return this.hasPending("last-append");
 	}
 }
 
-/** One pass: the entries `test` accepts and the rest, in order. */
-function partition<T>(items: T[], test: (item: T) => boolean): { matching: T[]; rest: T[] } {
-	const matching: T[] = [];
-	const rest: T[] = [];
-	for (const item of items) (test(item) ? matching : rest).push(item);
-	return { matching, rest };
+export interface RenderInput {
+	/** The request opens an epoch: the stack goes on the first user message. */
+	epoch: boolean;
+	/** The model takes a mid-conversation system message (`systemRoleOnly` blocks render, `moved` is filled). */
+	layout: boolean;
+	stack: readonly StackEntry[];
+	sticky: readonly StickyEntry[];
+	oneShots: readonly OneShot[];
 }
 
-function strip(r: StoredReminder): ReminderEntry {
-	const entry: ReminderEntry = { text: r.text, placement: r.placement, order: r.order, suffix: r.suffix };
-	if (r.raw) entry.raw = true;
-	if (r.systemRoleOnly) entry.systemRoleOnly = true;
-	if (r.skipStackCarrier) entry.skipStackCarrier = true;
-	if (r.since !== undefined) entry.since = r.since;
-	if (r.until !== undefined) entry.until = r.until;
-	if (r.userPins !== undefined) entry.userPins = [...r.userPins];
-	if (r.placement === "sticky-append" && r.toolCallId !== undefined) entry.toolCallId = r.toolCallId;
-	if (r.opener !== undefined) entry.opener = r.opener;
-	if (r.tailPin) entry.tailPin = r.tailPin;
-	if (r.pin !== undefined) entry.pin = r.pin;
-	return entry;
+export interface RenderResult {
+	messages: AgentMessage[];
+	/** The stack blocks that move to the mid-conversation system message (epoch and layout only). */
+	moved: MovedBlock[];
+	/** True when the stack was placed. */
+	stackPlaced: boolean;
+	/** The sticky states this request carried. */
+	stickyPlaced: string[];
+	/** The one-shots this request carried. */
+	placed: OneShot[];
+}
+
+type ContentBlock = TextContent | ImageContent;
+
+/**
+ * The request's messages (its tail, or all of them on an epoch) with the
+ * reminders placed, and what was placed. The input is not mutated. A one-shot
+ * that finds no anchor is not placed and stays pending.
+ */
+export function renderReminders(messages: readonly AgentMessage[], input: RenderInput): RenderResult {
+	const before = new Map<number, TextContent[]>();
+	const after = new Map<number, TextContent[]>();
+	const push = (map: Map<number, TextContent[]>, index: number, blocks: TextContent[]) => {
+		if (index < 0 || blocks.length === 0) return;
+		map.set(index, [...(map.get(index) ?? []), ...blocks]);
+	};
+	const firstUser = messages.findIndex(isUserLike);
+	const lastUser = messages.findLastIndex(isUserLike);
+	const last = messages.length - 1;
+	// Mid-turn, the request ends in the tool results the model is about to read:
+	// a one-shot belongs there. Otherwise on the last user turn.
+	const tail = last >= 0 && messages[last].role === "toolResult" ? last : lastUser;
+	const stackAt = firstUser === -1 ? tail : firstUser;
+
+	let stackPlaced = false;
+	let moved: MovedBlock[] = [];
+	if (input.epoch && stackAt !== -1) {
+		const stack = input.stack.filter((entry) => input.layout || !entry.systemRoleOnly);
+		push(before, stackAt, stack.map(block));
+		stackPlaced = stack.length > 0;
+		if (input.layout) {
+			moved = stack.filter((entry) => movesToSystemRole(entry.order)).map((entry) => ({ framed: framedReminderText(entry), inner: entry.text }));
+		}
+	}
+
+	const stickyPlaced: string[] = [];
+	for (const state of input.sticky) {
+		const carriers: number[] = [];
+		messages.forEach((message, index) => {
+			if (!isStickyCarrier(message) || stamp(message) < state.since) return;
+			if (state.skipStackCarrier && input.epoch && index === firstUser) return;
+			carriers.push(index);
+		});
+		if (!state.delivered) {
+			const first = firstResultAfter(messages, state);
+			if (first !== -1 && !carriers.includes(first)) carriers.unshift(first);
+		}
+		if (carriers.length === 0) continue;
+		stickyPlaced.push(state.key);
+		for (const index of carriers.sort((a, b) => a - b)) push(after, index, [block(state)]);
+	}
+
+	const placed: OneShot[] = [];
+	const opening = last >= 0 && isUserLike(messages[last]) ? last : -1;
+	const placedOnce = new Set<string>();
+	for (const shot of input.oneShots) {
+		if (shot.placement === "user-prepend") {
+			if (opening === -1) continue;
+			placed.push(shot);
+			if (shot.once && placedOnce.has(shot.text)) continue;
+			if (shot.once) placedOnce.add(shot.text);
+			push(before, opening, [block(shot)]);
+			continue;
+		}
+		const own = shot.toolCallId ? messages.findIndex((m) => m.role === "toolResult" && (m as { toolCallId?: string }).toolCallId === shot.toolCallId) : -1;
+		const at = own !== -1 ? own : tail;
+		if (at === -1) continue;
+		placed.push(shot);
+		push(after, at, [block(shot)]);
+	}
+
+	const changed = before.size > 0 || after.size > 0;
+	return {
+		messages: changed ? messages.map((m, index) => withBlocks(m, before.get(index) ?? [], after.get(index) ?? [])) : [...messages],
+		moved,
+		stackPlaced,
+		stickyPlaced,
+		placed,
+	};
+}
+
+function stamp(message: AgentMessage): number {
+	return (message as { timestamp?: number }).timestamp ?? 0;
 }
 
 /**
- * One pass over `messages` → a lookup from a pin to the index of the message it
- * rides (-1 when that message left the context). Built once per request by the
- * queue's drain and once by injectReminders, so pin count never multiplies the
- * message count on the per-request path.
+ * Where a state switched on mid-turn first shows: its switching call's result
+ * when the request carries it, else the first tool result stamped after the
+ * switch, but never one after a user message that already carries it. With no
+ * carrier at all (an overflow compaction kept only a reply and its results),
+ * the request's tail.
  */
-function pinLocator(messages: AgentMessage[]): (pin: PinAnchor) => number {
-	const byToolCall = new Map<string, number>();
-	const byTimestamp = new Map<number, number>();
-	messages.forEach((m, index) => {
-		if (m.role === "toolResult") {
-			const id = (m as { toolCallId?: string }).toolCallId;
-			if (typeof id === "string" && !byToolCall.has(id)) byToolCall.set(id, index);
-		} else if (isUserLike(m)) {
-			const stamp = (m as { timestamp?: number }).timestamp;
-			if (typeof stamp === "number" && !byTimestamp.has(stamp)) byTimestamp.set(stamp, index);
-		}
-	});
-	return (pin) => (pin.kind === "toolResult" ? byToolCall.get(pin.toolCallId) : byTimestamp.get(pin.timestamp)) ?? -1;
-}
-
-function samePin(a: PinAnchor | undefined, b: PinAnchor | undefined): boolean {
-	if (!a || !b) return a === b;
-	return a.kind === "toolResult" ? b.kind === "toolResult" && a.toolCallId === b.toolCallId : b.kind === "user" && a.timestamp === b.timestamp;
-}
-
-/** Each carrier list's lookup set, built once per array: a check runs for every message against every lifetime. */
-const carrierSets = new WeakMap<readonly number[], Set<number>>();
-
-function carrierSet(userPins: readonly number[]): Set<number> {
-	let set = carrierSets.get(userPins);
-	if (!set) carrierSets.set(userPins, (set = new Set(userPins)));
-	return set;
-}
-
-/** Closed lifetimes keep only delivered carriers; legacy snapshots retain their timestamp interval. */
-function carriesSticky(message: AgentMessage, entry: ReminderEntry): boolean {
-	if (!isStickyCarrier(message)) return false;
-	const stamp = (message as { timestamp?: number }).timestamp ?? 0;
-	if (entry.until !== undefined && entry.userPins !== undefined) return carrierSet(entry.userPins).has(stamp);
-	return (stamp >= (entry.since ?? 0) && (entry.until === undefined || stamp < entry.until)) ||
-		(entry.opener !== null && entry.opener !== undefined && stamp === entry.opener);
-}
-
-/** First carrier after activation; never reach back into an earlier user turn. */
-function firstStickyPin(messages: AgentMessage[], entry: ReminderEntry): PinAnchor | undefined {
-	if (entry.until !== undefined) return undefined;
-	if (entry.toolCallId !== undefined) return ownResultAnchor(messages, entry.toolCallId);
-	for (const message of messages) {
-		if (carriesSticky(message, entry)) return undefined;
-		if (message.role === "toolResult" && message.timestamp >= (entry.since ?? 0)) {
-			return { kind: "toolResult", toolCallId: message.toolCallId };
-		}
+function firstResultAfter(messages: readonly AgentMessage[], state: StickyEntry): number {
+	if (state.toolCallId !== undefined) {
+		return messages.findIndex((m) => m.role === "toolResult" && (m as { toolCallId?: string }).toolCallId === state.toolCallId);
 	}
-	// Overflow compaction may retain only an old reply/result. With no real
-	// user turn, a live state must still be visible and pinned to that tail.
-	return messages.some(isStickyCarrier) ? undefined : tailAnchor(messages);
-}
-
-/** `toolCallId`'s own result as an anchor, when this request holds it. */
-function ownResultAnchor(messages: readonly AgentMessage[], toolCallId: string): PinAnchor | undefined {
-	return messages.some((m) => m.role === "toolResult" && m.toolCallId === toolCallId) ? { kind: "toolResult", toolCallId } : undefined;
-}
-
-/** The anchor a one-shot lands on for this request: the trailing tool result, else the last user-like message. */
-export function tailAnchor(messages: AgentMessage[]): PinAnchor | undefined {
-	const last = messages[messages.length - 1] as (AgentMessage & { toolCallId?: string }) | undefined;
-	if (last?.role === "toolResult" && typeof last.toolCallId === "string") return { kind: "toolResult", toolCallId: last.toolCallId };
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const m = messages[i] as AgentMessage & { timestamp?: number };
-		if (isUserLike(m) && typeof m.timestamp === "number") {
-			return { kind: "user", timestamp: m.timestamp };
-		}
+	for (let i = 0; i < messages.length; i++) {
+		const message = messages[i];
+		if (stamp(message) < state.since) continue;
+		if (isStickyCarrier(message)) return -1;
+		if (message.role === "toolResult") return i;
 	}
-	return undefined;
-}
-
-/**
- * The anchor for a `user-prepend` breadcrumb on this request: the trailing
- * message when it is a user-like turn (the prompt that opens the request), else
- * undefined — mid-turn (a trailing tool result) the breadcrumbs keep waiting.
- */
-export function openingUserAnchor(messages: AgentMessage[]): PinAnchor | undefined {
-	const last = messages[messages.length - 1] as (AgentMessage & { timestamp?: number }) | undefined;
-	if (last && isUserLike(last) && typeof last.timestamp === "number") return { kind: "user", timestamp: last.timestamp };
-	return undefined;
-}
-
-/** A tool result's content with reminder blocks appended (for the `tool_result` hook). */
-export function appendReminderBlocks(content: ContentBlock[], entries: ReminderEntry[]): ContentBlock[] {
-	return [...content, ...entries.map(reminderBlock)];
+	if (messages.some(isStickyCarrier)) return -1;
+	const last = messages.length - 1;
+	return last >= 0 && messages[last].role === "toolResult" ? last : -1;
 }
 
 /**
@@ -709,18 +456,16 @@ export const COMPACTION_SUMMARY_PREFIX =
 	"The conversation history before this point was compacted into the following summary:\n\n<summary>\n";
 export const COMPACTION_SUMMARY_SUFFIX = "\n</summary>";
 
-type ContentBlock = TextContent | ImageContent;
-
 function toBlocks(content: string | ContentBlock[]): ContentBlock[] {
 	return typeof content === "string" ? [{ type: "text", text: content }] : [...content];
 }
 
-/** A reminder's text exactly as it rides a message: framed (unless raw), then its suffix. */
-export function framedReminderText(entry: Pick<ReminderEntry, "text" | "raw" | "suffix">): string {
-	return (entry.raw ? entry.text : wrapReminder(entry.text)) + (entry.suffix ?? "");
+/** A reminder's text exactly as it rides a message: framed, unless raw. */
+export function framedReminderText(entry: { text: string; raw?: boolean }): string {
+	return entry.raw ? entry.text : wrapReminder(entry.text);
 }
 
-function reminderBlock(entry: ReminderEntry): TextContent {
+function block(entry: { text: string; raw?: boolean }): TextContent {
 	return { type: "text", text: framedReminderText(entry) };
 }
 
@@ -729,9 +474,7 @@ function reminderBlock(entry: ReminderEntry): TextContent {
  * (task notification, wakeup, hook context, `<new-diagnostics>`); pi's
  * `convertToLlm` sends it to the model as `role: "user"`, so on the wire it IS
  * a user turn — and a turn opened by one (a `/loop` tick, an agent report
- * arriving while idle) has no `user` message of its own. Before 2026-09-05 such
- * a request got no context stack at all, and its pending one-shots pinned to
- * the previous user message (STEERING-REVIEW-2026-09-05 H1).
+ * arriving while idle) has no `user` message of its own (STEERING-REVIEW-2026-09-05 H1).
  */
 function isUserLike(m: AgentMessage): boolean {
 	return isStickyCarrier(m) || m.role === "compactionSummary";
@@ -759,85 +502,4 @@ function withBlocks(message: AgentMessage, before: TextContent[], after: TextCon
 	}
 	const target = message as AgentMessage & { content: string | ContentBlock[] };
 	return { ...target, content: [...before, ...toBlocks(target.content), ...after] } as AgentMessage;
-}
-
-/**
- * Returns a copy of `messages` with reminder blocks injected (Claude Code
- * convention: reminders ride inside message content blocks, never as messages
- * of their own). See the module header for the three placements. A bare string
- * is `last-append` (back-compat). The input array and its messages are not
- * mutated. With nothing to anchor to (no user, tool-result, or compaction
- * summary message), messages are returned unchanged and the caller keeps the
- * reminders queued.
- */
-export function injectReminders(messages: AgentMessage[], reminders: Array<string | ReminderEntry>): AgentMessage[] {
-	if (reminders.length === 0) return messages;
-
-	const entries: ReminderEntry[] = reminders.map((r) =>
-		typeof r === "string" ? { text: r, placement: "last-append", order: 0 } : r,
-	);
-	const firstPrepend = entries
-		.filter((e) => e.placement === "first-prepend")
-		.map((e, i) => ({ e, i }))
-		.sort((a, b) => a.e.order - b.e.order || a.i - b.i)
-		.map((x) => x.e);
-	const sticky = entries.filter((e) => e.placement === "sticky-append");
-	const pinnedEntries = entries.filter((e) => e.pin !== undefined);
-	const lastAppend = entries.filter((e) => e.placement === "last-append" && e.pin === undefined);
-	// An unpinned `user-prepend` never reaches here through the queue (drain
-	// holds it back); a caller passing one directly gets it on the opening user
-	// message, before the text, like a pinned one.
-	const looseUserPrepend = entries.filter((e) => e.placement === "user-prepend" && e.pin === undefined);
-
-	const firstUserIndex = messages.findIndex(isUserLike);
-	const lastUserIndex = messages.findLastIndex(isUserLike);
-	const lastIndex = messages.length - 1;
-	// Mid-turn, the request ends in the tool result(s) the model is about to
-	// read — that is where a one-shot reminder belongs. Otherwise the last user turn.
-	const tailIndex = lastIndex >= 0 && messages[lastIndex].role === "toolResult" ? lastIndex : lastUserIndex;
-	if (firstUserIndex === -1 && tailIndex === -1) return messages;
-
-	const before = new Map<number, TextContent[]>();
-	const after = new Map<number, TextContent[]>();
-	const push = (map: Map<number, TextContent[]>, index: number, blocks: TextContent[]) => {
-		if (index < 0 || blocks.length === 0) return;
-		map.set(index, [...(map.get(index) ?? []), ...blocks]);
-	};
-
-	push(before, firstUserIndex === -1 ? tailIndex : firstUserIndex, firstPrepend.map(reminderBlock));
-
-	const locate = pinLocator(messages);
-	for (const entry of sticky) {
-		const carriers: number[] = [];
-		messages.forEach((m, index) => {
-			if (carriesSticky(m, entry)) carriers.push(index);
-		});
-		const pin = entry.tailPin ?? firstStickyPin(messages, entry);
-		const pinned = pin ? locate(pin) : -1;
-		if (pinned !== -1 && !carriers.includes(pinned)) carriers.unshift(pinned);
-		if (entry.skipStackCarrier && carriers.includes(firstUserIndex)) {
-			for (const index of carriers.filter((index) => index !== firstUserIndex).sort((a, b) => a - b)) push(after, index, [reminderBlock(entry)]);
-			continue;
-		}
-		for (const index of carriers.sort((a, b) => a - b)) push(after, index, [reminderBlock(entry)]);
-	}
-
-	push(after, tailIndex === -1 ? firstUserIndex : tailIndex, lastAppend.map(reminderBlock));
-	if (lastUserIndex !== -1) push(before, lastUserIndex, looseUserPrepend.map(reminderBlock));
-
-	// Pinned one-shots ride the exact message they first landed on; a message
-	// compacted away simply no longer carries its pin. A pinned breadcrumb sits
-	// BEFORE that message's text (after the first-prepend stack, which was
-	// pushed first); every other pin sits after it.
-	if (pinnedEntries.length > 0) {
-		const locate = pinLocator(messages);
-		for (const entry of pinnedEntries) {
-			const index = locate(entry.pin as PinAnchor);
-			if (index === -1) continue;
-			push(entry.placement === "user-prepend" ? before : after, index, [reminderBlock(entry)]);
-		}
-	}
-
-	if (before.size === 0 && after.size === 0) return messages;
-	return messages.map((m, index) => withBlocks(m, before.get(index) ?? [], after.get(index) ?? []));
 }

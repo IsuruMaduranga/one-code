@@ -228,6 +228,7 @@ describe("permissionsExtension model_select updates classifier", () => {
 			registerMessageRenderer: () => {},
 			registerFlag: () => {},
 			getFlag: () => undefined,
+			appendEntry: () => {},
 		};
 
 		const fire = (event: string, payload: unknown, ctx: unknown) => {
@@ -274,6 +275,7 @@ describe("permissionsExtension model_select updates classifier", () => {
 				sessionManager: {
 					getSessionId: () => "sess-1",
 					getSessionDir: () => "/tmp/sess",
+					getBranch: () => [],
 				},
 				ui: {
 					setWidget: () => {},
@@ -316,7 +318,7 @@ describe("permissionsExtension model_select updates classifier", () => {
 				cwd: "/tmp/project",
 				model: makeModel("anthropic", "claude-3-7-sonnet", 3),
 				modelRegistry: { getAvailable: () => [makeModel("anthropic", "claude-3-5-haiku", 0.8)] },
-				sessionManager: { getSessionId: () => "sess-1", getSessionDir: () => "/tmp/sess" },
+				sessionManager: { getSessionId: () => "sess-1", getSessionDir: () => "/tmp/sess", getBranch: () => [] },
 				ui: { setWidget: () => {}, notify: () => {}, setStatus: () => {} },
 				hasUI: false,
 			},
@@ -357,7 +359,7 @@ describe("permissionsExtension model_select updates classifier", () => {
 				cwd: "/tmp/project",
 				model: makeModel("anthropic", "claude-3-7-sonnet", 3),
 				modelRegistry: { getAvailable: () => [] },
-				sessionManager: { getSessionId: () => "sess-1", getSessionDir: () => "/tmp/sess" },
+				sessionManager: { getSessionId: () => "sess-1", getSessionDir: () => "/tmp/sess", getBranch: () => [] },
 				ui: { setWidget: () => {}, notify: () => {}, setStatus: () => {} },
 				hasUI: false,
 			},

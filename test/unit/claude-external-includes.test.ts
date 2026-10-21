@@ -14,6 +14,8 @@ import { forwardSlashes } from "../../extensions/lib/paths.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { safetyControlWrite } from "../../extensions/auto-mode/safety-floor.ts";
 import { startupConsentReady } from "../../extensions/lib/consent-dialogs.ts";
+import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../../extensions/lib/ledger/plan.ts";
+import { foldBranch } from "../../extensions/lib/ledger/fold.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 
@@ -255,15 +257,17 @@ describe("external instruction include approval", () => {
 		await fake.fire("turn_start", {}, ctx);
 		const messages = [{ role: "user", content: [{ type: "text", text: "first prompt" }], timestamp: 1 }];
 		const first = await fake.fireOne("context", { messages }, ctx);
-		const startupCount = texts.length;
+		expect(JSON.stringify(first)).toContain(ref(join(root, "shared.md")));
+		expect(JSON.stringify(first)).not.toContain("APPROVED EXTERNAL INSTRUCTION");
 		select.mockImplementation(async (title, options) => title.startsWith(EXTERNAL_INCLUDES_TITLE) ? EXTERNAL_INCLUDES_YES : options[0]);
 		await fake.commands.get("config")!.handler("", ctx as never);
 		expect(readExternalIncludesApproval(cwd, home).approved).toBe(true);
-		expect(texts).toHaveLength(startupCount);
-		const next = await fake.fireOne("context", { messages }, ctx);
-		expect(JSON.stringify((next as { messages: unknown[] }).messages[0])).toContain(ref(join(root, "shared.md")));
-		expect(JSON.stringify(first)).not.toContain("APPROVED EXTERNAL INSTRUCTION");
-		expect(JSON.stringify(next)).not.toContain("APPROVED EXTERNAL INSTRUCTION");
+		// The live block takes the approval: the next epoch's message 1 carries it.
+		expect(texts.at(-1)).toContain("APPROVED EXTERNAL INSTRUCTION");
+		// Inside the epoch the sent message 1 is the ledger's record: a request renders only its tail.
+		fake.events.emit(LEDGER_PLAN_CHANNEL, { epoch: false, fold: foldBranch([]), consumed: [], facts: [], covers: { count: 1, role: "user", timestamp: 1 }, messages } as unknown as RequestPlan);
+		const next = await fake.fireOne("context", { messages: [{ role: "user", content: [{ type: "text", text: "second prompt" }], timestamp: 2 }] }, ctx);
+		expect(JSON.stringify(next ?? {})).not.toContain("APPROVED EXTERNAL INSTRUCTION");
 		write(join(cwd, "nested", "CLAUDE.md"), "@../../shared.md");
 		const emitted: string[] = [];
 		fake.events.on(REMINDER_CHANNEL, (data) => { const text = (data as { text?: string }).text; if (text) emitted.push(text); });

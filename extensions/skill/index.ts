@@ -25,9 +25,7 @@ import { pluginRoot } from "../lib/plugin-root.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
 import { awaitOneShotTurn, sessionOutlivesTurn } from "../lib/notifications.ts";
 import { PROMPT_OPTIONS_CHANNEL, type PromptOptionsAnnouncement } from "../lib/prompt-options.ts";
-import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
-import { CONTEXT_BASELINE_CHANNEL, CONTEXT_CAPABILITY_REFRESH_CHANNEL, restoredContext } from "../lib/context-stack.ts";
-import { applyAnnouncement, namesBaseline, planAnnouncement } from "../lib/announced-names.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../lib/reminders.ts";
 import {
 	nextSkillState,
 	readSkillStates,
@@ -47,7 +45,6 @@ import {
 	launchingSkill,
 	missingArgumentsNote,
 	parseSkillCommand,
-	redactOffSkillMessages,
 	resolveSkill,
 	SKILL_INVOCATION_TYPE,
 	type SkillInvocationDetails,
@@ -60,7 +57,7 @@ import { codeReviewBody } from "./code-review.ts";
 import { decodeSkillsKey } from "./panel/keys.ts";
 import { frontmatterFlag, readableSkillListing, skillListingBudget, skillListingText, usageScore, withoutPiSkillsBlock } from "./listing.ts";
 import { renderSkillsPanel, type SkillsPaint } from "./panel/render.ts";
-import { listableSkillNames, SKILL_LISTING_HEADER, skillNamesFromListing } from "./announce.ts";
+import { listableSkillNames, SKILL_LISTING_HEADER } from "./announce.ts";
 import { applySkillsKey, followRow, initialSkillsState, type SkillsRow, visibleRows } from "./panel/state.ts";
 import { announceArgumentHint, type CommandHint, frontmatterCommandHint } from "../lib/argument-hints.ts";
 import { parseSlashCommand, SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../lib/skill-body.ts";
@@ -126,10 +123,6 @@ export default function skillExtension(pi: ExtensionAPI) {
 	 * prompt from system-prompt's context_with_system handler (idle-turn.ts).
 	 */
 	let prompted = false;
-	/** Whether a request has gone out, freezing the listing on message 1 (./announce.ts). */
-	let requestSent = false;
-	/** The names the model has been shown: the frozen listing plus every notice. */
-	const listedSkills = new Set<string>();
 	/**
 	 * A one-shot run (`-p`, `--mode json`) ends when its prompt returns, so the
 	 * bare `/<name>` skill forms are taken by the `input` hook there instead of
@@ -148,26 +141,19 @@ export default function skillExtension(pi: ExtensionAPI) {
 		announcedSkills = false;
 		sessionUsage = undefined;
 		sessionModel = ctx.model;
-		// A restored stack is already message 1: seed what its listing named, so a
-		// skill added since is one notice, not a rewrite.
-		const restored = restoredContext(pi.events);
-		requestSent = restored !== undefined;
-		listedSkills.clear();
-		const stored = namesBaseline(restored?.baselines.skills) ?? skillNamesFromListing(restored?.stack.find((entry) => entry.key === "skills")?.text);
-		for (const name of stored ?? []) listedSkills.add(name);
 	});
-	pi.on("context", () => {
-		requestSent = true;
-	});
-	// A compaction starts a new prefix: list every skill again, so one announced
-	// only in a notice the summary replaced is named once more.
-	pi.on("session_compact", () => {
+	// Inside an epoch the listing on message 1 is the record: a skill that became
+	// listable since rides the request's tail with only its own line, decided
+	// when the request goes out from what the epoch has told.
+	pi.events.on(RENDER_CHANNEL, (data) => {
+		const request = data as RenderRequest;
+		if (request.epoch) return;
+		const told = request.told.get("skills") ?? new Set<string>();
 		const all = index();
-		const text = listingText(all);
-		listedSkills.clear();
-		for (const name of text ? listableNow(all) : []) listedSkills.add(name);
-		publishListed();
-		pi.events.emit(CONTEXT_CAPABILITY_REFRESH_CHANNEL, { key: "skills", text, order: CONTEXT_ORDER.skills });
+		const added = new Set(listableNow(all).filter((name) => !told.has(name)));
+		if (added.size === 0) return;
+		const text = listingText(all.filter((skill) => added.has(skill.name)));
+		if (text) request.blocks.push({ text, facts: [{ kind: "skills", names: [...added] }] });
 	});
 	pi.on("model_select", (event) => {
 		sessionModel = event.model;
@@ -206,25 +192,22 @@ export default function skillExtension(pi: ExtensionAPI) {
 		return listing === "(no skills available)" ? undefined : `${SKILL_LISTING_HEADER}\n\n${listing}`;
 	};
 	const listableNow = (skills: IndexedSkill[]) => listableSkillNames(skills, !pi.getActiveTools().includes("skill"));
-	const publishListed = () => pi.events.emit(CONTEXT_BASELINE_CHANNEL, { key: "skills", value: [...listedSkills] });
-	/**
-	 * The listing is frozen once a request has gone out (./announce.ts): a skill
-	 * that becomes listable later rides a one-shot with only its own line.
-	 */
+	/** The listing as live state: what an epoch's message 1 says (the render step above announces later skills). */
 	const announceSkills = () => {
 		const all = index();
-		const plan = planAnnouncement({ requestSent, announced: listedSkills, available: listableNow(all) });
-		if (plan.kind === "rewrite") {
-			const text = listingText(all);
-			if (text) pi.events.emit(REMINDER_CHANNEL, { text, scope: "every-turn", key: "skills", placement: "first-prepend", order: CONTEXT_ORDER.skills });
-		} else if (plan.kind === "addendum") {
-			const added = new Set(plan.added);
-			const text = listingText(all.filter((skill) => added.has(skill.name)));
-			if (text) pi.events.emit(REMINDER_CHANNEL, { text, group: "skills" });
+		const text = listingText(all);
+		if (!text) {
+			pi.events.emit(REMINDER_CHANNEL, { scope: "every-turn", key: "skills", remove: true });
+			return;
 		}
-		if (plan.kind === "none") return;
-		applyAnnouncement(listedSkills, plan);
-		publishListed();
+		pi.events.emit(REMINDER_CHANNEL, {
+			text,
+			scope: "every-turn",
+			key: "skills",
+			placement: "first-prepend",
+			order: CONTEXT_ORDER.skills,
+			facts: [{ kind: "skills", names: listableNow(all) }],
+		});
 	};
 	pi.on("before_agent_start", (event, ctx) => {
 		prompted = true;
@@ -767,28 +750,6 @@ export default function skillExtension(pi: ExtensionAPI) {
 	// re-index (before_agent_start runs every turn).
 	pi.on("before_agent_start", (_event, ctx) => {
 		if (piSkills.some((skill) => !registeredSkillCommands.has(skill.name) && !oneShotSkillNames.has(skill.name))) registerSkillCommands(ctx.cwd);
-	});
-
-	// FALLBACK for pi < 0.86.0 (plan.md "Fallbacks for older pi"; delete it
-	// when the peer floor reaches 0.86.0). Before faa9863cb, pi's steer() and
-	// followUp() expanded `/skill:<name>` natively WITHOUT firing an `input`
-	// event (queued interactive messages after the first, RPC steer/followUp),
-	// so a turned-off skill's instructions could land in the session history.
-	// On 0.86+ the `input` handler above refuses them first, so this finds
-	// nothing to redact and returns undefined.
-	// Strip them from every outgoing request instead — the wire copy carries the
-	// refusal notice, the session file keeps the original bytes, and untouched
-	// requests return undefined so the message array stays byte-identical
-	// (prompt-cache stable). Override states are read lazily, only when a
-	// message actually contains a `<skill>` block.
-	pi.on("context", (event) => {
-		let states: Map<string, string> | undefined;
-		const isOff = (name: string) => {
-			states ??= new Map(index().map((skill) => [skill.name, skill.state]));
-			return states.get(name) === "off";
-		};
-		const redacted = redactOffSkillMessages(event.messages, isOff);
-		return redacted ? { messages: redacted } : undefined;
 	});
 
 	const buildSkillsRows = (cwd: string | undefined): SkillsRow[] =>

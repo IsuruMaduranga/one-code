@@ -31,17 +31,19 @@ describe("tool-search without its own registration", () => {
 	afterEach(() => vi.useRealTimers());
 
 	it("lists nothing and leaves the active set as pi built it", () => {
-		expect(fake.reminders.filter((r) => r.key === "deferred-tools")).toHaveLength(0);
+		expect(fake.reminders.filter((r) => r.key === "deferred-tools" && r.text)).toHaveLength(0);
 		expect(fake.activeTools()).toEqual(["read", "bash", "mcp__fixture__lookup_ticket"]);
 	});
 
 	it("neither deactivates nor announces a tool deferred after session start", async () => {
 		fake.allTools.push({ name: "mcp__fixture__late", description: "late" });
 		fake.setActive([...fake.activeTools(), "mcp__fixture__late"]);
+		fake.reminders.length = 0;
 		fake.pi.events.emit(DEFER_CHANNEL, { name: "mcp__fixture__late" });
 		await vi.advanceTimersByTimeAsync(150);
 		expect(fake.activeTools()).toContain("mcp__fixture__late");
 		expect(fake.reminders).toHaveLength(0);
+		expect(fake.render({ told: { tools: ["mcp__fixture__lookup_ticket"] }, modes: { "deferred-unavailable": true } })).toEqual([]);
 	});
 
 	it("sends an Anthropic request without defer_loading definitions", () => {
@@ -56,18 +58,16 @@ describe("tool-search without its own registration", () => {
 });
 
 describe("a resumed session without tool_search", () => {
-	it("says once that the tools its first message lists cannot be loaded, and never steers to tool_search", () => {
+	it("says once per epoch that the tools its first message lists cannot be loaded, and never steers to tool_search", () => {
 		const fake = makeToolSearchFakePi(["read", "bash"]);
 		fake.allTools.push({ name: "read", description: "read" }, { name: "bash", description: "bash" });
-		// The restored first message listed a deferred MCP tool.
-		fake.restoreBaseline(["mcp__fixture__lookup_ticket"]);
 		toolSearchExtension(fake.pi as never);
 		fake.unregister("tool_search");
 		fake.addDeferred("mcp__fixture__lookup_ticket");
 		fake.pi.fire("session_start", {});
-		expect(fake.reminders.filter((r) => r.key === "deferred-unavailable")).toEqual([
-			expect.objectContaining({ scope: "next-turn", text: loaderUnavailableReminderText() }),
-		]);
+		// The epoch's first message listed a deferred MCP tool.
+		const blocks = fake.render({ told: { tools: ["mcp__fixture__lookup_ticket"] } });
+		expect(blocks).toEqual([{ text: loaderUnavailableReminderText(), facts: [{ kind: "mode", key: "deferred-unavailable", on: true }] }]);
 		fake.pi.fire("tool_execution_end", { isError: true, result: { content: [{ type: "text", text: "Tool mcp__fixture__lookup_ticket not found" }] } });
 		expect(fake.reminders.filter((r) => String(r.key).startsWith("deferred-miss"))).toHaveLength(0);
 	});

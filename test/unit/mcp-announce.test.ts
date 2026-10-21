@@ -1,117 +1,102 @@
 import { describe, expect, it } from "vitest";
-import { announcedFrom, applyMcpDelta, emptyAnnounced, mcpChangeNotices, mcpDelta, mcpStartupNotices } from "../../extensions/mcp/announce.ts";
+import type { ToldFact } from "../../extensions/lib/ledger/records.ts";
+import { mcpChangeNotices, mcpDelta, mcpFacts, type McpSnapshot, mcpStartupNotices } from "../../extensions/mcp/announce.ts";
 
-describe("announcedFrom", () => {
-	it("records the instructed and failed servers a fresh message 1 describes", () => {
-		const announced = announcedFrom({
-			connected: [{ name: "a", instructions: "x" }, { name: "quiet" }],
-			failed: [{ name: "gh", error: "401" }],
-		});
-		expect([...announced.instructed]).toEqual([["a", "x"]]);
-		expect([...announced.failed]).toEqual([["gh", "401"]]);
-		expect(mcpDelta(announced, { connected: [{ name: "a", instructions: "x" }], failed: [{ name: "gh", error: "401" }] })).toEqual({
-			newInstructions: [],
-			newFailures: [],
-			recovered: [],
-			dropped: [],
-		});
+/** What an epoch has told, as the ledger folds it: the latest hash per whole-text block key. */
+type Told = Map<string, string>;
+const tell = (told: Told, facts: readonly ToldFact[]) => {
+	for (const fact of facts) if (fact.kind === "block") told.set(fact.key, fact.hash);
+	return told;
+};
+/** Told by a message 1 rendered from `snapshot`. */
+const toldBy = (snapshot: McpSnapshot): Told => tell(new Map(), mcpFacts(snapshot));
+/** The delta, with what announcing it tells folded into `told`. */
+const announce = (told: Told, snapshot: McpSnapshot) => {
+	const delta = mcpDelta(told, snapshot);
+	tell(told, delta.facts);
+	return delta;
+};
+const nothing = { newInstructions: [], newFailures: [], recovered: [], dropped: [] };
+const changes = (delta: ReturnType<typeof mcpDelta>) => ({ newInstructions: delta.newInstructions, newFailures: delta.newFailures, recovered: delta.recovered, dropped: delta.dropped });
+
+describe("mcpFacts", () => {
+	it("tells the instructed and failed servers a message 1 describes, so the same state is no change", () => {
+		const snapshot = { connected: [{ name: "a", instructions: "x" }, { name: "quiet" }], failed: [{ name: "gh", error: "401" }] };
+		expect(changes(mcpDelta(toldBy(snapshot), { connected: [{ name: "a", instructions: "x" }], failed: [{ name: "gh", error: "401" }] }))).toEqual(nothing);
 	});
 });
 
 describe("mcpDelta", () => {
 	it("reports a newly connected server's instructions once", () => {
-		const announced = emptyAnnounced();
-		const delta = mcpDelta(announced, {
-			connected: [{ name: "deepwiki", instructions: "Use ask_question." }, { name: "quiet" }],
-			failed: [],
-		});
+		const told: Told = new Map();
+		const delta = announce(told, { connected: [{ name: "deepwiki", instructions: "Use ask_question." }, { name: "quiet" }], failed: [] });
 		expect(delta.newInstructions).toEqual([{ name: "deepwiki", instructions: "Use ask_question." }]);
 		expect(delta.newFailures).toEqual([]);
-		applyMcpDelta(announced, delta);
-		expect(mcpDelta(announced, { connected: [{ name: "deepwiki", instructions: "Use ask_question." }], failed: [] })).toEqual({
-			newInstructions: [],
-			newFailures: [],
-			recovered: [],
-			dropped: [],
-		});
+		expect(changes(mcpDelta(told, { connected: [{ name: "deepwiki", instructions: "Use ask_question." }], failed: [] }))).toEqual(nothing);
 	});
 
 	it("reports a failure once per distinct error, and recovery when the server comes back", () => {
-		const announced = emptyAnnounced();
-		let delta = mcpDelta(announced, { connected: [], failed: [{ name: "gh", error: "401" }] });
-		expect(delta.newFailures).toEqual([{ name: "gh", error: "401" }]);
-		applyMcpDelta(announced, delta);
-
-		delta = mcpDelta(announced, { connected: [], failed: [{ name: "gh", error: "401" }] });
-		expect(delta.newFailures).toEqual([]);
-
-		delta = mcpDelta(announced, { connected: [], failed: [{ name: "gh", error: "timeout" }] });
-		expect(delta.newFailures).toEqual([{ name: "gh", error: "timeout" }]);
-		applyMcpDelta(announced, delta);
-
-		delta = mcpDelta(announced, { connected: [{ name: "gh" }], failed: [] });
-		expect(delta.recovered).toEqual(["gh"]);
-		applyMcpDelta(announced, delta);
-		expect(announced.failed.size).toBe(0);
+		const told: Told = new Map();
+		expect(announce(told, { connected: [], failed: [{ name: "gh", error: "401" }] }).newFailures).toEqual([{ name: "gh", error: "401" }]);
+		expect(announce(told, { connected: [], failed: [{ name: "gh", error: "401" }] }).newFailures).toEqual([]);
+		expect(announce(told, { connected: [], failed: [{ name: "gh", error: "timeout" }] }).newFailures).toEqual([{ name: "gh", error: "timeout" }]);
+		expect(announce(told, { connected: [{ name: "gh" }], failed: [] }).recovered).toEqual(["gh"]);
+		expect(changes(mcpDelta(told, { connected: [{ name: "gh" }], failed: [] }))).toEqual(nothing);
 	});
 
-	it("reports an instructed server that vanished without a failure record as dropped", () => {
-		const announced = emptyAnnounced();
-		applyMcpDelta(announced, mcpDelta(announced, { connected: [{ name: "a", instructions: "x" }], failed: [] }));
-		const delta = mcpDelta(announced, { connected: [], failed: [] });
-		expect(delta.dropped).toEqual(["a"]);
-		applyMcpDelta(announced, delta);
-		expect(announced.instructed.size).toBe(0);
+	it("reports an instructed server that vanished without a failure record as dropped, once", () => {
+		const told: Told = new Map();
+		announce(told, { connected: [{ name: "a", instructions: "x" }], failed: [] });
+		expect(announce(told, { connected: [], failed: [] }).dropped).toEqual(["a"]);
+		expect(changes(mcpDelta(told, { connected: [], failed: [] }))).toEqual(nothing);
 	});
 
 	it("a server that reconnects with different instructions is re-announced with the new text", () => {
-		const announced = emptyAnnounced();
-		applyMcpDelta(announced, mcpDelta(announced, { connected: [{ name: "a", instructions: "old text" }], failed: [] }));
+		const told: Told = new Map();
+		announce(told, { connected: [{ name: "a", instructions: "old text" }], failed: [] });
 		// It dies (a failure, so not "dropped") …
-		applyMcpDelta(announced, mcpDelta(announced, { connected: [], failed: [{ name: "a", error: "connection closed by the server" }] }));
+		announce(told, { connected: [], failed: [{ name: "a", error: "connection closed by the server" }] });
 		// … and comes back after an upgrade with new instructions.
-		const delta = mcpDelta(announced, { connected: [{ name: "a", instructions: "new text" }], failed: [] });
+		const delta = announce(told, { connected: [{ name: "a", instructions: "new text" }], failed: [] });
 		expect(delta.recovered).toEqual(["a"]);
 		expect(delta.newInstructions).toEqual([{ name: "a", instructions: "new text" }]);
-		applyMcpDelta(announced, delta);
-		expect(announced.instructed.get("a")).toBe("new text");
 		// Same text again: nothing new to say.
-		expect(mcpDelta(announced, { connected: [{ name: "a", instructions: "new text" }], failed: [] }).newInstructions).toEqual([]);
+		expect(mcpDelta(told, { connected: [{ name: "a", instructions: "new text" }], failed: [] }).newInstructions).toEqual([]);
 	});
 
 	it("a server that closed is a new failure, not a drop", () => {
-		const announced = emptyAnnounced();
-		applyMcpDelta(announced, mcpDelta(announced, { connected: [{ name: "a", instructions: "x" }], failed: [] }));
-		const delta = mcpDelta(announced, { connected: [], failed: [{ name: "a", error: "connection closed by the server" }] });
+		const told: Told = new Map();
+		announce(told, { connected: [{ name: "a", instructions: "x" }], failed: [] });
+		const delta = mcpDelta(told, { connected: [], failed: [{ name: "a", error: "connection closed by the server" }] });
 		expect(delta.dropped).toEqual([]);
 		expect(delta.newFailures).toEqual([{ name: "a", error: "connection closed by the server" }]);
 	});
 
 	it("does not reannounce changes outside the instruction and failure text shown to the model", () => {
-		const announced = announcedFrom({
+		const told = toldBy({
 			connected: [{ name: "a", instructions: `${"a".repeat(3_000)} hidden old suffix` }],
 			failed: [{ name: "bad", error: `${"x".repeat(300)}\nhidden old diagnostics` }],
 		});
-		expect(mcpDelta(announced, {
+		expect(changes(mcpDelta(told, {
 			connected: [{ name: "a", instructions: `${"a".repeat(3_000)} hidden new suffix` }],
 			failed: [{ name: "bad", error: `${"x".repeat(300)}\nhidden new diagnostics` }],
-		})).toEqual({ newInstructions: [], newFailures: [], recovered: [], dropped: [] });
+		}))).toEqual(nothing);
 	});
 });
 
 describe("mcpChangeNotices", () => {
 	it("is empty when nothing changed", () => {
-		expect(mcpChangeNotices({ newInstructions: [], newFailures: [], recovered: [], dropped: [] })).toEqual([]);
+		expect(mcpChangeNotices({ ...nothing, facts: [] })).toEqual([]);
 	});
 
 	it("renders one notice per kind of change, instructions in Claude Code's frame", () => {
-		const notices = mcpChangeNotices({
+		const texts = mcpChangeNotices({
 			newInstructions: [{ name: "deepwiki", instructions: "Use ask_question." }],
 			newFailures: [{ name: "gh", error: "401 bad token" }],
 			recovered: ["ctx7"],
 			dropped: ["old"],
+			facts: [],
 		});
-		const texts = notices.map((notice) => notice.text);
 		expect(texts).toHaveLength(4);
 		expect(texts[0]).toContain("ctx7");
 		expect(texts[0]).toContain("connected after this conversation started");
@@ -121,8 +106,6 @@ describe("mcpChangeNotices", () => {
 		expect(texts[2]).toContain("failed to connect");
 		expect(texts[3]).toContain("old");
 		expect(texts[3]).toContain("disconnected");
-		// A compaction's rebuild repeats instructions and failures, not a recovery or a drop.
-		expect(notices.map((notice) => notice.rebuilt)).toEqual([false, true, true, false]);
 	});
 });
 

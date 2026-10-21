@@ -377,6 +377,85 @@ export class CronStore {
 	clear(): void {
 		this.jobs.clear();
 	}
+
+	/**
+	 * Put back a job the branch recorded (`scheduledJobsOnBranch`), keeping its
+	 * id: a /reload re-arms the session's jobs. A recurring job past its age is
+	 * not restored; a fire missed during the reload comes at once.
+	 */
+	restore(job: RecordedJob, now: number): boolean {
+		const fields = parseCron(job.cron);
+		if (!fields || this.jobs.has(job.id)) return false;
+		if (job.recurring && now - job.createdAt >= this.maxAgeMs) return false;
+		const base = { id: job.id, cron: job.cron, recurring: job.recurring, fields };
+		const nextFireAt = job.fireAt ?? this.fireAfter(base, Math.max(now, job.createdAt));
+		if (nextFireAt === null) return false;
+		this.jobs.set(job.id, { ...base, prompt: job.prompt, source: job.source, createdAt: job.createdAt, nextFireAt });
+		return true;
+	}
+}
+
+/** A job as the branch records it: what `CronStore.restore` takes. */
+export interface RecordedJob {
+	id: string;
+	cron: string;
+	prompt: string;
+	recurring: boolean;
+	source: CronSource;
+	createdAt: number;
+	/** A wakeup's exact fire time. */
+	fireAt?: number;
+}
+
+type BranchEntry = { type?: string; timestamp?: string; customType?: string; details?: unknown; message?: unknown };
+type Message = { role?: string; toolName?: string; toolCallId?: string; isError?: boolean; details?: unknown; content?: unknown; timestamp?: number };
+
+/**
+ * The main session's scheduled jobs a branch still holds: cron_create and
+ * schedule_wakeup results (the prompt read from their calls), minus
+ * cron_delete results, a wakeup stop, and final fires. A wakeup supersedes the
+ * one before it, as `DynamicLoop.schedule` does. Pure.
+ */
+export function scheduledJobsOnBranch(branch: readonly BranchEntry[]): RecordedJob[] {
+	const calls = new Map<string, Record<string, unknown>>();
+	const jobs = new Map<string, RecordedJob>();
+	const dropWakeups = () => {
+		for (const [id, job] of jobs) if (job.source === "wakeup") jobs.delete(id);
+	};
+	for (const entry of branch) {
+		if (entry.type === "custom_message" && (entry.customType === "wakeup" || entry.customType === "cron")) {
+			const details = entry.details as { jobId?: unknown; final?: unknown } | undefined;
+			if (details?.final !== true) continue;
+			if (entry.customType === "wakeup") dropWakeups();
+			else if (typeof details.jobId === "string") jobs.delete(details.jobId);
+			continue;
+		}
+		if (entry.type !== "message") continue;
+		const message = entry.message as Message | undefined;
+		if (message?.role === "assistant" && Array.isArray(message.content)) {
+			for (const block of message.content as Array<{ type?: string; id?: string; arguments?: unknown }>) {
+				if (block?.type === "toolCall" && typeof block.id === "string" && block.arguments && typeof block.arguments === "object") calls.set(block.id, block.arguments as Record<string, unknown>);
+			}
+			continue;
+		}
+		if (message?.role !== "toolResult" || message.isError || !message.toolCallId) continue;
+		const args = calls.get(message.toolCallId) ?? {};
+		const details = (message.details ?? {}) as Record<string, unknown>;
+		const at = message.timestamp ?? (Date.parse(entry.timestamp ?? "") || 0);
+		if (message.toolName === "cron_create" && typeof details.jobId === "string" && typeof details.cron === "string" && typeof args.prompt === "string") {
+			jobs.set(details.jobId, { id: details.jobId, cron: details.cron, prompt: args.prompt, recurring: details.recurring !== false, source: "model", createdAt: at });
+		} else if (message.toolName === "cron_delete" && typeof details.jobId === "string") {
+			jobs.delete(details.jobId);
+		} else if (message.toolName === "schedule_wakeup") {
+			if (details.stopped === true) dropWakeups();
+			else if (typeof details.scheduledFor === "number" && details.scheduledFor > 0 && typeof args.prompt === "string") {
+				dropWakeups();
+				const target = new Date(details.scheduledFor);
+				jobs.set(`w-${message.toolCallId}`, { id: `w-${message.toolCallId}`, cron: `${target.getMinutes()} ${target.getHours()} * * *`, prompt: args.prompt, recurring: false, source: "wakeup", createdAt: at, fireAt: details.scheduledFor });
+			}
+		}
+	}
+	return [...jobs.values()];
 }
 
 function publicJob(job: CronJob & { fields?: CronFields }): CronJob {

@@ -9,18 +9,14 @@
  *   (CONTEXT_ORDER.totalTokens), so it joins the mid-conversation system
  *   message where there is one;
  * - every later user message: the constant budget as a raw marker, a `sticky-append`
- *   reminder keyed once per session (`since: 0`, so a resumed session's earlier
- *   user messages carry it too — byte-identical to what they carried before);
+ *   reminder keyed once per session (`since: 0`: every user message a request
+ *   sends carries it, the first prompt excepted);
  * - every tool result: the countdown, a RAW `last-append` one-shot queued at
- *   `tool_result` time and written into the stored result by system-reminder
- *   (so it persists in the session like CC's and no later request re-caches the
- *   message). That is why this extension sits BEFORE `system-reminder` in the
- *   package manifest — pi runs `tool_result` handlers in load order, and the
- *   block must be queued before system-reminder's handler takes the one-shots.
- *   It emits only at runtime, never at load, so the "listeners load first" rule
- *   for the bus is not at stake. The block is bound to its call's id: pi runs a
- *   parallel batch's `tool_result` hooks concurrently, and unbound, the first
- *   result would take every queued countdown and the others none;
+ *   `tool_result` time and bound to its call's id, so it rides that result on
+ *   the next request (pi runs a parallel batch's `tool_result` hooks
+ *   concurrently; unbound, every countdown would land on the batch's last
+ *   result). The request that carries it records it (extensions/ledger), so no
+ *   later request re-renders it;
  * - the system prompt, before the gitStatus block — appended by the
  *   system-prompt extension from the same pure module.
  *

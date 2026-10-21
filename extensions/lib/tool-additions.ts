@@ -1,7 +1,7 @@
 /**
  * Claude Code's `tool_addition` for tools that arrive mid-session (pure). One
- * Code stores the arrival as the deferred-tool addendum one-shot
- * (lib/deferred.ts deferredAddendumText), which reads correctly on any model.
+ * Code renders the arrival as the deferred-tool addendum on the request's
+ * tail (lib/deferred.ts deferredAddendumText), which reads correctly on any model.
  * On a first-party model that takes mid-conversation tool changes, the
  * addendum leaves the message that carries it for a system message right
  * after it: Claude Code's sentence and names, then one reference-form
@@ -126,24 +126,4 @@ export function withToolAdditions(
 	}
 	if (all.size === 0) return undefined;
 	return { payload: { ...payload, messages: reseatMessageMark(out) }, names: [...all] };
-}
-
-/** A stored message as far as the addendum scan is concerned. */
-type BranchEntry = { type?: string; message?: { role?: string; content?: unknown } };
-
-/**
- * The names every addendum persisted into a tool result on the branch
- * announced: on resume they are re-activated, since their addition blocks
- * are rebuilt from the same stored blocks and the model may call them.
- */
-export function addendumNamesOnBranch(branch: readonly BranchEntry[]): string[] {
-	const names = new Set<string>();
-	for (const entry of branch) {
-		const message = entry?.type === "message" ? entry.message : undefined;
-		if (message?.role !== "toolResult" || !Array.isArray(message.content)) continue;
-		for (const block of message.content as StoredBlock[]) {
-			for (const name of (typeof block?.text === "string" ? addendumNames(block.text) : undefined) ?? []) names.add(name);
-		}
-	}
-	return [...names];
 }

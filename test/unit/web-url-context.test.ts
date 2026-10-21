@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFER_CHANNEL, deferredAddendumText, WITHHOLD_CHANNEL } from "../../extensions/lib/deferred.ts";
 import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/mcp-share.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
+import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/reminders.ts";
 import toolSearchExtension from "../../extensions/tool-search/index.ts";
 import webExtension from "../../extensions/web/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
@@ -51,6 +51,12 @@ function harness() {
 			await vi.advanceTimersByTimeAsync(150);
 		},
 		request: (model: Model) => fake.fire("context", { messages: [] }, ctx(model)),
+		/** Render a request inside an epoch that told `told` deferred tools; the addenda tool-search adds. */
+		render(told: string[], model: Model) {
+			const request: RenderRequest = { epoch: false, told: new Map([["tools", new Set(told)]]), modes: new Map(), toldBlocks: new Map(), model, blocks: [] };
+			fake.events.emit(RENDER_CHANNEL, request);
+			return request.blocks.map((block) => block.text);
+		},
 	};
 }
 
@@ -61,13 +67,12 @@ describe("url_context model-scoped deferral", () => {
 	afterEach(() => vi.useRealTimers());
 
 	for (const event of ["model_select", "session_tree"]) {
-		it(`${event}: withdraws a Gemini tool from search without rewriting the cached listing`, async () => {
+		it(`${event}: withdraws a Gemini tool from search, and the epoch announces nothing about it`, async () => {
 			const fake = harness();
 			await fake.start(gemini);
-			expect(listings(fake.reminders).at(-1)?.text).toContain("url_context");
+			const told = (listings(fake.reminders).at(-1)?.text ?? "").split("\n").slice(1);
+			expect(told).toContain("url_context");
 			expect(fake.getActiveTools()).not.toContain("url_context");
-			await fake.request(gemini);
-			const frozen = structuredClone(listings(fake.reminders));
 
 			await fake.switchModel(event, other);
 			const result = await fake.search();
@@ -76,21 +81,21 @@ describe("url_context model-scoped deferral", () => {
 			expect(result.content[0].text).toContain("Withdrawn for the current model (do not retry): url_context.");
 			expect((await fake.search("gemini")).details.matches).not.toContain("url_context");
 			expect(fake.getActiveTools()).not.toContain("url_context");
-			expect(listings(fake.reminders)).toEqual(frozen);
+			expect(fake.render(told, other)).toEqual([]);
+			// The live listing an epoch would render no longer names it.
+			expect(listings(fake.reminders).at(-1)?.text ?? "").not.toContain("url_context");
 		});
 
 		it(`${event}: announces Gemini as a late arrival when starting elsewhere`, async () => {
 			const fake = harness();
 			await fake.start(other);
-			expect(listings(fake.reminders).at(-1)?.text).not.toContain("url_context");
+			const told = (listings(fake.reminders).at(-1)?.text ?? "").split("\n").slice(1);
+			expect(told).not.toContain("url_context");
 			expect((await fake.search()).details.matches).toEqual([]);
-			await fake.request(other);
-			const frozen = structuredClone(listings(fake.reminders));
 
 			await fake.switchModel(event, gemini);
 			expect(fake.getActiveTools()).not.toContain("url_context");
-			expect(fake.reminders.filter((r) => r.text === deferredAddendumText(["url_context"]))).toHaveLength(1);
-			expect(listings(fake.reminders)).toEqual(frozen);
+			expect(fake.render(told, gemini)).toEqual([deferredAddendumText(["url_context"])]);
 			expect((await fake.search()).details.matches).toEqual(["url_context"]);
 			expect(fake.getActiveTools()).toContain("url_context");
 		});

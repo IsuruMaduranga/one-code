@@ -3,9 +3,8 @@
  * every reminder, a lifecycle `fire()`, and a mutable tool registry / active
  * set. Shared by tool-search-defer-miss.test.ts and tool-search-announce.test.ts.
  */
-import { CONTEXT_RESTORE_CHANNEL, type ContextRestoreRequest } from "../../../extensions/lib/context-stack.ts";
 import { DEFER_CHANNEL } from "../../../extensions/lib/deferred.ts";
-import { REMINDER_CHANNEL } from "../../../extensions/lib/reminders.ts";
+import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderedBlock, type RenderRequest } from "../../../extensions/lib/reminders.ts";
 
 export interface Reminder {
 	scope?: string;
@@ -77,12 +76,22 @@ export function makeToolSearchFakePi(initialActive: string[] = []) {
 		if (at !== -1) allTools.splice(at, 1);
 	};
 
-	/** Answer the context-restore request as a resumed session whose saved listing named `names`. */
-	const restoreBaseline = (names: string[]) => {
-		pi.events.on(CONTEXT_RESTORE_CHANNEL, (data) => {
-			(data as ContextRestoreRequest).restored = { version: 1, stack: [], sticky: [], baselines: { "tool-search": names } };
-		});
+	/**
+	 * Render one request the way system-reminder does: inside an epoch that told
+	 * `told` (fact kind → names), unless `epoch`. Returns the blocks owners added.
+	 */
+	const render = (opts: { epoch?: boolean; told?: Record<string, string[]>; modes?: Record<string, boolean>; model?: RenderRequest["model"] } = {}): RenderedBlock[] => {
+		const request: RenderRequest = {
+			epoch: opts.epoch ?? false,
+			told: new Map(Object.entries(opts.told ?? {}).map(([kind, names]) => [kind, new Set(names)])),
+			modes: new Map(Object.entries(opts.modes ?? {})),
+			toldBlocks: new Map(),
+			model: opts.model,
+			blocks: [],
+		};
+		pi.events.emit(RENDER_CHANNEL, request);
+		return request.blocks;
 	};
 
-	return { pi, reminders, allTools, setActive: (n: string[]) => (active = n), activeTools: () => active, addDeferred, runTool, unregister, restoreBaseline };
+	return { pi, reminders, allTools, setActive: (n: string[]) => (active = n), activeTools: () => active, addDeferred, runTool, unregister, render };
 }

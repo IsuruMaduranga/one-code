@@ -27,6 +27,7 @@
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../lib/ledger/plan.ts";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { convertToLlm, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { followLastExchange, replaySideCall } from "../lib/replay-call.ts";
@@ -64,11 +65,17 @@ export default function recapExtension(pi: ExtensionAPI) {
 		return dimMarkedLine(theme, REFERENCE_MARK, recapLine(content));
 	});
 
-	// The exact request messages the session last sent (after every extension's
-	// mutations), captured like the compaction extension does.
+	// The whole conversation the session's last request covered, as pi built
+	// it: inside an epoch the ledger cuts a request to its tail before this
+	// hook, so the full list comes with its plan (extensions/ledger).
 	let capturedMessages: AgentMessage[] | undefined;
+	let planned: readonly AgentMessage[] | undefined;
+	pi.events.on(LEDGER_PLAN_CHANNEL, (data) => {
+		planned = (data as RequestPlan).messages as readonly AgentMessage[];
+	});
 	pi.on("context", (event) => {
-		capturedMessages = event.messages;
+		capturedMessages = [...(planned ?? event.messages)];
+		planned = undefined;
 	});
 	// The same request as it went on the wire, and the reply that answered it.
 	const exchange = followLastExchange(pi);

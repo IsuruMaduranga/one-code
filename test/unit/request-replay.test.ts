@@ -41,13 +41,44 @@ function markers(value: unknown): number {
 }
 
 describe("captureRequest", () => {
-	it("captures the three appendable APIs and nothing else", () => {
+	it("captures every API whose body extends by appending to one list (R2-H4), and nothing else", () => {
 		expect(captureRequest(anthropic, { messages: [] })?.api).toBe("anthropic-messages");
 		expect(captureRequest({ ...anthropic, api: "openai-completions" }, { messages: [] })?.api).toBe("openai-completions");
 		expect(captureRequest({ ...anthropic, api: "openai-responses" }, { input: [] })?.api).toBe("openai-responses");
-		expect(captureRequest({ ...anthropic, api: "google-generative-ai" }, { contents: [] })).toBeUndefined();
+		expect(captureRequest({ ...anthropic, api: "openai-codex-responses" }, { input: [] })?.api).toBe("openai-codex-responses");
+		expect(captureRequest({ ...anthropic, api: "bedrock-converse-stream" }, { messages: [] })?.api).toBe("bedrock-converse-stream");
+		expect(captureRequest({ ...anthropic, api: "google-generative-ai" }, { contents: [] })?.api).toBe("google-generative-ai");
+		expect(captureRequest({ ...anthropic, api: "mistral-conversations" }, { messages: [] })).toBeUndefined();
 		expect(captureRequest({ ...anthropic, api: "openai-responses" }, { messages: [] })).toBeUndefined();
 		expect(captureRequest(undefined, { messages: [] })).toBeUndefined();
+	});
+});
+
+describe("extendPayload on Codex, Bedrock and Google (R2-H4)", () => {
+	const capture = (api: string, payload: Record<string, unknown>) => captureRequest({ ...anthropic, api }, payload)!;
+
+	it("appends the Codex tail to `input` and sets no cap Codex does not send", () => {
+		const out = extendPayload(capture("openai-codex-responses", { instructions: "x", input: [{ role: "user", content: "a" }], prompt_cache_key: "k" }), { input: [{ role: "user", content: "q" }] }, 4096);
+		expect(out.input).toEqual([{ role: "user", content: "a" }, { role: "user", content: "q" }]);
+		expect(out.prompt_cache_key).toBe("k");
+		expect(out).not.toHaveProperty("max_output_tokens");
+	});
+
+	it("sets Bedrock's nested cap and joins a user tail onto a trailing user turn", () => {
+		const base = { system: [{ text: "s" }], messages: [{ role: "user", content: [{ text: "a" }, { cachePoint: { type: "default" } }] }], inferenceConfig: { maxTokens: 64000, temperature: 1 } };
+		const out = extendPayload(capture("bedrock-converse-stream", base), { messages: [{ role: "user", content: [{ text: "q" }, { cachePoint: { type: "default" } }] }] }, 2048);
+		expect(out.messages).toEqual([{ role: "user", content: [{ text: "a" }, { cachePoint: { type: "default" } }, { text: "q" }] }]);
+		expect(out.inferenceConfig).toEqual({ maxTokens: 2048, temperature: 1 });
+		expect(base.inferenceConfig.maxTokens).toBe(64000);
+	});
+
+	it("sets Google's nested cap, joins user parts, and never replays the session's abort signal", () => {
+		const session = new AbortController().signal;
+		const own = new AbortController().signal;
+		const base = { model: "gemini", contents: [{ role: "model", parts: [{ text: "r" }] }], config: { maxOutputTokens: 8000, abortSignal: session, systemInstruction: "s" } };
+		const out = extendPayload(capture("google-generative-ai", base), { contents: [{ role: "user", parts: [{ text: "q" }] }], config: { abortSignal: own } }, 1500);
+		expect(out.contents).toEqual([{ role: "model", parts: [{ text: "r" }] }, { role: "user", parts: [{ text: "q" }] }]);
+		expect(out.config).toEqual({ maxOutputTokens: 1500, abortSignal: own, systemInstruction: "s" });
 	});
 });
 

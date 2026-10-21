@@ -15,7 +15,7 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { toolResultsOnBranch } from "./branch-restore.ts";
 import { parseClaudeId } from "./claude-id.ts";
 import { RESPONSES_APIS } from "./system-role.ts";
-import { ADDENDUM_HEAD, addendumNamesOnBranch } from "./tool-additions.ts";
+import { ADDENDUM_HEAD } from "./tool-additions.ts";
 import { normalizeToolName } from "../permissions/matcher.ts";
 
 export const DEFER_CHANNEL = "one-code:defer-tool";
@@ -167,11 +167,10 @@ const TOOL_SEARCH_NAMES: ReadonlySet<string> = new Set([TOOL_SEARCH]);
  * keeps a loaded tool out of the fixed `tools` array (Anthropic references,
  * OpenAI Responses loads), the summary replaced what named it, so pi would put
  * it back into `tools` and change the start of the request. A tool the kept
- * turns (`kept`) call, load or announce stays as it is.
+ * turns (`kept`) call or load stays as it is.
  */
 export function toolsToRedefer(candidates: Iterable<string>, kept: readonly SessionEntry[]): string[] {
 	const inUse = new Set([...toolSearchLoads(kept).values()].flat());
-	for (const name of addendumNamesOnBranch(kept)) inUse.add(name);
 	for (const entry of kept) {
 		const message = entry.type === "message" ? (entry.message as { role?: string; content?: unknown }) : undefined;
 		if (message?.role !== "assistant" || !Array.isArray(message.content)) continue;

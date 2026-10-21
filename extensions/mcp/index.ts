@@ -36,7 +36,7 @@ import {
 	readResource,
 	readResourceDir,
 } from "./client.ts";
-import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../lib/reminders.ts";
 import { join } from "node:path";
 import {
 	MCP_STATUS_CHANNEL,
@@ -49,8 +49,7 @@ import { readDisabledMcpServers, setMcpServerDisabled } from "../lib/mcp-overrid
 import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { authenticate as runOAuthFlow, silentProvider } from "./oauth/flow.ts";
 import { hasStoredTokens } from "./oauth/store.ts";
-import { announcedFrom, applyMcpDelta, emptyAnnounced, mcpAnnouncedBaseline, mcpAnnouncedFromReminders, mcpChangeNotices, mcpDelta, serializeMcpAnnounced, type McpAnnounced, type McpSnapshot, mcpStartupNotices } from "./announce.ts";
-import { CONTEXT_BASELINE_CHANNEL, CONTEXT_CAPABILITY_REFRESH_CHANNEL, restoredContext } from "../lib/context-stack.ts";
+import { mcpChangeNotices, mcpDelta, mcpFacts, type McpSnapshot, mcpStartupNotices } from "./announce.ts";
 import { decodeMcpKey } from "./panel/keys.ts";
 import { type McpEntry, type McpEntryStatus } from "./panel/model.ts";
 import { renderMcpPanel, type McpPaint } from "./panel/render.ts";
@@ -115,16 +114,6 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	// Live tool definitions, shared with in-process subagents so they reach MCP
 	// through these same open connections instead of connecting their own.
 	const sharedTools: ToolDefinition[] = [];
-	// Message 1 carries the MCP instructions and failed-servers reminders. Once a
-	// request has gone out it is part of every later request's cached prefix, so
-	// those blocks are frozen and later changes ride one-shot notices (./announce.ts).
-	let requestSent = false;
-	let announced = emptyAnnounced();
-	/** A resumed snapshot from before structured baselines: its MCP blocks, until the server names are known. */
-	let legacyBlocks: { instructions?: string; failures?: string } | undefined;
-	pi.on("context", () => {
-		requestSent = true;
-	});
 
 	/**
 	 * Where oversized results are persisted — the session dir, matching Claude
@@ -317,13 +306,10 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	 * which servers failed — otherwise it concludes the tools do not exist or the
 	 * user has no access instead of reporting a connection failure the user can
 	 * fix (review M4). Re-run on every connect, close, reconnect, authenticate,
-	 * enable and disable. Before the first request the two first-prepend blocks on
-	 * message 1 are (re)written; after it they are frozen and only the changes are
-	 * announced (./announce.ts).
+	 * enable and disable. The two first-prepend blocks are live state: what an
+	 * epoch's message 1 says. Inside an epoch the render step below announces
+	 * only what changed since the epoch told it (./announce.ts).
 	 */
-	const publishBaseline = (value: McpAnnounced) => {
-		pi.events.emit(CONTEXT_BASELINE_CHANNEL, { key: "mcp", value: serializeMcpAnnounced(value) });
-	};
 	const liveSnapshot = (): McpSnapshot => ({
 		connected: [...connections.values()].map((c) => ({ name: c.server.name, instructions: c.instructions })),
 		failed: failures.filter((f) => !connections.has(f.server.name)).map((f) => ({ name: f.server.name, error: f.error })),
@@ -331,72 +317,43 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	const emitInstructions = () => {
 		const live = [...connections.values()];
 		const snapshot = liveSnapshot();
-
-		if (!requestSent) {
-			// Nothing is cached yet: (re)write the standing message-1 blocks.
-			const nextAnnounced = announcedFrom(snapshot);
-			publishBaseline(nextAnnounced);
-			if (snapshot.failed.length === 0) {
-				pi.events.emit(REMINDER_CHANNEL, { scope: "every-turn", key: "mcp-failures", text: "", remove: true });
-			} else {
-				pi.events.emit(REMINDER_CHANNEL, {
-					scope: "every-turn",
-					key: "mcp-failures",
-					text: mcpFailuresReminder(snapshot.failed),
-					placement: "first-prepend",
-					order: CONTEXT_ORDER.mcp + 1,
-				});
-			}
-			const instructions = mcpInstructionsReminder(live);
-			if (instructions) {
-				pi.events.emit(REMINDER_CHANNEL, {
-					scope: "every-turn",
-					key: "mcp-instructions",
-					text: instructions,
-					placement: "first-prepend",
-					order: CONTEXT_ORDER.mcp,
-				});
-			} else {
-				// No server has instructions anymore (e.g. the last one was disabled or
-				// disconnected) — drop the stale every-turn reminder so the model stops
-				// being told to use tools that are gone.
-				pi.events.emit(REMINDER_CHANNEL, { scope: "every-turn", key: "mcp-instructions", text: "", remove: true });
-			}
-			announced = nextAnnounced;
-			return;
+		if (snapshot.failed.length === 0) {
+			pi.events.emit(REMINDER_CHANNEL, { scope: "every-turn", key: "mcp-failures", text: "", remove: true });
+		} else {
+			pi.events.emit(REMINDER_CHANNEL, {
+				scope: "every-turn",
+				key: "mcp-failures",
+				text: mcpFailuresReminder(snapshot.failed),
+				placement: "first-prepend",
+				order: CONTEXT_ORDER.mcp + 1,
+				facts: mcpFacts({ connected: [], failed: snapshot.failed }),
+			});
 		}
-
-		// Message 1 is frozen (rewriting it would re-cache the whole conversation):
-		// tell the model only what changed, as one-shots where it reads next.
-		const delta = mcpDelta(announced, snapshot);
-		const notices = mcpChangeNotices(delta);
-		if (notices.length > 0) {
-			const nextAnnounced = { instructed: new Map(announced.instructed), failed: new Map(announced.failed) };
-			applyMcpDelta(nextAnnounced, delta);
-			publishBaseline(nextAnnounced);
+		const instructions = mcpInstructionsReminder(live);
+		if (instructions) {
+			pi.events.emit(REMINDER_CHANNEL, {
+				scope: "every-turn",
+				key: "mcp-instructions",
+				text: instructions,
+				placement: "first-prepend",
+				order: CONTEXT_ORDER.mcp,
+				facts: mcpFacts({ connected: snapshot.connected, failed: [] }),
+			});
+		} else {
+			// No server has instructions anymore (e.g. the last one was disabled or
+			// disconnected) — drop the stale block so an epoch does not tell the
+			// model to use tools that are gone.
+			pi.events.emit(REMINDER_CHANNEL, { scope: "every-turn", key: "mcp-instructions", text: "", remove: true });
 		}
-		// A compaction's rebuild repeats new instructions and failures, so those may
-		// be cancelled; a recovery or a drop is said only here.
-		for (const notice of notices) pi.events.emit(REMINDER_CHANNEL, { text: notice.text, ...(notice.rebuilt ? { group: "mcp-instructions" } : {}) });
-		applyMcpDelta(announced, delta);
 	};
-
-	// A compaction starts a new prefix: rewrite both blocks from live state, so a
-	// server announced only in a notice the summary replaced is described again.
-	pi.on("session_compact", () => {
-		const snapshot = liveSnapshot();
-		announced = announcedFrom(snapshot);
-		publishBaseline(announced);
-		pi.events.emit(CONTEXT_CAPABILITY_REFRESH_CHANNEL, {
-			key: "mcp-instructions",
-			text: mcpInstructionsReminder([...connections.values()]),
-			order: CONTEXT_ORDER.mcp,
-		});
-		pi.events.emit(CONTEXT_CAPABILITY_REFRESH_CHANNEL, {
-			key: "mcp-failures",
-			text: snapshot.failed.length > 0 ? mcpFailuresReminder(snapshot.failed) : undefined,
-			order: CONTEXT_ORDER.mcp + 1,
-		});
+	// Inside an epoch, what changed since message 1 (or the last notice) rides
+	// the request's tail, decided when the request goes out.
+	pi.events.on(RENDER_CHANNEL, (data) => {
+		const request = data as RenderRequest;
+		if (request.epoch) return;
+		const delta = mcpDelta(request.toldBlocks, liveSnapshot(), !connectSettled);
+		const notices = mcpChangeNotices(delta);
+		notices.forEach((text, i) => request.blocks.push({ text, ...(i === 0 ? { facts: delta.facts } : {}) }));
 	});
 
 	/** Config files that exist but failed to parse (review M11) — shown at startup and in /mcp. */
@@ -428,12 +385,6 @@ export default function mcpExtension(pi: ExtensionAPI) {
 			onNote: (message) => configNotes.push(message),
 			registered: registeredMcpServers(pi),
 		});
-		// An older snapshot stored only the rendered blocks: read them again by the
-		// configured names, before any delta is taken against them.
-		if (legacyBlocks) {
-			announced = mcpAnnouncedFromReminders(legacyBlocks.instructions, legacyBlocks.failures, servers.map((server) => server.name));
-			legacyBlocks = undefined;
-		}
 		const configWarnings = [
 			...(configErrors.length > 0 ? [`MCP config could not be parsed (ignored): ${configErrors.join("; ")}`] : []),
 			...configNotes,
@@ -443,14 +394,9 @@ export default function mcpExtension(pi: ExtensionAPI) {
 			else process.stderr.write(`${text}\n`);
 		}
 		disabledNames = readDisabledMcpServers(ctx.cwd, home);
-		// A resumed first-prepend may describe a server whose configuration was
-		// removed entirely. There is no connection attempt in that case, so make
-		// the frozen-prefix delta explicit rather than leaving the stale capability
-		// silently standing. Fresh empty sessions keep their byte-identical no-op.
-		if (servers.length === 0) {
-			if (requestSent) emitInstructions();
-			return;
-		}
+		// With no server configured there is nothing to connect; a resumed epoch
+		// that told the model about one hears that it dropped at render time.
+		if (servers.length === 0) return;
 
 		// Disabled servers are listed but never connected; a server with an unset
 		// credential env var stays "needs authentication" and is not attempted
@@ -630,15 +576,6 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	};
 
 	pi.on("session_start", async (_event, ctx) => {
-		const restored = restoredContext(pi.events);
-		// The restored stack owns message 1. Its structured state records the exact
-		// arbitrary server text that was shown; a fresh session keeps prior behavior.
-		requestSent = restored !== undefined;
-		const stackText = (key: string) => restored?.stack.find((entry) => (entry as { key?: string }).key === key)?.text;
-		const structured = mcpAnnouncedBaseline(restored?.baselines.mcp);
-		legacyBlocks = structured ? undefined : { instructions: stackText("mcp-instructions"), failures: stackText("mcp-failures") };
-		announced = structured ?? mcpAnnouncedFromReminders(legacyBlocks?.instructions, legacyBlocks?.failures);
-		if (!restored) publishBaseline(announced);
 		// pi awaits session_start handlers serially before the prompt opens, and
 		// remote servers take seconds to answer — awaiting here was the entire
 		// "slow startup" (4.9s → 0.24s measured, findings §15). In the interactive

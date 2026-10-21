@@ -62,6 +62,7 @@ import {
 	formatDeleteResult,
 	formatJobList,
 	formatUnknownJob,
+	scheduledJobsOnBranch,
 } from "./cron.ts";
 import {
 	createTaskNotifier,
@@ -97,6 +98,8 @@ import { StringDecoder } from "node:string_decoder";
 import { SESSION_WORK_CHANNEL, sessionBackgroundTask, sessionCron, type SessionWorkQuery } from "../lib/session-work.ts";
 import { WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
 import { queueNotice } from "../lib/notices.ts";
+import { makeRecord, RECORD } from "../lib/ledger/records.ts";
+import { extensionVersion } from "../lib/package-version.ts";
 
 /** Claude Code's `task_output` limit (`TASK_MAX_OUTPUT_DEFAULT`). */
 const TASK_OUTPUT_MAX_CHARS = 32_000;
@@ -329,6 +332,10 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 			return;
 		}
 		const fold = job.source === "wakeup" ? foldDetails() : {};
+		// A fold removes the tick's messages from the model's context: above the
+		// append point, so the next request opens an epoch (extensions/ledger)
+		// and renders the folded context whole, once.
+		if (fold.noOpStreak !== undefined) pi.appendEntry(RECORD.epoch, makeRecord("epoch", extensionVersion(), { cause: "fold" }));
 		if (job.source === "wakeup") dynamicLoop.inFlight = job.prompt;
 		notify(job.source === "wakeup" ? "wakeup" : "cron", fireText(job), { jobId: job.id, cron: job.cron, source: job.source, final, ...fold });
 	};
@@ -869,9 +876,17 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		query.body = loopSkillPrompt(query.args, readLoopFile(query.cwd));
 	});
 
-	pi.on("session_start", (_event, ctx) => {
+	pi.on("session_start", (event, ctx) => {
 		lastCtx = ctx;
 		sessionCwd = ctx.cwd;
+		// A /reload keeps the process and the conversation, so the session's
+		// scheduled jobs come back from the branch (design.md section 13); a new
+		// process ends them, as Claude Code's session-only jobs end.
+		if (event.reason === "reload") {
+			const now = Date.now();
+			for (const job of scheduledJobsOnBranch(ctx.sessionManager.getBranch() as never)) cron.restore(job, now);
+			runCron();
+		}
 		if (pendingShutdownNotice) {
 			const notice = pendingShutdownNotice;
 			pendingShutdownNotice = undefined;
@@ -921,7 +936,8 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		// on it — and the replacement is told (see pendingShutdownNotice); a quit
 		// needs no note. A reload keeps the conversation, so its note says so.
 		const running = registry.running();
-		const jobs = cron.list();
+		// A reload re-arms the jobs from the branch: only the tasks stop.
+		const jobs = event.reason === "reload" ? [] : cron.list();
 		if ((running.length > 0 || jobs.length > 0) && event.reason !== "quit") {
 			const when = event.reason === "reload" ? "on reload" : "with the previous session";
 			const notices: string[] = [];

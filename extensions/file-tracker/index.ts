@@ -17,6 +17,7 @@
  */
 
 import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../lib/child-writes.ts";
+import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -35,7 +36,7 @@ import { REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
 import { resolveToolPath } from "../lib/tool-path.ts";
 import { parseRules, ruleMatches } from "../permissions/matcher.ts";
 import { loadPermissionSettings } from "../permissions/settings.ts";
-import { keptReadPaths, keptShellReadPaths, lastTouchesOnBranch, pathsReadOnBranch, shellCallsOnBranch } from "./replay.ts";
+import { type FileObservation, keptReadPaths, keptShellReadPaths, lastTouchesOnBranch, observationsOnBranch, pathsReadOnBranch, shellCallsOnBranch } from "./replay.ts";
 import { type RestoredRead, restoreBlocks, restoreCandidates } from "./restore.ts";
 import { fileToolResultContent } from "./results.ts";
 import { shellReadPaths, shownInFull } from "./shell-reads.ts";
@@ -167,6 +168,18 @@ function observeFromDisk(tracker: FileTracker, path: string): FileStamp | undefi
 	return stamp;
 }
 
+function sha256(text: string): string {
+	return createHash("sha256").update(text).digest("hex");
+}
+
+/** The file as it is on disk now, for the result that saw it; undefined when it is gone. */
+function observe(path: string): FileObservation | undefined {
+	const stamp = statIfPresent(path);
+	const current = readIfPresent(path);
+	if (!stamp || current === undefined) return undefined;
+	return { path, size: stamp.size, mtimeMs: stamp.mtimeMs, sha256: sha256(current) };
+}
+
 function pathOf(input: unknown, cwd: string): string | undefined {
 	// Share the field-name knowledge with the auto-mode gates: `path` for pi's
 	// built-ins, `file_path`/`notebook_path` for Claude Code-shaped calls. A
@@ -295,8 +308,24 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 		} catch {
 			return;
 		}
+		// What each result saw, recorded at the time: a file that changed since is
+		// stale, never taken as read in its current form (round-2 review H1).
+		const observed = observationsOnBranch(entries);
+		const changed: string[] = [];
 		for (const raw of pathsReadOnBranch(entries)) {
-			observeFromDisk(tracker, resolveToolPath(raw, ctx.cwd));
+			const path = resolveToolPath(raw, ctx.cwd);
+			const seen = observed.get(path);
+			const current = seen ? readIfPresent(path) : undefined;
+			if (seen && current !== undefined && sha256(current) !== seen.sha256) {
+				tracker.observeChanged(path, Date.now());
+				changed.push(path);
+			} else observeFromDisk(tracker, path);
+		}
+		if (changed.length > 0) {
+			pi.events.emit(REMINDER_CHANNEL, {
+				key: "file-tracker:changed-since-read",
+				text: `These files changed on disk since you last read them in this conversation: ${changed.join(", ")}. Read them again before editing them.`,
+			} satisfies ReminderPayload);
 		}
 		// Shell reads need the bash grammar, which may still be loading this early.
 		const target = tracker;
@@ -364,6 +393,8 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 		// After a read we know the file; after our own write we know it again, so a
 		// successful edit does not make the file look stale to the next edit.
 		if (!event.isError) touch(path);
+		// What the model saw, on the result: a resume compares it with the disk.
+		const observation = event.isError ? undefined : observe(path);
 		const content = fileToolResultContent({
 			toolName: event.toolName,
 			isError: event.isError,
@@ -373,7 +404,11 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 			existedBefore,
 			isEmptyFile: () => statIfPresent(path)?.size === 0,
 		});
-		return content ? { content } : undefined;
+		if (!content && !observation) return undefined;
+		return {
+			...(content ? { content } : {}),
+			...(observation ? { details: { ...((event.details as Record<string, unknown> | undefined) ?? {}), oneCodeFile: observation } } : {}),
+		};
 	});
 
 	/**

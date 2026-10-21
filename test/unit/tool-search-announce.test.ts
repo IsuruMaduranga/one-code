@@ -1,223 +1,93 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFER_CHANNEL, deferredAddendumText } from "../../extensions/lib/deferred.ts";
-import { CONTEXT_BASELINE_CHANNEL } from "../../extensions/lib/context-stack.ts";
-import { applyAnnouncement, planAnnouncement } from "../../extensions/tool-search/announce.ts";
+import { describe, expect, it } from "vitest";
+import { DEFER_CHANNEL, deferredAddendumText, WITHHOLD_CHANNEL } from "../../extensions/lib/deferred.ts";
 import toolSearchExtension from "../../extensions/tool-search/index.ts";
 import { makeToolSearchFakePi, type Reminder } from "./helpers/tool-search-fake-pi.ts";
 
 /**
- * The deferred-tools listing on message 1 must be FROZEN once a request has
- * gone out (rewriting it re-caches the whole conversation — measured 16.7k
- * tokens on request 2, 2026-09-04). Late arrivals ride a one-shot addendum.
- * Pure planner tests first, then the real extension against a fake pi with
- * fake timers for the announce debounce.
+ * The deferred-tools listing is live state: what a request that opens an epoch
+ * renders on message 1. Inside an epoch message 1 is the ledger's record, so a
+ * tool that registered since rides the request's tail, computed when the
+ * request goes out from what is loadable then minus what the epoch told
+ * (extensions/ledger, lib/reminders.ts RENDER_CHANNEL).
  */
 
-describe("planAnnouncement", () => {
-	it("rewrites the listing with every name while nothing is cached", () => {
-		expect(planAnnouncement({ requestSent: false, announced: new Set(), available: ["a", "b"] })).toEqual({
-			kind: "rewrite",
-			names: ["a", "b"],
-		});
-		expect(planAnnouncement({ requestSent: false, announced: new Set(["a"]), available: [] })).toEqual({ kind: "none" });
-	});
-
-	it("announces only the new names once a request has gone out", () => {
-		expect(planAnnouncement({ requestSent: true, announced: new Set(["a"]), available: ["a", "b", "c"] })).toEqual({
-			kind: "addendum",
-			added: ["b", "c"],
-		});
-		expect(planAnnouncement({ requestSent: true, announced: new Set(["a", "b"]), available: ["a", "b"] })).toEqual({
-			kind: "none",
-		});
-	});
-
-	it("does not announce names that disappeared (the frozen listing keeps them)", () => {
-		expect(planAnnouncement({ requestSent: true, announced: new Set(["a", "b"]), available: ["a"] })).toEqual({
-			kind: "none",
-		});
-	});
-
-	it("applyAnnouncement tracks what the model was told", () => {
-		const announced = new Set(["stale"]);
-		applyAnnouncement(announced, { kind: "rewrite", names: ["a"] });
-		expect([...announced]).toEqual(["a"]);
-		applyAnnouncement(announced, { kind: "addendum", added: ["b"] });
-		expect([...announced]).toEqual(["a", "b"]);
-		applyAnnouncement(announced, { kind: "none" });
-		expect([...announced]).toEqual(["a", "b"]);
-	});
-});
-
 const makeFakePi = () => makeToolSearchFakePi(["read", "bash"]);
-
 const listings = (reminders: Reminder[]) => reminders.filter((r) => r.key === "deferred-tools");
-const addenda = (reminders: Reminder[]) =>
-	reminders.filter((r) => r.group === "deferred-tools" && r.text?.startsWith("Additional deferred tools became available"));
+/** A first-party model that takes Claude Code's reference-form tool_addition. */
+const additionsModel = { provider: "anthropic", api: "anthropic-messages", id: "claude-sonnet-5-5", compat: { supportsMidConvoSystemMessages: true, supportsMidConvoToolChanges: true } };
 
-describe("tool-search announce wiring", () => {
-	let fake: ReturnType<typeof makeFakePi>;
+function mount() {
+	const fake = makeFakePi();
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	toolSearchExtension(fake.pi as any);
+	fake.addDeferred("web_fetch");
+	fake.pi.fire("session_start", {});
+	return fake;
+}
 
-	beforeEach(() => {
-		vi.useFakeTimers();
-		fake = makeFakePi();
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		toolSearchExtension(fake.pi as any);
-		fake.addDeferred("web_fetch");
-		fake.pi.fire("session_start", {});
-	});
-	afterEach(() => vi.useRealTimers());
-
-	it("writes the standing listing at session start and rewrites it for defers before the first request", async () => {
-		expect(listings(fake.reminders)).toHaveLength(1);
-		expect(listings(fake.reminders)[0].placement).toBe("first-prepend");
-		expect(listings(fake.reminders)[0].text).toContain("web_fetch");
-
+describe("tool-search listing and render-time addenda", () => {
+	it("keeps the standing listing current with live state, with the names it tells as facts", () => {
+		const fake = mount();
 		fake.addDeferred("lsp_diagnostics");
-		await vi.advanceTimersByTimeAsync(150);
-		const all = listings(fake.reminders);
-		expect(all).toHaveLength(2);
-		expect(all[1].text).toContain("lsp_diagnostics");
-		expect(addenda(fake.reminders)).toHaveLength(0);
+		const last = listings(fake.reminders).at(-1) as Reminder & { facts?: unknown };
+		expect(last.placement).toBe("first-prepend");
+		expect(last.text).toContain("lsp_diagnostics");
+		expect(last.facts).toEqual([{ kind: "tools", names: ["web_fetch", "lsp_diagnostics"] }]);
 		expect(fake.activeTools()).not.toContain("lsp_diagnostics");
 	});
 
-	it("after the first request a late defer becomes a one-shot addendum and the listing stays frozen", async () => {
-		fake.pi.fire("context", { messages: [] });
-		fake.reminders.length = 0;
-
-		fake.addDeferred("mcp__deepwiki__ask_question");
-		await vi.advanceTimersByTimeAsync(150);
-
-		expect(listings(fake.reminders)).toHaveLength(0);
-		const notes = addenda(fake.reminders);
-		expect(notes).toHaveLength(1);
-		expect(notes[0].text).toBe(deferredAddendumText(["mcp__deepwiki__ask_question"]));
-		expect(notes[0].text).not.toContain("web_fetch");
-		expect(notes[0].scope).toBeUndefined();
+	it("adds nothing to a request that opens an epoch: the listing says it all", () => {
+		const fake = mount();
+		fake.addDeferred("mcp__a__x");
+		expect(fake.render({ epoch: true })).toEqual([]);
 	});
 
-	it("a request going out during the debounce turns the pending rewrite into an addendum (the -p race)", async () => {
-		fake.reminders.length = 0;
-		fake.addDeferred("mcp__late__tool"); // timer scheduled, request not yet sent
-		fake.pi.fire("context", { messages: [] }); // first request goes out inside the window
-		await vi.advanceTimersByTimeAsync(150);
-
-		expect(listings(fake.reminders)).toHaveLength(0);
-		expect(addenda(fake.reminders)).toHaveLength(1);
-		expect(addenda(fake.reminders)[0].text).toContain("mcp__late__tool");
-	});
-
-	it("announces a server's burst after the debounce, without waiting for the whole MCP connect to settle", async () => {
-		fake.pi.fire("context", { messages: [] });
-		fake.reminders.length = 0;
+	it("announces only what the epoch has not told, once per request that needs it", () => {
+		const fake = mount();
 		fake.addDeferred("mcp__a__x");
 		fake.addDeferred("mcp__a__y");
-		await vi.advanceTimersByTimeAsync(150);
-		const notes = addenda(fake.reminders);
-		expect(notes).toHaveLength(1);
-		expect(notes[0].text).toContain("mcp__a__x");
-		expect(notes[0].text).toContain("mcp__a__y");
-		expect(listings(fake.reminders)).toHaveLength(0);
+		const blocks = fake.render({ told: { tools: ["web_fetch"] } });
+		expect(blocks).toEqual([{ text: deferredAddendumText(["mcp__a__x", "mcp__a__y"]), facts: [{ kind: "tools", names: ["mcp__a__x", "mcp__a__y"] }] }]);
+		expect(fake.render({ told: { tools: ["web_fetch", "mcp__a__x", "mcp__a__y"] } })).toEqual([]);
 	});
 
-	it("does not announce the same name twice", async () => {
-		fake.pi.fire("context", { messages: [] });
-		fake.reminders.length = 0;
-		fake.addDeferred("mcp__b__z");
-		await vi.advanceTimersByTimeAsync(150);
-		fake.pi.events.emit(DEFER_CHANNEL, { name: "mcp__b__z", keywords: ["again"] });
-		await vi.advanceTimersByTimeAsync(150);
-		expect(addenda(fake.reminders)).toHaveLength(1);
+	it("never announces a tool withheld before the request goes out (the H1 class)", () => {
+		const fake = mount();
+		fake.addDeferred("task_create");
+		fake.pi.events.emit(WITHHOLD_CHANNEL, { name: "task_create" });
+		expect(fake.render({ told: { tools: ["web_fetch"] } })).toEqual([]);
+		expect(listings(fake.reminders).at(-1)?.text).not.toContain("task_create");
 	});
 
-	it("a new session starts over with a fresh listing", async () => {
-		fake.pi.fire("context", { messages: [] });
-		fake.addDeferred("mcp__c__w");
-		await vi.advanceTimersByTimeAsync(150);
-		fake.reminders.length = 0;
-
-		fake.pi.fire("session_start", {});
-		const all = listings(fake.reminders);
-		expect(all).toHaveLength(1);
-		expect(all[0].text).toContain("web_fetch");
-		expect(all[0].text).toContain("mcp__c__w");
+	it("on a tool_addition model the addendum says the tools are callable, and makes them so", () => {
+		const fake = mount();
+		fake.addDeferred("probe_echo");
+		fake.setActive(fake.activeTools().filter((name) => name !== "probe_echo"));
+		const blocks = fake.render({ told: { tools: ["web_fetch"] }, model: additionsModel });
+		expect(blocks[0].facts).toEqual([{ kind: "tools", names: ["probe_echo"], callable: true }]);
+		expect(fake.activeTools()).toContain("probe_echo");
 	});
-});
 
-describe("tool-search resumed capability wiring", () => {
-	it("keeps an unchanged saved listing silent, appends only additions, and persists that correction for the next resume", () => {
-		const first = makeFakePi();
-		first.restoreBaseline(["web_fetch"]);
-		const published: string[][] = [];
-		first.pi.events.on(CONTEXT_BASELINE_CHANNEL, (data) => {
-			const baseline = data as { key: string; value: string[] };
-			if (baseline.key === "tool-search") published.push(baseline.value);
-		});
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		toolSearchExtension(first.pi as any);
-		first.addDeferred("web_fetch");
-		first.pi.fire("session_start", {});
-		expect(listings(first.reminders)).toHaveLength(0);
-		expect(addenda(first.reminders)).toHaveLength(0);
-
-		// This is a different live capability, so it reaches the tail and updates
-		// the stored comparison state without rewriting the locked listing.
-		first.allTools.push({ name: "new_tool", description: "new tool" });
-		first.setActive([...first.activeTools(), "new_tool"]);
-		first.pi.events.emit(DEFER_CHANNEL, { name: "new_tool" });
-		first.pi.fire("session_start", {});
-		expect(listings(first.reminders)).toHaveLength(0);
-		expect(addenda(first.reminders)).toHaveLength(1);
-		const corrected = published.at(-1)!;
-		expect(corrected).toEqual(["web_fetch", "new_tool"]);
-
-		const second = makeFakePi();
-		second.restoreBaseline(corrected);
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		toolSearchExtension(second.pi as any);
-		second.addDeferred("web_fetch");
-		second.addDeferred("new_tool");
-		second.pi.fire("session_start", {});
-		expect(listings(second.reminders)).toHaveLength(0);
-		expect(addenda(second.reminders)).toHaveLength(0);
+	it("says once per epoch that this run cannot load the deferred tools the epoch listed", () => {
+		const fake = mount();
+		fake.unregister("tool_search");
+		const blocks = fake.render({ told: { tools: ["web_fetch"] } });
+		expect(blocks).toHaveLength(1);
+		expect(blocks[0].text).toContain("tool_search is not available");
+		expect(fake.render({ told: { tools: ["web_fetch"] }, modes: { "deferred-unavailable": true } })).toEqual([]);
 	});
-});
 
-describe("tool-search announce lifecycle (LIFECYCLE-REVIEW-2026-09-06 L1)", () => {
-	afterEach(() => vi.useRealTimers());
+	it("a re-emitted defer of a told tool announces nothing new", () => {
+		const fake = mount();
+		fake.pi.events.emit(DEFER_CHANNEL, { name: "web_fetch", keywords: ["again"] });
+		expect(fake.render({ told: { tools: ["web_fetch"] } })).toEqual([]);
+	});
 
-	it("a debounced announce pending at session_shutdown is dropped, not fired on the dead runner", async () => {
-		vi.useFakeTimers();
-		const fake = makeFakePi();
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		toolSearchExtension(fake.pi as any);
-		fake.pi.fire("session_start", {});
-		fake.reminders.length = 0;
-
-		fake.addDeferred("mcp__late__tool"); // 100 ms debounce armed
+	it("a defer that lands after session_shutdown does nothing", () => {
+		const fake = mount();
 		fake.pi.fire("session_shutdown", { reason: "new" });
-		// After shutdown every pi.* call throws (runner invalidated); the fake models that.
-		const dead = () => {
-			throw new Error("This extension ctx is stale after session replacement or reload");
-		};
-		fake.pi.getAllTools = dead;
-		fake.pi.events.emit = dead;
-		await vi.advanceTimersByTimeAsync(500); // would have thrown from the timer callback
-		expect(fake.reminders).toHaveLength(0);
-	});
-
-	it("session_start clears a debounce armed by the previous session and re-announces fresh", async () => {
-		vi.useFakeTimers();
-		const fake = makeFakePi();
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		toolSearchExtension(fake.pi as any);
-		fake.pi.fire("session_start", {});
-		fake.addDeferred("web_fetch");
 		fake.reminders.length = 0;
-		fake.pi.fire("session_start", {}); // RPC new_session emits twice (findings §3)
-		await vi.advanceTimersByTimeAsync(500);
-		// Exactly the one listing deferAll wrote at the second start; the stale debounce did not add another.
-		expect(fake.reminders.filter((r) => r.key === "deferred-tools")).toHaveLength(1);
+		fake.addDeferred("mcp__late__tool");
+		expect(listings(fake.reminders)).toHaveLength(0);
 	});
 });

@@ -28,8 +28,10 @@
  * returned text as the stdout, as CC's `onDone(result)` does), and `/model` is
  * announced from the `model_select` event by the extension that persists the
  * choice. pi built-ins we cannot see
- * (`/compact`, `/settings`, …) stay silent. The blocks are pinned in process
- * memory, not written to the session file as CC does — a `--resume` drops them.
+ * (`/compact`, `/settings`, …) stay silent. The blocks are persisted when
+ * announced, as pending entries the next prompt's request carries and records
+ * (lib/reminders.ts `user-prepend`), so a `/reload` or a resume before that
+ * prompt keeps them, as CC's transcript does.
  */
 
 import { announceArgumentHint, type HintEmitter, withoutExactMatch } from "./argument-hints.ts";
@@ -81,9 +83,10 @@ export function localCommandBlocks(command: LocalCommand): string[] {
 }
 
 /**
- * Tell the model a local command ran. Call it from the command's handler
- * (before a `/clear` resets the session — the queue survives `newSession()`,
- * so the breadcrumb opens the new conversation exactly as in CC).
+ * Tell the model a local command ran. Call it from the command's handler; a
+ * command that replaces the session (`/clear`) announces from the new
+ * session's `session_start` instead, so the breadcrumb opens the new
+ * conversation exactly as in CC.
  */
 export function announceLocalCommand(pi: ReminderEmitter, command: LocalCommand): void {
 	localCommandBlocks(command).forEach((text, index) => {
