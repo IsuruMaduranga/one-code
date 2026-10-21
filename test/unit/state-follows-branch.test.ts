@@ -17,6 +17,7 @@ import permissionsExtension from "../../extensions/permissions/index.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../extensions/permissions/modes.ts";
 import { MODE_ENV } from "../../extensions/lib/permission-gate.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { stateEntry } from "./helpers/state-entry.ts";
 
 /** A request recorded on the branch: its model was told the mode in force. */
 const requestEntry = {
@@ -26,7 +27,6 @@ const requestEntry = {
 	customType: RECORD.request,
 	data: makeRecord("request", "0.6.0", { identity: { api: "anthropic-messages", provider: "anthropic", model: "claude-haiku", auth: "key" }, keep: 0, append: [], head: "h", blobs: {}, consumed: [] }),
 };
-const stateEntry = (key: string, value: unknown) => ({ type: "custom", id: `s-${key}`, parentId: null, customType: RECORD.state, data: makeRecord("state", "0.6.0", { key, value }) });
 
 describe("the permission mode follows the branch (H4)", () => {
 	let dir: string;

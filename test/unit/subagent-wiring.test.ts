@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../extensions/auto-mode/actions.ts";
 import backgroundExtension from "../../extensions/background/index.ts";
 import { type BackgroundTask, TASK_REGISTER_CHANNEL } from "../../extensions/background/registry.ts";
+import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/mcp-share.ts";
 import { DEFAULT_COALESCE_MS } from "../../extensions/lib/notifications.ts";
 import { AGENT_VIEW_CHANNEL } from "../../extensions/lib/agent-view.ts";
 import { SUBAGENT_GATE_CHANNEL } from "../../extensions/permissions/subagent-gate.ts";
@@ -541,6 +542,40 @@ describe("fork runs in a one-shot session", () => {
 		await h.call("Agent", { subagent_type: "fork", name: "historian", task: "Read the git history" });
 		const nested = (run.mock.calls[0][0] as { extraTools?: Array<{ name: string; parameters: unknown }> }).extraTools?.find((tool) => tool.name === "Agent");
 		expect(JSON.stringify(nested!.parameters)).toBe(JSON.stringify(h.fake.tools.get("Agent")!.parameters));
+	});
+
+	// The same rule for every tool a fork is handed: one whose schema differs
+	// from the parent's tool of that name replaces the parent's recorded
+	// declaration, and the fork misses the parent's cache from there on.
+	it("gives a fork only tools whose schemas match the parent's tools of the same name", async () => {
+		const { h, run } = await mountFork();
+		await h.call("Agent", { subagent_type: "fork", name: "historian", task: "Read the git history" });
+		const extraTools = (run.mock.calls[0][0] as { extraTools?: Array<{ name: string; parameters: unknown }> }).extraTools ?? [];
+		expect(extraTools.map((tool) => tool.name)).toEqual(expect.arrayContaining(["Agent", "cron_create", "cron_list", "cron_delete"]));
+		for (const tool of extraTools) {
+			const parent = h.fake.tools.get(tool.name);
+			expect(parent, `the parent has no ${tool.name} tool`).toBeDefined();
+			expect(JSON.stringify(tool.parameters), tool.name).toBe(JSON.stringify(parent!.parameters));
+		}
+	});
+
+	it("shares the parent's MCP tools with a fork as the parent's own definitions", async () => {
+		const run = vi.fn(() => ({ result: Promise.resolve(outcome()), kill: vi.fn(), snapshot: () => ({ text: "", toolCalls: 0, usage: emptyUsage() }) }));
+		let getMcpTools: (() => unknown[] | Promise<unknown[]>) | undefined;
+		vi.spyOn(SubagentRuntime, "create").mockImplementation(async (_cwd, mcpTools) => {
+			getMcpTools = mcpTools as typeof getMcpTools;
+			return { run } as unknown as SubagentRuntime;
+		});
+		const parent = join(dir, "parent.jsonl");
+		writeFileSync(parent, "");
+		const h = await mount([], session, "print", parent);
+		const shared = [{ name: "mcp__docs__search", parameters: { type: "object", properties: { query: { type: "string" } } } }];
+		h.fake.events.emit(MCP_TOOLS_CHANNEL, { tools: shared, settled: true });
+		await h.call("Agent", { subagent_type: "fork", name: "historian", task: "Read the git history" });
+		expect(run).toHaveBeenCalledTimes(1);
+		const tools = await getMcpTools!();
+		expect(tools).toHaveLength(shared.length);
+		tools.forEach((tool, i) => expect(tool).toBe(shared[i]));
 	});
 
 	it.each([{ model: "gpt-5-flash-text" }, { isolation: "worktree" }, { thinking: "high" }])("refuses a fork's nested call with a run option it cannot honor (%o)", async (option) => {

@@ -32,6 +32,7 @@ import { ccToolRenderers, safeThemePaint } from "../lib/tui-render.ts";
 import { userDenialText } from "../lib/user-denial.ts";
 import type { PermissionMode } from "../permissions/matcher.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../permissions/modes.ts";
+import { normalizePermissionMode } from "../permissions/settings.ts";
 import { buildPlanModeReminder } from "./reminder.ts";
 import { randomSlug } from "./slug.ts";
 import { readState, recordState } from "../lib/ledger/state.ts";
@@ -47,6 +48,8 @@ function planFileReferenceText(path: string, content: string): string {
 
 /** The branch's record of whether the plan file existed when the current plan-mode run began. */
 const PLAN_ENTRY_STATE = "plan-mode:entry";
+/** A plan-mode run as the branch records it, beside its plan file's path. */
+type PlanRun = { existed: boolean; modeBeforePlan?: PermissionMode };
 import {
 	approvedPlanText,
 	ENTER_PLAN_MODE_DESCRIPTION,
@@ -108,12 +111,15 @@ export default function planModeExtension(pi: ExtensionAPI) {
 	 * exit could only escalate: a default-mode session that planned was offered
 	 * auto (PERMISSIONS-REVIEW-2026-09-05 M4).
 	 */
-	const runOnBranch = (ctx: ExtensionContext, path: string): { existed: boolean; modeBeforePlan?: PermissionMode } | undefined => {
+	const runOnBranch = (ctx: ExtensionContext, path: string): PlanRun | undefined => {
 		const stored = readState(ctx, PLAN_ENTRY_STATE) as { path?: unknown; existed?: unknown; modeBeforePlan?: unknown } | undefined;
 		if (stored?.path !== path || typeof stored.existed !== "boolean") return undefined;
-		const before = typeof stored.modeBeforePlan === "string" && stored.modeBeforePlan in MODE_NAMES && stored.modeBeforePlan !== "plan" ? (stored.modeBeforePlan as PermissionMode) : undefined;
+		const mode = normalizePermissionMode(stored.modeBeforePlan);
+		const before = mode !== "plan" ? mode : undefined;
 		return { existed: stored.existed, ...(before ? { modeBeforePlan: before } : {}) };
 	};
+	/** Record the current run on the branch, for `runOnBranch` to read back. */
+	const recordRun = (path: string, run: PlanRun) => recordState(pi, PLAN_ENTRY_STATE, { path, ...run });
 
 	const freshPlanPath = (): string => {
 		let path = join(PLANS_DIR(), `${randomSlug()}.md`);
@@ -145,7 +151,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 		const run = runOnBranch(ctx, parent.path);
 		pi.appendEntry(PLAN_FILE_ENTRY, { path, sessionId, copiedFrom: parent.path } satisfies PlanFileRecord);
 		// The standing block names the new path anyway, so it also says whether the copy exists.
-		if (run) recordState(pi, PLAN_ENTRY_STATE, { path, ...run, existed: existsSync(path) });
+		if (run) recordRun(path, { ...run, existed: existsSync(path) });
 		return path;
 	};
 
@@ -157,9 +163,8 @@ export default function planModeExtension(pi: ExtensionAPI) {
 	 * this extension refreshes) before this extension's own session_tree runs,
 	 * so a cached path would be the abandoned branch's.
 	 */
-	const ensurePlanFile = (ctx: ExtensionContext): string => {
+	const ensurePlanFile = (ctx: ExtensionContext, onBranch = planFileRecords(ctx.sessionManager.getBranch()).at(-1)): string => {
 		const sessionId = ctx.sessionManager.getSessionId();
-		const onBranch = planFileRecords(ctx.sessionManager.getBranch()).at(-1);
 		if (onBranch && (onBranch.sessionId === undefined || onBranch.sessionId === sessionId)) return onBranch.path;
 		if (onBranch) return forkPlanFile(ctx, onBranch, sessionId);
 
@@ -170,7 +175,8 @@ export default function planModeExtension(pi: ExtensionAPI) {
 
 	/** A branch that names a plan file owns it before anything reads it: a fork copies its parent's now. */
 	const ownPlanFile = (ctx: ExtensionContext) => {
-		if (planFileOnBranch(ctx.sessionManager.getBranch())) ensurePlanFile(ctx);
+		const onBranch = planFileRecords(ctx.sessionManager.getBranch()).at(-1);
+		if (onBranch?.path) ensurePlanFile(ctx, onBranch);
 	};
 
 	/** Re-announce path + reminder; a re-emit replaces the sticky state by key. */
@@ -180,7 +186,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 		if (!run) {
 			// A run begins: record what it began with.
 			run = { existed: existsSync(path), ...(enteredFrom ? { modeBeforePlan: enteredFrom } : {}) };
-			recordState(pi, PLAN_ENTRY_STATE, { path, ...run });
+			recordRun(path, run);
 		}
 		pi.events.emit(PLAN_FILE_CHANNEL, { path });
 		pi.events.emit(REMINDER_CHANNEL, {
@@ -259,8 +265,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 		const path = planFileOnBranch(ctx.sessionManager.getBranch());
 		if (!path) return;
 		if (currentMode === "plan") {
-			const before = runOnBranch(ctx, path)?.modeBeforePlan;
-			recordState(pi, PLAN_ENTRY_STATE, { path, existed: existsSync(path), ...(before ? { modeBeforePlan: before } : {}) });
+			recordRun(path, { ...runOnBranch(ctx, path), existed: existsSync(path) });
 			refresh(ctx);
 		}
 		const content = existsSync(path) ? readFileSync(path, "utf8") : "";

@@ -85,8 +85,6 @@ interface ChildSessionSpec {
 	 * built from it so the fork reads the parent's prompt cache (fork-cache.ts).
 	 */
 	parentRequest?: RequestCapture;
-	/** The main session's live permission mode, for a fork: told to it when it differs from what it was told (parent-mode.ts). */
-	parentMode?: () => string;
 	/** Existing persisted session to resume (SendMessage to a finished agent). */
 	sessionFile?: string;
 	/** Where a new run's persisted session lands; falls back to an in-memory session. */
@@ -168,6 +166,8 @@ export class SubagentRuntime {
 	private readonly getMcpTools: () => ToolDefinition[] | Promise<ToolDefinition[]>;
 	/** The tools the parent session defers (lib/deferred.ts queryDeferred): a child defers the ones injected into it the same way. */
 	private readonly getParentDeferred: () => DeferRequest[];
+	/** The main session's live permission mode, for a fork: told to it when it differs from what it was told (parent-mode.ts). */
+	private readonly getParentMode: (() => string) | undefined;
 	/**
 	 * The parent's permission decision closure (undefined until permissions
 	 * publishes it), wrapped so every call carries the asking run's name: the
@@ -207,9 +207,11 @@ export class SubagentRuntime {
 		onModelUnusable: (model: string, reason: string) => void,
 		onChildWrite: (path: string, runName: string | undefined) => void,
 		getParentDeferred: () => DeferRequest[],
+		getParentMode: (() => string) | undefined,
 	) {
 		this.modelRuntime = modelRuntime;
 		this.getParentDeferred = getParentDeferred;
+		this.getParentMode = getParentMode;
 		this.onChildWrite = onChildWrite;
 		this.baseCwd = baseCwd;
 		this.getMcpTools = getMcpTools;
@@ -240,11 +242,12 @@ export class SubagentRuntime {
 		onModelUnusable: (model: string, reason: string) => void = () => {},
 		onChildWrite: (path: string, runName: string | undefined) => void = () => {},
 		getParentDeferred: () => DeferRequest[] = () => [],
+		getParentMode?: () => string,
 	): Promise<SubagentRuntime> {
 		const modelRuntime = await createSharedModelRuntime(getAgentDir());
 		// Prime the catalog once; spawns read the live snapshot (see resolveModel).
 		await modelRuntime.getAvailable();
-		return new SubagentRuntime(modelRuntime, cwd, getMcpTools, getPermissionBridge, getHookBridge, onExtensionError, onModelUnusable, onChildWrite, getParentDeferred);
+		return new SubagentRuntime(modelRuntime, cwd, getMcpTools, getPermissionBridge, getHookBridge, onExtensionError, onModelUnusable, onChildWrite, getParentDeferred, getParentMode);
 	}
 
 	/**
@@ -288,7 +291,7 @@ export class SubagentRuntime {
 				// tools) are deferred as the parent defers them: their owners run there.
 				deferLikeParentExtension(this.getParentDeferred(), injectedByParent(spec.extraTools ?? [])),
 				subagentHandbackExtension(handback, { deferred: fork }),
-				...(fork && spec.parentMode ? [parentModeExtension(spec.parentMode)] : []),
+				...(fork && this.getParentMode ? [parentModeExtension(this.getParentMode)] : []),
 				...(fork && spec.parentRequest ? [forkCacheExtension(spec.parentRequest)] : []),
 			],
 			// claude-context (above) injects the CLAUDE.md instructions on the child's session_start;

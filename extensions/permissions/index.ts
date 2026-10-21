@@ -91,7 +91,7 @@ import {
 	isPathSubjectTool,
 } from "./matcher.ts";
 import { type SessionGrant, sessionGrant } from "./session-grant.ts";
-import { formatModel, modeBadge, nextMode, PERMISSION_STATUS_CHANNEL, type PermissionStatus, CYCLE_KEY } from "./modes.ts";
+import { formatModel, modeBadge, nextMode, PERMISSION_MODE_STATE, PERMISSION_STATUS_CHANNEL, type PermissionStatus, CYCLE_KEY } from "./modes.ts";
 import { intrinsicTier, usesClaudeCodeFastPaths } from "../lib/model-tier.ts";
 import { type ChildToolCall, type ChildGateDecision, sessionPermissionBridge, SUBAGENT_GATE_CHANNEL } from "./subagent-gate.ts";
 import { trackOriginalCommands } from "../lib/original-command.ts";
@@ -266,8 +266,6 @@ const denyReason = (result: { cause?: string; rule?: { raw?: string } }): string
  * here, next to the emitter it belongs to.
  */
 const STANDING_REMINDER_MODES: ReadonlySet<PermissionMode> = new Set<PermissionMode>(["plan", "auto"]);
-/** The `one-code:state` key the permission mode is recorded under on the branch. */
-const PERMISSION_MODE_STATE = "permission-mode";
 /** The `one-code:state` key for the directories added to the workspace for this session. */
 const WORKSPACE_DIRS_STATE = "workspace-dirs";
 

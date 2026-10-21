@@ -137,12 +137,13 @@ export default function effortExtension(pi: ExtensionAPI) {
 	let workflowsOn = true;
 	/**
 	 * `record` false when the state comes from the branch itself (a resume, a
-	 * /tree switch); the caller then says whether the branch's model saw it on
-	 * (`announceOff`).
+	 * /tree switch). `seenOn` says whether the model saw ultracode on, so that
+	 * turning it off is announced: the live state by default, the branch's
+	 * stored state when following a branch.
 	 */
-	const setUltracode = (on: boolean, level?: ThinkingLevel, record = true, announceOff = record) => {
+	const setUltracode = (on: boolean, level?: ThinkingLevel, { record = true, seenOn = ultracodeActive }: { record?: boolean; seenOn?: boolean } = {}) => {
 		const changed = ultracodeActive !== on || (on && ultracodeLevel !== level);
-		const endsSeen = !on && announceOff && (record ? ultracodeActive : true);
+		const endsSeen = !on && seenOn;
 		ultracodeActive = on;
 		ultracodeLevel = on ? level : undefined;
 		if (changed) pi.events.emit(ULTRACODE_MODE_CHANNEL, { active: on });
@@ -342,7 +343,7 @@ export default function effortExtension(pi: ExtensionAPI) {
 		const stored = readState(ctx, ULTRACODE_STATE) as { on?: unknown; level?: unknown } | undefined;
 		const storedOn = stored?.on === true && typeof stored.level === "string";
 		const on = storedOn && (tree || stored.level === pi.getThinkingLevel());
-		setUltracode(on, on ? (stored?.level as ThinkingLevel) : undefined, false, storedOn && !on);
+		setUltracode(on, on ? (stored?.level as ThinkingLevel) : undefined, { record: false, seenOn: storedOn });
 		if (on && tree && pi.getThinkingLevel() !== stored?.level) pi.setThinkingLevel(stored?.level as ThinkingLevel);
 		applyStatus(ctx);
 	};

@@ -13,11 +13,11 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { readState } from "../lib/ledger/state.ts";
 import { RENDER_CHANNEL, type RenderRequest, toldBlockFact } from "../lib/reminders.ts";
+import { PERMISSION_MODE_STATE } from "../permissions/modes.ts";
+import { normalizePermissionMode } from "../permissions/settings.ts";
 
 /** The told fact's key. */
 const PARENT_MODE_FACT = "parent-permission-mode";
-/** The `one-code:state` key permissions records the mode under (permissions/index.ts PERMISSION_MODE_STATE); a fork's file carries the parent's. */
-const PERMISSION_MODE_STATE = "permission-mode";
 
 export function parentModeText(mode: string): string {
 	const plan = mode === "plan" ? " Only read-only tools run now: do not edit files or change state." : "";
@@ -29,8 +29,7 @@ export function parentModeExtension(getMode: () => string) {
 		/** The mode the fork's branch recorded: the parent's at spawn, which the inherited history shows. */
 		let atSpawn: string | undefined;
 		pi.on("session_start", (_event, ctx) => {
-			const stored = readState(ctx, PERMISSION_MODE_STATE);
-			atSpawn = typeof stored === "string" ? stored : undefined;
+			atSpawn = normalizePermissionMode(readState(ctx, PERMISSION_MODE_STATE));
 		});
 		pi.events.on(RENDER_CHANNEL, (data) => {
 			const request = data as RenderRequest;
