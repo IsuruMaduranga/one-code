@@ -29,7 +29,8 @@ interface Memo {
 
 const memos = () => processState("ledger:fold-memo", () => new WeakMap<object, Memo>());
 
-const sameEntries = (a: readonly EntryLike[], b: readonly EntryLike[]) => a.length === b.length && a.every((entry, i) => entry === b[i]);
+/** Whether two branches hold the same entries, each the same object, in the same order: the key a memo of anything derived from a branch takes. */
+export const sameEntries = (a: readonly unknown[], b: readonly unknown[]) => a.length === b.length && a.every((entry, i) => entry === b[i]);
 
 /** `foldBranch(branch, identity)`, reused while `owner`'s branch and the identity stay the same. Without an owner it folds. */
 export function foldOnce(owner: object | undefined, branch: readonly EntryLike[], identity: RequestIdentity | undefined): LedgerFold {

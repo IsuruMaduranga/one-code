@@ -61,7 +61,7 @@ import { looksLikeAnthropicRequest, MID_CONVERSATION_SYSTEM_BETA, withBetas } fr
 import { liftAddenda, supportsToolAdditions, TOOL_ADDITION_BETAS, withToolAdditions } from "../lib/tool-additions.ts";
 import { inContextEntries } from "../lib/compaction-boundary.ts";
 import { CALLABLE_TOOLS } from "../lib/ledger/fold.ts";
-import { foldOnce } from "../lib/ledger/fold-memo.ts";
+import { foldOnce, sameEntries } from "../lib/ledger/fold-memo.ts";
 import { declaredToolNames } from "../lib/ledger/wire.ts";
 import { MCP_TOOLS_CHANNEL } from "../lib/mcp-share.ts";
 import { sessionIdentity } from "../lib/anthropic-auth.ts";
@@ -106,8 +106,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 
 	/** Whether tool_search is registered; a `--tools` list without it turns deferral off (lib/deferred.ts). */
 	const deferring = () => deferralEnabled(pi.getAllTools());
-	const searchableTools = () => {
-		const all = pi.getAllTools();
+	const searchableTools = (all = pi.getAllTools()) => {
 		if (!deferralEnabled(all)) return [];
 		return all
 			.filter((tool) => deferredRegistry.has(tool.name))
@@ -207,6 +206,24 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	/** Loads `tool_search` made since the last turn started: their results reach the branch when the batch ends. */
 	const freshLoads = new Map<string, string[]>();
 
+	/** What the branch's in-context history loaded and uses, for the branch it was read from. */
+	let used: { entries: readonly EntryLike[]; loads: ReadonlyMap<string, string[]>; inUse: ReadonlySet<string> } | undefined;
+	/**
+	 * The branch's in-context loads and tools in use, read again only when the
+	 * branch changed (lib/ledger/fold-memo.ts `sameEntries`): the reconciler runs
+	 * at every turn, model switch, defer and withhold, and a server's connect
+	 * defers its tools in a burst with nothing appended between. Both are pure
+	 * functions of the entries; the registry, the model and this turn's loads
+	 * are applied on top at each run.
+	 */
+	const branchUse = (branch: EntryLike[]) => {
+		if (used && sameEntries(used.entries, branch)) return used;
+		const inContext = inContextEntries(branch) as SessionEntry[];
+		const loads = toolSearchLoads(inContext);
+		used = { entries: [...branch], loads, inUse: toolsInUse(inContext, loads) };
+		return used;
+	};
+
 	/**
 	 * The one place deferred tools are activated and deactivated (lib/deferred.ts
 	 * callableDeferredTools): a deferred tool is active exactly when the branch
@@ -221,21 +238,23 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	 * (turn_start) and whenever the inputs change.
 	 */
 	const reconcile = (owner: SessionLike | undefined, model: typeof currentModel) => {
-		if (!alive() || !deferring()) return;
+		if (!alive()) return;
+		const all = pi.getAllTools();
+		if (!deferralEnabled(all)) return;
 		const branch = branchOf(owner);
-		const inContext = inContextEntries(branch) as SessionEntry[];
-		loads = new Map([...toolSearchLoads(inContext), ...freshLoads]);
+		const use = branchUse(branch);
+		loads = new Map([...use.loads, ...freshLoads]);
 		const deferred = new Set(deferredRegistry.names);
 		// With nothing deferred no deferred tool is callable: the active set
 		// loses only withheld tools, and the branch's fold has nothing to decide.
 		let callable = new Set<string>();
 		if (deferred.size > 0) {
 			const fold = foldOf(owner, branch, model);
-			const inUse = toolsInUse(inContext);
+			const inUse = new Set(use.inUse);
 			for (const names of freshLoads.values()) for (const name of names) inUse.add(name);
 			const head = fold.lastRequest?.head;
 			const told = fold.told.get("tools") ?? new Set<string>();
-			const announcing = supportsToolAdditions(model) && !fold.opensEpoch ? new Set(searchableTools().map((tool) => tool.name).filter((name) => !told.has(name))) : new Set<string>();
+			const announcing = supportsToolAdditions(model) && !fold.opensEpoch ? new Set(searchableTools(all).map((tool) => tool.name).filter((name) => !told.has(name))) : new Set<string>();
 			callable = callableDeferredTools(deferred, {
 				inUse,
 				toldCallable: fold.told.get(CALLABLE_TOOLS) ?? new Set(),
@@ -244,7 +263,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 			});
 		}
 		const active = pi.getActiveTools();
-		const next = reconcileActive(active, deferred, callable, withheldNames, new Set(pi.getAllTools().map((tool) => tool.name)));
+		const next = reconcileActive(active, deferred, callable, withheldNames, new Set(all.map((tool) => tool.name)));
 		if (next !== active) pi.setActiveTools([...next]);
 	};
 	const reconcileNow = () => reconcile(session, currentModel);

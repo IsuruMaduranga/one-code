@@ -55,6 +55,32 @@ describe("tool-search on a resumed session", () => {
 		expect(fake.activeTools()).toEqual(["read", "mcp__s__loaded"]);
 	});
 
+	it("reads an unchanged branch once however often it reconciles (a turn, a defer burst), and again once it changes", () => {
+		let reads = 0;
+		const counted = (entry: { type: string; message: unknown }) => {
+			const { message } = entry;
+			return Object.defineProperty({ type: entry.type }, "message", { enumerable: true, get: () => (reads++, message) });
+		};
+		const entries = [counted(loadEntry("toolu_1", ["web_fetch"]))];
+		const ctx = ctxWithBranch(entries);
+		fake.pi.fire("session_start", { type: "session_start", reason: "resume" }, ctx);
+		expect(fake.activeTools()).toEqual(["read", "web_fetch"]);
+		const once = reads;
+		expect(once).toBeGreaterThan(0);
+		fake.pi.fire("turn_start", { type: "turn_start" }, ctx);
+		fake.allTools.push({ name: "mcp__s__a", description: "a" }, { name: "mcp__s__b", description: "b" });
+		fake.pi.events.emit(DEFER_CHANNEL, { name: "mcp__s__a" });
+		fake.pi.events.emit(DEFER_CHANNEL, { name: "mcp__s__b" });
+		fake.pi.fire("turn_start", { type: "turn_start" }, ctx);
+		expect(reads).toBe(once);
+		expect(fake.activeTools()).toEqual(["read", "web_fetch"]);
+		// A load lands on the branch: the next reconcile reads it.
+		entries.push(counted(loadEntry("toolu_2", ["notebook_edit"])));
+		fake.pi.fire("turn_start", { type: "turn_start" }, ctx);
+		expect(reads).toBeGreaterThan(once);
+		expect(fake.activeTools()).toEqual(["read", "web_fetch", "notebook_edit"]);
+	});
+
 	it("forgets the previous session's loads on /clear (the new branch is empty)", () => {
 		fake.pi.fire("session_start", { type: "session_start", reason: "resume" }, ctxWithBranch([loadEntry("toolu_1", ["web_fetch"])]));
 		expect(fake.activeTools()).toContain("web_fetch");

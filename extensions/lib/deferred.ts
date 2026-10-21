@@ -213,9 +213,9 @@ export function toolSearchLoads(branch: readonly SessionEntry[]): Map<string, st
 }
 const TOOL_SEARCH_NAMES: ReadonlySet<string> = new Set([TOOL_SEARCH]);
 
-/** The tools `entries` use: loaded by a `tool_search` result in them, or called by an assistant message in them. */
-export function toolsInUse(entries: readonly SessionEntry[]): Set<string> {
-	const inUse = new Set([...toolSearchLoads(entries).values()].flat());
+/** The tools `entries` use: loaded by a `tool_search` result in them (`loads`, their `toolSearchLoads`), or called by an assistant message in them. */
+export function toolsInUse(entries: readonly SessionEntry[], loads: ToolSearchLoads = toolSearchLoads(entries)): Set<string> {
+	const inUse = new Set([...loads.values()].flat());
 	for (const entry of entries) {
 		const message = entry.type === "message" ? (entry.message as { role?: string; content?: unknown }) : undefined;
 		if (message?.role !== "assistant" || !Array.isArray(message.content)) continue;
