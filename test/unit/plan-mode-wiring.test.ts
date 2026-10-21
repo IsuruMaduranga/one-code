@@ -53,6 +53,21 @@ describe("plan-mode wiring", () => {
 		expect(after.filter((r) => r.key === "permission-mode" && !r.remove).at(-1)?.text).toBe(before);
 	});
 
+	it("after a compaction, re-attaches the plan and says the file exists now (R3-M20)", async () => {
+		const ctx = createFakeCtx({ cwd: stateDir, sessionManager: { getBranch: () => fake.branch } });
+		await fake.fireOne("session_start", {}, ctx);
+		fake.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "plan", paused: false });
+		const atEntry = reminders.filter((r) => r.key === "permission-mode" && !r.remove).at(-1)?.text;
+		mkdirSync(join(planFiles[0].path, ".."), { recursive: true });
+		writeFileSync(planFiles[0].path, "# the plan\n1. Step one.\n");
+		await fake.fireOne("session_compact", {}, ctx);
+		const standing = reminders.filter((r) => r.key === "permission-mode" && !r.remove).at(-1)?.text;
+		expect(standing).not.toBe(atEntry);
+		const restore = reminders.find((r) => r.text?.startsWith("A plan file exists from plan mode at:"));
+		expect(restore?.text).toContain("1. Step one.");
+		expect(restore?.placement).toBe("user-prepend");
+	});
+
 	it("re-installs the sticky plan block and announces the plan file synchronously when the mode becomes plan mid-turn", async () => {
 		await fake.fireOne("session_start", {}, createFakeCtx({ cwd: stateDir, sessionManager: { getBranch: () => fake.branch } }));
 		fake.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "plan", paused: false });

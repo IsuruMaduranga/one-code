@@ -36,6 +36,15 @@ import { buildPlanModeReminder } from "./reminder.ts";
 import { randomSlug } from "./slug.ts";
 import { readState, recordState } from "../lib/ledger/state.ts";
 
+/** A plan file larger than this is named after a compaction, not inlined: the model reads it when it needs it. */
+const PLAN_REFERENCE_CHARS = 40_000;
+
+/** Claude Code's plan_file_reference attachment (utils/messages.ts), the plan the summary replaced. */
+function planFileReferenceText(path: string, content: string): string {
+	if (content.length > PLAN_REFERENCE_CHARS) return `A plan file exists from plan mode at: ${path}\n\nIt is too large to include here (${content.length.toLocaleString("en-US")} characters); read it before continuing.\n\nIf this plan is relevant to the current work and not already complete, continue working on it.`;
+	return `A plan file exists from plan mode at: ${path}\n\nPlan contents:\n\n${content}\n\nIf this plan is relevant to the current work and not already complete, continue working on it.`;
+}
+
 /** The branch's record of whether the plan file existed when the current plan-mode run began. */
 const PLAN_ENTRY_STATE = "plan-mode:entry";
 import {
@@ -196,6 +205,25 @@ export default function planModeExtension(pi: ExtensionAPI) {
 	pi.on("before_agent_start", (_event, ctx) => {
 		lastCtx = ctx;
 		if (currentMode === "plan") refresh(ctx);
+	});
+
+	// A compaction summarizes the plan away and opens an epoch, where nothing
+	// above has to stay byte-stable (R3-M20). Claude Code re-attaches the plan
+	// file whenever one exists, plan mode or not (compact.ts
+	// createPlanAttachmentIfNeeded); in plan mode the run is recorded again, so
+	// the new epoch's block says whether the file exists now.
+	pi.on("session_compact", (_event, ctx) => {
+		lastCtx = ctx;
+		const path = planFileOnBranch(ctx.sessionManager.getBranch());
+		if (!path) return;
+		if (currentMode === "plan") {
+			const before = runOnBranch(ctx, path)?.modeBeforePlan;
+			recordState(pi, PLAN_ENTRY_STATE, { path, existed: existsSync(path), ...(before ? { modeBeforePlan: before } : {}) });
+			refresh(ctx);
+		}
+		const content = existsSync(path) ? readFileSync(path, "utf8") : "";
+		if (!content.trim()) return;
+		pi.events.emit(REMINDER_CHANNEL, { text: planFileReferenceText(path, content), placement: "user-prepend", orTail: true, untilCompaction: true });
 	});
 
 	/**

@@ -461,12 +461,26 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 			const allowed = restoreAllowed(ctx);
 			const candidates = restoreCandidates(before, (path) => shown(path) || !allowed(path));
 			const read = createReadToolDefinition(ctx.cwd);
+			// Each file's content before the read: one that changed while it was
+			// read back is not recorded as seen, so the race fails safe (a fresh
+			// read is asked for) instead of passing the stale-edit guard.
+			const contentBefore = new Map(candidates.map((path) => [path, readIfPresent(path)]));
 			const reads: RestoredRead[] = await Promise.all(candidates.map(async (path) => ({ path, text: await readAgain(read, path, ctx) })));
 			const { blocks, restored } = restoreBlocks(reads, estimateTextTokens);
 			// The block that shows a file records what it showed, so a reload or a
 			// resume counts the file read exactly where the branch holds the block
 			// (replay.ts filesSeenOnBranch).
-			const seen = new Map(restored.map((path) => [path, touch(path)]));
+			const seen = new Map(
+				restored.map((path) => {
+					const observed = touch(path);
+					const prior = contentBefore.get(path);
+					if (observed && (prior === undefined || sha256(prior) !== observed.sha256)) {
+						tracker.forget(path);
+						return [path, undefined] as const;
+					}
+					return [path, observed] as const;
+				}),
+			);
 			for (const { text, restores } of blocks) {
 				const observation = restores ? seen.get(restores) : undefined;
 				pi.events.emit(REMINDER_CHANNEL, { text, placement: "user-prepend", orTail: true, untilCompaction: true, ...(observation ? { observations: [observation] } : {}) } satisfies ReminderPayload);
