@@ -23,7 +23,7 @@ describe("a sticky state's first delivery follows the branch", () => {
 
 		/** Render the tail [the switching call's result] inside an epoch whose fold told `blocks`. */
 		const render = async (blocks: Map<string, string>) => {
-			const plan = { epoch: false, fold: { ...foldBranch([]), blocks }, consumed: [], facts: [], covers: { count: 1, role: "user", timestamp: 1 }, messages: [] } as unknown as RequestPlan;
+			const plan = { epoch: false, fold: { ...foldBranch([]), blocks }, consumed: [], facts: [], carried: [], covers: { count: 1, role: "user", timestamp: 1 }, messages: [] } as unknown as RequestPlan;
 			fake.events.emit(LEDGER_PLAN_CHANNEL, plan);
 			const out = await fake.fireOne<{ messages: unknown[] } | undefined>("context", { messages: [result] }, ctx);
 			return { carried: JSON.stringify(out?.messages ?? []).includes("plan mode is on"), facts: plan.facts };

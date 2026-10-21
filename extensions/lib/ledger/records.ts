@@ -147,6 +147,9 @@ export interface EntryLike {
 	customType?: string;
 	data?: unknown;
 	message?: { role?: string; stopReason?: string };
+	/** A `context_edit`: the entry it edits, and its replacement (null omits the entry from the model's view). */
+	targetId?: string;
+	replacement?: unknown;
 }
 
 export type ParsedRecord = { [K in RecordKind]: { kind: K; entryId: string; data: RecordData[K] } }[RecordKind];

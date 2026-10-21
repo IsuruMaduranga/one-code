@@ -5,17 +5,23 @@
  *
  * Rules: told facts are a union within the
  * epoch and start empty at its start; pending items are those no request
- * consumed; the last request is the last one whose reply did not fail or
- * abort (pi omits such a reply before the next request); pi's `usage` entries (a
- * cache warm) are skipped. An epoch starts at the first request, after a
- * compaction entry or an `epoch` record, and at a request whose identity (api,
- * provider, model, auth) differs.
+ * delivered; pi's `usage` entries (a cache warm) are skipped. An epoch starts
+ * at the first request, after a compaction entry or an `epoch` record, and at
+ * a request whose identity (api, provider, model, auth) differs.
  *
- * A request's consumed pending ids and the told records written after it
- * count unless its reply failed: a failed request's tail is rendered again,
- * so what it carried is neither delivered nor told. A request with no reply
- * yet counts and is the base (the turn in flight, or a quit mid-stream),
- * marked unanswered: the next request does not extend it (lib/ledger/plan.ts).
+ * Delivered means the model saw it and the branch kept it. A request counts
+ * (its consumed pending ids and the told records written with it, and it
+ * becomes the base the next request extends) only when its own reply follows
+ * it: the first message after the request record, before any other request,
+ * epoch or compaction, is an assistant message that did not end in an error
+ * or an abort and that pi did not omit later (a `context_edit` with no
+ * replacement: a recoverable length stop, a failed attempt before a retry).
+ * A request with no reply (the turn in flight, a process that died
+ * mid-stream, a re-send that replaced it, a btw fork copied mid-stream)
+ * counts nothing, so its pending items are delivered again.
+ * A request that does not count takes back what it changed: the `epoch`
+ * record written right before it and an identity change it made, so a failed
+ * model hop leaves the epoch it left.
  *
  * The rebuilt request shares its elements with the branch's entries: clone
  * before mutating (`spliceRequest` does).
@@ -30,8 +36,6 @@ export type { EpochCause };
 /** A recorded request as the fold rebuilds it: the wire list and head, and the context messages it covered. */
 export interface FoldedRequest extends RecordedRequest {
 	covers?: Coverage;
-	/** False when no reply followed it on the branch: the turn in flight, or a process that died mid-stream. */
-	answered?: boolean;
 }
 
 export interface LedgerFold {
@@ -39,7 +43,7 @@ export interface LedgerFold {
 	opensEpoch: boolean;
 	/** Why, when `opensEpoch`. */
 	cause?: EpochCause;
-	/** The last request on the branch whose reply did not fail, rebuilt from its records. */
+	/** The last request on the branch that counts (its reply followed it and stayed), rebuilt from its records. */
 	lastRequest: FoldedRequest | undefined;
 	/** Every element hash already stored on the branch. */
 	knownHashes: Set<string>;
@@ -104,44 +108,75 @@ function rebuild(data: RequestRecordData, base: RecordedRequest | undefined, blo
 	};
 }
 
+/** What a request that does not count takes back: the told state, the epoch cause and the identity from before it. */
+interface FoldCheckpoint {
+	told: ToldState;
+	resetSinceBase: EpochCause | undefined;
+	lastIdentity: RequestIdentity | undefined;
+}
+
+const copyTold = (state: ToldState): ToldState => ({
+	told: new Map([...state.told].map(([kind, names]) => [kind, new Set(names)])),
+	modes: new Map(state.modes),
+	blocks: new Map(state.blocks),
+});
+
+/** The ids of the entries pi omitted from the model's view: a `context_edit` with no replacement. */
+function omittedIds(branch: readonly EntryLike[]): Set<string> {
+	const ids = new Set<string>();
+	for (const entry of branch) if (entry.type === "context_edit" && entry.replacement === null && typeof entry.targetId === "string") ids.add(entry.targetId);
+	return ids;
+}
+
 /** Fold the branch (root first, as `getBranch()` returns it). `identity` is the live request identity, for epoch detection. */
 export function foldBranch(branch: readonly EntryLike[], identity?: RequestIdentity): LedgerFold {
 	const blobs = new Map<string, unknown>();
-	const told = toldOf([]);
+	let told = toldOf([]);
 	const produced: { item: PendingRecordData; index: number }[] = [];
 	const consumed = new Set<string>();
+	const omitted = omittedIds(branch);
 	let base: FoldedRequest | undefined;
 	/** A compaction or `epoch` record after the base: the next request renders everything again. */
 	let resetSinceBase: EpochCause | undefined;
 	let lastIdentity: RequestIdentity | undefined;
+	/** The state before the last `epoch` record, while nothing but its own request may follow it. */
+	let beforeEpoch: { index: number; checkpoint: FoldCheckpoint } | undefined;
 	/** The latest request and what rode it, until its reply settles it. */
-	let open: { request: FoldedRequest | undefined; consumed: string[]; facts: ToldFact[] } | undefined;
+	let open: { request: FoldedRequest | undefined; consumed: string[]; facts: ToldFact[]; checkpoint: FoldCheckpoint } | undefined;
 
 	const tell = (facts: readonly ToldFact[]) => tellFacts(told, facts);
+	const checkpoint = (): FoldCheckpoint => ({ told: copyTold(told), resetSinceBase, lastIdentity });
 	/** A new epoch starts with nothing told. */
 	const resetTold = () => {
-		told.told.clear();
-		told.modes.clear();
-		told.blocks.clear();
+		told = toldOf([]);
 	};
-	/** Count what the open request carried and make it the base, unless its reply failed; `answered`: a reply settled it. */
-	const settle = (failed: boolean, answered = true) => {
+	/** Count what the open request carried and make it the base; a request without its reply takes back what it changed. */
+	const settle = (counts: boolean) => {
 		if (!open) return;
-		if (!failed) {
+		if (counts) {
 			for (const id of open.consumed) consumed.add(id);
 			tell(open.facts);
 			if (open.request) {
-				base = answered ? open.request : { ...open.request, answered: false };
+				base = open.request;
 				resetSinceBase = undefined;
 			}
+		} else {
+			({ told, resetSinceBase, lastIdentity } = open.checkpoint);
 		}
 		open = undefined;
 	};
 
 	branch.forEach((entry, index) => {
+		const attached = beforeEpoch?.index === index - 1 ? beforeEpoch : undefined;
+		beforeEpoch = undefined;
 		if (entry.type === "message") {
-			// pi drops an errored or aborted reply from the next request (transform-messages.js).
-			if (entry.message?.role === "assistant") settle(entry.message.stopReason === "error" || entry.message.stopReason === "aborted");
+			// A request's reply is the first message after its record: pi stores the
+			// prompt before the request and the tool results after the reply, so a
+			// user message first (a btw fork's side question, copied mid-stream) means
+			// no reply. pi drops an errored or aborted reply from the next request
+			// (transform-messages.js) and omits a recovered one.
+			const message = entry.message;
+			settle(message?.role === "assistant" && message.stopReason !== "error" && message.stopReason !== "aborted" && !omitted.has(entry.id));
 			return;
 		}
 		if (entry.type === "compaction") {
@@ -155,6 +190,7 @@ export function foldBranch(branch: readonly EntryLike[], identity?: RequestIdent
 		switch (record.kind) {
 			case "epoch":
 				settle(false);
+				beforeEpoch = { index, checkpoint: checkpoint() };
 				resetTold();
 				resetSinceBase = record.data.cause;
 				return;
@@ -162,9 +198,10 @@ export function foldBranch(branch: readonly EntryLike[], identity?: RequestIdent
 				settle(false);
 				const data = record.data;
 				for (const [hash, body] of Object.entries(data.blobs)) if (!blobs.has(hash)) blobs.set(hash, body);
+				const before = attached?.checkpoint ?? checkpoint();
 				if (lastIdentity && !sameIdentity(lastIdentity, data.identity)) resetTold();
 				lastIdentity = data.identity;
-				open = { request: rebuild(data, base, blobs), consumed: data.consumed, facts: [] };
+				open = { request: rebuild(data, base, blobs), consumed: data.consumed, facts: [], checkpoint: before };
 				return;
 			}
 			case "told":
@@ -176,7 +213,7 @@ export function foldBranch(branch: readonly EntryLike[], identity?: RequestIdent
 				return;
 		}
 	});
-	settle(false, false);
+	settle(false);
 
 	const latestByKey = new Map<string, number>();
 	for (const { item, index } of produced) if (item.key !== undefined) latestByKey.set(item.key, index);

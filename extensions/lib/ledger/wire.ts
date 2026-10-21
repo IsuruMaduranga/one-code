@@ -34,23 +34,31 @@ export function listKey(api: string): "messages" | "input" | "contents" {
 /** A Bedrock Converse `{ cachePoint }` block: a marker that is a whole list element. */
 const isCachePoint = (value: unknown): boolean => isObject(value) && Object.keys(value).length === 1 && "cachePoint" in value;
 
-/** `value` without cache markers (`cache_control`, Bedrock `cachePoint` blocks), deeply. */
+/**
+ * Fields that hold the model's or a tool author's data, never a cache marker:
+ * a tool call's input (`input`, Google's `args`, Bedrock's `toolUse.input`, a
+ * Responses call's `arguments`) and a tool's schema. A `cache_control` key
+ * inside one is content.
+ */
+const DATA_FIELDS: ReadonlySet<string> = new Set(["input", "args", "arguments", "input_schema", "inputSchema", "parameters"]);
+
+/** `value` without cache markers (`cache_control`, Bedrock `cachePoint` blocks), deeply, except inside `DATA_FIELDS`. */
 export function stripMarkers<T>(value: T): T {
 	if (Array.isArray(value)) return value.filter((item) => !isCachePoint(item)).map(stripMarkers) as T;
 	if (!isObject(value)) return value;
 	const out: Record<string, unknown> = {};
-	for (const [key, item] of Object.entries(value)) if (key !== "cache_control") out[key] = stripMarkers(item);
+	for (const [key, item] of Object.entries(value)) if (key !== "cache_control") out[key] = DATA_FIELDS.has(key) ? item : stripMarkers(item);
 	return out as T;
 }
 
 /** JSON with sorted keys and without cache markers, so neither key order nor a marker changes a hash; `undefined` fields drop out as in JSON. */
-function canonical(value: unknown): string {
-	if (Array.isArray(value)) return `[${value.filter((item) => !isCachePoint(item)).map((item) => (item === undefined ? "null" : canonical(item))).join(",")}]`;
+function canonical(value: unknown, data = false): string {
+	if (Array.isArray(value)) return `[${value.filter((item) => data || !isCachePoint(item)).map((item) => (item === undefined ? "null" : canonical(item, data))).join(",")}]`;
 	if (!isObject(value)) return JSON.stringify(value) ?? "null";
 	const fields = Object.keys(value)
-		.filter((key) => key !== "cache_control" && value[key] !== undefined)
+		.filter((key) => (data || key !== "cache_control") && value[key] !== undefined)
 		.sort()
-		.map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`);
+		.map((key) => `${JSON.stringify(key)}:${canonical(value[key], data || DATA_FIELDS.has(key))}`);
 	return `{${fields.join(",")}}`;
 }
 
@@ -67,6 +75,47 @@ const NESTED_OMIT: Record<string, readonly string[]> = {
 	config: ["maxOutputTokens", "abortSignal"],
 	inferenceConfig: ["maxTokens"],
 };
+
+/** The largest output cap pi's cache warmer sends: `maxTokens: 1`, which an API with a floor raises (Responses takes 16). */
+const WARM_CAP = 16;
+
+/** The payload's output caps, top-level and nested, wherever the API puts them. */
+function outputCaps(payload: WirePayload): number[] {
+	const caps: number[] = [];
+	for (const [key, value] of Object.entries(payload)) {
+		if (CAP_KEYS.has(key) && typeof value === "number") caps.push(value);
+		const nested = NESTED_OMIT[key];
+		if (nested && isObject(value)) for (const field of nested) if (typeof value[field] === "number") caps.push(value[field] as number);
+	}
+	return caps;
+}
+
+/** Whether `payload` carries pi's cache-warm output cap (a real session request asks for more, except an over-window one, which comes with a fresh plan). */
+export function hasWarmCap(payload: WirePayload): boolean {
+	const caps = outputCaps(payload);
+	return caps.length > 0 && caps.every((cap) => cap <= WARM_CAP);
+}
+
+/** `body` with the request-only fields of `from` (its output caps, Google's abort signal) in place of its own. */
+export function withRequestFields(body: WirePayload, from: WirePayload): WirePayload {
+	const out: WirePayload = { ...body };
+	for (const key of CAP_KEYS) {
+		if (key in from) out[key] = from[key];
+		else delete out[key];
+	}
+	for (const [key, fields] of Object.entries(NESTED_OMIT)) {
+		const source = from[key];
+		const target = out[key];
+		if (!isObject(source) || !isObject(target)) continue;
+		const merged: Record<string, unknown> = { ...target };
+		for (const field of fields) {
+			if (field in source) merged[field] = source[field];
+			else delete merged[field];
+		}
+		out[key] = merged;
+	}
+	return out;
+}
 
 /** The head of a payload: every body field outside the list and the output cap, markers stripped. */
 export function payloadHead(payload: WirePayload, api: string): Record<string, unknown> {
@@ -323,6 +372,36 @@ export function spliceRequest(base: RecordedRequest, payload: WirePayload, api: 
 	const tail = list.slice(preludeLength(list, api));
 	const prefix = structuredClone(base.list.slice(0, appendPoint(base.list, api)));
 	return { ...withRecordedHead(payload, base.head, api, loadedInList(base.list)), [listKey(api)]: [...prefix, ...tail] };
+}
+
+/** The first `cache_control` marker on a list element or one of its content blocks. */
+function listMarker(list: readonly unknown[]): unknown {
+	for (const element of list) {
+		if (!isObject(element)) continue;
+		if (element.cache_control !== undefined) return element.cache_control;
+		if (Array.isArray(element.content)) for (const block of element.content) if (isObject(block) && block.cache_control !== undefined) return block.cache_control;
+	}
+	return undefined;
+}
+
+/**
+ * The recorded request `base` as a body to send again, under `payload`'s
+ * request-only fields (a cache warm that outlived the instance that sent it:
+ * pi's own rendering of its context is the cut tail). pi's conversation
+ * marker goes back on the last block before the trailing directives, where pi
+ * put it.
+ */
+export function recordedBody(base: RecordedRequest, payload: WirePayload, api: string): WirePayload {
+	const list = structuredClone(base.list);
+	const mark = listMarker(payloadList(payload, api));
+	const last = list[appendPoint(list, api) - 1];
+	if (mark !== undefined && isObject(last)) {
+		const blocks = Array.isArray(last.content) ? last.content : undefined;
+		const target = blocks?.at(-1);
+		if (isObject(target)) target.cache_control = mark;
+		else if (!blocks) last.cache_control = mark;
+	}
+	return withRequestFields({ ...withRecordedHead(payload, base.head, api, loadedInList(base.list)), [listKey(api)]: list }, payload);
 }
 
 /**

@@ -44,10 +44,11 @@ describe("planRequest", () => {
 		expect(planRequest(foldBranch(branchWith({ count: 3, role: "user", timestamp: 3 })), messages).plan.cause).toBe("empty");
 	});
 
-	it("opens an epoch over a base no reply followed (a process that died mid-stream), whose list may end in system messages", () => {
+	it("takes no base from a request no reply followed (a process that died mid-stream): it counts nothing", () => {
 		const { plan, tailStart } = planRequest(foldBranch(branchWith({ count: 1, role: "user", timestamp: 1 }, false)), messages);
 		expect(plan.epoch).toBe(true);
-		expect(plan.cause).toBe("coverage");
+		expect(plan.cause).toBe("first");
+		expect(plan.base).toBeUndefined();
 		expect(tailStart).toBe(0);
 	});
 });
