@@ -63,7 +63,7 @@ import { type DescriptionForm, followDescriptionForm, registerVariantTool } from
 import { agentDescription } from "./agent-description.ts";
 import { prepareAgentArguments } from "./agent-args.ts";
 import { projectConfigDirName } from "../lib/config-mode.ts";
-import { pendingClaimReminder } from "./pending-claim.ts";
+import { pendingClaimReminder, runningAfterCompactionReminder } from "./pending-claim.ts";
 import { watchPermissionBridge } from "../permissions/subagent-gate.ts";
 import { watchHookBridge } from "../hooks/subagent-bridge.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, type ReminderPayload, toldBlockFact } from "../lib/reminders.ts";
@@ -778,11 +778,24 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		if (live) emitModelStatus(live);
 	});
 	// A compaction opens an epoch, which renders the three blocks from live state:
-	// refresh them, so a catalog that changed on disk since is current.
+	// refresh them, so a catalog that changed on disk since is current. The calls
+	// that started the background runs went into the summary, so the runs still
+	// going are named once on the new epoch's first request.
 	pi.on("session_compact", (_event, ctx) => {
 		emitModelStatus(ctx);
 		emitAgentCatalog(ctx);
 		emitDelegationSteer();
+		const going = [...registry.list()]
+			.filter((record) => runningIds.has(record.taskId) || (residents.get(record.taskId) !== undefined && residentPending(residents.get(record.taskId) as Resident)))
+			.map((record) => ({ name: record.name, taskId: record.taskId }));
+		const text = runningAfterCompactionReminder(going);
+		if (text) pi.events.emit(REMINDER_CHANNEL, { text, key: "subagents-running-after-compaction", untilCompaction: true });
+	});
+	// The catalog is read from disk at each run's start, so an agent file added
+	// or deleted mid-session reaches the model: the render step announces a
+	// changed catalog, live minus what the epoch told (R3-M28).
+	pi.on("before_agent_start", (_event, ctx) => {
+		emitAgentCatalog(ctx);
 	});
 	// The selected branch's runs: the abandoned branch's finished ones are not
 	// addressable from it (SendMessage, list_agents), as on a resume. A run still

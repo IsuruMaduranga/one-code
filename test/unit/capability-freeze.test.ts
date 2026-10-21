@@ -145,6 +145,37 @@ describe("subagent blocks", () => {
 	});
 });
 
+describe("agent catalog read at each run's start (R3-M28)", () => {
+	const root = mkdtempSync(join(tmpdir(), "capability-agents-"));
+	const cwd = join(root, "project");
+	beforeAll(() => {
+		mkdirSync(join(cwd, ".claude", "agents"), { recursive: true });
+		mkdirSync(join(root, "agent"), { recursive: true });
+		vi.stubEnv("PI_CODING_AGENT_DIR", join(root, "agent"));
+		stubHome(root);
+	});
+	afterAll(() => {
+		vi.unstubAllEnvs();
+		rmSync(root, { recursive: true, force: true });
+	});
+
+	it("announces an agent file added mid-session on the next run, live minus told", async () => {
+		const main = { provider: "openai", id: "main", name: "main", input: ["text"], cost: { input: 2, output: 8 } };
+		const fake = createFakePi();
+		const reminders: Array<Reminder & { facts?: ToldFact[] }> = [];
+		fake.events.on(REMINDER_CHANNEL, (r) => reminders.push(r as Reminder));
+		subagentsExtension(fake.pi as never);
+		const ctx = createFakeCtx({ cwd, model: main, modelRegistry: { getAvailable: () => [main] }, sessionManager: { getSessionId: () => "s", getBranch: () => fake.branch } });
+		await fake.fire("session_start", {}, ctx);
+		const told = [...liveFacts(reminders, "subagent-models"), ...liveFacts(reminders, "subagent-agents")];
+		writeFileSync(join(cwd, ".claude", "agents", "reviewer.md"), "---\nname: reviewer\ndescription: Reviews a diff\n---\nReview it.\n");
+		await fake.fire("before_agent_start", { prompt: "go", systemPromptOptions: {} }, ctx);
+		const blocks = render(fake, told);
+		expect(blocks).toHaveLength(1);
+		expect(blocks[0].text).toContain("reviewer");
+	});
+});
+
 describe("loaded tools at a compaction", () => {
 	const call = (name: string) => ({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "c1", name, arguments: {} }] } });
 	const load = (callId: string, added: string[]) => ({
