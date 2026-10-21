@@ -70,7 +70,7 @@ describe("claude-context's resumed-session check", () => {
 		await fake.fire("session_start", { reason: "startup" }, ctx);
 		await fake.fire("turn_start", {}, ctx);
 		const render = (facts: readonly ToldFact[]) => renderRequest(fake.events, { facts }).map((block) => block.text);
-		return { facts, render };
+		return { facts, render, events: fake.events };
 	}
 
 	it("says once, on the first request of a resumed process, what changed since the epoch's message 1", async () => {
@@ -79,10 +79,15 @@ describe("claude-context's resumed-session check", () => {
 		writeFileSync(join(cwd, "CLAUDE.md"), "new instructions\n");
 		writeFileSync(memory, "new memory\n");
 		const resumed = await open();
-		const notices = resumed.render(told).filter((text) => text.startsWith("Since the saved context snapshot"));
+		const blocks = renderRequest(resumed.events, { facts: told });
+		const notices = blocks.map((block) => block.text).filter((text) => text.startsWith("Since the saved context snapshot"));
 		expect(notices).toHaveLength(1);
 		expect(notices[0]).toContain("the memory index changed; CLAUDE.md-family instructions changed");
-		expect(resumed.render(told).filter((text) => text.startsWith("Since the saved context snapshot"))).toHaveLength(0);
+		// The request failed (nothing new told): the retry says it again.
+		expect(resumed.render(told).filter((text) => text.startsWith("Since the saved context snapshot"))).toHaveLength(1);
+		// Answered: its facts are told, so nothing more.
+		const delivered = [...told, ...blocks.flatMap((block) => block.facts ?? [])];
+		expect(resumed.render(delivered).filter((text) => text.startsWith("Since the saved context snapshot"))).toHaveLength(0);
 	});
 
 	it("tells the absence of instructions, so a CLAUDE.md added between sessions is noticed on resume", async () => {

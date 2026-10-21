@@ -35,6 +35,24 @@ describe("plan-mode wiring", () => {
 		rmSync(stateDir, { recursive: true, force: true });
 	});
 
+	it("keeps the run's plan-file entry state across a /reload, though the model created the file since", async () => {
+		const branch = () => fake.branch;
+		await fake.fireOne("session_start", {}, createFakeCtx({ cwd: stateDir, sessionManager: { getBranch: branch } }));
+		fake.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "plan", paused: false });
+		const before = reminders.filter((r) => r.key === "permission-mode" && !r.remove).at(-1)?.text;
+		mkdirSync(join(planFiles[0].path, ".."), { recursive: true });
+		writeFileSync(planFiles[0].path, "# the plan\n");
+		// /reload: a new instance on the same branch, still in plan mode.
+		const reloaded = createFakePi();
+		const after: Array<{ key?: string; text?: string; remove?: boolean }> = [];
+		reloaded.events.on(REMINDER_CHANNEL, (data) => after.push(data as never));
+		planModeExtension(reloaded.pi as never);
+		const entries = [...fake.branch];
+		await reloaded.fireOne("session_start", { reason: "reload" }, createFakeCtx({ cwd: stateDir, sessionManager: { getBranch: () => [...entries, ...reloaded.branch] } }));
+		reloaded.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "plan", paused: false });
+		expect(after.filter((r) => r.key === "permission-mode" && !r.remove).at(-1)?.text).toBe(before);
+	});
+
 	it("re-installs the sticky plan block and announces the plan file synchronously when the mode becomes plan mid-turn", async () => {
 		await fake.fireOne("session_start", {}, createFakeCtx({ cwd: stateDir }));
 		fake.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "plan", paused: false });

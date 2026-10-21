@@ -282,10 +282,13 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		if (connection.resources.length > 0 || connection.resourceTemplates?.length) registerResourceTools();
 	};
 
+	/** Servers with a connect in flight (startup, a reconnect, an authenticate): not dropped while it runs. */
+	const connectingNames = new Set<string>();
 	const connectOne = async (server: McpServer): Promise<void> => {
 		failures = failures.filter((f) => f.server.name !== server.name);
 		oauthNeeded.delete(server.name);
 		const provider = server.kind === "http" && hasStoredTokens(server) ? silentProvider(server) : undefined;
+		connectingNames.add(server.name);
 		try {
 			const connection = await connect(server, provider);
 			if (!alive()) {
@@ -297,6 +300,8 @@ export default function mcpExtension(pi: ExtensionAPI) {
 			if (!alive()) return;
 			if (server.kind === "http" && isUnauthorized(error)) oauthNeeded.add(server.name);
 			else failures.push({ server, error: (error as Error).message });
+		} finally {
+			connectingNames.delete(server.name);
 		}
 	};
 
@@ -349,7 +354,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	pi.events.on(RENDER_CHANNEL, (data) => {
 		const request = data as RenderRequest;
 		if (request.epoch) return;
-		const delta = mcpDelta(request.toldBlocks, liveSnapshot(), !connectSettled);
+		const delta = mcpDelta(request.toldBlocks, liveSnapshot(), !connectSettled, connectingNames);
 		const notices = mcpChangeNotices(delta);
 		notices.forEach((text, i) => request.blocks.push({ text, ...(i === 0 ? { facts: delta.facts } : {}) }));
 	});

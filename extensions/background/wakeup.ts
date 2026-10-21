@@ -40,6 +40,10 @@ export interface WakeupSchedule {
 	scheduledFor: number;
 	clampedDelaySeconds: number;
 	wasClamped: boolean;
+	/** The store's job id, so a cron_delete of it is matched when the branch is replayed. */
+	jobId?: string;
+	/** When this prompt's loop started: its age carries across a /reload. */
+	startedAt: number;
 }
 
 interface PromptAge {
@@ -58,6 +62,11 @@ export class DynamicLoop {
 		private readonly store: CronStore,
 		private readonly maxAgeMs = RECURRING_MAX_AGE_MS,
 	) {}
+
+	/** When the loop for `prompt` started, if it is running. */
+	chainStart(prompt: string): number | undefined {
+		return this.ages.get(prompt)?.startedAt;
+	}
 
 	/** A pending wakeup exists. */
 	hasPending(): boolean {
@@ -82,10 +91,20 @@ export class DynamicLoop {
 		const wasClamped = !(delaySeconds >= MIN_DELAY_SECONDS && delaySeconds <= MAX_DELAY_SECONDS);
 		const scheduledFor = now + clamped * 1000;
 		const target = new Date(scheduledFor);
-		this.store.create({ cron: `${target.getMinutes()} ${target.getHours()} * * *`, prompt, recurring: false, source: "wakeup", fireAt: scheduledFor }, now);
+		const created = this.store.create({ cron: `${target.getMinutes()} ${target.getHours()} * * *`, prompt, recurring: false, source: "wakeup", fireAt: scheduledFor }, now);
 		this.ages.set(prompt, { startedAt, lastScheduledFor: scheduledFor });
 		if (viaKeepalive) this.misses++;
-		return { scheduledFor, clampedDelaySeconds: clamped, wasClamped };
+		return { scheduledFor, clampedDelaySeconds: clamped, wasClamped, startedAt, ...(created.ok ? { jobId: created.job.id } : {}) };
+	}
+
+	/**
+	 * Take back a pending wakeup's loop state from the branch (a /reload, a
+	 * /tree switch): its age, and whether the keepalive armed it, which spends
+	 * the loop's one fallback.
+	 */
+	restoreChain(prompt: string, startedAt: number, scheduledFor: number, viaKeepalive: boolean): void {
+		this.ages.set(prompt, { startedAt, lastScheduledFor: scheduledFor });
+		this.misses = viaKeepalive ? 1 : 0;
 	}
 
 	/**

@@ -27,6 +27,20 @@ describe("mcpFacts", () => {
 });
 
 describe("mcpDelta", () => {
+	it("tells one failure per server, so two kept errors do not alternate request to request", () => {
+		const told = toldBy({ connected: [], failed: [] });
+		const snapshot = { connected: [], failed: [{ name: "gh", error: "401" }, { name: "gh", error: "timeout" }] };
+		const first = announce(told, snapshot);
+		expect(first.newFailures).toEqual([{ name: "gh", error: "timeout" }]);
+		expect(changes(announce(told, snapshot))).toEqual(nothing);
+	});
+
+	it("does not report a server dropped while its reconnect is in flight", () => {
+		const told = toldBy({ connected: [{ name: "a", instructions: "x" }], failed: [] });
+		expect(mcpDelta(told, { connected: [], failed: [] }, false, new Set(["a"])).dropped).toEqual([]);
+		expect(mcpDelta(told, { connected: [], failed: [] }).dropped).toEqual(["a"]);
+	});
+
 	it("reports a newly connected server's instructions once", () => {
 		const told: Told = new Map();
 		const delta = announce(told, { connected: [{ name: "deepwiki", instructions: "Use ask_question." }, { name: "quiet" }], failed: [] });

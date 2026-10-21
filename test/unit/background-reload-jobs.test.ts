@@ -45,6 +45,15 @@ describe("scheduledJobsOnBranch", () => {
 		expect(scheduledJobsOnBranch([...wakeup("w1", "tick", 61_000), fire("wakeup", "x", false), keepalive]).map((job) => [job.id, job.fireAt])).toEqual([["k1", 900_000]]);
 	});
 
+	it("replays a wakeup under the store's id, so a cron_delete of it holds, with its loop start", () => {
+		const branch = [
+			call("w1", "schedule_wakeup", { delaySeconds: 60, prompt: "tick", reason: "r", noop: false }),
+			result("w1", "schedule_wakeup", { scheduledFor: 61_000, jobId: "abc12345", startedAt: 500 }),
+		];
+		expect(scheduledJobsOnBranch(branch).map((job) => [job.id, job.chainStartedAt])).toEqual([["abc12345", 500]]);
+		expect(scheduledJobsOnBranch([...branch, call("d1", "cron_delete", { id: "abc12345" }), result("d1", "cron_delete", { jobId: "abc12345" })])).toEqual([]);
+	});
+
 	it("keeps only the latest wakeup, until it fires or the loop stops", () => {
 		const wakeup = (id: string, prompt: string, scheduledFor: number) => [call(id, "schedule_wakeup", { delaySeconds: 60, prompt, reason: "r", noop: false }), result(id, "schedule_wakeup", { scheduledFor })];
 		const scheduled = [...wakeup("w1", "first", 61_000), ...wakeup("w2", "second", 121_000)];

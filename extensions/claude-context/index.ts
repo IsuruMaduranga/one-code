@@ -385,9 +385,12 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	pi.events.on(RENDER_CHANNEL, (data) => {
 		const request = data as RenderRequest;
 		if (request.epoch) {
-			// This request renders the live blocks as message 1.
+			// This request renders the live blocks as message 1: with today's date,
+			// even when it opens past local midnight (a model switch, a fold).
 			resumeCheck = false;
 			if (files) adoptShown(files);
+			const today = localDate();
+			if (blockDate && blockDate !== today) emitDate(today);
 			return;
 		}
 		const today = localDate();
@@ -398,10 +401,12 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 			emitDate(today);
 		}
 		if (!resumeCheck || !livePrints) return;
-		resumeCheck = false;
 		const atCompaction = request.modes.get(FACT_KEYS.compaction) ?? false;
 		const notice = resumeFactsNotice(request.toldBlocks, atCompaction, atCompaction ? livePrints.atCompaction() : livePrints.atStart);
+		// Checked until a request shows the notice told (its facts are the live
+		// fingerprints): a failed request revokes them, so the retry says it again.
 		if (notice) request.blocks.push(notice);
+		else resumeCheck = false;
 	});
 
 	// All successful compactions (manual, automatic and idle) fire this hook. The

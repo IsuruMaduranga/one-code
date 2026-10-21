@@ -67,20 +67,23 @@ export function mcpFacts(snapshot: McpSnapshot): ToldFact[] {
 /**
  * What changed since the epoch told `told` (whole-text block hashes by key),
  * and the facts announcing it tells. While the startup connections are still
- * `settling`, a server not connected yet is not a drop.
+ * `settling`, a server not connected yet is not a drop, and neither is one in
+ * `connecting` (a reconnect in flight).
  */
-export function mcpDelta(told: ReadonlyMap<string, string>, snapshot: McpSnapshot, settling = false): McpDelta {
+export function mcpDelta(told: ReadonlyMap<string, string>, snapshot: McpSnapshot, settling = false, connecting: ReadonlySet<string> = new Set()): McpDelta {
 	const connectedNames = new Set(snapshot.connected.map((c) => c.name));
-	const failedNames = new Set(snapshot.failed.map((f) => f.name));
+	// One failure per server (the latest): two kept errors would alternate as the told fact.
+	const failed = [...new Map(snapshot.failed.map((f) => [f.name, f])).values()];
+	const failedNames = new Set(failed.map((f) => f.name));
 	const toldNames = (prefix: string) => [...told].filter(([key, hash]) => key.startsWith(prefix) && hash !== NONE).map(([key]) => key.slice(prefix.length));
 	const newInstructions = snapshot.connected
 		.filter((c) => c.instructions && told.get(INSTRUCTED + c.name) !== instructedFact(c.name, c.instructions).hash)
 		.map((c) => ({ name: c.name, instructions: displayedInstructions(c.name, c.instructions as string) }));
-	const newFailures = snapshot.failed
+	const newFailures = failed
 		.filter((f) => told.get(FAILED + f.name) !== failedFact(f.name, f.error).hash)
 		.map((f) => ({ name: f.name, error: displayedFailure(f.error) }));
 	const recovered = toldNames(FAILED).filter((name) => connectedNames.has(name));
-	const dropped = settling ? [] : toldNames(INSTRUCTED).filter((name) => !connectedNames.has(name) && !failedNames.has(name));
+	const dropped = settling ? [] : toldNames(INSTRUCTED).filter((name) => !connectedNames.has(name) && !failedNames.has(name) && !connecting.has(name));
 	return {
 		newInstructions,
 		newFailures,

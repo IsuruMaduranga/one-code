@@ -880,17 +880,30 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		query.body = loopSkillPrompt(query.args, readLoopFile(query.cwd));
 	});
 
+	/** Arm the branch's scheduled jobs, with each wakeup's loop age and keepalive spend. */
+	const armFromBranch = (ctx: ExtensionContext) => {
+		const now = Date.now();
+		for (const job of scheduledJobsOnBranch(ctx.sessionManager.getBranch() as never)) {
+			if (!cron.restore(job, now) || job.source !== "wakeup") continue;
+			dynamicLoop.restoreChain(job.prompt, job.chainStartedAt ?? job.createdAt, job.fireAt ?? now, job.keepalive === true);
+		}
+		runCron();
+	};
+	// The jobs follow the branch: a /tree switch ends the abandoned branch's and
+	// arms the selected one's (a subagent's own jobs stay with the agent).
+	pi.on("session_tree", (_event, ctx) => {
+		lastCtx = ctx;
+		cron.deleteWhere((job) => job.agentId === undefined);
+		dynamicLoop.clear();
+		armFromBranch(ctx);
+	});
 	pi.on("session_start", (event, ctx) => {
 		lastCtx = ctx;
 		sessionCwd = ctx.cwd;
 		// A /reload keeps the process and the conversation, so the session's
 		// scheduled jobs come back from the branch (design.md section 13); a new
 		// process ends them, as Claude Code's session-only jobs end.
-		if (event.reason === "reload") {
-			const now = Date.now();
-			for (const job of scheduledJobsOnBranch(ctx.sessionManager.getBranch() as never)) cron.restore(job, now);
-			runCron();
-		}
+		if (event.reason === "reload") armFromBranch(ctx);
 		if (pendingShutdownNotice) {
 			const notice = pendingShutdownNotice;
 			pendingShutdownNotice = undefined;
@@ -906,7 +919,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		// one fallback, recorded so a /reload re-arms it (no tool result does).
 		if (dynamicLoop.settle(Date.now()) === "armed") {
 			const armed = cron.list().find((job) => job.source === "wakeup");
-			if (armed) pi.appendEntry(WAKEUP_ARMED_ENTRY, { id: armed.id, prompt: armed.prompt, fireAt: armed.nextFireAt });
+			if (armed) pi.appendEntry(WAKEUP_ARMED_ENTRY, { id: armed.id, prompt: armed.prompt, fireAt: armed.nextFireAt, startedAt: dynamicLoop.chainStart(armed.prompt) });
 		}
 		runCron();
 	});

@@ -691,8 +691,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				notifyModelOnce(ctx, `${warning.text} ${warning.fix}`);
 			}
 		}
-		// Every refusal since the menu was last told, each named; the latest default stands.
+		// Every refusal since the menu was last told, each named, with the default as it is now.
 		if (refused !== undefined) refusal = { refused: [...(refusal?.refused ?? []).filter((model) => model !== refused), refused], replacement: resolution.model };
+		else if (refusal) refusal = { ...refusal, replacement: resolution.model };
 		publishBlock("subagent-models", text);
 		pi.events.emit(SUBAGENT_STATUS_CHANNEL, subagentStatusModel(configured, resolution));
 	};

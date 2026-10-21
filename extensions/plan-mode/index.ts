@@ -34,6 +34,10 @@ import type { PermissionMode } from "../permissions/matcher.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../permissions/modes.ts";
 import { buildPlanModeReminder } from "./reminder.ts";
 import { randomSlug } from "./slug.ts";
+import { readState, recordState } from "../lib/ledger/state.ts";
+
+/** The branch's record of whether the plan file existed when the current plan-mode run began. */
+const PLAN_ENTRY_STATE = "plan-mode:entry";
 import {
 	approvedPlanText,
 	ENTER_PLAN_MODE_DESCRIPTION,
@@ -89,7 +93,8 @@ export default function planModeExtension(pi: ExtensionAPI) {
 	 * Whether the plan file existed when plan mode came on, which picks Claude
 	 * Code's "Plan File Info" line. Fixed for the mode's whole run, so the sticky
 	 * block stays byte-identical turn after turn (plan-mode/reminder.ts);
-	 * cleared when the mode ends.
+	 * cleared when the mode ends. Recorded on the branch (`PLAN_ENTRY_STATE`)
+	 * with its path, so a /reload or resume inside the same run keeps it.
 	 */
 	let planExistedAtEntry: boolean | undefined;
 
@@ -112,7 +117,14 @@ export default function planModeExtension(pi: ExtensionAPI) {
 	/** Re-announce path + reminder; a re-emit replaces the sticky state by key. */
 	const refresh = (ctx: ExtensionContext, toolCallId?: string) => {
 		const path = ensurePlanFile(ctx);
-		planExistedAtEntry ??= existsSync(path);
+		if (planExistedAtEntry === undefined) {
+			const stored = readState(ctx, PLAN_ENTRY_STATE) as { path?: unknown; existed?: unknown } | undefined;
+			if (stored?.path === path && typeof stored.existed === "boolean") planExistedAtEntry = stored.existed;
+			else {
+				planExistedAtEntry = existsSync(path);
+				recordState(pi, PLAN_ENTRY_STATE, { path, existed: planExistedAtEntry });
+			}
+		}
 		pi.events.emit(PLAN_FILE_CHANNEL, { path });
 		pi.events.emit(REMINDER_CHANNEL, {
 			text: buildPlanModeReminder(path, planExistedAtEntry),
@@ -150,6 +162,8 @@ export default function planModeExtension(pi: ExtensionAPI) {
 		currentMode = status.mode;
 		if (currentMode === "plan" && previous !== "plan") modeBeforePlan = previous as PermissionMode | undefined;
 		if (currentMode !== "plan") planExistedAtEntry = undefined;
+		// The run ended: the next entry decides afresh.
+		if (previous === "plan" && currentMode !== "plan") recordState(pi, PLAN_ENTRY_STATE, null);
 		// Entering plan mode mid-turn: permissions' setMode has just closed the
 		// shared "permission-mode" key (before broadcasting this status, so this
 		// re-add is not undone) and will announce the change on the next tool

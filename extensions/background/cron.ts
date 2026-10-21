@@ -408,6 +408,9 @@ export interface RecordedJob {
 	fireAt?: number;
 	/** A recurring job's last fire on the branch: the next one is due after it. */
 	lastFiredAt?: number;
+	/** A wakeup's loop start, and whether the keepalive armed it (DynamicLoop.restoreChain). */
+	chainStartedAt?: number;
+	keepalive?: boolean;
 }
 
 type BranchEntry = { type?: string; timestamp?: string; customType?: string; details?: unknown; data?: unknown; message?: unknown };
@@ -421,7 +424,7 @@ export const JOB_FIRED_ENTRY = "one-code:job-fired";
 
 /**
  * The custom entry the loop's keepalive writes when it arms a wakeup itself
- * (`{ id, prompt, fireAt }`): no `schedule_wakeup` result records that one.
+ * (`{ id, prompt, fireAt, startedAt }`): no `schedule_wakeup` result records that one.
  */
 export const WAKEUP_ARMED_ENTRY = "one-code:wakeup-armed";
 type Message = { role?: string; toolName?: string; toolCallId?: string; isError?: boolean; details?: unknown; content?: unknown; timestamp?: number };
@@ -440,11 +443,22 @@ export function scheduledJobsOnBranch(branch: readonly BranchEntry[]): RecordedJ
 	};
 	for (const entry of branch) {
 		if (entry.type === "custom" && entry.customType === WAKEUP_ARMED_ENTRY) {
-			const armed = entry.data as { id?: unknown; prompt?: unknown; fireAt?: unknown } | undefined;
+			const armed = entry.data as { id?: unknown; prompt?: unknown; fireAt?: unknown; startedAt?: unknown } | undefined;
 			if (typeof armed?.id !== "string" || typeof armed.prompt !== "string" || typeof armed.fireAt !== "number") continue;
 			dropWakeups();
 			const target = new Date(armed.fireAt);
-			jobs.set(armed.id, { id: armed.id, cron: `${target.getMinutes()} ${target.getHours()} * * *`, prompt: armed.prompt, recurring: false, source: "wakeup", createdAt: Date.parse(entry.timestamp ?? "") || 0, fireAt: armed.fireAt });
+			const createdAt = Date.parse(entry.timestamp ?? "") || 0;
+			jobs.set(armed.id, {
+				id: armed.id,
+				cron: `${target.getMinutes()} ${target.getHours()} * * *`,
+				prompt: armed.prompt,
+				recurring: false,
+				source: "wakeup",
+				createdAt,
+				fireAt: armed.fireAt,
+				chainStartedAt: typeof armed.startedAt === "number" ? armed.startedAt : createdAt,
+				keepalive: true,
+			});
 			continue;
 		}
 		const fired = entry.type === "custom" && entry.customType === JOB_FIRED_ENTRY;
@@ -482,7 +496,10 @@ export function scheduledJobsOnBranch(branch: readonly BranchEntry[]): RecordedJ
 			if (details.stopped === true || typeof details.scheduledFor === "number") dropWakeups();
 			if (typeof details.scheduledFor === "number" && details.scheduledFor > 0 && typeof args.prompt === "string") {
 				const target = new Date(details.scheduledFor);
-				jobs.set(`w-${message.toolCallId}`, { id: `w-${message.toolCallId}`, cron: `${target.getMinutes()} ${target.getHours()} * * *`, prompt: args.prompt, recurring: false, source: "wakeup", createdAt: at, fireAt: details.scheduledFor });
+				// The store's own id, so a cron_delete of the wakeup removes it here too.
+				const id = typeof details.jobId === "string" ? details.jobId : `w-${message.toolCallId}`;
+				const chainStartedAt = typeof details.startedAt === "number" ? details.startedAt : at;
+				jobs.set(id, { id, cron: `${target.getMinutes()} ${target.getHours()} * * *`, prompt: args.prompt, recurring: false, source: "wakeup", createdAt: at, fireAt: details.scheduledFor, chainStartedAt });
 			}
 		}
 	}

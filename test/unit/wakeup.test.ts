@@ -19,7 +19,7 @@ describe("DynamicLoop (Claude Code's loop core, 2.1.282)", () => {
 	it("stores a wakeup as a one-shot job naming its minute, firing at the exact time", () => {
 		const { store, loop } = newLoop();
 		const scheduled = loop.schedule(90, "poll", at(14, 3, 20));
-		expect(scheduled).toEqual({ scheduledFor: at(14, 4, 50), clampedDelaySeconds: 90, wasClamped: false });
+		expect(scheduled).toEqual({ scheduledFor: at(14, 4, 50), clampedDelaySeconds: 90, wasClamped: false, startedAt: at(14, 3, 20), jobId: store.list()[0]?.id });
 		expect(store.list()).toMatchObject([{ cron: "4 14 * * *", recurring: false, source: "wakeup", nextFireAt: at(14, 4, 50) }]);
 	});
 
@@ -87,6 +87,14 @@ describe("DynamicLoop (Claude Code's loop core, 2.1.282)", () => {
 		expect(store.size).toBe(0);
 	});
 
+	it("a keepalive wakeup restored from the branch has spent the fallback: its own empty turn ends the loop", () => {
+		const { store, loop } = newLoop();
+		loop.restoreChain("tick", at(11, 0), at(12, 0), true);
+		loop.inFlight = "tick";
+		expect(loop.settle(at(12, 1), true)).toBe("ended");
+		expect(store.size).toBe(0);
+	});
+
 	it("keepalive stays out of a turn that scheduled its own wakeup, and resets when the model schedules", () => {
 		const { store, loop } = newLoop();
 		loop.inFlight = "tick";
@@ -109,7 +117,7 @@ describe("DynamicLoop (Claude Code's loop core, 2.1.282)", () => {
 
 describe("schedule_wakeup texts", () => {
 	it("formats the scheduled result in local time", () => {
-		expect(formatScheduled({ scheduledFor: at(14, 5, 9), clampedDelaySeconds: 300, wasClamped: false }, at(14, 0, 9))).toBe(
+		expect(formatScheduled({ scheduledFor: at(14, 5, 9), clampedDelaySeconds: 300, wasClamped: false, startedAt: at(14, 0, 9) }, at(14, 0, 9))).toBe(
 			"Next wakeup scheduled for 14:05:09 (in 300s). Nothing more to do this turn — the harness re-invokes you when the wakeup fires or a task-notification arrives.",
 		);
 	});
