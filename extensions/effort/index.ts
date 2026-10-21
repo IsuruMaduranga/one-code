@@ -21,6 +21,7 @@
  * same shape the permissions extension uses for plan mode.
  */
 
+import os from "node:os";
 import { join } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
@@ -50,6 +51,7 @@ import {
 	ULTRACODE_STATUS_KEY,
 } from "./slider.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
+import { readWorkflowSettings } from "../lib/one-code-settings.ts";
 import { panelUi } from "../lib/panel-focus.ts";
 import { extendingCompletions } from "../lib/argument-hints.ts";
 
@@ -131,6 +133,8 @@ export default function effortExtension(pi: ExtensionAPI) {
 	pi.on("session_start", cancelEffortNote);
 	pi.on("session_shutdown", cancelEffortNote);
 
+	/** Whether workflows are on for this session, read with workflow's own settings at session start. */
+	let workflowsOn = true;
 	/**
 	 * `record` false when the state comes from the branch itself (a resume, a
 	 * /tree switch); the caller then says whether the branch's model saw it on
@@ -144,7 +148,10 @@ export default function effortExtension(pi: ExtensionAPI) {
 		if (changed) pi.events.emit(ULTRACODE_MODE_CHANNEL, { active: on });
 		// Ultracode follows the branch: recorded on every change.
 		if (changed && record) recordState(pi, ULTRACODE_STATE, on ? { on, level } : { on });
-		if (on) {
+		// With workflows turned off (enableWorkflows/disableWorkflows) the block's
+		// "run a workflow for every task" would steer to a tool the session does
+		// not offer, so ultracode is only its reasoning level there (R3-M21).
+		if (on && workflowsOn) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text: ULTRACODE_STANDING_REMINDER,
 				key: REMINDER_KEY,
@@ -339,6 +346,9 @@ export default function effortExtension(pi: ExtensionAPI) {
 		if (on && tree && pi.getThinkingLevel() !== stored?.level) pi.setThinkingLevel(stored?.level as ThinkingLevel);
 		applyStatus(ctx);
 	};
-	pi.on("session_start", (_event, ctx) => followBranch(ctx, false));
+	pi.on("session_start", (_event, ctx) => {
+		workflowsOn = readWorkflowSettings(ctx.cwd, os.homedir()).enabled;
+		followBranch(ctx, false);
+	});
 	pi.on("session_tree", (_event, ctx) => followBranch(ctx, true));
 }

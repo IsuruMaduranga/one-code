@@ -5,7 +5,7 @@
  * cases for round-1 H4 (the permission mode came back as the settings default)
  * and H3 (a resume revived ultracode's standing block while the mode was off).
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -141,6 +141,18 @@ describe("ultracode follows the branch (H3)", () => {
 		expect((await start([stateEntry("ultracode", { on: true, level: "xhigh" })], "high")).offNotices()).toHaveLength(1);
 		expect((await start([stateEntry("ultracode", { on: false })])).offNotices()).toEqual([]);
 		expect((await start([])).offNotices()).toEqual([]);
+	});
+
+	it("leaves the standing block out while workflows are turned off (R3-M21)", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "ultracode-workflows-"));
+		vi.stubEnv("ONECODE_STATE_DIR", dir);
+		writeFileSync(join(dir, "settings.json"), JSON.stringify({ disableWorkflows: true }));
+		try {
+			expect((await start([stateEntry("ultracode", { on: true, level: "xhigh" })])).standing()).toMatchObject({ remove: true });
+		} finally {
+			vi.unstubAllEnvs();
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	it("puts the branch's level back at a /tree switch, where pi restores none, and keeps ultracode on (R3-M21)", async () => {
