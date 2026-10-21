@@ -11,16 +11,22 @@
  * which a model that takes a mid-conversation system message gets there
  * instead (system-reminder). The scratchpad path the block names embeds the
  * session id — derived at session_start, constant within the session.
+ *
+ * Both are live state with facts: the scratchpad the block names and whether
+ * the run is one-shot. Inside an epoch message 1 is the record, so a /fork
+ * (a new session id, so a new scratchpad) or a session continued in another
+ * run mode is announced on the request's tail, live minus what the epoch
+ * told (RENDER_CHANNEL), never by rewriting message 1.
  */
 
 import { getCurrentSystemMessage } from "@earendil-works/pi-ai";
 import type { BuildSystemPromptOptions, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { environmentBlock, modelLine } from "../lib/environment-block.ts";
 import { GIT_SNAPSHOT_OWNER_CHANNEL } from "../lib/git-status.ts";
-import { oneShotSessionNote, sessionOutlivesTurn } from "../lib/notifications.ts";
+import { interactiveSessionNote, oneShotSessionNote, sessionOutlivesTurn } from "../lib/notifications.ts";
 import { taskToolsEnabled } from "../lib/model-tier.ts";
 import { sessionModelTier } from "../lib/session-model-tier.ts";
-import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, toldBlockFact } from "../lib/reminders.ts";
 import { privateSessionScratchpadDir } from "../lib/scratchpad.ts";
 import { collectEnvironment, type EnvironmentInfo } from "./environment.ts";
 import { totalTokensBlock, turnTokenBudget } from "../context-budget/budget.ts";
@@ -28,6 +34,16 @@ import { optionsForIdleTurn, withSystemHead } from "./idle-turn.ts";
 import { buildClaudeCodeSystemPrompt } from "./template.ts";
 import { WORKSPACE_CHANNEL, type WorkspaceAnnouncement } from "../lib/workspace-channel.ts";
 import { PROMPT_OPTIONS_CHANNEL, type PromptOptionsAnnouncement, SYSTEM_PROMPT_REQUEST_CHANNEL, type SystemPromptRequest } from "../lib/prompt-options.ts";
+
+/** The told fact of the scratchpad the environment block names. */
+const SCRATCHPAD_FACT = "environment:scratchpad";
+/** The told mode of the one-shot run note. */
+const ONE_SHOT_MODE = "one-shot";
+
+/** The notice that this session's scratchpad is not the one message 1 names (a /fork is a new session). */
+function scratchpadChangedNote(dir: string): string {
+	return `This session's scratchpad directory is now ${dir}. Use it for temporary files instead of the scratchpad named earlier in this conversation.`;
+}
 
 export default function systemPromptExtension(pi: ExtensionAPI) {
 	const requestTier = sessionModelTier(pi);
@@ -40,6 +56,8 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 	let workspaceDirs: string[] = [];
 	/** The options the last before_agent_start saw; a turn opened from idle rebuilds from them. */
 	let lastOptions: BuildSystemPromptOptions | undefined;
+	/** Whether this run is one-shot (`-p`, json): the turn_start that queued the blocks saw it. */
+	let oneShotRun = false;
 	pi.events.on(WORKSPACE_CHANNEL, (data) => {
 		const dirs = (data as WorkspaceAnnouncement | undefined)?.dirs;
 		workspaceDirs = Array.isArray(dirs) ? dirs.filter((dir): dir is string => typeof dir === "string") : [];
@@ -91,14 +109,19 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 			key: "environment",
 			placement: "first-prepend",
 			order: CONTEXT_ORDER.environment,
+			facts: [toldBlockFact(SCRATCHPAD_FACT, scratchpad ?? "")],
 		});
-		if (!sessionOutlivesTurn(ctx.mode)) {
+		oneShotRun = !sessionOutlivesTurn(ctx.mode);
+		if (oneShotRun) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text: oneShotSessionNote(),
 				key: "one-shot",
 				placement: "first-prepend",
 				order: CONTEXT_ORDER.oneShot,
+				facts: [{ kind: "mode", key: ONE_SHOT_MODE, on: true }],
 			});
+		} else {
+			pi.events.emit(REMINDER_CHANNEL, { key: "one-shot", remove: true });
 		}
 		if (ctx.model) {
 			pi.events.emit(REMINDER_CHANNEL, {
@@ -107,6 +130,20 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 				placement: "first-prepend",
 				order: CONTEXT_ORDER.modelLine,
 			});
+		}
+	});
+
+	// Inside an epoch, what changed since message 1 was rendered goes on the tail.
+	pi.events.on(RENDER_CHANNEL, (data) => {
+		const request = data as RenderRequest;
+		if (request.epoch || lastOptions?.customPrompt) return;
+		const told = request.toldBlocks.get(SCRATCHPAD_FACT);
+		const live = toldBlockFact(SCRATCHPAD_FACT, scratchpad ?? "");
+		if (told !== undefined && told !== live.hash && scratchpad) {
+			request.blocks.push({ text: scratchpadChangedNote(scratchpad), facts: [live] });
+		}
+		if ((request.modes.get(ONE_SHOT_MODE) ?? false) !== oneShotRun) {
+			request.blocks.push({ text: oneShotRun ? oneShotSessionNote() : interactiveSessionNote(), facts: [{ kind: "mode", key: ONE_SHOT_MODE, on: oneShotRun }] });
 		}
 	});
 

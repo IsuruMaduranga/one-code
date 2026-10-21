@@ -119,9 +119,11 @@ describe("ultracode follows the branch (H3)", () => {
 		const reminders: ReminderPayload[] = [];
 		fake.events.on(REMINDER_CHANNEL, (data) => reminders.push(data as ReminderPayload));
 		effortExtension(fake.pi as never);
-		await fake.fire("session_start", {}, createFakeCtx({ sessionManager: { getBranch: () => branch } }));
+		const ctx = createFakeCtx({ sessionManager: { getBranch: () => branch } });
+		await fake.fire("session_start", {}, ctx);
 		const standing = () => reminders.filter((r) => r.key === "ultracode-mode").at(-1);
-		return { standing };
+		const offNotices = () => reminders.filter((r) => r.key === "ultracode-mode-change");
+		return { fake, ctx, standing, offNotices };
 	}
 
 	it("comes back on with its standing block when the branch recorded it on at pi's restored level", async () => {
@@ -133,6 +135,21 @@ describe("ultracode follows the branch (H3)", () => {
 		expect((await start([stateEntry("ultracode", { on: false })])).standing()).toMatchObject({ remove: true });
 		expect((await start([stateEntry("ultracode", { on: true, level: "xhigh" })], "high")).standing()).toMatchObject({ remove: true });
 		expect((await start([])).standing()).toMatchObject({ remove: true });
+	});
+
+	it("tells the model ultracode ended when the branch's model saw it on and a resume's level moved (R3-M21)", async () => {
+		expect((await start([stateEntry("ultracode", { on: true, level: "xhigh" })], "high")).offNotices()).toHaveLength(1);
+		expect((await start([stateEntry("ultracode", { on: false })])).offNotices()).toEqual([]);
+		expect((await start([])).offNotices()).toEqual([]);
+	});
+
+	it("puts the branch's level back at a /tree switch, where pi restores none, and keeps ultracode on (R3-M21)", async () => {
+		const { fake, ctx, standing, offNotices } = await start([], "medium");
+		const branch = [stateEntry("ultracode", { on: true, level: "xhigh" })];
+		await fake.fire("session_tree", {}, createFakeCtx({ ...ctx, sessionManager: { getBranch: () => branch } }));
+		expect(standing()).toMatchObject({ placement: "sticky-append" });
+		expect(fake.pi.setThinkingLevel).toHaveBeenCalledWith("xhigh");
+		expect(offNotices()).toEqual([]);
 	});
 });
 

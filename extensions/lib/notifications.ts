@@ -930,6 +930,14 @@ export function oneShotSessionNote(): string {
 	].join("\n");
 }
 
+/**
+ * The notice that a session whose first message said it was one-shot runs
+ * interactively now (a `-p` session continued in the TUI). One Code's own text.
+ */
+export function interactiveSessionNote(): string {
+	return "This session is interactive now, although its first message said it was one-shot: a user can reply, background work notifies you when it ends, scheduled jobs fire, and questions and plan approvals reach the user.";
+}
+
 function assertNever(mode: never): never {
 	throw new Error(`Unhandled session mode: ${String(mode)}`);
 }
