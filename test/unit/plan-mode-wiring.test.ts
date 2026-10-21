@@ -102,16 +102,26 @@ describe("plan-mode wiring", () => {
 			expect(tree.path).not.toBe(parentPath);
 		});
 
-		it("a resume of the parent keeps its own file; a record with no session id is the session's own", async () => {
+		it("a resume of the parent keeps its own file", async () => {
 			const parentPath = await planInParent();
 			const resumed = createFakePi();
 			const paths: string[] = [];
 			resumed.events.on(PLAN_FILE_CHANNEL, (data) => paths.push((data as { path: string }).path));
 			planModeExtension(resumed.pi as never);
-			const legacy = fake.branch.map((entry) => (entry.customType === "one-code:plan-mode-file" ? { ...entry, data: { path: parentPath } } : entry));
-			await resumed.fireOne("session_start", { reason: "startup" }, createFakeCtx({ cwd: stateDir, sessionManager: { getSessionId: () => "other", getBranch: () => [...legacy, ...resumed.branch] } }));
+			const entries = [...fake.branch];
+			await resumed.fireOne("session_start", { reason: "startup" }, createFakeCtx({ cwd: stateDir, sessionManager: { getSessionId: () => "parent", getBranch: () => [...entries, ...resumed.branch] } }));
 			resumed.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "plan", paused: false });
 			expect(paths.at(-1)).toBe(parentPath);
+		});
+
+		it("a record that names no session, as older sessions wrote, gets a copy rather than the shared file", async () => {
+			const parentPath = await planInParent();
+			const legacy = fake.branch.map((entry) => (entry.customType === "one-code:plan-mode-file" ? { ...entry, data: { path: parentPath } } : entry));
+			const fork = await openFork(legacy, "session_start");
+			expect(fork.path).not.toBe(parentPath);
+			expect(readFileSync(fork.path, "utf8")).toBe("# the plan\n");
+			writeFileSync(fork.path, "# the fork's plan\n");
+			expect(readFileSync(parentPath, "utf8")).toBe("# the plan\n");
 		});
 	});
 

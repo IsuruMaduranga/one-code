@@ -158,14 +158,15 @@ export default function planModeExtension(pi: ExtensionAPI) {
 	/**
 	 * The branch's plan file, else a fresh slug recorded on the branch. A
 	 * record another session made (a fork copies its parent's entries) gets
-	 * this session's own copy; a record with no session id is this session's.
+	 * this session's own copy, and so does a record that names no session (an
+	 * older session's): only a record this session made is its own.
 	 * Never cached: on /tree, permissions' session_tree switches the mode (and
 	 * this extension refreshes) before this extension's own session_tree runs,
 	 * so a cached path would be the abandoned branch's.
 	 */
 	const ensurePlanFile = (ctx: ExtensionContext, onBranch = planFileRecords(ctx.sessionManager.getBranch()).at(-1)): string => {
 		const sessionId = ctx.sessionManager.getSessionId();
-		if (onBranch && (onBranch.sessionId === undefined || onBranch.sessionId === sessionId)) return onBranch.path;
+		if (onBranch?.sessionId === sessionId) return onBranch.path;
 		if (onBranch) return forkPlanFile(ctx, onBranch, sessionId);
 
 		const path = freshPlanPath();
