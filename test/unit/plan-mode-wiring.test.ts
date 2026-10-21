@@ -270,6 +270,29 @@ describe("exit_plan_mode and the mode before planning (PERMISSIONS-REVIEW-2026-0
 		expect(text).toContain("Approve — auto mode");
 	});
 
+	it.each([
+		{ available: true, offered: true },
+		{ available: false, offered: false },
+	])("offers bypass back as the mode before planning only when the session can grant it (bypassAvailable: $available)", async ({ available, offered: expected }) => {
+		const offered: string[][] = [];
+		const ctx = createFakeCtx({
+			cwd: stateDir,
+			sessionManager: { getBranch: () => fake.branch },
+			hasUI: true,
+			modelRegistry: { getAvailable: () => [{ provider: "anthropic", id: "claude-haiku" }] },
+			ui: { custom: confirmPreselected(offered) },
+		});
+		await fake.fireOne("session_start", {}, ctx);
+		fake.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "bypassPermissions", paused: false, bypassAvailable: true });
+		await enterPlanWithPlanText(ctx);
+		// A resume without the bypass flag: the branch's run still says bypass came before.
+		fake.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "plan", paused: false, bypassAvailable: available });
+		modeRequests.length = 0;
+		await fake.tools.get("exit_plan_mode")!.execute("t3", {}, undefined, undefined, ctx);
+		expect(offered[0].join("\n").includes("back to bypass permissions")).toBe(expected);
+		expect(modeRequests).toEqual([{ mode: expected ? "bypassPermissions" : "default", toolCallId: "t3" }]);
+	});
+
 	it("a session that STARTED in plan mode has no pre-plan mode: the fixed list, manual approvals pre-selected", async () => {
 		const offered: string[][] = [];
 		const ctx = createFakeCtx({ cwd: stateDir, sessionManager: { getBranch: () => fake.branch }, hasUI: true, modelRegistry: { getAvailable: () => [] }, ui: { custom: confirmPreselected(offered) } });

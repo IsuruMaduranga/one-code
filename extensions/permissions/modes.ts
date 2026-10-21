@@ -140,6 +140,8 @@ export interface PermissionStatus {
 	classifier?: string;
 	/** Whether `classifier` is pinned by a real call, or still the planned first candidate. */
 	pinned?: boolean;
+	/** Whether this session can enter bypassPermissions (it started in it); a request for it otherwise lands in default. */
+	bypassAvailable?: boolean;
 }
 
 /**

@@ -95,6 +95,8 @@ export default function planModeExtension(pi: ExtensionAPI) {
 	 * own value, since the live mode before it belongs to the abandoned branch.
 	 */
 	let enteredFrom: PermissionMode | undefined;
+	/** Whether the session can enter bypassPermissions, as permissions last said: the exit offers it back only then. */
+	let bypassAvailable = false;
 
 	/**
 	 * The current run as the branch recorded it when plan mode came on: its plan
@@ -214,6 +216,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 		if (typeof status?.mode !== "string") return;
 		const previous = currentMode;
 		currentMode = status.mode;
+		bypassAvailable = status.bypassAvailable === true;
 		// Unknown for a session that STARTED in plan mode (the first status seen
 		// is plan itself): a run it begins offers the fixed list on exit.
 		if (currentMode === "plan" && previous !== "plan") enteredFrom = previous as PermissionMode | undefined;
@@ -362,12 +365,15 @@ export default function planModeExtension(pi: ExtensionAPI) {
 			// The mode the session was in before planning leads the list (Claude
 			// Code restores it), then auto mode when a classifier model is reachable —
 			// the same gate the mode cycle uses (permissions/index.ts autoInCycle) —
-			// and the fixed choices. Each approving choice carries the mode it
-			// switches to; the final "Keep planning" choice has none and leaves the
-			// session in plan mode.
+			// and the fixed choices. A bypass before planning is offered back only
+			// when this session can grant it (a resume without the bypass flag
+			// cannot, and the request would land in default). Each approving
+			// choice carries the mode it switches to; the final "Keep planning"
+			// choice has none and leaves the session in plan mode.
 			const autoAvailable = ctx.modelRegistry.getAvailable().length > 0;
 			const modeBeforePlan = runOnBranch(ctx, path)?.modeBeforePlan;
-			const restore = modeBeforePlan && (modeBeforePlan !== "auto" || autoAvailable) ? modeBeforePlan : undefined;
+			const offerable = (mode: PermissionMode) => (mode !== "auto" || autoAvailable) && (mode !== "bypassPermissions" || bypassAvailable);
+			const restore = modeBeforePlan && offerable(modeBeforePlan) ? modeBeforePlan : undefined;
 			const fixedModes: PermissionMode[] = [...(autoAvailable ? (["auto"] as const) : []), "acceptEdits", "default"];
 			const options: { label: string; mode?: PermissionMode; restore?: boolean }[] = [
 				...(restore ? [{ label: `Approve — back to ${MODE_NAMES[restore]} (the mode before planning)`, mode: restore, restore: true }] : []),

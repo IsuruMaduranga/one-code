@@ -525,6 +525,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			paused: pauseTracker.isPaused(),
 			classifier: display.classifier,
 			pinned: display.pinned,
+			bypassAvailable: bypassInCycle,
 			...(toolCallId ? { toolCallId } : {}),
 		} satisfies PermissionStatus);
 	};
