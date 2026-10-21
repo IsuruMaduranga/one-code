@@ -29,6 +29,7 @@ import { CHILD_EXTENSION_PATHS } from "../lib/child-extensions.ts";
 import { type HandbackSlot, SUBAGENT_HANDBACK, subagentHandbackExtension } from "../lib/subagent-handback.ts";
 import type { RequestCapture } from "../lib/request-replay.ts";
 import { forkCacheExtension } from "./fork-cache.ts";
+import { type DeferRequest, deferLikeParentExtension } from "../lib/deferred.ts";
 import type { ChildHandle, ChildOutcome, RpcChildHandle } from "./outcome.ts";
 import { sendToMainTool } from "./send-to-main-tool.ts";
 import { SessionTurnTracker } from "./session-turns.ts";
@@ -100,6 +101,8 @@ interface ChildSessionSpec {
 	onMessageToMain?: (message: string, summary?: string) => void;
 	/** Extra injected tools (e.g. the child-spawn Agent tool for depth-0 children). */
 	extraTools?: ToolDefinition[];
+	/** The tools the parent defers: the child defers the ones injected into it (MCP, cron) the same way, so they are listed, not declared. */
+	parentDeferred?: DeferRequest[];
 	/**
 	 * The main session's tool call that started the run's current turn, read
 	 * per gated call (a SendMessage can start a later turn). The permission
@@ -262,7 +265,7 @@ export class SubagentRuntime {
 	 * prompt and default tools, review S6); a named agent carries its own; a
 	 * plain run gets pi's base prompt. Built fresh per session (agent-loader.ts).
 	 */
-	private childLoaderOptions(spec: ChildSessionSpec, handback: HandbackSlot): AgentLoaderOptions {
+	private childLoaderOptions(spec: ChildSessionSpec, handback: HandbackSlot, injected: readonly ToolDefinition[]): AgentLoaderOptions {
 		const fork = SubagentRuntime.isFork(spec);
 		const systemPrompt = fork ? spec.parentSystemPrompt : spec.agent?.systemPrompt;
 		return {
@@ -275,6 +278,7 @@ export class SubagentRuntime {
 			// lib/subagent-handback.ts). Inline extensions load after the paths
 			// above, so the fork-cache one, last, sees the final body.
 			extraFactories: [
+				deferLikeParentExtension(spec.parentDeferred ?? [], injected.map((tool) => tool.name)),
 				subagentHandbackExtension(handback, { deferred: fork }),
 				...(fork && spec.parentRequest ? [forkCacheExtension(spec.parentRequest)] : []),
 			],
@@ -390,7 +394,9 @@ export class SubagentRuntime {
 	 * agent's own prompt and toolset.
 	 */
 	private async buildChildSession(spec: ChildSessionSpec, handback: HandbackSlot): Promise<{ session: Session; note?: string }> {
-		const [loader, mcpTools] = await Promise.all([buildAgentLoader(this.childLoaderOptions(spec, handback)), this.getMcpTools()]);
+		// The MCP tools first: the loader's deferral mirror needs the names injected.
+		const mcpTools = await this.getMcpTools();
+		const loader = await buildAgentLoader(this.childLoaderOptions(spec, handback, [...(spec.extraTools ?? []), ...mcpTools]));
 		const newSessionManager = () => newChildSessionManager(spec);
 		// A fork keeps the parent's toolset; only a named agent carries tool lists.
 		const agent = spec.forkFrom ? undefined : spec.agent;

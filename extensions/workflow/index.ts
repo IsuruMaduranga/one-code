@@ -76,6 +76,7 @@ import { isKeyRelease, keyId } from "../lib/key-input.ts";
 import { projectConfigDirName } from "../lib/config-mode.ts";
 import { panelUi } from "../lib/panel-focus.ts";
 import { dockRowsReporter, trackDockRows } from "../lib/dock-rows.ts";
+import { queryDeferred } from "../lib/deferred.ts";
 
 /**
  * Claude Code's own arming reminder, verbatim in intent: the keyword is a
@@ -268,6 +269,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 					getPermissionBridge,
 					getHookBridge,
 					getMcpTools,
+					getParentDeferred: () => queryDeferred(pi.events),
 					// Workflow agents run in their own sessions; their spend reaches the footer only through the bus.
 					onUsage: (cost) => recordUsage(pi, "subagent", { cost: { total: cost } }),
 					unusableModels: () => unusableModels,

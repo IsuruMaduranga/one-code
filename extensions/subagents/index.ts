@@ -53,7 +53,7 @@ import { scanSkills } from "../lib/skill-scan.ts";
 import { type GuideInput, guideAgentDefinition, settingsSetup } from "./guide-agent.ts";
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpServerStatus, type McpStatusEvent, type McpStatusKind } from "../lib/mcp-status.ts";
 
-import { DEFER_CHANNEL } from "../lib/deferred.ts";
+import { DEFER_CHANNEL, queryDeferred } from "../lib/deferred.ts";
 import { requestSystemPrompt } from "../lib/prompt-options.ts";
 import { captureMatches, LAST_REQUEST_CHANNEL, type RequestCapture } from "../lib/request-replay.ts";
 import { BTW_FORK_CHANNEL, btwForkDescription, btwForkName, btwForkRecord, btwForkTaskId, type BtwForkRequest, type BtwForkResult } from "../lib/btw-fork.ts";
@@ -1696,6 +1696,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			onMessageToMain: (message, summary) =>
 				parent ? relayToParent(parent.taskId, record.taskId, request.name, message, summary) : notifyAgentMessage(record.taskId, request.name, message),
 			extraTools: spawnToolsFor(record),
+			parentDeferred: queryDeferred(pi.events),
 			mainToolCallId: () => mainCallOf(record.taskId),
 		});
 		liveHandles.set(record.taskId, handle);
@@ -1873,6 +1874,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			sink: live.sink,
 			onMessageToMain: (message) => notifyAgentMessage(p.record.taskId, p.record.name, message),
 			extraTools: spawnToolsFor(p.record, { resident: true }),
+			parentDeferred: queryDeferred(pi.events),
 			mainToolCallId: () => mainCallOf(p.record.taskId),
 			onTurnEnd: (outcome) => {
 				registry.sessionFileFor(p.record);
@@ -2619,6 +2621,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			sink: live.sink,
 			onMessageToMain: (message) => notifyAgentMessage(record.taskId, record.name, message),
 			extraTools: spawnToolsFor(record),
+			parentDeferred: queryDeferred(pi.events),
 			mainToolCallId: () => mainCallOf(record.taskId),
 		});
 		liveHandles.set(record.taskId, handle);

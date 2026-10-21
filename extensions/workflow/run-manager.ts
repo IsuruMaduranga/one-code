@@ -29,6 +29,7 @@ import { runWorkflowScript } from "./vm-runtime.ts";
 import type { AgentRecord, RunProgressEvent, RunStatus, WorkflowMeta } from "./types.ts";
 import { WorkflowScriptError } from "./types.ts";
 import type { ViewerRunSnapshot } from "./viewer.ts";
+import type { DeferRequest } from "../lib/deferred.ts";
 
 const WALL_CLOCK_CAP_MS = 30 * 60 * 1000;
 const RECENT_EVENTS_CAP = 200;
@@ -58,6 +59,8 @@ export interface StartRunOptions {
 	onChildWrite?: (path: string, agent: string | undefined) => void;
 	/** The parent's live MCP tools, shared into every workflow agent (see AgentRunnerOptions). */
 	getMcpTools?: () => ToolDefinition[] | Promise<ToolDefinition[]>;
+	/** The tools the parent defers: each agent defers them too. */
+	getParentDeferred?: () => DeferRequest[];
 }
 
 export class RunHandle extends EventEmitter {
@@ -263,6 +266,7 @@ export class WorkflowRunManager {
 				onModelUnusable: options.onModelUnusable,
 				onChildWrite: options.onChildWrite,
 				getMcpTools: options.getMcpTools,
+				getParentDeferred: options.getParentDeferred,
 				resultsDir: handle.runDir,
 			});
 

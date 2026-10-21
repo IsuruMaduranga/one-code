@@ -18,6 +18,8 @@ import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../extensio
 import { MODE_ENV } from "../../extensions/lib/permission-gate.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
+/** A request recorded on the branch: its model was told the mode in force. */
+const requestEntry = { type: "custom", id: "r1", parentId: null, customType: RECORD.request, data: {} };
 const stateEntry = (key: string, value: unknown) => ({ type: "custom", id: `s-${key}`, parentId: null, customType: RECORD.state, data: makeRecord("state", "0.6.0", { key, value }) });
 
 describe("the permission mode follows the branch (H4)", () => {
@@ -33,8 +35,9 @@ describe("the permission mode follows the branch (H4)", () => {
 		rmSync(dir, { recursive: true, force: true });
 	});
 
-	async function start(branch: unknown[], flags: Record<string, string | boolean> = {}, reason = "startup") {
+	async function start(branch: unknown[], flags: Record<string, string | boolean> = {}, reason = "startup", reminders?: ReminderPayload[]) {
 		const fake = createFakePi();
+		if (reminders) fake.events.on(REMINDER_CHANNEL, (data) => reminders.push(data as ReminderPayload));
 		for (const [name, value] of Object.entries(flags)) fake.flags.set(name, value);
 		const modes: string[] = [];
 		fake.events.on(PERMISSION_STATUS_CHANNEL, (data) => modes.push((data as PermissionStatus).mode));
@@ -72,9 +75,26 @@ describe("the permission mode follows the branch (H4)", () => {
 		expect(resumed.mode()).not.toBe("bypassPermissions");
 	});
 
-	it("lets a flag win over the branch", async () => {
-		const resumed = await start([stateEntry("permission-mode", "plan")], { "permission-mode": "default" });
+	it("lets a launch flag win over the branch, and tells the model, which a request told the branch's mode", async () => {
+		const reminders: ReminderPayload[] = [];
+		// `pi --continue --permission-mode default`: the process's first runtime starts with reason "startup".
+		const resumed = await start([stateEntry("permission-mode", "plan"), requestEntry], { "permission-mode": "default" }, "startup", reminders);
 		expect(resumed.mode()).toBe("default");
+		expect(reminders.find((r) => r.key === "permission-mode-change")?.text).toBe('The user\'s permission mode is now "default".');
+	});
+
+	it("says nothing to a branch whose model was never told a mode, or that keeps it", async () => {
+		const reminders: ReminderPayload[] = [];
+		await start([stateEntry("permission-mode", "plan")], { "permission-mode": "default" }, "startup", reminders);
+		await start([stateEntry("permission-mode", "acceptEdits"), requestEntry], {}, "startup", reminders);
+		expect(reminders.find((r) => r.key === "permission-mode-change")).toBeUndefined();
+	});
+
+	it("keeps the branch's mode over the launch flags after the launch (/reload, /resume, /fork)", async () => {
+		for (const reason of ["reload", "resume", "fork"]) {
+			const run = await start([stateEntry("permission-mode", "acceptEdits"), requestEntry], { "permission-mode": "plan" }, reason);
+			expect(run.mode()).toBe("acceptEdits");
+		}
 	});
 
 	it("takes the selected branch's mode on /tree", async () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { DEFER_CHANNEL, deferredAddendumText, WITHHOLD_CHANNEL } from "../../extensions/lib/deferred.ts";
+import { DEFER_CHANNEL, deferredAddendumText, deferredRemovedText, REMOVED_TOOL_MODE, WITHHOLD_CHANNEL } from "../../extensions/lib/deferred.ts";
+import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/mcp-share.ts";
 import toolSearchExtension from "../../extensions/tool-search/index.ts";
 import { makeToolSearchFakePi, type Reminder } from "./helpers/tool-search-fake-pi.ts";
 
@@ -49,6 +50,31 @@ describe("tool-search listing and render-time addenda", () => {
 		const blocks = fake.render({ told: { tools: ["web_fetch"] } });
 		expect(blocks).toEqual([{ text: deferredAddendumText(["mcp__a__x", "mcp__a__y"]), facts: [{ kind: "tools", names: ["mcp__a__x", "mcp__a__y"] }] }]);
 		expect(fake.render({ told: { tools: ["web_fetch", "mcp__a__x", "mcp__a__y"] } })).toEqual([]);
+	});
+
+	it("says once that a tool the epoch was told about is gone, and announces it again if it comes back", () => {
+		const fake = mount();
+		const gone = { kind: "mode", key: `${REMOVED_TOOL_MODE}mcp__gone__x`, on: true };
+		// Not yet known gone: a resume's first request goes out before a slow MCP server registers.
+		expect(fake.render({ told: { tools: ["web_fetch", "mcp__gone__x", "lsp"] } })).toEqual([]);
+		fake.pi.events.emit(MCP_TOOLS_CHANNEL, { tools: [], settled: true });
+		// Settled: the MCP tool is gone; a non-MCP tool this process never saw (a fork's parent-only tool) is not announced.
+		expect(fake.render({ told: { tools: ["web_fetch", "mcp__gone__x", "lsp"] } })).toEqual([{ text: deferredRemovedText(["mcp__gone__x"]), facts: [gone] }]);
+		expect(fake.render({ told: { tools: ["web_fetch", "mcp__gone__x"] }, modes: { [gone.key]: true } })).toEqual([]);
+		fake.addDeferred("mcp__gone__x");
+		expect(fake.render({ told: { tools: ["web_fetch", "mcp__gone__x"] }, modes: { [gone.key]: true } })).toEqual([
+			{ text: deferredAddendumText(["mcp__gone__x"]), facts: [{ kind: "tools", names: ["mcp__gone__x"] }, { ...gone, on: false }] },
+		]);
+	});
+
+	it("says a tool this process saw is gone once it leaves", () => {
+		const fake = mount();
+		fake.addDeferred("late_echo");
+		fake.render({ told: { tools: ["web_fetch"] } });
+		fake.unregister("late_echo");
+		expect(fake.render({ told: { tools: ["web_fetch", "late_echo"] } })).toEqual([
+			{ text: deferredRemovedText(["late_echo"]), facts: [{ kind: "mode", key: `${REMOVED_TOOL_MODE}late_echo`, on: true }] },
+		]);
 	});
 
 	it("never announces a tool withheld before the request goes out (the H1 class)", () => {

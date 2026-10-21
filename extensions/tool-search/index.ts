@@ -49,6 +49,10 @@ import {
 	toolSearchLoads,
 	toolsToRedefer,
 	WITHHOLD_CHANNEL,
+	DEFERRED_QUERY_CHANNEL,
+	type DeferredQuery,
+	deferredRemovedText,
+	REMOVED_TOOL_MODE,
 	withheldMissReminderText,
 } from "../lib/deferred.ts";
 import { looksLikeAnthropicRequest, MID_CONVERSATION_SYSTEM_BETA, withBetas } from "../lib/anthropic-payload.ts";
@@ -56,6 +60,7 @@ import { liftAddenda, supportsToolAdditions, TOOL_ADDITION_BETAS, withToolAdditi
 import { inContextEntries } from "../lib/compaction-boundary.ts";
 import { CALLABLE_TOOLS, foldBranch } from "../lib/ledger/fold.ts";
 import { eagerToolNames } from "../lib/ledger/wire.ts";
+import { MCP_TOOLS_CHANNEL } from "../lib/mcp-share.ts";
 import { requestIdentity } from "../lib/anthropic-auth.ts";
 import type { EntryLike } from "../lib/ledger/records.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../lib/reminders.ts";
@@ -132,6 +137,14 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		});
 	};
 
+	/** Deferred tools this process has seen loadable: one of them missing later is known to be gone. */
+	const seenHere = new Set<string>();
+	/** True once the MCP extension published its settled tool set: an MCP tool missing then is gone. */
+	let mcpSettled = false;
+	pi.events.on(MCP_TOOLS_CHANNEL, (data) => {
+		if ((data as { settled?: boolean } | undefined)?.settled) mcpSettled = true;
+	});
+
 	/** Make `names` callable now: pi fixes a turn's callable tools before the request's hooks run. */
 	const activate = (names: readonly string[]) => {
 		const active = pi.getActiveTools();
@@ -157,11 +170,28 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 			}
 			return;
 		}
-		const added = searchableTools().map((tool) => tool.name).filter((name) => !told.has(name));
+		// A tool told gone and back since counts as new. One told and missing now
+		// is announced gone once its absence is known: this process saw it leave,
+		// or it is an MCP tool and the MCP connects have settled (a resume sends
+		// its first request before a slow server registers, and a fork never had
+		// the parent's own tools). A tool withdrawn for the model is not gone: a
+		// call to it says so.
+		const gone = (name: string) => request.modes.get(REMOVED_TOOL_MODE + name) === true;
+		const loadable = new Set(searchableTools().map((tool) => tool.name));
+		for (const name of loadable) seenHere.add(name);
+		const absent = (name: string) => seenHere.has(name) || (name.startsWith("mcp__") && mcpSettled);
+		const removed = [...told].filter((name) => !loadable.has(name) && !withheldNames.has(name) && !gone(name) && absent(name));
+		if (removed.length > 0) {
+			request.blocks.push({ text: deferredRemovedText(removed), facts: removed.map((name) => ({ kind: "mode" as const, key: REMOVED_TOOL_MODE + name, on: true })) });
+		}
+		const added = [...loadable].filter((name) => !told.has(name) || gone(name));
 		if (added.length === 0) return;
 		const callable = supportsToolAdditions(request.model);
 		if (callable) activate(added);
-		request.blocks.push({ text: deferredAddendumText(added), facts: [{ kind: "tools", names: added, ...(callable ? { callable: true } : {}) }] });
+		request.blocks.push({
+			text: deferredAddendumText(added),
+			facts: [{ kind: "tools", names: added, ...(callable ? { callable: true } : {}) }, ...added.filter(gone).map((name) => ({ kind: "mode" as const, key: REMOVED_TOOL_MODE + name, on: false }))],
+		});
 	});
 
 	/** The addenda the last `context` pass lifted off tool results, by call id (lib/tool-additions.ts). */
@@ -238,6 +268,11 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		}
 		publishListing();
 	};
+
+	pi.events.on(DEFERRED_QUERY_CHANNEL, (data) => {
+		const query = data as DeferredQuery;
+		for (const name of deferredRegistry.names) query.tools.push({ name, keywords: deferredRegistry.keywordsFor(name) });
+	});
 
 	pi.events.on(DEFER_CHANNEL, (data) => {
 		const request = data as DeferRequest;
