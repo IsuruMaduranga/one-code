@@ -6,7 +6,6 @@ import {
 	frameForDelivery,
 	TASK_OUTPUT_DELIVERED_CHANNEL,
 	handBackPointer,
-	isNotificationDetails,
 	mergeNotificationTexts,
 	NOTIFICATION_BATCH_KEY,
 	NOTIFICATION_ID_KEY,
@@ -266,13 +265,6 @@ describe("announcePromptOptions and the first turn a completion opens", () => {
 		expect(seen).toEqual([]);
 		announcePromptOptions(events, { cwd: "/p", getSystemPromptOptions: () => ({ skills: [] }) });
 		expect(seen).toEqual([{ channel: PROMPT_OPTIONS_CHANNEL, data: { options: { skills: [] }, cwd: "/p" } }]);
-	});
-
-	it("isNotificationDetails recognises one notification and a coalesced batch, nothing else", () => {
-		expect(isNotificationDetails({ [NOTIFICATION_ID_KEY]: "1-a" })).toBe(true);
-		expect(isNotificationDetails({ [NOTIFICATION_BATCH_KEY]: [] })).toBe(true);
-		expect(isNotificationDetails({ taskId: "t" })).toBe(false);
-		expect(isNotificationDetails(undefined)).toBe(false);
 	});
 });
 

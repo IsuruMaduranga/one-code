@@ -482,11 +482,6 @@ export const NOTIFICATION_ID_KEY = "notificationId";
 /** `details` key on a coalesced message: the `{customType, details}` of each notification it carries, in arrival order. */
 export const NOTIFICATION_BATCH_KEY = "notifications";
 
-/** True for the `details` of a message the notifier sent (one notification or a coalesced batch). */
-export function isNotificationDetails(details: unknown): boolean {
-	return typeof details === "object" && details !== null && (NOTIFICATION_ID_KEY in details || NOTIFICATION_BATCH_KEY in details);
-}
-
 /** Inject a harness notification (a task/agent completion, a monitor event, a review note) into the conversation. */
 export interface TaskNotifier {
 	(customType: string, text: string, details?: Record<string, unknown>): void;

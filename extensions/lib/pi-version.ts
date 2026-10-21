@@ -68,9 +68,7 @@ export function piVersionWarning(runningPiVersion: string | undefined): string |
  * unparseable version reads as no, the older and safer behavior.
  */
 export function piFiresBeforeAgentStartForCustomRuns(runningPiVersion: string | undefined): boolean {
-	if (!runningPiVersion) return false;
-	const order = compareVersions(runningPiVersion, "1.2.0");
-	return order !== undefined && order >= 0;
+	return piAtLeast(runningPiVersion, "1.2.0");
 }
 
 /**
@@ -81,7 +79,12 @@ export function piFiresBeforeAgentStartForCustomRuns(runningPiVersion: string | 
  * as no.
  */
 export function piHasBuiltinExtensions(runningPiVersion: string | undefined, firstVersion: string): boolean {
+	return piAtLeast(runningPiVersion, firstVersion);
+}
+
+/** Whether the running pi is `min` or later; a missing or unparseable version reads as no. */
+function piAtLeast(runningPiVersion: string | undefined, min: string): boolean {
 	if (!runningPiVersion) return false;
-	const order = compareVersions(runningPiVersion, firstVersion);
+	const order = compareVersions(runningPiVersion, min);
 	return order !== undefined && order >= 0;
 }

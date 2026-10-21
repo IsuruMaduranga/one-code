@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { toolsToRedefer } from "../../extensions/lib/deferred.ts";
+import { toolsInUse } from "../../extensions/lib/deferred.ts";
 import type { ToldFact } from "../../extensions/lib/ledger/records.ts";
 import { pluginRoot } from "../../extensions/lib/plugin-root.ts";
 import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/reminders.ts";
@@ -176,16 +176,15 @@ describe("agent catalog read at each run's start (R3-M28)", () => {
 	});
 });
 
-describe("loaded tools at a compaction", () => {
+describe("tools in use", () => {
 	const call = (name: string) => ({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "c1", name, arguments: {} }] } });
 	const load = (callId: string, added: string[]) => ({
 		type: "message",
 		message: { role: "toolResult", toolName: "tool_search", toolCallId: callId, content: [], details: { added } },
 	});
 
-	it("returns them to deferred unless the kept turns call or load them", () => {
-		const kept = [call("b"), load("t2", ["d"])] as never[];
-		expect(toolsToRedefer(["a", "b", "d", "a"], kept)).toEqual(["a"]);
-		expect(toolsToRedefer(["a"], [])).toEqual(["a"]);
+	it("are the tools the entries call or load", () => {
+		expect(toolsInUse([call("b"), load("t2", ["d"])] as never[])).toEqual(new Set(["b", "d"]));
+		expect(toolsInUse([])).toEqual(new Set());
 	});
 });

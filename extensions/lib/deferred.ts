@@ -213,19 +213,6 @@ export function toolSearchLoads(branch: readonly SessionEntry[]): Map<string, st
 }
 const TOOL_SEARCH_NAMES: ReadonlySet<string> = new Set([TOOL_SEARCH]);
 
-/**
- * The loaded tools a compaction returns to deferred (`candidates`: every tool a
- * `tool_search` load or a `tool_addition` activated). On a request path that
- * keeps a loaded tool out of the fixed `tools` array (Anthropic references,
- * OpenAI Responses loads), the summary replaced what named it, so pi would put
- * it back into `tools` and change the start of the request. A tool the kept
- * turns (`kept`) call or load stays as it is.
- */
-export function toolsToRedefer(candidates: Iterable<string>, kept: readonly SessionEntry[]): string[] {
-	const inUse = toolsInUse(kept);
-	return [...new Set(candidates)].filter((name) => !inUse.has(name));
-}
-
 /** The tools `entries` use: loaded by a `tool_search` result in them, or called by an assistant message in them. */
 export function toolsInUse(entries: readonly SessionEntry[]): Set<string> {
 	const inUse = new Set([...toolSearchLoads(entries).values()].flat());
