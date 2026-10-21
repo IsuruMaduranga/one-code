@@ -19,8 +19,8 @@
  * that prompt. before_agent_start also re-announces the existing state.
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { registerFormTool } from "../lib/tool-variants.ts";
 import { Type } from "typebox";
@@ -69,7 +69,7 @@ import {
 	selectPlanChoice,
 } from "./viewer.ts";
 
-import { MODE_CHANNEL, PLAN_FILE_CHANNEL, PLAN_FILE_ENTRY, planFileOnBranch } from "../lib/plan-mode-channels.ts";
+import { MODE_CHANNEL, PLAN_FILE_CHANNEL, PLAN_FILE_ENTRY, planFileOnBranch, planFileRecords, type PlanFileRecord } from "../lib/plan-mode-channels.ts";
 import { panelUi } from "../lib/panel-focus.ts";
 export { MODE_CHANNEL, PLAN_FILE_CHANNEL };
 
@@ -115,22 +115,60 @@ export default function planModeExtension(pi: ExtensionAPI) {
 		return { existed: stored.existed, ...(before ? { modeBeforePlan: before } : {}) };
 	};
 
-	/**
-	 * The branch's plan file, else a fresh slug recorded on the branch. Never
-	 * cached: on /tree, permissions' session_tree switches the mode (and this
-	 * extension refreshes) before this extension's own session_tree runs, so a
-	 * cached path would be the abandoned branch's.
-	 */
-	const ensurePlanFile = (ctx: ExtensionContext): string => {
-		const onBranch = planFileOnBranch(ctx.sessionManager.getBranch());
-		if (onBranch) return onBranch;
-
+	const freshPlanPath = (): string => {
 		let path = join(PLANS_DIR(), `${randomSlug()}.md`);
 		for (let attempt = 0; attempt < 5 && existsSync(path); attempt++) {
 			path = join(PLANS_DIR(), `${randomSlug()}.md`);
 		}
-		pi.appendEntry(PLAN_FILE_ENTRY, { path });
 		return path;
+	};
+
+	/**
+	 * A fork's own copy of the plan another session recorded (Claude Code's
+	 * copyPlanForFork), so the two sessions never overwrite each other's plan
+	 * (decisions/modes.md). The copy this session already made of it, on any
+	 * of its branches, is reused; the run moves to the copy unchanged, so its
+	 * standing block differs only in the path.
+	 */
+	const forkPlanFile = (ctx: ExtensionContext, parent: PlanFileRecord, sessionId: string): string => {
+		const made = planFileRecords(ctx.sessionManager.getEntries()).find((r) => r.sessionId === sessionId && r.copiedFrom === parent.path);
+		const path = made?.path ?? freshPlanPath();
+		if (!made && existsSync(parent.path)) {
+			try {
+				mkdirSync(dirname(path), { recursive: true });
+				copyFileSync(parent.path, path);
+			} catch (error) {
+				if (ctx.hasUI) ctx.ui.notify(`Could not copy the plan at ${parent.path} for this fork (${(error as Error).message}); its plan starts empty at ${path}.`, "warning");
+			}
+		}
+		const run = runOnBranch(ctx, parent.path);
+		pi.appendEntry(PLAN_FILE_ENTRY, { path, sessionId, copiedFrom: parent.path } satisfies PlanFileRecord);
+		if (run) recordState(pi, PLAN_ENTRY_STATE, { path, ...run });
+		return path;
+	};
+
+	/**
+	 * The branch's plan file, else a fresh slug recorded on the branch. A
+	 * record another session made (a fork copies its parent's entries) gets
+	 * this session's own copy; a record with no session id is this session's.
+	 * Never cached: on /tree, permissions' session_tree switches the mode (and
+	 * this extension refreshes) before this extension's own session_tree runs,
+	 * so a cached path would be the abandoned branch's.
+	 */
+	const ensurePlanFile = (ctx: ExtensionContext): string => {
+		const sessionId = ctx.sessionManager.getSessionId();
+		const onBranch = planFileRecords(ctx.sessionManager.getBranch()).at(-1);
+		if (onBranch && (onBranch.sessionId === undefined || onBranch.sessionId === sessionId)) return onBranch.path;
+		if (onBranch) return forkPlanFile(ctx, onBranch, sessionId);
+
+		const path = freshPlanPath();
+		pi.appendEntry(PLAN_FILE_ENTRY, { path, sessionId } satisfies PlanFileRecord);
+		return path;
+	};
+
+	/** A branch that names a plan file owns it before anything reads it: a fork copies its parent's now. */
+	const ownPlanFile = (ctx: ExtensionContext) => {
+		if (planFileOnBranch(ctx.sessionManager.getBranch())) ensurePlanFile(ctx);
 	};
 
 	/** Re-announce path + reminder; a re-emit replaces the sticky state by key. */
@@ -193,12 +231,14 @@ export default function planModeExtension(pi: ExtensionAPI) {
 
 	pi.on("session_start", (_event, ctx) => {
 		lastCtx = ctx;
+		ownPlanFile(ctx);
 		if (currentMode === "plan") refresh(ctx);
 	});
 	// The plan file and its run follow the branch (both are read from it): a
 	// /tree switch takes the selected branch's, or allocates one there.
 	pi.on("session_tree", (_event, ctx) => {
 		lastCtx = ctx;
+		ownPlanFile(ctx);
 		if (currentMode === "plan") refresh(ctx);
 	});
 

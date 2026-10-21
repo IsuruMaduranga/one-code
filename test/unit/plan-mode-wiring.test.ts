@@ -5,7 +5,7 @@
  * were denied "see the plan-mode reminder" (STEERING-REVIEW-2026-09-05 M3).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MODE_CHANNEL, PLAN_FILE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
@@ -51,6 +51,66 @@ describe("plan-mode wiring", () => {
 		await reloaded.fireOne("session_start", { reason: "reload" }, createFakeCtx({ cwd: stateDir, sessionManager: { getBranch: () => [...entries, ...reloaded.branch] } }));
 		reloaded.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "plan", paused: false });
 		expect(after.filter((r) => r.key === "permission-mode" && !r.remove).at(-1)?.text).toBe(before);
+	});
+
+	describe("a fork gets its own copy of the plan (R3-M19, Claude Code's copyPlanForFork)", () => {
+		const standing = (list: Array<{ key?: string; text?: string; remove?: boolean }>) => list.filter((r) => r.key === "permission-mode" && !r.remove).at(-1)?.text;
+		/** The parent session: in plan mode, its plan written. */
+		const planInParent = async () => {
+			await fake.fireOne("session_start", {}, createFakeCtx({ cwd: stateDir, sessionManager: { getSessionId: () => "parent", getBranch: () => fake.branch } }));
+			fake.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "plan", paused: false });
+			const path = planFiles[0].path;
+			mkdirSync(join(path, ".."), { recursive: true });
+			writeFileSync(path, "# the plan\n");
+			return path;
+		};
+		/** A new instance in session `fork` on `entries` (a fork copies the parent's), still in plan mode. */
+		const openFork = async (entries: FakePi["branch"], event: string, all: FakePi["branch"] = entries) => {
+			const forked = createFakePi();
+			const seen: Array<{ key?: string; text?: string; remove?: boolean }> = [];
+			const paths: string[] = [];
+			forked.events.on(REMINDER_CHANNEL, (data) => seen.push(data as never));
+			forked.events.on(PLAN_FILE_CHANNEL, (data) => paths.push((data as { path: string }).path));
+			planModeExtension(forked.pi as never);
+			const ctx = createFakeCtx({ cwd: stateDir, sessionManager: { getSessionId: () => "fork", getBranch: () => [...entries, ...forked.branch], getEntries: () => [...all, ...forked.branch] } });
+			await forked.fireOne(event, { reason: "fork" }, ctx);
+			forked.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "plan", paused: false });
+			return { forked, seen, path: paths.at(-1)! };
+		};
+
+		it("copies the plan to a new file and moves the run to it unchanged", async () => {
+			const parentPath = await planInParent();
+			const before = standing(reminders)!;
+			const fork = await openFork([...fake.branch], "session_start");
+			expect(fork.path).not.toBe(parentPath);
+			expect(readFileSync(fork.path, "utf8")).toBe("# the plan\n");
+			expect(standing(fork.seen)).toBe(before.replaceAll(parentPath, fork.path));
+			writeFileSync(fork.path, "# the fork's plan\n");
+			expect(readFileSync(parentPath, "utf8")).toBe("# the plan\n");
+		});
+
+		it("a /tree in the fork to a node before the copy takes the same copy, not another", async () => {
+			const parentPath = await planInParent();
+			const parentEntries = [...fake.branch];
+			const fork = await openFork(parentEntries, "session_start");
+			writeFileSync(fork.path, "# the fork's plan\n");
+			const tree = await openFork(parentEntries, "session_tree", [...parentEntries, ...fork.forked.branch]);
+			expect(tree.path).toBe(fork.path);
+			expect(readFileSync(fork.path, "utf8")).toBe("# the fork's plan\n");
+			expect(tree.path).not.toBe(parentPath);
+		});
+
+		it("a resume of the parent keeps its own file; a record with no session id is the session's own", async () => {
+			const parentPath = await planInParent();
+			const resumed = createFakePi();
+			const paths: string[] = [];
+			resumed.events.on(PLAN_FILE_CHANNEL, (data) => paths.push((data as { path: string }).path));
+			planModeExtension(resumed.pi as never);
+			const legacy = fake.branch.map((entry) => (entry.customType === "one-code:plan-mode-file" ? { ...entry, data: { path: parentPath } } : entry));
+			await resumed.fireOne("session_start", { reason: "startup" }, createFakeCtx({ cwd: stateDir, sessionManager: { getSessionId: () => "other", getBranch: () => [...legacy, ...resumed.branch] } }));
+			resumed.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "plan", paused: false });
+			expect(paths.at(-1)).toBe(parentPath);
+		});
 	});
 
 	it("after a compaction, re-attaches the plan and says the file exists now (R3-M20)", async () => {
