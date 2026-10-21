@@ -21,7 +21,11 @@ export const RECORD = {
 	state: "one-code:state",
 	/** Produced for the model, not yet sent. */
 	pending: "one-code:pending",
-	/** Opens an epoch: the head is rendered again. */
+	/**
+	 * An epoch opens at the next request: written right before the record of a
+	 * request that opened one, and by an owner that must change the history
+	 * above the append point (the no-op loop fold) to make the next one open.
+	 */
 	epoch: "one-code:epoch",
 	/** Written at every `/tree`: pi keeps the leaf move only in memory. */
 	branch: "one-code:branch",
@@ -44,8 +48,24 @@ export interface RequestIdentity {
 	auth: string;
 }
 
+export const sameIdentity = (a: RequestIdentity, b: RequestIdentity): boolean => a.api === b.api && a.provider === b.provider && a.model === b.model && a.auth === b.auth;
+
+/**
+ * Which of the session's context messages a request covers: the first `count`
+ * of pi's `context` messages, the last of them identified by role and
+ * timestamp. The next request in the epoch sends only the messages after them
+ * (the tail) through pi, and takes the rest from the record.
+ */
+export interface Coverage {
+	count: number;
+	role: string;
+	timestamp: number;
+}
+
 export interface RequestRecordData extends RecordBase {
 	identity: RequestIdentity;
+	/** Absent on a record that cannot be extended (written without a context pass): the next request opens an epoch. */
+	covers?: Coverage;
 	/** Elements of the previous request's list reused unchanged. */
 	keep: number;
 	/** Content hashes of the elements appended after them. */
@@ -59,11 +79,19 @@ export interface RequestRecordData extends RecordBase {
 }
 
 export type ToldFact =
-	| { kind: "tools"; names: string[] }
+	/**
+	 * `callable`: announced by a `tool_addition` the model may call at once, not
+	 * only listed for tool_search. `removed`: announced gone, so the epoch no
+	 * longer holds them told.
+	 */
+	| { kind: "tools"; names: string[]; callable?: boolean; removed?: boolean }
 	| { kind: "skills"; names: string[] }
-	| { kind: "agents"; names: string[] }
-	| { kind: "mcp"; server: string; hash: string }
-	| { kind: "mode"; key: string; on: boolean };
+	| { kind: "mode"; key: string; on: boolean }
+	/** A whole-text block (a menu, a catalog): the content hash of the text last told under `key`. */
+	| { kind: "block"; key: string; hash: string };
+
+/** A whole-text block fact. */
+export type BlockFact = Extract<ToldFact, { kind: "block" }>;
 
 export interface ToldRecordData extends RecordBase {
 	facts: ToldFact[];
@@ -76,13 +104,26 @@ export interface StateRecordData extends RecordBase {
 
 export interface PendingRecordData extends RecordBase {
 	id: string;
-	source: string;
+	/** A later pending item with the same key replaces this one while both are undelivered. */
 	key?: string;
 	text: string;
+	/** Where it lands: the request's tail (default), or before the text of the prompt that opens a request. */
+	placement?: "last-append" | "user-prepend";
+	/** Sent bare instead of inside a `<system-reminder>` frame. */
+	raw?: boolean;
+	/** Rides this call's result when the request carries it. */
+	toolCallId?: string;
+	/** `user-prepend` only: placed once per request, however many are pending (the shared caveat). */
+	once?: boolean;
 }
 
+const EPOCH_CAUSES = ["first", "compaction", "model", "auth", "fold", "coverage", "empty"] as const;
+
+/** Why an epoch opened: no request yet, a compaction, a model or auth switch, a history fold, a base that cannot be extended, or nothing new since it. */
+export type EpochCause = (typeof EPOCH_CAUSES)[number];
+
 export interface EpochRecordData extends RecordBase {
-	cause: "first" | "compaction" | "model" | "auth" | "fold";
+	cause: EpochCause;
 }
 
 export interface BranchRecordData extends RecordBase {
@@ -112,23 +153,24 @@ export type ParsedRecord = { [K in RecordKind]: { kind: K; entryId: string; data
 
 const KIND_BY_TYPE = new Map<string, RecordKind>(Object.entries(RECORD).map(([kind, type]) => [type, kind as RecordKind]));
 
-const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+export const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const isString = (value: unknown): value is string => typeof value === "string";
 const isStrings = (value: unknown): value is string[] => Array.isArray(value) && value.every(isString);
 
-const EPOCH_CAUSES: ReadonlySet<string> = new Set(["first", "compaction", "model", "auth", "fold"]);
+const isCoverage = (value: unknown): boolean =>
+	isObject(value) && Number.isInteger(value.count) && (value.count as number) >= 0 && isString(value.role) && typeof value.timestamp === "number";
 
 function isToldFact(fact: unknown): boolean {
 	if (!isObject(fact)) return false;
 	switch (fact.kind) {
 		case "tools":
+			return isStrings(fact.names) && (fact.callable === undefined || typeof fact.callable === "boolean") && (fact.removed === undefined || typeof fact.removed === "boolean");
 		case "skills":
-		case "agents":
 			return isStrings(fact.names);
-		case "mcp":
-			return isString(fact.server) && isString(fact.hash);
 		case "mode":
 			return isString(fact.key) && typeof fact.on === "boolean";
+		case "block":
+			return isString(fact.key) && isString(fact.hash);
 		default:
 			return false;
 	}
@@ -137,6 +179,7 @@ function isToldFact(fact: unknown): boolean {
 /** Each kind's own fields, checked whole: a record that fails is ignored, never partly read. */
 const SHAPE: { [K in RecordKind]: (data: Record<string, unknown>) => boolean } = {
 	request: (d) =>
+		(d.covers === undefined || isCoverage(d.covers)) &&
 		isObject(d.identity) &&
 		isString(d.identity.api) &&
 		isString(d.identity.provider) &&
@@ -150,8 +193,15 @@ const SHAPE: { [K in RecordKind]: (data: Record<string, unknown>) => boolean } =
 		isStrings(d.consumed),
 	told: (d) => Array.isArray(d.facts) && d.facts.every(isToldFact),
 	state: (d) => isString(d.key) && "value" in d,
-	pending: (d) => isString(d.id) && isString(d.source) && isString(d.text) && (d.key === undefined || isString(d.key)),
-	epoch: (d) => isString(d.cause) && EPOCH_CAUSES.has(d.cause),
+	pending: (d) =>
+		isString(d.id) &&
+		isString(d.text) &&
+		(d.key === undefined || isString(d.key)) &&
+		(d.placement === undefined || d.placement === "last-append" || d.placement === "user-prepend") &&
+		(d.raw === undefined || typeof d.raw === "boolean") &&
+		(d.toolCallId === undefined || isString(d.toolCallId)) &&
+		(d.once === undefined || typeof d.once === "boolean"),
+	epoch: (d) => (EPOCH_CAUSES as readonly unknown[]).includes(d.cause),
 	branch: (d) => isString(d.fromLeafId),
 };
 
@@ -167,4 +217,13 @@ export function readRecord(entry: EntryLike): ParsedRecord | undefined {
 /** A record's data with `v` and `by` filled in, ready for `pi.appendEntry(RECORD[kind], …)`. */
 export function makeRecord<K extends RecordKind>(_kind: K, by: string, fields: Omit<RecordData[K], keyof RecordBase>): RecordData[K] {
 	return { v: LEDGER_VERSION, by, ...fields } as RecordData[K];
+}
+
+/** The latest value the branch's `one-code:state` entries hold for `key`, or undefined when none does (latest wins). */
+export function stateOnBranch(branch: readonly EntryLike[], key: string): unknown {
+	for (let i = branch.length - 1; i >= 0; i--) {
+		const record = readRecord(branch[i]);
+		if (record?.kind === "state" && record.data.key === key) return record.data.value;
+	}
+	return undefined;
 }

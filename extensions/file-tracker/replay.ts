@@ -4,11 +4,12 @@
  * does not block every edit with "has not been read in this conversation" —
  * a claim the model can see is false in its own transcript (review T9).
  *
- * The content the model saw is not in the transcript, so a replayed file is
- * observed with its CURRENT content: an edit after resume is allowed, and a
- * change made while the session was closed is not flagged. That is Claude
- * Code's behaviour too (its read state persists across resume); the stale-edit
- * guard still catches anything that changes from this point on.
+ * The content the model saw is not in the transcript, but each read and write
+ * result records what it saw (`details.oneCodeFile`, `FileObservation`): a
+ * file whose disk content still matches is observed with its current
+ * content, and one that changed since is stale, so an edit needs a fresh read
+ * (round-2 review H1). A result from before the record existed is observed
+ * with its current content, as Claude Code's persisted read state is.
  */
 
 import { pathArgument } from "../auto-mode/paths.ts";
@@ -51,6 +52,32 @@ export function* successfulPathCalls(entries: readonly unknown[]): Generator<{ n
 }
 
 const touchesFile = (name: string) => READ_TOOLS.has(name) || WRITE_TOOLS.has(name);
+
+/** What a read or write result saw of its file, recorded in its details as `oneCodeFile`. */
+export interface FileObservation {
+	/** Absolute, as the tool resolved it (worktree included). */
+	path: string;
+	size: number;
+	mtimeMs: number;
+	sha256: string;
+}
+
+const isObservation = (value: unknown): value is FileObservation => {
+	const v = value as Partial<FileObservation> | undefined;
+	return typeof v?.path === "string" && typeof v.size === "number" && typeof v.mtimeMs === "number" && typeof v.sha256 === "string";
+};
+
+/** The latest observation each file's read or write results recorded on the branch, by absolute path. */
+export function observationsOnBranch(entries: readonly unknown[]): Map<string, FileObservation> {
+	const out = new Map<string, FileObservation>();
+	for (const entry of entries) {
+		const message = (entry as { type?: string; message?: { role?: string; isError?: boolean; details?: { oneCodeFile?: unknown } } })?.message;
+		if ((entry as { type?: string })?.type !== "message" || message?.role !== "toolResult" || message.isError) continue;
+		const observed = message.details?.oneCodeFile;
+		if (isObservation(observed)) out.set(observed.path, observed);
+	}
+	return out;
+}
 
 /** Paths (as written in the tool input) of every successful read/edit/write on the branch, in order, deduplicated. */
 export function pathsReadOnBranch(entries: readonly unknown[]): string[] {

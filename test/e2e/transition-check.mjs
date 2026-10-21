@@ -20,8 +20,10 @@
  *   prefix   inside an epoch, the base request's messages are a byte-identical
  *            prefix of this request's messages.
  *   cache    inside an epoch, this request reads at least what the base had
- *            read and written (Anthropic usage; skipped where the provider
- *            reports no cache writes).
+ *            read and written, less END_TOKENS: a request's last cache entry
+ *            holds about 25 tokens past its final block that only the
+ *            identical request reads back (findings §73). Anthropic usage;
+ *            skipped where the provider reports no cache writes.
  *
  * The base of a step's first request is the last request of the step named
  * by its `base` (the branch it extends); a later request in a step extends
@@ -47,7 +49,12 @@ const wire = lines(join(work, "wire.jsonl"));
 const meta = lines(join(work, "wire.meta.jsonl"));
 if (meta.length !== wire.length) console.log(`WARN wire.jsonl has ${wire.length} lines, wire.meta.jsonl ${meta.length}`);
 
-const isWarm = (body) => body.max_tokens === 1 || body.max_output_tokens === 1 || body.max_completion_tokens === 1;
+/** The tokens past a request's final block its cache entry holds and a longer request cannot read (findings §73: 25 on Sonnet 5.5). */
+const END_TOKENS = 32;
+
+/** A pi cache warm: the same body with the output cap at 1, top-level or nested (Bedrock, Google). */
+const isWarm = (body) =>
+	[body.max_tokens, body.max_output_tokens, body.max_completion_tokens, body.maxTokens, body.inferenceConfig?.maxTokens, body.config?.maxOutputTokens, body.generationConfig?.maxOutputTokens].includes(1);
 
 /** The parts of a request the checks compare, in the request's own dialect. */
 function shape(body) {
@@ -167,9 +174,9 @@ for (const step of steps) {
 			const now = new Map(current.tools.map((tool) => [toolName(tool), tool]));
 			const changed = previous.tools.filter((tool) => !now.has(toolName(tool)) || !same(tool, now.get(toolName(tool)))).map(toolName);
 			if (changed.length) fail(step.label, "head", `${where}: tools removed or changed: ${changed.join(", ")}`);
-			const eagerBefore = previous.tools.filter((tool) => !deferred(tool)).map(toolName).join(",");
+			const eagerBefore = previous.tools.filter((tool) => !deferred(tool)).map(toolName);
 			const eagerNow = current.tools.filter((tool) => !deferred(tool)).map(toolName);
-			if (!eagerNow.join(",").startsWith(eagerBefore)) fail(step.label, "head", `${where}: the eager tools changed order`);
+			if (eagerBefore.some((name, i) => eagerNow[i] !== name)) fail(step.label, "head", `${where}: the eager tools changed order`);
 			const at = previous.messages.findIndex((message, i) => !same(message, current.messages[i]));
 			if (at !== -1) {
 				fail(step.label, "prefix", `${where}: message ${at} of ${previous.messages.length} changed\n      was: ${preview(previous.messages[at])}\n      now: ${preview(current.messages[at])}`);
@@ -177,7 +184,7 @@ for (const step of steps) {
 			const had = base.end?.usage;
 			const got = request.end?.usage;
 			if (had && got && (had.cacheWrite ?? 0) > 0) {
-				const floor = (had.cacheRead ?? 0) + (had.cacheWrite ?? 0);
+				const floor = (had.cacheRead ?? 0) + (had.cacheWrite ?? 0) - END_TOKENS;
 				if ((got.cacheRead ?? 0) < floor) fail(step.label, "cache", `${where}: read ${got.cacheRead ?? 0}, expected at least ${floor}`);
 			}
 		}

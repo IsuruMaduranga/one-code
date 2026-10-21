@@ -27,6 +27,7 @@
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { followCoveredMessages } from "../lib/covered-messages.ts";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { convertToLlm, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { followLastExchange, replaySideCall } from "../lib/replay-call.ts";
@@ -64,11 +65,10 @@ export default function recapExtension(pi: ExtensionAPI) {
 		return dimMarkedLine(theme, REFERENCE_MARK, recapLine(content));
 	});
 
-	// The exact request messages the session last sent (after every extension's
-	// mutations), captured like the compaction extension does.
+	// The whole conversation the session's last request covered, as pi built it.
 	let capturedMessages: AgentMessage[] | undefined;
-	pi.on("context", (event) => {
-		capturedMessages = event.messages;
+	followCoveredMessages(pi, (messages) => {
+		capturedMessages = messages;
 	});
 	// The same request as it went on the wire, and the reply that answered it.
 	const exchange = followLastExchange(pi);

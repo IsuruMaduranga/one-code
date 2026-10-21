@@ -49,11 +49,11 @@ describe("Claude Code's empty tool-result marker", () => {
 		expect(applyPostToolUseOutcome([text("file body")], { updatedToolResult: "  " }, "read")).toEqual([text(marker("Read"))]);
 	});
 
-	it("adds the marker before queued reminders, and preserves structured content", async () => {
+	it("adds the marker, preserves structured content, and leaves a pending reminder out of the stored result", async () => {
 		const structuredContent = { exit_code: 0, output: "" };
 		const result = await resultFor([], "bash", true, structuredContent);
-		expect(result.content[0]).toEqual(text(marker("Bash")));
-		expect(result.content[1].text).toContain("A file changed.");
+		// The reminder rides the next request's tail instead (lib/reminders.ts).
+		expect(result.content).toEqual([text(marker("Bash"))]);
 		expect(result.structuredContent).toBe(structuredContent);
 		expect(result.isError).toBe(false);
 	});
@@ -74,7 +74,7 @@ describe("built-in empty results", () => {
 	const dirs: string[] = [];
 	afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
-	it("keeps the empty-file warning after generic normalization and reminders", async () => {
+	it("keeps the empty-file warning after generic normalization, with no reminder in the stored result", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "empty-result-read-"));
 		dirs.push(dir);
 		writeFileSync(join(dir, "empty.txt"), "");
@@ -91,8 +91,7 @@ describe("built-in empty results", () => {
 			if (change) event = { ...event, ...change };
 		}
 		expect(event.content[0].text).toBe("<system-reminder>Warning: the file exists but the contents are empty.</system-reminder>");
-		expect(event.content).toHaveLength(2);
-		expect(event.content[1].text).toContain("A file changed.");
+		expect(event.content).toHaveLength(1);
 	});
 
 	it.each([

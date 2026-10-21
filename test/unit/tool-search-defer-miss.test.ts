@@ -41,7 +41,7 @@ describe("tool-search deferred-miss steering", () => {
 
 		const correction = correctionFor(fake.reminders, "web_fetch");
 		expect(correction).toBeDefined();
-		expect(correction?.scope).toBe("next-turn");
+		expect(correction?.placement).toBeUndefined();
 		expect(correction?.text).toContain("tool_search");
 		expect(correction?.text).toContain("select:web_fetch");
 	});
@@ -89,34 +89,25 @@ describe("tool-search late-defer announcements (M7)", () => {
 		fake.reminders.length = 0;
 	});
 
-	it("before any request, a late defer updates the listing (debounced into one)", async () => {
+	it("a late defer deactivates the tool at once and updates the live listing", () => {
 		fake.allTools.push({ name: "mcp__s__a", description: "a" }, { name: "mcp__s__b", description: "b" });
 		fake.setActive(["read", "mcp__s__a", "mcp__s__b"]);
 		fake.pi.events.emit(DEFER_CHANNEL, { name: "mcp__s__a" });
 		fake.pi.events.emit(DEFER_CHANNEL, { name: "mcp__s__b" });
 		expect(fake.pi.getActiveTools()).toEqual(["read"]);
-		expect(listings()).toHaveLength(0);
-		await new Promise((r) => setTimeout(r, 150));
-		expect(listings()).toHaveLength(1);
-		expect(listings()[0].text).toContain("mcp__s__a");
-		expect(listings()[0].text).toContain("mcp__s__b");
+		const last = listings().at(-1);
+		expect(last?.text).toContain("mcp__s__a");
+		expect(last?.text).toContain("mcp__s__b");
 	});
 
-	it("after a request went out, deactivates a late defer at once and announces it in one addendum (the listing stays frozen)", async () => {
-		fake.pi.fire("context", { messages: [] });
+	it("inside an epoch, the next request announces a late defer in one addendum", () => {
 		fake.allTools.push({ name: "mcp__s__a", description: "a" });
 		fake.setActive(["read", "mcp__s__a"]);
 		fake.pi.events.emit(DEFER_CHANNEL, { name: "mcp__s__a" });
-		expect(fake.pi.getActiveTools()).toEqual(["read"]); // deactivated at once
-		expect(fake.reminders).toHaveLength(0); // announced after the debounce
-		await new Promise((r) => setTimeout(r, 150));
-		// Message 1 is cached by now: the standing listing is never rewritten …
-		expect(listings()).toHaveLength(0);
-		// … the new name rides a one-shot addendum with a key of its own instead (tool-search/announce.ts).
-		expect(fake.reminders).toHaveLength(1);
-		expect(fake.reminders[0].key).toBeUndefined();
-		expect(fake.reminders[0].group).toBe("deferred-tools");
-		expect(fake.reminders[0].text).toContain("mcp__s__a");
+		expect(fake.pi.getActiveTools()).toEqual(["read"]);
+		const blocks = fake.render({ told: { tools: ["web_fetch"] } });
+		expect(blocks).toHaveLength(1);
+		expect(blocks[0].text).toContain("mcp__s__a");
+		expect(blocks[0].text).not.toContain("web_fetch");
 	});
 });
-

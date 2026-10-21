@@ -77,7 +77,8 @@ import { canShowCustomUi, rpcReadOnlyText } from "../lib/headless-output.ts";
 import { sessionResultsDir } from "../lib/persisted-output.ts";
 import { privateSessionScratchpadDir } from "../lib/scratchpad.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
-import { CONTEXT_BASELINE_CHANNEL, restoredContext } from "../lib/context-stack.ts";
+import { readState, recordState } from "../lib/ledger/state.ts";
+import { type EntryLike, readRecord } from "../lib/ledger/records.ts";
 import {
 	decide,
 	extractSubject,
@@ -264,6 +265,8 @@ const denyReason = (result: { cause?: string; rule?: { raw?: string } }): string
  * here, next to the emitter it belongs to.
  */
 const STANDING_REMINDER_MODES: ReadonlySet<PermissionMode> = new Set<PermissionMode>(["plan", "auto"]);
+/** The `one-code:state` key the permission mode is recorded under on the branch. */
+const PERMISSION_MODE_STATE = "permission-mode";
 
 const YES = "Yes";
 const NO = "No, tell the agent what to do differently";
@@ -327,8 +330,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	let bypassInCycle = false;
 	/** Whether auto mode is a stop on the cycle — only when a classifier model is reachable. */
 	let autoInCycle = false;
-	/** Whether this conversation's first turn has decided on Claude Code's auto-mode note. */
-	let autoNoteDecided = false;
+	/** The mode the branch's latest `one-code:state` entry holds: the mode follows the branch. */
+	let branchMode: PermissionMode | undefined;
+	/** Whether a request went out on this branch: only then was its model told the branch's mode. */
+	let requestOnBranch = false;
 	let deny: PermissionRule[] = [];
 	let ask: PermissionRule[] = [];
 	let allow: PermissionRule[] = [];
@@ -794,6 +799,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	/** `startup`: the session opens in this mode, so there is no switch to announce, only the mode's standing block. */
 	const setMode = (next: PermissionMode, startup = false, toolCallId?: string) => {
 		const changed = mode !== next;
+		/** The mode the branch recorded before this switch; its model was told it once a request went out. */
+		const told = branchMode;
 		mode = next;
 		process.env[MODE_ENV] = next;
 		// Close the standing block of the mode being left BEFORE the status
@@ -803,11 +810,15 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// becomes plan — removing the key afterwards would undo that re-add and
 		// leave a turn entered mid-stream with no plan reminder until the next
 		// prompt (STEERING-REVIEW-2026-09-05 M3). Auto installs its own block below.
-		const previousMode = restoredContext(pi.events)?.baselines["permission-mode"];
-		if (mode !== "auto" && !(mode === "plan" && (startup ? previousMode === "plan" : !changed))) {
+		if (mode !== "auto" && !(mode === "plan" && (startup ? branchMode === "plan" : !changed))) {
 			pi.events.emit(REMINDER_CHANNEL, { remove: true, key: "permission-mode" });
 		}
-		pi.events.emit(CONTEXT_BASELINE_CHANNEL, { key: "permission-mode", value: mode });
+		// The mode follows the branch: recorded on every change, so a resume, a
+		// fork, /reload or a /tree switch starts from it (decisions/modes.md).
+		if (mode !== branchMode) {
+			recordState(pi, PERMISSION_MODE_STATE, mode);
+			branchMode = mode;
+		}
 		applyBadge(undefined, toolCallId);
 		// Every switch is announced once on the tail of the next request (the next
 		// tool result mid-turn, the prompt between turns), so the model learns of
@@ -822,8 +833,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				: "";
 		// Not at startup: "is now" beside the mode's own standing block read as a
 		// duplicate to both GPT-6 models in the 2026-10-04 self-test, and Claude
-		// Code announces only a switch.
-		if (!startup) {
+		// Code announces only a switch. A startup that leaves the mode the branch
+		// recorded (a flag, a stored bypass that needs its flag again) is one.
+		if (!startup || (told !== undefined && told !== mode && requestOnBranch)) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text: `The user's permission mode is now "${mode}".${planNote}`,
 				key: "permission-mode-change",
@@ -836,7 +848,6 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 					"Auto mode is active: your tool calls run without per-action prompts, but each one is screened by an approval classifier that blocks anything irreversible, destructive, or aimed outside this environment. " +
 					"Work normally — do not narrate the classifier or try to phrase calls to get past it. If a call is blocked, take the block at face value: do not retry it, and do not reach the same result another way. Continue with work that does not depend on it, or explain what you were trying to do and let the user decide. " +
 					"Attempting to weaken this gate (editing permission settings, changing the mode, or routing work around it) is itself blocked.",
-				scope: "every-turn",
 				key: "permission-mode",
 				// Session state: rides every user message since auto mode came on, so
 				// the cached prefix holds turn to turn (lib/reminders.ts).
@@ -896,7 +907,11 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		return settings;
 	};
 
-	const reloadSettings = (ctx: ExtensionContext) => {
+	/**
+	 * `launching`: the process is starting (reason "startup"), when its flags
+	 * pick the mode. `carried`: the mode a /clear or /new carries onto its empty branch.
+	 */
+	const reloadSettings = (ctx: ExtensionContext, launching: boolean, carried: PermissionMode | undefined) => {
 		const settings = reloadRules(ctx);
 		projectAllowDeclined = false;
 		// Dropped so edited autoMode rules and instruction files are picked up on
@@ -907,14 +922,15 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// Claude Code's resolution order (flags, then settings' defaultMode), with
 		// bypassPermissions refused wherever a settings source disabled it — before
 		// 2026-09-05 (H3) that policy was silently not in force here.
-		const startup = resolveStartupMode(
-			[
-				pi.getFlag("dangerously-skip-permissions") === true ? "bypassPermissions" : undefined,
-				normalizePermissionMode(pi.getFlag("permission-mode")),
-				settings.defaultMode,
-			],
-			settings,
-		);
+		// The mode follows the branch: at launch the flags win over it, and after
+		// that (/reload, /resume, /fork, /clear in the same process) the branch's
+		// own mode wins over the launch flags, so a switch the user made is kept.
+		// A stored bypassPermissions is never restored by itself: it needs its flag.
+		const bypassFlag = pi.getFlag("dangerously-skip-permissions") === true ? ("bypassPermissions" as const) : undefined;
+		const modeFlag = normalizePermissionMode(pi.getFlag("permission-mode"));
+		const fromBranch = branchMode ?? carried;
+		const restored = fromBranch === "bypassPermissions" ? undefined : fromBranch;
+		const startup = resolveStartupMode(launching ? [bypassFlag, modeFlag, restored, settings.defaultMode] : [restored, bypassFlag, modeFlag, settings.defaultMode], settings);
 		if (startup.mode) mode = startup.mode;
 		if (startup.bypassRefused && ctx.hasUI) ctx.ui.notify("Bypass permissions mode was disabled by settings", "warning");
 		bypassInCycle = mode === "bypassPermissions";
@@ -934,16 +950,17 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	};
 
 	// Claude Code's auto-mode note joins the mid-conversation system message
-	// when the conversation opens in auto mode, decided once on its first turn
-	// so message 1 never changes later (auto-mode/system-note.ts).
+	// when the conversation opens in auto mode (auto-mode/system-note.ts). It is
+	// live state, rendered only by a request that opens an epoch, so message 1
+	// never changes inside one; a compaction or a model switch decides it again.
 	pi.on("turn_start", (_event, ctx) => {
-		if (autoNoteDecided) return;
-		autoNoteDecided = true;
 		const note = mode === "auto" && ctx.model ? autoModeSystemNote(ctx.model) : undefined;
-		if (!note) return;
+		if (!note) {
+			pi.events.emit(REMINDER_CHANNEL, { remove: true, key: "auto-mode-note" });
+			return;
+		}
 		pi.events.emit(REMINDER_CHANNEL, {
 			text: note,
-			scope: "every-turn",
 			key: "auto-mode-note",
 			placement: "first-prepend",
 			order: CONTEXT_ORDER.autoModeNote,
@@ -982,7 +999,6 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// one, its "don't ask again" grants and its pause state do not carry over
 		// (PERMISSIONS-REVIEW-2026-09-05 L1). A reload keeps them — same conversation.
 		if (event.reason !== "reload") {
-			autoNoteDecided = false;
 			sessionAllows.length = 0;
 			currentMainToolCallId = undefined;
 			inFlightMainCalls = [];
@@ -1012,19 +1028,28 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		oneCodeProjectSettingsFile = oneCodeProjectSettingsPath(ctx.cwd, os.homedir());
 		protectedDirs = runtimeProtectedDirs();
 		secretPaths = runtimeSecretPaths(os.homedir());
-		reloadSettings(ctx);
-		// Stored mode is announcement history only: live settings/flags still
-		// decide the gate. A resume into another mode is an ordinary switch.
-		const restored = restoredContext(pi.events);
-		const previousMode = normalizePermissionMode(restored?.baselines["permission-mode"]);
-		if (restored && previousMode && previousMode !== mode) setMode(mode);
-		else if (restored && !STANDING_REMINDER_MODES.has(mode)) pi.events.emit(REMINDER_CHANNEL, { remove: true, key: "permission-mode" });
-		pi.events.emit(CONTEXT_BASELINE_CHANNEL, { key: "permission-mode", value: mode });
+		branchMode = normalizePermissionMode(readState(ctx, PERMISSION_MODE_STATE));
+		requestOnBranch = (ctx.sessionManager.getBranch() as EntryLike[]).some((entry) => readRecord(entry)?.kind === "request");
+		// Claude Code keeps the mode across /clear: the new branch starts from the
+		// mode this process last published (MODE_ENV), and records it.
+		const carried = event.reason === "new" && !branchMode ? normalizePermissionMode(process.env[MODE_ENV]) : undefined;
+		reloadSettings(ctx, event.reason === "startup", carried);
+		if (!STANDING_REMINDER_MODES.has(mode)) setMode(mode, true);
 		// The system prompt lists the workspace as the session starts (lib/workspace-channel.ts).
 		pi.events.emit(WORKSPACE_CHANNEL, { dirs: workspacePaths } satisfies WorkspaceAnnouncement);
 		resetClassifierChoice(ctx.model, "batched");
 		// The bridge reads live mode/rules, but belongs to this parent session only.
 		pi.events.emit(SUBAGENT_GATE_CHANNEL, { decide: sessionPermissionBridge(evaluateChildToolCall, childPermissionSession.signal) });
+	});
+
+	// A /tree switch selects a branch whose model was told that branch's mode:
+	// take it, as a resume would, without announcing a switch. A stored
+	// bypassPermissions is never taken.
+	pi.on("session_tree", (_event, ctx) => {
+		const onBranch = normalizePermissionMode(readState(ctx, PERMISSION_MODE_STATE));
+		if (!onBranch || onBranch === "bypassPermissions" || onBranch === mode) return;
+		branchMode = onBranch;
+		setMode(onBranch, true);
 	});
 
 	// The published bridge stays: aborted, it denies every call a retained child

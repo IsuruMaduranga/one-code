@@ -1,23 +1,20 @@
 /**
- * What to tell the model when MCP state changes after the first request (pure).
+ * What to tell the model when MCP state changes inside an epoch (pure).
  *
  * The MCP instructions and failed-servers reminders are `first-prepend` blocks
- * on message 1. Before the first request they are simply (re)written; after it
- * message 1 is part of every request's cached prefix, so they are FROZEN and
- * changes ride one-shot notices where the model reads next (same rule as the
- * deferred-tools listing, tool-search/announce.ts). `McpAnnounced` records what
- * the model has been told; `mcpDelta` compares it with the live state.
+ * on message 1. A request that opens an epoch renders them from live state;
+ * inside an epoch message 1 is the record (extensions/ledger), so changes ride
+ * notices on the request's tail, decided when the request goes out from what
+ * the epoch has told (the same rule as the deferred-tools listing). What was
+ * told is a whole-text block fact per server (`mcp-instructed:<name>`,
+ * `mcp-failed:<name>`): the hash of the instructions or error last told, or of
+ * the empty text once a drop or a recovery was announced.
  */
 
 import { mcpFailuresReminder, mcpInstructionsReminder } from "./client.ts";
+import type { BlockFact, ToldFact } from "../lib/ledger/records.ts";
+import { toldBlockFact } from "../lib/reminders.ts";
 import { countNoun } from "../lib/tui-render.ts";
-
-export interface McpAnnounced {
-	/** Servers whose instructions the model has been given, with the text it saw. */
-	instructed: Map<string, string>;
-	/** Servers the model has been told failed, with the error it saw. */
-	failed: Map<string, string>;
-}
 
 export interface McpSnapshot {
 	connected: Array<{ name: string; instructions?: string }>;
@@ -33,16 +30,19 @@ export interface McpDelta {
 	recovered: string[];
 	/** Servers whose instructions the model saw that are no longer connected and not reported failed. */
 	dropped: string[];
+	/** What announcing this delta tells, for the request that carries it. */
+	facts: ToldFact[];
 }
 
-export function emptyAnnounced(): McpAnnounced {
-	return { instructed: new Map(), failed: new Map() };
-}
+const INSTRUCTED = "mcp-instructed:";
+const FAILED = "mcp-failed:";
+/** The told hash of "nothing": a drop or a recovery was announced. */
+const NONE = toldBlockFact("", "").hash;
 
 /**
  * Store and compare the exact bounded values the reminder puts on the wire.
  * A changing tail beyond either cap is not a model-visible capability change
- * and must not become a false resume addendum.
+ * and must not become a false notice.
  */
 function displayedInstructions(name: string, instructions: string): string {
 	const rendered = mcpInstructionsReminder([{ server: { name }, instructions }]);
@@ -53,109 +53,63 @@ function displayedFailure(error: string): string {
 	return error.split("\n")[0].slice(0, 300);
 }
 
-/** Maps are serialized as entry arrays so arbitrary server instructions/errors round-trip exactly. */
-export interface McpAnnouncedBaseline { instructed: Array<[string, string]>; failed: Array<[string, string]> }
-export function serializeMcpAnnounced(announced: McpAnnounced): McpAnnouncedBaseline {
-	return { instructed: [...announced.instructed], failed: [...announced.failed] };
+const instructedFact = (name: string, instructions: string): BlockFact => toldBlockFact(INSTRUCTED + name, displayedInstructions(name, instructions));
+const failedFact = (name: string, error: string): BlockFact => toldBlockFact(FAILED + name, displayedFailure(error));
+
+/** What message 1's two MCP blocks rendered from `snapshot` tell. */
+export function mcpFacts(snapshot: McpSnapshot): ToldFact[] {
+	return [
+		...snapshot.connected.flatMap((c) => (c.instructions ? [instructedFact(c.name, c.instructions)] : [])),
+		...snapshot.failed.map((f) => failedFact(f.name, f.error)),
+	];
 }
+
 /**
- * Best-effort compatibility reader for stacks written before structured MCP
- * baselines. With the configured server `names`, a section starts only at a
- * `## <name>` heading, so a `## ` heading inside a server's instructions stays
- * part of them instead of reading as a server of its own.
+ * What changed since the epoch told `told` (whole-text block hashes by key),
+ * and the facts announcing it tells. While the startup connections are still
+ * `settling`, a server not connected yet is not a drop, and neither is one in
+ * `connecting` (a reconnect in flight).
  */
-export function mcpAnnouncedFromReminders(instructions: string | undefined, failures: string | undefined, names?: Iterable<string>): McpAnnounced {
-	const announced = emptyAnnounced();
-	const known = names ? new Set(names) : undefined;
-	const instructionPrefix = "# MCP Server Instructions\n\nThe following MCP servers have provided instructions for how to use their tools and resources:\n\n";
-	if (instructions?.startsWith(instructionPrefix)) {
-		const sections: string[] = [];
-		for (const section of instructions.slice(instructionPrefix.length).split("\n\n## ")) {
-			const normalized = section.startsWith("## ") ? section.slice(3) : section;
-			const newline = normalized.indexOf("\n");
-			const heading = newline > 0 ? normalized.slice(0, newline) : normalized;
-			if (known && sections.length > 0 && !known.has(heading)) sections[sections.length - 1] += `\n\n## ${normalized}`;
-			else sections.push(normalized);
-		}
-		for (const section of sections) {
-			const newline = section.indexOf("\n");
-			if (newline > 0) announced.instructed.set(section.slice(0, newline), section.slice(newline + 1));
-		}
-	}
-	const failurePrefix = "The following MCP servers are configured but failed to connect — their tools (typically named mcp__<server>__*) are unavailable for this session:\n";
-	if (failures?.startsWith(failurePrefix)) {
-		for (const line of failures.slice(failurePrefix.length).split("\n")) {
-			if (!line.startsWith("- ")) break;
-			const colon = line.indexOf(": ", 2);
-			if (colon > 2) announced.failed.set(line.slice(2, colon), line.slice(colon + 2));
-		}
-	}
-	return announced;
-}
-
-export function mcpAnnouncedBaseline(value: unknown): McpAnnounced | undefined {
-	if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-	const input = value as Record<string, unknown>;
-	const pairs = (item: unknown): Array<[string, string]> | undefined =>
-		Array.isArray(item) && item.every((pair) => Array.isArray(pair) && pair.length === 2 && typeof pair[0] === "string" && typeof pair[1] === "string")
-			? item as Array<[string, string]>
-			: undefined;
-	const instructed = pairs(input.instructed);
-	const failed = pairs(input.failed);
-	return instructed && failed ? { instructed: new Map(instructed), failed: new Map(failed) } : undefined;
-}
-
-/** What message 1 says after it was (re)written from `snapshot`, before the first request. */
-export function announcedFrom(snapshot: McpSnapshot): McpAnnounced {
-	return {
-		instructed: new Map(
-			snapshot.connected.filter((c) => c.instructions).map((c) => [c.name, displayedInstructions(c.name, c.instructions as string)]),
-		),
-		failed: new Map(snapshot.failed.map((f) => [f.name, displayedFailure(f.error)])),
-	};
-}
-
-export function mcpDelta(announced: McpAnnounced, snapshot: McpSnapshot): McpDelta {
+export function mcpDelta(told: ReadonlyMap<string, string>, snapshot: McpSnapshot, settling = false, connecting: ReadonlySet<string> = new Set()): McpDelta {
 	const connectedNames = new Set(snapshot.connected.map((c) => c.name));
-	const failedNames = new Set(snapshot.failed.map((f) => f.name));
+	// One failure per server (the latest): two kept errors would alternate as the told fact.
+	const failed = [...new Map(snapshot.failed.map((f) => [f.name, f])).values()];
+	const failedNames = new Set(failed.map((f) => f.name));
+	const toldNames = (prefix: string) => [...told].filter(([key, hash]) => key.startsWith(prefix) && hash !== NONE).map(([key]) => key.slice(prefix.length));
+	const newInstructions = snapshot.connected
+		.filter((c) => c.instructions && told.get(INSTRUCTED + c.name) !== instructedFact(c.name, c.instructions).hash)
+		.map((c) => ({ name: c.name, instructions: displayedInstructions(c.name, c.instructions as string) }));
+	const newFailures = failed
+		.filter((f) => told.get(FAILED + f.name) !== failedFact(f.name, f.error).hash)
+		.map((f) => ({ name: f.name, error: displayedFailure(f.error) }));
+	const recovered = toldNames(FAILED).filter((name) => connectedNames.has(name));
+	const dropped = settling ? [] : toldNames(INSTRUCTED).filter((name) => !connectedNames.has(name) && !failedNames.has(name) && !connecting.has(name));
 	return {
-		newInstructions: snapshot.connected
-			.filter((c) => c.instructions && announced.instructed.get(c.name) !== displayedInstructions(c.name, c.instructions as string))
-			.map((c) => ({ name: c.name, instructions: displayedInstructions(c.name, c.instructions as string) })),
-		newFailures: snapshot.failed
-			.filter((f) => announced.failed.get(f.name) !== displayedFailure(f.error))
-			.map((f) => ({ name: f.name, error: displayedFailure(f.error) })),
-		recovered: [...announced.failed.keys()].filter((name) => connectedNames.has(name)),
-		dropped: [...announced.instructed.keys()].filter((name) => !connectedNames.has(name) && !failedNames.has(name)),
+		newInstructions,
+		newFailures,
+		recovered,
+		dropped,
+		facts: [
+			...newInstructions.map((s) => toldBlockFact(INSTRUCTED + s.name, s.instructions)),
+			...newFailures.map((f) => toldBlockFact(FAILED + f.name, f.error)),
+			...recovered.map((name) => toldBlockFact(FAILED + name, "")),
+			...dropped.map((name) => toldBlockFact(INSTRUCTED + name, "")),
+		],
 	};
 }
 
-export function applyMcpDelta(announced: McpAnnounced, delta: McpDelta): void {
-	for (const s of delta.newInstructions) announced.instructed.set(s.name, s.instructions);
-	for (const f of delta.newFailures) announced.failed.set(f.name, f.error);
-	for (const name of delta.recovered) announced.failed.delete(name);
-	for (const name of delta.dropped) announced.instructed.delete(name);
-}
-
 /**
- * One-shot notices for a delta, in the order they should be queued. Empty when
- * nothing changed. `rebuilt`: a compaction's rebuild of the two blocks says the
- * same again (new instructions, new failures); a recovery or a drop it does not.
+ * The notices for a delta, in the order they go on the tail. Empty when
+ * nothing changed.
  */
-export interface McpNotice {
-	text: string;
-	rebuilt: boolean;
-}
-
-export function mcpChangeNotices(delta: McpDelta): McpNotice[] {
-	const notices: McpNotice[] = [];
-	const add = (text: string, rebuilt: boolean) => notices.push({ text, rebuilt });
+export function mcpChangeNotices(delta: McpDelta): string[] {
+	const notices: string[] = [];
+	const add = (text: string) => notices.push(text);
 	if (delta.recovered.length > 0) {
 		add(
 			`MCP server${delta.recovered.length === 1 ? "" : "s"} ${delta.recovered.join(", ")} ` +
 				"connected after this conversation started (an earlier notice reported a connection failure). " +
 				"The server's tools are available as deferred tools — load them with tool_search.",
-			false,
 		);
 	}
 	if (delta.newInstructions.length > 0) {
@@ -164,17 +118,15 @@ export function mcpChangeNotices(delta: McpDelta): McpNotice[] {
 			`MCP server${names.length === 1 ? "" : "s"} ${names.join(", ")} connected after this conversation started; ` +
 				"the tools are available as deferred tools (load with tool_search). Server instructions:\n\n" +
 				mcpInstructionsReminder(delta.newInstructions.map((s) => ({ server: { name: s.name }, instructions: s.instructions }))),
-			true,
 		);
 	}
 	if (delta.newFailures.length > 0) {
-		add(mcpFailuresReminder(delta.newFailures), true);
+		add(mcpFailuresReminder(delta.newFailures));
 	}
 	if (delta.dropped.length > 0) {
 		add(
 			`MCP server${delta.dropped.length === 1 ? "" : "s"} ${delta.dropped.join(", ")} disconnected; ` +
 				'their tools answer "not connected" until the server is reconnected (the user can do that in /mcp).',
-			false,
 		);
 	}
 	return notices;

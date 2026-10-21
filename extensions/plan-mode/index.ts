@@ -27,7 +27,6 @@ import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { oneCodeStateDir } from "../lib/paths.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
-import { CONTEXT_BASELINE_CHANNEL, restoredContext } from "../lib/context-stack.ts";
 import { canShowCustomUi } from "../lib/headless-output.ts";
 import { ccToolRenderers, safeThemePaint } from "../lib/tui-render.ts";
 import { userDenialText } from "../lib/user-denial.ts";
@@ -35,6 +34,10 @@ import type { PermissionMode } from "../permissions/matcher.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../permissions/modes.ts";
 import { buildPlanModeReminder } from "./reminder.ts";
 import { randomSlug } from "./slug.ts";
+import { readState, recordState } from "../lib/ledger/state.ts";
+
+/** The branch's record of whether the plan file existed when the current plan-mode run began. */
+const PLAN_ENTRY_STATE = "plan-mode:entry";
 import {
 	approvedPlanText,
 	ENTER_PLAN_MODE_DESCRIPTION,
@@ -90,7 +93,8 @@ export default function planModeExtension(pi: ExtensionAPI) {
 	 * Whether the plan file existed when plan mode came on, which picks Claude
 	 * Code's "Plan File Info" line. Fixed for the mode's whole run, so the sticky
 	 * block stays byte-identical turn after turn (plan-mode/reminder.ts);
-	 * cleared when the mode ends.
+	 * cleared when the mode ends. Recorded on the branch (`PLAN_ENTRY_STATE`)
+	 * with its path, so a /reload or resume inside the same run keeps it.
 	 */
 	let planExistedAtEntry: boolean | undefined;
 
@@ -110,15 +114,20 @@ export default function planModeExtension(pi: ExtensionAPI) {
 		return path;
 	};
 
-	/** Re-announce path + reminder; every-turn re-emits replace by key. */
+	/** Re-announce path + reminder; a re-emit replaces the sticky state by key. */
 	const refresh = (ctx: ExtensionContext, toolCallId?: string) => {
 		const path = ensurePlanFile(ctx);
-		planExistedAtEntry ??= existsSync(path);
-		pi.events.emit(CONTEXT_BASELINE_CHANNEL, { key: "plan-mode", value: { path, existed: planExistedAtEntry } });
+		if (planExistedAtEntry === undefined) {
+			const stored = readState(ctx, PLAN_ENTRY_STATE) as { path?: unknown; existed?: unknown } | undefined;
+			if (stored?.path === path && typeof stored.existed === "boolean") planExistedAtEntry = stored.existed;
+			else {
+				planExistedAtEntry = existsSync(path);
+				recordState(pi, PLAN_ENTRY_STATE, { path, existed: planExistedAtEntry });
+			}
+		}
 		pi.events.emit(PLAN_FILE_CHANNEL, { path });
 		pi.events.emit(REMINDER_CHANNEL, {
 			text: buildPlanModeReminder(path, planExistedAtEntry),
-			scope: "every-turn",
 			key: "permission-mode",
 			placement: "sticky-append",
 			toolCallId,
@@ -153,6 +162,8 @@ export default function planModeExtension(pi: ExtensionAPI) {
 		currentMode = status.mode;
 		if (currentMode === "plan" && previous !== "plan") modeBeforePlan = previous as PermissionMode | undefined;
 		if (currentMode !== "plan") planExistedAtEntry = undefined;
+		// The run ended: the next entry decides afresh.
+		if (previous === "plan" && currentMode !== "plan") recordState(pi, PLAN_ENTRY_STATE, null);
 		// Entering plan mode mid-turn: permissions' setMode has just closed the
 		// shared "permission-mode" key (before broadcasting this status, so this
 		// re-add is not undone) and will announce the change on the next tool
@@ -164,14 +175,14 @@ export default function planModeExtension(pi: ExtensionAPI) {
 
 	pi.on("session_start", (_event, ctx) => {
 		lastCtx = ctx;
-		const restored = restoredContext(pi.events);
-		const baseline = restored?.baselines["plan-mode"] as { path?: unknown; existed?: unknown } | undefined;
-		const path = planFileOnBranch(ctx.sessionManager.getBranch());
-		if (currentMode === "plan" && restored?.baselines["permission-mode"] === "plan" &&
-			path && baseline?.path === path && typeof baseline.existed === "boolean") {
-			planFilePath = path;
-			planExistedAtEntry = baseline.existed;
-		}
+		if (currentMode === "plan") refresh(ctx);
+	});
+	// The plan file follows the branch: a /tree switch takes the selected
+	// branch's (or allocates one there on the next refresh), never the abandoned one's.
+	pi.on("session_tree", (_event, ctx) => {
+		lastCtx = ctx;
+		planFilePath = undefined;
+		planExistedAtEntry = undefined;
 		if (currentMode === "plan") refresh(ctx);
 	});
 

@@ -79,26 +79,29 @@ describe("worktree state announcements", () => {
 		resumed.events.on(REMINDER_CHANNEL, (data) => reminders.push(data as ReminderPayload));
 		worktreeExtension(resumed.pi as never);
 		const missingPath = join(repo, "missing-worktree");
+		const entered = { type: "message", message: {
+			role: "toolResult", toolName: "enter_worktree", toolCallId: "old", content: [], timestamp: 1,
+			details: { worktreeState: { path: missingPath, originalCwd: repo, sharedRoot: repo, createdByUs: false } },
+		} };
+		// The session's branch: the entering result, then every entry either instance appends.
+		let reloaded: ReturnType<typeof createFakePi> | undefined;
 		const ctx = createFakeCtx({
 			cwd: repo,
-			sessionManager: { getSessionId: () => "resumed-missing-worktree", getBranch: () => [{ type: "message", message: {
-				role: "toolResult", toolName: "enter_worktree", toolCallId: "old", content: [], timestamp: 1,
-				details: { worktreeState: { path: missingPath, originalCwd: repo, sharedRoot: repo, createdByUs: false } },
-			} }] },
+			sessionManager: { getSessionId: () => "resumed-missing-worktree", getBranch: () => [entered, ...resumed.branch, ...(reloaded?.branch ?? [])] },
 		});
 		await resumed.fire("session_start", {}, ctx);
 		expect(reminders).toContainEqual({ key: "cc-worktree-session", remove: true });
-		const notice = reminders.find((entry) => entry.text && entry.scope !== "every-turn");
+		const notice = reminders.find((entry) => entry.text && entry.placement === undefined);
 		expect(notice?.text).toContain(`back in ${repo}`);
 		expect(notice?.text).toContain(missingPath);
 		expect(notice?.text).toContain("no longer exists");
 
-		// Said once per session: a reload (a new instance), a re-start and a
-		// tree navigation of the same session do not repeat it.
+		// Said once per branch, recorded on it: a reload (a new instance), a
+		// re-start and a tree navigation of the same branch do not repeat it.
 		const notices = () => reminders.filter((entry) => entry.text?.startsWith("Left worktree session")).length;
 		await resumed.fire("session_tree", {}, ctx);
 		await resumed.fire("session_start", { reason: "reload" }, ctx);
-		const reloaded = createFakePi();
+		reloaded = createFakePi();
 		reloaded.events.on(REMINDER_CHANNEL, (data) => reminders.push(data as ReminderPayload));
 		worktreeExtension(reloaded.pi as never);
 		await reloaded.fire("session_start", { reason: "reload" }, ctx);

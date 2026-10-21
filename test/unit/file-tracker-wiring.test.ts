@@ -280,6 +280,29 @@ describe("file-tracker wiring", () => {
 		expect(result).toBeUndefined();
 	});
 
+	it("treats a file that changed since the recorded read as stale on resume, and says so once (R2-H1)", async () => {
+		const file = path("moved-on.ts");
+		writeFileSync(file, "what the model read");
+		// The read records what it saw.
+		const readResult = await fake.fireOne<{ details?: { oneCodeFile?: unknown } }>("tool_result", { toolName: "read", toolCallId: "r1", input: { path: file }, isError: false, details: { truncation: undefined } }, ctx());
+		const observation = readResult?.details?.oneCodeFile;
+		expect(observation).toMatchObject({ path: file, size: "what the model read".length });
+		const branch = [
+			{ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "r1", name: "read", arguments: { path: file } }] } },
+			{ type: "message", message: { role: "toolResult", toolCallId: "r1", isError: false, details: { oneCodeFile: observation } } },
+		];
+		// The file changes while the session is closed.
+		writeFileSync(file, "someone else's version");
+		const resumed = createFakePi();
+		const notices: string[] = [];
+		resumed.events.on(REMINDER_CHANNEL, (data) => notices.push(String((data as { text?: string }).text)));
+		fileTrackerExtension(resumed.pi as never);
+		await resumed.fireOne("session_start", { reason: "resume" }, createFakeCtx({ cwd: dir, sessionManager: { getSessionId: () => "s1", getBranch: () => branch } }));
+		expect(notices.filter((text) => text.includes(file))).toHaveLength(1);
+		const blocked = await resumed.fireOne<{ block?: boolean }>("tool_call", { toolName: "edit", input: { path: file } }, ctx());
+		expect(blocked?.block).toBe(true);
+	});
+
 	it("starts a fresh tracker on session_tree when the session id changes", async () => {
 		const file = path("e.ts");
 		writeFileSync(file, "content");

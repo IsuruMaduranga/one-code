@@ -49,21 +49,27 @@ import {
 	toolSearchLoads,
 	toolsToRedefer,
 	WITHHOLD_CHANNEL,
+	DEFERRED_QUERY_CHANNEL,
+	type DeferredQuery,
+	deferredRemovedText,
 	withheldMissReminderText,
 } from "../lib/deferred.ts";
 import { looksLikeAnthropicRequest, MID_CONVERSATION_SYSTEM_BETA, withBetas } from "../lib/anthropic-payload.ts";
-import { addendumNamesOnBranch, liftAddenda, supportsToolAdditions, TOOL_ADDITION_BETAS, withToolAdditions } from "../lib/tool-additions.ts";
+import { liftAddenda, supportsToolAdditions, TOOL_ADDITION_BETAS, withToolAdditions } from "../lib/tool-additions.ts";
 import { inContextEntries } from "../lib/compaction-boundary.ts";
-import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
+import { CALLABLE_TOOLS, foldBranch } from "../lib/ledger/fold.ts";
+import { declaredToolNames } from "../lib/ledger/wire.ts";
+import { MCP_TOOLS_CHANNEL } from "../lib/mcp-share.ts";
+import { authKind, requestIdentity } from "../lib/anthropic-auth.ts";
+import type { EntryLike } from "../lib/ledger/records.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../lib/reminders.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 import { normalizeToolName } from "../permissions/matcher.ts";
-import { applyAnnouncement, deferredToolsBaseline, deferredToolsFromReminder, planAnnouncement } from "./announce.ts";
-import { CONTEXT_BASELINE_CHANNEL, CONTEXT_CAPABILITY_REFRESH_CHANNEL, restoredContext } from "../lib/context-stack.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 
-/** Coalesces the burst of per-tool defers one server emits into one listing update. */
-const ANNOUNCE_DEBOUNCE_MS = 100;
+/** The told mode for "this epoch's message 1 lists deferred tools this run cannot load", said once per epoch. */
+const UNAVAILABLE_MODE = "deferred-unavailable";
 
 export default function toolSearchExtension(pi: ExtensionAPI) {
 	// Owned here (see lib/deferred.ts): the only instance, fed over DEFER_CHANNEL.
@@ -75,26 +81,24 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	// A re-defer (a model change bringing it back) clears the name from here.
 	const withheldNames = new Set<string>();
 	let sessionStarted = false;
-	// The deferred-tools listing is a first-prepend reminder on message 1, part of
-	// the cached prefix of every later request. Before the first request nothing
-	// is cached, so the listing is (re)written freely; after it the listing is
-	// FROZEN and later arrivals ride a one-shot addendum where the model reads
-	// next (./announce.ts — a rewrite re-cached 16.7k tokens of history on
-	// request 2 of every run whose MCP tools registered inside the debounce,
-	// measured 2026-09-04). The debounce makes one server's burst of per-tool
-	// defers one notice; a notice is a one-shot at the tail, so nothing waits
-	// for the whole MCP connect to settle (one slow server held every late tool
-	// back from the model until it did).
-	let requestSent = false;
-	let announceTimer: NodeJS.Timeout | undefined;
 	// After session_shutdown every pi.* call throws (the runner is invalidated,
-	// findings §8); a debounced announce landing in a timer callback then would
-	// be an uncaught exception and take pi down (LIFECYCLE-REVIEW L1).
+	// findings §8): an event that lands then must do nothing (LIFECYCLE-REVIEW L1).
 	const alive = sessionAlive(pi);
-	/** Names the model has been told about: the frozen listing plus every addendum. */
-	const announced = new Set<string>();
-	/** The session's model as last seen, for an announcement made outside any hook. */
-	let latestModel: { provider?: string; api?: string; compat?: unknown } | undefined;
+	/** The session's branch, for folding what the current epoch has told and loaded. */
+	let branchOf: (() => EntryLike[]) | undefined;
+	/**
+	 * Whether the next request opens an epoch: a fold with the live identity, so
+	 * a model or auth switch counts. Kept by leaf and identity: a server's
+	 * connect defers its tools in a burst with nothing appended between.
+	 */
+	let epochAt: { at: string; opens: boolean } | undefined;
+	const opensEpoch = (branch: EntryLike[], model: { provider?: string; api?: string; id?: string } | undefined): boolean => {
+		const at = `${branch.length}\0${branch.at(-1)?.id}\0${model?.provider}/${model?.api}/${model?.id}/${authKind(model?.provider)}`;
+		if (epochAt?.at !== at) epochAt = { at, opens: foldBranch(branch, requestIdentity(model)).opensEpoch };
+		return epochAt.opens;
+	};
+	/** The session's model, for a decision made outside a hook that carries one. */
+	let currentModel: { provider?: string; api?: string; id?: string; compat?: unknown } | undefined;
 
 	/** Whether tool_search is registered; a `--tools` list without it turns deferral off (lib/deferred.ts). */
 	const deferring = () => deferralEnabled(pi.getAllTools());
@@ -110,64 +114,81 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 			}));
 	};
 
-	const publishBaseline = (names: ReadonlySet<string>) => {
-		pi.events.emit(CONTEXT_BASELINE_CHANNEL, { key: "tool-search", value: [...names] });
-	};
-	const announce = () => {
+	/**
+	 * The deferred-tools listing as live state: what an epoch's message 1 says.
+	 * Inside an epoch message 1 is the record, so a change here is announced by
+	 * the render step below, never by rewriting it.
+	 */
+	const publishListing = () => {
 		if (!alive()) return;
 		const available = searchableTools();
-		const plan = planAnnouncement({ requestSent, announced, available: available.map((t) => t.name) });
-		// Store the post-announcement state before the next context pass can place it.
-		if (plan.kind !== "none") {
-			const next = new Set(announced);
-			applyAnnouncement(next, plan);
-			publishBaseline(next);
+		if (available.length === 0) {
+			pi.events.emit(REMINDER_CHANNEL, { key: "deferred-tools", remove: true });
+			return;
 		}
-		if (plan.kind === "rewrite") {
-			pi.events.emit(REMINDER_CHANNEL, {
-				scope: "every-turn",
-				key: "deferred-tools",
-				text: deferredReminderText(available),
-				placement: "first-prepend",
-				order: CONTEXT_ORDER.deferredTools,
-			});
-		} else if (plan.kind === "addendum") {
-			// Unkeyed: a keyed next-turn reminder replaces its predecessor, and an
-			// addendum replaced before delivery would lose names. Its group lets a
-			// compaction's rebuilt listing cancel it (lib/context-stack.ts).
-			pi.events.emit(REMINDER_CHANNEL, { text: deferredAddendumText(plan.added), group: "deferred-tools" });
-			// Where the request carries it as Claude Code's tool_addition, the model
-			// calls the tool directly, so pi's dispatcher must already accept it.
-			if (supportsToolAdditions(latestModel)) {
-				for (const name of plan.added) {
-					loadedTools.add(name);
-				}
-				pi.setActiveTools([...new Set([...pi.getActiveTools(), ...plan.added])]);
-			}
-		}
-		applyAnnouncement(announced, plan);
+		pi.events.emit(REMINDER_CHANNEL, {
+			key: "deferred-tools",
+			text: deferredReminderText(available),
+			placement: "first-prepend",
+			order: CONTEXT_ORDER.deferredTools,
+			facts: [{ kind: "tools", names: available.map((tool) => tool.name) }],
+		});
 	};
 
-	const clearAnnounce = () => {
-		if (announceTimer) clearTimeout(announceTimer);
-		announceTimer = undefined;
+	/** Deferred tools this process has seen loadable: one of them missing later is known to be gone. */
+	const seenHere = new Set<string>();
+	/** True once the MCP extension published its settled tool set: an MCP tool missing then is gone. */
+	let mcpSettled = false;
+	pi.events.on(MCP_TOOLS_CHANNEL, (data) => {
+		if ((data as { settled?: boolean } | undefined)?.settled) mcpSettled = true;
+	});
+
+	/** Make `names` callable now: pi fixes a turn's callable tools before the request's hooks run. */
+	const activate = (names: readonly string[]) => {
+		const active = pi.getActiveTools();
+		const missing = names.filter((name) => !active.includes(name));
+		if (missing.length > 0) pi.setActiveTools([...active, ...missing]);
+		for (const name of names) loadedTools.add(name);
 	};
-	const scheduleAnnounce = () => {
-		clearAnnounce();
-		if (!alive()) return;
-		announceTimer = setTimeout(() => {
-			announceTimer = undefined;
-			// Rewrite or addendum is decided at fire time, not schedule time: a
-			// request may have gone out during the debounce (the -p race).
-			announce();
-		}, ANNOUNCE_DEBOUNCE_MS);
-		announceTimer.unref?.();
-	};
+
+	// Inside an epoch, a deferred tool that registered since the epoch's listing
+	// is announced on the request's tail: computed when the request goes out,
+	// from what is loadable then and what the epoch has told, so a tool withheld
+	// in the meantime is never announced (the H1 class). Where the model takes
+	// Claude Code's tool_addition, the addendum becomes one (the context and
+	// payload hooks below) and the tool is callable at once.
+	pi.events.on(RENDER_CHANNEL, (data) => {
+		const request = data as RenderRequest;
+		if (request.epoch) return;
+		const told = request.told.get("tools") ?? new Set<string>();
+		if (!deferring()) {
+			// The epoch's message 1 lists deferred tools this run cannot load.
+			if (told.size > 0 && !request.modes.has(UNAVAILABLE_MODE)) {
+				request.blocks.push({ text: loaderUnavailableReminderText(), facts: [{ kind: "mode", key: UNAVAILABLE_MODE, on: true }] });
+			}
+			return;
+		}
+		// A tool told and missing now is announced gone once its absence is known
+		// (the fold then holds it untold, so a return is announced as new): this
+		// process saw it leave, or it is an MCP tool and the MCP connects have
+		// settled (a resume sends its first request before a slow server
+		// registers, and a fork never had the parent's own tools). A tool
+		// withdrawn for the model is not gone: a call to it says so.
+		const loadable = new Set(searchableTools().map((tool) => tool.name));
+		for (const name of loadable) seenHere.add(name);
+		const absent = (name: string) => seenHere.has(name) || (name.startsWith("mcp__") && mcpSettled);
+		const removed = [...told].filter((name) => !loadable.has(name) && !withheldNames.has(name) && absent(name));
+		if (removed.length > 0) request.blocks.push({ text: deferredRemovedText(removed), facts: [{ kind: "tools", names: removed, removed: true }] });
+		const added = [...loadable].filter((name) => !told.has(name));
+		if (added.length === 0) return;
+		const callable = supportsToolAdditions(request.model);
+		if (callable) activate(added);
+		request.blocks.push({ text: deferredAddendumText(added), facts: [{ kind: "tools", names: added, ...(callable ? { callable: true } : {}) }] });
+	});
 
 	/** The addenda the last `context` pass lifted off tool results, by call id (lib/tool-additions.ts). */
 	let addendaByCall = new Map<string, string[]>();
 	pi.on("context", (event, ctx) => {
-		requestSent = true;
 		addendaByCall = new Map();
 		if (!supportsToolAdditions(ctx?.model) || !Array.isArray(event?.messages)) return undefined;
 		const lifted = liftAddenda(event.messages);
@@ -175,50 +196,38 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		return lifted.messages === event.messages ? undefined : { messages: lifted.messages };
 	});
 
-	// Every tool_search load of this session (call id → names), seeded from the
-	// transcript at session_start and extended by each load: the wire hook needs
-	// it to reference a loaded tool from the result that loaded it.
+	// Every tool_search load still in context (call id → names), seeded from the
+	// branch at session_start and on a /tree switch, and extended by each load:
+	// the wire hook needs it to reference a loaded tool from the result that
+	// loaded it.
 	let loads = new Map<string, string[]>();
-	// Every deferred tool a tool_search load or a tool_addition activated and no
-	// compaction has returned to deferred: seeded from the turns still in context
-	// at session_start and on a /tree switch (empty after /clear). The transcript
-	// tells the model those tools are callable, and Claude Code keeps a loaded
-	// tool callable across a resume (its tool_reference blocks stay in the
-	// history), so deferring them again would send the model into a "Tool <name>
-	// not found" round trip. deferAll and the late-defer handler leave them alone;
-	// a compaction re-defers the ones its kept turns no longer use
-	// (lib/deferred.ts toolsToRedefer).
+	// Every deferred tool callable without a fresh load: loaded by a tool_search
+	// result still in context, or announced callable by a tool_addition this
+	// epoch (the ledger's told facts). Claude Code keeps a loaded tool callable
+	// across a resume (its tool_reference blocks stay in the history), so
+	// deferring one again would send the model into a "Tool <name> not found"
+	// round trip. A compaction returns to deferred the ones its kept turns no
+	// longer use (lib/deferred.ts toolsToRedefer).
 	let loadedTools = new Set<string>();
-	// Whether the last request kept loaded tools out of the fixed `tools` array
-	// (Anthropic references, OpenAI Responses loads). Only then does a loaded
-	// tool go back to deferred at a compaction; elsewhere it is in `tools`
-	// already, and removing it would be the miss. A model switch makes it
-	// unknown until the next request.
-	let nativeLoads = false;
-	pi.on("model_select", () => {
-		nativeLoads = false;
-	});
 
 	// On models that take client-side tool references (first-party Claude >= 4.5,
-	// not Haiku) the `tools` array is held byte-identical to request 1's: every
-	// deferred tool rides every Anthropic request as a `defer_loading: true`
-	// definition, and a tool that tool_search loaded — which pi 0.86 promotes into
-	// the eager list, re-caching everything from the tools block down — is
-	// demoted back to deferred and loaded through `tool_reference` blocks in the
-	// tool_search result that activated it (lib/deferred.ts stabilizeDeferredTools
-	// has the rules; working-docs/decisions/caching.md the measurements).
-	// On OpenAI Responses models with native tool loading (GPT-5.4 and newer on
-	// openai and openai-codex) a loaded tool leaves `tools` for pi-ai's own
-	// load item at the tool_search result instead (stabilizeResponsesToolLoads).
+	// not Haiku) every deferred tool rides every Anthropic request as a
+	// `defer_loading: true` definition, and a tool that tool_search loaded — which
+	// pi promotes into the eager list — is demoted back to deferred and loaded
+	// through `tool_reference` blocks in the tool_search result that activated it
+	// (lib/deferred.ts stabilizeDeferredTools has the rules;
+	// working-docs/decisions/caching.md the measurements). On OpenAI Responses
+	// models with native tool loading (GPT-5.4 and newer on openai and
+	// openai-codex) a loaded tool leaves `tools` for pi-ai's own load item at the
+	// tool_search result instead (stabilizeResponsesToolLoads). Inside an epoch
+	// the request carries only its tail here: the ledger's payload hook, later,
+	// puts the recorded list in front and keeps the recorded tools.
 	pi.on("before_provider_request", (event, ctx) => {
-		latestModel = ctx.model;
 		const allTools = pi.getAllTools();
 		const enabled = deferralEnabled(allTools);
 		const toolLoadCompat = responsesToolLoadCompat(ctx.model as ResponsesToolLoadModel | undefined);
-		nativeLoads = false;
 		if (toolLoadCompat) {
 			if (!enabled) return undefined;
-			nativeLoads = true;
 			return stabilizeResponsesToolLoads(event.payload as Record<string, unknown>, (name) => deferredRegistry.has(name), loads, toolLoadCompat);
 		}
 		const original = event.payload as Record<string, unknown>;
@@ -234,33 +243,28 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		// A tool that arrived mid-session goes out as Claude Code's tool_addition
 		// where the model takes one, declared deferred.
 		const lifted = additions ? withToolAdditions(original, addendaByCall) : undefined;
-		// Every tool this request announces by tool_addition must be callable,
-		// whatever a compaction decided from the stored branch: an addendum pinned
-		// to a user message is not stored there.
-		if (lifted) {
-			const active = pi.getActiveTools();
-			const missing = lifted.names.filter((name) => deferredRegistry.has(name) && !active.includes(name));
-			for (const name of lifted.names) loadedTools.add(name);
-			if (missing.length > 0) pi.setActiveTools([...active, ...missing]);
-		}
 		const stable = stabilizeDeferredTools(lifted?.payload ?? original, allTools, isDeferred, loads, new Set(lifted?.names ?? []));
 		// Renamed (OAuth) tools cannot be referenced: the active tools stay as pi
 		// rendered them and the addition goes as text.
 		if (!stable) return announceAsText();
-		nativeLoads = true;
 		return lifted ? withBetas(stable, TOOL_ADDITION_BETAS) : stable;
 	});
 
-
-	/** Deactivate every deferred-registry tool the transcript has not loaded, and announce the loadable set. */
+	/** Deactivate every deferred-registry tool that is not callable without a load, and publish the listing. */
 	const deferAll = () => {
 		const deferred = new Set(deferredRegistry.names);
-		if (deferred.size === 0 || !deferring()) return;
-		const active = pi.getActiveTools();
-		const next = active.filter((name) => !deferred.has(name) || loadedTools.has(name));
-		if (next.length !== active.length) pi.setActiveTools(next);
-		announce();
+		if (deferred.size > 0 && deferring()) {
+			const active = pi.getActiveTools();
+			const next = active.filter((name) => !deferred.has(name) || loadedTools.has(name));
+			if (next.length !== active.length) pi.setActiveTools(next);
+		}
+		publishListing();
 	};
+
+	pi.events.on(DEFERRED_QUERY_CHANNEL, (data) => {
+		const query = data as DeferredQuery;
+		for (const name of deferredRegistry.names) query.tools.push({ name, keywords: deferredRegistry.keywordsFor(name) });
+	});
 
 	pi.events.on(DEFER_CHANNEL, (data) => {
 		const request = data as DeferRequest;
@@ -269,16 +273,16 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		if (request?.name && withheldNames.delete(request.name)) loadedTools.delete(request.name);
 		// A defer arriving after the session_start pass (MCP servers connect
 		// asynchronously and register their tools then) would otherwise leave the
-		// tool eager AND unlisted in the reminder. Deactivate it (unless the
-		// transcript loaded it) and refresh the keyed reminder.
-		if (sessionStarted && request?.name && deferring()) {
+		// tool eager AND unlisted. Deactivate it unless it is callable already;
+		// where the epoch is open and the model takes a tool_addition, the next
+		// request announces it as callable, so it is activated now, before pi
+		// fixes that turn's tools.
+		if (sessionStarted && request?.name && deferring() && alive()) {
 			const active = pi.getActiveTools();
-			if (active.includes(request.name) && !loadedTools.has(request.name)) {
-				pi.setActiveTools(active.filter((name) => name !== request.name));
-			}
-			// The tool is searchable (keyword search reads the registry) from now;
-			// only the standing listing waits.
-			scheduleAnnounce();
+			const announceCallable = supportsToolAdditions(currentModel) && branchOf !== undefined && !opensEpoch(branchOf(), currentModel);
+			if (announceCallable) activate([request.name]);
+			else if (active.includes(request.name) && !loadedTools.has(request.name)) pi.setActiveTools(active.filter((name) => name !== request.name));
+			publishListing();
 		}
 	});
 
@@ -291,31 +295,20 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		if (!alive()) return;
 		const active = pi.getActiveTools();
 		if (active.includes(name)) pi.setActiveTools(active.filter((n) => n !== name));
-		// Before the first request the listing is still free to change: rewrite it
-		// now, synchronously, so a request going out right after session_start
-		// never names the withheld tool. After it the frozen listing stands.
-		if (sessionStarted && !requestSent) announce();
+		publishListing();
 	});
 
-	/**
-	 * Seed the loads and the loaded set from the branch's turns still in context
-	 * (a compaction's summary replaced the rest); returns the names their
-	 * tool_addition notices announced.
-	 */
-	const adoptLoads = (branch: SessionEntry[]): string[] => {
-		const inContext = inContextEntries(branch);
-		loads = toolSearchLoads(inContext);
+	/** Seed the loads and the callable set from the branch: loads still in context, and tools the epoch announced callable. */
+	const adoptLoads = (branch: EntryLike[]) => {
+		loads = toolSearchLoads(inContextEntries(branch) as SessionEntry[]);
 		loadedTools = new Set([...loads.values()].flat());
-		const added = addendumNamesOnBranch(inContext);
-		// Tools added mid-session by tool_addition stay callable after a resume.
-		if (supportsToolAdditions(latestModel)) for (const name of added) loadedTools.add(name);
-		return added;
+		for (const name of foldBranch(branch).told.get(CALLABLE_TOOLS) ?? []) loadedTools.add(name);
 	};
 
 	// A /tree switch keeps the process: the selected branch's loads decide which
 	// deferred tools are callable and referenced there.
 	pi.on("session_tree", (_event, ctx) => {
-		adoptLoads(ctx?.sessionManager?.getBranch?.() ?? []);
+		adoptLoads((ctx?.sessionManager?.getBranch?.() ?? []) as EntryLike[]);
 		if (!deferring()) return;
 		const registered = new Set(pi.getAllTools().map((tool) => tool.name));
 		const active = pi.getActiveTools();
@@ -328,63 +321,35 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 
 	pi.on("session_start", (_event, ctx) => {
 		sessionStarted = true;
-		// A pending debounce belongs to the previous session's listing (RPC's
-		// new_session emits session_start twice, findings §3); deferAll below
-		// announces the fresh one.
-		clearAnnounce();
-		latestModel = ctx?.model;
-		const addedOnBranch = adoptLoads(ctx?.sessionManager?.getBranch?.() ?? []);
-		const restored = restoredContext(pi.events);
-		// A restored stack is already message 1. Seed its announced names so a live
-		// capability change becomes one addendum, not a rewrite or duplicate notice.
-		requestSent = restored !== undefined;
-		announced.clear();
-		const baseline = deferredToolsBaseline(restored?.baselines["tool-search"]);
-		const legacy = deferredToolsFromReminder(restored?.stack.find((entry) => (entry as { key?: string }).key === "deferred-tools")?.text);
-		for (const name of baseline ?? legacy ?? []) announced.add(name);
-		// Native tool_addition entries can outlive an older baseline snapshot; they
-		// already told the model about these names, so merge them before planning.
-		for (const name of addedOnBranch) announced.add(name);
+		currentModel = ctx?.model;
+		const sessionManager = ctx?.sessionManager;
+		branchOf = sessionManager ? () => sessionManager.getBranch() as EntryLike[] : undefined;
+		adoptLoads(branchOf?.() ?? []);
 		deferAll();
-		// A restored message 1 keeps its listing (its bytes are locked), so when
-		// this run's tool list leaves tool_search out, say once that it is gone.
-		if (restored && announced.size > 0 && !deferring()) {
-			pi.events.emit(REMINDER_CHANNEL, { scope: "next-turn", key: "deferred-unavailable", text: loaderUnavailableReminderText() });
-		}
-		// Even an absent listing is meaningful on resume: preserve that baseline so
-		// the first later deferred tool is a tail notice, not a message-1 rewrite.
-		if (!restored) publishBaseline(announced);
+	});
+	pi.on("model_select", (event) => {
+		currentModel = event.model;
 	});
 
-	// A compaction starts a new prefix: list every deferred tool again, so one
-	// announced only in a notice or a tool_addition the summary replaced is named
-	// once more (Claude Code re-announces the whole set after compacting).
+	// A compaction opens an epoch, which lists every deferred tool again. The
+	// loads that named a loaded tool went with the summary: the tool goes back to
+	// deferred, so the new epoch declares it the way it declares the rest (Claude
+	// Code declares a deferred tool only while a reference to it is in the
+	// history). A tool the kept turns still call or load stays, and so does one
+	// the last request declared eagerly (no native deferral, OAuth-renamed
+	// tools): it is in `tools` already, and removing it would be the miss.
 	pi.on("session_compact", (_event, ctx) => {
-		clearAnnounce();
-		// The loads and additions that named a loaded tool went with the summary:
-		// the tool goes back to deferred, listed below, so the tools array keeps
-		// its shape (Claude Code declares a deferred tool only while a reference
-		// to it is in the history).
-		if (nativeLoads) {
-			const kept = inContextEntries(ctx?.sessionManager?.getBranch?.() ?? []);
-			const redefer = new Set(toolsToRedefer([...loadedTools].filter((name) => deferredRegistry.has(name)), kept));
-			loads = toolSearchLoads(kept);
-			for (const name of redefer) loadedTools.delete(name);
-			const active = pi.getActiveTools();
-			if (active.some((name) => redefer.has(name))) pi.setActiveTools(active.filter((name) => !redefer.has(name)));
-		}
-		const available = searchableTools();
-		announced.clear();
-		for (const tool of available) announced.add(tool.name);
-		publishBaseline(announced);
-		pi.events.emit(CONTEXT_CAPABILITY_REFRESH_CHANNEL, {
-			key: "deferred-tools",
-			text: available.length > 0 ? deferredReminderText(available) : undefined,
-			order: CONTEXT_ORDER.deferredTools,
-		});
+		const branch = (ctx?.sessionManager?.getBranch?.() ?? []) as EntryLike[];
+		const kept = inContextEntries(branch) as SessionEntry[];
+		const head = foldBranch(branch).lastRequest?.head;
+		const eager = head ? declaredToolNames(head, { eager: true }) : new Set<string>();
+		const redefer = new Set(toolsToRedefer([...loadedTools].filter((name) => deferredRegistry.has(name) && !eager.has(name)), kept));
+		loads = toolSearchLoads(kept);
+		for (const name of redefer) loadedTools.delete(name);
+		const active = pi.getActiveTools();
+		if (active.some((name) => redefer.has(name))) pi.setActiveTools(active.filter((name) => !redefer.has(name)));
+		publishListing();
 	});
-
-	pi.on("session_shutdown", clearAnnounce);
 
 	// The every-turn deferred-tools list tells the model to load via tool_search,
 	// but if it calls a deferred tool directly anyway, pi's core dispatcher fails
@@ -403,7 +368,6 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		// Without tool_search there is nothing to steer a deferred-tool miss to.
 		if (deferredRegistry.has(name) && deferring()) {
 			pi.events.emit(REMINDER_CHANNEL, {
-				scope: "next-turn",
 				key: `deferred-miss-${name}`,
 				text: deferredMissReminderText(name),
 			});
@@ -412,7 +376,6 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 			// the ordinary steer above would send the model to tool_search for a
 			// name that will not be found there either.
 			pi.events.emit(REMINDER_CHANNEL, {
-				scope: "next-turn",
 				key: `deferred-miss-${name}`,
 				text: withheldMissReminderText(name),
 			});

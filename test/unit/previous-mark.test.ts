@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { lastMessageMark, withPreviousMark } from "../../extensions/lib/previous-mark.ts";
+import { baseMark, lastMessageMark, withPreviousMark } from "../../extensions/lib/previous-mark.ts";
+import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../../extensions/lib/ledger/plan.ts";
 import cacheMarksExtension from "../../extensions/cache-marks/index.ts";
 import { createFakePi } from "./helpers/fake-pi.ts";
 
@@ -47,40 +48,50 @@ describe("previous-mark", () => {
 	});
 });
 
+describe("baseMark", () => {
+	it("is the base's last block before its trailing directive, with the request's own tail marker", () => {
+		const directive = { role: "system", content: [], output_config: { effort: "high" } };
+		const spliced = [first, facts(false), directive, additions, tail(true)];
+		expect(baseMark(spliced, [first, facts(false), directive], "anthropic-messages")).toEqual({ message: 1, block: 0, marker: mark, content: text("session facts") });
+		expect(baseMark(spliced, [], "anthropic-messages")).toBeUndefined();
+		expect(baseMark([first, facts(false)], [first, facts(false)], "anthropic-messages")).toBeUndefined();
+	});
+});
+
 describe("cache-marks wiring", () => {
 	// On, whatever the environment running the tests says.
 	beforeEach(() => vi.stubEnv("CC_CACHE_MARKS", ""));
 	afterEach(() => vi.unstubAllEnvs());
 	const anthropic = { model: { provider: "anthropic", api: "anthropic-messages" } };
+	/** The ledger's plan for a request that extends a base whose list was `list`. */
+	const extending = (list: unknown[]) => ({ epoch: false, base: { list } }) as unknown as RequestPlan;
 
-	it("carries each request's breakpoint into the next one, on first-party Anthropic only", async () => {
+	it("marks the block the base request carried its tail mark on, on first-party Anthropic only", async () => {
 		const fake = createFakePi();
 		cacheMarksExtension(fake.pi as never);
-		await fake.fire("session_start", {});
-		expect(await fake.fireOne("before_provider_request", { payload: request([first, facts(true)]) }, anthropic)).toBeUndefined();
+		fake.events.emit(LEDGER_PLAN_CHANNEL, extending([first, facts(false)]));
 		const next = await fake.fireOne<{ messages: Array<{ content: unknown[] }> }>("before_provider_request", { payload: request([first, facts(false), additions, tail(true)]) }, anthropic);
 		expect(next?.messages[1].content[0]).toEqual(text("session facts", true));
 
 		const other = createFakePi();
 		cacheMarksExtension(other.pi as never);
+		other.events.emit(LEDGER_PLAN_CHANNEL, extending([first, facts(false)]));
 		const openrouter = { model: { provider: "openrouter", api: "anthropic-messages" } };
-		await other.fire("before_provider_request", { payload: request([first, facts(true)]) }, openrouter);
 		expect(await other.fireOne("before_provider_request", { payload: request([first, facts(false), additions, tail(true)]) }, openrouter)).toBeUndefined();
 	});
 
 	it("leaves a proxy endpoint alone", async () => {
 		const fake = createFakePi();
 		cacheMarksExtension(fake.pi as never);
+		fake.events.emit(LEDGER_PLAN_CHANNEL, extending([first, facts(false)]));
 		const proxy = { model: { provider: "anthropic", api: "anthropic-messages", baseUrl: "https://proxy.example.com" } };
-		await fake.fire("before_provider_request", { payload: request([first, facts(true)]) }, proxy);
 		expect(await fake.fireOne("before_provider_request", { payload: request([first, facts(false), additions, tail(true)]) }, proxy)).toBeUndefined();
 	});
 
-	it("forgets the previous breakpoint at a compaction", async () => {
+	it("adds nothing to a request that opens an epoch", async () => {
 		const fake = createFakePi();
 		cacheMarksExtension(fake.pi as never);
-		await fake.fire("before_provider_request", { payload: request([first, facts(true)]) }, anthropic);
-		await fake.fire("session_compact", {});
+		fake.events.emit(LEDGER_PLAN_CHANNEL, { epoch: true } as RequestPlan);
 		expect(await fake.fireOne("before_provider_request", { payload: request([first, facts(false), additions, tail(true)]) }, anthropic)).toBeUndefined();
 	});
 });

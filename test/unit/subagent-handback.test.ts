@@ -88,7 +88,7 @@ describe("the hand-back extension a child loads", () => {
 		expect(deferred).toEqual([]);
 		expect(reminders).toEqual([]);
 		await fake.fire("session_start", { reason: "startup" });
-		expect(reminders).toEqual([{ text: SUBAGENT_HANDBACK_REMINDER, scope: "every-turn", key: "subagent-handback", placement: "sticky-append" }]);
+		expect(reminders).toEqual([{ text: SUBAGENT_HANDBACK_REMINDER, key: "subagent-handback", placement: "sticky-append" }]);
 	});
 
 	it("defers the tool in a fork, which sends the parent's tool list", () => {

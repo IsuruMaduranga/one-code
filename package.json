@@ -29,13 +29,13 @@
 			"extensions/branding/index.ts",
 			"extensions/claude-compat/index.ts",
 			"extensions/kept-thinking/index.ts",
+			"extensions/ledger/index.ts",
 			"extensions/context-budget/index.ts",
 			"extensions/system-reminder/index.ts",
 			"extensions/claude-context/index.ts",
 			"extensions/tool-call-corruption/index.ts",
 			"extensions/hooks/index.ts",
 			"extensions/tool-search/index.ts",
-			"extensions/cache-marks/index.ts",
 			"extensions/search-tools/index.ts",
 			"extensions/tool-style/index.ts",
 			"extensions/plugins/index.ts",
@@ -76,6 +76,8 @@
 			"extensions/context-management/index.ts",
 			"extensions/compaction/index.ts",
 			"extensions/idle-compact/index.ts",
+			"extensions/ledger/wire.ts",
+			"extensions/cache-marks/index.ts",
 			"extensions/system-prompt/index.ts"
 		],
 		"themes": [
@@ -121,7 +123,7 @@
 		"vitest": "^2.1.0"
 	},
 	"peerDependencies": {
-		"@earendil-works/pi-coding-agent": ">=0.84.3",
+		"@earendil-works/pi-coding-agent": ">=1.0.0",
 		"typebox": "*"
 	}
 }

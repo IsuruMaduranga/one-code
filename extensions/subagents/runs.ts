@@ -140,6 +140,11 @@ export class RunRegistry {
 		this.reserved.clear();
 	}
 
+	/** Keep only the records `keep` accepts; names held for runs being spawned stay held. */
+	retain(keep: (record: AgentRunRecord) => boolean): void {
+		for (const record of [...this.byId.values()]) if (!keep(record)) this.remove(record.taskId);
+	}
+
 	/** Hold a name until its record is added. */
 	reserve(name: string): void {
 		this.reserved.add(name);

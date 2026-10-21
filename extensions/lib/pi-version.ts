@@ -9,15 +9,15 @@
  * never blocking — when outside it. The bundled `one-code` app pins pi inside
  * the range, so it never warns.
  *
- * The minimum is the oldest pi the extension set loads on: 0.84.3 first
- * exports `createPowerShellToolDefinition`, and on anything older the
- * PowerShell extension fails at load, which stops pi before any warning can
- * show. The peer range in package.json and the guide name the same floor
- * (pi-version.test.ts), and CI runs `test/e2e/pi-floor-smoke.mjs` against it.
+ * The minimum is 1.0.0: the record-once request path (extensions/ledger)
+ * builds on pi 1.0's session entries, transcript system messages and request
+ * pipeline (decisions/distribution.md). The peer range in package.json and the
+ * guide name the same floor (pi-version.test.ts), and CI runs
+ * `test/e2e/pi-floor-smoke.mjs` against it.
  */
 
 /** Inclusive minimum and exclusive maximum pi version this release is tested against. */
-export const TESTED_PI_MIN = "0.84.3";
+export const TESTED_PI_MIN = "1.0.0";
 export const TESTED_PI_MAX_EXCLUSIVE = "1.4.0";
 
 /** Dotted-numeric parse; undefined for anything that is not plain x.y.z numbers. */

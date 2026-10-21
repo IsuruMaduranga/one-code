@@ -29,6 +29,7 @@ import { CHILD_EXTENSION_PATHS } from "../lib/child-extensions.ts";
 import { type HandbackSlot, SUBAGENT_HANDBACK, subagentHandbackExtension } from "../lib/subagent-handback.ts";
 import type { RequestCapture } from "../lib/request-replay.ts";
 import { forkCacheExtension } from "./fork-cache.ts";
+import { type DeferRequest, deferLikeParentExtension, injectedByParent } from "../lib/deferred.ts";
 import type { ChildHandle, ChildOutcome, RpcChildHandle } from "./outcome.ts";
 import { sendToMainTool } from "./send-to-main-tool.ts";
 import { SessionTurnTracker } from "./session-turns.ts";
@@ -162,6 +163,8 @@ export class SubagentRuntime {
 	 * still-connecting (possibly empty) one.
 	 */
 	private readonly getMcpTools: () => ToolDefinition[] | Promise<ToolDefinition[]>;
+	/** The tools the parent session defers (lib/deferred.ts queryDeferred): a child defers the ones injected into it the same way. */
+	private readonly getParentDeferred: () => DeferRequest[];
 	/**
 	 * The parent's permission decision closure (undefined until permissions
 	 * publishes it), wrapped so every call carries the asking run's name: the
@@ -200,8 +203,10 @@ export class SubagentRuntime {
 		onExtensionError: (runName: string | undefined, error: ExtensionError) => void,
 		onModelUnusable: (model: string, reason: string) => void,
 		onChildWrite: (path: string, runName: string | undefined) => void,
+		getParentDeferred: () => DeferRequest[],
 	) {
 		this.modelRuntime = modelRuntime;
+		this.getParentDeferred = getParentDeferred;
 		this.onChildWrite = onChildWrite;
 		this.baseCwd = baseCwd;
 		this.getMcpTools = getMcpTools;
@@ -231,11 +236,12 @@ export class SubagentRuntime {
 		onExtensionError: (runName: string | undefined, error: ExtensionError) => void = () => {},
 		onModelUnusable: (model: string, reason: string) => void = () => {},
 		onChildWrite: (path: string, runName: string | undefined) => void = () => {},
+		getParentDeferred: () => DeferRequest[] = () => [],
 	): Promise<SubagentRuntime> {
 		const modelRuntime = await createSharedModelRuntime(getAgentDir());
 		// Prime the catalog once; spawns read the live snapshot (see resolveModel).
 		await modelRuntime.getAvailable();
-		return new SubagentRuntime(modelRuntime, cwd, getMcpTools, getPermissionBridge, getHookBridge, onExtensionError, onModelUnusable, onChildWrite);
+		return new SubagentRuntime(modelRuntime, cwd, getMcpTools, getPermissionBridge, getHookBridge, onExtensionError, onModelUnusable, onChildWrite, getParentDeferred);
 	}
 
 	/**
@@ -275,6 +281,9 @@ export class SubagentRuntime {
 			// lib/subagent-handback.ts). Inline extensions load after the paths
 			// above, so the fork-cache one, last, sees the final body.
 			extraFactories: [
+				// The tools injected below (the spawn and cron tools, the shared MCP
+				// tools) are deferred as the parent defers them: their owners run there.
+				deferLikeParentExtension(this.getParentDeferred(), injectedByParent(spec.extraTools ?? [])),
 				subagentHandbackExtension(handback, { deferred: fork }),
 				...(fork && spec.parentRequest ? [forkCacheExtension(spec.parentRequest)] : []),
 			],
@@ -390,7 +399,10 @@ export class SubagentRuntime {
 	 * agent's own prompt and toolset.
 	 */
 	private async buildChildSession(spec: ChildSessionSpec, handback: HandbackSlot): Promise<{ session: Session; note?: string }> {
-		const [loader, mcpTools] = await Promise.all([buildAgentLoader(this.childLoaderOptions(spec, handback)), this.getMcpTools()]);
+		// The MCP wait first: the loader takes the parent's deferrals, which a server
+		// connecting during the wait adds to (it is instant once the connects settled).
+		const mcpTools = await this.getMcpTools();
+		const loader = await buildAgentLoader(this.childLoaderOptions(spec, handback));
 		const newSessionManager = () => newChildSessionManager(spec);
 		// A fork keeps the parent's toolset; only a named agent carries tool lists.
 		const agent = spec.forkFrom ? undefined : spec.agent;

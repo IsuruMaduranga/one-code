@@ -14,9 +14,14 @@
  * either: its tools are shared in from the parent as customTools
  * (lib/mcp-share.ts `watchMcpTools`), not reconnected.
  *
- * Order mirrors the package's load order: the reminder and deferral sinks
- * (system-reminder, tool-search) first, before anything emitting on their
- * channels (the bus does not replay). A caller that loads these must set the
+ * Order mirrors the package's load order: kept-thinking first (the first
+ * `context` hook, before anything reads the messages), the ledger's request
+ * side next (it cuts the request to its tail before anything injects), then
+ * the reminder and deferral sinks (system-reminder, tool-search), before
+ * anything emitting on their channels (the bus does not replay), then the
+ * ledger's payload side, after every hook that shapes the tail and before
+ * cache-marks. A fork's file is a copy of the parent's, records included, so
+ * its first request extends the parent's last one and reads its cache. A caller that loads these must set the
  * loader's `noContextFiles`, because claude-context injects `# claudeMd` itself.
  */
 
@@ -34,7 +39,7 @@ const EXTENSIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 // (mode "print"), so `run_in_background` runs blocking there and nothing a
 // child starts outlives it (Claude Code kills an agent's shells as it exits).
 export const CHILD_EXTENSIONS = [
-	"system-reminder", "tool-search", "cache-marks", "claude-context", "tool-call-corruption/child",
+	"kept-thinking", "ledger", "system-reminder", "tool-search", "ledger/wire", "cache-marks", "claude-context", "tool-call-corruption/child",
 	"file-tracker", "search-tools", "skill", "bash/child", "powershell/child", "web", "web-fetch", "notebook",
 ];
 

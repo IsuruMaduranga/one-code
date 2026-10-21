@@ -3,9 +3,11 @@
  * every reminder, a lifecycle `fire()`, and a mutable tool registry / active
  * set. Shared by tool-search-defer-miss.test.ts and tool-search-announce.test.ts.
  */
-import { CONTEXT_RESTORE_CHANNEL, type ContextRestoreRequest } from "../../../extensions/lib/context-stack.ts";
 import { DEFER_CHANNEL } from "../../../extensions/lib/deferred.ts";
-import { REMINDER_CHANNEL } from "../../../extensions/lib/reminders.ts";
+import { CALLABLE_TOOLS } from "../../../extensions/lib/ledger/fold.ts";
+import type { ToldFact } from "../../../extensions/lib/ledger/records.ts";
+import { REMINDER_CHANNEL, type RenderedBlock, type RenderRequest } from "../../../extensions/lib/reminders.ts";
+import { renderRequest } from "./fake-pi.ts";
 
 export interface Reminder {
 	scope?: string;
@@ -77,12 +79,17 @@ export function makeToolSearchFakePi(initialActive: string[] = []) {
 		if (at !== -1) allTools.splice(at, 1);
 	};
 
-	/** Answer the context-restore request as a resumed session whose saved listing named `names`. */
-	const restoreBaseline = (names: string[]) => {
-		pi.events.on(CONTEXT_RESTORE_CHANNEL, (data) => {
-			(data as ContextRestoreRequest).restored = { version: 1, stack: [], sticky: [], baselines: { "tool-search": names } };
-		});
+	/**
+	 * Render one request the way system-reminder does: inside an epoch that told
+	 * `told` (fact kind → names), unless `epoch`. Returns the blocks owners added.
+	 */
+	const render = (opts: { epoch?: boolean; told?: Record<string, string[]>; modes?: Record<string, boolean>; model?: RenderRequest["model"] } = {}): RenderedBlock[] => {
+		const facts: ToldFact[] = [
+			...Object.entries(opts.told ?? {}).map(([kind, names]) => (kind === CALLABLE_TOOLS ? { kind: "tools" as const, names, callable: true } : { kind: kind as "tools" | "skills", names })),
+			...Object.entries(opts.modes ?? {}).map(([key, on]) => ({ kind: "mode" as const, key, on })),
+		];
+		return renderRequest(pi.events, { facts, ...(opts.epoch ? { epoch: true } : {}), model: opts.model });
 	};
 
-	return { pi, reminders, allTools, setActive: (n: string[]) => (active = n), activeTools: () => active, addDeferred, runTool, unregister, restoreBaseline };
+	return { pi, reminders, allTools, setActive: (n: string[]) => (active = n), activeTools: () => active, addDeferred, runTool, unregister, render };
 }

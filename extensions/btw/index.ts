@@ -28,6 +28,7 @@
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { followCoveredMessages } from "../lib/covered-messages.ts";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import {
 	convertToLlm,
@@ -88,11 +89,10 @@ export default function btwExtension(pi: ExtensionAPI) {
 		return linesComponent((width) => [...row.render(width), truncateLine(`  ⎿  ${paint("dim", btwForkedLine(data.name, data.taskId))}`, width)]);
 	});
 
-	// The exact request messages the session last sent (after every extension's
-	// mutations), captured like recap and the compaction extension do.
+	// The whole conversation the session's last request covered, as pi built it.
 	let capturedMessages: AgentMessage[] | undefined;
-	pi.on("context", (event) => {
-		capturedMessages = event.messages;
+	followCoveredMessages(pi, (messages) => {
+		capturedMessages = messages;
 	});
 	// The same request as it went on the wire, and the reply that answered it.
 	const exchange = followLastExchange(pi);

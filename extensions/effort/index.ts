@@ -27,6 +27,7 @@ import { getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
 import { getAgentDir, SettingsManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { effortSetMessage, isPersistedEffort, type PersistedEffort } from "./settings.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
+import { readState, recordState } from "../lib/ledger/state.ts";
 import { dimRightAlignedWidget, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import {
 	acceptedEffortArgs,
@@ -78,6 +79,9 @@ const ULTRACODE_STANDING_REMINDER =
 	"Token cost is not the constraint here; the most exhaustive correct answer is. " +
 	"Work solo only on conversational turns and trivial mechanical edits.";
 
+/** The `one-code:state` key ultracode is recorded under on the branch. */
+const ULTRACODE_STATE = "ultracode";
+
 export default function effortExtension(pi: ExtensionAPI) {
 	let ultracodeActive = false;
 	/**
@@ -117,15 +121,17 @@ export default function effortExtension(pi: ExtensionAPI) {
 	pi.on("session_start", cancelEffortNote);
 	pi.on("session_shutdown", cancelEffortNote);
 
-	const setUltracode = (on: boolean, level?: ThinkingLevel) => {
-		const changed = ultracodeActive !== on;
+	/** `record` false when the state comes from the branch itself (a resume, a /tree switch). */
+	const setUltracode = (on: boolean, level?: ThinkingLevel, record = true) => {
+		const changed = ultracodeActive !== on || (on && ultracodeLevel !== level);
 		ultracodeActive = on;
 		ultracodeLevel = on ? level : undefined;
 		if (changed) pi.events.emit(ULTRACODE_MODE_CHANNEL, { active: on });
+		// Ultracode follows the branch: recorded on every change.
+		if (changed && record) recordState(pi, ULTRACODE_STATE, on ? { on, level } : { on });
 		if (on) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text: ULTRACODE_STANDING_REMINDER,
-				scope: "every-turn",
 				key: REMINDER_KEY,
 				placement: "sticky-append",
 			});
@@ -250,7 +256,7 @@ export default function effortExtension(pi: ExtensionAPI) {
 						const error = await persist(ctx, undefined);
 						if (error) return report(ctx, error, true);
 					}
-					// getSettings arrived in pi 1.0.1; the package still admits older pi.
+					// getSettings arrived in pi 1.0.1; a 1.0.0 install falls back to pi's default.
 					pi.setThinkingLevel(pi.getSettings?.().defaultThinkingLevel ?? "medium");
 					setUltracode(false);
 					applyStatus(ctx);
@@ -301,7 +307,17 @@ export default function effortExtension(pi: ExtensionAPI) {
 		showEffortNote(ctx, event.level);
 	});
 
-	pi.on("session_start", (_event, ctx) => {
+	/**
+	 * Take the branch's ultracode state (a resume, /reload, a fork, a /tree
+	 * switch): on only while pi's reasoning level, which pi restores from the
+	 * branch itself, is still the level ultracode settled on.
+	 */
+	const followBranch = (ctx: ExtensionContext) => {
+		const stored = readState(ctx, ULTRACODE_STATE) as { on?: unknown; level?: unknown } | undefined;
+		const on = stored?.on === true && typeof stored.level === "string" && stored.level === pi.getThinkingLevel();
+		setUltracode(on, on ? (stored?.level as ThinkingLevel) : undefined, false);
 		applyStatus(ctx);
-	});
+	};
+	pi.on("session_start", (_event, ctx) => followBranch(ctx));
+	pi.on("session_tree", (_event, ctx) => followBranch(ctx));
 }

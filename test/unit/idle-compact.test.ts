@@ -24,6 +24,7 @@ import {
 import { hasOneHourCache } from "../../extensions/lib/anthropic-payload.ts";
 import { unrefTimers } from "../../extensions/lib/timer-ops.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { LEDGER_SENT_CHANNEL, type LedgerSent } from "../../extensions/lib/ledger/plan.ts";
 
 const FIRE_MS = 54 * 60_000;
 const ephemeral = (ttl?: string) => ({ type: "ephemeral", ...(ttl ? { ttl } : {}) });
@@ -181,9 +182,9 @@ describe("idle-compact wiring, beside the compaction extension's capture", () =>
 			...over,
 		});
 		await fake.fire("session_start", { reason: "startup" }, ctx);
-		/** One main-session request and its reply. */
+		/** One main-session request (as the ledger publishes it once sent) and its reply. */
 		const turn = async (payload: unknown = body("1h"), usage = { cacheRead: 200_000, cacheWrite: 1_000 }) => {
-			await fake.fire("before_provider_request", { payload }, ctx);
+			fake.events.emit(LEDGER_SENT_CHANNEL, { payload, model, sessionId: "fake-session", plan: {} } as unknown as LedgerSent);
 			await fake.fire("message_end", { message: { role: "assistant", content: [{ type: "text", text: "ok" }], usage } }, ctx);
 		};
 		return { fake, ctx, turn, compact: ctx.compact as ReturnType<typeof vi.fn>, key: () => onKey?.() };

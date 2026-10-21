@@ -12,6 +12,7 @@
  * that entry directly. It costs nothing: the entry exists, so the mark reads.
  */
 
+import { appendPoint } from "./ledger/wire.ts";
 import { MAX_CACHE_MARKERS } from "./request-replay.ts";
 
 type Block = Record<string, unknown> & { cache_control?: unknown };
@@ -80,4 +81,21 @@ export function withPreviousMark<T extends Record<string, unknown>>(payload: T, 
 	content[previous.block] = { ...target, cache_control: previous.marker };
 	copy[previous.message] = { ...messages[previous.message], content };
 	return { ...payload, messages: copy };
+}
+
+/**
+ * The breakpoint the base request carried, located in `messages` (the request
+ * that extends it, spliced): the last block of the base's last element before
+ * its trailing directives, with the marker this request's own tail mark uses.
+ * Undefined when the request has no tail mark or the base is empty.
+ */
+export function baseMark(messages: unknown, baseList: readonly unknown[], api: string): MessageMark | undefined {
+	if (!Array.isArray(messages)) return undefined;
+	const end = appendPoint(baseList, api);
+	const tail = lastMessageMark(messages);
+	if (end === 0 || !tail || tail.message < end) return undefined;
+	const blocks = blocksOf(messages[end - 1]);
+	const block = blocks.length - 1;
+	if (block < 0) return undefined;
+	return { message: end - 1, block, marker: tail.marker, content: blocks[block] };
 }

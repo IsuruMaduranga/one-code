@@ -1,0 +1,97 @@
+/**
+ * ledger-wire extension, the payload side of the ledger (extensions/ledger/index.ts
+ * has the request side and the design). Its `before_provider_request` hook
+ * runs after every hook that shapes the tail (system-reminder's layout,
+ * tool-search, context-management) and before cache-marks:
+ *
+ * 1. Inside an epoch it splices: the base request's recorded list, then pi's
+ *    rendering of the tail, under the recorded system prompt and tools, with
+ *    tools added mid-epoch appended (lib/ledger/wire.ts spliceRequest).
+ * 2. It validates the request (lib/ledger/validate.ts): no reference to an
+ *    undeclared tool, no system message stranded before a user message. A
+ *    problem is a bug; it is dropped and reported, so it costs one block,
+ *    never a 400. ONE_CODE_LEDGER_STRICT=1 sends it unrepaired instead, for
+ *    the live probes to see.
+ * 3. It records the request as a delta against the last one on the branch,
+ *    with the pending items it carried and what its new blocks told the
+ *    model, and publishes it (LEDGER_SENT_CHANNEL) for the side calls that
+ *    replay it (compaction's summarizer, btw, recap, forks). A request that
+ *    adds nothing (a pi cache warm, a provider retry) records and publishes
+ *    nothing, and it is answered from the same plan, so a warm warms exactly
+ *    what was sent.
+ */
+
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { requestIdentity } from "../lib/anthropic-auth.ts";
+import { notifyOrPrint } from "../lib/headless-output.ts";
+import { LEDGER_PLAN_CHANNEL, LEDGER_SENT_CHANNEL, type LedgerSent, type RequestPlan } from "../lib/ledger/plan.ts";
+import { makeRecord, RECORD, type ToldFact } from "../lib/ledger/records.ts";
+import { deliveredAfterRepair, repairRequest, validateRequest } from "../lib/ledger/validate.ts";
+import { appendPoint, encodeRequest, type RecordedRequest, recordedRequest, spliceRequest, type WirePayload } from "../lib/ledger/wire.ts";
+import { extensionVersion } from "../lib/package-version.ts";
+
+export default function ledgerWireExtension(pi: ExtensionAPI) {
+	const by = extensionVersion();
+	/** The plan of the last `context` pass; a warm or a retry re-runs only this hook and reuses it. */
+	let plan: RequestPlan | undefined;
+	/** What this hook recorded under `plan`: the branch past the plan's fold, so a warm compares with it without folding again. */
+	let recorded: { request?: RecordedRequest; hashes: Set<string> } | undefined;
+	/** Problems already reported this session, so a recurring bug is one notice. */
+	const reported = new Set<string>();
+
+	pi.events.on(LEDGER_PLAN_CHANNEL, (data) => {
+		plan = data as RequestPlan;
+		recorded = undefined;
+	});
+	// A failed or aborted reply: the fold rebuilds the next record against the
+	// request before it (the plan's base), so a re-send under the same plan must
+	// encode against that one too, not the failed request.
+	pi.on("message_end", (event) => {
+		const message = event.message as { role?: string; stopReason?: string };
+		if (recorded && message.role === "assistant" && (message.stopReason === "error" || message.stopReason === "aborted")) recorded = { hashes: recorded.hashes };
+	});
+	pi.on("session_start", () => {
+		plan = undefined;
+		recorded = undefined;
+		reported.clear();
+	});
+
+	pi.on("before_provider_request", (event, ctx) => {
+		const model = ctx.model;
+		// No context pass in this instance (a warm that outlived a /reload): leave pi's request alone.
+		const identity = requestIdentity(model);
+		if (!model || !identity || !plan) return undefined;
+		const api = model.api;
+		const current = plan;
+		let payload = event.payload as WirePayload;
+		if (!current.epoch && current.base) payload = spliceRequest(current.base, payload, api);
+		const spliced = payload;
+		let delivered: { consumed: string[]; facts: ToldFact[] } = { consumed: current.consumed, facts: current.facts };
+
+		const problems = validateRequest(payload, api);
+		if (problems.length > 0) {
+			const fresh = problems.map((problem) => JSON.stringify(problem)).filter((key) => !reported.has(key));
+			for (const key of fresh) reported.add(key);
+			if (fresh.length > 0) notifyOrPrint(ctx, `One Code: the request had ${problems.length} problem(s) the ledger ${process.env.ONE_CODE_LEDGER_STRICT === "1" ? "left in place" : "removed"}: ${fresh.join(", ")}`, "warning");
+			if (process.env.ONE_CODE_LEDGER_STRICT !== "1") {
+				payload = repairRequest(payload, api, problems);
+				delivered = deliveredAfterRepair(payload, api, delivered, current.fold.pending, new Set(current.base?.hashes ?? []));
+			}
+		}
+
+		// The recorded prefix is known, unless a repair moved its elements.
+		const base = current.base;
+		const request = recordedRequest(payload, identity, base && payload === spliced ? { base, end: appendPoint(base.list, api) } : undefined);
+		const known = { has: (hash: string) => current.fold.knownHashes.has(hash) || recorded?.hashes.has(hash) === true };
+		const delta = encodeRequest(recorded?.request ?? current.fold.lastRequest, request, known);
+		if (delta) {
+			if (current.epoch) pi.appendEntry(RECORD.epoch, makeRecord("epoch", by, { cause: current.cause ?? "first" }));
+			pi.appendEntry(RECORD.request, makeRecord("request", by, { ...delta, covers: current.covers, consumed: delivered.consumed }));
+			if (delivered.facts.length > 0) pi.appendEntry(RECORD.told, makeRecord("told", by, { facts: delivered.facts }));
+			recorded = { request, hashes: new Set([...(recorded?.hashes ?? []), ...Object.keys(delta.blobs)]) };
+			// A warm or a retry is the same request again: the side calls keep the one they have.
+			pi.events.emit(LEDGER_SENT_CHANNEL, { payload, model, sessionId: ctx.sessionManager.getSessionId(), plan: current } satisfies LedgerSent);
+		}
+		return payload === event.payload ? undefined : payload;
+	});
+}

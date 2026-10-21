@@ -38,6 +38,8 @@
  * (settings, consent, logging) and a payload naming the child.
  */
 
+import { randomUUID } from "node:crypto";
+import { readState, recordState } from "../lib/ledger/state.ts";
 import { contentText } from "@earendil-works/pi-ai";
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { RunOutcomeLatch } from "../lib/interrupt.ts";
@@ -84,11 +86,13 @@ export function hookContextText(event: CcHookEvent, text: string): string {
  * convention) and the model gets a preview plus the path — nothing is cut away.
  */
 const HOOK_MODEL_TEXT_CAP = 20_000;
-// A monotonic counter, not Date.now(), so two hooks finishing in the same
-// millisecond do not persist to the same file and clobber each other (review M2).
-let hookPersistSeq = 0;
+// A random id, never a counter: the results directory is shared by every
+// session of the project, and a counter restarts with each process and each
+// /reload, so a later hook overwrote a file an earlier transcript points to
+// (design.md section 14). Two hooks finishing in the same millisecond still get
+// two files (review M2).
 function capHookText(text: string, ctx: HookDispatchCtx, label: string): string {
-	return persistIfLarge(text, { dir: sessionResultsDir(ctx), id: `hook-${label}-${hookPersistSeq++}`, maxBytes: HOOK_MODEL_TEXT_CAP });
+	return persistIfLarge(text, { dir: sessionResultsDir(ctx), id: `hook-${label}-${randomUUID()}`, maxBytes: HOOK_MODEL_TEXT_CAP });
 }
 
 interface MatchedHook {
@@ -123,11 +127,31 @@ function isStopContinuation(event: unknown): boolean {
 	return run.messageType === "custom" && run.message?.customType === STOP_CONTINUATION_TYPE;
 }
 
+/** Hook context waiting for the next prompt. */
+type PendingContext = { event: CcHookEvent; text: string };
+/** The `one-code:state` key the waiting hook context is recorded under. */
+const PENDING_CONTEXT_STATE = "hooks:pending-context";
+
 export default function hooksExtension(pi: ExtensionAPI) {
 	const workCwd = followWorkCwd(pi.events);
 	let stopHookBlocks = 0;
-	/** Context from UserPromptSubmit / SessionStart / PostCompact hooks, delivered with the next prompt. */
-	let pendingPromptContext: Array<{ event: CcHookEvent; text: string }> = [];
+	/**
+	 * Context from UserPromptSubmit / SessionStart / PostCompact hooks, delivered
+	 * with the next prompt. Recorded on the branch whenever it changes, so a
+	 * /reload or a quit before that prompt keeps it, and a /tree switch takes
+	 * the selected branch's (round-2 review M8, L1).
+	 */
+	let pendingPromptContext: PendingContext[] = [];
+	const setPending = (next: PendingContext[]) => {
+		const changed = next.length !== pendingPromptContext.length || next.some((entry, i) => entry !== pendingPromptContext[i]);
+		pendingPromptContext = next;
+		if (changed) recordState(pi, PENDING_CONTEXT_STATE, next);
+	};
+	/** The branch's recorded queue. */
+	const pendingOnBranch = (ctx: ExtensionContext): PendingContext[] => {
+		const stored = readState(ctx, PENDING_CONTEXT_STATE);
+		return Array.isArray(stored) ? stored.filter((entry): entry is PendingContext => typeof entry?.event === "string" && typeof entry?.text === "string") : [];
+	};
 	/**
 	 * UserPromptSubmit context for messages queued mid-turn, held until pi
 	 * delivers the message (lib/queued-delivery.ts): such a message never
@@ -404,7 +428,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		// A queued message's context waits for pi to deliver that message
 		// (message_start below), so it rides the same request.
 		if (queued) queuedPromptContext.hold(event.text, hookContextText("UserPromptSubmit", outcome.additionalContext));
-		else pendingPromptContext.push({ event: "UserPromptSubmit", text: outcome.additionalContext });
+		else setPending([...pendingPromptContext, { event: "UserPromptSubmit", text: outcome.additionalContext }]);
 		return undefined;
 	});
 
@@ -437,7 +461,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		const queued = typeof input === "string" ? queuedPromptContext.release(input) : undefined;
 		if (queued) emit(queued);
 		const waiting = pendingPromptContext;
-		pendingPromptContext = [];
+		setPending([]);
 		for (const { event: hookEvent, text } of waiting) emit(hookContextText(hookEvent, text));
 	});
 
@@ -468,7 +492,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		const userRun = isUserRun(event);
 		const texts = pendingPromptContext.filter((entry) => userRun || entry.event !== "UserPromptSubmit");
 		if (texts.length === 0) return;
-		pendingPromptContext = pendingPromptContext.filter((entry) => !texts.includes(entry));
+		setPending(pendingPromptContext.filter((entry) => !texts.includes(entry)));
 		return {
 			message: {
 				customType: "one-code:hook-context",
@@ -476,6 +500,10 @@ export default function hooksExtension(pi: ExtensionAPI) {
 				display: false,
 			},
 		};
+	});
+
+	pi.on("session_tree", (_event, ctx) => {
+		pendingPromptContext = pendingOnBranch(ctx);
 	});
 
 	// ---- SessionStart / SessionEnd -----------------------------------------
@@ -491,7 +519,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		// while its hook ran; discard the stale result instead of pushing it into
 		// the new session's context (`pendingPromptContext` is shared and reset).
 		if (gen === sessionGen && outcome.additionalContext) {
-			pendingPromptContext.push({ event: "SessionStart", text: outcome.additionalContext });
+			setPending([...pendingPromptContext, { event: "SessionStart", text: outcome.additionalContext }]);
 		}
 	};
 
@@ -500,7 +528,8 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		sessionAbort = new AbortController();
 		lastCtx = ctx;
 		const gen = ++sessionGen;
-		pendingPromptContext = [];
+		// What this branch was still waiting to send (a /reload, a resume, a fork).
+		pendingPromptContext = pendingOnBranch(ctx);
 		queuedPromptContext.clear();
 		sessionStartPending = undefined;
 		prompted = false;
@@ -711,7 +740,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		};
 		const outcome = await dispatch(ctx, "PostCompact", { candidates: [trigger] }, payload);
 		if (gen !== sessionGen) return;
-		if (outcome.additionalContext) pendingPromptContext.push({ event: "PostCompact", text: outcome.additionalContext });
+		if (outcome.additionalContext) setPending([...pendingPromptContext, { event: "PostCompact", text: outcome.additionalContext }]);
 		// CC fires SessionStart(source: "compact") after compaction. Awaited inline
 		// (not backgrounded), so the current generation is still in force.
 		await dispatchSessionStart(ctx, "compact", sessionGen);

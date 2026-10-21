@@ -476,10 +476,10 @@ describe("claude-context rule attachment wiring", () => {
 		await fake.fireOne("session_start", {}, ctx);
 		expect(emitted.some((entry) => entry.text?.includes("Only source files."))).toBe(false);
 		await fake.fire("tool_result", { toolName: "read", input: { path: "src/a.ts" }, isError: false, content: [] }, ctx);
-		expect(emitted.filter((entry) => !entry.placement).map((entry) => entry.text)).toEqual([`Contents of ${conditional}:\n\nOnly source files.\n`]);
+		expect(emitted.filter((entry) => !entry.placement && entry.text).map((entry) => entry.text)).toEqual([`Contents of ${conditional}:\n\nOnly source files.\n`]);
 	});
 
-	it("freezes successful startup in first-prepend, attaches a matching nested rule once, and resets only attachments on compaction/tree", async () => {
+	it("keeps the startup block as live first-prepend state, attaches a matching nested rule once, and resets only attachments on compaction/tree", async () => {
 		const home = join(fixture, "home");
 		const cwd = join(fixture, "project");
 		write(cwd, "CLAUDE.md", "startup instruction\n");
@@ -495,7 +495,7 @@ describe("claude-context rule attachment wiring", () => {
 		await fake.fireOne("session_start", {}, ctx);
 		const startup = emitted.filter((entry) => entry.key === "claude-context");
 		expect(startup).toHaveLength(1);
-		expect(startup[0]).toMatchObject({ placement: "first-prepend", scope: "every-turn" });
+		expect(startup[0]).toMatchObject({ placement: "first-prepend" });
 		expect(startup[0].text).toContain("startup instruction");
 
 		const read = (path: string, isError = false) => fake.fire("tool_result", { toolName: "read", input: { path }, isError, content: [] }, ctx);
@@ -513,7 +513,7 @@ describe("claude-context rule attachment wiring", () => {
 		await fake.fireOne("session_tree", {}, ctx);
 		await read("src/match/yes.ts");
 		expect(emitted.filter((entry) => entry.key === undefined && entry.text?.includes("matching nested rule"))).toHaveLength(3);
-		// The startup prefix is not re-emitted or altered by attachment resets.
-		expect(emitted.filter((entry) => entry.key === "claude-context")).toEqual(startup);
+		// The compaction refreshes the live block for the next epoch; attachment resets leave its text alone.
+		expect(emitted.filter((entry) => entry.key === "claude-context").map((entry) => entry.text)).toEqual([startup[0].text, startup[0].text]);
 	});
 });

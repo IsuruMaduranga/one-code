@@ -62,6 +62,9 @@ import {
 	formatDeleteResult,
 	formatJobList,
 	formatUnknownJob,
+	JOB_FIRED_ENTRY,
+	scheduledJobsOnBranch,
+	WAKEUP_ARMED_ENTRY,
 } from "./cron.ts";
 import {
 	createTaskNotifier,
@@ -97,6 +100,8 @@ import { StringDecoder } from "node:string_decoder";
 import { SESSION_WORK_CHANNEL, sessionBackgroundTask, sessionCron, type SessionWorkQuery } from "../lib/session-work.ts";
 import { WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
 import { queueNotice } from "../lib/notices.ts";
+import { makeRecord, RECORD } from "../lib/ledger/records.ts";
+import { extensionVersion } from "../lib/package-version.ts";
 
 /** Claude Code's `task_output` limit (`TASK_MAX_OUTPUT_DEFAULT`). */
 const TASK_OUTPUT_MAX_CHARS = 32_000;
@@ -329,7 +334,13 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 			return;
 		}
 		const fold = job.source === "wakeup" ? foldDetails() : {};
+		// A fold removes the tick's messages from the model's context: above the
+		// append point, so the next request opens an epoch (extensions/ledger)
+		// and renders the folded context whole, once.
+		if (fold.noOpStreak !== undefined) pi.appendEntry(RECORD.epoch, makeRecord("epoch", extensionVersion(), { cause: "fold" }));
 		if (job.source === "wakeup") dynamicLoop.inFlight = job.prompt;
+		// Recorded whatever way the notification goes out, so a /reload knows the fire happened.
+		pi.appendEntry(JOB_FIRED_ENTRY, { jobId: job.id, final, source: job.source });
 		notify(job.source === "wakeup" ? "wakeup" : "cron", fireText(job), { jobId: job.id, cron: job.cron, source: job.source, final, ...fold });
 	};
 	/** Fire every due job (only while idle), then arm the one timer to the next fire. */
@@ -869,9 +880,30 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		query.body = loopSkillPrompt(query.args, readLoopFile(query.cwd));
 	});
 
-	pi.on("session_start", (_event, ctx) => {
+	/** Arm the branch's scheduled jobs, with each wakeup's loop age and keepalive spend. */
+	const armFromBranch = (ctx: ExtensionContext) => {
+		const now = Date.now();
+		for (const job of scheduledJobsOnBranch(ctx.sessionManager.getBranch() as never)) {
+			if (!cron.restore(job, now) || job.source !== "wakeup") continue;
+			dynamicLoop.restoreChain(job.prompt, job.chainStartedAt ?? job.createdAt, job.fireAt ?? now, job.keepalive === true);
+		}
+		runCron();
+	};
+	// The jobs follow the branch: a /tree switch ends the abandoned branch's and
+	// arms the selected one's (a subagent's own jobs stay with the agent).
+	pi.on("session_tree", (_event, ctx) => {
+		lastCtx = ctx;
+		cron.deleteWhere((job) => job.agentId === undefined);
+		dynamicLoop.clear();
+		armFromBranch(ctx);
+	});
+	pi.on("session_start", (event, ctx) => {
 		lastCtx = ctx;
 		sessionCwd = ctx.cwd;
+		// A /reload keeps the process and the conversation, so the session's
+		// scheduled jobs come back from the branch (design.md section 13); a new
+		// process ends them, as Claude Code's session-only jobs end.
+		if (event.reason === "reload") armFromBranch(ctx);
 		if (pendingShutdownNotice) {
 			const notice = pendingShutdownNotice;
 			pendingShutdownNotice = undefined;
@@ -883,8 +915,12 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	});
 	pi.on("agent_settled", () => {
 		agentBusy = false;
-		// Claude Code's keepalive: a wakeup's turn that scheduled no next one gets one fallback.
-		dynamicLoop.settle(Date.now());
+		// Claude Code's keepalive: a wakeup's turn that scheduled no next one gets
+		// one fallback, recorded so a /reload re-arms it (no tool result does).
+		if (dynamicLoop.settle(Date.now()) === "armed") {
+			const armed = cron.list().find((job) => job.source === "wakeup");
+			if (armed) pi.appendEntry(WAKEUP_ARMED_ENTRY, { id: armed.id, prompt: armed.prompt, fireAt: armed.nextFireAt, startedAt: dynamicLoop.chainStart(armed.prompt) });
+		}
 		runCron();
 	});
 	// Folded no-op ticks leave the model's context (noop-fold.ts); the note stands in for them.
@@ -921,7 +957,8 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		// on it — and the replacement is told (see pendingShutdownNotice); a quit
 		// needs no note. A reload keeps the conversation, so its note says so.
 		const running = registry.running();
-		const jobs = cron.list();
+		// A reload re-arms the jobs from the branch: only the tasks stop.
+		const jobs = event.reason === "reload" ? [] : cron.list();
 		if ((running.length > 0 || jobs.length > 0) && event.reason !== "quit") {
 			const when = event.reason === "reload" ? "on reload" : "with the previous session";
 			const notices: string[] = [];

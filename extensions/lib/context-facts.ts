@@ -1,51 +1,65 @@
-/** Comparisons for the historical context stack. No pi imports or live-state reads. */
-import { createHash } from "node:crypto";
-import { buildClaudeMdBlock, buildContextBlock, type ContextFile } from "./claude-context.ts";
-import type { ReminderEntry } from "./reminders.ts";
+/**
+ * What claude-context's message-1 blocks tell, as ledger facts, and the notice
+ * for a resumed session whose workspace changed since (pure). The blocks are
+ * live state; an epoch records their fingerprints with its request, so the
+ * first request of a resumed process compares them with the live files and git
+ * status, and says what changed once. The historical blocks stay as sent.
+ */
+import { buildClaudeMdBlock, type ContextFile } from "./claude-context.ts";
+import type { ToldFact } from "./ledger/records.ts";
+import { contentHash } from "./ledger/wire.ts";
+import { toldBlockFact } from "./reminders.ts";
 
-export const CONTEXT_FACT_KEYS = ["claude-context", "one-code-context", "claude-context-context", "claude-context-date"] as const;
-export const RESUME_FACTS_KEY = "context-resume-changes";
-export const DATE_CHANGE_KEY = "claude-context-date-change";
+/** The told keys of the fingerprints (whole-text block facts) and of the compaction flag (a mode). */
+export const FACT_KEYS = {
+	instructions: "context-facts:instructions",
+	memory: "context-facts:memory",
+	git: "context-facts:git",
+	date: "context-facts:date",
+	/** On when the epoch's blocks were taken at a compaction, not at the session's start. */
+	compaction: "context-facts:compaction",
+} as const;
 
-export interface ContextFactsBaseline {
+/** A told block's hash (`toldBlockFact`): for a string or null it is the sha256 of its JSON. */
+const fingerprint = contentHash;
+
+/** Fingerprints of only what the model was shown, not unshown file tails or filesystem mtimes. */
+export interface ContextFingerprints {
 	instructions: string;
 	memory: string;
-	git: string;
-	/** A compaction starts a new snapshot epoch, not a new conversation. */
-	atCompaction: boolean;
-	/**
-	 * The directory the facts were read in: the session's cwd, or the entered
-	 * worktree at a compaction. A resume compares in the same one. Absent in
-	 * older snapshots.
-	 */
-	cwd?: string;
 }
 
-const fingerprint = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
-
-/** Hash only what the model was shown, not unshown file tails or filesystem mtimes. */
-export function contextFactsBaseline(input: {
-	contextFiles: ContextFile[];
-	memoryIndex: { path: string; content: string } | null;
-	gitStatus: string | null;
-	atCompaction: boolean;
-	cwd?: string;
-}): ContextFactsBaseline {
+export function contextFingerprints(input: { contextFiles: ContextFile[]; memoryIndex: { path: string; content: string } | null }): ContextFingerprints {
 	return {
 		instructions: fingerprint(buildClaudeMdBlock({ contextFiles: input.contextFiles })),
 		memory: fingerprint(buildClaudeMdBlock({ contextFiles: [], memoryIndex: input.memoryIndex })),
-		git: fingerprint(input.gitStatus),
-		atCompaction: input.atCompaction,
-		...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
 	};
 }
 
-export function storedFactsBaseline(value: unknown): ContextFactsBaseline | undefined {
-	if (!value || typeof value !== "object") return undefined;
-	const v = value as Record<string, unknown>;
-	if (![v.instructions, v.memory, v.git].every((part) => typeof part === "string" && /^[a-f0-9]{64}$/.test(part)) || typeof v.atCompaction !== "boolean") return undefined;
-	const { cwd, ...facts } = v;
-	return { ...facts, ...(typeof cwd === "string" ? { cwd } : {}) } as unknown as ContextFactsBaseline;
+export const gitFingerprint = (gitStatus: string | null): string => fingerprint(gitStatus);
+
+/** The live workspace's fingerprints for the resumed-session check: the instructions, the memory index and, when a git snapshot is taken, the git status. */
+export type LiveFingerprints = ContextFingerprints & { git?: string };
+
+export function liveFingerprints(files: Parameters<typeof contextFingerprints>[0], gitStatus: string | null, withGit: boolean): LiveFingerprints {
+	return { ...contextFingerprints(files), ...(withGit ? { git: gitFingerprint(gitStatus) } : {}) };
+}
+export const dateFingerprint = (date: string): string => fingerprint(date);
+
+/** The facts the instructions block tells. */
+export function instructionFacts(prints: ContextFingerprints): ToldFact[] {
+	return [
+		{ kind: "block", key: FACT_KEYS.instructions, hash: prints.instructions },
+		{ kind: "block", key: FACT_KEYS.memory, hash: prints.memory },
+	];
+}
+
+/** The facts the context block tells: its git snapshot, and whether a compaction took it. */
+export function contextBlockFacts(gitStatus: string | null, atCompaction: boolean): ToldFact[] {
+	return [
+		toldBlockFact(FACT_KEYS.git, gitStatus),
+		{ kind: "mode", key: FACT_KEYS.compaction, on: atCompaction },
+	];
 }
 
 /** A refreshed git snapshot must not describe itself as the conversation's initial status. */
@@ -53,26 +67,31 @@ export function compactionGitStatus(text: string | null): string | null {
 	return text?.replace("This is the git status at the start of the conversation.", "This is the git status at the latest compaction.") ?? null;
 }
 
-/** One short factual notice; the historical blocks themselves remain byte-identical. */
-export function resumeFactsNotice(before: ContextFactsBaseline, current: ContextFactsBaseline): string | undefined {
+/**
+ * One short factual notice when the live workspace differs from what the
+ * epoch's blocks told, and the facts that bring the told state up to date.
+ * Undefined when nothing the epoch told has changed, or the epoch told none
+ * of it (its blocks predate the facts).
+ */
+export function resumeFactsNotice(
+	told: ReadonlyMap<string, string>,
+	atCompaction: boolean,
+	live: ContextFingerprints & { git?: string },
+): { text: string; facts: ToldFact[] } | undefined {
 	const changed: string[] = [];
-	if (before.git !== current.git) changed.push("git status changed");
-	if (before.memory !== current.memory) changed.push("the memory index changed");
-	if (before.instructions !== current.instructions) changed.push("CLAUDE.md-family instructions changed");
+	const facts: ToldFact[] = [];
+	const compare = (key: string, hash: string | undefined, what: string) => {
+		const before = told.get(key);
+		if (hash === undefined || before === undefined || before === hash) return;
+		changed.push(what);
+		facts.push({ kind: "block", key, hash });
+	};
+	compare(FACT_KEYS.git, live.git, "git status changed");
+	compare(FACT_KEYS.memory, live.memory, "the memory index changed");
+	compare(FACT_KEYS.instructions, live.instructions, "CLAUDE.md-family instructions changed");
 	if (changed.length === 0) return undefined;
-	return `Since the saved context snapshot, ${changed.join("; ")}. The earlier context block reflects ${before.atCompaction ? "the latest compaction" : "the session's start"}, not the current workspace. Read the current files or run git status if needed.`;
-}
-
-/** Old snapshots lack separate fingerprints: do not invent which half of # claudeMd changed. */
-export function legacyResumeFactsNotice(stack: readonly ReminderEntry[], live: {
-	instructions: string | null;
-	email: string | null;
-	gitStatus: string | null;
-}): string | undefined {
-	const changed: string[] = [];
-	const previousContext = stack.find((entry) => entry.key === "claude-context-context")?.text ?? null;
-	const gitPart = (text: string | null) => text?.match(/# gitStatus\n[\s\S]*?(?=\n\nOne Code attached this context automatically;|$)/)?.[0] ?? null;
-	if (gitPart(previousContext) !== gitPart(buildContextBlock(live))) changed.push("git status changed");
-	if ((stack.find((entry) => entry.key === "claude-context")?.text ?? null) !== live.instructions) changed.push("CLAUDE.md-family instructions or the memory index changed");
-	return changed.length ? `Since the saved context snapshot, ${changed.join("; ")}. The earlier context block reflects the session's start, not the current workspace. Read the current files or run git status if needed.` : undefined;
+	return {
+		text: `Since the saved context snapshot, ${changed.join("; ")}. The earlier context block reflects ${atCompaction ? "the latest compaction" : "the session's start"}, not the current workspace. Read the current files or run git status if needed.`,
+		facts,
+	};
 }

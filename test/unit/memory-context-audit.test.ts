@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import claudeContextExtension from "../../extensions/claude-context/index.ts";
 import systemReminderExtension from "../../extensions/system-reminder/index.ts";
 import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
-import { contextStackOnBranch } from "../../extensions/lib/context-stack.ts";
 import { projectMemoryDir } from "../../extensions/lib/memory.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
@@ -118,7 +117,7 @@ describe("independent memory context audit", () => {
 		await run.fake.fire("session_compact", { reason: "manual" }, run.ctx);
 		const summary = [{ role: "compactionSummary", summary: "summary", timestamp: 2 }];
 		expect.soft(JSON.stringify(await run.request(summary))).not.toContain(SECRET);
-		expect.soft(JSON.stringify(contextStackOnBranch(branchOf(run.fake)))).not.toContain(SECRET);
+		expect.soft(JSON.stringify(branchOf(run.fake))).not.toContain(SECRET);
 	});
 
 	it.skipIf(process.platform === "win32")("does not attempt a blocking read of a FIFO index", async () => {

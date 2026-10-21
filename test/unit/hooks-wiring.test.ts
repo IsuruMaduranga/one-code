@@ -81,7 +81,7 @@ describe("hooks wiring", () => {
 	};
 
 	const mount = () => hooksExtension(fake.pi as never);
-	const ctx = () => createFakeCtx({ cwd: projectDir, sessionManager: { getSessionId: () => "test", getSessionFile: () => undefined, getSessionDir: () => root } });
+	const ctx = () => createFakeCtx({ cwd: projectDir, sessionManager: { getSessionId: () => "test", getSessionFile: () => undefined, getSessionDir: () => root, getBranch: () => [] } });
 
 	it("disableAllHooks skips installed plugin commands as well as settings hooks", async () => {
 		const installPath = join(claudeDir, "plugins", "cache", "market", "fixture", "1.0.0");

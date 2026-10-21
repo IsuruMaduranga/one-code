@@ -2,541 +2,224 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
-	appendReminderBlocks,
 	COMPACTION_SUMMARY_PREFIX,
 	COMPACTION_SUMMARY_SUFFIX,
-	injectReminders,
-	openingUserAnchor,
-	ReminderQueue,
-	tailAnchor,
+	LiveReminders,
+	type OneShot,
+	type RenderInput,
+	renderReminders,
+	type StackEntry,
+	type StickyToPlace,
+	stickyFact,
+	toldBlockFact,
 	wrapReminder,
 } from "../../extensions/lib/reminders.ts";
 
 // Minimal structural stand-ins for AgentMessage
-const user = (content: string | Array<{ type: string; text?: string }>, timestamp = 0) =>
-	({ role: "user", content, timestamp }) as any;
-const assistant = () => ({ role: "assistant", content: [], timestamp: 0 }) as any;
-const toolResult = (text = "ok", timestamp = 0) =>
-	({ role: "toolResult", toolCallId: "c1", toolName: "bash", content: [{ type: "text", text }], timestamp }) as any;
-const compaction = (summary = "what happened", timestamp = 0) =>
-	({ role: "compactionSummary", summary, tokensBefore: 1, timestamp }) as any;
+const user = (content: string | Array<{ type: string; text?: string }>, timestamp = 0) => ({ role: "user", content, timestamp }) as any;
+const assistant = (timestamp = 0) => ({ role: "assistant", content: [], timestamp }) as any;
+const toolResult = (text = "ok", timestamp = 0, toolCallId = "c1") =>
+	({ role: "toolResult", toolCallId, toolName: "bash", content: [{ type: "text", text }], timestamp }) as any;
+const custom = (text: string, timestamp = 0) => ({ role: "custom", customType: "task-notification", content: text, display: true, timestamp }) as any;
+const compaction = (summary = "what happened", timestamp = 0) => ({ role: "compactionSummary", summary, tokensBefore: 1, timestamp }) as any;
 const blockTexts = (m: any) => (typeof m.content === "string" ? [m.content] : m.content.map((b: any) => b.text));
 
-const texts = (q: ReminderQueue) => q.drain([]).map((e) => e.text);
+const stack = (text: string, order = 0, extra: Partial<StackEntry> = {}): StackEntry => ({ key: text, text, order, ...extra });
+const sticky = (text: string, since = 0, extra: Partial<StickyToPlace> = {}): StickyToPlace => ({ key: text, text, since, delivered: false, ...extra });
+const shot = (text: string, extra: Partial<OneShot> = {}): OneShot => ({ text, placement: "last-append", ...extra });
+const render = (messages: any[], input: Partial<RenderInput>) =>
+	renderReminders(messages, { epoch: false, layout: false, stack: [], sticky: [], oneShots: [], ...input });
 
-describe("ReminderQueue", () => {
-	it("drains pending next-turn reminders once", () => {
-		const q = new ReminderQueue();
-		q.enqueue("a");
-		q.enqueue("b");
-		expect(texts(q)).toEqual(["a", "b"]);
-		expect(texts(q)).toEqual([]);
+describe("LiveReminders", () => {
+	it("keeps the first-prepend stack as live state, in Claude Code's order, replaced by key", () => {
+		const live = new LiveReminders();
+		expect(live.apply({ text: "claudeMd", placement: "first-prepend", order: 50, key: "md" })).toBe("live");
+		live.apply({ text: "env", placement: "first-prepend", order: 1, key: "env" });
+		live.apply({ text: "env 2", placement: "first-prepend", order: 1, key: "env" });
+		expect(live.stackEntries().map((entry) => entry.text)).toEqual(["env 2", "claudeMd"]);
+		live.apply({ key: "md", remove: true });
+		expect(live.stackEntries().map((entry) => entry.text)).toEqual(["env 2"]);
 	});
 
-	it("keeps every-turn reminders across drains until removed", () => {
-		const q = new ReminderQueue();
-		q.enqueue("persistent", { scope: "every-turn", key: "k" });
-		q.enqueue("once");
-		expect(texts(q)).toEqual(["persistent", "once"]);
-		expect(texts(q)).toEqual(["persistent"]);
-		q.remove("k");
-		expect(texts(q)).toEqual([]);
+	it("hands one-shots back for persisting and ignores empty text", () => {
+		const live = new LiveReminders();
+		expect(live.apply({ text: "steer" })).toBe("one-shot");
+		expect(live.apply({ text: "crumb", placement: "user-prepend" })).toBe("one-shot");
+		expect(live.apply({ text: "  " })).toBe("ignored");
+		expect(live.stackEntries()).toEqual([]);
+		expect(live.stickyEntries()).toEqual([]);
 	});
 
-	it("replaces every-turn reminders with the same key", () => {
-		const q = new ReminderQueue();
-		q.enqueue("v1", { scope: "every-turn", key: "k" });
-		q.enqueue("v2", { scope: "every-turn", key: "k" });
-		expect(texts(q)).toEqual(["v2"]);
-	});
-
-	it("replaces keyed next-turn reminders, keeping the latest in queue order", () => {
-		const q = new ReminderQueue();
-		q.enqueue("mode is acceptEdits", { key: "mode" });
-		q.enqueue("unrelated");
-		q.enqueue("mode is plan", { key: "mode" });
-		expect(texts(q)).toEqual(["unrelated", "mode is plan"]);
-	});
-
-	it("ignores empty text", () => {
-		const q = new ReminderQueue();
-		q.enqueue("  ");
-		expect(q.size).toBe(0);
-	});
-
-	it("carries placement and order through drain (defaults to last-append/0)", () => {
-		const q = new ReminderQueue();
-		q.enqueue("plain");
-		q.enqueue("ctx", { scope: "every-turn", key: "c", placement: "first-prepend", order: 4 });
-		expect(q.drain([])).toEqual([
-			{ text: "ctx", placement: "first-prepend", order: 4 },
-			{ text: "plain", placement: "last-append", order: 0 },
-		]);
-	});
-
-	it("takeOneShots removes only the pending last-append one-shots (for the tool_result hook)", () => {
-		const q = new ReminderQueue();
-		q.enqueue("file changed");
-		q.enqueue("ctx", { scope: "every-turn", key: "c", placement: "first-prepend" });
-		q.enqueue("later", { placement: "first-prepend" });
-		expect(q.hasPendingOneShots).toBe(true);
-		expect(q.takeOneShots().map((e) => e.text)).toEqual(["file changed"]);
-		expect(q.hasPendingOneShots).toBe(false);
-		expect(texts(q)).toEqual(["ctx", "later"]);
-	});
-
-	it("pinned one-shots stay in every later drain, fixed to their anchor (retry-safe by construction)", () => {
-		const q = new ReminderQueue();
-		q.enqueue("file changed");
-		q.pin({ kind: "toolResult", toolCallId: "c1" });
-		const messages = [user("go"), assistant(), toolResult()];
-		const first = q.drain(messages);
-		expect(first).toEqual([{ text: "file changed", placement: "last-append", order: 0, pin: { kind: "toolResult", toolCallId: "c1" } }]);
-		expect(q.drain(messages)).toEqual(first);
-		expect(q.size).toBe(1);
-	});
-
-	// Battery round 7: in a parallel batch, a read's nested CLAUDE.md queued after
-	// that read's own tool_result hook landed on another file's result.
-	it("pins a one-shot bound to a call onto that call's result, never another's", () => {
-		const q = new ReminderQueue();
-		q.enqueue("nested rules for src/reports", { toolCallId: "r-summary" });
-		expect(q.takeOneShots("r-inventory")).toEqual([]);
-		const second = { ...toolResult(), toolCallId: "r-inventory" };
-		const first = { ...toolResult(), toolCallId: "r-summary" };
-		const messages = [user("go"), assistant(), first, second];
-		q.pin({ kind: "toolResult", toolCallId: "r-inventory" }, "last-append", messages);
-		expect(q.drain(messages)).toEqual([expect.objectContaining({ text: "nested rules for src/reports", pin: { kind: "toolResult", toolCallId: "r-summary" } })]);
-	});
-
-	it("drain drops only the pins whose anchor left the context; there is no count cap", () => {
-		const q = new ReminderQueue();
-		for (let i = 0; i < 1000; i++) {
-			q.enqueue(`note ${i}`);
-			q.pin({ kind: "user", timestamp: i });
-		}
-		expect(q.size).toBe(1000);
-		// Every anchor still present: nothing is evicted, however many there are.
-		q.drain(Array.from({ length: 1000 }, (_, i) => user(`t${i}`, i)));
-		expect(q.size).toBe(1000);
-		// Compaction replaced the first 990 turns with a summary: exactly those pins go.
-		const after = q.drain([compaction("summary", 5000), ...Array.from({ length: 10 }, (_, i) => user(`t${990 + i}`, 990 + i))]);
-		expect(q.size).toBe(10);
-		expect(after.map((r) => r.text)).toEqual(Array.from({ length: 10 }, (_, i) => `note ${990 + i}`));
-	});
-
-	it("stamps sticky-append with `since` at enqueue and keeps it while the text is unchanged", () => {
-		let now = 1000;
-		const q = new ReminderQueue(() => now);
-		q.enqueue("plan mode on", { scope: "every-turn", key: "permission-mode", placement: "sticky-append" });
-		now = 2000;
-		q.enqueue("plan mode on", { scope: "every-turn", key: "permission-mode", placement: "sticky-append" });
-		expect(q.drain([])[0].since).toBe(1000);
-		// Different text under the same key is a new fact: anchors from now.
-		q.enqueue("auto mode on", { scope: "every-turn", key: "permission-mode", placement: "sticky-append" });
-		expect(q.drain([])[0].since).toBe(2000);
+	it("keeps a sticky state's start, and so its told delivery, while its text is unchanged, and starts a new one when it changes", () => {
+		let now = 10;
+		const live = new LiveReminders(() => now);
+		live.apply({ text: "plan", key: "mode", placement: "sticky-append" });
+		const delivered = stickyFact(live.stickyEntries()[0]);
+		now = 20;
+		live.apply({ text: "plan", key: "mode", placement: "sticky-append" });
+		expect(live.stickyEntries()).toEqual([{ key: "mode", text: "plan", since: 10 }]);
+		expect(stickyFact(live.stickyEntries()[0])).toEqual(delivered);
+		live.apply({ text: "auto", key: "mode", placement: "sticky-append" });
+		expect(live.stickyEntries()).toEqual([{ key: "mode", text: "auto", since: 20 }]);
+		expect(stickyFact(live.stickyEntries()[0]).hash).not.toBe(delivered.hash);
+		live.apply({ key: "mode", remove: true });
+		expect(live.stickyEntries()).toEqual([]);
 	});
 });
 
-describe("injectReminders", () => {
-	it("appends reminder blocks to the last user message with string content", () => {
-		const messages = [user("hello"), assistant()];
-		const result = injectReminders(messages, ["be careful"]);
-		const injected = result[0] as any;
-		expect(injected.content).toEqual([
-			{ type: "text", text: "hello" },
-			{ type: "text", text: wrapReminder("be careful") },
-		]);
+describe("renderReminders: the stack", () => {
+	it("prepends the stack, sorted, before the first user message's text only when the request opens an epoch", () => {
+		const messages = [user("one", 1), assistant(2), user("two", 3)];
+		const entries = [stack("a", 1), stack("b", 2)];
+		const opened = render(messages, { epoch: true, stack: entries });
+		expect(blockTexts(opened.messages[0])).toEqual([wrapReminder("a"), wrapReminder("b"), "one"]);
+		expect(opened.stackPlaced).toBe(true);
+		const inside = render(messages, { stack: entries });
+		expect(inside.messages).toEqual(messages);
+		expect(inside.stackPlaced).toBe(false);
 	});
 
-	it("targets the LAST user message and preserves array content", () => {
-		const messages = [user("first"), assistant(), user([{ type: "text", text: "second" }])];
-		const result = injectReminders(messages, ["note"]);
-		expect((result[0] as any).content).toBe("first");
-		expect((result[2] as any).content).toHaveLength(2);
-		expect((result[2] as any).content[1].text).toContain("<system-reminder>");
-	});
-
-	it("does not mutate the input messages", () => {
-		const original = user("hello");
-		const messages = [original];
-		injectReminders(messages, ["x"]);
-		expect(original.content).toBe("hello");
-	});
-
-	it("returns messages unchanged when there is nothing to anchor to", () => {
-		const messages = [assistant()];
-		expect(injectReminders(messages, ["x"])).toBe(messages);
-	});
-
-	it("appends a mid-turn last-append reminder to the trailing tool result, not the turn's user prompt (C1)", () => {
-		const messages = [user("do it"), assistant(), toolResult("ran")];
-		const result = injectReminders(messages, ["that tool is deferred"]);
-		expect(blockTexts(result[0])).toEqual(["do it"]);
-		expect(blockTexts(result[2])).toEqual(["ran", wrapReminder("that tool is deferred")]);
-		expect(result[2].role).toBe("toolResult");
-		expect((result[2] as any).toolCallId).toBe("c1");
-	});
-
-	it("sticky-append rides every user message since its anchor and none before (C2)", () => {
-		const messages = [user("t1", 100), assistant(), user("t2", 200), assistant(), user("t3", 300)];
-		// Switched on while turn t2 was open (stamped after t2, before t3); the
-		// queue fixed t2 as the opener on the first request after the switch.
-		const entry = { text: "auto mode on", placement: "sticky-append" as const, order: 0, since: 250, opener: 200 };
-		const result = injectReminders(messages, [entry]);
-		expect(blockTexts(result[0])).toEqual(["t1"]);
-		expect(blockTexts(result[2])).toEqual(["t2", wrapReminder("auto mode on")]);
-		expect(blockTexts(result[4])).toEqual(["t3", wrapReminder("auto mode on")]);
-		// Byte-stable: the same request one turn later yields the same earlier messages.
-		const later = injectReminders([...messages, assistant(), user("t4", 400)], [entry]);
-		expect(later.slice(0, 5)).toEqual(result);
-	});
-
-	it("sticky-append first rides the result after a mid-turn switch, not the opener", () => {
-		const messages = [user("t1", 100), assistant(), toolResult("ran", 160)];
-		const entry = { text: "plan on", placement: "sticky-append" as const, order: 0, since: 150 };
-		const result = injectReminders(messages, [entry]);
-		expect(blockTexts(result[0])).toEqual(["t1"]);
-		expect(blockTexts(result[2])).toEqual(["ran", wrapReminder("plan on")]);
-		const later = injectReminders([user("t0", 50), assistant(), ...messages, assistant(), user("t2", 200)], [entry]);
-		expect(blockTexts(later[0])).toEqual(["t0"]);
-		expect(later.slice(2, 5)).toEqual(result);
-		expect(blockTexts(later[6])).toEqual(["t2", wrapReminder("plan on")]);
-	});
-
-	it("sticky-append switched on between turns leaves the previous turn's message alone (A4-M1)", () => {
-		let now = 100;
-		const q = new ReminderQueue(() => now);
-		const turn1 = [user("turn 1", 100), assistant()];
-		// Turn 1 ends; the user switches the mode on while idle (t=500).
-		now = 500;
-		q.enqueue("AUTO", { scope: "every-turn", key: "permission-mode", placement: "sticky-append" });
-		const turn2 = [...turn1, user("turn 2", 1000)];
-		const first = injectReminders(turn2, q.drain(turn2));
-		expect(blockTexts(first[0])).toEqual(["turn 1"]);
-		expect(blockTexts(first[2])).toEqual(["turn 2", wrapReminder("AUTO")]);
-		// Later requests keep the earlier messages byte-identical.
-		const turn2b = [...turn2, assistant(), toolResult("ran")];
-		expect(injectReminders(turn2b, q.drain(turn2b)).slice(0, 3)).toEqual(first);
-	});
-
-	it("a /tree branch that closed a still-live lifetime keeps its copy, and the live state goes on from now", () => {
-		let now = 100;
-		const q = new ReminderQueue(() => now);
-		q.enqueue("plan on", { scope: "every-turn", key: "plan", placement: "sticky-append" });
-		// The selected branch turned plan mode off after one carrier; this session (resumed) still has it on.
-		const closed = { key: "plan", text: "plan on", placement: "sticky-append" as const, order: 0, since: 100, until: 200, userPins: [150] };
-		now = 250;
-		q.restoreBranch({ stack: [], sticky: [closed] }, []);
-		now = 300;
-		q.enqueue("plan on", { scope: "every-turn", key: "plan", placement: "sticky-append" });
-		const messages = [user("before", 150), assistant(), user("after", 300)];
-		const sent = injectReminders(messages, q.drain(messages));
-		expect(blockTexts(sent[0])).toEqual(["before", wrapReminder("plan on")]);
-		expect(blockTexts(sent[2])).toEqual(["after", wrapReminder("plan on")]);
-	});
-
-	it("sticky-append switched on mid-turn keeps its result pin once an earlier-stamped steer arrives", () => {
-		let now = 100;
-		const q = new ReminderQueue(() => now);
-		// The turn opened at t=100; a steer typed at t=400 is still queued when
-		// the mode switches on at t=500.
-		const before = [user("turn 1", 100), assistant(), toolResult("ran", 510)];
-		now = 500;
-		q.enqueue("AUTO", { scope: "every-turn", key: "permission-mode", placement: "sticky-append" });
-		const first = injectReminders(before, q.drain(before));
-		expect(blockTexts(first[0])).toEqual(["turn 1"]);
-		expect(blockTexts(first[2])).toEqual(["ran", wrapReminder("AUTO")]);
-		// The steer enters the context: the block stays on its first result.
-		const withSteer = [...before, user("steer", 400), assistant()];
-		const second = injectReminders(withSteer, q.drain(withSteer));
-		expect(second.slice(0, 3)).toEqual(first);
-		expect(blockTexts(second[3])).toEqual(["steer"]);
-		// Plan mode re-emits the same text every turn: the pin must not move.
-		now = 900;
-		q.enqueue("AUTO", { scope: "every-turn", key: "permission-mode", placement: "sticky-append" });
-		const next = [...withSteer, user("turn 2", 1000)];
-		const third = injectReminders(next, q.drain(next));
-		expect(third.slice(0, 5)).toEqual(second);
-		expect(blockTexts(third[5])).toEqual(["turn 2", wrapReminder("AUTO")]);
-	});
-
-	it("a pinned one-shot rides the exact tool result or user turn it first landed on", () => {
-		const messages = [user("t1", 100), assistant(), toolResult("ran"), assistant(), user("t2", 200)];
-		const pinnedToResult = { text: "deferred miss", placement: "last-append" as const, order: 0, pin: { kind: "toolResult" as const, toolCallId: "c1" } };
-		const pinnedToTurn = { text: "mode changed", placement: "last-append" as const, order: 0, pin: { kind: "user" as const, timestamp: 100 } };
-		const result = injectReminders(messages, [pinnedToResult, pinnedToTurn]);
-		expect(blockTexts(result[0])).toEqual(["t1", wrapReminder("mode changed")]);
-		expect(blockTexts(result[2])).toEqual(["ran", wrapReminder("deferred miss")]);
-		expect(blockTexts(result[4])).toEqual(["t2"]);
-		// Anchor compacted away: the pin is simply absent, nothing else moves.
-		const later = injectReminders([user("t2", 200)], [pinnedToResult, pinnedToTurn]);
-		expect(blockTexts(later[0])).toEqual(["t2"]);
-	});
-
-	it("tailAnchor names the trailing tool result, else the last user-like turn", () => {
-		expect(tailAnchor([user("t1", 100), assistant(), toolResult("ran")])).toEqual({ kind: "toolResult", toolCallId: "c1" });
-		expect(tailAnchor([user("t1", 100), assistant(), user("t2", 200)])).toEqual({ kind: "user", timestamp: 200 });
-		expect(tailAnchor([compaction("s", 5), assistant(), user("t2", 200)])).toEqual({ kind: "user", timestamp: 200 });
-		expect(tailAnchor([assistant()])).toBeUndefined();
-	});
-
-	it("appendReminderBlocks adds wrapped blocks after the result's own content", () => {
-		expect(appendReminderBlocks([{ type: "text", text: "ok" }], [{ text: "note", placement: "last-append", order: 0 }])).toEqual([
-			{ type: "text", text: "ok" },
-			{ type: "text", text: wrapReminder("note") },
-		]);
-	});
-
-	it("sticky-append with no user turn at all rides the tail", () => {
-		const messages = [compaction("s", 5), assistant(), toolResult("ran")];
-		const result = injectReminders(messages, [{ text: "plan on", placement: "sticky-append", order: 0, since: 150 }]);
-		expect(blockTexts(result[2])).toEqual(["ran", wrapReminder("plan on")]);
-	});
-
-	it("keeps a standing block on the tail it rode when the next request gains a user turn (overflow retry)", () => {
-		// The overflow retry after a compaction that kept only the last reply: no user turn.
-		const q = new ReminderQueue();
-		q.enqueue("<total_tokens>15000000 tokens left</total_tokens>", { scope: "every-turn", key: "budget", placement: "sticky-append", raw: true, since: 0 });
-		const retry = [compaction("s", 5), assistant(), toolResult("ran")];
-		const first = injectReminders(retry, q.drain(retry));
-		expect(blockTexts(first[2])).toEqual(["ran", "<total_tokens>15000000 tokens left</total_tokens>"]);
-		// The next turn adds the model's reply and a prompt: the tool result must not change.
-		const next = [...retry, assistant(), user("go on", 200)];
-		const second = injectReminders(next, q.drain(next));
-		expect(second[2]).toEqual(first[2]);
-		expect(blockTexts(second[4])).toEqual(["go on", "<total_tokens>15000000 tokens left</total_tokens>"]);
-	});
-
-	it("anchors the first-prepend stack to a compaction summary when no user turn survived (C7)", () => {
-		const messages = [compaction("summary text", 5), assistant(), toolResult("ran")];
-		const result = injectReminders(messages, [
-			{ text: "claudeMd", placement: "first-prepend", order: 50 },
-			"steer",
-		]);
-		expect(result[0].role).toBe("user");
-		expect(result[0].timestamp).toBe(5);
-		expect(blockTexts(result[0])).toEqual([
-			wrapReminder("claudeMd"),
-			`${COMPACTION_SUMMARY_PREFIX}summary text${COMPACTION_SUMMARY_SUFFIX}`,
-		]);
-		expect(blockTexts(result[2])).toEqual(["ran", wrapReminder("steer")]);
-	});
-
-	it("prefers the first real user message after a compaction summary for first-prepend", () => {
-		const messages = [compaction(), user("next")];
-		const result = injectReminders(messages, [{ text: "ctx", placement: "first-prepend", order: 0 }]);
-		expect(result[0].role).toBe("user");
-		expect(blockTexts(result[0])).toEqual([wrapReminder("ctx"), `${COMPACTION_SUMMARY_PREFIX}what happened${COMPACTION_SUMMARY_SUFFIX}`]);
+	it("anchors the stack to a compaction summary, in pi's frame", () => {
+		const result = render([compaction("summary text", 5), assistant(), toolResult("ran")], { epoch: true, stack: [stack("claudeMd", 50)], oneShots: [shot("steer")] });
+		expect(result.messages[0].role).toBe("user");
+		expect(result.messages[0].timestamp).toBe(5);
+		expect(blockTexts(result.messages[0])).toEqual([wrapReminder("claudeMd"), `${COMPACTION_SUMMARY_PREFIX}summary text${COMPACTION_SUMMARY_SUFFIX}`]);
+		expect(blockTexts(result.messages[2])).toEqual(["ran", wrapReminder("steer")]);
 	});
 
 	it("reproduces pi's compaction-summary frame byte for byte", async () => {
-		const pi = await import(
-			pathToFileURL(resolve("node_modules/@earendil-works/pi-coding-agent/dist/core/messages.js")).href
-		);
+		const pi = await import(pathToFileURL(resolve("node_modules/@earendil-works/pi-coding-agent/dist/core/messages.js")).href);
 		expect(COMPACTION_SUMMARY_PREFIX).toBe(pi.COMPACTION_SUMMARY_PREFIX);
 		expect(COMPACTION_SUMMARY_SUFFIX).toBe(pi.COMPACTION_SUMMARY_SUFFIX);
 	});
 
-	it("returns messages unchanged for empty reminders", () => {
+	it("leaves a system-message-only block out where there is no such message, and moves the session facts where there is", () => {
+		const entries = [stack("env", 1), stack("note", 45, { systemRoleOnly: true }), stack("claudeMd", 50), stack("date", 56)];
+		const plain = render([user("hi")], { epoch: true, stack: entries });
+		expect(blockTexts(plain.messages[0])).toEqual([wrapReminder("env"), wrapReminder("claudeMd"), wrapReminder("date"), "hi"]);
+		expect(plain.moved).toEqual([]);
+		const layout = render([user("hi")], { epoch: true, layout: true, stack: entries });
+		expect(layout.moved.map((block) => block.inner)).toEqual(["env", "note", "date"]);
+	});
+
+	it("prepends the stack to a request whose only user-like message is a harness notification", () => {
+		const result = render([custom("task done", 4)], { epoch: true, stack: [stack("ctx")] });
+		expect(blockTexts(result.messages[0])).toEqual([wrapReminder("ctx"), "task done"]);
+	});
+
+	it("does not mutate the input messages", () => {
 		const messages = [user("hi")];
-		expect(injectReminders(messages, [])).toBe(messages);
-	});
-
-	it("prepends first-prepend reminders (sorted by order) before the user text", () => {
-		const messages = [user("hi")];
-		const result = injectReminders(messages, [
-			{ text: "claudeMd", placement: "first-prepend", order: 50 },
-			{ text: "deferred", placement: "first-prepend", order: 10 },
-			{ text: "mcp", placement: "first-prepend", order: 30 },
-		]);
-		expect((result[0] as any).content.map((b: any) => b.text)).toEqual([
-			wrapReminder("deferred"),
-			wrapReminder("mcp"),
-			wrapReminder("claudeMd"),
-			"hi",
-		]);
-	});
-
-	it("prepends first-prepend to the FIRST user message and appends last-append to the LAST", () => {
-		const messages = [user("first"), assistant(), user([{ type: "text", text: "second" }])];
-		const result = injectReminders(messages, [
-			{ text: "ctx", placement: "first-prepend", order: 0 },
-			{ text: "steer", placement: "last-append", order: 0 },
-		]);
-		expect((result[0] as any).content.map((b: any) => b.text)).toEqual([wrapReminder("ctx"), "first"]);
-		expect((result[2] as any).content.map((b: any) => b.text)).toEqual(["second", wrapReminder("steer")]);
-	});
-
-	it("on a single user message, prepends firsts and appends lasts around the text", () => {
-		const messages = [user("hi")];
-		const result = injectReminders(messages, [
-			{ text: "ctx", placement: "first-prepend", order: 0 },
-			{ text: "steer", placement: "last-append", order: 0 },
-		]);
-		expect((result[0] as any).content.map((b: any) => b.text)).toEqual([
-			wrapReminder("ctx"),
-			"hi",
-			wrapReminder("steer"),
-		]);
+		const copy = structuredClone(messages);
+		render(messages, { epoch: true, stack: [stack("ctx")], oneShots: [shot("x")] });
+		expect(messages).toEqual(copy);
 	});
 });
 
-describe("custom (harness) messages are anchors (STEERING-REVIEW-2026-09-05 H1)", () => {
-	const custom = (text: string, timestamp = 0) =>
-		({ role: "custom", customType: "task-notification", content: [{ type: "text", text }], display: true, timestamp }) as any;
-
-	it("prepends the context stack to a request whose only user-like message is a notification", () => {
-		const messages = [custom("SYSTEM NOTIFICATION — loop tick", 7)];
-		const result = injectReminders(messages, [{ text: "claudeMd", placement: "first-prepend", order: 50 }]);
-		expect(result[0].role).toBe("custom");
-		expect(blockTexts(result[0])).toEqual([wrapReminder("claudeMd"), "SYSTEM NOTIFICATION — loop tick"]);
+describe("renderReminders: sticky states", () => {
+	it("rides every user message of the request stamped at or after it switched on, and none before", () => {
+		const messages = [user("old", 1), assistant(2), user("new", 5), assistant(6), custom("note", 7)];
+		const result = render(messages, { sticky: [sticky("auto", 5)] });
+		expect(blockTexts(result.messages[0])).toEqual(["old"]);
+		expect(blockTexts(result.messages[2])).toEqual(["new", wrapReminder("auto")]);
+		expect(blockTexts(result.messages[4])).toEqual(["note", wrapReminder("auto")]);
+		expect(result.stickyPlaced).toEqual(["auto"]);
 	});
 
-	it("pins a pending one-shot to the notification that opened the turn, not the earlier user message", () => {
-		const messages = [user("hi", 1), assistant(), custom("agent report", 9)];
-		expect(tailAnchor(messages)).toEqual({ kind: "user", timestamp: 9 });
-		const result = injectReminders(messages, [{ text: "mode changed", placement: "last-append", order: 0, pin: { kind: "user", timestamp: 9 } }]);
-		expect(blockTexts(result[0])).toEqual(["hi"]);
-		expect(blockTexts(result[2])).toEqual(["agent report", wrapReminder("mode changed")]);
+	it("switched on mid-turn, it first rides the switching call's result", () => {
+		const messages = [assistant(1), toolResult("a", 2, "c1"), toolResult("b", 3, "c2")];
+		const result = render(messages, { sticky: [sticky("plan", 2, { toolCallId: "c2" })] });
+		expect(blockTexts(result.messages[1])).toEqual(["a"]);
+		expect(blockTexts(result.messages[2])).toEqual(["b", wrapReminder("plan")]);
 	});
 
-	it("sticky-append rides notification messages too (they are user turns on the wire)", () => {
-		const messages = [user("hi", 1), assistant(), custom("agent report", 9)];
-		const result = injectReminders(messages, [{ text: "auto on", placement: "sticky-append", order: 0, since: 0 }]);
-		expect(blockTexts(result[0])).toEqual(["hi", wrapReminder("auto on")]);
-		expect(blockTexts(result[2])).toEqual(["agent report", wrapReminder("auto on")]);
+	it("without a call, it rides the first result after the switch, never an earlier user turn", () => {
+		const messages = [user("opener", 1), assistant(2), toolResult("first", 5), assistant(6), toolResult("second", 7)];
+		const result = render(messages, { sticky: [sticky("plan", 4)] });
+		expect(blockTexts(result.messages[0])).toEqual(["opener"]);
+		expect(blockTexts(result.messages[2])).toEqual(["first", wrapReminder("plan")]);
+		expect(blockTexts(result.messages[4])).toEqual(["second"]);
 	});
 
-	it("drain keeps a pin anchored to a notification while that message is in context", () => {
-		const q = new ReminderQueue(() => 5);
-		q.enqueue("one-shot");
-		q.pin({ kind: "user", timestamp: 9 });
-		expect(q.drain([custom("report", 9)]).map((e) => e.text)).toEqual(["one-shot"]);
-		expect(q.drain([user("other", 1)])).toEqual([]);
-	});
-});
-
-describe("one-shot delivery guarantees (C3)", () => {
-	it("a pinned one-shot is injected identically on every later request, including a retried attempt", () => {
-		const q = new ReminderQueue();
-		q.enqueue("deferred-tool miss", { placement: "last-append" });
-		q.pin({ kind: "toolResult", toolCallId: "c1" });
-		const messages = [user("do it"), assistant(), toolResult("ran")];
-		const attempt1 = injectReminders(messages, q.drain(messages));
-		// A 529/overloaded retry re-runs the context event with the same messages.
-		const attempt2 = injectReminders(messages, q.drain(messages));
-		expect(attempt2).toEqual(attempt1);
-		expect(blockTexts(attempt1[2])).toEqual(["ran", wrapReminder("deferred-tool miss")]);
+	it("once delivered, it rides only new user messages, not a later tool result", () => {
+		const result = render([assistant(1), toolResult("later", 9)], { sticky: [sticky("plan", 4, { delivered: true })] });
+		expect(result.stickyPlaced).toEqual([]);
+		expect(blockTexts(result.messages[1])).toEqual(["later"]);
 	});
 
-	it("takeOneShots hands over only last-append one-shots, leaving state and context reminders queued", () => {
-		const q = new ReminderQueue();
-		q.enqueue("one-shot", { placement: "last-append" });
-		q.enqueue("mode on", { placement: "sticky-append", scope: "every-turn", key: "mode" });
-		q.enqueue("claudeMd", { placement: "first-prepend" });
-		expect(q.takeOneShots().map((e) => e.text)).toEqual(["one-shot"]);
-		expect(q.hasPendingOneShots).toBe(false);
-		expect(q.drain([]).map((e) => e.text).sort()).toEqual(["claudeMd", "mode on"]);
+	it("with no user turn at all (an overflow compaction kept only a reply and its result), it rides the tail", () => {
+		const result = render([assistant(1), toolResult("ran", 2)], { sticky: [sticky("auto", 9)] });
+		expect(blockTexts(result.messages[1])).toEqual(["ran", wrapReminder("auto")]);
 	});
 
-	it("takeOneShots leaves a one-shot bound to another call's result for that result's hook", () => {
-		const q = new ReminderQueue();
-		q.enqueue("countdown a", { placement: "last-append", raw: true, toolCallId: "a" });
-		q.enqueue("countdown b", { placement: "last-append", raw: true, toolCallId: "b" });
-		q.enqueue("file changed");
-		expect(q.takeOneShots("a").map((e) => e.text)).toEqual(["countdown a", "file changed"]);
-		expect(q.takeOneShots("c")).toEqual([]);
-		expect(q.takeOneShots("b").map((e) => e.text)).toEqual(["countdown b"]);
-		expect(q.hasPendingOneShots).toBe(false);
+	it("still pins a state whose switching result was compacted away, to the first later tool result", () => {
+		const result = render([assistant(10), toolResult("later", 12)], { sticky: [sticky("plan", 5, { toolCallId: "gone" })] });
+		expect(result.stickyPlaced).toEqual(["plan"]);
+		expect(JSON.stringify(result.messages[1])).toContain("plan");
 	});
 
-	it("a raw entry is injected without the system-reminder frame", () => {
-		const messages = [user("do it"), assistant(), toolResult("ran")];
-		const result = injectReminders(messages, [{ text: "<total_tokens>5 tokens left</total_tokens>", placement: "last-append", order: 0, raw: true }]);
-		expect(blockTexts(result[2])).toEqual(["ran", "<total_tokens>5 tokens left</total_tokens>"]);
+	it("never pins a state on from the start (since 0) to a tool result: the constant budget line rides user messages only", () => {
+		const budget = sticky("<total_tokens>200000 tokens left</total_tokens>", 0, { raw: true, skipStackCarrier: true });
+		const result = render([assistant(1), toolResult("ran", 2)], { sticky: [budget] });
+		expect(result.stickyPlaced).toEqual([]);
+		expect(JSON.stringify(result.messages)).not.toContain("200000 tokens left");
+	});
+
+	it("skipStackCarrier keeps it off the message that carries the stack, on an epoch only", () => {
+		const marker = sticky("<total_tokens>1 tokens left</total_tokens>", 0, { raw: true, skipStackCarrier: true });
+		const messages = [user("one", 1), assistant(2), user("two", 3)];
+		const opened = render(messages, { epoch: true, stack: [stack("ctx")], sticky: [marker] });
+		expect(blockTexts(opened.messages[0])).toEqual([wrapReminder("ctx"), "one"]);
+		expect(blockTexts(opened.messages[2])).toEqual(["two", marker.text]);
+		const inside = render([user("three", 4)], { sticky: [{ ...marker, delivered: true }] });
+		expect(blockTexts(inside.messages[0])).toEqual(["three", marker.text]);
 	});
 });
 
-describe("user-prepend (local-command breadcrumbs)", () => {
-	const brief = (q: ReminderQueue) => q.enqueue("<cmd>", { placement: "user-prepend", raw: true });
-
-	it("stays queued through a drain until pinned to a user message", () => {
-		const q = new ReminderQueue();
-		brief(q);
-		expect(q.hasPending("user-prepend")).toBe(true);
-		expect(q.drain([toolResult()]).map((e) => e.text)).toEqual([]);
-		expect(q.hasPending("user-prepend")).toBe(true);
-		q.pin({ kind: "user", timestamp: 7 }, "user-prepend");
-		expect(q.hasPending("user-prepend")).toBe(false);
-		const drained = q.drain([user("hi", 7)]);
-		expect(drained.map((e) => [e.text, e.placement, e.pin])).toEqual([["<cmd>", "user-prepend", { kind: "user", timestamp: 7 }]]);
+describe("renderReminders: one-shots", () => {
+	it("puts a one-shot on the trailing tool result mid-turn, else on the last user turn", () => {
+		const midTurn = render([user("go", 1), assistant(2), toolResult("ran", 3)], { oneShots: [shot("steer", { id: "p1" })] });
+		expect(blockTexts(midTurn.messages[0])).toEqual(["go"]);
+		expect(blockTexts(midTurn.messages[2])).toEqual(["ran", wrapReminder("steer")]);
+		expect(midTurn.placed.map((s) => s.id)).toEqual(["p1"]);
+		const prompt = render([assistant(1), toolResult("ran", 2), assistant(3), user("next", 4)], { oneShots: [shot("steer")] });
+		expect(blockTexts(prompt.messages[3])).toEqual(["next", wrapReminder("steer")]);
 	});
 
-	it("never enters a tool result (takeOneShots leaves it); `once` text is not queued twice while pending", () => {
-		const q = new ReminderQueue();
-		q.enqueue("<caveat>", { placement: "user-prepend", raw: true, once: true });
-		brief(q);
-		q.enqueue("<caveat>", { placement: "user-prepend", raw: true, once: true });
-		brief(q); // a second identical command block is a second command — kept
-		expect(q.takeOneShots()).toEqual([]);
-		q.pin({ kind: "user", timestamp: 1 }, "user-prepend");
-		expect(q.drain([user("x", 1)]).map((e) => e.text)).toEqual(["<caveat>", "<cmd>", "<cmd>"]);
-		// A later command starts a new run: the caveat is queued again.
-		q.enqueue("<caveat>", { placement: "user-prepend", raw: true, once: true });
-		expect(q.hasPending("user-prepend")).toBe(true);
+	it("rides its own call's result when the request carries it, never another call's in the batch", () => {
+		const messages = [assistant(1), toolResult("a", 2, "c1"), toolResult("b", 3, "c2")];
+		const result = render(messages, { oneShots: [shot("countdown", { toolCallId: "c1", raw: true })] });
+		expect(blockTexts(result.messages[1])).toEqual(["a", "countdown"]);
+		expect(blockTexts(result.messages[2])).toEqual(["b"]);
 	});
 
-	it("openingUserAnchor names a trailing user-like message only", () => {
-		expect(openingUserAnchor([user("a", 3)])).toEqual({ kind: "user", timestamp: 3 });
-		expect(openingUserAnchor([user("a", 3), assistant(), toolResult()])).toBeUndefined();
-		expect(openingUserAnchor([{ role: "custom", content: "tick", timestamp: 9 } as any])).toEqual({ kind: "user", timestamp: 9 });
-		expect(openingUserAnchor([])).toBeUndefined();
+	it("puts a breadcrumb before the opening prompt's text, after the stack, raw, and once per `once` text", () => {
+		const crumbs = [shot("caveat", { placement: "user-prepend", raw: true, once: true, id: "a" }), shot("cmd", { placement: "user-prepend", raw: true, id: "b" }), shot("caveat", { placement: "user-prepend", raw: true, once: true, id: "c" })];
+		const result = render([user("hi", 1)], { epoch: true, stack: [stack("ctx")], oneShots: crumbs });
+		expect(blockTexts(result.messages[0])).toEqual([wrapReminder("ctx"), "caveat", "cmd", "hi"]);
+		expect(result.placed.map((s) => s.id)).toEqual(["a", "b", "c"]);
 	});
 
-	it("injects a pinned breadcrumb BEFORE the user text, after the first-prepend stack, raw", () => {
-		const messages = [user("build it", 5)];
-		const out = injectReminders(messages, [
-			{ text: "ctx", placement: "first-prepend", order: 50 },
-			{ text: "<caveat>\n", placement: "user-prepend", order: 0, raw: true, pin: { kind: "user", timestamp: 5 } },
-			{ text: "<command-name>/clear</command-name>\n", placement: "user-prepend", order: 0, raw: true, pin: { kind: "user", timestamp: 5 } },
-			{ text: "budget", placement: "sticky-append", order: 0, raw: true, since: 0 },
-		]);
-		expect(blockTexts(out[0])).toEqual([wrapReminder("ctx"), "<caveat>\n", "<command-name>/clear</command-name>\n", "build it", "budget"]);
+	it("keeps a breadcrumb waiting mid-turn: it never rides a tool result", () => {
+		const result = render([user("go", 1), assistant(2), toolResult("ran", 3)], { oneShots: [shot("cmd", { placement: "user-prepend" })] });
+		expect(result.placed).toEqual([]);
+		expect(blockTexts(result.messages[2])).toEqual(["ran"]);
 	});
 
-	it("a pinned breadcrumb rides its own message on a later request, not the new prompt", () => {
-		const out = injectReminders(
-			[user("first", 1), assistant(), user("second", 2)],
-			[{ text: "<crumb>\n", placement: "user-prepend", order: 0, raw: true, pin: { kind: "user", timestamp: 1 } }],
-		);
-		expect(blockTexts(out[0])).toEqual(["<crumb>\n", "first"]);
-		expect(blockTexts(out[2])).toEqual(["second"]);
+	it("places nothing, and leaves every one-shot pending, when nothing can carry it", () => {
+		const result = render([assistant(1)], { oneShots: [shot("steer")] });
+		expect(result.placed).toEqual([]);
+		expect(result.messages).toEqual([assistant(1)]);
+	});
+
+	it("puts a one-shot on a harness notification that opened the turn", () => {
+		const result = render([user("earlier", 1), assistant(2), custom("agent done", 3)], { oneShots: [shot("steer")] });
+		expect(blockTexts(result.messages[2])).toEqual(["agent done", wrapReminder("steer")]);
 	});
 });
 
-describe("sticky-append with skipStackCarrier", () => {
-	it("rides every later user message but never the one carrying the context stack", () => {
-		const messages = [
-			{ role: "user", content: [{ type: "text", text: "first" }], timestamp: 1 },
-			{ role: "assistant", content: [{ type: "text", text: "ok" }], timestamp: 2 },
-			{ role: "user", content: [{ type: "text", text: "second" }], timestamp: 3 },
-		] as never[];
-		const out = injectReminders(messages, [
-			{ text: "stack", placement: "first-prepend", order: 1 },
-			{ text: "marker", placement: "sticky-append", order: 0, raw: true, since: 0, skipStackCarrier: true },
-		]) as Array<{ content: Array<{ text: string }> }>;
-		expect(out[0].content.map((b) => b.text)).toEqual([wrapReminder("stack"), "first"]);
-		expect(out[2].content.map((b) => b.text)).toEqual(["second", "marker"]);
-	});
-
-	it("puts nothing anywhere while the first prompt is the only user message", () => {
-		const messages = [
-			{ role: "user", content: [{ type: "text", text: "first" }], timestamp: 1 },
-			{ role: "toolResult", toolCallId: "t", content: [{ type: "text", text: "out" }], timestamp: 2 },
-		] as never[];
-		const out = injectReminders(messages, [{ text: "marker", placement: "sticky-append", order: 0, raw: true, since: 0, skipStackCarrier: true }]) as Array<{ content: Array<{ text: string }> }>;
-		expect(out[1].content.map((b) => b.text)).toEqual(["out"]);
-		expect(out[0].content.map((b) => b.text)).toEqual(["first"]);
+describe("whole-text block facts", () => {
+	it("hash the told text, so the same text is the same fact and another is not", () => {
+		expect(toldBlockFact("menu", "A")).toEqual(toldBlockFact("menu", "A"));
+		expect(toldBlockFact("menu", "A").hash).not.toBe(toldBlockFact("menu", "B").hash);
 	});
 });

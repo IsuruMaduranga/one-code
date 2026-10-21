@@ -23,6 +23,8 @@ export interface TrackedFile {
 	 */
 	oversized: boolean;
 	at: number;
+	/** Seen, but changed on disk since (a resumed read whose file moved on): stale until read again. */
+	changed?: boolean;
 }
 
 /** What a stat says about a file on disk; equal stamps mean "no need to re-read". */
@@ -73,6 +75,16 @@ export class FileTracker {
 		}
 	}
 
+	/**
+	 * Record a file the model saw in a form that is gone: it changed on disk
+	 * since, and its old content is not kept. It counts as read, but stale.
+	 */
+	observeChanged(path: string, at: number): void {
+		this.notified.delete(path);
+		this.stamps.delete(path);
+		this.files.set(path, { content: "", oversized: false, at, changed: true });
+	}
+
 	forget(path: string): void {
 		this.files.delete(path);
 		this.notified.delete(path);
@@ -113,7 +125,7 @@ export class FileTracker {
 	/** The content last seen, or undefined when untracked or tracked without content (oversized). */
 	lastSeen(path: string): string | undefined {
 		const known = this.files.get(path);
-		return known && !known.oversized ? known.content : undefined;
+		return known && !known.oversized && !known.changed ? known.content : undefined;
 	}
 
 	get tracked(): string[] {
@@ -130,6 +142,7 @@ export class FileTracker {
 		if (currentContent === undefined) return "absent";
 		const known = this.files.get(path);
 		if (!known) return "unread";
+		if (known.changed) return "stale";
 		// Oversized files are tracked without content; treat them as fresh rather
 		// than blocking edits we cannot reason about.
 		if (known.oversized) return "fresh";

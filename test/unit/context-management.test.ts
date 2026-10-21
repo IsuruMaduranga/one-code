@@ -105,6 +105,11 @@ describe("clearThinkingApplies", () => {
 	it("does not apply without either (the API rejects the edit)", () => {
 		expect(clearThinkingApplies({}, false)).toBe(false);
 	});
+	it("does not apply when the request turns thinking off, on an adaptive model too (R2-H3)", () => {
+		expect(clearThinkingApplies({ thinking: { type: "disabled" } }, false)).toBe(false);
+		expect(clearThinkingApplies({ thinking: { type: "disabled" } }, true)).toBe(false);
+		expect(clearThinkingApplies({ thinking: { type: "adaptive" } }, false)).toBe(true);
+	});
 });
 
 describe("withClearThinking", () => {

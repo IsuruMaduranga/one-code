@@ -12,6 +12,9 @@
 
 import { createEventBus, type EventBus } from "@earendil-works/pi-coding-agent";
 import { vi } from "vitest";
+import { toldOf } from "../../../extensions/lib/ledger/fold.ts";
+import type { ToldFact } from "../../../extensions/lib/ledger/records.ts";
+import { RENDER_CHANNEL, type RenderedBlock, type RenderRequest } from "../../../extensions/lib/reminders.ts";
 
 export type FakeHandler = (event: unknown, ctx: unknown) => unknown;
 
@@ -54,6 +57,8 @@ export interface FakePi {
 	sentMessages: SentMessage[];
 	sentUserMessages: Array<{ content: unknown; options?: unknown }>;
 	appendedEntries: Array<{ customType: string; data?: unknown }>;
+	/** The session branch `appendEntry` writes to, as `getBranch()` returns it: pass `sessionManager: { getBranch: () => fake.branch }`. */
+	branch: Array<{ type: string; id: string; parentId: string | null; customType?: string; data?: unknown; message?: unknown }>;
 	notified: string[];
 	flags: Map<string, boolean | string>;
 	getActiveTools: () => string[];
@@ -75,6 +80,7 @@ export function createFakePi(): FakePi {
 	const sentMessages: SentMessage[] = [];
 	const sentUserMessages: Array<{ content: unknown; options?: unknown }> = [];
 	const appendedEntries: Array<{ customType: string; data?: unknown }> = [];
+	const branch: FakePi["branch"] = [];
 	const notified: string[] = [];
 	const flags = new Map<string, boolean | string>();
 	let activeTools: string[] = [];
@@ -114,6 +120,7 @@ export function createFakePi(): FakePi {
 		},
 		appendEntry: (customType: string, data?: unknown) => {
 			appendedEntries.push({ customType, data });
+			branch.push({ type: "custom", id: `e${branch.length + 1}`, parentId: branch.at(-1)?.id ?? null, customType, data });
 		},
 		setSessionName: vi.fn(),
 		getSessionName: vi.fn(() => undefined),
@@ -150,6 +157,7 @@ export function createFakePi(): FakePi {
 		sentMessages,
 		sentUserMessages,
 		appendedEntries,
+		branch,
 		notified,
 		flags,
 		getActiveTools: () => activeTools,
@@ -238,4 +246,19 @@ export function createFakeCtx(overrides: Record<string, unknown> = {}): Record<s
 export async function flushNotices(): Promise<void> {
 	if (vi.isFakeTimers()) vi.advanceTimersByTime(0);
 	else await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/**
+ * Render one request the way system-reminder does, inside an epoch that told
+ * `facts` (folded as the ledger folds them), or one that opens an epoch.
+ * Returns the blocks capability owners added on RENDER_CHANNEL.
+ */
+export function renderRequest(
+	events: { emit(channel: string, data: unknown): void },
+	opts: { facts?: readonly ToldFact[]; epoch?: boolean; model?: RenderRequest["model"] } = {},
+): RenderedBlock[] {
+	const told = toldOf(opts.facts ?? []);
+	const request: RenderRequest = { epoch: opts.epoch ?? false, told: told.told, modes: told.modes, toldBlocks: told.blocks, model: opts.model, blocks: [] };
+	events.emit(RENDER_CHANNEL, request);
+	return request.blocks;
 }

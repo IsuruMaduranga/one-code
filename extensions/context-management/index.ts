@@ -38,9 +38,8 @@
  * for an anthropic-messages endpoint you have confirmed accepts it.
  */
 
-import { readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
-import { type ExtensionAPI, getAgentDir } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { isAnthropicOAuth } from "../lib/anthropic-auth.ts";
 import { looksLikeAnthropicRequest } from "../lib/anthropic-payload.ts";
 import { CACHE_RETENTION_ENV, mainSessionCacheRetention } from "../lib/cache-retention.ts";
 
@@ -93,9 +92,16 @@ export function anthropicBetas(oauth: boolean, compat: AnthropicModelCompat | un
 // tool-search); re-exported so existing importers keep working.
 export { looksLikeAnthropicRequest } from "../lib/anthropic-payload.ts";
 
-/** The edit is rejected unless thinking is enabled or the model is adaptive. */
+/**
+ * The edit is rejected unless thinking is on: enabled or adaptive in the
+ * request, or left to an adaptive model's default. A request that turns
+ * thinking off (`{ type: "disabled" }`, "off" effort on Opus 5 and Haiku 5.5)
+ * takes no edit, adaptive model or not (round-2 review H3).
+ */
 export function clearThinkingApplies(payload: Record<string, unknown>, forceAdaptiveThinking: boolean): boolean {
-	return payload.thinking !== undefined || forceAdaptiveThinking;
+	const type = (payload.thinking as { type?: unknown } | undefined)?.type;
+	if (type === undefined) return payload.thinking === undefined && forceAdaptiveThinking;
+	return type === "enabled" || type === "adaptive";
 }
 
 export function withClearThinking(payload: Record<string, unknown>): Record<string, unknown> {
@@ -107,29 +113,6 @@ export function withClearThinking(payload: Record<string, unknown>): Record<stri
 		...payload,
 		context_management: { edits: [...(existing?.edits ?? []), CLEAR_THINKING_EDIT] },
 	};
-}
-
-/** mtime cache: this runs on every provider request, the hottest path there is. */
-let authCache: { mtimeMs: number; oauth: boolean } | undefined;
-
-/** OAuth logins need pi's identity betas kept in the header we overwrite. */
-export function isAnthropicOAuth(): boolean {
-	// getAgentDir() honours PI_CODING_AGENT_DIR, so an isolated one-code app
-	// reads its own auth.json rather than ~/.pi's.
-	const path = join(getAgentDir(), "auth.json");
-	try {
-		const mtimeMs = statSync(path).mtimeMs;
-		const cached = authCache;
-		if (cached && cached.mtimeMs === mtimeMs) return cached.oauth;
-		const auth = JSON.parse(readFileSync(path, "utf8"));
-		const entry = auth?.anthropic;
-		const oauth = entry?.type === "oauth" || typeof entry?.refresh === "string";
-		authCache = { mtimeMs, oauth };
-		return oauth;
-	} catch {
-		authCache = undefined;
-		return false;
-	}
 }
 
 interface AnthropicishModel {

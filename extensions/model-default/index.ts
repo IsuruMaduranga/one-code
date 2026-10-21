@@ -88,6 +88,8 @@ export default function modelDefaultExtension(pi: ExtensionAPI) {
 		timer.unref?.();
 	});
 
-	// A quit inside the quiet period must not lose the choice.
+	// A quit inside the quiet period must not lose the choice, and a prompt sent
+	// inside it must carry the switch's breadcrumb, not the request after it.
 	pi.on("session_shutdown", () => flush());
+	pi.on("before_agent_start", () => flush());
 }

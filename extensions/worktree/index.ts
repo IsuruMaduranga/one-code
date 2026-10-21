@@ -34,6 +34,7 @@ import { rewriteToolInput, validateWorktreeName } from "./rewrite.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 import { findProjectRoot, HARNESS_GIT_CONFIG, HARNESS_GIT_NO_HOOKS, repositoryWorktrees } from "../lib/git.ts";
 import { projectConfigDir, projectConfigDirName } from "../lib/config-mode.ts";
+import { readStringsState, recordState } from "../lib/ledger/state.ts";
 
 const run = promisify(execFile);
 const REMINDER_KEY = "cc-worktree-session";
@@ -74,12 +75,8 @@ async function listWorktreePaths(cwd: string): Promise<string[]> {
  */
 const ISOLATION_NOTE = "Git commands aimed at the main checkout or another worktree of this repository are refused until you exit.";
 
-/**
- * Sessions already told their restored worktree is gone, as `<session id>\0<path>`.
- * Module scope on purpose: jiti keeps this module across the factory re-run
- * that `/reload` makes, and a reload restores the same stale state again.
- */
-const reportedMissingWorktrees = new Set<string>();
+/** The `one-code:state` key of the worktree paths the branch was already told are gone. */
+const MISSING_REPORTED_STATE = "worktree:missing-reported";
 
 export default function worktreeExtension(pi: ExtensionAPI) {
 	let state: WorktreeState | undefined;
@@ -96,7 +93,6 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 		if (next) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text: reminderFor(next),
-				scope: "every-turn",
 				key: REMINDER_KEY,
 				placement: "sticky-append",
 				toolCallId,
@@ -110,11 +106,12 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 		const details = restoreLatestDetails<WorktreeDetails>(ctx.sessionManager.getBranch(), WORKTREE_TOOLS, (d) => d?.worktreeState !== undefined);
 		let restored = details?.worktreeState ?? undefined;
 		if (restored && !existsSync(restored.path)) {
-			// Nothing records that the session left, so every later restore finds
-			// the same stale state; tell the model once per session.
-			const key = `${ctx.sessionManager.getSessionId()}\0${restored.path}`;
-			if (!reportedMissingWorktrees.has(key)) {
-				reportedMissingWorktrees.add(key);
+			// Nothing in the tool details records that the session left, so every
+			// later restore finds the same stale state; tell the branch once, and
+			// record that it was told (a resume, /reload or /tree reads it back).
+			const reported = readStringsState(ctx, MISSING_REPORTED_STATE);
+			if (!reported.includes(restored.path)) {
+				recordState(pi, MISSING_REPORTED_STATE, [...reported, restored.path]);
 				pi.events.emit(REMINDER_CHANNEL, {
 					text: `Left worktree session; back in ${restored.originalCwd}. The worktree at ${restored.path} no longer exists.`,
 				});

@@ -228,6 +228,7 @@ describe("permissionsExtension model_select updates classifier", () => {
 			registerMessageRenderer: () => {},
 			registerFlag: () => {},
 			getFlag: () => undefined,
+			appendEntry: () => {},
 		};
 
 		const fire = (event: string, payload: unknown, ctx: unknown) => {
@@ -274,6 +275,7 @@ describe("permissionsExtension model_select updates classifier", () => {
 				sessionManager: {
 					getSessionId: () => "sess-1",
 					getSessionDir: () => "/tmp/sess",
+					getBranch: () => [],
 				},
 				ui: {
 					setWidget: () => {},
@@ -316,7 +318,7 @@ describe("permissionsExtension model_select updates classifier", () => {
 				cwd: "/tmp/project",
 				model: makeModel("anthropic", "claude-3-7-sonnet", 3),
 				modelRegistry: { getAvailable: () => [makeModel("anthropic", "claude-3-5-haiku", 0.8)] },
-				sessionManager: { getSessionId: () => "sess-1", getSessionDir: () => "/tmp/sess" },
+				sessionManager: { getSessionId: () => "sess-1", getSessionDir: () => "/tmp/sess", getBranch: () => [] },
 				ui: { setWidget: () => {}, notify: () => {}, setStatus: () => {} },
 				hasUI: false,
 			},
@@ -346,7 +348,7 @@ describe("permissionsExtension model_select updates classifier", () => {
 			if (status.mode === "plan") {
 				// What plan-mode's refresh does inside the broadcast.
 				fake.pi.events.emit("one-code:plan-file-path", { path: "/home/u/.onecode/plans/brisk-otter-map.md" });
-				fake.pi.events.emit("one-code:system-reminder", { text: "plan block", scope: "every-turn", key: "permission-mode", placement: "sticky-append" });
+				fake.pi.events.emit("one-code:system-reminder", { text: "plan block", key: "permission-mode", placement: "sticky-append" });
 			}
 		});
 		permissionsExtension(fake.pi as any);
@@ -357,7 +359,7 @@ describe("permissionsExtension model_select updates classifier", () => {
 				cwd: "/tmp/project",
 				model: makeModel("anthropic", "claude-3-7-sonnet", 3),
 				modelRegistry: { getAvailable: () => [] },
-				sessionManager: { getSessionId: () => "sess-1", getSessionDir: () => "/tmp/sess" },
+				sessionManager: { getSessionId: () => "sess-1", getSessionDir: () => "/tmp/sess", getBranch: () => [] },
 				ui: { setWidget: () => {}, notify: () => {}, setStatus: () => {} },
 				hasUI: false,
 			},
