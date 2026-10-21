@@ -21,4 +21,19 @@ describe("a fork's parent mode", () => {
 		expect(blocks[0].text).toContain('permission mode is now "plan"');
 		expect(renderRequest(fake.events, { facts: blocks[0].facts })).toEqual([]);
 	});
+
+	it("tells the live mode on an epoch, whose history no longer shows the mode inherited at spawn", async () => {
+		let mode = "auto";
+		const fake = createFakePi();
+		parentModeExtension(() => mode)(fake.pi as never);
+		await fake.fire("session_start", {}, createFakeCtx({ sessionManager: { getBranch: () => [stateEntry(PERMISSION_MODE_STATE, "auto")] } }));
+		mode = "plan";
+		expect(renderRequest(fake.events)).toHaveLength(1);
+		// Back to the spawn mode, then a compaction: the summary may still say plan.
+		mode = "auto";
+		const blocks = renderRequest(fake.events, { epoch: true });
+		expect(blocks).toHaveLength(1);
+		expect(blocks[0].text).toContain('permission mode is now "auto"');
+		expect(renderRequest(fake.events, { facts: blocks[0].facts })).toEqual([]);
+	});
 });
