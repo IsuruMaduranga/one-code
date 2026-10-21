@@ -30,13 +30,11 @@ export interface LedgerSent {
 	plan: RequestPlan;
 }
 
-/** Why a request renders everything again: the fold's causes, plus "coverage" (the base cannot be extended) and "empty" (nothing new since it). */
-export type PlanCause = EpochCause;
-
 export interface RequestPlan {
 	/** True when the request opens an epoch: the whole conversation goes through pi and the message-1 stack is rendered. */
 	epoch: boolean;
-	cause?: PlanCause;
+	/** Why it opens one; the plan adds "coverage" (the base cannot be extended) and "empty" (nothing new since it) to the fold's causes. */
+	cause?: EpochCause;
 	/** The request this one extends inside its epoch; undefined on an epoch. */
 	base?: FoldedRequest;
 	/** The context messages this request covers, for its record. */
@@ -72,7 +70,7 @@ export function coverageOf(messages: readonly CoveredMessage[]): Coverage {
  */
 export function planRequest(fold: LedgerFold, messages: readonly CoveredMessage[]): { plan: RequestPlan; tailStart: number } {
 	const covers = coverageOf(messages);
-	const plan = (epoch: boolean, cause: PlanCause | undefined, base?: FoldedRequest): RequestPlan => ({
+	const plan = (epoch: boolean, cause: EpochCause | undefined, base?: FoldedRequest): RequestPlan => ({
 		epoch,
 		...(cause ? { cause } : {}),
 		...(base ? { base } : {}),
@@ -84,6 +82,9 @@ export function planRequest(fold: LedgerFold, messages: readonly CoveredMessage[
 	});
 	const base = fold.lastRequest;
 	if (fold.opensEpoch || !base) return { plan: plan(true, fold.cause ?? "first"), tailStart: 0 };
+	// No reply followed the base (the process died mid-stream): its list may end
+	// in system messages that expected one, so render everything again.
+	if (base.answered === false) return { plan: plan(true, "coverage"), tailStart: 0 };
 	const at = base.covers;
 	const last = at && at.count > 0 ? messages[at.count - 1] : undefined;
 	if (!at || at.count > messages.length || (at.count > 0 && (last?.role !== at.role || (last?.timestamp ?? 0) !== at.timestamp))) {

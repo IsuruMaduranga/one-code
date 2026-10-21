@@ -88,7 +88,6 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 		const env = environment(ctx.cwd);
 		pi.events.emit(REMINDER_CHANNEL, {
 			text: environmentBlock({ ...env, scratchpadDir: scratchpad, workspaceDirs }),
-			scope: "every-turn",
 			key: "environment",
 			placement: "first-prepend",
 			order: CONTEXT_ORDER.environment,
@@ -96,7 +95,6 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 		if (!sessionOutlivesTurn(ctx.mode)) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text: oneShotSessionNote(),
-				scope: "every-turn",
 				key: "one-shot",
 				placement: "first-prepend",
 				order: CONTEXT_ORDER.oneShot,
@@ -105,7 +103,6 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 		if (ctx.model) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text: modelLine(ctx.model),
-				scope: "every-turn",
 				key: "model-line",
 				placement: "first-prepend",
 				order: CONTEXT_ORDER.modelLine,

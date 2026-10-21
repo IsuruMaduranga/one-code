@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { foldBranch } from "../../extensions/lib/ledger/fold.ts";
 import { planRequest } from "../../extensions/lib/ledger/plan.ts";
 import { makeRecord, RECORD } from "../../extensions/lib/ledger/records.ts";
-import { repairRequest, validateRequest } from "../../extensions/lib/ledger/validate.ts";
-import { contentHash, isTrailer, mergeDeclarations, payloadHead, preludeLength, type RecordedRequest, spliceRequest, stripMarkers, withRecordedHead } from "../../extensions/lib/ledger/wire.ts";
+import { deliveredAfterRepair, repairRequest, validateRequest } from "../../extensions/lib/ledger/validate.ts";
+import { contentHash, declaredToolNames, isTrailer, mergeDeclarations, payloadHead, preludeLength, recordedRequest, spliceRequest, withRecordedHead } from "../../extensions/lib/ledger/wire.ts";
 
 const identity = { api: "anthropic-messages", provider: "anthropic", model: "claude-sonnet-5-5", auth: "key" };
 const mark = { type: "ephemeral" };
@@ -12,20 +12,15 @@ const assistant = (text: string) => ({ role: "assistant", content: [{ type: "tex
 const directive = { role: "system", content: [], output_config: { effort: "high" } };
 const tool = (name: string, extra: Record<string, unknown> = {}) => ({ name, input_schema: { type: "object" }, ...extra });
 
-function recorded(payload: Record<string, unknown>, api = identity.api): RecordedRequest {
-	const list = stripMarkers((payload.messages ?? payload.input) as unknown[]);
-	const head = payloadHead(payload, api);
-	return { identity: { ...identity, api }, list, head, hashes: list.map(contentHash), headHash: contentHash(head) };
-}
+const recorded = (payload: Record<string, unknown>, api = identity.api) => recordedRequest(payload, { ...identity, api });
 
 describe("planRequest", () => {
 	const messages = [{ role: "user", timestamp: 1 }, { role: "assistant", timestamp: 2 }, { role: "user", timestamp: 3 }];
-	const branchWith = (covers: { count: number; role: string; timestamp: number }) => {
-		const base = { model: identity.model, system: "s", messages: [user("one")] };
-		const list = stripMarkers(base.messages);
-		const head = payloadHead(base, identity.api);
-		const blobs = Object.fromEntries([...list.map((m) => [contentHash(m), m]), [contentHash(head), head]]);
-		return [{ type: "custom", id: "r1", parentId: null, customType: RECORD.request, data: makeRecord("request", "0.6.0", { identity, keep: 0, append: list.map(contentHash), head: contentHash(head), blobs, consumed: [], covers }) }];
+	const branchWith = (covers: { count: number; role: string; timestamp: number }, answered = true) => {
+		const { list, head, hashes, headHash } = recorded({ model: identity.model, system: "s", messages: [user("one")] });
+		const blobs = Object.fromEntries([...list.map((m, i) => [hashes[i], m]), [headHash, head]]);
+		const request = { type: "custom", id: "r1", parentId: null, customType: RECORD.request, data: makeRecord("request", "0.6.0", { identity, keep: 0, append: hashes, head: headHash, blobs, consumed: [], covers }) };
+		return answered ? [request, { type: "message", id: "a1", parentId: "r1", message: { role: "assistant" } }] : [request];
 	};
 
 	it("opens an epoch on an empty branch, covering every message", () => {
@@ -47,6 +42,13 @@ describe("planRequest", () => {
 		expect(planRequest(foldBranch(branchWith({ count: 1, role: "user", timestamp: 9 })), messages).plan.cause).toBe("coverage");
 		expect(planRequest(foldBranch(branchWith({ count: 5, role: "user", timestamp: 1 })), messages).plan.cause).toBe("coverage");
 		expect(planRequest(foldBranch(branchWith({ count: 3, role: "user", timestamp: 3 })), messages).plan.cause).toBe("empty");
+	});
+
+	it("opens an epoch over a base no reply followed (a process that died mid-stream), whose list may end in system messages", () => {
+		const { plan, tailStart } = planRequest(foldBranch(branchWith({ count: 1, role: "user", timestamp: 1 }, false)), messages);
+		expect(plan.epoch).toBe(true);
+		expect(plan.cause).toBe("coverage");
+		expect(tailStart).toBe(0);
 	});
 });
 
@@ -100,9 +102,23 @@ describe("the recorded head", () => {
 		expect(merged).toEqual([tool("read", { cache_control: mark }), tool("probe", { defer_loading: true })]);
 	});
 
+	it("keeps the recorded prompt_cache_key, so a fork extending its parent's request routes to the parent's cache", () => {
+		const head = payloadHead({ instructions: "p", prompt_cache_key: "parent-session", input: [] }, "openai-responses");
+		expect(withRecordedHead({ instructions: "p", prompt_cache_key: "fork-session" }, head, "openai-responses").prompt_cache_key).toBe("parent-session");
+		// Codex sends the session's own id as a header too: the key must agree with it.
+		const codex = payloadHead({ instructions: "p", prompt_cache_key: "parent-session", input: [] }, "openai-codex-responses");
+		expect(withRecordedHead({ instructions: "p", prompt_cache_key: "fork-session" }, codex, "openai-codex-responses").prompt_cache_key).toBe("fork-session");
+	});
+
 	it("keeps every beta an earlier request needed", () => {
 		const head = payloadHead({ system: "s", betas: ["mid-conversation-system"] }, identity.api);
 		expect(withRecordedHead({ system: "s", betas: ["other"] }, head, identity.api).betas).toEqual(["mid-conversation-system", "other"]);
+	});
+
+	it("keeps pi's Bedrock cache point after a recorded system prompt that differs from the live one", () => {
+		const head = payloadHead({ messages: [], system: [{ text: "old prompt" }, { cachePoint: { type: "default" } }] }, "bedrock-converse-stream");
+		const out = withRecordedHead({ system: [{ text: "new prompt" }, { cachePoint: { type: "default" } }] }, head, "bedrock-converse-stream");
+		expect(out.system).toEqual([{ text: "old prompt" }, { cachePoint: { type: "default" } }]);
 	});
 
 	it("merges Google's function declarations and Bedrock's tool specs by name", () => {
@@ -115,6 +131,15 @@ describe("the recorded head", () => {
 	});
 });
 
+describe("declaredToolNames", () => {
+	it("names the tools a recorded head declares eagerly, in any API's shape, never a deferred one", () => {
+		expect(declaredToolNames({ tools: [tool("read"), tool("cron_list", { defer_loading: true })] }, { eager: true })).toEqual(new Set(["read"]));
+		expect(declaredToolNames({ tools: [{ type: "function", function: { name: "cron_list" } }] }, { eager: true })).toEqual(new Set(["cron_list"]));
+		expect(declaredToolNames({ toolConfig: { tools: [{ toolSpec: { name: "a" } }, { cachePoint: { type: "default" } }] } }, { eager: true })).toEqual(new Set(["a"]));
+		expect(declaredToolNames({ config: { tools: [{ functionDeclarations: [{ name: "g" }] }] } }, { eager: true })).toEqual(new Set(["g"]));
+	});
+});
+
 describe("repairRequest", () => {
 	it("drops a reference to an undeclared tool and a stranded system message", () => {
 		const addition = (name: string) => ({ role: "system", content: [{ type: "tool_addition", tool: { type: "tool_reference", name } }] });
@@ -124,5 +149,27 @@ describe("repairRequest", () => {
 		const repaired = repairRequest(payload, identity.api, problems);
 		expect(validateRequest(repaired, identity.api)).toEqual([]);
 		expect(repaired.messages).toEqual([user("one"), user("two")]);
+	});
+
+	it("records as delivered only what the repaired request still carries", () => {
+		const addition = (name: string) => ({ role: "system", content: [{ type: "tool_addition", tool: { type: "tool_reference", name } }] });
+		const payload = { tools: [tool("read"), tool("probe")], messages: [user("one"), addition("probe"), user("note: <system-reminder>a file changed</system-reminder>")] };
+		const repaired = repairRequest(payload, identity.api, validateRequest(payload, identity.api));
+		const delivered = deliveredAfterRepair(
+			repaired,
+			identity.api,
+			{ consumed: ["kept", "dropped"], facts: [{ kind: "tools", names: ["probe"], callable: true }, { kind: "tools", names: ["listed"] }] },
+			[{ id: "kept", text: "a file changed" }, { id: "dropped", text: "only on the stranded message" }],
+		);
+		expect(delivered).toEqual({ consumed: ["kept"], facts: [{ kind: "tools", names: ["listed"] }] });
+	});
+
+	it("does not count a dropped reminder as sent because the same text sits earlier in the recorded history", () => {
+		const note = (text: string) => ({ role: "system", content: [{ type: "text", text }] });
+		const earlier = user("<system-reminder>mode is plan</system-reminder>");
+		const payload = { tools: [tool("read")], messages: [earlier, assistant("1"), user("two"), note("mode is plan"), user("three")] };
+		const repaired = repairRequest(payload, identity.api, validateRequest(payload, identity.api));
+		const delivered = deliveredAfterRepair(repaired, identity.api, { consumed: ["p1"], facts: [] }, [{ id: "p1", text: "mode is plan" }], new Set([contentHash(earlier), contentHash(assistant("1"))]));
+		expect(delivered.consumed).toEqual([]);
 	});
 });

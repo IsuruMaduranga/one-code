@@ -53,7 +53,7 @@ import { scanSkills } from "../lib/skill-scan.ts";
 import { type GuideInput, guideAgentDefinition, settingsSetup } from "./guide-agent.ts";
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpServerStatus, type McpStatusEvent, type McpStatusKind } from "../lib/mcp-status.ts";
 
-import { DEFER_CHANNEL } from "../lib/deferred.ts";
+import { DEFER_CHANNEL, queryDeferred } from "../lib/deferred.ts";
 import { requestSystemPrompt } from "../lib/prompt-options.ts";
 import { captureMatches, LAST_REQUEST_CHANNEL, type RequestCapture } from "../lib/request-replay.ts";
 import { BTW_FORK_CHANNEL, btwForkDescription, btwForkName, btwForkRecord, btwForkTaskId, type BtwForkRequest, type BtwForkResult } from "../lib/btw-fork.ts";
@@ -66,7 +66,7 @@ import { projectConfigDirName } from "../lib/config-mode.ts";
 import { pendingClaimReminder } from "./pending-claim.ts";
 import { watchPermissionBridge } from "../permissions/subagent-gate.ts";
 import { watchHookBridge } from "../hooks/subagent-bridge.ts";
-import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, type ReminderPayload, toldBlockFact, toldBlockIs } from "../lib/reminders.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, type ReminderPayload, toldBlockFact } from "../lib/reminders.ts";
 import { type BackgroundTask, generateTaskId, TASK_REGISTER_CHANNEL } from "../background/registry.ts";
 import { type ChildAction } from "../auto-mode/actions.ts";
 import { type ChildOutcome, forkTaskMessage, OUTPUT_CAP, type RpcChildHandle } from "./outcome.ts";
@@ -112,7 +112,7 @@ import { createMarkdownProse } from "./prose.ts";
 import { asScrollableViewport, ViewportMirror } from "./viewport-mirror.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 import { extendingCompletions } from "../lib/argument-hints.ts";
-import { makeRecord, RECORD, stateOnBranch, type EntryLike } from "../lib/ledger/records.ts";
+import { readStringsState, recordState } from "../lib/ledger/state.ts";
 import { panelUi } from "../lib/panel-focus.ts";
 import { dockRowsReporter, trackDockRows } from "../lib/dock-rows.ts";
 
@@ -421,7 +421,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		unusableModels.add(model);
 		// A refusal is a durable fact of the account, not UI prose: a resumed
 		// session must not pick the same model and announce it again.
-		pi.appendEntry(RECORD.state, makeRecord("state", extensionVersion(), { key: REFUSED_MODELS_STATE, value: [...unusableModels] }));
+		recordState(pi, REFUSED_MODELS_STATE, [...unusableModels]);
 		return true;
 	};
 	pi.events.on(MODEL_UNUSABLE_CHANNEL, (data) => {
@@ -467,6 +467,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				if (lastCtx) emitModelStatus(lastCtx, lastCtx.model, model);
 			},
 			(path, agent) => pi.events.emit(CHILD_WROTE_CHANNEL, { path, ...(agent ? { agent } : {}) } satisfies ChildWrote),
+			() => queryDeferred(pi.events),
 		).catch((error: unknown) => {
 			runtimePromise = undefined;
 			throw error;
@@ -639,11 +640,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	/** The live text of each block; null when the block is absent. */
 	const liveBlocks: Record<SubagentBlockKey, string | null> = { "subagent-models": null, "subagent-agents": null, "subagent-delegation": null };
 	/** A model the account refused since the menu was last told: its narrow correction stands in for the whole menu. */
-	let refusal: { refused: string; replacement: Model<Api> | undefined } | undefined;
+	let refusal: { refused: string[]; replacement: Model<Api> | undefined } | undefined;
 	const publishBlock = (key: SubagentBlockKey, text: string | null) => {
 		liveBlocks[key] = text;
 		if (text === null) pi.events.emit(REMINDER_CHANNEL, { key, remove: true });
-		else pi.events.emit(REMINDER_CHANNEL, { text, scope: "every-turn", key, placement: "first-prepend", order: BLOCK_ORDER[key], facts: [toldBlockFact(key, text)] });
+		else pi.events.emit(REMINDER_CHANNEL, { text, key, placement: "first-prepend", order: BLOCK_ORDER[key], facts: [toldBlockFact(key, text)] });
 	};
 	pi.events.on(RENDER_CHANNEL, (data) => {
 		const request = data as RenderRequest;
@@ -653,11 +654,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		}
 		for (const key of Object.keys(liveBlocks) as SubagentBlockKey[]) {
 			const text = liveBlocks[key];
+			// An absent block is told as its empty text; one never told needs no withdrawal.
 			const told = request.toldBlocks.get(key);
-			if (text === null ? told === undefined || told === toldBlockFact(key, "").hash : toldBlockIs(request, key, text)) continue;
-			const facts = [toldBlockFact(key, text ?? "")];
+			const fact = toldBlockFact(key, text ?? "");
+			if (told === fact.hash || (text === null && told === undefined)) continue;
+			const facts = [fact];
 			if (text === null) request.blocks.push({ text: "The subagent delegation guidance previously shown for this conversation is no longer active.", facts });
-			else if (key === "subagent-models" && refusal) request.blocks.push({ text: refusedModelNote(refusal.refused, refusal.replacement), facts });
+			else if (key === "subagent-models" && refusal) request.blocks.push({ text: refusal.refused.map((model) => refusedModelNote(model, refusal?.replacement)).join("\n"), facts });
 			else request.blocks.push({ text, facts });
 		}
 		refusal = undefined;
@@ -688,7 +691,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				notifyModelOnce(ctx, `${warning.text} ${warning.fix}`);
 			}
 		}
-		if (refused !== undefined) refusal = { refused, replacement: resolution.model };
+		// Every refusal since the menu was last told, each named; the latest default stands.
+		if (refused !== undefined) refusal = { refused: [...(refusal?.refused ?? []).filter((model) => model !== refused), refused], replacement: resolution.model };
 		publishBlock("subagent-models", text);
 		pi.events.emit(SUBAGENT_STATUS_CHANNEL, subagentStatusModel(configured, resolution));
 	};
@@ -746,8 +750,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		// The account's refusals follow the branch: restore the selection floor
 		// before building the menu, or this process picks the refused model again.
-		const refusedOnBranch = stateOnBranch(ctx.sessionManager.getBranch() as EntryLike[], REFUSED_MODELS_STATE);
-		if (Array.isArray(refusedOnBranch)) for (const model of refusedOnBranch) if (typeof model === "string") unusableModels.add(model);
+		for (const model of readStringsState(ctx, REFUSED_MODELS_STATE)) unusableModels.add(model);
 		lastCtx = ctx;
 		// A replaced session (/clear, /new, /resume) never reaches this instance
 		// with the old one's agents: pi emits `session_shutdown` (reason "new" /
@@ -780,10 +783,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		emitAgentCatalog(ctx);
 		emitDelegationSteer();
 	});
-	// The selected branch's runs only: the abandoned branch's are not
-	// addressable from it (SendMessage, list_agents), as on a resume.
+	// The selected branch's runs: the abandoned branch's finished ones are not
+	// addressable from it (SendMessage, list_agents), as on a resume. A run still
+	// going, a resident between turns and a nested run (recorded only in memory)
+	// stay reachable, and so do names held for spawns in flight.
 	pi.on("session_tree", (_event, ctx) => {
-		registry.clear();
+		registry.retain((record) => liveRuns.get(record.taskId)?.status === "running" || residents.has(record.taskId) || parentTaskOf.has(record.taskId));
 		reconstructRuns(ctx);
 	});
 	pi.on("session_shutdown", async () => {

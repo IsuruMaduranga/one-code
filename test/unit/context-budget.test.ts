@@ -82,14 +82,12 @@ describe("context-budget wiring", () => {
 		expect(reminders).toEqual([
 			{
 				text: "<total_tokens>15000000 tokens left</total_tokens>",
-				scope: "every-turn",
 				key: "total-tokens-first",
 				placement: "first-prepend",
 				order: 46,
 			},
 			{
 				text: "<total_tokens>15000000 tokens left</total_tokens>",
-				scope: "every-turn",
 				key: "total-tokens",
 				placement: "sticky-append",
 				raw: true,

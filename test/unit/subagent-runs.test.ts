@@ -33,6 +33,17 @@ describe("RunRegistry", () => {
 		expect(registry.resolve("missing")).toBeUndefined();
 	});
 
+	it("keeps only the records a /tree switch retains, and every name held for a spawn in flight", () => {
+		const registry = new RunRegistry();
+		registry.add(record("explore-1", "b1111111"));
+		registry.add(record("explore-2", "b2222222"));
+		registry.reserve("explore-3");
+		registry.retain((run) => run.taskId === "b2222222");
+		expect(registry.resolve("explore-1")).toBeUndefined();
+		expect(registry.resolve("explore-2")?.taskId).toBe("b2222222");
+		expect(registry.names().sort()).toEqual(["explore-2", "explore-3"]);
+	});
+
 	it("refuses an empty or too-short prefix instead of matching whatever exists", () => {
 		const registry = new RunRegistry();
 		registry.add(record("explore-1", "b1111111"));

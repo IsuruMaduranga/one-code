@@ -9,9 +9,9 @@ import {
 	type RenderInput,
 	renderReminders,
 	type StackEntry,
-	type StickyEntry,
+	type StickyToPlace,
+	stickyFact,
 	toldBlockFact,
-	toldBlockIs,
 	wrapReminder,
 } from "../../extensions/lib/reminders.ts";
 
@@ -25,7 +25,7 @@ const compaction = (summary = "what happened", timestamp = 0) => ({ role: "compa
 const blockTexts = (m: any) => (typeof m.content === "string" ? [m.content] : m.content.map((b: any) => b.text));
 
 const stack = (text: string, order = 0, extra: Partial<StackEntry> = {}): StackEntry => ({ key: text, text, order, ...extra });
-const sticky = (text: string, since = 0, extra: Partial<StickyEntry> = {}): StickyEntry => ({ key: text, text, since, delivered: false, ...extra });
+const sticky = (text: string, since = 0, extra: Partial<StickyToPlace> = {}): StickyToPlace => ({ key: text, text, since, delivered: false, ...extra });
 const shot = (text: string, extra: Partial<OneShot> = {}): OneShot => ({ text, placement: "last-append", ...extra });
 const render = (messages: any[], input: Partial<RenderInput>) =>
 	renderReminders(messages, { epoch: false, layout: false, stack: [], sticky: [], oneShots: [], ...input });
@@ -33,9 +33,9 @@ const render = (messages: any[], input: Partial<RenderInput>) =>
 describe("LiveReminders", () => {
 	it("keeps the first-prepend stack as live state, in Claude Code's order, replaced by key", () => {
 		const live = new LiveReminders();
-		expect(live.apply({ text: "claudeMd", placement: "first-prepend", order: 50, key: "md", scope: "every-turn" })).toBe("live");
-		live.apply({ text: "env", placement: "first-prepend", order: 1, key: "env", scope: "every-turn" });
-		live.apply({ text: "env 2", placement: "first-prepend", order: 1, key: "env", scope: "every-turn" });
+		expect(live.apply({ text: "claudeMd", placement: "first-prepend", order: 50, key: "md" })).toBe("live");
+		live.apply({ text: "env", placement: "first-prepend", order: 1, key: "env" });
+		live.apply({ text: "env 2", placement: "first-prepend", order: 1, key: "env" });
 		expect(live.stackEntries().map((entry) => entry.text)).toEqual(["env 2", "claudeMd"]);
 		live.apply({ key: "md", remove: true });
 		expect(live.stackEntries().map((entry) => entry.text)).toEqual(["env 2"]);
@@ -50,16 +50,18 @@ describe("LiveReminders", () => {
 		expect(live.stickyEntries()).toEqual([]);
 	});
 
-	it("keeps a sticky state's start and delivery while its text is unchanged, and starts a new one when it changes", () => {
+	it("keeps a sticky state's start, and so its told delivery, while its text is unchanged, and starts a new one when it changes", () => {
 		let now = 10;
 		const live = new LiveReminders(() => now);
-		live.apply({ text: "plan", key: "mode", placement: "sticky-append", scope: "every-turn" });
-		live.markDelivered(["mode"]);
+		live.apply({ text: "plan", key: "mode", placement: "sticky-append" });
+		const delivered = stickyFact(live.stickyEntries()[0]);
 		now = 20;
-		live.apply({ text: "plan", key: "mode", placement: "sticky-append", scope: "every-turn" });
-		expect(live.stickyEntries()).toEqual([{ key: "mode", text: "plan", since: 10, delivered: true }]);
-		live.apply({ text: "auto", key: "mode", placement: "sticky-append", scope: "every-turn" });
-		expect(live.stickyEntries()).toEqual([{ key: "mode", text: "auto", since: 20, delivered: false }]);
+		live.apply({ text: "plan", key: "mode", placement: "sticky-append" });
+		expect(live.stickyEntries()).toEqual([{ key: "mode", text: "plan", since: 10 }]);
+		expect(stickyFact(live.stickyEntries()[0])).toEqual(delivered);
+		live.apply({ text: "auto", key: "mode", placement: "sticky-append" });
+		expect(live.stickyEntries()).toEqual([{ key: "mode", text: "auto", since: 20 }]);
+		expect(stickyFact(live.stickyEntries()[0]).hash).not.toBe(delivered.hash);
 		live.apply({ key: "mode", remove: true });
 		expect(live.stickyEntries()).toEqual([]);
 	});
@@ -149,6 +151,13 @@ describe("renderReminders: sticky states", () => {
 		expect(blockTexts(result.messages[1])).toEqual(["ran", wrapReminder("auto")]);
 	});
 
+	it("never pins a state on from the start (since 0) to a tool result: the constant budget line rides user messages only", () => {
+		const budget = sticky("<total_tokens>200000 tokens left</total_tokens>", 0, { raw: true, skipStackCarrier: true });
+		const result = render([assistant(1), toolResult("ran", 2)], { sticky: [budget] });
+		expect(result.stickyPlaced).toEqual([]);
+		expect(JSON.stringify(result.messages)).not.toContain("200000 tokens left");
+	});
+
 	it("skipStackCarrier keeps it off the message that carries the stack, on an epoch only", () => {
 		const marker = sticky("<total_tokens>1 tokens left</total_tokens>", 0, { raw: true, skipStackCarrier: true });
 		const messages = [user("one", 1), assistant(2), user("two", 3)];
@@ -203,10 +212,8 @@ describe("renderReminders: one-shots", () => {
 });
 
 describe("whole-text block facts", () => {
-	it("tell whether the epoch's last told text for a key is the live one", () => {
-		const fact = toldBlockFact("menu", "A");
-		const request = { toldBlocks: new Map([[fact.key, fact.hash]]) };
-		expect(toldBlockIs(request, "menu", "A")).toBe(true);
-		expect(toldBlockIs(request, "menu", "B")).toBe(false);
+	it("hash the told text, so the same text is the same fact and another is not", () => {
+		expect(toldBlockFact("menu", "A")).toEqual(toldBlockFact("menu", "A"));
+		expect(toldBlockFact("menu", "A").hash).not.toBe(toldBlockFact("menu", "B").hash);
 	});
 });

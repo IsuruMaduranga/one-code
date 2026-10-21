@@ -15,7 +15,7 @@ import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
 describe("workflow wiring: the ultracode keyword", () => {
 	let fake: FakePi;
-	const reminders: Array<{ text?: string; scope?: string }> = [];
+	const reminders: Array<{ text?: string; placement?: string }> = [];
 
 	beforeEach(() => {
 		fake = createFakePi();
@@ -27,7 +27,7 @@ describe("workflow wiring: the ultracode keyword", () => {
 	it("arms the turn with a next-turn one-shot when the keyword is in the prompt", async () => {
 		await fake.fire("input", { text: "ultracode: audit every extension", source: "interactive" });
 		expect(reminders).toHaveLength(1);
-		expect(reminders[0].scope).toBe("next-turn");
+		expect(reminders[0].placement).toBeUndefined();
 		expect(reminders[0].text).toContain('keyword "ultracode"');
 
 		reminders.length = 0;

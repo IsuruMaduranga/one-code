@@ -61,8 +61,12 @@ const STEP_TIMEOUT_MS = Number(process.env.PROBE_STEP_TIMEOUT_MS ?? 180_000);
 
 const splitModel = (spec) => {
 	const slash = spec.indexOf("/");
+	if (slash <= 0 || slash === spec.length - 1) throw new Error(`expected provider/model-id, got "${spec}"`);
 	return { provider: spec.slice(0, slash), modelId: spec.slice(slash + 1) };
 };
+// Fail at the start, not at the hop steps.
+splitModel(MODEL);
+splitModel(HOP);
 const wireCount = () => (existsSync(WIRE) ? readFileSync(WIRE, "utf8").split("\n").filter((l) => l.trim()).length : 0);
 
 /** One pi process in RPC mode, with request/response matching and an event log. */
@@ -109,7 +113,16 @@ class Pi {
 				for (const listener of this.listeners) listener(event);
 			}
 		});
-		this.exited = new Promise((done) => this.child.on("exit", done));
+		// A dead pi answers nothing: fail every request waiting on it at once, and
+		// let a later write to its closed stdin fail quietly instead of crashing the probe.
+		this.child.stdin.on("error", () => {});
+		this.exited = new Promise((done) =>
+			this.child.on("exit", (code) => {
+				for (const waiter of this.waiters.values()) waiter({ type: "response", success: false, error: `pi exited with code ${code}` });
+				this.waiters.clear();
+				done(code);
+			}),
+		);
 	}
 
 	/** A dialog would stall the probe: confirm and select take the first choice, input is skipped. */

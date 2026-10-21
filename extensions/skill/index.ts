@@ -142,6 +142,11 @@ export default function skillExtension(pi: ExtensionAPI) {
 		sessionUsage = undefined;
 		sessionModel = ctx.model;
 	});
+	/** The index as the current run's first request read it; a new run, or pi's skills for it, reads it again. */
+	let runIndex: IndexedSkill[] | undefined;
+	pi.on("agent_start", () => {
+		runIndex = undefined;
+	});
 	// Inside an epoch the listing on message 1 is the record: a skill that became
 	// listable since rides the request's tail with only its own line, decided
 	// when the request goes out from what the epoch has told.
@@ -149,7 +154,8 @@ export default function skillExtension(pi: ExtensionAPI) {
 		const request = data as RenderRequest;
 		if (request.epoch) return;
 		const told = request.told.get("skills") ?? new Set<string>();
-		const all = index();
+		// Read once per run: a run makes many requests, and the index reads every skill file.
+		const all = (runIndex ??= index());
 		const added = new Set(listableNow(all).filter((name) => !told.has(name)));
 		if (added.size === 0) return;
 		const text = listingText(all.filter((skill) => added.has(skill.name)));
@@ -197,12 +203,11 @@ export default function skillExtension(pi: ExtensionAPI) {
 		const all = index();
 		const text = listingText(all);
 		if (!text) {
-			pi.events.emit(REMINDER_CHANNEL, { scope: "every-turn", key: "skills", remove: true });
+			pi.events.emit(REMINDER_CHANNEL, { key: "skills", remove: true });
 			return;
 		}
 		pi.events.emit(REMINDER_CHANNEL, {
 			text,
-			scope: "every-turn",
 			key: "skills",
 			placement: "first-prepend",
 			order: CONTEXT_ORDER.skills,
@@ -213,6 +218,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 		prompted = true;
 		sessionModel = ctx.model ?? sessionModel;
 		adoptPiSkills(event.systemPromptOptions.skills ?? [], ctx.cwd);
+		runIndex = undefined;
 		// The listing above is the one skills instruction: drop pi's own section
 		// from the prompt (a child agent's own prompt carries it; the main
 		// session's prompt is rebuilt without it).

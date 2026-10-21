@@ -41,6 +41,7 @@ import { withoutUnusable } from "../lib/model-unusable.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "../subagents/worktree.ts";
 import type { AgentCallOptions, AgentCallResult, AgentEffort, AgentRunUpdate, KeptWorktree } from "./types.ts";
 import { WorkflowScriptError } from "./types.ts";
+import { type DeferRequest, deferLikeParentExtension, injectedByParent } from "../lib/deferred.ts";
 
 const MAX_SCHEMA_RETRIES = 2;
 const OUTPUT_CAP = 50_000;
@@ -78,6 +79,8 @@ export interface AgentRunnerOptions {
 	 * as custom tools over the parent's connections, as the subagent runner does.
 	 */
 	getMcpTools?: () => ToolDefinition[] | Promise<ToolDefinition[]>;
+	/** The tools the parent defers (lib/deferred.ts DEFERRED_QUERY_CHANNEL): the agent defers them too, so its MCP tools are listed, not declared. */
+	getParentDeferred?: () => DeferRequest[];
 	/** Where an answer past OUTPUT_CAP is saved (`<dir>/tool-results/`): the run's directory. */
 	resultsDir?: string;
 }
@@ -299,7 +302,7 @@ export class AgentRunner {
 				extraExtensionPaths: CHILD_EXTENSION_PATHS,
 				// claude-context (a child extension) injects the CLAUDE.md instructions itself.
 				noContextFiles: true,
-				...(handback ? { extraFactories: [subagentHandbackExtension(handback)] } : {}),
+				extraFactories: [deferLikeParentExtension(this.options.getParentDeferred?.() ?? [], injectedByParent([])), ...(handback ? [subagentHandbackExtension(handback)] : [])],
 				getPermissionBridge: this.options.getPermissionBridge,
 				getHookBridge: this.options.getHookBridge,
 			},

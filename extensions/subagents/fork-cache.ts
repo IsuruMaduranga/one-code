@@ -30,6 +30,9 @@ import { type AffinityModel, affinityHeaders, captureMatches, forkOutputRoom, fo
 
 type ModelRef = { api?: string; provider?: string; id?: string };
 
+/** The APIs whose fork splice (`forkRequestPayload`) handles the body's shape. */
+const SPLICED_FORK_APIS: ReadonlySet<string> = new Set(["anthropic-messages", "openai-completions", "openai-responses", "azure-openai-responses", "openai-codex-responses"]);
+
 export function forkCacheExtension(capture: RequestCapture) {
 	return (pi: ExtensionAPI) => {
 		// The fork advertises the parent's tools, where SendMessage is deferred
@@ -46,7 +49,10 @@ export function forkCacheExtension(capture: RequestCapture) {
 		pi.on("context_with_system", (event, ctx) => {
 			shaped = false;
 			const covers = capture.covers;
-			if (!covers || !captureMatches(capture, ctx.model as ModelRef | undefined)) return undefined;
+			// Bedrock and Google nest their tools and need joined turns and the
+			// fork's own abort signal, which the fork splice does not handle: their
+			// forks go out whole instead.
+			if (!covers || !SPLICED_FORK_APIS.has(capture.api) || !captureMatches(capture, ctx.model as ModelRef | undefined)) return undefined;
 			const tail = uncoveredMessages(event.messages as { role: string; timestamp?: number }[], covers);
 			if (!tail) return undefined;
 			// Too little output room left after the prefix: send the fork whole

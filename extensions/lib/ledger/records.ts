@@ -48,6 +48,8 @@ export interface RequestIdentity {
 	auth: string;
 }
 
+export const sameIdentity = (a: RequestIdentity, b: RequestIdentity): boolean => a.api === b.api && a.provider === b.provider && a.model === b.model && a.auth === b.auth;
+
 /**
  * Which of the session's context messages a request covers: the first `count`
  * of pi's `context` messages, the last of them identified by role and
@@ -77,11 +79,13 @@ export interface RequestRecordData extends RecordBase {
 }
 
 export type ToldFact =
-	/** `callable`: announced by a `tool_addition` the model may call at once, not only listed for tool_search. */
-	| { kind: "tools"; names: string[]; callable?: boolean }
+	/**
+	 * `callable`: announced by a `tool_addition` the model may call at once, not
+	 * only listed for tool_search. `removed`: announced gone, so the epoch no
+	 * longer holds them told.
+	 */
+	| { kind: "tools"; names: string[]; callable?: boolean; removed?: boolean }
 	| { kind: "skills"; names: string[] }
-	| { kind: "agents"; names: string[] }
-	| { kind: "mcp"; server: string; hash: string }
 	| { kind: "mode"; key: string; on: boolean }
 	/** A whole-text block (a menu, a catalog): the content hash of the text last told under `key`. */
 	| { kind: "block"; key: string; hash: string };
@@ -100,7 +104,6 @@ export interface StateRecordData extends RecordBase {
 
 export interface PendingRecordData extends RecordBase {
 	id: string;
-	source: string;
 	/** A later pending item with the same key replaces this one while both are undelivered. */
 	key?: string;
 	text: string;
@@ -110,14 +113,14 @@ export interface PendingRecordData extends RecordBase {
 	raw?: boolean;
 	/** Rides this call's result when the request carries it. */
 	toolCallId?: string;
-	/** The capability block it is about: an epoch's rebuild of that block supersedes it. */
-	group?: string;
 	/** `user-prepend` only: placed once per request, however many are pending (the shared caveat). */
 	once?: boolean;
 }
 
+const EPOCH_CAUSES = ["first", "compaction", "model", "auth", "fold", "coverage", "empty"] as const;
+
 /** Why an epoch opened: no request yet, a compaction, a model or auth switch, a history fold, a base that cannot be extended, or nothing new since it. */
-export type EpochCause = "first" | "compaction" | "model" | "auth" | "fold" | "coverage" | "empty";
+export type EpochCause = (typeof EPOCH_CAUSES)[number];
 
 export interface EpochRecordData extends RecordBase {
 	cause: EpochCause;
@@ -150,25 +153,20 @@ export type ParsedRecord = { [K in RecordKind]: { kind: K; entryId: string; data
 
 const KIND_BY_TYPE = new Map<string, RecordKind>(Object.entries(RECORD).map(([kind, type]) => [type, kind as RecordKind]));
 
-const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+export const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const isString = (value: unknown): value is string => typeof value === "string";
 const isStrings = (value: unknown): value is string[] => Array.isArray(value) && value.every(isString);
 
 const isCoverage = (value: unknown): boolean =>
 	isObject(value) && Number.isInteger(value.count) && (value.count as number) >= 0 && isString(value.role) && typeof value.timestamp === "number";
 
-const EPOCH_CAUSES: ReadonlySet<string> = new Set(["first", "compaction", "model", "auth", "fold", "coverage", "empty"]);
-
 function isToldFact(fact: unknown): boolean {
 	if (!isObject(fact)) return false;
 	switch (fact.kind) {
 		case "tools":
-			return isStrings(fact.names) && (fact.callable === undefined || typeof fact.callable === "boolean");
+			return isStrings(fact.names) && (fact.callable === undefined || typeof fact.callable === "boolean") && (fact.removed === undefined || typeof fact.removed === "boolean");
 		case "skills":
-		case "agents":
 			return isStrings(fact.names);
-		case "mcp":
-			return isString(fact.server) && isString(fact.hash);
 		case "mode":
 			return isString(fact.key) && typeof fact.on === "boolean";
 		case "block":
@@ -197,15 +195,13 @@ const SHAPE: { [K in RecordKind]: (data: Record<string, unknown>) => boolean } =
 	state: (d) => isString(d.key) && "value" in d,
 	pending: (d) =>
 		isString(d.id) &&
-		isString(d.source) &&
 		isString(d.text) &&
 		(d.key === undefined || isString(d.key)) &&
 		(d.placement === undefined || d.placement === "last-append" || d.placement === "user-prepend") &&
 		(d.raw === undefined || typeof d.raw === "boolean") &&
 		(d.toolCallId === undefined || isString(d.toolCallId)) &&
-		(d.group === undefined || isString(d.group)) &&
 		(d.once === undefined || typeof d.once === "boolean"),
-	epoch: (d) => isString(d.cause) && EPOCH_CAUSES.has(d.cause),
+	epoch: (d) => (EPOCH_CAUSES as readonly unknown[]).includes(d.cause),
 	branch: (d) => isString(d.fromLeafId),
 };
 

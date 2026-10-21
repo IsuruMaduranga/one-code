@@ -43,7 +43,6 @@ describe("plan-mode wiring", () => {
 		const standing = reminders.find((r) => r.key === "permission-mode" && !r.remove);
 		expect(standing).toBeDefined();
 		expect(standing?.placement).toBe("sticky-append");
-		expect(standing?.scope).toBe("every-turn");
 		expect(standing?.text).toContain(planFiles[0].path);
 
 		// Staying in plan mode (a repeated status broadcast) does not re-emit; leaving does nothing here.

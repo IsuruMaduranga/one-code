@@ -57,7 +57,8 @@ import { looksLikeAnthropicRequest } from "../lib/anthropic-payload.ts";
 import { forcedReasoningLevel } from "../lib/model-policy.ts";
 import { captureRequest, extendPayload, LAST_REQUEST_CHANNEL, LastExchange, lastCovered, type RequestCapture, replayOutputCap } from "../lib/request-replay.ts";
 import { withoutSystemMessages } from "../lib/side-call.ts";
-import { LEDGER_PLAN_CHANNEL, LEDGER_SENT_CHANNEL, type LedgerSent, type RequestPlan } from "../lib/ledger/plan.ts";
+import { followCoveredMessages } from "../lib/covered-messages.ts";
+import { LEDGER_SENT_CHANNEL, type LedgerSent } from "../lib/ledger/plan.ts";
 import { claudeCodeCut, type CutEntry, doomedMessages } from "./cut.ts";
 import { fitToBudget, replayFits, withoutUsage } from "./fit.ts";
 import { withoutThinking } from "./kept-thinking.ts";
@@ -111,16 +112,8 @@ export default function compactionExtension(pi: ExtensionAPI) {
 	 * (findings §27).
 	 */
 	let captured: { messages: AgentMessage[]; systemPrompt: string; model: string | undefined } | undefined;
-	// The ledger (extensions/ledger) cuts a request inside an epoch to its tail
-	// before this hook runs; the whole conversation the request covers comes
-	// with its plan.
-	let planned: readonly AgentMessage[] | undefined;
-	pi.events.on(LEDGER_PLAN_CHANNEL, (data) => {
-		planned = (data as RequestPlan).messages as readonly AgentMessage[];
-	});
-	pi.on("context", (event, ctx) => {
-		captured = { messages: [...(planned ?? event.messages)], systemPrompt: ctx.getSystemPrompt(), model: modelKey(ctx.model) };
-		planned = undefined;
+	followCoveredMessages(pi, (messages, ctx) => {
+		captured = { messages, systemPrompt: ctx.getSystemPrompt(), model: modelKey(ctx.model) };
 	});
 
 	/**

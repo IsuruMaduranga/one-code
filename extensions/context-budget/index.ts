@@ -43,14 +43,12 @@ export default function contextBudgetExtension(pi: ExtensionAPI) {
 		if (!enabled()) return;
 		pi.events.emit(REMINDER_CHANNEL, {
 			text: totalTokensBlock(budget.budget),
-			scope: "every-turn",
 			key: FIRST_PROMPT_KEY,
 			placement: "first-prepend",
 			order: CONTEXT_ORDER.totalTokens,
 		} satisfies ReminderPayload);
 		pi.events.emit(REMINDER_CHANNEL, {
 			text: totalTokensBlock(budget.budget),
-			scope: "every-turn",
 			key: USER_MESSAGE_KEY,
 			placement: "sticky-append",
 			raw: true,

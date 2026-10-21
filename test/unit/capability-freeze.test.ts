@@ -16,26 +16,12 @@ import { setSkillState } from "../../extensions/lib/skill-overrides.ts";
 import { listableSkillNames, SKILL_LISTING_HEADER } from "../../extensions/skill/announce.ts";
 import skillExtension from "../../extensions/skill/index.ts";
 import subagentsExtension from "../../extensions/subagents/index.ts";
-import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { createFakeCtx, createFakePi, type FakePi, renderRequest } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import type { Reminder } from "./helpers/tool-search-fake-pi.ts";
 
 /** Render one request inside an epoch that told `facts`; the blocks owners add. */
-function render(fake: FakePi, facts: readonly ToldFact[], model?: RenderRequest["model"]) {
-	const told = new Map<string, Set<string>>();
-	const toldBlocks = new Map<string, string>();
-	for (const fact of facts) {
-		if (fact.kind === "block") toldBlocks.set(fact.key, fact.hash);
-		else if (fact.kind === "tools" || fact.kind === "skills" || fact.kind === "agents") {
-			const set = told.get(fact.kind) ?? new Set<string>();
-			for (const name of fact.names) set.add(name);
-			told.set(fact.kind, set);
-		}
-	}
-	const request: RenderRequest = { epoch: false, told, modes: new Map(), toldBlocks, model, blocks: [] };
-	fake.events.emit(RENDER_CHANNEL, request);
-	return request.blocks;
-}
+const render = (fake: FakePi, facts: readonly ToldFact[], model?: RenderRequest["model"]) => renderRequest(fake.events, { facts, model });
 /** The facts the live first-prepend blocks under `key` tell, as an epoch's message 1 would. */
 const liveFacts = (reminders: Array<Reminder & { facts?: ToldFact[] }>, key: string) => reminders.filter((r) => r.key === key && r.facts).at(-1)?.facts ?? [];
 
@@ -121,9 +107,7 @@ describe("skills listing", () => {
 	it("adds nothing to a request that opens an epoch", async () => {
 		const { fake, turn } = await mount();
 		await turn([alpha, beta]);
-		const request: RenderRequest = { epoch: true, told: new Map(), modes: new Map(), toldBlocks: new Map(), model: undefined, blocks: [] };
-		fake.events.emit(RENDER_CHANNEL, request);
-		expect(request.blocks).toEqual([]);
+		expect(renderRequest(fake.events, { epoch: true })).toEqual([]);
 	});
 });
 

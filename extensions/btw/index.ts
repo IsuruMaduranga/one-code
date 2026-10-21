@@ -28,7 +28,7 @@
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../lib/ledger/plan.ts";
+import { followCoveredMessages } from "../lib/covered-messages.ts";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import {
 	convertToLlm,
@@ -89,17 +89,10 @@ export default function btwExtension(pi: ExtensionAPI) {
 		return linesComponent((width) => [...row.render(width), truncateLine(`  ⎿  ${paint("dim", btwForkedLine(data.name, data.taskId))}`, width)]);
 	});
 
-	// The whole conversation the session's last request covered, as pi built
-	// it: inside an epoch the ledger cuts a request to its tail before this
-	// hook, so the full list comes with its plan (extensions/ledger).
+	// The whole conversation the session's last request covered, as pi built it.
 	let capturedMessages: AgentMessage[] | undefined;
-	let planned: readonly AgentMessage[] | undefined;
-	pi.events.on(LEDGER_PLAN_CHANNEL, (data) => {
-		planned = (data as RequestPlan).messages as readonly AgentMessage[];
-	});
-	pi.on("context", (event) => {
-		capturedMessages = [...(planned ?? event.messages)];
-		planned = undefined;
+	followCoveredMessages(pi, (messages) => {
+		capturedMessages = messages;
 	});
 	// The same request as it went on the wire, and the reply that answered it.
 	const exchange = followLastExchange(pi);

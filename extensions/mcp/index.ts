@@ -318,10 +318,9 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		const live = [...connections.values()];
 		const snapshot = liveSnapshot();
 		if (snapshot.failed.length === 0) {
-			pi.events.emit(REMINDER_CHANNEL, { scope: "every-turn", key: "mcp-failures", text: "", remove: true });
+			pi.events.emit(REMINDER_CHANNEL, { key: "mcp-failures", text: "", remove: true });
 		} else {
 			pi.events.emit(REMINDER_CHANNEL, {
-				scope: "every-turn",
 				key: "mcp-failures",
 				text: mcpFailuresReminder(snapshot.failed),
 				placement: "first-prepend",
@@ -332,7 +331,6 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		const instructions = mcpInstructionsReminder(live);
 		if (instructions) {
 			pi.events.emit(REMINDER_CHANNEL, {
-				scope: "every-turn",
 				key: "mcp-instructions",
 				text: instructions,
 				placement: "first-prepend",
@@ -343,7 +341,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 			// No server has instructions anymore (e.g. the last one was disabled or
 			// disconnected) — drop the stale block so an epoch does not tell the
 			// model to use tools that are gone.
-			pi.events.emit(REMINDER_CHANNEL, { scope: "every-turn", key: "mcp-instructions", text: "", remove: true });
+			pi.events.emit(REMINDER_CHANNEL, { key: "mcp-instructions", text: "", remove: true });
 		}
 	};
 	// Inside an epoch, what changed since message 1 (or the last notice) rides

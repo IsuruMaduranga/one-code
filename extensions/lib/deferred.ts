@@ -37,6 +37,47 @@ export interface DeferRequest {
 	keywords?: string[];
 }
 
+/**
+ * Ask the session's tool-search which tools it defers: emit a `DeferredQuery`
+ * and it adds one request per deferred tool. A subagent defers the same tools
+ * its parent injects into it (MCP, cron, SendMessage), whose owners run only
+ * in the parent.
+ */
+export const DEFERRED_QUERY_CHANNEL = "one-code:deferred-query";
+
+export interface DeferredQuery {
+	tools: DeferRequest[];
+}
+
+/** The tools this session defers, as its tool-search answers DEFERRED_QUERY_CHANNEL (none without one). */
+export function queryDeferred(events: { emit(channel: string, data: unknown): void }): DeferRequest[] {
+	const query: DeferredQuery = { tools: [] };
+	events.emit(DEFERRED_QUERY_CHANNEL, query);
+	return query.tools;
+}
+
+/**
+ * The tools a child gets from its parent rather than its own extensions: the
+ * shared MCP tools (`mcp__*`, which no child extension owns) and `extra`, the
+ * ones the caller injects by name (the spawn and cron tools).
+ */
+export function injectedByParent(extra: readonly { name: string }[]): (name: string) => boolean {
+	const names = new Set(extra.map((tool) => tool.name));
+	return (name) => name.startsWith("mcp__") || names.has(name);
+}
+
+/**
+ * An inline child extension that defers, at load, the parent's deferral of each
+ * tool `injected` names, whose owners run only in the parent. A tool the
+ * child's own extensions own stays theirs to defer or withhold per the child's
+ * model.
+ */
+export function deferLikeParentExtension(parentDeferred: readonly DeferRequest[], injected: (name: string) => boolean) {
+	return (pi: { events: { emit(channel: string, data: unknown): void } }) => {
+		for (const request of parentDeferred) if (injected(request.name)) pi.events.emit(DEFER_CHANNEL, request);
+	};
+}
+
 export interface SearchableTool {
 	name: string;
 	description: string;
@@ -99,6 +140,17 @@ export function deferredReminderText(tools: Array<Pick<SearchableTool, "name"> &
  */
 export function deferredAddendumText(added: readonly string[]): string {
 	return [ADDENDUM_HEAD, ...added].join("\n");
+}
+
+/**
+ * The one-shot that says deferred tools the conversation was told about are
+ * gone (their MCP server disconnected or was removed, a resume without it).
+ * The earlier listing or addendum stays in the history as sent, and so may
+ * the tool's declaration, so without this the model calls it and gets "Tool
+ * not found".
+ */
+export function deferredRemovedText(removed: readonly string[]): string {
+	return ["The following deferred tools are no longer available. tool_search cannot load them and calls to them fail; do not use them:", ...removed].join("\n");
 }
 
 /** The loader every deferred tool sits behind. */

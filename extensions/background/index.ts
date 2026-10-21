@@ -62,7 +62,9 @@ import {
 	formatDeleteResult,
 	formatJobList,
 	formatUnknownJob,
+	JOB_FIRED_ENTRY,
 	scheduledJobsOnBranch,
+	WAKEUP_ARMED_ENTRY,
 } from "./cron.ts";
 import {
 	createTaskNotifier,
@@ -337,6 +339,8 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		// and renders the folded context whole, once.
 		if (fold.noOpStreak !== undefined) pi.appendEntry(RECORD.epoch, makeRecord("epoch", extensionVersion(), { cause: "fold" }));
 		if (job.source === "wakeup") dynamicLoop.inFlight = job.prompt;
+		// Recorded whatever way the notification goes out, so a /reload knows the fire happened.
+		pi.appendEntry(JOB_FIRED_ENTRY, { jobId: job.id, final, source: job.source });
 		notify(job.source === "wakeup" ? "wakeup" : "cron", fireText(job), { jobId: job.id, cron: job.cron, source: job.source, final, ...fold });
 	};
 	/** Fire every due job (only while idle), then arm the one timer to the next fire. */
@@ -898,8 +902,12 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	});
 	pi.on("agent_settled", () => {
 		agentBusy = false;
-		// Claude Code's keepalive: a wakeup's turn that scheduled no next one gets one fallback.
-		dynamicLoop.settle(Date.now());
+		// Claude Code's keepalive: a wakeup's turn that scheduled no next one gets
+		// one fallback, recorded so a /reload re-arms it (no tool result does).
+		if (dynamicLoop.settle(Date.now()) === "armed") {
+			const armed = cron.list().find((job) => job.source === "wakeup");
+			if (armed) pi.appendEntry(WAKEUP_ARMED_ENTRY, { id: armed.id, prompt: armed.prompt, fireAt: armed.nextFireAt });
+		}
 		runCron();
 	});
 	// Folded no-op ticks leave the model's context (noop-fold.ts); the note stands in for them.

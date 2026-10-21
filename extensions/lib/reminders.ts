@@ -8,7 +8,7 @@
  * byte for byte; nothing here is restored or re-rendered later.
  *
  * Cross-extension contract: emit on the event bus channel
- * `one-code:system-reminder` with `{ text, scope?, placement? }`. The live
+ * `one-code:system-reminder` with `{ text, placement? }`. The live
  * state lives in the system-reminder extension; do not import one from here
  * (jiti gives every extension its own module instance, so a shared export
  * steers nothing).
@@ -68,9 +68,6 @@ export const REMINDER_CHANNEL = "one-code:system-reminder";
  */
 export const RENDER_CHANNEL = "one-code:render";
 
-/** "next-turn" fires once on the next LLM call; "every-turn" fires on every call until removed. */
-export type ReminderScope = "next-turn" | "every-turn";
-
 /** See the module header for which placement fits which kind of reminder. */
 export type ReminderPlacement = "first-prepend" | "sticky-append" | "last-append" | "user-prepend";
 
@@ -124,7 +121,6 @@ export function movesToSystemRole(order: number): boolean {
 
 export interface ReminderPayload {
 	text?: string;
-	scope?: ReminderScope;
 	/** Key so a reminder can be replaced (a pending one-shot, a live block) or removed (a live block). */
 	key?: string;
 	/** Remove the live block or close the sticky state under `key`. */
@@ -153,22 +149,13 @@ export interface ReminderPayload {
 	 * avoid attaching a switch or countdown to another call in a parallel batch.
 	 */
 	toolCallId?: string;
-	/** A one-shot about a capability block (its `first-prepend` key): an epoch's rebuild of the block supersedes it. */
-	group?: string;
 	/** `first-prepend` only: what the block tells the model, recorded when an epoch sends it. */
 	facts?: ToldFact[];
-	/** Who produced a one-shot, for the pending record (default "reminder"). */
-	source?: string;
 }
 
-/** The fact that the whole-text block `key` told `text`. */
-export function toldBlockFact(key: string, text: string): BlockFact {
-	return { kind: "block", key, hash: contentHash(text) };
-}
-
-/** True when the epoch's last told text for `key` is `text`. */
-export function toldBlockIs(request: Pick<RenderRequest, "toldBlocks">, key: string, text: string): boolean {
-	return request.toldBlocks.get(key) === contentHash(text);
+/** The fact that the whole-text block `key` told `value` (a text, or a snapshot such as a git status). */
+export function toldBlockFact(key: string, value: unknown): BlockFact {
+	return { kind: "block", key, hash: contentHash(value) };
 }
 
 /** A live `first-prepend` block. */
@@ -190,9 +177,10 @@ export interface StickyEntry {
 	since: number;
 	toolCallId?: string;
 	skipStackCarrier?: boolean;
-	/** True once a request carried it: a tool-result pin is only for its first delivery. */
-	delivered: boolean;
 }
+
+/** A sticky state as a render places it: `delivered` once an answered request in the epoch carried it (its `stickyFact` is told), so a tool-result pin is only for its first delivery. */
+export type StickyToPlace = StickyEntry & { delivered: boolean };
 
 /** A one-shot to place on this request: a pending entry, or a block an owner rendered for it. */
 export interface OneShot {
@@ -209,7 +197,6 @@ export interface OneShot {
 /** What a capability owner adds on RENDER_CHANNEL. */
 export interface RenderedBlock {
 	text: string;
-	raw?: boolean;
 	/** What the block tells the model, recorded with the request that carries it. */
 	facts?: ToldFact[];
 }
@@ -274,7 +261,7 @@ export class LiveReminders {
 		// Re-emitting an unchanged standing state keeps its start and delivery; a
 		// changed one is a new state from now.
 		if (same && (payload.since === undefined || payload.since === previous.since)) return "live";
-		const entry: StickyEntry = { key, text, since: payload.since ?? this.now(), delivered: false };
+		const entry: StickyEntry = { key, text, since: payload.since ?? this.now() };
 		if (payload.raw) entry.raw = true;
 		if (payload.skipStackCarrier) entry.skipStackCarrier = true;
 		if (payload.toolCallId) entry.toolCallId = payload.toolCallId;
@@ -291,14 +278,11 @@ export class LiveReminders {
 	stickyEntries(): StickyEntry[] {
 		return [...this.sticky.values()];
 	}
+}
 
-	/** Record that a request carried these sticky states. */
-	markDelivered(keys: readonly string[]): void {
-		for (const key of keys) {
-			const entry = this.sticky.get(key);
-			if (entry) entry.delivered = true;
-		}
-	}
+/** The told fact of a sticky state's first delivery: it follows the branch, and a failed request's is revoked. */
+export function stickyFact(entry: Pick<StickyEntry, "key" | "text" | "since">): BlockFact {
+	return toldBlockFact(`sticky:${entry.key}`, { since: entry.since, text: entry.text });
 }
 
 export interface RenderInput {
@@ -307,7 +291,7 @@ export interface RenderInput {
 	/** The model takes a mid-conversation system message (`systemRoleOnly` blocks render, `moved` is filled). */
 	layout: boolean;
 	stack: readonly StackEntry[];
-	sticky: readonly StickyEntry[];
+	sticky: readonly StickyToPlace[];
 	oneShots: readonly OneShot[];
 }
 
@@ -364,7 +348,9 @@ export function renderReminders(messages: readonly AgentMessage[], input: Render
 			if (state.skipStackCarrier && input.epoch && index === firstUser) return;
 			carriers.push(index);
 		});
-		if (!state.delivered) {
+		// The pin is for a state switched on mid-turn; one on from the start
+		// (`since: 0`, the constant budget line) rides user messages only.
+		if (!state.delivered && state.since > 0) {
 			const first = firstResultAfter(messages, state);
 			if (first !== -1 && !carriers.includes(first)) carriers.unshift(first);
 		}

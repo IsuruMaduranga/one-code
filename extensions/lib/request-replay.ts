@@ -20,6 +20,8 @@
  */
 
 import type { Message } from "@earendil-works/pi-ai";
+import { isObject } from "./ledger/records.ts";
+import { listKey, stripMarkers, toolName } from "./ledger/wire.ts";
 import { estimateMessageTokens } from "./pi-ai-estimate.ts";
 
 /** The compaction extension publishes a RequestCapture here, or undefined when none is valid. */
@@ -35,17 +37,6 @@ export type ReplayApi =
 	| "bedrock-converse-stream"
 	| "google-generative-ai"
 	| "google-vertex";
-
-const LIST_KEY: Record<ReplayApi, string> = {
-	"anthropic-messages": "messages",
-	"openai-completions": "messages",
-	"openai-responses": "input",
-	"azure-openai-responses": "input",
-	"openai-codex-responses": "input",
-	"bedrock-converse-stream": "messages",
-	"google-generative-ai": "contents",
-	"google-vertex": "contents",
-};
 
 /**
  * Where the output cap lives, first match in the captured body wins: a
@@ -63,12 +54,21 @@ const CAP_PATHS: Record<ReplayApi, ReadonlyArray<readonly string[]>> = {
 	"google-vertex": [["config", "maxOutputTokens"]],
 };
 
-const REPLAY_APIS: ReadonlySet<string> = new Set(Object.keys(LIST_KEY));
+const REPLAY_APIS: ReadonlySet<string> = new Set<ReplayApi>([
+	"anthropic-messages",
+	"openai-completions",
+	"openai-responses",
+	"azure-openai-responses",
+	"openai-codex-responses",
+	"bedrock-converse-stream",
+	"google-generative-ai",
+	"google-vertex",
+]);
 
 /** The value at `path` in `payload`, when it is a number. */
 function capAt(payload: Record<string, unknown>, path: readonly string[]): number | undefined {
 	let value: unknown = payload;
-	for (const key of path) value = isRecord(value) ? value[key] : undefined;
+	for (const key of path) value = isObject(value) ? value[key] : undefined;
 	return typeof value === "number" ? value : undefined;
 }
 
@@ -82,7 +82,7 @@ function capPath(api: ReplayApi, payload: Record<string, unknown>): readonly str
 function withCap(payload: Record<string, unknown>, path: readonly string[], value: number): Record<string, unknown> {
 	const [head, ...rest] = path;
 	if (rest.length === 0) return { ...payload, [head]: value };
-	const inner = isRecord(payload[head]) ? (payload[head] as Record<string, unknown>) : {};
+	const inner = isObject(payload[head]) ? (payload[head] as Record<string, unknown>) : {};
 	return { ...payload, [head]: withCap(inner, rest, value) };
 }
 
@@ -114,7 +114,7 @@ interface ModelRef {
 export function captureRequest(model: ModelRef | undefined, payload: unknown, covers?: CoveredThrough, sessionId?: string): RequestCapture | undefined {
 	const api = model?.api;
 	if (!api || !REPLAY_APIS.has(api)) return undefined;
-	if (!model?.provider || !model.id || !isRecord(payload) || !Array.isArray(payload[LIST_KEY[api as ReplayApi]])) return undefined;
+	if (!model?.provider || !model.id || !isObject(payload) || !Array.isArray(payload[listKey(api)])) return undefined;
 	return { api: api as ReplayApi, provider: model.provider, modelId: model.id, payload, ...(covers ? { covers } : {}), ...(sessionId ? { sessionId } : {}) };
 }
 
@@ -221,10 +221,10 @@ export class LastExchange<Reply extends MessageLike = MessageLike> {
  * trailing user message, so the roles still alternate.
  */
 export function extendPayload(capture: RequestCapture, tail: Record<string, unknown>, maxTokens?: number): Record<string, unknown> {
-	const key = LIST_KEY[capture.api];
+	const key = listKey(capture.api);
 	const base = capture.payload[key] as unknown[];
 	// The tail's own markers are dropped: the capture's mark the entry the session wrote.
-	const extra = withoutCachePoints(withoutCacheControl(Array.isArray(tail[key]) ? (tail[key] as unknown[]) : [])) as unknown[];
+	const extra = stripMarkers(Array.isArray(tail[key]) ? (tail[key] as unknown[]) : []);
 	const list =
 		capture.api === "anthropic-messages"
 			? appendAnthropic(base, extra)
@@ -233,9 +233,9 @@ export function extendPayload(capture: RequestCapture, tail: Record<string, unkn
 				: [...base, ...extra];
 	let out: Record<string, unknown> = { ...capture.payload, [key]: list };
 	// Google's config carries the request's live abort signal: the side call's own, never the session's.
-	if (capture.api.startsWith("google-") && isRecord(out.config)) {
+	if (capture.api.startsWith("google-") && isObject(out.config)) {
 		const { abortSignal: _session, ...config } = out.config;
-		const own = isRecord(tail.config) ? tail.config.abortSignal : undefined;
+		const own = isObject(tail.config) ? tail.config.abortSignal : undefined;
 		out = { ...out, config: own === undefined ? config : { ...config, abortSignal: own } };
 	}
 	const path = maxTokens === undefined ? undefined : capPath(capture.api, capture.payload);
@@ -330,7 +330,7 @@ export const MAX_CACHE_MARKERS = 4;
  *   tail's mark the fork's own entry, and the earliest are dropped past four.
  */
 export function forkRequestPayload(capture: RequestCapture, child: Record<string, unknown>, baseline: ReadonlySet<string>): Record<string, unknown> {
-	const key = LIST_KEY[capture.api];
+	const key = listKey(capture.api);
 	const base = capture.payload[key] as unknown[];
 	const tail = (Array.isArray(child[key]) ? (child[key] as WireMessage[]) : []).filter((entry) => entry.role !== "system" && entry.role !== "developer");
 	const out: Record<string, unknown> = { ...capture.payload, [key]: capture.api === "anthropic-messages" ? joinUserTurns(base, tail) : [...base, ...tail] };
@@ -362,32 +362,26 @@ export function forkOutputRoom(capture: RequestCapture, tail: unknown): number |
 	return cap === undefined ? undefined : cap - Math.ceil(JSON.stringify(tail).length / 4);
 }
 
-/** The names a body's tool list declares (Anthropic, Chat Completions and Responses shapes). */
+/** The names a body's tool list declares, in any API's shape (lib/ledger/wire.ts toolName). */
 export function toolNames(tools: unknown): string[] {
 	return Array.isArray(tools) ? tools.map(toolName).filter((name): name is string => name !== undefined) : [];
 }
 
-function toolName(tool: unknown): string | undefined {
-	if (!isRecord(tool)) return undefined;
-	if (typeof tool.name === "string") return tool.name;
-	return isRecord(tool.function) && typeof tool.function.name === "string" ? tool.function.name : undefined;
-}
-
 function forkTools(parent: unknown, child: unknown, baseline: ReadonlySet<string>, tail: unknown[]): unknown[] | undefined {
-	if (!Array.isArray(parent)) return Array.isArray(child) ? (withoutCacheControl(child) as unknown[]) : undefined;
+	if (!Array.isArray(parent)) return Array.isArray(child) ? stripMarkers(child) : undefined;
 	const declared = new Set(toolNames(parent));
 	const referenced = referencedTools(tail);
 	const extra = (Array.isArray(child) ? child : []).filter((tool) => {
 		const name = toolName(tool);
 		return name !== undefined && !declared.has(name) && (!baseline.has(name) || referenced.has(name));
 	});
-	return extra.length > 0 ? [...parent, ...(withoutCacheControl(extra) as unknown[])] : parent;
+	return extra.length > 0 ? [...parent, ...stripMarkers(extra)] : parent;
 }
 
 /** Tool names the tail's `tool_reference` blocks load (Anthropic tool search). */
 function referencedTools(value: unknown, found = new Set<string>()): Set<string> {
 	if (Array.isArray(value)) for (const entry of value) referencedTools(entry, found);
-	else if (isRecord(value)) {
+	else if (isObject(value)) {
 		if (value.type === "tool_reference" && typeof value.tool_name === "string") found.add(value.tool_name);
 		for (const entry of Object.values(value)) referencedTools(entry, found);
 	}
@@ -426,7 +420,7 @@ function captureMarkers(capture: RequestCapture): number {
 	let count = capturedMarkerCounts.get(capture);
 	if (count === undefined) {
 		const payload = capture.payload;
-		count = countMarkers(payload.tools) + countMarkers(payload.system) + countMarkers(payload[LIST_KEY[capture.api]]);
+		count = countMarkers(payload.tools) + countMarkers(payload.system) + countMarkers(payload[listKey(capture.api)]);
 		capturedMarkerCounts.set(capture, count);
 	}
 	return count;
@@ -434,7 +428,7 @@ function captureMarkers(capture: RequestCapture): number {
 
 function countMarkers(value: unknown): number {
 	if (Array.isArray(value)) return value.reduce((sum: number, entry) => sum + countMarkers(entry), 0);
-	if (!isRecord(value)) return 0;
+	if (!isObject(value)) return 0;
 	let count = "cache_control" in value ? 1 : 0;
 	for (const [key, entry] of Object.entries(value)) if (key !== "cache_control") count += countMarkers(entry);
 	return count;
@@ -451,7 +445,7 @@ function dropFirstMarkers(value: unknown, budget: { drop: number }): unknown {
 		});
 		return changed ? out : value;
 	}
-	if (!isRecord(value)) return value;
+	if (!isObject(value)) return value;
 	let out: Record<string, unknown> | undefined;
 	if ("cache_control" in value) {
 		const { cache_control: _, ...rest } = value;
@@ -491,25 +485,4 @@ function appendAnthropic(base: unknown[], extra: unknown[]): unknown[] {
 function blocksOf(content: unknown): Block[] {
 	if (typeof content === "string") return [{ type: "text", text: content }];
 	return Array.isArray(content) ? (content as Block[]) : [];
-}
-
-/** `value` without Bedrock's `{ cachePoint }` marker blocks, at any depth. */
-function withoutCachePoints(value: unknown): unknown {
-	if (Array.isArray(value)) return value.filter((entry) => !(isRecord(entry) && Object.keys(entry).length === 1 && "cachePoint" in entry)).map(withoutCachePoints);
-	if (!isRecord(value)) return value;
-	return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, withoutCachePoints(entry)]));
-}
-
-function withoutCacheControl(value: unknown): unknown {
-	if (Array.isArray(value)) return value.map(withoutCacheControl);
-	if (!isRecord(value)) return value;
-	const out: Record<string, unknown> = {};
-	for (const [key, entry] of Object.entries(value)) {
-		if (key !== "cache_control") out[key] = withoutCacheControl(entry);
-	}
-	return out;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
 }

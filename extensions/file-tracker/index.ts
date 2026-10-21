@@ -159,25 +159,24 @@ function observeShellReads(tracker: FileTracker, before: Map<string, string>, ou
 /** Above this a shell read's output is persisted, not shown, so the file cannot have been seen whole. */
 const MAX_SHELL_READ_BYTES = 256 * 1024;
 
-/** Observe a file's current content together with the stamp it was read at, and return that stamp. */
-function observeFromDisk(tracker: FileTracker, path: string): FileStamp | undefined {
+/**
+ * Observe a file's current content together with the stamp it was read at.
+ * Returns that stamp, and what was seen for the result that read it
+ * (undefined when the file is gone).
+ */
+function observeFromDisk(tracker: FileTracker, path: string): { stamp?: FileStamp; seen?: FileObservation } {
 	const stamp = statIfPresent(path);
 	const current = readIfPresent(path);
-	if (current === undefined) tracker.forget(path);
-	else tracker.observe(path, current, Date.now(), stamp);
-	return stamp;
+	if (current === undefined) {
+		tracker.forget(path);
+		return stamp ? { stamp } : {};
+	}
+	tracker.observe(path, current, Date.now(), stamp);
+	return stamp ? { stamp, seen: { path, size: stamp.size, mtimeMs: stamp.mtimeMs, sha256: sha256(current) } } : {};
 }
 
 function sha256(text: string): string {
 	return createHash("sha256").update(text).digest("hex");
-}
-
-/** The file as it is on disk now, for the result that saw it; undefined when it is gone. */
-function observe(path: string): FileObservation | undefined {
-	const stamp = statIfPresent(path);
-	const current = readIfPresent(path);
-	if (!stamp || current === undefined) return undefined;
-	return { path, size: stamp.size, mtimeMs: stamp.mtimeMs, sha256: sha256(current) };
 }
 
 function pathOf(input: unknown, cwd: string): string | undefined {
@@ -285,8 +284,9 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 	/** Observe a file the model read or wrote, and record it as touched at its current modification time. */
 	const touch = (path: string) => {
 		childWrites.delete(path);
-		const stamp = observeFromDisk(tracker, path);
+		const { stamp, seen } = observeFromDisk(tracker, path);
 		if (stamp) touched.set(path, stamp.mtimeMs);
+		return seen;
 	};
 
 	// A resumed session (or a session_tree switch) carries reads the model did
@@ -392,9 +392,8 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 
 		// After a read we know the file; after our own write we know it again, so a
 		// successful edit does not make the file look stale to the next edit.
-		if (!event.isError) touch(path);
 		// What the model saw, on the result: a resume compares it with the disk.
-		const observation = event.isError ? undefined : observe(path);
+		const observation = event.isError ? undefined : touch(path);
 		const content = fileToolResultContent({
 			toolName: event.toolName,
 			isError: event.isError,
@@ -482,12 +481,10 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 	 *   (one blocked call plus a re-read per edit for anyone with an asynchronous
 	 *   formatter). Claude Code computes its `edited_text_file` attachments on
 	 *   every tool round, so the model reads the change before its next edit
-	 *   (review M5). The one-shot is pending when the next request goes out and
-	 *   the injector pins it to that tool result — pi runs `tool_result` hooks
-	 *   BEFORE it emits `tool_execution_end` (agent-loop.js
-	 *   finalizeExecutedToolCall → emitToolExecutionEnd), so it cannot be written
-	 *   into the stored result; pinned is the same mechanism tool-search's
-	 *   deferred-tool miss uses. Our own edit/write/read of a file was observed by
+	 *   (review M5). The one-shot is a pending entry when the next request goes
+	 *   out, and the renderer places it on that request's trailing tool result
+	 *   (lib/reminders.ts), the same mechanism tool-search's deferred-tool miss
+	 *   uses; reminders never enter a stored result. Our own edit/write/read of a file was observed by
 	 *   the `tool_result` handler above before this fires, so it is fresh here
 	 *   and never reported as external — but only for a call that ran alone. pi
 	 *   executes a batch of parallel tool calls CONCURRENTLY, so the first edit's

@@ -26,13 +26,9 @@ import { mcpFacts, type McpSnapshot } from "../../extensions/mcp/announce.ts";
 
 /** Render one request inside an epoch whose message 1 described `told`; the blocks MCP adds to its tail. */
 function renderInEpoch(events: { emit(channel: string, data: unknown): void }, told: McpSnapshot): string[] {
-	const toldBlocks = new Map<string, string>();
-	for (const fact of mcpFacts(told)) if (fact.kind === "block") toldBlocks.set(fact.key, fact.hash);
-	const request: RenderRequest = { epoch: false, told: new Map(), modes: new Map(), toldBlocks, model: undefined, blocks: [] };
-	events.emit(RENDER_CHANNEL, request);
-	return request.blocks.map((block) => block.text);
+	return renderRequest(events, { facts: mcpFacts(told) }).map((block) => block.text);
 }
-import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { createFakeCtx, createFakePi, type FakePi, renderRequest } from "./helpers/fake-pi.ts";
 import { localCommandBlocks } from "../../extensions/lib/local-command.ts";
 import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
 

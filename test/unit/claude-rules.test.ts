@@ -495,7 +495,7 @@ describe("claude-context rule attachment wiring", () => {
 		await fake.fireOne("session_start", {}, ctx);
 		const startup = emitted.filter((entry) => entry.key === "claude-context");
 		expect(startup).toHaveLength(1);
-		expect(startup[0]).toMatchObject({ placement: "first-prepend", scope: "every-turn" });
+		expect(startup[0]).toMatchObject({ placement: "first-prepend" });
 		expect(startup[0].text).toContain("startup instruction");
 
 		const read = (path: string, isError = false) => fake.fire("tool_result", { toolName: "read", input: { path }, isError, content: [] }, ctx);

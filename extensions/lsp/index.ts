@@ -5,9 +5,8 @@
  *  1. A session-wide watcher (watcher.ts): new diagnostics — cross-file, all
  *     severities, deduplicated against what was already delivered — ride the
  *     tool result of the round that surfaced them as a raw `<new-diagnostics>`
- *     block (a reminder-queue one-shot, pinned to the trailing tool result
- *     after the `<total_tokens>` line — the exact place a Claude Code session
- *     shows them), or the message that opens the next run when they arrived
+ *     block (a reminder-queue one-shot, delivered on the trailing tool result
+ *     of the next request — the exact place a Claude Code session shows them), or the message that opens the next run when they arrived
  *     while idle (`agent_start`, so a notification-opened run gets them too).
  *     Until 2026-09-05 they went out as a custom steer message of their own
  *     (a separate user turn on the wire). Editing a file clears its
@@ -289,11 +288,10 @@ export default function lspExtension(pi: ExtensionAPI) {
 
 	/**
 	 * Queue the block where the model reads next. Raw (no `<system-reminder>`
-	 * frame, as in Claude Code) and last-append: from a `tool_result` hook this
-	 * extension runs after system-reminder's, so the one-shot is pending at the
-	 * next `context` and pinned to the trailing tool result (process memory,
-	 * same mechanism as the file-tracker's per-round report); from `agent_start`
-	 * it pins to the message that opened the run.
+	 * frame, as in Claude Code) and last-append: persisted as a pending entry,
+	 * it rides the trailing tool result of the next request (the same mechanism
+	 * as the file-tracker's per-round report); from `agent_start` it rides the
+	 * message that opened the run.
 	 */
 	const queueNewDiagnostics = (text: string) => {
 		pi.events.emit(REMINDER_CHANNEL, { text, placement: "last-append", raw: true } satisfies ReminderPayload);

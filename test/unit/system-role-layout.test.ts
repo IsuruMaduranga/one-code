@@ -101,7 +101,7 @@ describe("system-reminder's layout hook", () => {
 		const fake = createFakePi();
 		systemReminderExtension(fake.pi as never);
 		const emit = (text: string, order: number, extra: Record<string, unknown> = {}) =>
-			fake.events.emit(REMINDER_CHANNEL, { text, scope: "every-turn", key: text, placement: "first-prepend", order, ...extra });
+			fake.events.emit(REMINDER_CHANNEL, { text, key: text, placement: "first-prepend", order, ...extra });
 		emit("# Environment\nx", CONTEXT_ORDER.environment);
 		emit("While auto mode is active:\n\nnote", CONTEXT_ORDER.autoModeNote, { systemRoleOnly: true });
 		emit("Codebase and user instructions are shown below.", CONTEXT_ORDER.claudeMd);

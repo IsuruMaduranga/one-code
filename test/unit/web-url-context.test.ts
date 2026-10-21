@@ -4,7 +4,7 @@ import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/mcp-share.ts";
 import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/reminders.ts";
 import toolSearchExtension from "../../extensions/tool-search/index.ts";
 import webExtension from "../../extensions/web/index.ts";
-import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { createFakeCtx, createFakePi, renderRequest } from "./helpers/fake-pi.ts";
 import type { Reminder } from "./helpers/tool-search-fake-pi.ts";
 
 const gemini = { provider: "google", api: "google-generative-ai", id: "gemini-test" };
@@ -53,9 +53,7 @@ function harness() {
 		request: (model: Model) => fake.fire("context", { messages: [] }, ctx(model)),
 		/** Render a request inside an epoch that told `told` deferred tools; the addenda tool-search adds. */
 		render(told: string[], model: Model) {
-			const request: RenderRequest = { epoch: false, told: new Map([["tools", new Set(told)]]), modes: new Map(), toldBlocks: new Map(), model, blocks: [] };
-			fake.events.emit(RENDER_CHANNEL, request);
-			return request.blocks.map((block) => block.text);
+			return renderRequest(fake.events, { facts: [{ kind: "tools", names: told }], model }).map((block) => block.text);
 		},
 	};
 }

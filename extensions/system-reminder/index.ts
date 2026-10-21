@@ -30,10 +30,13 @@ import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../lib/ledger/plan.ts";
 import { type EntryLike, makeRecord, type PendingRecordData, RECORD } from "../lib/ledger/records.ts";
 import { claudeFamily } from "../lib/model-tier.ts";
 import { extensionVersion } from "../lib/package-version.ts";
-import { LiveReminders, type OneShot, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, renderReminders, type ReminderPayload } from "../lib/reminders.ts";
+import { LiveReminders, type OneShot, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, renderReminders, type ReminderPayload, stickyFact } from "../lib/reminders.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { instructionRole, messagesKey, type MovedBlock, systemRoleLayout, wireShape, withSystemRoleContext } from "../lib/system-role.ts";
 import { resolveCountdowns, withTurnBudgetMessages } from "../lib/turn-budget-layout.ts";
+
+/** Whether requests carry the `<total_tokens>` budget lines (`CC_TOTAL_TOKENS=0` turns them off). */
+const budgetMarkers = () => process.env.CC_TOTAL_TOKENS !== "0";
 
 /** A pending entry as a one-shot to place. */
 function oneShotOf(item: PendingRecordData): OneShot {
@@ -61,13 +64,11 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 	const persist = (payload: ReminderPayload) => {
 		const data = makeRecord("pending", by, {
 			id: randomUUID(),
-			source: payload.source ?? "reminder",
 			text: payload.text as string,
 			placement: payload.placement === "user-prepend" ? "user-prepend" : "last-append",
 			...(payload.key ? { key: payload.key } : {}),
 			...(payload.raw ? { raw: true } : {}),
 			...(payload.toolCallId ? { toolCallId: payload.toolCallId } : {}),
-			...(payload.group ? { group: payload.group } : {}),
 			...(payload.once ? { once: true } : {}),
 		});
 		pi.appendEntry(RECORD.pending, data);
@@ -110,23 +111,28 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 		const epoch = current?.epoch ?? true;
 		const fold = current?.fold ?? foldBranch(ctx.sessionManager.getBranch() as EntryLike[]);
 
-		const request: RenderRequest = { epoch, told: epoch ? new Map() : fold.told, modes: epoch ? new Map() : fold.modes, toldBlocks: epoch ? new Map() : fold.blocks, model: ctx.model, blocks: [] };
+		// Owners add nothing on an epoch (the live stack is rendered), so the told maps need no reset here.
+		const request: RenderRequest = { epoch, told: fold.told, modes: fold.modes, toldBlocks: fold.blocks, model: ctx.model, blocks: [] };
 		pi.events.emit(RENDER_CHANNEL, request);
-		// An epoch rebuilds every capability block, so a notice about one is superseded.
-		const outbox = fold.pending.filter((item) => !deliveredHere.has(item.id));
-		const superseded = epoch ? outbox.filter((item) => item.group !== undefined) : [];
 		const oneShots: OneShot[] = [
-			...outbox.filter((item) => !(epoch && item.group !== undefined)).map(oneShotOf),
-			...request.blocks.map((block) => ({ text: block.text, placement: "last-append" as const, ...(block.raw ? { raw: true } : {}), ...(block.facts ? { facts: block.facts } : {}) })),
+			...fold.pending.filter((item) => !deliveredHere.has(item.id)).map(oneShotOf),
+			...request.blocks.map((block) => ({ text: block.text, placement: "last-append" as const, ...(block.facts ? { facts: block.facts } : {}) })),
 		];
 		const stack = live.stackEntries();
-		const rendered = renderReminders(event.messages, { epoch, layout: layout !== undefined, stack, sticky: live.stickyEntries(), oneShots });
-		live.markDelivered(rendered.stickyPlaced);
+		// A sticky state's first delivery is told, so a failed request's revokes and an epoch renders it again.
+		const toldBlocks = epoch ? new Map<string, string>() : fold.blocks;
+		const sticky = live.stickyEntries().map((entry) => {
+			const fact = stickyFact(entry);
+			return { ...entry, fact, delivered: toldBlocks.get(fact.key) === fact.hash };
+		});
+		const rendered = renderReminders(event.messages, { epoch, layout: layout !== undefined, stack, sticky, oneShots });
+		const stickyFacts = sticky.filter((entry) => !entry.delivered && rendered.stickyPlaced.includes(entry.key)).map((entry) => entry.fact);
 
-		const consumed = [...superseded.map((item) => item.id), ...rendered.placed.flatMap((shot) => (shot.id ? [shot.id] : []))];
+		const consumed = rendered.placed.flatMap((shot) => (shot.id ? [shot.id] : []));
 		const facts = [
 			...(epoch && rendered.stackPlaced ? stack.filter((entry) => layout !== undefined || !entry.systemRoleOnly).flatMap((entry) => entry.facts ?? []) : []),
 			...rendered.placed.flatMap((shot) => shot.facts ?? []),
+			...stickyFacts,
 		];
 		if (current) {
 			current.consumed.push(...consumed);
@@ -141,8 +147,7 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 		// or framed, while the result's blocks are still separate (lib/turn-budget-layout.ts).
 		// With the budget off no result carries one, so a tool's own such line stays its output.
 		countdowns = new Map();
-		const budgetOn = process.env.CC_TOTAL_TOKENS !== "0";
-		const resolved = budgetOn && ctx.model && wireShape(ctx.model.api) ? resolveCountdowns(rendered.messages, layout !== undefined) : undefined;
+		const resolved = budgetMarkers() && ctx.model && wireShape(ctx.model.api) ? resolveCountdowns(rendered.messages, layout !== undefined) : undefined;
 		if (resolved) countdowns = resolved.left;
 		const out = resolved?.messages ?? rendered.messages;
 		const changed = out.length !== event.messages.length || out.some((message, i) => message !== event.messages[i]);
@@ -161,8 +166,7 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 		// gets its clear_at nudge after each tool result.
 		const firstParty = model.provider === "anthropic";
 		const nudge = layout === "anthropic" && firstParty && claudeFamily(model.id) === "fable";
-		const markers = process.env.CC_TOTAL_TOKENS !== "0";
-		payload = withTurnBudgetMessages(payload, { shape, systemRole: layout !== undefined, role, left: countdowns, nudge, markers, stackCarrier: epochRequest }) ?? payload;
+		payload = withTurnBudgetMessages(payload, { shape, systemRole: layout !== undefined, role, left: countdowns, nudge, markers: budgetMarkers(), stackCarrier: epochRequest }) ?? payload;
 		if (payload !== event.payload && shape === "anthropic") {
 			const key = messagesKey(shape);
 			payload = { ...payload, [key]: reseatMessageMark(payload[key] as Array<{ role?: unknown; content?: unknown }>) };

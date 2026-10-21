@@ -6,37 +6,14 @@
  *
  * Pure: no pi imports.
  */
-import { contentHash, listKey, type RecordedRequest, toolName, type WirePayload } from "./wire.ts";
+import { isObject, type ToldFact } from "./records.ts";
+import { contentHash, declaredToolNames, listKey, type WirePayload } from "./wire.ts";
 
 export type Problem =
 	/** A tool_reference, tool_addition or tool_removal names a tool `tools` does not declare. */
 	| { kind: "undeclared"; name: string; index: number }
 	/** Anthropic: a system message with content followed by something other than an assistant message (findings §52). */
-	| { kind: "stranded-system"; index: number }
-	/** An element above the append point differs from the record. */
-	| { kind: "prefix"; index: number };
-
-const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
-
-/** Every declaration list in the payload: `tools`, Bedrock `toolConfig.tools`, Google's function declarations. */
-function declarations(payload: WirePayload): unknown[] {
-	const config = isObject(payload.config) ? payload.config : undefined;
-	const toolConfig = isObject(payload.toolConfig) ? payload.toolConfig : undefined;
-	const google = Array.isArray(config?.tools)
-		? config.tools.flatMap((group) => (isObject(group) && Array.isArray(group.functionDeclarations) ? group.functionDeclarations : []))
-		: [];
-	return [...(Array.isArray(payload.tools) ? payload.tools : []), ...(Array.isArray(toolConfig?.tools) ? toolConfig.tools : []), ...google];
-}
-
-/** The names the payload declares, in any API's shape. */
-function declaredNames(payload: WirePayload): Set<string> {
-	const names = new Set<string>();
-	for (const tool of declarations(payload)) {
-		const name = toolName(tool);
-		if (name !== undefined) names.add(name);
-	}
-	return names;
-}
+	| { kind: "stranded-system"; index: number };
 
 /** The tool a `tool_reference` block names: `name` in a `tool_addition`, `tool_name` in a tool result. */
 function referenceName(block: Record<string, unknown>): string | undefined {
@@ -75,23 +52,17 @@ function strandedSystems(list: readonly unknown[]): number[] {
 	return stranded;
 }
 
-export function validateRequest(payload: WirePayload, api: string, recorded?: RecordedRequest): Problem[] {
+export function validateRequest(payload: WirePayload, api: string): Problem[] {
 	const problems: Problem[] = [];
 	const value = payload[listKey(api)];
 	const list: unknown[] = Array.isArray(value) ? value : [];
 
-	const declared = declaredNames(payload);
+	const declared = declaredToolNames(payload);
 	list.forEach((element, index) => {
 		for (const name of referencedNames(element, new Set())) if (!declared.has(name)) problems.push({ kind: "undeclared", name, index });
 	});
 
 	if (api === "anthropic-messages") for (const index of strandedSystems(list)) problems.push({ kind: "stranded-system", index });
-
-	if (recorded) {
-		for (let index = 0; index < recorded.list.length; index++) {
-			if (index >= list.length || contentHash(list[index]) !== recorded.hashes[index]) problems.push({ kind: "prefix", index });
-		}
-	}
 	return problems;
 }
 
@@ -113,8 +84,7 @@ function withoutReferences(value: unknown, names: ReadonlySet<string>): unknown 
 /**
  * The payload with every flagged problem removed, for a production request
  * (a test treats any problem as fatal instead): references to undeclared
- * tools are dropped, and so is a stranded system message. A prefix problem is
- * not repairable here; the caller's splice prevents it.
+ * tools are dropped, and so is a stranded system message.
  */
 export function repairRequest(payload: WirePayload, api: string, problems: readonly Problem[]): WirePayload {
 	const key = listKey(api);
@@ -129,4 +99,38 @@ export function repairRequest(payload: WirePayload, api: string, problems: reado
 		);
 	}
 	return { ...payload, [key]: list };
+}
+
+/**
+ * What a repaired request still delivers, so its record does not count a
+ * dropped block as sent: the consumed pending items whose text is still in
+ * the payload's new elements (not `prefix`, the recorded ones by hash, where
+ * an earlier copy of the same text may sit), and the callable-tool facts without a tool whose
+ * `tool_addition` was dropped (a listing for tool_search names tools the
+ * request need not declare).
+ */
+export function deliveredAfterRepair(
+	payload: WirePayload,
+	api: string,
+	delivered: { consumed: readonly string[]; facts: readonly ToldFact[] },
+	pending: readonly { id: string; text: string }[],
+	prefix: ReadonlySet<string> = new Set(),
+): { consumed: string[]; facts: ToldFact[] } {
+	const list = payload[listKey(api)];
+	const sent = JSON.stringify(Array.isArray(list) ? list.filter((element) => !prefix.has(contentHash(element))) : []);
+	const texts = new Map(pending.map((item) => [item.id, item.text]));
+	// The repair left only references to declared tools.
+	const referenced = referencedNames(payload[listKey(api)], new Set());
+	const facts = delivered.facts.flatMap((fact): ToldFact[] => {
+		if (fact.kind !== "tools" || !fact.callable) return [fact];
+		const names = fact.names.filter((name) => referenced.has(name));
+		return names.length > 0 ? [{ ...fact, names }] : [];
+	});
+	return {
+		consumed: delivered.consumed.filter((id) => {
+			const text = texts.get(id);
+			return text === undefined || sent.includes(JSON.stringify(text).slice(1, -1));
+		}),
+		facts,
+	};
 }

@@ -44,9 +44,9 @@ import {
 import { collectGitStatus, GIT_SNAPSHOT_OWNER_CHANNEL } from "../lib/git-status.ts";
 import { readMemoryIndex } from "../lib/memory-index.ts";
 import { claudeConfigDir, oneCodeStateDir, tryRealpath } from "../lib/paths.ts";
-import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../lib/reminders.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, toldBlockFact } from "../lib/reminders.ts";
 import { inContextEntries } from "../lib/compaction-boundary.ts";
-import { compactionGitStatus, contextBlockFacts, type ContextFingerprints, contextFingerprints, dateFingerprint, FACT_KEYS, gitFingerprint, instructionFacts, resumeFactsNotice } from "../lib/context-facts.ts";
+import { compactionGitStatus, contextBlockFacts, contextFingerprints, dateFingerprint, FACT_KEYS, instructionFacts, liveFingerprints, type LiveFingerprints, resumeFactsNotice } from "../lib/context-facts.ts";
 import { resolveToolPath } from "../lib/tool-path.ts";
 import { sessionWorkCwd, WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
 import { pathArgument } from "../auto-mode/paths.ts";
@@ -54,6 +54,7 @@ import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
 import { EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_NONE, EXTERNAL_INCLUDES_SETTING, EXTERNAL_INCLUDES_YES, externalIncludesDialog, persistExternalIncludesApproval, readExternalIncludesApproval } from "../lib/claude-external-includes.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 import { consentDialog, installConsentDialogs, startupConsentReady } from "../lib/consent-dialogs.ts";
+import type { ToldFact } from "../lib/ledger/records.ts";
 
 const REMINDER_KEY = "claude-context";
 const ONECODE_REMINDER_KEY = "one-code-context";
@@ -155,20 +156,30 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	let approvalAbort = new AbortController();
 	let sessionGeneration = 0;
 
+	/**
+	 * The instructions facts while no instructions block renders (no CLAUDE.md,
+	 * no memory index): they ride the date block, so an epoch still tells the
+	 * absence and a resume notices a file that appeared since.
+	 */
+	let absentInstructionFacts: ToldFact[] = [];
 	const emitDate = (date: string) => {
 		blockDate = date;
 		pi.events.emit(REMINDER_CHANNEL, {
 			text: dateBlock(date),
-			scope: "every-turn",
 			key: DATE_REMINDER_KEY,
 			placement: "first-prepend",
 			order: CONTEXT_ORDER.date,
-			facts: [{ kind: "block", key: FACT_KEYS.date, hash: dateFingerprint(date) }],
+			facts: [toldBlockFact(FACT_KEYS.date, date), ...absentInstructionFacts],
 		});
 	};
 
-	/** The live workspace's fingerprints, taken at this process's first turn, for the resumed-session check. */
-	let livePrints: (ContextFingerprints & { git?: string }) | undefined;
+	/**
+	 * The live workspace's fingerprints, taken at this process's first turn, for
+	 * the resumed-session check, in each directory the epoch's facts may have
+	 * been read in: the session's own at its start, the entered worktree at a
+	 * compaction (session_compact reads there).
+	 */
+	let livePrints: { atStart: LiveFingerprints; atCompaction: () => LiveFingerprints } | undefined;
 	/** True until this process's first request inside an epoch has compared the epoch's facts with the live workspace. */
 	let resumeCheck = true;
 	const readFiles = (cwd: string) => {
@@ -218,19 +229,22 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		if (instructions) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text: instructions,
-				scope: "every-turn",
 				key: REMINDER_KEY,
 				placement: "first-prepend",
 				order: CONTEXT_ORDER.claudeMd,
 				facts: instructionFacts(contextFingerprints(current)),
 			});
 		} else pi.events.emit(REMINDER_CHANNEL, { remove: true, key: REMINDER_KEY });
+		const absent = instructions ? [] : instructionFacts(contextFingerprints(current));
+		if (JSON.stringify(absent) !== JSON.stringify(absentInstructionFacts)) {
+			absentInstructionFacts = absent;
+			if (blockDate) emitDate(blockDate);
+		}
 		// One Code's own instructions ride in a separate block AFTER the instructions
 		// block, so they take precedence over CLAUDE.md (higher order = closer to the user text).
 		if (current.oneCode) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text: current.oneCode,
-				scope: "every-turn",
 				key: ONECODE_REMINDER_KEY,
 				placement: "first-prepend",
 				order: CONTEXT_ORDER.oneCodeMd,
@@ -245,7 +259,6 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		}
 		pi.events.emit(REMINDER_CHANNEL, {
 			text: context,
-			scope: "every-turn",
 			key: CONTEXT_REMINDER_KEY,
 			placement: "first-prepend",
 			order: CONTEXT_ORDER.context,
@@ -354,7 +367,14 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		if (gen !== sessionGeneration || approvalAbort.signal.aborted) return;
 		if (gitStatus !== undefined) return;
 		gitStatus = snapshotGit(ctx.cwd);
-		if (files) livePrints = { ...contextFingerprints(files), ...(takesGitSnapshot ? { git: gitFingerprint(gitStatus) } : {}) };
+		if (files) {
+			const atStart = liveFingerprints(files, gitStatus, takesGitSnapshot);
+			const workCwd = sessionWorkCwd(entered, ctx.cwd);
+			// The entered worktree's, read only if the epoch's facts came from a compaction there.
+			let inWorktree: LiveFingerprints | undefined;
+			const atCompaction = () => (inWorktree ??= liveFingerprints(readFiles(workCwd), snapshotGit(workCwd), takesGitSnapshot));
+			livePrints = { atStart, atCompaction: workCwd === ctx.cwd ? () => atStart : atCompaction };
+		}
 		emitContextBlock(gitStatus, false);
 	});
 
@@ -373,11 +393,14 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		const today = localDate();
 		const toldDate = request.toldBlocks.get(FACT_KEYS.date);
 		if (blockDate && toldDate !== undefined && toldDate !== dateFingerprint(today)) {
-			request.blocks.push({ text: dateChangeReminder(today), facts: [{ kind: "block", key: FACT_KEYS.date, hash: dateFingerprint(today) }] });
+			request.blocks.push({ text: dateChangeReminder(today), facts: [toldBlockFact(FACT_KEYS.date, today)] });
+			// The live block too, so a later epoch (a model switch, a fold) renders today's date on message 1.
+			emitDate(today);
 		}
 		if (!resumeCheck || !livePrints) return;
 		resumeCheck = false;
-		const notice = resumeFactsNotice(request.toldBlocks, request.modes.get(FACT_KEYS.compaction) ?? false, livePrints);
+		const atCompaction = request.modes.get(FACT_KEYS.compaction) ?? false;
+		const notice = resumeFactsNotice(request.toldBlocks, atCompaction, atCompaction ? livePrints.atCompaction() : livePrints.atStart);
 		if (notice) request.blocks.push(notice);
 	});
 

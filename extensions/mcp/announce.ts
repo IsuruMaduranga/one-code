@@ -13,7 +13,7 @@
 
 import { mcpFailuresReminder, mcpInstructionsReminder } from "./client.ts";
 import type { BlockFact, ToldFact } from "../lib/ledger/records.ts";
-import { contentHash } from "../lib/ledger/wire.ts";
+import { toldBlockFact } from "../lib/reminders.ts";
 import { countNoun } from "../lib/tui-render.ts";
 
 export interface McpSnapshot {
@@ -37,7 +37,7 @@ export interface McpDelta {
 const INSTRUCTED = "mcp-instructed:";
 const FAILED = "mcp-failed:";
 /** The told hash of "nothing": a drop or a recovery was announced. */
-const NONE = contentHash("");
+const NONE = toldBlockFact("", "").hash;
 
 /**
  * Store and compare the exact bounded values the reminder puts on the wire.
@@ -53,8 +53,8 @@ function displayedFailure(error: string): string {
 	return error.split("\n")[0].slice(0, 300);
 }
 
-const instructedFact = (name: string, instructions: string): BlockFact => ({ kind: "block", key: INSTRUCTED + name, hash: contentHash(displayedInstructions(name, instructions)) });
-const failedFact = (name: string, error: string): BlockFact => ({ kind: "block", key: FAILED + name, hash: contentHash(displayedFailure(error)) });
+const instructedFact = (name: string, instructions: string): BlockFact => toldBlockFact(INSTRUCTED + name, displayedInstructions(name, instructions));
+const failedFact = (name: string, error: string): BlockFact => toldBlockFact(FAILED + name, displayedFailure(error));
 
 /** What message 1's two MCP blocks rendered from `snapshot` tell. */
 export function mcpFacts(snapshot: McpSnapshot): ToldFact[] {
@@ -87,10 +87,10 @@ export function mcpDelta(told: ReadonlyMap<string, string>, snapshot: McpSnapsho
 		recovered,
 		dropped,
 		facts: [
-			...newInstructions.map((s): ToldFact => ({ kind: "block", key: INSTRUCTED + s.name, hash: contentHash(s.instructions) })),
-			...newFailures.map((f): ToldFact => ({ kind: "block", key: FAILED + f.name, hash: contentHash(f.error) })),
-			...recovered.map((name): ToldFact => ({ kind: "block", key: FAILED + name, hash: NONE })),
-			...dropped.map((name): ToldFact => ({ kind: "block", key: INSTRUCTED + name, hash: NONE })),
+			...newInstructions.map((s) => toldBlockFact(INSTRUCTED + s.name, s.instructions)),
+			...newFailures.map((f) => toldBlockFact(FAILED + f.name, f.error)),
+			...recovered.map((name) => toldBlockFact(FAILED + name, "")),
+			...dropped.map((name) => toldBlockFact(INSTRUCTED + name, "")),
 		],
 	};
 }
