@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFER_CHANNEL, deferredAddendumText, deferredRemovedText, WITHHOLD_CHANNEL } from "../../extensions/lib/deferred.ts";
+import { requestIdentity } from "../../extensions/lib/anthropic-auth.ts";
+import { makeRecord, RECORD } from "../../extensions/lib/ledger/records.ts";
 import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/mcp-share.ts";
 import toolSearchExtension from "../../extensions/tool-search/index.ts";
 import { makeToolSearchFakePi, type Reminder } from "./helpers/tool-search-fake-pi.ts";
@@ -16,6 +18,17 @@ const makeFakePi = () => makeToolSearchFakePi(["read", "bash"]);
 const listings = (reminders: Reminder[]) => reminders.filter((r) => r.key === "deferred-tools");
 /** A first-party model that takes Claude Code's reference-form tool_addition. */
 const additionsModel = { provider: "anthropic", api: "anthropic-messages", id: "claude-sonnet-5-5", compat: { supportsMidConvoSystemMessages: true, supportsMidConvoToolChanges: true } };
+
+/** A branch inside an epoch on `model` whose message 1 listed `told` as deferred. */
+function epochBranch(told: string[], model = additionsModel) {
+	const identity = requestIdentity(model);
+	if (!identity) throw new Error("no identity");
+	return [
+		{ type: "custom", id: "r1", parentId: null, customType: RECORD.request, data: makeRecord("request", "test", { identity, keep: 0, append: [], head: "h", blobs: { h: { system: "s", tools: [] } }, consumed: [], covers: { count: 1, role: "user", timestamp: 1 } }) },
+		{ type: "custom", id: "t1", parentId: "r1", customType: RECORD.told, data: makeRecord("told", "test", { facts: [{ kind: "tools", names: told }] }) },
+		{ type: "message", id: "a1", parentId: "t1", message: { role: "assistant" } },
+	];
+}
 
 function mount() {
 	const fake = makeFakePi();
@@ -81,13 +94,63 @@ describe("tool-search listing and render-time addenda", () => {
 		expect(listings(fake.reminders).at(-1)?.text).not.toContain("task_create");
 	});
 
-	it("on a tool_addition model the addendum says the tools are callable, and makes them so", () => {
+	it("on a tool_addition model, activates an untold tool before the turn and announces it callable (R3-M1)", () => {
+		const fake = makeFakePi();
+		toolSearchExtension(fake.pi as never);
+		fake.addDeferred("web_fetch");
+		const ctx = { model: additionsModel, sessionManager: { getBranch: () => epochBranch(["web_fetch"]) } };
+		fake.pi.fire("session_start", {}, ctx);
+		fake.addDeferred("probe_echo");
+		fake.pi.fire("turn_start", {}, ctx);
+		expect(fake.activeTools()).toContain("probe_echo");
+		const blocks = fake.render({ told: { tools: ["web_fetch"] }, model: additionsModel });
+		expect(blocks[0].facts).toEqual([{ kind: "tools", names: ["probe_echo"], callable: true }]);
+	});
+
+	it("never announces a tool callable that this turn's tools lack: one inactive now waits", () => {
 		const fake = mount();
 		fake.addDeferred("probe_echo");
 		fake.setActive(fake.activeTools().filter((name) => name !== "probe_echo"));
-		const blocks = fake.render({ told: { tools: ["web_fetch"] }, model: additionsModel });
-		expect(blocks[0].facts).toEqual([{ kind: "tools", names: ["probe_echo"], callable: true }]);
-		expect(fake.activeTools()).toContain("probe_echo");
+		expect(fake.render({ told: { tools: ["web_fetch"] }, model: additionsModel })).toEqual([]);
+	});
+
+	it("keeps a tool the epoch listed deferred when its server connects late, so tool_search loads it (R3-H3)", async () => {
+		const fake = makeFakePi();
+		toolSearchExtension(fake.pi as never);
+		const ctx = { model: additionsModel, sessionManager: { getBranch: () => epochBranch(["mcp__s__x"]) } };
+		fake.pi.fire("session_start", {}, ctx);
+		fake.addDeferred("mcp__s__x");
+		expect(fake.activeTools()).not.toContain("mcp__s__x");
+		const result = await fake.runTool("tool_search", { query: "select:mcp__s__x" });
+		expect(result.content[0].text).toBe("Loaded mcp__s__x. These tools are now callable.");
+	});
+
+	it("keeps a deferred tool the recorded head declares eagerly callable after a /reload (R3-M2)", () => {
+		const fake = makeFakePi();
+		toolSearchExtension(fake.pi as never);
+		fake.addDeferred("mcp__s__x");
+		const branch = epochBranch(["mcp__s__x"]);
+		(branch[0].data as { blobs: Record<string, unknown> }).blobs.h = { system: "s", tools: [{ name: "mcp__s__x", input_schema: { type: "object" } }] };
+		fake.pi.fire("session_start", {}, { model: additionsModel, sessionManager: { getBranch: () => branch } });
+		expect(fake.activeTools()).toContain("mcp__s__x");
+	});
+
+	it("never leaves a withheld tool active after pi restores a /tree branch's loadout (R3-M3)", () => {
+		const fake = mount();
+		fake.pi.events.emit(WITHHOLD_CHANNEL, { name: "web_fetch" });
+		fake.setActive([...fake.activeTools(), "web_fetch"]);
+		fake.pi.fire("session_tree", {}, { model: additionsModel, sessionManager: { getBranch: () => [] } });
+		expect(fake.activeTools()).not.toContain("web_fetch");
+	});
+
+	it("tells the model a recorded tool this session no longer runs is unavailable, when a call to it fails (R3-M4)", () => {
+		const fake = makeFakePi();
+		toolSearchExtension(fake.pi as never);
+		const branch = epochBranch([]);
+		(branch[0].data as { blobs: Record<string, unknown> }).blobs.h = { system: "s", tools: [{ name: "workflow", input_schema: { type: "object" } }] };
+		fake.pi.fire("session_start", {}, { model: additionsModel, sessionManager: { getBranch: () => branch } });
+		fake.pi.fire("tool_execution_end", { isError: true, result: { content: [{ type: "text", text: "Tool workflow not found" }] } });
+		expect(fake.reminders.find((r) => r.key === "deferred-miss-workflow")?.text).toContain("no longer available in this session");
 	});
 
 	it("says once per epoch that this run cannot load the deferred tools the epoch listed", () => {

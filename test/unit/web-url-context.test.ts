@@ -118,13 +118,15 @@ describe("url_context model-scoped deferral", () => {
 			expect(fake.getActiveTools()).not.toContain("url_context");
 		});
 
-		it(`${event}: re-defers on every return to Gemini and preserves loads on same-provider events`, async () => {
+		it(`${event}: a return to Gemini keeps url_context callable while its load is in context, and preserves loads on same-provider events`, async () => {
 			const fake = harness();
 			await fake.start(other);
 			await fake.request(other);
 			for (let cycle = 0; cycle < 3; cycle++) {
 				await fake.switchModel(event, gemini);
-				expect(fake.getActiveTools()).not.toContain("url_context");
+				// The history's tool_search result loaded it in an earlier cycle: it names the tool, so the tool stays declared.
+				if (cycle === 0) expect(fake.getActiveTools()).not.toContain("url_context");
+				else expect(fake.getActiveTools()).toContain("url_context");
 				expect((await fake.search()).details.matches).toEqual(["url_context"]);
 				await fake.switchModel(event, { ...gemini, id: `gemini-${cycle}` });
 				expect(fake.getActiveTools()).toContain("url_context");

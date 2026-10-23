@@ -47,6 +47,7 @@ function oneShotOf(item: PendingRecordData): OneShot {
 		...(item.raw ? { raw: true } : {}),
 		...(item.toolCallId ? { toolCallId: item.toolCallId } : {}),
 		...(item.once ? { once: true } : {}),
+		...(item.orTail ? { orTail: true } : {}),
 	};
 }
 
@@ -70,6 +71,10 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 			...(payload.raw ? { raw: true } : {}),
 			...(payload.toolCallId ? { toolCallId: payload.toolCallId } : {}),
 			...(payload.once ? { once: true } : {}),
+			...(payload.orTail ? { orTail: true } : {}),
+			...(payload.untilCompaction ? { untilCompaction: true } : {}),
+			...(payload.observations?.length ? { observations: payload.observations } : {}),
+			...(payload.notified?.length ? { notified: payload.notified } : {}),
 		});
 		pi.appendEntry(RECORD.pending, data);
 	};
@@ -129,14 +134,17 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 		const stickyFacts = sticky.filter((entry) => !entry.delivered && rendered.stickyPlaced.includes(entry.key)).map((entry) => entry.fact);
 
 		const consumed = rendered.placed.flatMap((shot) => (shot.id ? [shot.id] : []));
-		const facts = [
-			...(epoch && rendered.stackPlaced ? stack.filter((entry) => layout !== undefined || !entry.systemRoleOnly).flatMap((entry) => entry.facts ?? []) : []),
-			...rendered.placed.flatMap((shot) => shot.facts ?? []),
-			...stickyFacts,
-		];
+		// Each fact with the text that carries it: a repair that drops the text drops the fact.
+		const carried = [
+			...(epoch && rendered.stackPlaced ? stack.filter((entry) => layout !== undefined || !entry.systemRoleOnly).map((entry) => ({ text: entry.text, facts: entry.facts ?? [] })) : []),
+			...rendered.placed.map((shot) => ({ text: shot.text, facts: shot.facts ?? [] })),
+			...sticky.filter((entry) => stickyFacts.includes(entry.fact)).map((entry) => ({ text: entry.text, facts: [entry.fact] })),
+		].filter((block) => block.facts.length > 0);
+		const facts = carried.flatMap((block) => block.facts);
 		if (current) {
 			current.consumed.push(...consumed);
 			current.facts.push(...facts);
+			current.carried.push(...carried);
 		} else {
 			for (const id of consumed) deliveredHere.add(id);
 		}

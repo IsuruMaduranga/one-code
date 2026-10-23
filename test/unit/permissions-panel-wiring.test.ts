@@ -153,6 +153,31 @@ describe("/permissions wiring", () => {
 		expect(completeMock).toHaveBeenCalledTimes(2);
 	});
 
+	it("keeps an approved denial's grant across /reload, which re-runs the factory, but not into another session", async () => {
+		// pi builds a fresh extension instance for every session start.
+		const restart = async (reason: string) => {
+			fake = createFakePi();
+			permissionsExtension(fake.pi as never);
+			await fake.fire("session_start", { reason }, ctx);
+		};
+		blockOnce();
+		await bash(`rm -rf ${outside()}`);
+		await openPanel(ENTER);
+		await restart("reload");
+		completeMock.mockClear();
+		expect(await bash(`rm -rf ${outside()}`)).toBeUndefined();
+		expect(completeMock).not.toHaveBeenCalled();
+
+		blockOnce();
+		await bash(`rm -rf ${outside()}`);
+		await openPanel(ENTER);
+		await restart("fork");
+		completeMock.mockClear();
+		blockOnce();
+		expect((await bash(`rm -rf ${outside()}`))?.block).toBe(true);
+		expect(completeMock).toHaveBeenCalledTimes(2);
+	});
+
 	it("does not grant a call the user toggled back off, or a changed command", async () => {
 		blockOnce();
 		await bash(`rm -rf ${outside()}`);

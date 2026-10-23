@@ -1,22 +1,25 @@
 /**
  * Rebuild read-before-write state from a session branch (pure): which files
- * the model has read or written this conversation, so a `--resume`d session
- * does not block every edit with "has not been read in this conversation" —
- * a claim the model can see is false in its own transcript (review T9).
+ * the model has seen this conversation, so a `--resume`d session does not
+ * block every edit with "has not been read in this conversation", a claim
+ * the model can see is false in its own transcript (review T9).
  *
  * The content the model saw is not in the transcript, but each read and write
- * result records what it saw (`details.oneCodeFile`, `FileObservation`): a
- * file whose disk content still matches is observed with its current
- * content, and one that changed since is stale, so an edit needs a fresh read
- * (round-2 review H1). A result from before the record existed is observed
- * with its current content, as Claude Code's persisted read state is.
+ * result records what it saw (`details.oneCodeFile`, `FileObservation`) under
+ * the absolute path the tool resolved. The replay keys on that path, never on
+ * the call's own spelling: a worktree rewrites a relative path only in the
+ * call it runs, so the transcript's `a.ts` would resolve to the main
+ * checkout's twin (round-3 review M15). A post-compaction restore records the
+ * same on its pending entry, and a changed-on-disk notice records the
+ * versions it named. The caller compares each observation with the disk: a
+ * file that still matches is read, one that changed since is stale. A result
+ * that recorded nothing (a session from before the record existed) leaves its
+ * file unread: the disk as it is now is never taken as what the model saw
+ * (round-2 review H1).
  */
 
-import { pathArgument } from "../auto-mode/paths.ts";
+import { readRecord } from "../lib/ledger/records.ts";
 import { shownInFull } from "./shell-reads.ts";
-
-const READ_TOOLS = new Set(["read", "notebook_edit"]);
-const WRITE_TOOLS = new Set(["edit", "write", "notebook_edit"]);
 
 interface ToolCallBlock {
 	type: "toolCall";
@@ -25,33 +28,7 @@ interface ToolCallBlock {
 	arguments?: Record<string, unknown>;
 }
 
-type BranchMessage = { role?: string; content?: unknown; toolCallId?: string; isError?: boolean; timestamp?: number };
-
-/**
- * Every tool call on the branch that names a path (`path`, `file_path` or
- * `notebook_path`, as the gates read it) and got a successful result, in
- * result order, with the result message's time.
- */
-export function* successfulPathCalls(entries: readonly unknown[]): Generator<{ name: string; path: string; timestamp: number | undefined }> {
-	const calls = new Map<string, { name: string; path: string }>();
-	for (const entry of entries) {
-		const e = entry as { type?: string; message?: BranchMessage };
-		if (e?.type !== "message" || !e.message) continue;
-		const m = e.message;
-		if (m.role === "assistant" && Array.isArray(m.content)) {
-			for (const block of m.content as ToolCallBlock[]) {
-				if (block?.type !== "toolCall" || !block.id) continue;
-				const path = pathArgument(block.arguments);
-				if (path?.trim()) calls.set(block.id, { name: block.name, path });
-			}
-		} else if (m.role === "toolResult" && m.toolCallId && !m.isError) {
-			const call = calls.get(m.toolCallId);
-			if (call) yield { ...call, timestamp: m.timestamp };
-		}
-	}
-}
-
-const touchesFile = (name: string) => READ_TOOLS.has(name) || WRITE_TOOLS.has(name);
+type BranchMessage = { role?: string; content?: unknown; toolCallId?: string; toolName?: string; isError?: boolean; details?: { oneCodeFile?: unknown } };
 
 /** What a read or write result saw of its file, recorded in its details as `oneCodeFile`. */
 export interface FileObservation {
@@ -67,47 +44,79 @@ const isObservation = (value: unknown): value is FileObservation => {
 	return typeof v?.path === "string" && typeof v.size === "number" && typeof v.mtimeMs === "number" && typeof v.sha256 === "string";
 };
 
-/** The latest observation each file's read or write results recorded on the branch, by absolute path. */
-export function observationsOnBranch(entries: readonly unknown[]): Map<string, FileObservation> {
-	const out = new Map<string, FileObservation>();
-	for (const entry of entries) {
-		const message = (entry as { type?: string; message?: { role?: string; isError?: boolean; details?: { oneCodeFile?: unknown } } })?.message;
-		if ((entry as { type?: string })?.type !== "message" || message?.role !== "toolResult" || message.isError) continue;
-		const observed = message.details?.oneCodeFile;
-		if (isObservation(observed)) out.set(observed.path, observed);
-	}
-	return out;
-}
-
-/** Paths (as written in the tool input) of every successful read/edit/write on the branch, in order, deduplicated. */
-export function pathsReadOnBranch(entries: readonly unknown[]): string[] {
-	const seen = new Set<string>();
-	for (const call of successfulPathCalls(entries)) if (touchesFile(call.name)) seen.add(call.path);
-	return [...seen];
-}
-
 /**
- * Each path (as written in the tool input) a successful read/edit/write on the
- * branch touched, with the time of its last such result message: the order
- * the post-compaction file restore uses after a resume, when the modification
- * times stat'ed at those reads are gone (Claude Code uses the transcript time
- * the same way).
+ * Every successful tool result on the branch that recorded what it saw of a
+ * file, in branch order: its position, the tool that ran (from its call, else
+ * the result's own `toolName`) and the observation.
  */
-export function lastTouchesOnBranch(entries: readonly unknown[]): Map<string, number> {
-	const touches = new Map<string, number>();
-	for (const call of successfulPathCalls(entries)) {
-		if (touchesFile(call.name) && call.timestamp !== undefined) touches.set(call.path, call.timestamp);
+function* fileResults(entries: readonly unknown[]): Generator<{ index: number; name: string | undefined; seen: FileObservation }> {
+	const names = new Map<string, string>();
+	for (const [index, entry] of entries.entries()) {
+		const e = entry as { type?: string; message?: BranchMessage };
+		if (e?.type !== "message" || !e.message) continue;
+		const m = e.message;
+		if (m.role === "assistant" && Array.isArray(m.content)) {
+			for (const block of m.content as ToolCallBlock[]) if (block?.type === "toolCall" && block.id) names.set(block.id, block.name);
+		} else if (m.role === "toolResult" && !m.isError) {
+			const seen = m.details?.oneCodeFile;
+			if (isObservation(seen)) yield { index, name: (m.toolCallId ? names.get(m.toolCallId) : undefined) ?? m.toolName, seen };
+		}
 	}
-	return touches;
+}
+
+/** What the branch shows the model saw of a file, and what it was told about the file since. */
+export interface SeenFile {
+	/** The version the model last saw, as the result or restore that showed it recorded it. */
+	seen: FileObservation;
+	/** Content hashes of the changed versions a notice named after that. */
+	notified: Set<string>;
 }
 
 /**
- * The paths (as written in the tool input) that a successful `read` in the
- * kept turns returned: those files are in context already, so the
- * post-compaction restore skips them.
+ * Each file the model saw in the entries still in context (`inContextEntries`),
+ * by absolute path: the last result or post-compaction restore that showed
+ * it, and the changed versions a notice named since.
+ *
+ * In the kept turns before the latest compaction only a `read` result counts,
+ * as at the compaction itself: a kept edit or write does not show the whole
+ * file. A restore counts only after the latest compaction, and there it
+ * counts whether or not a request delivered it yet. A later compaction is
+ * the only thing that drops a restore undelivered (lib/ledger/fold.ts), so
+ * one recorded since the latest is either delivered or rides the next
+ * request, and the model sees the file before it can call a tool on it; the
+ * live session counts it read from the compaction on, too. A notice counts
+ * wherever it lies after the file's last observation: it is delivered or
+ * pending, and announcing the same version again would repeat it.
+ */
+export function filesSeenOnBranch(entries: readonly unknown[]): Map<string, SeenFile> {
+	let compaction = -1;
+	entries.forEach((entry, index) => {
+		if ((entry as { type?: string })?.type === "compaction") compaction = index;
+	});
+	const results = new Map([...fileResults(entries)].map((result) => [result.index, result]));
+	const files = new Map<string, SeenFile>();
+	const see = (seen: FileObservation) => files.set(seen.path, { seen, notified: new Set() });
+	entries.forEach((entry, index) => {
+		const result = results.get(index);
+		if (result) {
+			if (index > compaction || result.name === "read") see(result.seen);
+			return;
+		}
+		const record = readRecord(entry as never);
+		if (record?.kind !== "pending") return;
+		if (index > compaction) for (const seen of record.data.observations ?? []) if (isObservation(seen)) see(seen);
+		for (const told of record.data.notified ?? []) files.get(told.path)?.notified.add(told.sha256);
+	});
+	return files;
+}
+
+/**
+ * The files (absolute, as their results recorded them) that a successful
+ * `read` in the kept turns returned: those files are in context already, so
+ * the post-compaction restore skips them.
  */
 export function keptReadPaths(kept: readonly unknown[]): string[] {
-	return [...successfulPathCalls(kept)].filter((call) => call.name === "read").map((call) => call.path);
+	return [...fileResults(kept)].filter((result) => result.name === "read").map((result) => result.seen.path);
 }
 
 /**

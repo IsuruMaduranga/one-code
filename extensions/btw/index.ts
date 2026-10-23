@@ -14,8 +14,8 @@
  * reads the cache the session wrote (lib/request-replay.ts; the compaction
  * extension publishes the capture). Without a capture for the session model,
  * or on a provider API the replay does not cover, it falls back to a
- * standalone call: the messages the session last sent (captured from the
- * `context` event), the earlier side exchanges, an empty system prompt,
+ * standalone call: the current branch's messages (read from the session at
+ * call time), the earlier side exchanges, an empty system prompt,
  * name-only tool stubs so a history carrying tool_use blocks stays valid on
  * strict providers, and withReasoningFallback for models that cannot disable
  * thinking. Both run on the SESSION model: a side question deserves the same
@@ -27,8 +27,6 @@
  * subagent through the subagents extension (lib/btw-fork.ts).
  */
 
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { followCoveredMessages } from "../lib/covered-messages.ts";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import {
 	convertToLlm,
@@ -44,7 +42,7 @@ import { btwForkedLine, type BtwForkResult, requestBtwFork } from "../lib/btw-fo
 import { canShowCustomUi, notifyOrPrint, printAnswer } from "../lib/headless-output.ts";
 import { announcePromptOptions } from "../lib/prompt-options.ts";
 import { followLastExchange, replaySideCall } from "../lib/replay-call.ts";
-import { answerText, stripImageBlocks, toolStubs, trimToTurnBoundary, withoutSystemMessages } from "../lib/side-call.ts";
+import { answerText, branchMessages, stripImageBlocks, toolStubs, trimToTurnBoundary, withoutSystemMessages } from "../lib/side-call.ts";
 import { boundedDockHeight, linesComponent, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { CONVERSATION_CACHE_PLACEMENT } from "../lib/side-call-cache.ts";
 import { releaseSideCalls, runSideCall } from "../lib/side-call-run.ts";
@@ -89,12 +87,7 @@ export default function btwExtension(pi: ExtensionAPI) {
 		return linesComponent((width) => [...row.render(width), truncateLine(`  ⎿  ${paint("dim", btwForkedLine(data.name, data.taskId))}`, width)]);
 	});
 
-	// The whole conversation the session's last request covered, as pi built it.
-	let capturedMessages: AgentMessage[] | undefined;
-	followCoveredMessages(pi, (messages) => {
-		capturedMessages = messages;
-	});
-	// The same request as it went on the wire, and the reply that answered it.
+	// The session's last request as it went on the wire, and the reply that answered it.
 	const exchange = followLastExchange(pi);
 
 	// The session's answered side questions, oldest first: sent before each new
@@ -116,7 +109,6 @@ export default function btwExtension(pi: ExtensionAPI) {
 		sessionEpoch++;
 		// Claude Code's `[question]` placeholder after a bare `/btw` in the prompt.
 		pi.events.emit(ARGUMENT_HINT_CHANNEL, { command: "btw", hint: "[question]" } satisfies ArgumentHint);
-		capturedMessages = undefined;
 		history = [];
 		inFlight?.abort();
 		inFlight = undefined;
@@ -157,7 +149,9 @@ export default function btwExtension(pi: ExtensionAPI) {
 		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
 		if (!auth.ok) throw new Error("No API key is available for the current model.");
 		const tools = toolStubs(pi.getActiveTools(), STUB_REASON);
-		const context = trimToTurnBoundary(withoutSystemMessages(capturedMessages ?? []));
+		// The current branch, read now: a /tree or a compaction since the last
+		// request changed it, and pi fires no `context` event for either.
+		const context = trimToTurnBoundary(withoutSystemMessages(branchMessages(ctx)));
 		// btw runs on a cheap, possibly text-only reader and answers a text question,
 		// so images the conversation carried are stripped before the call
 		// (working-docs/decisions/model-policy.md).

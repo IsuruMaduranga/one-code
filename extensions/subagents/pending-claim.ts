@@ -33,6 +33,19 @@ export interface PendingRun {
  * there is nothing to say. Named runs, so a model with several in flight knows
  * which ones it cannot have heard from.
  */
+/**
+ * The background agents still working when a compaction summarized the calls
+ * that started them: the new epoch's history no longer shows them, so a model
+ * that is not told could start the same work again or report a result it
+ * never got (lifecycle-grid-hunt round 3, R3-M27; Claude Code re-attaches its
+ * task status after a compaction).
+ */
+export function runningAfterCompactionReminder(runs: readonly PendingRun[]): string | undefined {
+	if (runs.length === 0) return undefined;
+	const named = runs.map((run) => `${run.name} (task ${run.taskId})`).join(", ");
+	return `Background agents you started before this conversation was compacted are still running: ${named}. Each one notifies you when it finishes; do not start the same work again. Use task_output to check on one, or task_stop to end it.`;
+}
+
 export function pendingClaimReminder(runs: readonly PendingRun[]): string | undefined {
 	if (runs.length === 0) return undefined;
 	const named = runs.map((run) => `${run.name} (task ${run.taskId})`).join(", ");

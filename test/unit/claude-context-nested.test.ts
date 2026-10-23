@@ -140,9 +140,9 @@ describe("claude-context: nested instructions after a resume or branch switch", 
 });
 
 describe("claude-context: nested instructions not yet sent", () => {
-	// The queued reminder text is not persisted, so a reload before the request
-	// that carries it must leave the files unshown.
-	it("attaches again after a reload that came before the request went out", async () => {
+	// The queued text is a pending one-shot on the branch, and the shown record
+	// is written with it: a reload before the request keeps both (round 3, R3-L10).
+	it("does not attach them again after a reload that came before the request went out", async () => {
 		const fake = createFakePi();
 		claudeContextExtension(fake.pi as never);
 		const texts: string[] = [];
@@ -159,7 +159,7 @@ describe("claude-context: nested instructions not yet sent", () => {
 		branch = [result, ...fake.appendedEntries.map((entry) => ({ type: "custom", ...entry }))];
 		await fake.fire("session_tree", {}, ctx);
 		await read("src/reports/deep/x.py", "r2");
-		expect(texts).toHaveLength(4);
+		expect(texts).toHaveLength(2);
 	});
 });
 

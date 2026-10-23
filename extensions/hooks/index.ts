@@ -26,11 +26,17 @@
  * never as a message of its own: PreToolUse context is queued as a one-shot on
  * the reminder channel, so it lands INSIDE the tool result it belongs to,
  * persisted, at no extra turn; PostToolUse context is appended to the result
- * the same way; prompt/session/compaction context is returned from
- * `before_agent_start` as a custom message right AFTER the user's prompt. Until
+ * the same way; prompt, session and compaction context is a one-shot too,
+ * persisted as a `one-code:pending` entry when the hook answers, so it rides
+ * the next request whatever opens it (a prompt, a notification, the
+ * continuation after a mid-turn compaction) and counts as delivered only when
+ * that request's reply stays on the branch (lib/ledger/fold.ts). Until
  * 2026-09-05 each was a custom steer (one extra LLM turn per hook per tool,
  * pi draining one steer per call) and prompt context landed BEFORE the prompt
- * (STEERING-REVIEW-2026-09-05 M6).
+ * (STEERING-REVIEW-2026-09-05 M6); until 2026-10-21 prompt, session and
+ * compaction context was a `before_agent_start` message, taken off its queue
+ * before the request went out and held until a run started (round 3,
+ * R3-M14).
  *
  * Subagents: the tool hooks also run for a child's tool calls, through the
  * bridge published on `SUBAGENT_HOOK_CHANNEL` (subagent-bridge.ts): the child
@@ -39,7 +45,6 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { readState, recordState } from "../lib/ledger/state.ts";
 import { contentText } from "@earendil-works/pi-ai";
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { RunOutcomeLatch } from "../lib/interrupt.ts";
@@ -67,9 +72,7 @@ import { type ChildHookCall, type ChildHookResult, type HookBridge, SUBAGENT_HOO
 import { projectHooksApproved } from "./trust.ts";
 import { QueuedDelivery } from "../lib/queued-delivery.ts";
 import { SKILL_INVOCATION_TYPE, type SkillInvocationDetails } from "../skill/invoke.ts";
-import { isNotificationDetails } from "../lib/notifications.ts";
 import { consentDialog } from "../lib/consent-dialogs.ts";
-import { isUserRun } from "../lib/prompt-options.ts";
 import { followWorkCwd } from "../lib/worktree-channel.ts";
 
 /** Claude Code's `hook_additional_context` attachment text (utils/messages.ts). */
@@ -127,41 +130,15 @@ function isStopContinuation(event: unknown): boolean {
 	return run.messageType === "custom" && run.message?.customType === STOP_CONTINUATION_TYPE;
 }
 
-/** Hook context waiting for the next prompt. */
-type PendingContext = { event: CcHookEvent; text: string };
-/** The `one-code:state` key the waiting hook context is recorded under. */
-const PENDING_CONTEXT_STATE = "hooks:pending-context";
-
 export default function hooksExtension(pi: ExtensionAPI) {
 	const workCwd = followWorkCwd(pi.events);
 	let stopHookBlocks = 0;
-	/**
-	 * Context from UserPromptSubmit / SessionStart / PostCompact hooks, delivered
-	 * with the next prompt. Recorded on the branch whenever it changes, so a
-	 * /reload or a quit before that prompt keeps it, and a /tree switch takes
-	 * the selected branch's (round-2 review M8, L1).
-	 */
-	let pendingPromptContext: PendingContext[] = [];
-	const setPending = (next: PendingContext[]) => {
-		const changed = next.length !== pendingPromptContext.length || next.some((entry, i) => entry !== pendingPromptContext[i]);
-		pendingPromptContext = next;
-		if (changed) recordState(pi, PENDING_CONTEXT_STATE, next);
-	};
-	/** The branch's recorded queue. */
-	const pendingOnBranch = (ctx: ExtensionContext): PendingContext[] => {
-		const stored = readState(ctx, PENDING_CONTEXT_STATE);
-		return Array.isArray(stored) ? stored.filter((entry): entry is PendingContext => typeof entry?.event === "string" && typeof entry?.text === "string") : [];
-	};
-	/**
-	 * UserPromptSubmit context for messages queued mid-turn, held until pi
-	 * delivers the message (lib/queued-delivery.ts): such a message never
-	 * reaches before_agent_start.
-	 */
+	/** Prompt, session and compaction hook context, as a one-shot the next request carries (lib/reminders.ts). */
+	const deliverContext = (event: CcHookEvent, text: string) => pi.events.emit(REMINDER_CHANNEL, { text: hookContextText(event, text), placement: "last-append" });
+	/** UserPromptSubmit context, held until pi delivers the prompt it belongs to (lib/queued-delivery.ts). */
 	const queuedPromptContext = new QueuedDelivery<string>();
 	/** The last context seen, for bridged child calls (dispatched parent-side). */
 	let lastCtx: ExtensionContext | undefined;
-	/** True once a prompt opened a turn in this session (before_agent_start). */
-	let prompted = false;
 	/**
 	 * The in-flight SessionStart hook dispatch. It runs OFF the `session_start`
 	 * path so the editor opens immediately (a slow hook used to hold the prompt
@@ -409,7 +386,6 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		// steer/followUp). The Stop latch is reset in before_agent_start, where a
 		// turn really starts: pi re-checks streaming after these handlers, so a
 		// queued message whose turn ended during the hook opens a new turn.
-		const queued = event.streamingBehavior;
 		const gen = sessionGen;
 		// Drain the backgrounded SessionStart dispatch before this prompt's own
 		// UserPromptSubmit context, so their order in the first turn is unchanged
@@ -425,10 +401,10 @@ export default function hooksExtension(pi: ExtensionAPI) {
 			return { action: "handled" as const };
 		}
 		if (!outcome.additionalContext) return undefined;
-		// A queued message's context waits for pi to deliver that message
-		// (message_start below), so it rides the same request.
-		if (queued) queuedPromptContext.hold(event.text, hookContextText("UserPromptSubmit", outcome.additionalContext));
-		else setPending([...pendingPromptContext, { event: "UserPromptSubmit", text: outcome.additionalContext }]);
+		// The context waits for pi to deliver this prompt (message_start below),
+		// queued mid-turn or not, so it rides the prompt's own request and never a
+		// run a notification opens first.
+		queuedPromptContext.hold(event.text, hookContextText("UserPromptSubmit", outcome.additionalContext));
 		return undefined;
 	});
 
@@ -445,34 +421,24 @@ export default function hooksExtension(pi: ExtensionAPI) {
 			if (text) emit(text);
 			return;
 		}
-		// A `/skill:` command the skill extension took over arrives as its hidden
-		// message, carrying the typed text. It opens the turn when the command
-		// was idle, through a sendMessage that never reaches before_agent_start,
-		// so the prompt context waiting there rides this message too.
 		if (message.role !== "custom") return;
-		// A background completion that opens the session's first turn
-		// (lib/prompt-options.ts) skips before_agent_start as well, so the
-		// SessionStart context a typed first prompt would carry rides it.
-		const opensFirstTurn = !prompted && isNotificationDetails(message.details);
-		if (message.customType !== SKILL_INVOCATION_TYPE && !opensFirstTurn) return;
-		if (opensFirstTurn) await drainSessionStart();
-		if (gen !== sessionGen) return;
+		// A background completion that opens the first turn skips
+		// before_agent_start: the SessionStart context must be pending before its
+		// request is rendered.
+		await drainSessionStart();
+		// A `/skill:` command the skill extension took over arrives as its hidden
+		// message, carrying the typed text: a queued one's context rides it.
+		if (message.customType !== SKILL_INVOCATION_TYPE || queuedPromptContext.isEmpty) return;
 		const input = (message.details as Partial<SkillInvocationDetails> | undefined)?.input;
 		const queued = typeof input === "string" ? queuedPromptContext.release(input) : undefined;
-		if (queued) emit(queued);
-		const waiting = pendingPromptContext;
-		setPending([]);
-		for (const { event: hookEvent, text } of waiting) emit(hookContextText(hookEvent, text));
+		if (gen === sessionGen && queued) emit(queued);
 	});
 
-	// Prompt/session/compaction hook context rides the turn it belongs to as a
-	// custom message pi appends right AFTER the user's prompt (the
-	// before_agent_start `message` return). An idle `sendMessage` from here
-	// landed it BEFORE the prompt (pi appends first, then adds the user message).
+	// The first turn waits for the backgrounded SessionStart dispatch, so its
+	// context is pending before the request is rendered.
 	pi.on("before_agent_start", async (event, ctx) => {
 		const gen = sessionGen;
 		lastCtx = ctx;
-		prompted = true;
 		// The SessionStart dispatch runs in the background from session_start; the
 		// first turn must wait for it so its additionalContext is present (and, on
 		// first run, so its approval dialog gates execution before the model runs).
@@ -485,25 +451,6 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		// continuation keeps the cap counting: a notification or scheduled run
 		// starts a fresh turn, as a prompt does.
 		if (!isStopContinuation(event)) stopHookBlocks = 0;
-		// UserPromptSubmit context belongs to the user's prompt; SessionStart and
-		// PostCompact context belong to whichever run opens next, which on pi
-		// 1.2.0 can be one a notification or scheduled fire opened. Its
-		// message_start can no longer deliver them: `prompted` is set above.
-		const userRun = isUserRun(event);
-		const texts = pendingPromptContext.filter((entry) => userRun || entry.event !== "UserPromptSubmit");
-		if (texts.length === 0) return;
-		setPending(pendingPromptContext.filter((entry) => !texts.includes(entry)));
-		return {
-			message: {
-				customType: "one-code:hook-context",
-				content: texts.map(({ event, text }) => wrapReminder(hookContextText(event, text))).join("\n"),
-				display: false,
-			},
-		};
-	});
-
-	pi.on("session_tree", (_event, ctx) => {
-		pendingPromptContext = pendingOnBranch(ctx);
 	});
 
 	// ---- SessionStart / SessionEnd -----------------------------------------
@@ -517,10 +464,8 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		});
 		// A later session_start (rapid /clear, resume) may have superseded this one
 		// while its hook ran; discard the stale result instead of pushing it into
-		// the new session's context (`pendingPromptContext` is shared and reset).
-		if (gen === sessionGen && outcome.additionalContext) {
-			setPending([...pendingPromptContext, { event: "SessionStart", text: outcome.additionalContext }]);
-		}
+		// the new session's context.
+		if (gen === sessionGen && outcome.additionalContext) deliverContext("SessionStart", outcome.additionalContext);
 	};
 
 	pi.on("session_start", (event, ctx) => {
@@ -528,11 +473,8 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		sessionAbort = new AbortController();
 		lastCtx = ctx;
 		const gen = ++sessionGen;
-		// What this branch was still waiting to send (a /reload, a resume, a fork).
-		pendingPromptContext = pendingOnBranch(ctx);
 		queuedPromptContext.clear();
 		sessionStartPending = undefined;
-		prompted = false;
 		stopHookBlocks = 0;
 		// Publish the child hook bridge (subagent-bridge.ts). The closures read
 		// live parent state per call, so once per session start is enough.
@@ -740,7 +682,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		};
 		const outcome = await dispatch(ctx, "PostCompact", { candidates: [trigger] }, payload);
 		if (gen !== sessionGen) return;
-		if (outcome.additionalContext) setPending([...pendingPromptContext, { event: "PostCompact", text: outcome.additionalContext }]);
+		if (outcome.additionalContext) deliverContext("PostCompact", outcome.additionalContext);
 		// CC fires SessionStart(source: "compact") after compaction. Awaited inline
 		// (not backgrounded), so the current generation is still in force.
 		await dispatchSessionStart(ctx, "compact", sessionGen);

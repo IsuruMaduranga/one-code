@@ -515,6 +515,11 @@ export default function workflowExtension(pi: ExtensionAPI) {
 		applyWorkflowSettings(ctx.cwd);
 		registerInputHook(ctx);
 	});
+	// pi restores the selected branch's tool loadout at a /tree switch: turned off, the tool stays out.
+	pi.on("session_tree", () => {
+		const active = pi.getActiveTools();
+		if (!workflowsEnabled && active.includes("workflow")) pi.setActiveTools(active.filter((name) => name !== "workflow"));
+	});
 
 	// The permission-mode badge is a below-editor widget too, re-set on every
 	// mode change; setWidget order is last-write order, so re-set the strip

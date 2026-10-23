@@ -20,6 +20,7 @@
  */
 
 import type { Message } from "@earendil-works/pi-ai";
+import { settleSystemMessages } from "./ledger/layout.ts";
 import { isObject } from "./ledger/records.ts";
 import { listKey, stripMarkers, toolName } from "./ledger/wire.ts";
 import { estimateMessageTokens } from "./pi-ai-estimate.ts";
@@ -227,7 +228,7 @@ export function extendPayload(capture: RequestCapture, tail: Record<string, unkn
 	const extra = stripMarkers(Array.isArray(tail[key]) ? (tail[key] as unknown[]) : []);
 	const list =
 		capture.api === "anthropic-messages"
-			? appendAnthropic(base, extra)
+			? settleSystemMessages(appendAnthropic(base, extra), capture.api, base.length)
 			: capture.api === "bedrock-converse-stream" || capture.api.startsWith("google-")
 				? joinTurns(base, extra, capture.api.startsWith("google-") ? "parts" : "content")
 				: [...base, ...extra];
@@ -333,7 +334,7 @@ export function forkRequestPayload(capture: RequestCapture, child: Record<string
 	const key = listKey(capture.api);
 	const base = capture.payload[key] as unknown[];
 	const tail = (Array.isArray(child[key]) ? (child[key] as WireMessage[]) : []).filter((entry) => entry.role !== "system" && entry.role !== "developer");
-	const out: Record<string, unknown> = { ...capture.payload, [key]: capture.api === "anthropic-messages" ? joinUserTurns(base, tail) : [...base, ...tail] };
+	const out: Record<string, unknown> = { ...capture.payload, [key]: capture.api === "anthropic-messages" ? settleSystemMessages(joinUserTurns(base, tail), capture.api, base.length) : [...base, ...tail] };
 	const tools = forkTools(capture.payload.tools, child.tools, baseline, tail);
 	if (tools) out.tools = tools;
 	const capKey = CAP_PATHS[capture.api].find((path) => capAt(capture.payload, path) !== undefined);

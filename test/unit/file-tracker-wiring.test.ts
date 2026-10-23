@@ -4,7 +4,8 @@
  * replay reconstruction — as opposed to tracker.ts's pure state machine,
  * already covered by file-tracker.test.ts.
  */
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -31,6 +32,11 @@ describe("file-tracker wiring", () => {
 
 	const path = (name: string) => join(dir, name);
 	const ctx = () => createFakeCtx({ cwd: dir });
+	/** What a result that read `file` now records of it (`details.oneCodeFile`). */
+	const observed = (file: string) => {
+		const stat = statSync(file);
+		return { path: file, size: stat.size, mtimeMs: stat.mtimeMs, sha256: createHash("sha256").update(readFileSync(file, "utf-8")).digest("hex") };
+	};
 
 	it("blocks an edit to an existing file that was never read", async () => {
 		const file = path("a.ts");
@@ -267,7 +273,7 @@ describe("file-tracker wiring", () => {
 		writeFileSync(file, "resumed content");
 		const branch = [
 			{ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "1", name: "read", arguments: { path: file } }] } },
-			{ type: "message", message: { role: "toolResult", toolCallId: "1", isError: false } },
+			{ type: "message", message: { role: "toolResult", toolCallId: "1", isError: false, details: { oneCodeFile: observed(file) } } },
 		];
 		await fake.fireOne("session_start", { reason: "resume" }, createFakeCtx({ cwd: dir, sessionManager: { getSessionId: () => "s1", getBranch: () => branch } }));
 
@@ -373,7 +379,7 @@ describe("file-tracker wiring", () => {
 			}
 			const branch = [
 				{ type: "message", id: "a1", message: { role: "assistant", content: [{ type: "toolCall", id: "1", name: "read", arguments: { path: kept } }] } },
-				{ type: "message", id: "r1", message: { role: "toolResult", toolCallId: "1", isError: false } },
+				{ type: "message", id: "r1", message: { role: "toolResult", toolCallId: "1", isError: false, details: { oneCodeFile: observed(kept) } } },
 				{ type: "compaction", id: "c", firstKeptEntryId: "a1" },
 			];
 			const emitted: unknown[] = [];
@@ -397,7 +403,7 @@ describe("file-tracker wiring", () => {
 		writeFileSync(kept, "y");
 		const read = (id: string, file: string) => [
 			{ type: "message", id: `a${id}`, message: { role: "assistant", content: [{ type: "toolCall", id, name: "read", arguments: { path: file } }] } },
-			{ type: "message", id: `r${id}`, message: { role: "toolResult", toolCallId: id, isError: false } },
+			{ type: "message", id: `r${id}`, message: { role: "toolResult", toolCallId: id, isError: false, details: { oneCodeFile: observed(file) } } },
 		];
 		const branch = [...read("1", before), ...read("2", kept), { type: "compaction", id: "c", firstKeptEntryId: "a2" }];
 		await fake.fireOne("session_start", { reason: "resume" }, createFakeCtx({ cwd: dir, sessionManager: { getSessionId: () => "s2", getBranch: () => branch } }));
@@ -414,7 +420,7 @@ describe("file-tracker wiring", () => {
 		for (const file of [kept, other]) await fake.fireOne("tool_result", { toolName: "read", input: { path: file }, isError: false }, ctx());
 		const branch = [
 			{ type: "message", id: "a1", message: { role: "assistant", content: [{ type: "toolCall", id: "1", name: "read", arguments: { path: kept } }] } },
-			{ type: "message", id: "r1", message: { role: "toolResult", toolCallId: "1", isError: false } },
+			{ type: "message", id: "r1", message: { role: "toolResult", toolCallId: "1", isError: false, details: { oneCodeFile: observed(kept) } } },
 			{ type: "compaction", id: "c", firstKeptEntryId: "a1", timestamp: new Date().toISOString() },
 		];
 		await fake.fire("session_compact", { compactionEntry: branch[2], fromExtension: true, reason: "manual", willRetry: false }, createFakeCtx({ cwd: dir, sessionManager: { getSessionId: () => "s", getBranch: () => branch } }));
@@ -473,10 +479,11 @@ describe("file-tracker wiring", () => {
 		const kept = path("kept-stale.ts");
 		writeFileSync(kept, "seen by the model");
 		await fake.fireOne("tool_result", { toolName: "read", input: { path: kept }, isError: false }, ctx());
+		const seen = observed(kept);
 		writeFileSync(kept, "changed after the read, longer than before");
 		const branch = [
 			{ type: "message", id: "a1", message: { role: "assistant", content: [{ type: "toolCall", id: "1", name: "read", arguments: { path: kept } }] } },
-			{ type: "message", id: "r1", message: { role: "toolResult", toolCallId: "1", isError: false } },
+			{ type: "message", id: "r1", message: { role: "toolResult", toolCallId: "1", isError: false, details: { oneCodeFile: seen } } },
 			{ type: "compaction", id: "c", firstKeptEntryId: "a1", timestamp: new Date().toISOString() },
 		];
 		await fake.fire("session_compact", { compactionEntry: branch[2], fromExtension: true, reason: "manual", willRetry: false }, createFakeCtx({ cwd: dir, sessionManager: { getSessionId: () => "s", getBranch: () => branch } }));
@@ -491,7 +498,7 @@ describe("file-tracker wiring", () => {
 		await fake.fireOne("tool_result", { toolName: "read", input: { path: kept }, isError: false }, ctx());
 		const read = [
 			{ type: "message", id: "a1", message: { role: "assistant", content: [{ type: "toolCall", id: "1", name: "read", arguments: { path: kept } }] } },
-			{ type: "message", id: "r1", message: { role: "toolResult", toolCallId: "1", isError: false } },
+			{ type: "message", id: "r1", message: { role: "toolResult", toolCallId: "1", isError: false, details: { oneCodeFile: observed(kept) } } },
 		];
 		const first = [...read, { type: "compaction", id: "c1", firstKeptEntryId: "a1", timestamp: new Date().toISOString() }];
 		const emitted: string[] = [];

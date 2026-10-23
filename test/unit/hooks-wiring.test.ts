@@ -142,34 +142,38 @@ describe("hooks wiring", () => {
 		expect(fake.sentMessages).toHaveLength(0);
 	});
 
-	it("UserPromptSubmit context rides the prompt's own turn, AFTER the prompt (before_agent_start message), not as an idle message before it", async () => {
+	it("UserPromptSubmit context is a one-shot released when pi delivers the prompt, never a message of its own", async () => {
 		const hookPrompt = script("hook-prompt.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"additionalContext":"today is a holiday"}}'\n`);
 		writeUserHooks({ UserPromptSubmit: [{ hooks: [{ type: "command", command: hookPrompt }] }] });
+		const reminders: unknown[] = [];
+		fake.events.on(REMINDER_CHANNEL, (payload) => reminders.push(payload));
 		mount();
 		await fake.fireOne("input", { source: "interactive", text: "hello" }, ctx());
 		// Nothing is sent on its own: pi would have appended an idle custom message
 		// BEFORE the user message it is about to add.
 		expect(fake.sentMessages).toHaveLength(0);
-		const result = await fake.fireOne<{ message?: { customType: string; content: string; display: boolean } }>("before_agent_start", { prompt: "hello" }, ctx());
-		expect(result?.message).toEqual({
-			customType: "one-code:hook-context",
-			content: wrapReminder(hookContextText("UserPromptSubmit", "today is a holiday")),
-			display: false,
-		});
+		expect(reminders).toHaveLength(0);
+		expect(await fake.fireOne("before_agent_start", { prompt: "hello" }, ctx())).toBeUndefined();
+		await fake.fireOne("message_start", { message: { role: "user", content: [{ type: "text", text: "hello" }] } }, ctx());
+		expect(reminders).toEqual([{ text: hookContextText("UserPromptSubmit", "today is a holiday"), placement: "last-append" }]);
 		// Delivered once.
-		const again = await fake.fireOne<{ message?: unknown }>("before_agent_start", { prompt: "next" }, ctx());
-		expect(again).toBeUndefined();
+		await fake.fireOne("message_start", { message: { role: "user", content: [{ type: "text", text: "hello" }] } }, ctx());
+		expect(reminders).toHaveLength(1);
 	});
 
 	it("keeps UserPromptSubmit context for the prompt when a notification opens a run first (pi 1.2.0 custom run)", async () => {
 		const hookPrompt = script("hook-prompt-custom.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"additionalContext":"for the prompt"}}'\n`);
 		writeUserHooks({ UserPromptSubmit: [{ hooks: [{ type: "command", command: hookPrompt }] }] });
+		const reminders: unknown[] = [];
+		fake.events.on(REMINDER_CHANNEL, (payload) => reminders.push(payload));
 		mount();
 		await fake.fireOne("input", { source: "interactive", text: "hello" }, ctx());
-		const custom = await fake.fireOne<{ message?: unknown }>("before_agent_start", { messageType: "custom", message: { role: "custom", customType: "task-notification" } }, ctx());
-		expect(custom).toBeUndefined();
-		const result = await fake.fireOne<{ message?: { content: string } }>("before_agent_start", { prompt: "hello" }, ctx());
-		expect(result?.message?.content).toBe(wrapReminder(hookContextText("UserPromptSubmit", "for the prompt")));
+		const notification = { role: "custom", customType: "task-notification", content: [], details: { notificationId: "1-a" } };
+		await fake.fireOne("before_agent_start", { messageType: "custom", message: notification }, ctx());
+		await fake.fireOne("message_start", { message: notification }, ctx());
+		expect(reminders).toHaveLength(0);
+		await fake.fireOne("message_start", { message: { role: "user", content: [{ type: "text", text: "hello" }] } }, ctx());
+		expect(reminders).toEqual([{ text: hookContextText("UserPromptSubmit", "for the prompt"), placement: "last-append" }]);
 	});
 
 	it.each(["steer", "followUp"] as const)(
@@ -655,23 +659,21 @@ describe("hooks wiring", () => {
 		expect(reminders).toContain(hookContextText("SessionStart", "session context"));
 	});
 
-	it("SessionStart context rides a first run a notification opens on pi 1.2.0, while UserPromptSubmit context waits for its prompt", async () => {
+	it("SessionStart context is pending for the first run a notification opens on pi 1.2.0, while UserPromptSubmit context waits for its prompt", async () => {
 		const start = script("hook-start-custom.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"additionalContext":"session context"}}'\n`);
 		const prompt = script("hook-prompt-held.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"additionalContext":"for the prompt"}}'\n`);
 		writeUserHooks({ SessionStart: [{ hooks: [{ type: "command", command: start }] }], UserPromptSubmit: [{ hooks: [{ type: "command", command: prompt }] }] });
+		const reminders: string[] = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => reminders.push((data as { text: string }).text));
 		mount();
 		await fake.fireOne("session_start", { reason: "startup" }, ctx());
 		await fake.fireOne("input", { source: "interactive", text: "hello" }, ctx());
 		const notificationMessage = { role: "custom", customType: "subagent-result", content: [], details: { notificationId: "1-a" } };
-		const custom = await fake.fireOne<{ message?: { content: string } }>("before_agent_start", { messageType: "custom", message: notificationMessage }, ctx());
-		expect(custom?.message?.content).toBe(wrapReminder(hookContextText("SessionStart", "session context")));
-		// The run's message_start delivers nothing more.
-		const reminders: string[] = [];
-		fake.events.on(REMINDER_CHANNEL, (data) => reminders.push((data as { text: string }).text));
+		expect(await fake.fireOne("before_agent_start", { messageType: "custom", message: notificationMessage }, ctx())).toBeUndefined();
 		await fake.fireOne("message_start", { message: notificationMessage }, ctx());
-		expect(reminders).toEqual([]);
-		const result = await fake.fireOne<{ message?: { content: string } }>("before_agent_start", { messageType: "user", prompt: "hello" }, ctx());
-		expect(result?.message?.content).toBe(wrapReminder(hookContextText("UserPromptSubmit", "for the prompt")));
+		expect(reminders).toEqual([hookContextText("SessionStart", "session context")]);
+		await fake.fireOne("message_start", { message: { role: "user", content: [{ type: "text", text: "hello" }] } }, ctx());
+		expect(reminders).toEqual([hookContextText("SessionStart", "session context"), hookContextText("UserPromptSubmit", "for the prompt")]);
 	});
 });
 

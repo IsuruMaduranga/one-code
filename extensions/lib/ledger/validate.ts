@@ -103,11 +103,12 @@ export function repairRequest(payload: WirePayload, api: string, problems: reado
 
 /**
  * What a repaired request still delivers, so its record does not count a
- * dropped block as sent: the consumed pending items whose text is still in
- * the payload's new elements (not `prefix`, the recorded ones by hash, where
- * an earlier copy of the same text may sit), and the callable-tool facts without a tool whose
- * `tool_addition` was dropped (a listing for tool_search names tools the
- * request need not declare).
+ * dropped block as sent. Facts ride the text that carries them: the consumed
+ * pending items, and the facts of each `carried` block, count only while
+ * their text is still in the payload's new elements (not `prefix`, the
+ * recorded ones by hash, where an earlier copy of the same text may sit).
+ * The callable-tool facts also lose a tool whose `tool_addition` was dropped
+ * (a listing for tool_search names tools the request need not declare).
  */
 export function deliveredAfterRepair(
 	payload: WirePayload,
@@ -115,13 +116,17 @@ export function deliveredAfterRepair(
 	delivered: { consumed: readonly string[]; facts: readonly ToldFact[] },
 	pending: readonly { id: string; text: string }[],
 	prefix: ReadonlySet<string> = new Set(),
+	carried: readonly { text: string; facts: readonly ToldFact[] }[] = [],
 ): { consumed: string[]; facts: ToldFact[] } {
 	const list = payload[listKey(api)];
 	const sent = JSON.stringify(Array.isArray(list) ? list.filter((element) => !prefix.has(contentHash(element))) : []);
+	const onWire = (text: string) => sent.includes(JSON.stringify(text).slice(1, -1));
 	const texts = new Map(pending.map((item) => [item.id, item.text]));
+	const dropped = new Set(carried.filter((block) => !onWire(block.text)).flatMap((block) => block.facts));
 	// The repair left only references to declared tools.
 	const referenced = referencedNames(payload[listKey(api)], new Set());
 	const facts = delivered.facts.flatMap((fact): ToldFact[] => {
+		if (dropped.has(fact)) return [];
 		if (fact.kind !== "tools" || !fact.callable) return [fact];
 		const names = fact.names.filter((name) => referenced.has(name));
 		return names.length > 0 ? [{ ...fact, names }] : [];
@@ -129,7 +134,7 @@ export function deliveredAfterRepair(
 	return {
 		consumed: delivered.consumed.filter((id) => {
 			const text = texts.get(id);
-			return text === undefined || sent.includes(JSON.stringify(text).slice(1, -1));
+			return text === undefined || onWire(text);
 		}),
 		facts,
 	};

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { validateRequest } from "../../extensions/lib/ledger/validate.ts";
+import type { ToldFact } from "../../extensions/lib/ledger/records.ts";
+import { deliveredAfterRepair, repairRequest, validateRequest } from "../../extensions/lib/ledger/validate.ts";
 
 const api = "anthropic-messages";
 const user = (text: string) => ({ role: "user", content: [{ type: "text", text }] });
@@ -47,5 +48,18 @@ describe("ledger validate", () => {
 	it("checks only references on non-Anthropic shapes, which take a system message anywhere", () => {
 		const responses = { model: "gpt-6", instructions: "x", tools: [], input: [{ role: "developer", content: "note" }, { role: "user", content: "hi" }] };
 		expect(validateRequest(responses, "openai-responses")).toEqual([]);
+	});
+
+	it("drops the facts of a block the repair removed, and keeps the rest (facts ride their text)", () => {
+		const stack = { role: "system", content: [{ type: "text", text: "<system-reminder>\nDeferred tools: probe_echo\n</system-reminder>" }] };
+		const payload = body([user("one"), stack, user("hook context")]);
+		const listed: ToldFact = { kind: "tools", names: ["probe_echo"] };
+		const date: ToldFact = { kind: "block", key: "date", hash: "d" };
+		const repaired = repairRequest(payload, api, validateRequest(payload, api));
+		const delivered = deliveredAfterRepair(repaired, api, { consumed: [], facts: [listed, date] }, [], new Set(), [
+			{ text: "Deferred tools: probe_echo", facts: [listed] },
+			{ text: "one", facts: [date] },
+		]);
+		expect(delivered.facts).toEqual([date]);
 	});
 });

@@ -205,6 +205,15 @@ describe("renderReminders: one-shots", () => {
 		expect(blockTexts(result.messages[2])).toEqual(["ran"]);
 	});
 
+	it("puts an `orTail` breadcrumb (a post-compaction restore) on the tail mid-turn, and before the prompt's text when one opens the request (R3-M16)", () => {
+		const restore = shot("restored a.ts", { placement: "user-prepend", orTail: true, id: "r" });
+		const midTurn = render([user("go", 1), assistant(2), toolResult("ran", 3)], { oneShots: [restore] });
+		expect(midTurn.placed.map((s) => s.id)).toEqual(["r"]);
+		expect(blockTexts(midTurn.messages[2])).toEqual(["ran", wrapReminder("restored a.ts")]);
+		const opening = render([user("next", 1)], { oneShots: [restore] });
+		expect(blockTexts(opening.messages[0])).toEqual([wrapReminder("restored a.ts"), "next"]);
+	});
+
 	it("places nothing, and leaves every one-shot pending, when nothing can carry it", () => {
 		const result = render([assistant(1)], { oneShots: [shot("steer")] });
 		expect(result.placed).toEqual([]);

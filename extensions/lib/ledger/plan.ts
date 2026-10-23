@@ -45,8 +45,16 @@ export interface RequestPlan {
 	consumed: string[];
 	/** What this request's new blocks tell the model (the renderer fills it). */
 	facts: ToldFact[];
+	/** Each new block's text with the facts it carries, so a repair that drops a block drops its facts (the renderer fills it). */
+	carried: CarriedFacts[];
 	/** Every context message pi built for the request, before the cut: what the whole request covers. */
 	messages: readonly CoveredMessage[];
+}
+
+/** A block's text and the facts it tells: they count only while the text is on the wire. */
+export interface CarriedFacts {
+	text: string;
+	facts: readonly ToldFact[];
 }
 
 /** A context message as far as coverage reads it. */
@@ -78,13 +86,11 @@ export function planRequest(fold: LedgerFold, messages: readonly CoveredMessage[
 		fold,
 		consumed: [],
 		facts: [],
+		carried: [],
 		messages,
 	});
 	const base = fold.lastRequest;
 	if (fold.opensEpoch || !base) return { plan: plan(true, fold.cause ?? "first"), tailStart: 0 };
-	// No reply followed the base (the process died mid-stream): its list may end
-	// in system messages that expected one, so render everything again.
-	if (base.answered === false) return { plan: plan(true, "coverage"), tailStart: 0 };
 	const at = base.covers;
 	const last = at && at.count > 0 ? messages[at.count - 1] : undefined;
 	if (!at || at.count > messages.length || (at.count > 0 && (last?.role !== at.role || (last?.timestamp ?? 0) !== at.timestamp))) {

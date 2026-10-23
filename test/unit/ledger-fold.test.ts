@@ -53,6 +53,7 @@ describe("ledger fold", () => {
 		b.message("assistant");
 		b.message("user");
 		b.request(body([user("one"), assistant("1"), user("two")]));
+		b.message("assistant");
 		const fold = foldBranch(b.entries, live);
 		expect(fold.opensEpoch).toBe(false);
 		expect(fold.lastRequest?.list).toEqual([user("one"), assistant("1"), user("two")]);
@@ -138,17 +139,18 @@ describe("ledger fold", () => {
 		expect(fold.told.size).toBe(0);
 	});
 
-	it("after a failed model hop, opens an epoch back on the first model rather than extending its last request with nothing told", () => {
+	it("after a failed model hop, extends the first model's epoch again, with what it told", () => {
 		const b = new Branch();
 		b.request(body([user("one")]));
+		b.record("told", { facts: [{ kind: "tools", names: ["web_fetch"] }] });
 		b.message("assistant");
 		b.record("epoch", { cause: "model" });
 		b.request(body([user("one"), assistant("1"), user("two")]), { identity: { ...identity, model: "claude-haiku-4-5" } });
 		b.message("assistant", "error");
 		const fold = foldBranch(b.entries, live);
-		expect(fold.opensEpoch).toBe(true);
+		expect(fold.opensEpoch).toBe(false);
 		expect(fold.lastRequest?.list).toEqual([user("one")]);
-		expect(fold.told.size).toBe(0);
+		expect(fold.told.get("tools")).toEqual(new Set(["web_fetch"]));
 	});
 
 	it("takes tools told gone out of the told set, callable ones included", () => {
@@ -167,7 +169,19 @@ describe("ledger fold", () => {
 		b.record("pending", { id: "p3", key: "model", text: "/model b" });
 		expect(foldBranch(b.entries, live).pending.map((p) => p.id)).toEqual(["p1", "p3"]);
 		b.request(body([user("one")]), { consumed: ["p1"] });
+		b.message("assistant");
 		expect(foldBranch(b.entries, live).pending.map((p) => p.id)).toEqual(["p3"]);
+	});
+
+	it("drops an undelivered `untilCompaction` item (a post-compaction restore) at a later compaction, and keeps the others", () => {
+		const b = new Branch();
+		b.compaction();
+		b.record("pending", { id: "restore-1", text: "a.ts as it was", untilCompaction: true });
+		b.record("pending", { id: "hook", text: "PostCompact context" });
+		expect(foldBranch(b.entries, live).pending.map((p) => p.id)).toEqual(["restore-1", "hook"]);
+		b.compaction();
+		b.record("pending", { id: "restore-2", text: "a.ts as it is", untilCompaction: true });
+		expect(foldBranch(b.entries, live).pending.map((p) => p.id)).toEqual(["hook", "restore-2"]);
 	});
 
 	it("sees only the branch it is given: an abandoned branch's records are simply absent", () => {

@@ -44,11 +44,14 @@ export interface RequestIdentity {
 	api: string;
 	provider: string;
 	model: string;
-	/** "api-key" | "oauth" | …: OAuth renames tools, so a change opens an epoch. */
+	/** "key" | "oauth" | "chatgpt": OAuth renames tools, ChatGPT sign-in drops fields, so a change opens an epoch. */
 	auth: string;
+	/** Whether pi-ai puts its per-message effort markers in the list; absent on a model without them. */
+	effortMarkers?: boolean;
 }
 
-export const sameIdentity = (a: RequestIdentity, b: RequestIdentity): boolean => a.api === b.api && a.provider === b.provider && a.model === b.model && a.auth === b.auth;
+export const sameIdentity = (a: RequestIdentity, b: RequestIdentity): boolean =>
+	a.api === b.api && a.provider === b.provider && a.model === b.model && a.auth === b.auth && a.effortMarkers === b.effortMarkers;
 
 /**
  * Which of the session's context messages a request covers: the first `count`
@@ -76,6 +79,12 @@ export interface RequestRecordData extends RecordBase {
 	blobs: Record<string, unknown>;
 	/** Pending ids this request carried, so the outbox drops them. */
 	consumed: string[];
+	/**
+	 * The session whose cache host the request was routed to (pi-ai's
+	 * session-affinity headers): the session that opened the epoch, so a /fork
+	 * that extends its parent's request goes where the parent's cache lives.
+	 */
+	routing?: string;
 }
 
 export type ToldFact =
@@ -115,11 +124,32 @@ export interface PendingRecordData extends RecordBase {
 	toolCallId?: string;
 	/** `user-prepend` only: placed once per request, however many are pending (the shared caveat). */
 	once?: boolean;
+	/** `user-prepend` only: on a request that does not open with a prompt, it rides the tail instead of waiting for one. */
+	orTail?: boolean;
+	/** Dropped, undelivered, at a later compaction: it belongs to the epoch the compaction before it opened (a post-compaction restore). */
+	untilCompaction?: boolean;
+	/**
+	 * Files whose whole content the item shows the model (a post-compaction
+	 * restore), as they were when it was produced. The item and this record
+	 * are one entry, so file-tracker's replay counts the files read exactly
+	 * where the branch holds the item.
+	 */
+	observations?: FileVersion[];
+	/** The changed versions of files the item names without showing them (a changed-on-disk notice): never a read. */
+	notified?: FileVersion[];
 }
 
-const EPOCH_CAUSES = ["first", "compaction", "model", "auth", "fold", "coverage", "empty"] as const;
+/** A file's version as a pending item records it: the absolute path and content hash, with the size and modification time when known. */
+export interface FileVersion {
+	path: string;
+	sha256: string;
+	size?: number;
+	mtimeMs?: number;
+}
 
-/** Why an epoch opened: no request yet, a compaction, a model or auth switch, a history fold, a base that cannot be extended, or nothing new since it. */
+const EPOCH_CAUSES = ["first", "compaction", "model", "auth", "effort", "fold", "coverage", "empty"] as const;
+
+/** Why an epoch opened: no request yet, a compaction, a model or auth switch, thinking turned off or on where pi marks effort per message, a history fold, a base that cannot be extended, or nothing new since it. */
 export type EpochCause = (typeof EPOCH_CAUSES)[number];
 
 export interface EpochRecordData extends RecordBase {
@@ -147,6 +177,9 @@ export interface EntryLike {
 	customType?: string;
 	data?: unknown;
 	message?: { role?: string; stopReason?: string };
+	/** A `context_edit`: the entry it edits, and its replacement (null omits the entry from the model's view). */
+	targetId?: string;
+	replacement?: unknown;
 }
 
 export type ParsedRecord = { [K in RecordKind]: { kind: K; entryId: string; data: RecordData[K] } }[RecordKind];
@@ -156,6 +189,10 @@ const KIND_BY_TYPE = new Map<string, RecordKind>(Object.entries(RECORD).map(([ki
 export const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const isString = (value: unknown): value is string => typeof value === "string";
 const isStrings = (value: unknown): value is string[] => Array.isArray(value) && value.every(isString);
+
+const isFileVersions = (value: unknown): boolean =>
+	Array.isArray(value) &&
+	value.every((file) => isObject(file) && isString(file.path) && isString(file.sha256) && (file.size === undefined || typeof file.size === "number") && (file.mtimeMs === undefined || typeof file.mtimeMs === "number"));
 
 const isCoverage = (value: unknown): boolean =>
 	isObject(value) && Number.isInteger(value.count) && (value.count as number) >= 0 && isString(value.role) && typeof value.timestamp === "number";
@@ -185,12 +222,14 @@ const SHAPE: { [K in RecordKind]: (data: Record<string, unknown>) => boolean } =
 		isString(d.identity.provider) &&
 		isString(d.identity.model) &&
 		isString(d.identity.auth) &&
+		(d.identity.effortMarkers === undefined || typeof d.identity.effortMarkers === "boolean") &&
 		Number.isInteger(d.keep) &&
 		(d.keep as number) >= 0 &&
 		isStrings(d.append) &&
 		isString(d.head) &&
 		isObject(d.blobs) &&
-		isStrings(d.consumed),
+		isStrings(d.consumed) &&
+		(d.routing === undefined || isString(d.routing)),
 	told: (d) => Array.isArray(d.facts) && d.facts.every(isToldFact),
 	state: (d) => isString(d.key) && "value" in d,
 	pending: (d) =>
@@ -200,7 +239,11 @@ const SHAPE: { [K in RecordKind]: (data: Record<string, unknown>) => boolean } =
 		(d.placement === undefined || d.placement === "last-append" || d.placement === "user-prepend") &&
 		(d.raw === undefined || typeof d.raw === "boolean") &&
 		(d.toolCallId === undefined || isString(d.toolCallId)) &&
-		(d.once === undefined || typeof d.once === "boolean"),
+		(d.once === undefined || typeof d.once === "boolean") &&
+		(d.orTail === undefined || typeof d.orTail === "boolean") &&
+		(d.untilCompaction === undefined || typeof d.untilCompaction === "boolean") &&
+		(d.observations === undefined || isFileVersions(d.observations)) &&
+		(d.notified === undefined || isFileVersions(d.notified)),
 	epoch: (d) => (EPOCH_CAUSES as readonly unknown[]).includes(d.cause),
 	branch: (d) => isString(d.fromLeafId),
 };

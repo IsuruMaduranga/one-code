@@ -63,7 +63,7 @@ import { type DescriptionForm, followDescriptionForm, registerVariantTool } from
 import { agentDescription } from "./agent-description.ts";
 import { prepareAgentArguments } from "./agent-args.ts";
 import { projectConfigDirName } from "../lib/config-mode.ts";
-import { pendingClaimReminder } from "./pending-claim.ts";
+import { pendingClaimReminder, runningAfterCompactionReminder } from "./pending-claim.ts";
 import { watchPermissionBridge } from "../permissions/subagent-gate.ts";
 import { watchHookBridge } from "../hooks/subagent-bridge.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, type ReminderPayload, toldBlockFact } from "../lib/reminders.ts";
@@ -296,6 +296,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		const mode = (data as Partial<PermissionStatus> | undefined)?.mode;
 		if (typeof mode === "string") permissionMode = mode;
 	});
+	/** The mode a fork's calls are checked in, read live at each of its requests (parent-mode.ts). */
+	const parentMode = () => permissionMode;
 	/**
 	 * Task ids with a blocking child (nested spawn or SendMessage resume) currently
 	 * running (SendMessage must wait for these). Keyed by task id, like `residents`:
@@ -778,11 +780,24 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		if (live) emitModelStatus(live);
 	});
 	// A compaction opens an epoch, which renders the three blocks from live state:
-	// refresh them, so a catalog that changed on disk since is current.
+	// refresh them, so a catalog that changed on disk since is current. The calls
+	// that started the background runs went into the summary, so the runs still
+	// going are named once on the new epoch's first request.
 	pi.on("session_compact", (_event, ctx) => {
 		emitModelStatus(ctx);
 		emitAgentCatalog(ctx);
 		emitDelegationSteer();
+		const going = [...registry.list()]
+			.filter((record) => runningIds.has(record.taskId) || (residents.get(record.taskId) !== undefined && residentPending(residents.get(record.taskId) as Resident)))
+			.map((record) => ({ name: record.name, taskId: record.taskId }));
+		const text = runningAfterCompactionReminder(going);
+		if (text) pi.events.emit(REMINDER_CHANNEL, { text, key: "subagents-running-after-compaction", untilCompaction: true });
+	});
+	// The catalog is read from disk at each run's start, so an agent file added
+	// or deleted mid-session reaches the model: the render step announces a
+	// changed catalog, live minus what the epoch told (R3-M28).
+	pi.on("before_agent_start", (_event, ctx) => {
+		emitAgentCatalog(ctx);
 	});
 	// The selected branch's runs: the abandoned branch's finished ones are not
 	// addressable from it (SendMessage, list_agents), as on a resume. A run still
@@ -1389,12 +1404,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	 * can resume it later. Undefined for a named agent.
 	 */
 	const forkInputs = (request: RunRequest, record: AgentRunRecord, ctx: ExtensionContext) => {
-		if (!request.fork) return { parentSystemPrompt: undefined, parentRequest: undefined };
+		if (!request.fork) return { parentSystemPrompt: undefined, parentRequest: undefined, parentMode: undefined };
 		const parentSystemPrompt = forkSystemPrompt(ctx);
 		persistForkPrompt(record, parentSystemPrompt);
 		const parentRequest = forkRequest(ctx);
 		if (parentRequest) persistForkRequest(record, parentRequest);
-		return { parentSystemPrompt, parentRequest };
+		return { parentSystemPrompt, parentRequest, parentMode };
 	};
 	const readForkPrompt = (record: AgentRunRecord): string | undefined => {
 		if (!record.sessionSearchDir) return undefined;
@@ -1679,7 +1694,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 		runningIds.add(record.taskId);
 		const live = trackLiveRun(record, request, parent);
-		const { parentSystemPrompt: forkPrompt, parentRequest } = forkInputs(request, record, ctx);
+		const { parentSystemPrompt: forkPrompt, parentRequest, parentMode: forkMode } = forkInputs(request, record, ctx);
 		const handle = runtime.run({
 			name: request.name,
 			agent: agentDef,
@@ -1688,6 +1703,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			forkFrom: request.fork ? forkFrom : undefined,
 			parentSystemPrompt: forkPrompt,
 			parentRequest,
+			parentMode: forkMode,
 			sessionDir: record.sessionSearchDir || undefined,
 			model: request.model,
 			fallbackModel: request.fallbackModel,
@@ -1849,7 +1865,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			}, RESIDENT_IDLE_MS);
 			reaper.unref?.();
 		};
-		const { parentSystemPrompt: forkPrompt, parentRequest } = forkInputs(p.request, p.record, ctx);
+		const { parentSystemPrompt: forkPrompt, parentRequest, parentMode: forkMode } = forkInputs(p.request, p.record, ctx);
 		// No `signal` here on purpose: a resident outlives the spawning turn and
 		// is stopped through task_stop / the panel, not by the turn ending (S15).
 		const started = await runtime.runResident({
@@ -1860,6 +1876,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			forkMessages: p.request.fork ? forkMessages : undefined,
 			parentSystemPrompt: forkPrompt,
 			parentRequest,
+			parentMode: forkMode,
 			sessionDir: p.record.sessionSearchDir || undefined,
 			model: p.request.model,
 			fallbackModel: p.request.fallbackModel,
@@ -2610,6 +2627,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			sessionFile,
 			parentSystemPrompt: forkPrompt,
 			parentRequest: record.agent === FORK_AGENT ? readForkRequest(record) : undefined,
+			parentMode: record.agent === FORK_AGENT ? parentMode : undefined,
 			// Blocking, so the call's own abort stops it; a background turn is stopped by task_stop.
 			signal: oneShot ? signal : undefined,
 			model: record.model,

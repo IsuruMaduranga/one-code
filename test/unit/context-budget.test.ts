@@ -49,6 +49,20 @@ describe("TurnBudget", () => {
 		expect(budget.left(null)).toBe(960);
 	});
 
+	it("rebases at a compaction: what the turn spent stays spent, and growth after it counts on top", () => {
+		const budget = new TurnBudget(1000);
+		budget.startTurn(500);
+		expect(budget.left(800)).toBe(700);
+		budget.rebase(200);
+		expect(budget.left(200)).toBe(700);
+		expect(budget.left(260)).toBe(640);
+		// An unknown size at the compaction: the first known size is the new baseline.
+		budget.rebase(undefined);
+		expect(budget.left(undefined)).toBe(640);
+		expect(budget.left(100)).toBe(640);
+		expect(budget.left(150)).toBe(590);
+	});
+
 	it("floors at zero", () => {
 		const budget = new TurnBudget(100);
 		budget.startTurn(0);
@@ -119,6 +133,27 @@ describe("context-budget wiring", () => {
 			"<total_tokens>14999900 tokens left</total_tokens>",
 		]);
 		for (const r of reminders) expect(r).toMatchObject({ placement: "last-append", raw: true });
+	});
+
+	it("keeps counting down after a compaction inside the turn, from what the turn had spent", async () => {
+		const { fake, reminders } = collect();
+		await fake.fireOne("agent_start", {}, createFakeCtx(usage(10_000)));
+		await fake.fireOne("tool_result", {}, createFakeCtx(usage(50_000)));
+		// The compaction drops the context; pi knows no size until the next reply.
+		await fake.fireOne("session_compact", {}, createFakeCtx({ getContextUsage: () => ({ tokens: null, contextWindow: 1_000_000, percent: null }) }));
+		await fake.fireOne("tool_result", {}, createFakeCtx(usage(undefined)));
+		await fake.fireOne("tool_result", {}, createFakeCtx(usage(8_000)));
+		await fake.fireOne("tool_result", {}, createFakeCtx(usage(9_500)));
+		await fake.fireOne("tool_result", {}, createFakeCtx(usage(12_000)));
+
+		expect(reminders.map((r) => r.text)).toEqual([
+			"<total_tokens>14960000 tokens left</total_tokens>",
+			"<total_tokens>14960000 tokens left</total_tokens>",
+			// The first size after the compaction is the new baseline.
+			"<total_tokens>14960000 tokens left</total_tokens>",
+			"<total_tokens>14958500 tokens left</total_tokens>",
+			"<total_tokens>14956000 tokens left</total_tokens>",
+		]);
 	});
 
 	it("gives each of several parallel tool results its own single countdown, unframed", async () => {

@@ -119,9 +119,11 @@ describe("ultracode follows the branch (H3)", () => {
 		const reminders: ReminderPayload[] = [];
 		fake.events.on(REMINDER_CHANNEL, (data) => reminders.push(data as ReminderPayload));
 		effortExtension(fake.pi as never);
-		await fake.fire("session_start", {}, createFakeCtx({ sessionManager: { getBranch: () => branch } }));
+		const ctx = createFakeCtx({ sessionManager: { getBranch: () => branch } });
+		await fake.fire("session_start", {}, ctx);
 		const standing = () => reminders.filter((r) => r.key === "ultracode-mode").at(-1);
-		return { standing };
+		const offNotices = () => reminders.filter((r) => r.key === "ultracode-mode-change");
+		return { fake, ctx, standing, offNotices };
 	}
 
 	it("comes back on with its standing block when the branch recorded it on at pi's restored level", async () => {
@@ -134,19 +136,20 @@ describe("ultracode follows the branch (H3)", () => {
 		expect((await start([stateEntry("ultracode", { on: true, level: "xhigh" })], "high")).standing()).toMatchObject({ remove: true });
 		expect((await start([])).standing()).toMatchObject({ remove: true });
 	});
-});
 
-describe("hook context waiting for a prompt follows the branch (R2-M8)", () => {
-	it("survives a /reload and rides the next prompt", async () => {
-		const { default: hooksExtension } = await import("../../extensions/hooks/index.ts");
-		const fake = createFakePi();
-		hooksExtension(fake.pi as never);
-		const branch = [stateEntry("hooks:pending-context", [{ event: "SessionStart", text: "the build is red" }])];
-		const ctx = createFakeCtx({ cwd: process.cwd(), sessionManager: { getSessionId: () => "s", getSessionFile: () => undefined, getSessionDir: () => undefined, getBranch: () => branch } });
-		await fake.fire("session_start", { reason: "reload" }, ctx);
-		const delivered = await fake.fireOne<{ message?: { content: string } }>("before_agent_start", { prompt: "next" }, ctx);
-		expect(delivered?.message?.content).toContain("the build is red");
-		// Delivered: the queue the branch records is empty now.
-		expect(fake.branch.at(-1)?.data).toMatchObject({ key: "hooks:pending-context", value: [] });
+	it("tells the model ultracode ended when the branch's model saw it on and a resume's level moved (R3-M21)", async () => {
+		expect((await start([stateEntry("ultracode", { on: true, level: "xhigh" })], "high")).offNotices()).toHaveLength(1);
+		expect((await start([stateEntry("ultracode", { on: false })])).offNotices()).toEqual([]);
+		expect((await start([])).offNotices()).toEqual([]);
+	});
+
+	it("puts the branch's level back at a /tree switch, where pi restores none, and keeps ultracode on (R3-M21)", async () => {
+		const { fake, ctx, standing, offNotices } = await start([], "medium");
+		const branch = [stateEntry("ultracode", { on: true, level: "xhigh" })];
+		await fake.fire("session_tree", {}, createFakeCtx({ ...ctx, sessionManager: { getBranch: () => branch } }));
+		expect(standing()).toMatchObject({ placement: "sticky-append" });
+		expect(fake.pi.setThinkingLevel).toHaveBeenCalledWith("xhigh");
+		expect(offNotices()).toEqual([]);
 	});
 });
+

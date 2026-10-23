@@ -79,6 +79,16 @@ const ULTRACODE_STANDING_REMINDER =
 	"Token cost is not the constraint here; the most exhaustive correct answer is. " +
 	"Work solo only on conversational turns and trivial mechanical edits.";
 
+/**
+ * Said once when ultracode ends while the model has seen its standing block:
+ * the earlier messages keep the block in the record, so without this the model
+ * reads the opt-in as standing (lifecycle-grid-hunt round 3, R3-M21).
+ */
+const ULTRACODE_OFF_REMINDER =
+	"Ultracode mode is off now: the user's standing opt-in to multi-agent orchestration has ended. Run a workflow only when the task calls for one or the user asks.";
+/** One key for both directions, so a quick off and on again leaves only the latest pending. */
+const ULTRACODE_CHANGE_KEY = "ultracode-mode-change";
+
 /** The `one-code:state` key ultracode is recorded under on the branch. */
 const ULTRACODE_STATE = "ultracode";
 
@@ -121,9 +131,14 @@ export default function effortExtension(pi: ExtensionAPI) {
 	pi.on("session_start", cancelEffortNote);
 	pi.on("session_shutdown", cancelEffortNote);
 
-	/** `record` false when the state comes from the branch itself (a resume, a /tree switch). */
-	const setUltracode = (on: boolean, level?: ThinkingLevel, record = true) => {
+	/**
+	 * `record` false when the state comes from the branch itself (a resume, a
+	 * /tree switch); the caller then says whether the branch's model saw it on
+	 * (`announceOff`).
+	 */
+	const setUltracode = (on: boolean, level?: ThinkingLevel, record = true, announceOff = record) => {
 		const changed = ultracodeActive !== on || (on && ultracodeLevel !== level);
+		const endsSeen = !on && announceOff && (record ? ultracodeActive : true);
 		ultracodeActive = on;
 		ultracodeLevel = on ? level : undefined;
 		if (changed) pi.events.emit(ULTRACODE_MODE_CHANNEL, { active: on });
@@ -138,6 +153,7 @@ export default function effortExtension(pi: ExtensionAPI) {
 		} else {
 			pi.events.emit(REMINDER_CHANNEL, { remove: true, key: REMINDER_KEY });
 		}
+		if (endsSeen) pi.events.emit(REMINDER_CHANNEL, { text: ULTRACODE_OFF_REMINDER, key: ULTRACODE_CHANGE_KEY });
 	};
 
 	const canPersist = (ctx: ExtensionContext) => ctx.hasUI && (ctx.mode === "tui" || ctx.mode === "rpc") && !!ctx.model;
@@ -309,15 +325,20 @@ export default function effortExtension(pi: ExtensionAPI) {
 
 	/**
 	 * Take the branch's ultracode state (a resume, /reload, a fork, a /tree
-	 * switch): on only while pi's reasoning level, which pi restores from the
-	 * branch itself, is still the level ultracode settled on.
+	 * switch). At a session start it is on only while pi's reasoning level,
+	 * which pi restores from the branch itself, is still the level ultracode
+	 * settled on (a launch `--thinking` flag wins). pi restores no level at a
+	 * /tree switch, so there the branch's level is put back with the mode.
+	 * When the branch's model saw it on and it resolves off, the model is told.
 	 */
-	const followBranch = (ctx: ExtensionContext) => {
+	const followBranch = (ctx: ExtensionContext, tree: boolean) => {
 		const stored = readState(ctx, ULTRACODE_STATE) as { on?: unknown; level?: unknown } | undefined;
-		const on = stored?.on === true && typeof stored.level === "string" && stored.level === pi.getThinkingLevel();
-		setUltracode(on, on ? (stored?.level as ThinkingLevel) : undefined, false);
+		const storedOn = stored?.on === true && typeof stored.level === "string";
+		const on = storedOn && (tree || stored.level === pi.getThinkingLevel());
+		setUltracode(on, on ? (stored?.level as ThinkingLevel) : undefined, false, storedOn && !on);
+		if (on && tree && pi.getThinkingLevel() !== stored?.level) pi.setThinkingLevel(stored?.level as ThinkingLevel);
 		applyStatus(ctx);
 	};
-	pi.on("session_start", (_event, ctx) => followBranch(ctx));
-	pi.on("session_tree", (_event, ctx) => followBranch(ctx));
+	pi.on("session_start", (_event, ctx) => followBranch(ctx, false));
+	pi.on("session_tree", (_event, ctx) => followBranch(ctx, true));
 }

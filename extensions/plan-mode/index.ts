@@ -80,36 +80,46 @@ export default function planModeExtension(pi: ExtensionAPI) {
 	/** The last mode broadcast by permissions; undefined until the first status arrives. */
 	let currentMode: string | undefined;
 	/**
-	 * The mode the session was in when it entered plan mode, offered first on
-	 * exit (Claude Code's ExitPlanMode restores `prePlanMode`). Unknown for a
-	 * session that STARTED in plan mode — the first status seen is plan itself —
-	 * so that session gets the fixed list. Until 2026-09-05 the exit could only
-	 * escalate: a default-mode session that planned was offered auto
-	 * (PERMISSIONS-REVIEW-2026-09-05 M4).
+	 * The live mode the last switch into plan mode came from. It is recorded on
+	 * the branch only when that switch begins a run (`refresh` finds no run
+	 * recorded for the branch's plan file). A switch that merely restores a run,
+	 * permissions following a /tree to a branch in plan mode, keeps the branch's
+	 * own value, since the live mode before it belongs to the abandoned branch.
 	 */
-	let modeBeforePlan: PermissionMode | undefined;
-	let planFilePath: string | undefined;
+	let enteredFrom: PermissionMode | undefined;
+
 	/**
-	 * Whether the plan file existed when plan mode came on, which picks Claude
-	 * Code's "Plan File Info" line. Fixed for the mode's whole run, so the sticky
-	 * block stays byte-identical turn after turn (plan-mode/reminder.ts);
-	 * cleared when the mode ends. Recorded on the branch (`PLAN_ENTRY_STATE`)
-	 * with its path, so a /reload or resume inside the same run keeps it.
+	 * The current run as the branch recorded it when plan mode came on: its plan
+	 * file, whether that file existed then (which picks Claude Code's "Plan File
+	 * Info" line, fixed for the run so the sticky block stays byte-identical turn
+	 * after turn, plan-mode/reminder.ts), and the mode it came from, offered
+	 * first on exit (Claude Code's ExitPlanMode restores `prePlanMode`). Read
+	 * from the branch every time, never kept here, so a /reload, a resume and a
+	 * /tree each see the run of the branch they land on. Until 2026-09-05 the
+	 * exit could only escalate: a default-mode session that planned was offered
+	 * auto (PERMISSIONS-REVIEW-2026-09-05 M4).
 	 */
-	let planExistedAtEntry: boolean | undefined;
+	const runOnBranch = (ctx: ExtensionContext, path: string): { existed: boolean; modeBeforePlan?: PermissionMode } | undefined => {
+		const stored = readState(ctx, PLAN_ENTRY_STATE) as { path?: unknown; existed?: unknown; modeBeforePlan?: unknown } | undefined;
+		if (stored?.path !== path || typeof stored.existed !== "boolean") return undefined;
+		const before = typeof stored.modeBeforePlan === "string" && stored.modeBeforePlan in MODE_NAMES && stored.modeBeforePlan !== "plan" ? (stored.modeBeforePlan as PermissionMode) : undefined;
+		return { existed: stored.existed, ...(before ? { modeBeforePlan: before } : {}) };
+	};
 
-	/** Restore the branch's plan file, else allocate a fresh slug. */
+	/**
+	 * The branch's plan file, else a fresh slug recorded on the branch. Never
+	 * cached: on /tree, permissions' session_tree switches the mode (and this
+	 * extension refreshes) before this extension's own session_tree runs, so a
+	 * cached path would be the abandoned branch's.
+	 */
 	const ensurePlanFile = (ctx: ExtensionContext): string => {
-		if (planFilePath) return planFilePath;
-
-		planFilePath = planFileOnBranch(ctx.sessionManager.getBranch());
-		if (planFilePath) return planFilePath;
+		const onBranch = planFileOnBranch(ctx.sessionManager.getBranch());
+		if (onBranch) return onBranch;
 
 		let path = join(PLANS_DIR(), `${randomSlug()}.md`);
 		for (let attempt = 0; attempt < 5 && existsSync(path); attempt++) {
 			path = join(PLANS_DIR(), `${randomSlug()}.md`);
 		}
-		planFilePath = path;
 		pi.appendEntry(PLAN_FILE_ENTRY, { path });
 		return path;
 	};
@@ -117,17 +127,15 @@ export default function planModeExtension(pi: ExtensionAPI) {
 	/** Re-announce path + reminder; a re-emit replaces the sticky state by key. */
 	const refresh = (ctx: ExtensionContext, toolCallId?: string) => {
 		const path = ensurePlanFile(ctx);
-		if (planExistedAtEntry === undefined) {
-			const stored = readState(ctx, PLAN_ENTRY_STATE) as { path?: unknown; existed?: unknown } | undefined;
-			if (stored?.path === path && typeof stored.existed === "boolean") planExistedAtEntry = stored.existed;
-			else {
-				planExistedAtEntry = existsSync(path);
-				recordState(pi, PLAN_ENTRY_STATE, { path, existed: planExistedAtEntry });
-			}
+		let run = runOnBranch(ctx, path);
+		if (!run) {
+			// A run begins: record what it began with.
+			run = { existed: existsSync(path), ...(enteredFrom ? { modeBeforePlan: enteredFrom } : {}) };
+			recordState(pi, PLAN_ENTRY_STATE, { path, ...run });
 		}
 		pi.events.emit(PLAN_FILE_CHANNEL, { path });
 		pi.events.emit(REMINDER_CHANNEL, {
-			text: buildPlanModeReminder(path, planExistedAtEntry),
+			text: buildPlanModeReminder(path, run.existed),
 			key: "permission-mode",
 			placement: "sticky-append",
 			toolCallId,
@@ -160,8 +168,9 @@ export default function planModeExtension(pi: ExtensionAPI) {
 		if (typeof status?.mode !== "string") return;
 		const previous = currentMode;
 		currentMode = status.mode;
-		if (currentMode === "plan" && previous !== "plan") modeBeforePlan = previous as PermissionMode | undefined;
-		if (currentMode !== "plan") planExistedAtEntry = undefined;
+		// Unknown for a session that STARTED in plan mode (the first status seen
+		// is plan itself): a run it begins offers the fixed list on exit.
+		if (currentMode === "plan" && previous !== "plan") enteredFrom = previous as PermissionMode | undefined;
 		// The run ended: the next entry decides afresh.
 		if (previous === "plan" && currentMode !== "plan") recordState(pi, PLAN_ENTRY_STATE, null);
 		// Entering plan mode mid-turn: permissions' setMode has just closed the
@@ -177,12 +186,10 @@ export default function planModeExtension(pi: ExtensionAPI) {
 		lastCtx = ctx;
 		if (currentMode === "plan") refresh(ctx);
 	});
-	// The plan file follows the branch: a /tree switch takes the selected
-	// branch's (or allocates one there on the next refresh), never the abandoned one's.
+	// The plan file and its run follow the branch (both are read from it): a
+	// /tree switch takes the selected branch's, or allocates one there.
 	pi.on("session_tree", (_event, ctx) => {
 		lastCtx = ctx;
-		planFilePath = undefined;
-		planExistedAtEntry = undefined;
 		if (currentMode === "plan") refresh(ctx);
 	});
 
@@ -287,6 +294,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 			// switches to; the final "Keep planning" choice has none and leaves the
 			// session in plan mode.
 			const autoAvailable = ctx.modelRegistry.getAvailable().length > 0;
+			const modeBeforePlan = runOnBranch(ctx, path)?.modeBeforePlan;
 			const restore = modeBeforePlan && (modeBeforePlan !== "auto" || autoAvailable) ? modeBeforePlan : undefined;
 			const fixedModes: PermissionMode[] = [...(autoAvailable ? (["auto"] as const) : []), "acceptEdits", "default"];
 			const options: { label: string; mode?: PermissionMode; restore?: boolean }[] = [

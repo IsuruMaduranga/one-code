@@ -15,7 +15,8 @@
  * compaction extension publishes the capture). Without a capture for the
  * session model, or on a provider API the replay does not cover, it falls back
  * to a small standalone call on a cheap same-containment model
- * (pickEconomicalContainedModel): the last 30 messages and name-only stubs of
+ * (pickEconomicalContainedModel): the current branch's last 30 messages (read
+ * from the session when the recap runs) and name-only stubs of
  * the active tools (some providers reject a history carrying tool_use blocks
  * with no tools declared). The result is a display-only entry (appendEntry,
  * not in LLM context). Best-effort throughout: any failure just shows nothing.
@@ -27,7 +28,6 @@
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { followCoveredMessages } from "../lib/covered-messages.ts";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { convertToLlm, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { followLastExchange, replaySideCall } from "../lib/replay-call.ts";
@@ -35,7 +35,7 @@ import { recordUsage } from "../lib/usage-bus.ts";
 import { pickEconomicalContainedModel } from "../lib/model-tier.ts";
 import { CONVERSATION_CACHE_PLACEMENT } from "../lib/side-call-cache.ts";
 import { releaseSideCalls, runSideCall } from "../lib/side-call-run.ts";
-import { answerText, stripImageBlocks, toolStubs, withoutSystemMessages } from "../lib/side-call.ts";
+import { answerText, branchMessages, stripImageBlocks, toolStubs, withoutSystemMessages } from "../lib/side-call.ts";
 import { unrefTimers } from "../lib/timer-ops.ts";
 import { dimMarkedLine } from "../lib/tui-render.ts";
 import { RECAP_PROMPT, recapLine, recentForRecap, REFERENCE_MARK } from "./prompt.ts";
@@ -65,12 +65,7 @@ export default function recapExtension(pi: ExtensionAPI) {
 		return dimMarkedLine(theme, REFERENCE_MARK, recapLine(content));
 	});
 
-	// The whole conversation the session's last request covered, as pi built it.
-	let capturedMessages: AgentMessage[] | undefined;
-	followCoveredMessages(pi, (messages) => {
-		capturedMessages = messages;
-	});
-	// The same request as it went on the wire, and the reply that answered it.
+	// The session's last request as it went on the wire, and the reply that answered it.
 	const exchange = followLastExchange(pi);
 
 	let lastCtx: ExtensionContext | undefined;
@@ -126,8 +121,11 @@ export default function recapExtension(pi: ExtensionAPI) {
 
 	async function generate() {
 		const ctx = lastCtx;
-		const messages = capturedMessages;
-		if (!ctx?.hasUI || !messages?.length || scheduler.hasFiredSinceTurn) return;
+		if (!ctx?.hasUI || scheduler.hasFiredSinceTurn) return;
+		// The current branch, read now: a /tree or a compaction since the last
+		// request changed it, and pi fires no `context` event for either.
+		const messages = branchMessages(ctx);
+		if (!messages.length) return;
 		abortInFlight();
 		const controller = new AbortController();
 		inFlight = controller;
@@ -159,11 +157,10 @@ export default function recapExtension(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		lastCtx = ctx;
 		// A new session (including after /clear): drop any timer armed by the
-		// previous session and its captured messages, so a stale recap can never
-		// surface against the fresh conversation.
+		// previous session, so a stale recap can never surface against the
+		// fresh conversation.
 		scheduler.reset();
 		abortInFlight();
-		capturedMessages = undefined;
 		if (!ctx.hasUI) return;
 		// Reset the idle clock on any keystroke — the closest signal to CC's
 		// terminal-blur trigger pi exposes. Registered ONCE (session_start fires

@@ -265,7 +265,7 @@ describe("external instruction include approval", () => {
 		// The live block takes the approval: the next epoch's message 1 carries it.
 		expect(texts.at(-1)).toContain("APPROVED EXTERNAL INSTRUCTION");
 		// Inside the epoch the sent message 1 is the ledger's record: a request renders only its tail.
-		fake.events.emit(LEDGER_PLAN_CHANNEL, { epoch: false, fold: foldBranch([]), consumed: [], facts: [], covers: { count: 1, role: "user", timestamp: 1 }, messages } as unknown as RequestPlan);
+		fake.events.emit(LEDGER_PLAN_CHANNEL, { epoch: false, fold: foldBranch([]), consumed: [], facts: [], carried: [], covers: { count: 1, role: "user", timestamp: 1 }, messages } as unknown as RequestPlan);
 		const next = await fake.fireOne("context", { messages: [{ role: "user", content: [{ type: "text", text: "second prompt" }], timestamp: 2 }] }, ctx);
 		expect(JSON.stringify(next ?? {})).not.toContain("APPROVED EXTERNAL INSTRUCTION");
 		write(join(cwd, "nested", "CLAUDE.md"), "@../../shared.md");

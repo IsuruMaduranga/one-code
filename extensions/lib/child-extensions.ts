@@ -18,9 +18,14 @@
  * `context` hook, before anything reads the messages), the ledger's request
  * side next (it cuts the request to its tail before anything injects), then
  * the reminder and deferral sinks (system-reminder, tool-search), before
- * anything emitting on their channels (the bus does not replay), then the
- * ledger's payload side, after every hook that shapes the tail and before
- * cache-marks. A fork's file is a copy of the parent's, records included, so
+ * anything emitting on their channels (the bus does not replay), then
+ * context-management and compaction as in the main session (a child's requests
+ * carry the same thinking edit, and a fork that crosses its threshold is
+ * summarized by replaying its own last request, not by pi's uncached default
+ * summarizer), then the ledger's payload side, after every hook that shapes
+ * the tail and before cache-marks. A child has its own event bus (pi's
+ * resource loader makes one per loader), so its captures never reach the
+ * parent's side calls. A fork's file is a copy of the parent's, records included, so
  * its first request extends the parent's last one and reads its cache. A caller that loads these must set the
  * loader's `noContextFiles`, because claude-context injects `# claudeMd` itself.
  */
@@ -39,7 +44,7 @@ const EXTENSIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 // (mode "print"), so `run_in_background` runs blocking there and nothing a
 // child starts outlives it (Claude Code kills an agent's shells as it exits).
 export const CHILD_EXTENSIONS = [
-	"kept-thinking", "ledger", "system-reminder", "tool-search", "ledger/wire", "cache-marks", "claude-context", "tool-call-corruption/child",
+	"kept-thinking", "ledger", "system-reminder", "tool-search", "context-management", "compaction", "ledger/wire", "cache-marks", "claude-context", "tool-call-corruption/child",
 	"file-tracker", "search-tools", "skill", "bash/child", "powershell/child", "web", "web-fetch", "notebook",
 ];
 

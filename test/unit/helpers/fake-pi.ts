@@ -206,13 +206,20 @@ export function createFakeCtx(overrides: Record<string, unknown> = {}): Record<s
 		...(overrides.ui as Record<string, unknown> | undefined),
 	};
 
-	const sessionManager = {
+	const sessionManager: Record<string, unknown> = {
 		getSessionId: () => "fake-session",
 		getSessionFile: () => undefined,
 		getSessionDir: () => undefined,
 		getBranch: () => [],
 		...(overrides.sessionManager as Record<string, unknown> | undefined),
 	};
+	// pi's projection of the branch, without compaction: its message entries' messages.
+	sessionManager.buildSessionProjection ??= () => ({
+		entries: [],
+		messages: (sessionManager.getBranch as () => Array<{ type: string; message?: unknown }>)().flatMap((entry) => (entry.type === "message" && entry.message ? [entry.message] : [])),
+		thinkingLevel: "off",
+		model: null,
+	});
 
 	const base: Record<string, unknown> = {
 		ui,
@@ -236,7 +243,7 @@ export function createFakeCtx(overrides: Record<string, unknown> = {}): Record<s
 		_notified: notified,
 	};
 
-	return { ...base, ...overrides, ui };
+	return { ...base, ...overrides, ui, sessionManager };
 }
 
 /**

@@ -222,15 +222,65 @@ const TOOL_SEARCH_NAMES: ReadonlySet<string> = new Set([TOOL_SEARCH]);
  * turns (`kept`) call or load stays as it is.
  */
 export function toolsToRedefer(candidates: Iterable<string>, kept: readonly SessionEntry[]): string[] {
-	const inUse = new Set([...toolSearchLoads(kept).values()].flat());
-	for (const entry of kept) {
+	const inUse = toolsInUse(kept);
+	return [...new Set(candidates)].filter((name) => !inUse.has(name));
+}
+
+/** The tools `entries` use: loaded by a `tool_search` result in them, or called by an assistant message in them. */
+export function toolsInUse(entries: readonly SessionEntry[]): Set<string> {
+	const inUse = new Set([...toolSearchLoads(entries).values()].flat());
+	for (const entry of entries) {
 		const message = entry.type === "message" ? (entry.message as { role?: string; content?: unknown }) : undefined;
 		if (message?.role !== "assistant" || !Array.isArray(message.content)) continue;
 		for (const block of message.content as Array<{ type?: string; name?: unknown }>) {
 			if (block?.type === "toolCall" && typeof block.name === "string") inUse.add(block.name);
 		}
 	}
-	return [...new Set(candidates)].filter((name) => !inUse.has(name));
+	return inUse;
+}
+
+/** Why a deferred tool is callable without a fresh `tool_search` load. */
+export interface CallableReasons {
+	/** Loaded by a `tool_search` result in context, or called in context: its history names it. */
+	inUse: ReadonlySet<string>;
+	/** Announced callable by a `tool_addition` in the current epoch (the ledger's told facts). */
+	toldCallable: ReadonlySet<string>;
+	/** Declared eagerly by the recorded head the next request starts from: it stays declared, so it stays callable. */
+	declaredEager: ReadonlySet<string>;
+	/** Announced callable by the next request itself: loadable and untold inside an epoch, on a model that takes `tool_addition`. */
+	announcing: ReadonlySet<string>;
+}
+
+/**
+ * The deferred tools that are callable now, derived from the branch, the model
+ * and the registry (lifecycle-grid-hunt design.md section 6): every other
+ * deferred tool is inactive, whoever activated it. One function decides, so a
+ * resume, `/reload`, `/tree`, a compaction, a model switch and a late defer
+ * cannot disagree with what the wire declares and what the model was told.
+ */
+export function callableDeferredTools(deferred: Iterable<string>, reasons: CallableReasons): Set<string> {
+	const callable = new Set<string>();
+	for (const name of deferred) {
+		if (reasons.inUse.has(name) || reasons.toldCallable.has(name) || reasons.declaredEager.has(name) || reasons.announcing.has(name)) callable.add(name);
+	}
+	return callable;
+}
+
+/**
+ * pi's active set with exactly the `callable` deferred tools active (those
+ * pi has registered) and no `withheld` tool; every other tool as it was. The
+ * input itself when nothing changes.
+ */
+export function reconcileActive(
+	active: readonly string[],
+	deferred: ReadonlySet<string>,
+	callable: ReadonlySet<string>,
+	withheld: ReadonlySet<string>,
+	registered: ReadonlySet<string>,
+): readonly string[] {
+	const kept = active.filter((name) => !withheld.has(name) && (!deferred.has(name) || callable.has(name)));
+	const added = [...callable].filter((name) => registered.has(name) && !withheld.has(name) && !kept.includes(name));
+	return kept.length === active.length && added.length === 0 ? active : [...kept, ...added];
 }
 
 type WireTool = Record<string, unknown> & { name: string };
@@ -581,6 +631,15 @@ export function loaderUnavailableReminderText(): string {
  */
 export function withheldMissReminderText(name: string): string {
 	return `\`${name}\` failed with "Tool ${name} not found" because it was withdrawn for the current model — it is not a deferred tool you can load with tool_search. Do not retry it; continue without it.`;
+}
+
+/**
+ * A call to a tool the conversation still declares (the epoch's recorded
+ * tools stay declared, decisions/caching.md "record once") that this session
+ * no longer runs: a setting turned it off, or an extension stopped offering it.
+ */
+export function unavailableToolReminderText(name: string): string {
+	return `\`${name}\` failed with "Tool ${name} not found" because it is no longer available in this session, although it is still declared. Do not retry it; continue without it.`;
 }
 
 export interface SearchMatch {
