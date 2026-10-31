@@ -192,6 +192,18 @@ describe("renderReminders: one-shots", () => {
 		expect(blockTexts(result.messages[2])).toEqual(["b"]);
 	});
 
+	it("rides its own prompt when the request carries it: a failed request's context stays off the next prompt (#57)", () => {
+		// The first prompt's request failed, so pi resends it, with no reply, ahead of the next prompt.
+		const messages = [user("say ok", 1), user("say ok again", 5)];
+		const result = render(messages, { oneShots: [shot("first's context", { id: "a", promptTimestamp: 1 }), shot("second's context", { id: "b", promptTimestamp: 5 })] });
+		expect(blockTexts(result.messages[0])).toEqual(["say ok", wrapReminder("first's context")]);
+		expect(blockTexts(result.messages[1])).toEqual(["say ok again", wrapReminder("second's context")]);
+		expect(result.placed.map((s) => s.id)).toEqual(["a", "b"]);
+		// Its prompt gone from the request (compacted away), it rides the tail.
+		const gone = render([compaction("s", 1), user("next", 9)], { oneShots: [shot("context", { promptTimestamp: 5 })] });
+		expect(blockTexts(gone.messages[1])).toEqual(["next", wrapReminder("context")]);
+	});
+
 	it("puts a breadcrumb before the opening prompt's text, after the stack, raw, and once per `once` text", () => {
 		const crumbs = [shot("caveat", { placement: "user-prepend", raw: true, once: true, id: "a" }), shot("cmd", { placement: "user-prepend", raw: true, id: "b" }), shot("caveat", { placement: "user-prepend", raw: true, once: true, id: "c" })];
 		const result = render([user("hi", 1)], { epoch: true, stack: [stack("ctx")], oneShots: crumbs });

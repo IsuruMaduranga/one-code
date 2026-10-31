@@ -34,7 +34,8 @@
  *   emitted as a `one-code:pending` entry, so it survives `/reload` and quit
  *   and is gone with an abandoned `/tree` branch; delivered on the tail of the
  *   next request (the call's own result when `toolCallId` names one in the
- *   tail, else the trailing tool result, else the last user message), and
+ *   tail, the prompt's own message when `promptTimestamp` names one, else
+ *   the trailing tool result, else the last user message), and
  *   recorded as consumed by that request.
  * - `user-prepend`: LOCAL-COMMAND BREADCRUMBS (`/clear`, `/model`, a panel
  *   command): pending like a one-shot, but placed only before the text of a
@@ -157,6 +158,13 @@ export interface ReminderPayload {
 	 * avoid attaching a switch or countdown to another call in a parallel batch.
 	 */
 	toolCallId?: string;
+	/**
+	 * A one-shot only: the timestamp of the user message it belongs to (a
+	 * prompt's hook context). It rides that message when the request carries
+	 * it, so a prompt whose request failed keeps its own context when the
+	 * next prompt resends it.
+	 */
+	promptTimestamp?: number;
 	/** `first-prepend` only: what the block tells the model, recorded when an epoch sends it. */
 	facts?: ToldFact[];
 }
@@ -198,6 +206,7 @@ export interface OneShot {
 	raw?: boolean;
 	placement: "last-append" | "user-prepend";
 	toolCallId?: string;
+	promptTimestamp?: number;
 	once?: boolean;
 	orTail?: boolean;
 	facts?: ToldFact[];
@@ -380,7 +389,11 @@ export function renderReminders(messages: readonly AgentMessage[], input: Render
 			push(before, opening, [block(shot)]);
 			continue;
 		}
-		const own = shot.toolCallId ? messages.findIndex((m) => m.role === "toolResult" && (m as { toolCallId?: string }).toolCallId === shot.toolCallId) : -1;
+		const own = shot.toolCallId
+			? messages.findIndex((m) => m.role === "toolResult" && (m as { toolCallId?: string }).toolCallId === shot.toolCallId)
+			: shot.promptTimestamp !== undefined
+				? messages.findIndex((m) => isStickyCarrier(m) && stamp(m) === shot.promptTimestamp)
+				: -1;
 		const at = own !== -1 ? own : tail;
 		if (at === -1) continue;
 		placed.push(shot);
