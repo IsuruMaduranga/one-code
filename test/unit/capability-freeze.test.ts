@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { toolsToRedefer } from "../../extensions/lib/deferred.ts";
+import { toolsInUse } from "../../extensions/lib/deferred.ts";
 import type { ToldFact } from "../../extensions/lib/ledger/records.ts";
 import { pluginRoot } from "../../extensions/lib/plugin-root.ts";
 import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/reminders.ts";
@@ -174,18 +174,47 @@ describe("agent catalog read at each run's start (R3-M28)", () => {
 		expect(blocks).toHaveLength(1);
 		expect(blocks[0].text).toContain("reviewer");
 	});
+
+	it("rebuilds the catalog when an agent file is edited or removed, and reuses it otherwise", async () => {
+		const main = { provider: "openai", id: "main", name: "main", input: ["text"], cost: { input: 2, output: 8 } };
+		const fake = createFakePi();
+		const reminders: Array<Reminder & { facts?: ToldFact[] }> = [];
+		fake.events.on(REMINDER_CHANNEL, (r) => reminders.push(r as Reminder));
+		subagentsExtension(fake.pi as never);
+		const ctx = createFakeCtx({ cwd, model: main, modelRegistry: { getAvailable: () => [main] }, sessionManager: { getSessionId: () => "s", getBranch: () => fake.branch } });
+		const file = join(cwd, ".claude", "agents", "editor.md");
+		writeFileSync(file, "---\nname: editor\ndescription: Edits prose\n---\nEdit it.\n");
+		await fake.fire("session_start", {}, ctx);
+		const catalog = () => reminders.filter((r) => r.key === "subagent-agents" && r.placement === "first-prepend").at(-1)?.text ?? "";
+		expect(catalog()).toContain("- editor: Edits prose");
+		const before = catalog();
+		await fake.fire("before_agent_start", { prompt: "go", systemPromptOptions: {} }, ctx);
+		expect(catalog()).toBe(before);
+		writeFileSync(file, "---\nname: editor\ndescription: Edits code, at more length\n---\nEdit it.\n");
+		await fake.fire("before_agent_start", { prompt: "go", systemPromptOptions: {} }, ctx);
+		expect(catalog()).toContain("- editor: Edits code, at more length");
+		rmSync(file);
+		await fake.fire("before_agent_start", { prompt: "go", systemPromptOptions: {} }, ctx);
+		expect(catalog()).not.toContain("editor");
+	});
 });
 
-describe("loaded tools at a compaction", () => {
+describe("tools in use", () => {
 	const call = (name: string) => ({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "c1", name, arguments: {} }] } });
 	const load = (callId: string, added: string[]) => ({
 		type: "message",
 		message: { role: "toolResult", toolName: "tool_search", toolCallId: callId, content: [], details: { added } },
 	});
 
-	it("returns them to deferred unless the kept turns call or load them", () => {
-		const kept = [call("b"), load("t2", ["d"])] as never[];
-		expect(toolsToRedefer(["a", "b", "d", "a"], kept)).toEqual(["a"]);
-		expect(toolsToRedefer(["a"], [])).toEqual(["a"]);
+	it("are the tools the entries call or load", () => {
+		expect(toolsInUse([call("b"), load("t2", ["d"])] as never[])).toEqual(new Set(["b", "d"]));
+		expect(toolsInUse([])).toEqual(new Set());
+	});
+
+	it("leave out a call the dispatcher failed as not found", () => {
+		const notFound = { type: "message", message: { role: "toolResult", toolName: "b", toolCallId: "c1", isError: true, content: [{ type: "text", text: "Tool b not found" }] } };
+		expect(toolsInUse([call("b"), notFound] as never[])).toEqual(new Set());
+		const failed = { type: "message", message: { role: "toolResult", toolName: "b", toolCallId: "c1", isError: true, content: [{ type: "text", text: "Timed out" }] } };
+		expect(toolsInUse([call("b"), failed] as never[])).toEqual(new Set(["b"]));
 	});
 });

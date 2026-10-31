@@ -126,8 +126,8 @@ export class LedgerSim {
 		return out;
 	}
 
-	async payload(tail: SimMessage[], cap = 1000): Promise<Payload> {
-		let payload = this.render(tail, cap);
+	async payload(tail: SimMessage[], cap = 1000, rendered: (payload: Payload) => Payload = (payload) => payload): Promise<Payload> {
+		let payload = rendered(this.render(tail, cap));
 		for (const handler of this.handlers.before_provider_request ?? []) {
 			const result = await handler({ payload }, this.ctx());
 			if (result !== undefined) payload = result as Payload;
@@ -135,12 +135,19 @@ export class LedgerSim {
 		return payload;
 	}
 
-	/** One request and its reply. `sends` > 1: pi-ai sending the body again under the same plan (its strict-tools fallback). */
-	async request(reply: string, stopReason = "stop", sends = 1): Promise<Payload> {
+	/**
+	 * One request and its reply: one provider call, which resolves its headers
+	 * once (pi's `prepareRequest`) before its payloads. `sends` > 1: pi-ai
+	 * sending the body again in the same call (its strict-tools fallback);
+	 * `resend` changes the body pi-ai renders for each later send. `cap`: the
+	 * output cap pi-ai clamped the request to.
+	 */
+	async request(reply: string, stopReason = "stop", sends = 1, cap = 1000, resend?: (payload: Payload) => Payload): Promise<Payload> {
 		const tail = await this.context();
 		this.lastTail = tail;
-		let payload = await this.payload(tail);
-		for (let i = 1; i < sends; i++) payload = await this.payload(tail);
+		await this.headers();
+		let payload = await this.payload(tail, cap);
+		for (let i = 1; i < sends; i++) payload = await this.payload(tail, cap, resend);
 		this.sent.push(payload);
 		const entry = this.message("assistant", reply, stopReason);
 		for (const handler of this.handlers.message_end ?? []) await handler({ message: entry.message }, this.ctx());
@@ -151,6 +158,7 @@ export class LedgerSim {
 	async requestWithoutReply(): Promise<Payload> {
 		const tail = await this.context();
 		this.lastTail = tail;
+		await this.headers();
 		const payload = await this.payload(tail);
 		this.sent.push(payload);
 		return payload;
@@ -163,8 +171,9 @@ export class LedgerSim {
 		return event.headers;
 	}
 
-	/** pi's cache warm: the last request's context through the payload hooks again, with the cap at 1. */
+	/** pi's cache warm: its own provider call, the last request's context through the payload hooks again, with the cap at 1. */
 	async warm(): Promise<Payload> {
+		await this.headers();
 		const payload = await this.payload(this.lastTail, 1);
 		this.add({ type: "usage" });
 		return payload;

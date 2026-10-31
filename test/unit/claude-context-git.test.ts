@@ -57,4 +57,13 @@ describe("claude-context's git snapshot", () => {
 		];
 		expect(await contextBlock(true, branch)).toContain("This is the git status at the latest compaction.");
 	});
+
+	it("is the compaction's after a reload when no request settled before the compaction", async () => {
+		const branch = [
+			{ type: "message", id: "u1", parentId: null, message: { role: "user" } },
+			{ type: "message", id: "a1", parentId: "u1", message: { role: "assistant", stopReason: "error" } },
+			{ type: "compaction", id: "c1", parentId: "a1" },
+		];
+		expect(await contextBlock(true, branch)).toContain("This is the git status at the latest compaction.");
+	});
 });

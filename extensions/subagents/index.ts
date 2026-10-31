@@ -29,7 +29,7 @@ import type { Api, Message, Model } from "@earendil-works/pi-ai";
 import { type AgentToolResult, defineTool, getAgentDir, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-mode/actions.ts";
-import { type AgentDefinition, agentFileSources, BUNDLED_AGENTS_DIR, discoverAgents } from "./agents.ts";
+import { type AgentDefinition, agentFileSources, agentSourcesStamp, BUNDLED_AGENTS_DIR, discoverAgents } from "./agents.ts";
 import { findConfigured, modelIdentity, modelSpec, supportsImageInput } from "../lib/model-policy.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../lib/model-unusable.ts";
 import { applicableSubagentDefault, loadSubagentDefault, persistSubagentModel, type SubagentDefault } from "./default-model.ts";
@@ -228,6 +228,15 @@ const SubagentParams = Type.Object({
 });
 
 
+/** The Agent tool's schema inside a non-fork child: the nested run's options only. */
+const NESTED_AGENT_PARAMS = Type.Object({
+	subagent_type: Type.Optional(Type.String({ description: "An agent name from the list in this tool's description (default: general-purpose)" })),
+	task: Type.String({ description: "The task — a complete, self-contained instruction" }),
+	prompt: Type.Optional(Type.String({ description: "Alias of `task` (Claude Code's name for it)." })),
+	description: Type.Optional(Type.String({ description: "A short (3-5 word) description of the task." })),
+	name: Type.Optional(Type.String({ description: "Name for this run (default: <agent>-<n>)" })),
+});
+
 /**
  * The anti-fabrication sentence, carried by the tool RESULT of a background
  * spawn and not only by the Agent tool's description. Claude Code puts it in the
@@ -296,8 +305,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		const mode = (data as Partial<PermissionStatus> | undefined)?.mode;
 		if (typeof mode === "string") permissionMode = mode;
 	});
-	/** The mode a fork's calls are checked in, read live at each of its requests (parent-mode.ts). */
-	const parentMode = () => permissionMode;
 	/**
 	 * Task ids with a blocking child (nested spawn or SendMessage resume) currently
 	 * running (SendMessage must wait for these). Keyed by task id, like `residents`:
@@ -470,6 +477,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			},
 			(path, agent) => pi.events.emit(CHILD_WROTE_CHANNEL, { path, ...(agent ? { agent } : {}) } satisfies ChildWrote),
 			() => queryDeferred(pi.events),
+			// The mode a fork's calls are checked in, read live at each of its requests (parent-mode.ts).
+			() => permissionMode,
 		).catch((error: unknown) => {
 			runtimePromise = undefined;
 			throw error;
@@ -534,13 +543,19 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		};
 	};
 
-	const loadAgents = (cwd: string) => {
-		// Plugin agents sit between bundled and user definitions, and are exposed
-		// namespaced (`<plugin>:<agent>`) so two plugins can ship the same name.
+	// Plugin agents sit between bundled and user definitions, and are exposed
+	// namespaced (`<plugin>:<agent>`) so two plugins can ship the same name.
+	const agentSources = (cwd: string) => {
+		const plugins = discoverPlugins(defaultDiscoverRoots(getAgentDir(), cwd));
+		return { plugins, fileSources: agentFileSources(cwd, os.homedir(), plugins.agentDirs) };
+	};
+	type AgentSources = ReturnType<typeof agentSources>;
+
+	/** `sources` when the caller already resolved them (the catalog stamp). */
+	const loadAgents = (cwd: string, sources: AgentSources = agentSources(cwd)) => {
 		// The code-defined guide ranks below every agent file, so one of the same
 		// name replaces it.
-		const plugins = discoverPlugins(defaultDiscoverRoots(getAgentDir(), cwd));
-		const fileSources = agentFileSources(cwd, os.homedir(), plugins.agentDirs);
+		const { plugins, fileSources } = sources;
 		// The prompt is built from the catalog it sits in, when a spawn reads it.
 		let catalog: AgentDefinition[] = [];
 		const guide = guideAgentDefinition(() => guideInput(cwd, catalog, plugins));
@@ -559,9 +574,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		return a.source === "built-in" || a.source.startsWith(BUNDLED_AGENTS_DIR) ? " (Tools: *)" : " (Tools: All tools)";
 	};
 
-	const describeAgents = (cwd: string) => {
-		const agents = loadAgents(cwd);
-		const lines = agents.map((a) => `- ${a.name}: ${a.description || "(no description)"}${toolsClause(a)}`);
+	/** One catalog row per agent, the shape every catalog the model reads uses. */
+	const catalogLines = (agents: AgentDefinition[]): string[] => agents.map((a) => `- ${a.name}: ${a.description || "(no description)"}${toolsClause(a)}`);
+
+	const describeAgents = (cwd: string, sources?: AgentSources) => {
+		const lines = catalogLines(loadAgents(cwd, sources));
 		lines.push(`- ${FORK_AGENT}: clone this conversation, with its full context, to work on a task in parallel`);
 		return lines.join("\n");
 	};
@@ -700,13 +717,28 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		pi.events.emit(SUBAGENT_STATUS_CHANNEL, subagentStatusModel(configured, resolution));
 	};
 
+	/** The last catalog text and the stamp of the agent files it was built from. */
+	let catalogMemo: { stamp: string; text: string } | undefined;
 	/**
 	 * The agent catalog as an every-turn reminder, as Claude Code does ("Available
 	 * agent types are listed in <system-reminder> messages") — without it the
-	 * model has to guess names or make a discovery call first.
+	 * model has to guess names or make a discovery call first. Rebuilt only when
+	 * the agent files changed: every run start asks, and stating the files is
+	 * cheaper than reading and parsing each one. The sources are resolved once
+	 * per check (the plugin discovery behind them is a process-wide memo), and a
+	 * rebuild reads the same ones the stamp stated.
 	 */
-	const agentCatalog = (ctx: ExtensionContext) =>
-		`Available agent types for the Agent tool:\n${describeAgents(ctx.cwd)}\n\nWhen you launch multiple agents for independent work, send them in a single message with multiple tool uses so they run concurrently.`;
+	const agentCatalog = (ctx: ExtensionContext) => {
+		const sources = agentSources(ctx.cwd);
+		const stamp = `${ctx.cwd}\n${agentSourcesStamp(sources.fileSources)}`;
+		if (catalogMemo?.stamp !== stamp) {
+			catalogMemo = {
+				stamp,
+				text: `Available agent types for the Agent tool:\n${describeAgents(ctx.cwd, sources)}\n\nWhen you launch multiple agents for independent work, send them in a single message with multiple tool uses so they run concurrently.`,
+			};
+		}
+		return catalogMemo.text;
+	};
 	const emitAgentCatalog = (ctx: ExtensionContext) => publishBlock("subagent-agents", agentCatalog(ctx));
 
 	const emitDelegationSteer = () => publishBlock("subagent-delegation", requestTier() === "tiny" ? DELEGATION_STEER : null);
@@ -723,6 +755,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		const tier = requestTier();
 		return tier === "cheap" || tier === "tiny";
 	};
+	/** A run that is still working: a live child, or a resident with a turn pending. */
+	const stillRunning = (taskId: string): boolean => {
+		const resident = residents.get(taskId);
+		return (resident !== undefined && residentPending(resident)) || runningIds.has(taskId);
+	};
 	pi.on("agent_start", () => {
 		spawnedThisLoop.clear();
 		parentBusy = true;
@@ -738,10 +775,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		// lookups below would be discarded work on every turn that delegated.
 		if (!backstopApplies()) return undefined;
 		const pending = spawned
-			.filter((taskId) => {
-				const resident = residents.get(taskId);
-				return (resident !== undefined && residentPending(resident)) || runningIds.has(taskId);
-			})
+			.filter(stillRunning)
 			.map((taskId) => registry.resolve(taskId))
 			.filter((record): record is AgentRunRecord => record !== undefined)
 			.map((record) => ({ name: record.name, taskId: record.taskId }));
@@ -779,16 +813,37 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		const live = liveUiCtx(lastCtx);
 		if (live) emitModelStatus(live);
 	});
+	/**
+	 * The main conversation's runs still going at the last compaction, and the
+	 * compaction entry they belong to: named on the next request, as far as
+	 * they are still going then.
+	 */
+	let runningAtCompaction: { entryId: string | undefined; taskIds: string[] } | undefined;
 	// A compaction opens an epoch, which renders the three blocks from live state:
 	// refresh them, so a catalog that changed on disk since is current. The calls
 	// that started the background runs went into the summary, so the runs still
-	// going are named once on the new epoch's first request.
-	pi.on("session_compact", (_event, ctx) => {
+	// going are named once on the new epoch's first request. Only the main
+	// conversation's own runs: a nested run reports to the agent that spawned it.
+	pi.on("session_compact", (event, ctx) => {
 		emitModelStatus(ctx);
 		emitAgentCatalog(ctx);
 		emitDelegationSteer();
-		const going = [...registry.list()]
-			.filter((record) => runningIds.has(record.taskId) || (residents.get(record.taskId) !== undefined && residentPending(residents.get(record.taskId) as Resident)))
+		const taskIds = [...registry.list()].filter((record) => (record.depth ?? 0) === 0 && stillRunning(record.taskId)).map((record) => record.taskId);
+		runningAtCompaction = taskIds.length > 0 ? { entryId: event?.compactionEntry?.id, taskIds } : undefined;
+	});
+	// Named when the request is built, not at the compaction: the next request can
+	// come much later (a manual /compact waits for the next prompt), and a run that
+	// finished meanwhile is not running. The run's own notification says it ended.
+	// A /tree to a branch without that compaction still shows the calls.
+	pi.on("turn_start", (_event, ctx) => {
+		const owed = runningAtCompaction;
+		if (!owed) return;
+		runningAtCompaction = undefined;
+		if (owed.entryId !== undefined && !ctx.sessionManager.getBranch().some((entry) => entry.id === owed.entryId)) return;
+		const going = owed.taskIds
+			.filter(stillRunning)
+			.map((taskId) => registry.resolve(taskId))
+			.filter((record): record is AgentRunRecord => record !== undefined)
 			.map((record) => ({ name: record.name, taskId: record.taskId }));
 		const text = runningAfterCompactionReminder(going);
 		if (text) pi.events.emit(REMINDER_CHANNEL, { text, key: "subagents-running-after-compaction", untilCompaction: true });
@@ -1404,12 +1459,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	 * can resume it later. Undefined for a named agent.
 	 */
 	const forkInputs = (request: RunRequest, record: AgentRunRecord, ctx: ExtensionContext) => {
-		if (!request.fork) return { parentSystemPrompt: undefined, parentRequest: undefined, parentMode: undefined };
+		if (!request.fork) return { parentSystemPrompt: undefined, parentRequest: undefined };
 		const parentSystemPrompt = forkSystemPrompt(ctx);
 		persistForkPrompt(record, parentSystemPrompt);
 		const parentRequest = forkRequest(ctx);
 		if (parentRequest) persistForkRequest(record, parentRequest);
-		return { parentSystemPrompt, parentRequest, parentMode };
+		return { parentSystemPrompt, parentRequest };
 	};
 	const readForkPrompt = (record: AgentRunRecord): string | undefined => {
 		if (!record.sessionSearchDir) return undefined;
@@ -1457,9 +1512,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	const childCatalog = (cwd: string): string => {
 		let text = childCatalogCache.get(cwd);
 		if (text === undefined) {
-			text = loadAgents(cwd)
-				.map((a) => `- ${a.name}: ${a.description || "(no description)"}${toolsClause(a)}`)
-				.join("\n");
+			text = catalogLines(loadAgents(cwd)).join("\n");
 			childCatalogCache.set(cwd, text);
 		}
 		return text;
@@ -1486,17 +1539,17 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			// accepted as `task`, `description` is tolerated, and the agent name is
 			// matched case-insensitively — a nested subagent is just as likely to be
 			// CC-trained.
-			parameters: Type.Object({
-				subagent_type: Type.Optional(Type.String({ description: "An agent name from the list in this tool's description (default: general-purpose)" })),
-				task: Type.String({ description: "The task — a complete, self-contained instruction" }),
-				prompt: Type.Optional(Type.String({ description: "Alias of `task` (Claude Code's name for it)." })),
-				description: Type.Optional(Type.String({ description: "A short (3-5 word) description of the task." })),
-				name: Type.Optional(Type.String({ description: "Name for this run (default: <agent>-<n>)" })),
-			}) as never,
+			// A fork inherits the parent's tools block byte for byte (its first request
+			// extends the parent's recorded one, decisions/caching.md), so its spawn
+			// tool takes the parent's Agent schema: the ledger keeps the recorded
+			// declaration only while the live schema matches it, and pi validates the
+			// call against the live one. The options a nested run lacks are refused in
+			// execute() with the fix named.
+			parameters: (parentRecord.agent === FORK_AGENT ? SubagentParams : NESTED_AGENT_PARAMS) as never,
 			prepareArguments: prepareAgentArguments as never,
 			async execute(_toolCallId: string, params: unknown, signal?: AbortSignal) {
 				const ctx = lastCtx;
-				const p = (params ?? {}) as { subagent_type?: unknown; task?: unknown; prompt?: unknown; name?: unknown; description?: unknown };
+				const p = (params ?? {}) as { subagent_type?: unknown; task?: unknown; prompt?: unknown; name?: unknown; description?: unknown; model?: unknown; thinking?: unknown; isolation?: unknown; action?: unknown };
 				const description = typeof p.description === "string" && p.description.trim() ? p.description.trim() : undefined;
 				const agentName = typeof p.subagent_type === "string" ? p.subagent_type : "";
 				const taskInput = typeof p.task === "string" ? p.task : typeof p.prompt === "string" ? p.prompt : "";
@@ -1505,10 +1558,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				if (!ctx) return err("The host session is not ready to spawn agents — retry shortly.");
 				if (agentName.toLowerCase() === FORK_AGENT) return err('"fork" is only available to the main conversation — pick a named agent instead.');
 				const agents = loadAgents(parentRecord.cwd);
+				// Only a fork's schema (the parent's) offers these; a nested run has none of them.
+				if (p.action === "list") return { content: [{ type: "text" as const, text: `Available agents:\n${catalogLines(agents).join("\n")}` }], details: {} };
+				const unsupported = (["model", "thinking", "isolation"] as const).filter((key) => p[key] != null);
+				if (unsupported.length > 0) return err(`${unsupported.map((key) => `\`${key}\``).join(", ")} ${unsupported.length === 1 ? "is" : "are"} not available to an Agent call made inside a subagent: a nested agent runs blocking, in this agent's directory, on its definition's model. Call again without ${unsupported.length === 1 ? "it" : "them"}.`);
 				const agentDef = agents.find((a) => a.name.toLowerCase() === agentName.toLowerCase());
 				if (!agentDef) {
-					const catalog = agents.map((a) => `- ${a.name}: ${a.description || "(no description)"}${toolsClause(a)}`).join("\n");
-					return err(`${agentName ? `Unknown agent "${agentName}"` : "`subagent_type` is required"}. Available agents:\n${catalog}`);
+					return err(`${agentName ? `Unknown agent "${agentName}"` : "`subagent_type` is required"}. Available agents:\n${catalogLines(agents).join("\n")}`);
 				}
 				if (!task) return err("`task` is required: a complete, self-contained instruction for the agent (Claude Code names this parameter `prompt` — either is accepted).");
 
@@ -1625,7 +1681,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		if (!resident || resident.handle.exited()) return;
 		fire.delivered = true;
 		// A send that fails after all ends the job, as a fire to an ended agent does.
-		void resident.handle.send(fire.prompt).catch(() => {
+		void resident.handle.send(fire.text(resident.handle.conversation)).catch(() => {
 			pi.events.emit(AGENT_CRON_CHANNEL, { op: "delete", agentId: fire.agentId, id: fire.jobId } satisfies AgentCronRequest);
 		});
 	});
@@ -1694,7 +1750,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 		runningIds.add(record.taskId);
 		const live = trackLiveRun(record, request, parent);
-		const { parentSystemPrompt: forkPrompt, parentRequest, parentMode: forkMode } = forkInputs(request, record, ctx);
+		const { parentSystemPrompt: forkPrompt, parentRequest } = forkInputs(request, record, ctx);
 		const handle = runtime.run({
 			name: request.name,
 			agent: agentDef,
@@ -1703,7 +1759,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			forkFrom: request.fork ? forkFrom : undefined,
 			parentSystemPrompt: forkPrompt,
 			parentRequest,
-			parentMode: forkMode,
 			sessionDir: record.sessionSearchDir || undefined,
 			model: request.model,
 			fallbackModel: request.fallbackModel,
@@ -1865,7 +1920,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			}, RESIDENT_IDLE_MS);
 			reaper.unref?.();
 		};
-		const { parentSystemPrompt: forkPrompt, parentRequest, parentMode: forkMode } = forkInputs(p.request, p.record, ctx);
+		const { parentSystemPrompt: forkPrompt, parentRequest } = forkInputs(p.request, p.record, ctx);
 		// No `signal` here on purpose: a resident outlives the spawning turn and
 		// is stopped through task_stop / the panel, not by the turn ending (S15).
 		const started = await runtime.runResident({
@@ -1876,7 +1931,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			forkMessages: p.request.fork ? forkMessages : undefined,
 			parentSystemPrompt: forkPrompt,
 			parentRequest,
-			parentMode: forkMode,
 			sessionDir: p.record.sessionSearchDir || undefined,
 			model: p.request.model,
 			fallbackModel: p.request.fallbackModel,
@@ -2627,7 +2681,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			sessionFile,
 			parentSystemPrompt: forkPrompt,
 			parentRequest: record.agent === FORK_AGENT ? readForkRequest(record) : undefined,
-			parentMode: record.agent === FORK_AGENT ? parentMode : undefined,
 			// Blocking, so the call's own abort stops it; a background turn is stopped by task_stop.
 			signal: oneShot ? signal : undefined,
 			model: record.model,

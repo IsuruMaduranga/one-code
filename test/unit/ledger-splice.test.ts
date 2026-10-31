@@ -3,7 +3,7 @@ import { foldBranch } from "../../extensions/lib/ledger/fold.ts";
 import { planRequest } from "../../extensions/lib/ledger/plan.ts";
 import { makeRecord, RECORD } from "../../extensions/lib/ledger/records.ts";
 import { deliveredAfterRepair, repairRequest, validateRequest } from "../../extensions/lib/ledger/validate.ts";
-import { contentHash, declaredToolNames, isTrailer, mergeDeclarations, payloadHead, preludeLength, recordedRequest, spliceRequest, withRecordedHead } from "../../extensions/lib/ledger/wire.ts";
+import { contentHash, declaredToolNames, isTrailer, mergeDeclarations, payloadHead, preludeLength, recordedRequest, spliceRequest, withBranchToolOrder, withRecordedHead } from "../../extensions/lib/ledger/wire.ts";
 
 const identity = { api: "anthropic-messages", provider: "anthropic", model: "claude-sonnet-5-5", auth: "key" };
 const mark = { type: "ephemeral" };
@@ -129,6 +129,23 @@ describe("the recorded head", () => {
 		const bedrockHead = payloadHead({ messages: [], toolConfig: { tools: [{ toolSpec: { name: "a" } }] } }, "bedrock-converse-stream");
 		const bedrock = withRecordedHead({ toolConfig: { tools: [{ toolSpec: { name: "b" } }, { cachePoint: { type: "default" } }] } }, bedrockHead, "bedrock-converse-stream");
 		expect((bedrock.toolConfig as { tools: unknown[] }).tools).toEqual([{ toolSpec: { name: "a" } }, { toolSpec: { name: "b" } }, { cachePoint: { type: "default" } }]);
+	});
+});
+
+describe("withBranchToolOrder", () => {
+	it("orders the declarations like the branch in each API's shape, and returns a payload already in order as it is", () => {
+		const order = ["b", "a"];
+		const anthropic = { tools: [tool("a"), tool("c"), tool("b")] };
+		expect(withBranchToolOrder(anthropic, order, identity.api).tools).toEqual([tool("b"), tool("a"), tool("c")]);
+		const inOrder = { tools: [tool("b"), tool("a")] };
+		expect(withBranchToolOrder(inOrder, order, identity.api)).toBe(inOrder);
+		const bedrock = { toolConfig: { tools: [{ toolSpec: { name: "a" } }, { toolSpec: { name: "b" } }, { cachePoint: { type: "default" } }], toolChoice: { auto: {} } } };
+		expect(withBranchToolOrder(bedrock, order, "bedrock-converse-stream").toolConfig).toEqual({ tools: [{ toolSpec: { name: "b" } }, { toolSpec: { name: "a" } }, { cachePoint: { type: "default" } }], toolChoice: { auto: {} } });
+		const google = { config: { systemInstruction: "s", tools: [{ functionDeclarations: [{ name: "a" }, { name: "b" }] }, { googleSearch: {} }] } };
+		expect(withBranchToolOrder(google, order, "google-generative-ai").config).toEqual({ systemInstruction: "s", tools: [{ functionDeclarations: [{ name: "b" }, { name: "a" }] }, { googleSearch: {} }] });
+		const googleInOrder = { config: { tools: [{ functionDeclarations: [{ name: "b" }, { name: "a" }] }, { googleSearch: {} }] } };
+		expect(withBranchToolOrder(googleInOrder, order, "google-generative-ai")).toBe(googleInOrder);
+		expect(withBranchToolOrder({ messages: [] }, order, "google-generative-ai")).toEqual({ messages: [] });
 	});
 });
 

@@ -64,7 +64,9 @@ describe("switch guard texts", () => {
 
 	it("the widget line warns about /clear and quitting, and points at /tasks only for tasks", () => {
 		expect(workWidgetLine(2, 0)).toBe(" 2 background tasks · stopped by /clear, /reload or quitting · /tasks to manage");
-		expect(workWidgetLine(0, 1)).toBe(" 1 scheduled job · stopped by /clear, /reload or quitting");
+		// A /reload re-arms scheduled jobs from the branch; only running tasks stop.
+		expect(workWidgetLine(0, 1)).toBe(" 1 scheduled job · stopped by /clear or quitting");
+		expect(workWidgetLine(1, 2)).toBe(" 1 background task and 2 scheduled jobs · stopped by /clear or quitting, the tasks by /reload too · /tasks to manage");
 	});
 });
 

@@ -34,17 +34,12 @@ function store(): Store {
  * The process's value for `key`, created by `init` on first use. Keys are
  * namespaced by their owner (`"permissions:grants"`); the value is shared by
  * every instance of that owner in the process, so it must be mutated, not
- * replaced, or set again with `setProcessState`.
+ * replaced.
  */
 export function processState<T>(key: string, init: () => T): T {
 	const values = store();
 	if (!values.has(key)) values.set(key, init());
 	return values.get(key) as T;
-}
-
-/** Replace the process's value for `key`. */
-export function setProcessState<T>(key: string, value: T): void {
-	store().set(key, value);
 }
 
 /** Forget every process value: a test's fresh process. */

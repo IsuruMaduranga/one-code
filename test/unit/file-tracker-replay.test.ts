@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { filesSeenOnBranch, keptReadPaths, keptShellReadPaths } from "../../extensions/file-tracker/replay.ts";
-import { LEDGER_VERSION, RECORD } from "../../extensions/lib/ledger/records.ts";
+import { makeRecord, type PendingRecordData, RECORD } from "../../extensions/lib/ledger/records.ts";
 
 const call = (id: string, name: string, args: Record<string, unknown>) => ({ type: "toolCall", id, name, arguments: args });
 const assistant = (...blocks: unknown[]) => ({ type: "message", message: { role: "assistant", content: blocks } });
@@ -11,7 +11,7 @@ const result = (toolCallId: string, path: string | undefined, { isError = false,
 	type: "message",
 	message: { role: "toolResult", toolCallId, isError, ...(path ? { details: { oneCodeFile: seen(path, sha256) } } : {}) },
 });
-const pending = (fields: Record<string, unknown>) => ({ type: "custom", id: `p${Math.random()}`, customType: RECORD.pending, data: { v: LEDGER_VERSION, by: "test", id: "x", text: "t", ...fields } });
+const pending = (fields: Partial<PendingRecordData>) => ({ type: "custom", id: `p${Math.random()}`, customType: RECORD.pending, data: makeRecord("pending", "test", { id: "x", text: "t", ...fields }) });
 const compaction = { type: "compaction", id: "c" };
 
 describe("filesSeenOnBranch", () => {
@@ -40,6 +40,17 @@ describe("filesSeenOnBranch", () => {
 			result("3", "/w/new"),
 		];
 		expect([...filesSeenOnBranch(entries).keys()]).toEqual(["/w/kept-read", "/w/restored", "/w/new"]);
+	});
+
+	it("takes a kept edit or write as the latest version of a file a kept read showed", () => {
+		const entries = [
+			assistant(call("1", "read", { path: "/w/a" }), call("2", "edit", { path: "/w/a" }), call("3", "write", { path: "/w/a" })),
+			result("1", "/w/a", { sha256: "h1" }),
+			result("2", "/w/a", { sha256: "h2" }),
+			result("3", "/w/a", { sha256: "h3" }),
+			compaction,
+		];
+		expect(filesSeenOnBranch(entries).get("/w/a")?.seen).toEqual(seen("/w/a", "h3"));
 	});
 
 	it("collects the versions a notice named after the file's last observation", () => {

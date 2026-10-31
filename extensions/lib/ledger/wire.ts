@@ -90,7 +90,7 @@ function outputCaps(payload: WirePayload): number[] {
 	return caps;
 }
 
-/** Whether `payload` carries pi's cache-warm output cap (a real session request asks for more, except an over-window one, which comes with a fresh plan). */
+/** Whether `payload` carries pi's cache-warm output cap. A real request can too (pi-ai clamps its cap to the window's room), so the caller also checks it is a call of its own. */
 export function hasWarmCap(payload: WirePayload): boolean {
 	const caps = outputCaps(payload);
 	return caps.length > 0 && caps.every((cap) => cap <= WARM_CAP);
@@ -214,12 +214,35 @@ export function functionDeclarations(groups: readonly unknown[]): unknown[] {
 	return groups.flatMap((group) => (isObject(group) && Array.isArray(group.functionDeclarations) ? group.functionDeclarations : []));
 }
 
-/** Every declaration in a payload or head: `tools`, Bedrock `toolConfig.tools`, Google's function declarations. */
+/** The object whose `tools` array declares a body's tools: Google's `config` (its tools are groups of function declarations), Bedrock's `toolConfig`, else the body itself. */
+type ToolsHolder = "config" | "toolConfig" | "body";
+
+const toolsHolder = (api: string): ToolsHolder => (api.startsWith("google-") ? "config" : api === "bedrock-converse-stream" ? "toolConfig" : "body");
+
+/** The `tools` array of `body`'s `holder`, or undefined when there is none. */
+function toolsIn(body: WirePayload, holder: ToolsHolder): unknown[] | undefined {
+	const at = holder === "body" ? body : body[holder];
+	return isObject(at) && Array.isArray(at.tools) ? at.tools : undefined;
+}
+
+/** `body` with `tools` as its `holder`'s tools array, the holder created when absent. */
+function withToolsIn(body: WirePayload, holder: ToolsHolder, tools: unknown[]): WirePayload {
+	if (holder === "body") return { ...body, tools };
+	const at = body[holder];
+	return { ...body, [holder]: { ...(isObject(at) ? at : {}), tools } };
+}
+
+/** `body` with the tools array where `api` puts it mapped by `fn`: `body` itself when it has none or `fn` returns its input. */
+function mapTools(body: WirePayload, api: string, fn: (tools: unknown[]) => unknown[]): WirePayload {
+	const holder = toolsHolder(api);
+	const tools = toolsIn(body, holder);
+	const mapped = tools && fn(tools);
+	return mapped === undefined || mapped === tools ? body : withToolsIn(body, holder, mapped);
+}
+
+/** Every declaration in a payload or head, whatever its API: `tools`, Bedrock `toolConfig.tools`, Google's function declarations. */
 export function declarationsOf(payload: WirePayload): unknown[] {
-	const config = isObject(payload.config) ? payload.config : undefined;
-	const toolConfig = isObject(payload.toolConfig) ? payload.toolConfig : undefined;
-	const google = Array.isArray(config?.tools) ? functionDeclarations(config.tools) : [];
-	return [...(Array.isArray(payload.tools) ? payload.tools : []), ...(Array.isArray(toolConfig?.tools) ? toolConfig.tools : []), ...google];
+	return [...(toolsIn(payload, "body") ?? []), ...(toolsIn(payload, "toolConfig") ?? []), ...functionDeclarations(toolsIn(payload, "config") ?? [])];
 }
 
 /** The names a payload or head declares, in any API's shape; `eager` keeps only declarations not marked `defer_loading`. */
@@ -253,7 +276,7 @@ function withRecordedDeferral(live: unknown, recorded: unknown): unknown {
  * as pi built it (its cache marker included); one that differs only in its
  * text or its deferral takes the recorded bytes, so a description variant or a
  * load never moves the tools array. One whose input schema changed (an
- * upgrade, an MCP server's new schema, a fork's own spawn tool) takes the live
+ * upgrade, an MCP server's new schema) takes the live
  * declaration, with the recorded deferral: pi validates and runs a call
  * against the live schema, so the wire must offer that one. Nameless markers
  * that end the live list (Bedrock `cachePoint`) end it.
@@ -284,6 +307,51 @@ export function mergeDeclarations(recorded: readonly unknown[], live: readonly u
 	let trailing = live.length;
 	while (trailing > 0 && toolName(live[trailing - 1]) === undefined) trailing--;
 	return [...withToolsMarker(out, live), ...live.slice(trailing)];
+}
+
+/**
+ * An epoch's live declarations in the order the branch first declared them
+ * (`LedgerFold.toolOrder`), then the ones it never declared in pi's order;
+ * nameless trailing markers stay last. pi derives its tools from the
+ * transcript's tool deltas, where a changed definition is a removal and an
+ * addition (pi-ai `getCurrentTools`), so a tool whose text follows the model
+ * tier (bash, the description-form tools) moved to the end at every hop, and a
+ * hop back to the earlier model missed the prefix it had cached. The bytes stay
+ * pi's: only the order comes from the branch.
+ */
+export function orderLikeBranch<T extends readonly unknown[]>(order: readonly string[], live: T): T | unknown[] {
+	const rank = new Map(order.map((name, index) => [name, index]));
+	let trailing = live.length;
+	while (trailing > 0 && toolName(live[trailing - 1]) === undefined) trailing--;
+	const named = live.slice(0, trailing).filter((tool) => toolName(tool) !== undefined);
+	const known = named.filter((tool) => rank.has(toolName(tool)!)).sort((a, b) => rank.get(toolName(a)!)! - rank.get(toolName(b)!)!);
+	const ordered = [...known, ...named.filter((tool) => !rank.has(toolName(tool)!))];
+	if (ordered.length === trailing && ordered.every((tool, index) => tool === live[index])) return live;
+	return [...withToolsMarker(ordered, live), ...live.slice(trailing)];
+}
+
+/** `payload` with its declarations in the branch's order (`orderLikeBranch`), in any API's shape. */
+export function withBranchToolOrder(payload: WirePayload, order: readonly string[], api: string): WirePayload {
+	if (order.length === 0) return payload;
+	const reorder = (tools: unknown[]) => orderLikeBranch(order, tools);
+	return mapTools(payload, api, toolsHolder(api) === "config" ? (groups) => mapGroupDeclarations(groups, reorder) : reorder);
+}
+
+/** Google's tool groups with each group's function declarations mapped by `fn`: `groups` itself when `fn` returns every input. */
+function mapGroupDeclarations(groups: unknown[], fn: (declarations: unknown[]) => unknown[]): unknown[] {
+	const out = groups.map((group) => {
+		if (!isObject(group) || !Array.isArray(group.functionDeclarations)) return group;
+		const declarations = fn(group.functionDeclarations);
+		return declarations === group.functionDeclarations ? group : { ...group, functionDeclarations: declarations };
+	});
+	return out.some((group, index) => group !== groups[index]) ? out : groups;
+}
+
+/** Google's recorded tool groups merged with the live ones: one group of the merged function declarations (none when empty), then the recorded groups without declarations. */
+function mergeGroups(recorded: readonly unknown[], live: readonly unknown[]): unknown[] {
+	const merged = mergeDeclarations(functionDeclarations(recorded), functionDeclarations(live));
+	const others = recorded.filter((group) => !(isObject(group) && Array.isArray(group.functionDeclarations)));
+	return [...(merged.length ? [{ functionDeclarations: merged }] : []), ...others];
 }
 
 /**
@@ -332,31 +400,24 @@ function recordedValue(recorded: unknown, live: unknown): unknown {
  * pi no longer declares stays (Claude Code never removes a tool mid-conversation).
  */
 export function withRecordedHead(payload: WirePayload, head: Record<string, unknown>, api: string, declaredElsewhere: ReadonlySet<string> = new Set()): WirePayload {
-	const out: WirePayload = { ...payload };
-	const merge = (recordedTools: unknown, liveTools: unknown) =>
-		Array.isArray(recordedTools) ? mergeDeclarations(recordedTools, Array.isArray(liveTools) ? liveTools : [], declaredElsewhere) : liveTools;
-	if (api.startsWith("google-")) {
+	const holder = toolsHolder(api);
+	const recordedTools = toolsIn(head, holder);
+	const withMergedTools = (out: WirePayload): WirePayload => {
+		if (!recordedTools) return out;
+		const live = toolsIn(payload, holder) ?? [];
+		return withToolsIn(out, holder, holder === "config" ? mergeGroups(recordedTools, live) : mergeDeclarations(recordedTools, live, declaredElsewhere));
+	};
+	if (holder === "config") {
 		const recorded = isObject(head.config) ? head.config : {};
 		const live = isObject(payload.config) ? payload.config : {};
 		const config: Record<string, unknown> = { ...live };
 		if ("systemInstruction" in recorded) config.systemInstruction = recordedValue(recorded.systemInstruction, live.systemInstruction);
-		const recordedGroups = Array.isArray(recorded.tools) ? recorded.tools : undefined;
-		const liveGroups = Array.isArray(live.tools) ? live.tools : [];
-		if (recordedGroups) {
-			const merged = mergeDeclarations(functionDeclarations(recordedGroups), functionDeclarations(liveGroups));
-			const others = recordedGroups.filter((group) => !(isObject(group) && Array.isArray(group.functionDeclarations)));
-			config.tools = [...(merged.length ? [{ functionDeclarations: merged }] : []), ...others];
-		}
-		out.config = config;
-		return out;
+		return withMergedTools({ ...payload, config });
 	}
-	if (api === "bedrock-converse-stream") {
+	let out: WirePayload = { ...payload };
+	if (holder === "toolConfig") {
 		if ("system" in head) out.system = recordedValue(head.system, payload.system);
-		if (isObject(head.toolConfig)) {
-			const live = isObject(payload.toolConfig) ? payload.toolConfig : {};
-			out.toolConfig = { ...live, tools: merge(head.toolConfig.tools, live.tools) };
-		}
-		return out;
+		return withMergedTools(out);
 	}
 	// The cache key routes to the host holding the record's cache: a fork child,
 	// or a /fork, extends a request recorded under the parent session's key. Not
@@ -365,7 +426,7 @@ export function withRecordedHead(payload: WirePayload, head: Record<string, unkn
 	// nothing live (findings §75).
 	const fields = api === "openai-codex-responses" ? ["system", "instructions"] : ["system", "instructions", "prompt_cache_key"];
 	for (const field of fields) if (field in head) out[field] = recordedValue(head[field], payload[field]);
-	if ("tools" in head) out.tools = merge(head.tools, payload.tools);
+	out = withMergedTools(out);
 	// A beta an earlier request needed (a mid-conversation system message, a
 	// tool_addition) is still needed: that request's messages are in this one.
 	if (Array.isArray(head.betas)) {

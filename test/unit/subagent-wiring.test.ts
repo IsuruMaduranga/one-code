@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../extensions/auto-mode/actions.ts";
 import backgroundExtension from "../../extensions/background/index.ts";
 import { type BackgroundTask, TASK_REGISTER_CHANNEL } from "../../extensions/background/registry.ts";
+import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/mcp-share.ts";
 import { DEFAULT_COALESCE_MS } from "../../extensions/lib/notifications.ts";
 import { AGENT_VIEW_CHANNEL } from "../../extensions/lib/agent-view.ts";
 import { SUBAGENT_GATE_CHANNEL } from "../../extensions/permissions/subagent-gate.ts";
@@ -530,6 +531,84 @@ describe("fork runs in a one-shot session", () => {
 		expect(retried.content[0].text).not.toContain("already used");
 		expect(retried.details!.agentRuns![0].name).toBe("truncate-check");
 	});
+
+	// A fork's first request extends the parent's recorded one, tools block
+	// included; the ledger keeps a recorded declaration only while the live
+	// schema matches (lib/ledger/wire.ts mergeDeclarations), so a fork's spawn
+	// tool with its own schema replaced the parent's Agent mid-array and the fork
+	// missed the parent's cache from there on.
+	it("gives a fork a spawn tool with the parent's Agent schema", async () => {
+		const { h, run } = await mountFork();
+		await h.call("Agent", { subagent_type: "fork", name: "historian", task: "Read the git history" });
+		const nested = (run.mock.calls[0][0] as { extraTools?: Array<{ name: string; parameters: unknown }> }).extraTools?.find((tool) => tool.name === "Agent");
+		expect(JSON.stringify(nested!.parameters)).toBe(JSON.stringify(h.fake.tools.get("Agent")!.parameters));
+	});
+
+	// The fork's wire carries the parent's Agent declaration, which offers these
+	// options; a nested run cannot honor them, so the result names the fix.
+	it("refuses the parent's options a nested run cannot honor, naming the fix, and runs the call without them", async () => {
+		const { h, run } = await mountFork();
+		h.fake.events.emit(SUBAGENT_GATE_CHANNEL, { decide: async () => undefined });
+		await h.call("Agent", { subagent_type: "fork", name: "historian", task: "Read the git history" });
+		const nested = (run.mock.calls[0][0] as { extraTools?: Array<{ name: string; execute: (...args: unknown[]) => Promise<Result> }> }).extraTools!.find((tool) => tool.name === "Agent")!;
+		const call = (params: Record<string, unknown>) => nested.execute("nested-call", { subagent_type: "explore", task: "Look", ...params }, undefined, undefined, h.ctx);
+		for (const option of [{ model: "gpt-5-flash-text" }, { thinking: "high" }, { isolation: "worktree" }]) {
+			const refused = await call(option);
+			expect(refused.isError).toBe(true);
+			expect(refused.content[0].text).toContain(`\`${Object.keys(option)[0]}\``);
+			expect(refused.content[0].text).toContain("Call again without it");
+		}
+		const forked = await call({ subagent_type: "fork" });
+		expect(forked.isError).toBe(true);
+		expect(forked.content[0].text).toContain("pick a named agent");
+		expect(run).toHaveBeenCalledTimes(1);
+		const plain = await call({});
+		expect(plain.isError).toBe(false);
+		expect(run).toHaveBeenCalledTimes(2);
+	});
+
+	// The same rule for every tool a fork is handed: one whose schema differs
+	// from the parent's tool of that name replaces the parent's recorded
+	// declaration, and the fork misses the parent's cache from there on.
+	it("gives a fork only tools whose schemas match the parent's tools of the same name", async () => {
+		const { h, run } = await mountFork();
+		await h.call("Agent", { subagent_type: "fork", name: "historian", task: "Read the git history" });
+		const extraTools = (run.mock.calls[0][0] as { extraTools?: Array<{ name: string; parameters: unknown }> }).extraTools ?? [];
+		expect(extraTools.map((tool) => tool.name)).toEqual(expect.arrayContaining(["Agent", "cron_create", "cron_list", "cron_delete"]));
+		for (const tool of extraTools) {
+			const parent = h.fake.tools.get(tool.name);
+			expect(parent, `the parent has no ${tool.name} tool`).toBeDefined();
+			expect(JSON.stringify(tool.parameters), tool.name).toBe(JSON.stringify(parent!.parameters));
+		}
+	});
+
+	it("shares the parent's MCP tools with a fork as the parent's own definitions", async () => {
+		const run = vi.fn(() => ({ result: Promise.resolve(outcome()), kill: vi.fn(), snapshot: () => ({ text: "", toolCalls: 0, usage: emptyUsage() }) }));
+		let getMcpTools: (() => unknown[] | Promise<unknown[]>) | undefined;
+		vi.spyOn(SubagentRuntime, "create").mockImplementation(async (_cwd, mcpTools) => {
+			getMcpTools = mcpTools as typeof getMcpTools;
+			return { run } as unknown as SubagentRuntime;
+		});
+		const parent = join(dir, "parent.jsonl");
+		writeFileSync(parent, "");
+		const h = await mount([], session, "print", parent);
+		const shared = [{ name: "mcp__docs__search", parameters: { type: "object", properties: { query: { type: "string" } } } }];
+		h.fake.events.emit(MCP_TOOLS_CHANNEL, { tools: shared, settled: true });
+		await h.call("Agent", { subagent_type: "fork", name: "historian", task: "Read the git history" });
+		expect(run).toHaveBeenCalledTimes(1);
+		const tools = await getMcpTools!();
+		expect(tools).toHaveLength(shared.length);
+		tools.forEach((tool, i) => expect(tool).toBe(shared[i]));
+	});
+
+	it.each([{ model: "gpt-5-flash-text" }, { isolation: "worktree" }, { thinking: "high" }])("refuses a fork's nested call with a run option it cannot honor (%o)", async (option) => {
+		const { h, run } = await mountFork();
+		await h.call("Agent", { subagent_type: "fork", name: "historian", task: "Read the git history" });
+		const nested = (run.mock.calls[0][0] as { extraTools?: Array<{ name: string; execute: (...args: unknown[]) => Promise<Result> }> }).extraTools!.find((tool) => tool.name === "Agent")!;
+		const result = await nested.execute("nested", { subagent_type: "general-purpose", task: "Look", ...option }, undefined, undefined, h.ctx);
+		expect(result.isError).toBe(true);
+		expect(result.content[0].text).toContain(`\`${Object.keys(option)[0]}\``);
+	});
 });
 
 // SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M1: a long report is persisted with a
@@ -660,5 +739,71 @@ describe("subagent runs follow a /tree switch", () => {
 		const selected = [{ type: "message", message: { role: "toolResult", toolName: "Agent", details: { agentRuns: [run("selected")] } } }];
 		await h.fake.fire("session_tree", {}, { ...h.ctx, sessionManager: { ...(h.ctx.sessionManager as object), getBranch: () => selected } });
 		expect(await names()).toEqual(["selected"]);
+	});
+});
+
+// A compaction summarizes the calls that started background agents, so the
+// next request names the ones still going.
+describe("background agents named after a compaction", () => {
+	const KEY = "subagents-running-after-compaction";
+	const compactionNotices = (h: Awaited<ReturnType<typeof mount>>) => {
+		const texts: string[] = [];
+		h.fake.events.on(REMINDER_CHANNEL, (data) => {
+			const reminder = data as { text?: string; key?: string };
+			if (reminder.key === KEY && reminder.text) texts.push(reminder.text);
+		});
+		return texts;
+	};
+
+	it("names only top-level runs, not a nested run whose result goes to the agent that spawned it", async () => {
+		const runtime = fakeResident();
+		runtime.runner.run.mockReturnValue({ result: new Promise<ChildOutcome>(() => {}), kill: vi.fn(), snapshot: () => ({ text: "", toolCalls: 0, usage: emptyUsage() }) });
+		const h = await mount();
+		h.fake.events.emit(SUBAGENT_GATE_CHANNEL, { decide: async () => undefined });
+		const notices = compactionNotices(h);
+		await h.call("Agent", { subagent_type: "general-purpose", task: "Delegate" });
+		const nested = runtime.options().extraTools?.find((tool) => tool.name === "Agent");
+		void nested!.execute("nested-call", { subagent_type: "explore", task: "Look", name: "looker" }, undefined, undefined, h.ctx as never);
+		await vi.advanceTimersByTimeAsync(0);
+		await h.fake.fire("session_compact", { compactionEntry: { id: "c1" } }, h.ctx);
+		await h.fake.fire("turn_start", {}, compacted(h));
+		expect(notices).toHaveLength(1);
+		expect(notices[0]).toContain("general-purpose-1");
+		expect(notices[0]).not.toContain("looker");
+	});
+
+	/** The session's context with the compaction entry `c1` on its branch. */
+	const compacted = (h: Awaited<ReturnType<typeof mount>>, branch: unknown[] = [{ type: "compaction", id: "c1" }]) => ({
+		...h.ctx,
+		sessionManager: { ...(h.ctx.sessionManager as object), getBranch: () => branch },
+	});
+
+	it("does not name an agent that finished between the compaction and the next request", async () => {
+		const runtime = fakeResident();
+		const h = await mount();
+		const notices = compactionNotices(h);
+		await h.call("Agent", { subagent_type: "general-purpose", task: "Count the files" });
+		await h.fake.fire("session_compact", { compactionEntry: { id: "c1" } }, h.ctx);
+		runtime.finish();
+		await vi.advanceTimersByTimeAsync(DEFAULT_COALESCE_MS + 1);
+		await h.fake.fire("turn_start", {}, compacted(h));
+		expect(notices).toEqual([]);
+	});
+
+	it("names a run once, on the first request after the compaction, and not on a branch without that compaction", async () => {
+		fakeResident();
+		const h = await mount();
+		const notices = compactionNotices(h);
+		await h.call("Agent", { subagent_type: "general-purpose", task: "Count the files" });
+		await h.fake.fire("session_compact", { compactionEntry: { id: "c1" } }, h.ctx);
+		expect(notices).toEqual([]);
+		await h.fake.fire("turn_start", {}, compacted(h));
+		await h.fake.fire("turn_start", {}, compacted(h));
+		expect(notices).toHaveLength(1);
+
+		await h.fake.fire("session_compact", { compactionEntry: { id: "c2" } }, h.ctx);
+		// A /tree to a branch that does not hold the compaction: its history still shows the call.
+		await h.fake.fire("turn_start", {}, compacted(h, [{ type: "compaction", id: "c1" }]));
+		expect(notices).toHaveLength(1);
 	});
 });

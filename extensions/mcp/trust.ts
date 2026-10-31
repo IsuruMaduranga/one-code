@@ -32,6 +32,7 @@ import { readSettingsFile, type SettingsSource, settingsSources } from "../lib/c
 import { claudeSourcesOn } from "../lib/config-mode.ts";
 import { boundConsentItems } from "../lib/consent-preview.ts";
 import { consentStorePath } from "../lib/consent-stores.ts";
+import { processState } from "../lib/process-state.ts";
 import type { McpServer } from "./config.ts";
 import { escapeControlText } from "../lib/terminal-text.ts";
 
@@ -313,8 +314,14 @@ export interface McpTrustOutcome {
 	withheld: { server: McpServer; reason: "declined" | "not-approved" | "disabled-by-claude-settings" }[];
 }
 
-/** Process-lifetime memory per project+server+hash, so /clear (a new session_start) does not re-ask a "No". */
-const sessionDecisions = new Map<string, boolean>();
+/**
+ * Process-lifetime memory per project+server+hash, so /clear (a new
+ * session_start) and /reload do not re-ask a "No". Process state
+ * (lib/process-state.ts), not module scope: pi evaluates this module again
+ * at `/reload` and at a `/resume` into another directory (lifecycle grid
+ * R3-L13).
+ */
+const sessionDecisions = () => processState("mcp:trust-decisions", () => new Map<string, boolean>());
 const pendingPrompts = new Map<string, Promise<string | undefined>>();
 
 /**
@@ -363,7 +370,7 @@ export async function approveMcpServers(
 			approved.push(server);
 			continue;
 		}
-		const remembered = sessionDecisions.get(`${root}:${server.name}:${hash}`);
+		const remembered = sessionDecisions().get(`${root}:${server.name}:${hash}`);
 		if (remembered === true) approved.push(server);
 		else if (remembered === false) withheld.push({ server, reason: "declined" });
 		else pending.push(server);
@@ -400,12 +407,12 @@ export async function approveMcpServers(
 		const root = projectRootOf(server);
 		const decisionKey = `${root}:${server.name}:${hashServerConfig(server)}`;
 		if (choice === CHOICE_ALL || choice === CHOICE_THIS || choice === CHOICE_THESE) {
-			sessionDecisions.set(decisionKey, true);
+			sessionDecisions().set(decisionKey, true);
 			if (choice === CHOICE_ALL) persistEnableAll(root, deps.storePath);
 			persistApproval(root, server, deps.storePath);
 			approved.push(server);
 		} else {
-			sessionDecisions.set(decisionKey, false);
+			sessionDecisions().set(decisionKey, false);
 			withheld.push({ server, reason: "declined" });
 			// An explicit "No" is remembered as a disable; Escape is this session only.
 			if (choice === CHOICE_NO) deps.disable(server);
@@ -419,6 +426,6 @@ export async function approveMcpServers(
 
 /** Test seam. */
 export function resetMcpTrustSessionState(): void {
-	sessionDecisions.clear();
+	sessionDecisions().clear();
 	pendingPrompts.clear();
 }

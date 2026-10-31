@@ -28,11 +28,11 @@ export interface PendingRun {
 	taskId: string;
 }
 
-/**
- * The one-shot for a turn that ended with runs still pending, or undefined when
- * there is nothing to say. Named runs, so a model with several in flight knows
- * which ones it cannot have heard from.
- */
+/** The runs by name and task id, comma-separated. */
+function namedRuns(runs: readonly PendingRun[]): string {
+	return runs.map((run) => `${run.name} (task ${run.taskId})`).join(", ");
+}
+
 /**
  * The background agents still working when a compaction summarized the calls
  * that started them: the new epoch's history no longer shows them, so a model
@@ -42,13 +42,17 @@ export interface PendingRun {
  */
 export function runningAfterCompactionReminder(runs: readonly PendingRun[]): string | undefined {
 	if (runs.length === 0) return undefined;
-	const named = runs.map((run) => `${run.name} (task ${run.taskId})`).join(", ");
-	return `Background agents you started before this conversation was compacted are still running: ${named}. Each one notifies you when it finishes; do not start the same work again. Use task_output to check on one, or task_stop to end it.`;
+	return `Background agents you started before this conversation was compacted are still running: ${namedRuns(runs)}. Each one notifies you when it finishes; do not start the same work again. Use task_output to check on one, or task_stop to end it.`;
 }
 
+/**
+ * The one-shot for a turn that ended with runs still pending, or undefined when
+ * there is nothing to say. Named runs, so a model with several in flight knows
+ * which ones it cannot have heard from.
+ */
 export function pendingClaimReminder(runs: readonly PendingRun[]): string | undefined {
 	if (runs.length === 0) return undefined;
-	const named = runs.map((run) => `${run.name} (task ${run.taskId})`).join(", ");
+	const named = namedRuns(runs);
 	const subject = runs.length === 1 ? "It has" : "They have";
 	return (
 		`You ended that turn while ${named} ${runs.length === 1 ? "was" : "were"} still running. ${subject} not reported yet, ` +

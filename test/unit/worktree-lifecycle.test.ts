@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WORKTREE_CHANNEL, type WorktreeLocation } from "../../extensions/lib/worktree-channel.ts";
+import { resetProcessStateForTest } from "../../extensions/lib/process-state.ts";
 import worktreeExtension from "../../extensions/worktree/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
@@ -33,6 +34,7 @@ beforeEach(() => {
 	writeFileSync(join(repo, ".gitignore"), "output.txt\n");
 	git(repo, "add", ".");
 	git(repo, "commit", "-qm", "initial");
+	resetProcessStateForTest();
 	fake = createFakePi();
 	location = null;
 	fake.events.on(WORKTREE_CHANNEL, (data) => { location = data as WorktreeLocation | null; });
@@ -207,5 +209,55 @@ describe("worktree lifecycle safety", () => {
 		const input = { path: "a.txt" };
 		await resumed.fire("tool_call", { toolName: "read", toolCallId: "r", input }, ctx());
 		expect(input.path).toBe(join(path, "a.txt"));
+	});
+
+	describe("/clear and /new keep an entered worktree, as Claude Code does (R3-M23)", () => {
+		/** A fresh instance on its own branch, as pi builds one at a session swap; `cwd` is the new session's directory. */
+		const swap = async (reason: string, branch: FakePi["branch"] = [], cwd = repo) => {
+			const next = createFakePi();
+			let seen: WorktreeLocation | null = null;
+			next.events.on(WORKTREE_CHANNEL, (data) => { seen = data as WorktreeLocation | null; });
+			worktreeExtension(next.pi as never);
+			const entries = [...branch];
+			await next.fire("session_start", { reason }, createFakeCtx({ cwd, sessionManager: { getBranch: () => [...entries, ...next.branch] } }));
+			return { next, location: () => seen, branch: () => [...entries, ...next.branch] };
+		};
+
+		it("starts the new branch in the worktree and records it there, so a resume reads it back", async () => {
+			const path = await start();
+			const cleared = await swap("new");
+			expect(cleared.location()?.path).toBe(path);
+			const input = { path: "a.txt" };
+			await cleared.next.fire("tool_call", { toolName: "read", toolCallId: "r", input }, ctx());
+			expect(input.path).toBe(join(path, "a.txt"));
+			// A fresh process resuming the cleared session: nothing carried in memory.
+			resetProcessStateForTest();
+			const resumed = await swap("startup", cleared.branch());
+			expect(resumed.location()?.path).toBe(path);
+		});
+
+		it("keeps nothing after the session exited the worktree", async () => {
+			await start();
+			await exit({ action: "keep" });
+			expect((await swap("new")).location()).toBeNull();
+		});
+
+		it("carries only a /clear or /new, and only into the directory the worktree was entered from", async () => {
+			await start();
+			expect((await swap("new", [], root)).location()).toBeNull();
+			expect((await swap("resume")).location()).toBeNull();
+		});
+
+		it("restores a recorded carry only in the directory the worktree was entered from", async () => {
+			await start();
+			const cleared = await swap("new");
+			resetProcessStateForTest();
+			// The cleared branch run from another directory (a fork into another project).
+			const elsewhere = await swap("startup", cleared.branch(), root);
+			expect(elsewhere.location()).toBeNull();
+			const input = { path: "a.txt" };
+			await elsewhere.next.fire("tool_call", { toolName: "read", toolCallId: "r", input }, createFakeCtx({ cwd: root }));
+			expect(input.path).toBe("a.txt");
+		});
 	});
 });

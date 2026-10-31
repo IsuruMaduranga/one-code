@@ -31,10 +31,11 @@
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, type ExtensionContext, VERSION as PI_VERSION } from "@earendil-works/pi-coding-agent";
 import { withKeepAlive } from "../lsp/keep-alive.ts";
 import { ONE_SHOT_COMMAND_FAILED_CHANNEL, RunOutcomeLatch } from "./interrupt.ts";
 import { escapeXml } from "./local-command.ts";
+import { piFiresBeforeAgentStartForCustomRuns } from "./pi-version.ts";
 import { isUserRun, PROMPT_OPTIONS_CHANNEL } from "./prompt-options.ts";
 import { wrapReminder } from "./reminders.ts";
 
@@ -481,11 +482,6 @@ export const NOTIFICATION_ID_KEY = "notificationId";
 /** `details` key on a coalesced message: the `{customType, details}` of each notification it carries, in arrival order. */
 export const NOTIFICATION_BATCH_KEY = "notifications";
 
-/** True for the `details` of a message the notifier sent (one notification or a coalesced batch). */
-export function isNotificationDetails(details: unknown): boolean {
-	return typeof details === "object" && details !== null && (NOTIFICATION_ID_KEY in details || NOTIFICATION_BATCH_KEY in details);
-}
-
 /** Inject a harness notification (a task/agent completion, a monitor event, a review note) into the conversation. */
 export interface TaskNotifier {
 	(customType: string, text: string, details?: Record<string, unknown>): void;
@@ -533,6 +529,25 @@ export interface TaskNotifierOptions {
 	 * report, so its hand-back would only repeat it.
 	 */
 	withdrawOnDelivery?: boolean;
+	/**
+	 * Whether pi fires `before_agent_start` for a run `sendMessage` opens from
+	 * idle (pi 1.2.0 and later). Then such a run builds One Code's system
+	 * prompt like a typed one, and no notification needs the user-message
+	 * path (see "First turn of a session"). Defaults to the running pi's
+	 * version; tests set it to model an older pi.
+	 */
+	customRunsFireBeforeAgentStart?: boolean;
+	/**
+	 * Runs once a notification this notifier sent reaches the conversation,
+	 * with its customType and the details it was sent with: at its
+	 * `message_end`, or at the send for one delivered as a user message (see
+	 * "First turn of a session"), whose message carries no details for pi to
+	 * hand back. A producer whose message makes something true for the model
+	 * (a `/loop` fire's instructions) records that here, not when it calls the
+	 * notifier: the notifier may still hold the message, and a `/reload`
+	 * drops it.
+	 */
+	onDelivered?: (customType: string, details: Record<string, unknown>) => void;
 }
 
 /**
@@ -619,9 +634,10 @@ export const DEFAULT_COALESCE_MS = 250;
  * anything dispatched afterwards; a throwing `sendMessage` is swallowed as a
  * second line.
  *
- * First turn of a session: pi's idle `sendMessage(…, {triggerTurn: true})`
- * calls `_runAgentPrompt` directly and skips the `prompt()` preamble, so no
- * `before_agent_start` fires — and our system prompt is set from that hook.
+ * First turn of a session, on pi before 1.2.0: pi's idle
+ * `sendMessage(…, {triggerTurn: true})` calls `_runAgentPrompt` directly and
+ * skips the `prompt()` preamble, so no `before_agent_start` fires — and our
+ * system prompt is set from that hook.
  * A session whose first input was `/loop …` therefore ran its first request on
  * pi's stock system prompt with no reminder stack (review H1, measured). Until
  * no `prompt()` has run in this process, an idle notification is delivered as a
@@ -636,6 +652,15 @@ export const DEFAULT_COALESCE_MS = 250;
  * so the system-prompt extension installs the prompt for it from
  * `context_with_system` (`system-prompt/idle-turn.ts`). Upstream ask:
  * working-docs/upstream_prs.md #17.
+ *
+ * pi 1.2.0 fires `before_agent_start` for that run too, so there every
+ * notification goes the custom-message way from the start. Before, the
+ * fallback ran on every pi, and a `/reload` re-runs the factory, which starts
+ * over as if no prompt had run: a re-armed `/loop` wakeup went out as a plain
+ * user message and lost its customType and no-op fold (lifecycle grid
+ * R3-M17). On an older pi the fallback is still right after a reload: the
+ * system-prompt extension has lost the options too, and the user-message
+ * path is the only one that rebuilds the prompt.
  */
 export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOptions = {}): TaskNotifier {
 	interface Pending {
@@ -652,6 +677,7 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 		details: Record<string, unknown>;
 	}
 	const coalesceMs = options.coalesceMs ?? DEFAULT_COALESCE_MS;
+	const customRunsPrompt = options.customRunsFireBeforeAgentStart ?? piFiresBeforeAgentStartForCustomRuns(PI_VERSION);
 	const pending = new Map<string, Pending>();
 	// Every notifier hears every message_end; simultaneous producers must not share an outbox id.
 	const producerId = randomUUID();
@@ -660,11 +686,12 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 	/** False once the session this notifier belongs to has shut down. */
 	let active = true;
 	/**
-	 * True once an idle turn can be built without `prompt()`: a prompt has run
-	 * (the only path that emits before_agent_start), or a command announced
-	 * pi's prompt options.
+	 * True once an idle turn can be built without `prompt()`: always on pi
+	 * 1.2.0 and later; before it, once a prompt has run (the only path that
+	 * emits before_agent_start there) or a command announced pi's prompt
+	 * options.
 	 */
-	let prompted = false;
+	let prompted = customRunsPrompt;
 	/** True between agent_start and agent_settled. */
 	let busy = false;
 	/** True from a turn settling aborted/errored until the next turn starts: hold, do not start turns. */
@@ -698,6 +725,7 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 				// followUp: pi 1.2.0 counts a starting run as busy and rejects a
 				// bare send there; when idle, the option changes nothing.
 				pi.sendUserMessage(frameForDelivery(entry.text, "opens-turn"), { deliverAs: "followUp" });
+				options.onDelivered?.(entry.customType, entry.details);
 				return;
 			}
 			pi.sendMessage(
@@ -805,10 +833,14 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 	};
 
 	pi.on("message_end", (event) => {
-		const message = event.message as { role?: string; details?: unknown };
+		const message = event.message as { role?: string; customType?: string; details?: unknown };
 		if (message.role !== "custom") return;
-		const id = (message.details as Record<string, unknown> | undefined)?.[NOTIFICATION_ID_KEY];
-		if (typeof id === "string") pending.delete(id);
+		const details = message.details as Record<string, unknown> | undefined;
+		const id = details?.[NOTIFICATION_ID_KEY];
+		if (typeof id !== "string") return;
+		pending.delete(id);
+		// Every notifier hears every message_end: only its own ids are its deliveries.
+		if (details && id.startsWith(`${producerId}-`)) options.onDelivered?.(message.customType ?? "", details);
 	});
 	pi.on("agent_end", (event, ctx) => {
 		outcome.record(event.messages, ctx.signal?.aborted);
@@ -847,7 +879,7 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 		clearBatch();
 		held = [];
 		active = true;
-		prompted = false;
+		prompted = customRunsPrompt;
 		busy = false;
 		interrupted = false;
 	});

@@ -213,6 +213,8 @@ export function createFakeCtx(overrides: Record<string, unknown> = {}): Record<s
 		getBranch: () => [],
 		...(overrides.sessionManager as Record<string, unknown> | undefined),
 	};
+	// A session with one branch: its entries are the branch's.
+	sessionManager.getEntries ??= () => (sessionManager.getBranch as () => unknown[])();
 	// pi's projection of the branch, without compaction: its message entries' messages.
 	sessionManager.buildSessionProjection ??= () => ({
 		entries: [],

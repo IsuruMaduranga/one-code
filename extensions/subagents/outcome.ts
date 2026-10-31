@@ -5,6 +5,7 @@
  */
 
 import type { ChildAction } from "../auto-mode/actions.ts";
+import type { FireConversation } from "../lib/agent-cron.ts";
 import type { UsageTotals } from "./usage.ts";
 
 export const OUTPUT_CAP = 50_000;
@@ -72,6 +73,8 @@ export interface RpcChildHandle {
 	 * the caller never reports a delivery that did not happen.
 	 */
 	send(message: string): Promise<"started" | "steered">;
+	/** The agent's own session: a cron fire's `/loop` sentinel reads and records its delivery there (lib/agent-cron.ts). */
+	conversation: FireConversation;
 	busy(): boolean;
 	exited(): boolean;
 	/**

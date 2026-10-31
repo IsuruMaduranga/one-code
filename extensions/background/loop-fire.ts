@@ -12,6 +12,7 @@
  */
 
 import { projectConfigDir, userConfigDir } from "../lib/config-mode.ts";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -35,7 +36,12 @@ export interface LoopFile {
 	content: string;
 }
 
-/** What went out already this session; compaction resets it (the first fire after it resends everything). */
+/**
+ * What one conversation was already sent; compaction resets it (the first
+ * fire after it resends everything). `lastLoopFileDelivered` is the delivered
+ * loop.md's fingerprint (`loopFileMark`), not its text, so the record stays
+ * small on the branch.
+ */
 export interface LoopDeliveryState {
 	autonomousPreambleDelivered: boolean;
 	lastLoopFileDelivered: string | null;
@@ -43,6 +49,37 @@ export interface LoopDeliveryState {
 
 export function freshDeliveryState(): LoopDeliveryState {
 	return { autonomousPreambleDelivered: false, lastLoopFileDelivered: null };
+}
+
+/**
+ * The `one-code:state` key the record lives under, on the branch of the
+ * conversation the fires land in (the main session's, or a subagent's own):
+ * it follows `/tree`, survives `/reload` and resume, and a compaction resets
+ * it (lib/ledger/state.ts `stateSinceCompaction`).
+ */
+export const LOOP_DELIVERY_STATE = "loop-delivery";
+
+/**
+ * The key a main-session fire's notification details carry its record
+ * under. The record is written when that message is delivered (the
+ * notifier's `onDelivered`), not when the text is built: the notifier may
+ * still hold it, and a `/reload` or `/clear` then drops it unsent.
+ */
+export const LOOP_DELIVERY_DETAILS_KEY = "loopDelivery";
+
+/** A stored record read back, or a fresh one when it is missing or malformed. */
+export function deliveryFromState(value: unknown): LoopDeliveryState {
+	const stored = value as Partial<LoopDeliveryState> | undefined;
+	if (!stored || typeof stored !== "object") return freshDeliveryState();
+	return {
+		autonomousPreambleDelivered: stored.autonomousPreambleDelivered === true,
+		lastLoopFileDelivered: typeof stored.lastLoopFileDelivered === "string" ? stored.lastLoopFileDelivered : null,
+	};
+}
+
+/** What a delivered loop.md is remembered by: equal texts, equal marks. */
+export function loopFileMark(content: string): string {
+	return `sha256:${createHash("sha256").update(content).digest("hex")}`;
 }
 
 export function isAutonomousSentinel(prompt: string): boolean {
@@ -112,7 +149,7 @@ export function readLoopFile(cwd: string, home = homedir()): LoopFile | null {
 	return readLoopFileAt(join(projectConfigDir(cwd), "loop.md")) ?? readLoopFileAt(join(userConfigDir(home), "loop.md"));
 }
 
-function resolveLoopFile(e: LoopDeliveryState, t: string, o: LoopFile | null, preamble: string): string {let n=t===LOOP_FILE_DYNAMIC_SENTINEL;if(o){let s=n?loopFileDynamicTick():loopFileCronTick();if(e.lastLoopFileDelivered===o.content)return s;return e.lastLoopFileDelivered=o.content,`# /loop tick \u2014 tasks from ${o.path}
+function resolveLoopFile(e: LoopDeliveryState, t: string, o: LoopFile | null, preamble: string): string {let n=t===LOOP_FILE_DYNAMIC_SENTINEL;if(o){let s=n?loopFileDynamicTick():loopFileCronTick(),m=loopFileMark(o.content);if(e.lastLoopFileDelivered===m)return s;return e.lastLoopFileDelivered=m,`# /loop tick \u2014 tasks from ${o.path}
 
 The user configured a loop-tasks file. Work through the tasks defined below; these are the instructions for this tick and every subsequent tick (the reminder on later fires refers back to this message).
 

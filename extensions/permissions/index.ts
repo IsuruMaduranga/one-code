@@ -91,7 +91,7 @@ import {
 	isPathSubjectTool,
 } from "./matcher.ts";
 import { type SessionGrant, sessionGrant } from "./session-grant.ts";
-import { formatModel, modeBadge, nextMode, PERMISSION_STATUS_CHANNEL, type PermissionStatus, CYCLE_KEY } from "./modes.ts";
+import { formatModel, modeBadge, nextMode, PERMISSION_MODE_STATE, PERMISSION_STATUS_CHANNEL, type PermissionStatus, CYCLE_KEY } from "./modes.ts";
 import { intrinsicTier, usesClaudeCodeFastPaths } from "../lib/model-tier.ts";
 import { type ChildToolCall, type ChildGateDecision, sessionPermissionBridge, SUBAGENT_GATE_CHANNEL } from "./subagent-gate.ts";
 import { trackOriginalCommands } from "../lib/original-command.ts";
@@ -266,8 +266,6 @@ const denyReason = (result: { cause?: string; rule?: { raw?: string } }): string
  * here, next to the emitter it belongs to.
  */
 const STANDING_REMINDER_MODES: ReadonlySet<PermissionMode> = new Set<PermissionMode>(["plan", "auto"]);
-/** The `one-code:state` key the permission mode is recorded under on the branch. */
-const PERMISSION_MODE_STATE = "permission-mode";
 /** The `one-code:state` key for the directories added to the workspace for this session. */
 const WORKSPACE_DIRS_STATE = "workspace-dirs";
 
@@ -435,6 +433,21 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		workspacePaths = [...new Set([...trusted, ...flagWorkspaceDirs, ...sessionWorkspaceDirs].map((dir) => tryRealpath(dir) ?? dir))];
 		workspaceDirs = [...new Set(workspacePaths.map(resolvedOrSelf))];
 		readableRoots = [...harnessReadableRoots, ...docsDirPaths, ...workspaceDirs];
+		if (sessionStarted) announceWorkspace();
+	};
+	/** What the system prompt was last told the workspace is (lib/workspace-channel.ts). */
+	let announcedWorkspace: string | undefined;
+	let sessionStarted = false;
+	/**
+	 * The environment block lists the workspace: a change mid-session reaches
+	 * the next epoch's message 1 (a compaction), while inside the epoch the
+	 * /add-dir output already told the model (R3-L4).
+	 */
+	const announceWorkspace = () => {
+		const key = workspacePaths.join("\0");
+		if (key === announcedWorkspace) return;
+		announcedWorkspace = key;
+		pi.events.emit(WORKSPACE_CHANNEL, { dirs: workspacePaths } satisfies WorkspaceAnnouncement);
 	};
 	const recordSessionWorkspace = () => recordState(pi, WORKSPACE_DIRS_STATE, [...sessionWorkspaceDirs]);
 	/**
@@ -512,6 +525,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			paused: pauseTracker.isPaused(),
 			classifier: display.classifier,
 			pinned: display.pinned,
+			bypassAvailable: bypassInCycle,
 			...(toolCallId ? { toolCallId } : {}),
 		} satisfies PermissionStatus);
 	};
@@ -1081,7 +1095,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		reloadSettings(ctx, event.reason === "startup", carried);
 		if (!STANDING_REMINDER_MODES.has(mode)) setMode(mode, true);
 		// The system prompt lists the workspace as the session starts (lib/workspace-channel.ts).
-		pi.events.emit(WORKSPACE_CHANNEL, { dirs: workspacePaths } satisfies WorkspaceAnnouncement);
+		sessionStarted = true;
+		announcedWorkspace = undefined;
+		announceWorkspace();
 		resetClassifierChoice(ctx.model, "batched");
 		// The bridge reads live mode/rules, but belongs to this parent session only.
 		pi.events.emit(SUBAGENT_GATE_CHANNEL, { decide: sessionPermissionBridge(evaluateChildToolCall, childPermissionSession.signal) });
@@ -1168,7 +1184,12 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	pi.events.on(MODE_CHANNEL, (data) => {
 		const request = data as { mode?: unknown; toolCallId?: unknown } | undefined;
 		const requested = normalizePermissionMode(request?.mode);
-		if (requested) setMode(requested, false, typeof request?.toolCallId === "string" ? request.toolCallId : undefined);
+		if (!requested) return;
+		// Another extension asks (plan mode's exit restores the mode it came from,
+		// read from the branch). A stored value never grants a permission by
+		// itself: bypass only where this session has it, else the default mode.
+		const allowed = requested === "bypassPermissions" && !bypassInCycle ? "default" : requested;
+		setMode(allowed, false, typeof request?.toolCallId === "string" ? request.toolCallId : undefined);
 	});
 
 	// The plan-mode extension announces the plan file on PLAN_FILE_CHANNEL;

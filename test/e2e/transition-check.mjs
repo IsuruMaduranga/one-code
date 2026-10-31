@@ -19,6 +19,9 @@
  *            unchanged, with the eager tools in the same order.
  *   prefix   inside an epoch, the base request's messages are a byte-identical
  *            prefix of this request's messages.
+ *   fresh    (with the probe's --oracle) a fresh process opened on a copy of
+ *            the session file before the step sends the step's first request
+ *            byte for byte: the request is a pure function of the branch.
  *   cache    inside an epoch, this request reads at least what the base had
  *            read and written, less END_TOKENS: a request's last cache entry
  *            holds about 25 tokens past its final block that only the
@@ -189,6 +192,30 @@ for (const step of steps) {
 			}
 		}
 		base = request;
+	}
+}
+
+/** The first path at which two JSON values differ, for a readable fresh-process failure. */
+function firstDifference(a, b, path = "") {
+	if (JSON.stringify(a) === JSON.stringify(b)) return undefined;
+	if (a && b && typeof a === "object" && typeof b === "object") {
+		for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+			const inner = firstDifference(a[key], b[key], `${path}/${key}`);
+			if (inner) return inner;
+		}
+	}
+	return `${path || "/"}: live ${preview(a)} | fresh ${preview(b)}`;
+}
+
+// fresh: the request is a pure function of the branch, so a fresh process on
+// a copy of the session file sends what the live one sent (--oracle).
+for (const step of steps) {
+	if (!step.oracle) continue;
+	if (step.oracle.error) fail(step.label, "fresh", step.oracle.error);
+	else if (!step.oracle.equal) {
+		const fresh = lines(join(work, step.oracle.file))[0];
+		const live = wire[step.wireStart];
+		fail(step.label, "fresh", firstDifference(live, fresh) ?? "the bytes differ");
 	}
 }
 

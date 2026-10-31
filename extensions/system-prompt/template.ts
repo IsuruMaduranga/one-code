@@ -39,7 +39,16 @@ const BUNDLES: Record<PromptTier, PromptBundle> = {
 
 function buildToolsSection(options: BuildSystemPromptOptions): string {
 	const tools = options.selectedTools ?? ["read", "bash", "edit", "write"];
-	const visible = tools.filter((name) => !!options.toolSnippets?.[name]);
+	// In registration order (the snippets' own), never activation order: a tool
+	// withdrawn and brought back (a model hop through another tier) is appended
+	// to pi's active list, and a prompt built from that order would depend on
+	// the process's history instead of the branch (R3, the fresh-process oracle).
+	const order = Object.keys(options.toolSnippets ?? {});
+	const rank = (name: string) => {
+		const at = order.indexOf(name);
+		return at === -1 ? order.length : at;
+	};
+	const visible = tools.filter((name) => !!options.toolSnippets?.[name]).sort((a, b) => rank(a) - rank(b));
 	const toolsList =
 		visible.length > 0 ? visible.map((name) => `- ${name}: ${options.toolSnippets![name]}`).join("\n") : "(none)";
 

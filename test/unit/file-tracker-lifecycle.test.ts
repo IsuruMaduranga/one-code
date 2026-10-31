@@ -133,6 +133,22 @@ describe("file-tracker read state follows the branch", () => {
 			expect(notices.filter((text) => text.includes(file))).toHaveLength(1);
 		});
 
+		it("keeps a file read whose read and later edit the compaction both kept, across a resume", async () => {
+			const file = join(dir, "kept.ts");
+			writeFileSync(file, "before\n");
+			await toolCall("read", { path: file });
+			const keptFrom = fake.branch.at(-2)!.id;
+			writeFileSync(file, "after\n");
+			await toolCall("edit", { path: file });
+			push({ type: "compaction", firstKeptEntryId: keptFrom, timestamp: new Date().toISOString() } as never);
+			await fake.fire("session_compact", { compactionEntry: fake.branch.at(-1), fromExtension: true, reason: "manual", willRetry: false }, ctx());
+			expect(await edit(file)).toBeUndefined();
+
+			await load("resume");
+			expect(await edit(file)).toBeUndefined();
+			expect(notices.filter((text) => text.includes(file))).toHaveLength(0);
+		});
+
 		it("drops a restore that a later compaction summarized away", async () => {
 			const file = join(dir, "twice.txt");
 			writeFileSync(file, "restored once\n");
