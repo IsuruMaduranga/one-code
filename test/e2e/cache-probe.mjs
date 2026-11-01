@@ -32,7 +32,18 @@
  *      input + cacheRead, less one cache block (IMPLICIT_BLOCK) for the
  *      provider's rounding.
  *
- *   5. With `--late-tool NAME` (cache-probe-late-tool.sh): NAME is absent from
+ *   5. Tool declarations, wherever the request keeps them: top-level `tools`,
+ *      Responses `additional_tools` items (pi 1.4.0 puts the starting tools in
+ *      one at `input[0]` for models flagged for mid-conversation system
+ *      messages and additional tools) and `tool_search_output` items. The set
+ *      of declared names never shrinks from one request to the next, no name
+ *      is declared twice in one request, and a tool `tool_search` loaded is
+ *      declared in every request from the one carrying that load's result.
+ *   6. The system prompt is sent once per request: request 1's prompt
+ *      (`system`, `instructions`, or the list's first system or developer
+ *      message) appears once, never again further down the list.
+ *
+ *   7. With `--late-tool NAME` (cache-probe-late-tool.sh): NAME is absent from
  *      request 1, rides every later request's `tools` as `defer_loading: true`
  *      once it appears, and is announced either by a reference-form
  *      `tool_addition` in a system message or by the deferred-tool addendum.
@@ -71,7 +82,24 @@ const lines = (path) =>
 		.map((l) => JSON.parse(l));
 
 const dumped = lines(positional[0]);
-const hasTools = (p) => Array.isArray(p?.tools) && p.tools.length > 0;
+
+/** A request's conversation list in any of the three shapes. */
+const listOf = (p) => (Array.isArray(p?.input) ? p.input : Array.isArray(p?.messages) ? p.messages : []);
+/** A tool entry's name in the Anthropic/Responses (`name`) or Chat Completions (`function.name`) shape. */
+const toolNameOf = (t) => (typeof t?.name === "string" ? t.name : typeof t?.function?.name === "string" ? t.function.name : undefined);
+/**
+ * Every tool name a request declares, once per declaration, wherever it sits:
+ * top-level `tools` (deferred entries included), and the Responses
+ * `additional_tools` and `tool_search_output` items in the list.
+ */
+const declaredNames = (p) => {
+	const names = (Array.isArray(p?.tools) ? p.tools : []).map(toolNameOf);
+	for (const item of listOf(p)) {
+		if ((item?.type === "additional_tools" || item?.type === "tool_search_output") && Array.isArray(item.tools)) names.push(...item.tools.map(toolNameOf));
+	}
+	return names.filter((name) => name !== undefined);
+};
+const hasTools = (p) => declaredNames(p).length > 0;
 const sessionModel = dumped.find(hasTools)?.model;
 const isSession = (p) => hasTools(p) && p.model === sessionModel;
 const requests = dumped.filter(isSession);
@@ -119,7 +147,12 @@ const conversationHead = (p) => {
 	const firstUser = items.findIndex((item) => item?.role === "user");
 	return JSON.stringify(withoutCacheControl(firstUser === -1 ? null : items.slice(0, firstUser + 1)));
 };
-const eagerTools = (p) => JSON.stringify(withoutCacheControl((p.tools ?? []).filter((t) => t?.defer_loading !== true)));
+/** The eager tools the head declares: top-level entries without `defer_loading`, plus a leading `additional_tools` item's. */
+const eagerTools = (p) => {
+	const head = listOf(p)[0];
+	const leading = head?.type === "additional_tools" && Array.isArray(head.tools) ? head.tools : [];
+	return JSON.stringify(withoutCacheControl([...(p.tools ?? []), ...leading].filter((t) => t?.defer_loading !== true)));
+};
 
 /** Index of the first differing char, for a readable pointer into a long string. */
 const firstDiff = (a, b) => {
@@ -154,6 +187,57 @@ const checkStable = (label, pick, { downgrade = false, skipErrored = false } = {
 checkStable("system", systemText);
 checkStable("conversation head (to the first user message)", conversationHead, { skipErrored: true });
 checkStable("eager tools", eagerTools, { downgrade: eagerLoadOk });
+
+// 5. Declarations: never shrink, never doubled, a loaded tool stays declared.
+const declaredSets = requests.map((p) => new Set(declaredNames(p)));
+requests.forEach((p, i) => {
+	const names = declaredNames(p);
+	const doubled = [...new Set(names.filter((name, at) => names.indexOf(name) !== at))];
+	if (doubled.length > 0) failures.push(`request ${i + 1} declares ${doubled.join(", ")} more than once`);
+	if (i > 0) {
+		const lost = [...declaredSets[i - 1]].filter((name) => !declaredSets[i].has(name));
+		if (lost.length > 0) failures.push(`request ${i + 1} no longer declares ${lost.join(", ")}, which request ${i} declared`);
+	}
+});
+/** A wire call id: pi sends Responses ids as `<call_id>|<item_id>`. */
+const wireCallId = (id) => String(id).split("|")[0];
+/** Whether request p carries the result of tool call `callId` (Responses output, Anthropic tool_result, Completions tool message). */
+const carriesResult = (p, callId) =>
+	listOf(p).some(
+		(item) =>
+			item?.call_id === callId ||
+			item?.tool_call_id === callId ||
+			(Array.isArray(item?.content) && item.content.some((block) => block?.type === "tool_result" && block.tool_use_id === callId)),
+	);
+const toolLoads = lines(positional[1])
+	.filter((e) => e.type === "tool_execution_end" && e.toolName === "tool_search" && Array.isArray(e.result?.details?.added))
+	.map((e) => ({ callId: wireCallId(e.toolCallId), added: e.result.details.added }));
+for (const load of toolLoads) {
+	const from = requests.findIndex((p) => carriesResult(p, load.callId));
+	if (from === -1) continue;
+	for (let i = from; i < requests.length; i++) {
+		const missing = load.added.filter((name) => !declaredSets[i].has(name));
+		if (missing.length > 0) failures.push(`request ${i + 1} carries the tool_search load of ${missing.join(", ")} but does not declare it`);
+	}
+}
+
+// 6. The system prompt once per request.
+const asJson = (value) => JSON.stringify(withoutCacheControl(value));
+const isInstruction = (item) => (item?.role === "system" || item?.role === "developer") && item.type === undefined;
+const promptOf = (p) => {
+	if (p.system !== undefined) return { field: "system", text: asJson(p.system) };
+	if (p.instructions !== undefined) return { field: "instructions", text: asJson(p.instructions) };
+	const first = listOf(p).find(isInstruction);
+	return first ? { field: undefined, text: asJson(first.content) } : undefined;
+};
+const prompt = requests[0] ? promptOf(requests[0]) : undefined;
+if (prompt) {
+	requests.forEach((p, i) => {
+		const inField = prompt.field !== undefined && asJson(p[prompt.field]) === prompt.text ? 1 : 0;
+		const inList = listOf(p).filter((item) => isInstruction(item) && asJson(item.content) === prompt.text).length;
+		if (inField + inList > 1) failures.push(`request ${i + 1} sends the system prompt ${inField + inList} times`);
+	});
+}
 
 if (skipped > 0) console.log(`(${skipped} side-call request${skipped === 1 ? "" : "s"} skipped)`);
 const erroredCount = requests.filter((_, i) => isErrored(i)).length;

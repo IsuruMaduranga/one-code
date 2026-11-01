@@ -62,3 +62,9 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/pi-floor" --no-save --legacy-peer-deps --no-audit --no-fund "@earendil-works/pi-coding-agent@$min"
       - run: node test/e2e/pi-floor-smoke.mjs "$RUNNER_TEMP/pi-floor/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
       - run: node test/e2e/pi-floor-smoke.mjs node_modules/@earendil-works/pi-coding-agent/dist/cli.js
+      # The ledger reads the Responses tool shape from the bytes; this renders
+      # requests through the oldest pi-ai and checks the readers understand them.
+      - name: Responses shape contract on the oldest pi
+        run: npx vitest run test/unit/responses-shape-contract.test.ts
+        env:
+          ONE_CODE_PI_AI: ${{ runner.temp }}/pi-floor/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai
