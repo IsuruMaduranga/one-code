@@ -18,7 +18,7 @@
 
 /** Inclusive minimum and exclusive maximum pi version this release is tested against. */
 export const TESTED_PI_MIN = "1.0.0";
-export const TESTED_PI_MAX_EXCLUSIVE = "1.4.0";
+export const TESTED_PI_MAX_EXCLUSIVE = "1.5.0";
 
 /** Dotted-numeric parse; undefined for anything that is not plain x.y.z numbers. */
 export function parseVersion(version: string): number[] | undefined {
