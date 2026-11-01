@@ -62,7 +62,7 @@ import { liftAddenda, supportsToolAdditions, TOOL_ADDITION_BETAS, withToolAdditi
 import { inContextEntries } from "../lib/compaction-boundary.ts";
 import { CALLABLE_TOOLS } from "../lib/ledger/fold.ts";
 import { foldOnce, sameEntries } from "../lib/ledger/fold-memo.ts";
-import { declaredToolNames } from "../lib/ledger/wire.ts";
+import { recordedToolNames } from "../lib/ledger/wire.ts";
 import { MCP_TOOLS_CHANNEL } from "../lib/mcp-share.ts";
 import { sessionIdentity } from "../lib/anthropic-auth.ts";
 import type { EntryLike } from "../lib/ledger/records.ts";
@@ -260,13 +260,13 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 			const fold = foldOf(owner, branch, model);
 			const inUse = new Set(use.inUse);
 			for (const names of freshLoads.values()) for (const name of names) inUse.add(name);
-			const head = fold.lastRequest?.head;
+			const last = fold.lastRequest;
 			const told = fold.told.get("tools") ?? new Set<string>();
 			const announcing = supportsToolAdditions(model) && !fold.opensEpoch ? new Set(searchableTools(all).map((tool) => tool.name).filter((name) => !told.has(name))) : new Set<string>();
 			callable = callableDeferredTools(deferred, {
 				inUse,
 				toldCallable: fold.told.get(CALLABLE_TOOLS) ?? new Set(),
-				declaredEager: head ? declaredToolNames(head, { eager: true }) : new Set(),
+				declaredEager: last ? recordedToolNames(last, { eager: true }) : new Set(),
 				announcing,
 			});
 		}
@@ -410,7 +410,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 				key: `deferred-miss-${name}`,
 				text: withheldMissReminderText(name),
 			});
-		} else if (session && declaredToolNames(foldOf(session, branchOf(session), currentModel).lastRequest?.head ?? {}).has(name)) {
+		} else if (session && recordedToolNames(foldOf(session, branchOf(session), currentModel).lastRequest ?? { head: {}, list: [] }).has(name)) {
 			// The epoch's recorded tools stay declared after the tool left the
 			// session (a setting turned it off): the call cannot be salvaged, and
 			// the model must not keep trying it.

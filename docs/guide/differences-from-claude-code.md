@@ -102,12 +102,15 @@ from user and managed scope. `includeCoAuthoredBy`, `apiKeyHelper`, `forceLoginM
 `/doctor report` to see, per file, which keys were used, ignored, or
 refused.
 
-## Prompt layout on Anthropic models
+## Prompt layout
 
-Claude Code delivers part of its reminder stack to Opus and Sonnet as a
-system-role message after the first user message. pi's message model can't
-express that, so One Code uses the layout Claude Code uses for Haiku on
-every model. The content is the same; only the placement differs.
+Claude Code delivers part of its reminder stack (the environment, the tool
+and agent listings, the date) to Opus and Sonnet as a system-role message
+after the first user message. One Code does the same on every model that
+pi's model catalog marks as taking a system message at that spot, on
+Anthropic and on OpenAI. Every other model, Haiku 4.5 included, gets the
+same text inside the first user message, the layout Claude Code uses for
+Haiku. The content is the same either way; only the placement differs.
 
 ## Platform support
 

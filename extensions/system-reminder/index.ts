@@ -48,6 +48,7 @@ function oneShotOf(item: PendingRecordData): OneShot {
 		placement: item.placement ?? "last-append",
 		...(item.raw ? { raw: true } : {}),
 		...(item.toolCallId ? { toolCallId: item.toolCallId } : {}),
+		...(item.promptTimestamp !== undefined ? { promptTimestamp: item.promptTimestamp } : {}),
 		...(item.once ? { once: true } : {}),
 		...(item.orTail ? { orTail: true } : {}),
 	};
@@ -75,6 +76,7 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 			...(payload.key ? { key: payload.key } : {}),
 			...(payload.raw ? { raw: true } : {}),
 			...(payload.toolCallId ? { toolCallId: payload.toolCallId } : {}),
+			...(payload.promptTimestamp !== undefined ? { promptTimestamp: payload.promptTimestamp } : {}),
 			...(payload.once ? { once: true } : {}),
 			...(payload.orTail ? { orTail: true } : {}),
 			...(payload.untilCompaction ? { untilCompaction: true } : {}),

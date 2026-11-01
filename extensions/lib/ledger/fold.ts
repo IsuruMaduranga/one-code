@@ -29,7 +29,7 @@
  * Pure: no pi imports.
  */
 import { type Coverage, type EntryLike, type EpochCause, type PendingRecordData, readRecord, type RequestIdentity, type RequestRecordData, sameIdentity, type ToldFact } from "./records.ts";
-import { declaredToolNames, type RecordedRequest } from "./wire.ts";
+import { declaredToolNames, leadingToolsItem, loadedInList, type RecordedRequest } from "./wire.ts";
 
 export type { EpochCause };
 
@@ -132,6 +132,12 @@ function omittedIds(branch: readonly EntryLike[]): Set<string> {
 	return ids;
 }
 
+/** The tools a request declares at its head: its head's declarations, then a leading Responses `additional_tools` item's (pi 1.4.0 and later). */
+function headToolNames(request: Pick<RecordedRequest, "head" | "list">): string[] {
+	const item = leadingToolsItem(request.head.tools, request.list);
+	return [...declaredToolNames(request.head), ...(item ? loadedInList([item]) : [])];
+}
+
 /** Fold the branch (root first, as `getBranch()` returns it). `identity` is the live request identity, for epoch detection. */
 export function foldBranch(branch: readonly EntryLike[], identity?: RequestIdentity): LedgerFold {
 	const blobs = new Map<string, unknown>();
@@ -143,7 +149,7 @@ export function foldBranch(branch: readonly EntryLike[], identity?: RequestIdent
 	let lastCompaction = -1;
 	let base: FoldedRequest | undefined;
 	const toolOrder = new Set<string>();
-	/** The head hash of the last counted request, whose declarations `toolOrder` holds. */
+	/** The head hash of the last counted request, and its first list element's (a leading tools item's), whose declarations `toolOrder` holds. */
 	let orderedHead: string | undefined;
 	/** A compaction or `epoch` record after the base: the next request renders everything again. */
 	let resetSinceBase: EpochCause | undefined;
@@ -169,8 +175,9 @@ export function foldBranch(branch: readonly EntryLike[], identity?: RequestIdent
 				base = open.request;
 				resetSinceBase = undefined;
 				// Requests mostly share their head: the last counted one's adds no name.
-				if (open.request.headHash !== orderedHead) for (const name of declaredToolNames(open.request.head)) toolOrder.add(name);
-				orderedHead = open.request.headHash;
+				const heading = `${open.request.headHash}:${open.request.hashes[0] ?? ""}`;
+				if (heading !== orderedHead) for (const name of headToolNames(open.request)) toolOrder.add(name);
+				orderedHead = heading;
 			}
 		} else {
 			({ told, resetSinceBase, lastIdentity } = open.checkpoint);

@@ -1,5 +1,5 @@
 {
-	"fetchedAt": "2026-10-18T06:11:57.814Z",
+	"fetchedAt": "2026-11-01T12:46:45.941Z",
 	"source": "https://huggingface.co/api/models/",
 	"payload": {
 		"ByteDance-Seed/UI-TARS-1.5-7B": 8292166656,
@@ -12,6 +12,7 @@
 		"MiniMaxAI/MiniMax-M2.1": 228689764864,
 		"MiniMaxAI/MiniMax-M2.5": 228703644928,
 		"MiniMaxAI/MiniMax-M2.7": 228689764864,
+		"MiniMaxAI/MiniMax-M3.1-Flash": 220490854016,
 		"MiniMaxAI/MiniMax-Text-01": 456089655296,
 		"MiniMaxAI/Minimax-M3": 427040140160,
 		"NousResearch/Hermes-3-Llama-3.1-405B": 405853388800,
@@ -52,6 +53,7 @@
 		"Qwen/Qwen3.8-2.4T-A95B": 2446182725504,
 		"Qwen/Qwen3.8-27B": 27781427952,
 		"Qwen/Qwen3.8-Flash-Next": 179999981459,
+		"RecursiveSI/flint": 39785287456,
 		"RekaAI/reka-edge-2603": 7128509568,
 		"RekaAI/reka-flash-3": 20905482240,
 		"Sao10K/L3-8B-Lunaris-v1": 8030261248,
@@ -113,6 +115,7 @@
 		"mistralai/Ministral-3-14B-Instruct-2512": 13945032240,
 		"mistralai/Ministral-3-3B-Instruct-2512": 3849090048,
 		"mistralai/Ministral-3-8B-Instruct-2512": 8918026716,
+		"mistralai/Mistral-Large-4-1T-A52B": null,
 		"mistralai/Mistral-Nemo-Instruct-2407": 12247782400,
 		"mistralai/Mistral-Small-24B-Instruct-2501": 23572403200,
 		"mistralai/Mistral-Small-3.1-24B-Instruct-2503": 24011361280,
@@ -144,6 +147,7 @@
 		"poolside/Laguna-S-2.1": 117561977600,
 		"poolside/Laguna-XS-2.1": 33442617088,
 		"prism-ml/Ternary-Bonsai-2-27B-gguf": null,
+		"prism-ml/Ternary-Bonsai-2-9B-gguf": null,
 		"reflection/Beam-1.0-501B-A23B": 501267612352,
 		"stepfun-ai/Step-3.5-Flash": 199384301376,
 		"stepfun-ai/Step-3.7-Flash": 201365316160,

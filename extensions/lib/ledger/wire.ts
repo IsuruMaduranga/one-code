@@ -176,14 +176,47 @@ export function encodeRequest(
 const PROMPT_IN_LIST: ReadonlySet<string> = new Set(["openai-completions", "openai-responses", "azure-openai-responses", "mistral-conversations"]);
 
 /**
- * How many leading elements of pi's list render the system prompt: one where
- * the API puts the prompt in the list, else none. A request that sends only
- * its tail through pi still gets that element, which the record already holds.
+ * Whether `element` is a Responses `additional_tools` item: tools declared in
+ * the input. pi 1.4.0 and later declare a request's starting tools in one at
+ * the head of the input for models flagged for mid-conversation system
+ * messages and additional tools (findings §78); a `tool_search` load rides
+ * one at its load point on any version.
+ */
+export function isToolsItem(element: unknown): element is Record<string, unknown> & { tools: unknown[] } {
+	return isObject(element) && element.type === "additional_tools" && Array.isArray(element.tools);
+}
+
+/** A Responses `additional_tools` item declaring `tools`, in the shape of `like` (pi's own item) when there is one. */
+export function toolsItemFor(tools: unknown[], like?: Record<string, unknown>): Record<string, unknown> {
+	const { tools: _tools, ...shape } = like ?? { type: "additional_tools", role: "developer" };
+	return { ...shape, tools };
+}
+
+/**
+ * The `additional_tools` item a body declares its starting tools in (pi 1.4.0
+ * and later, findings §78), given its top-level `tools` and its list; undefined
+ * when it keeps them in a top-level array, or declares none at its head.
+ */
+export function leadingToolsItem(tools: unknown, list: readonly unknown[]): (Record<string, unknown> & { tools: unknown[] }) | undefined {
+	const head = list[0];
+	return !Array.isArray(tools) && isToolsItem(head) ? head : undefined;
+}
+
+/** A plain instruction message: role system or developer, not a typed item such as `additional_tools`. */
+const isInstruction = (element: unknown): boolean => isObject(element) && (element.role === "system" || element.role === "developer") && (element.type === undefined || element.type === "message");
+
+/**
+ * How many leading elements of pi's list render its head: a Responses
+ * request's leading `additional_tools` item (pi 1.4.0 and later), then the
+ * system prompt where the API puts it in the list. A request that sends only
+ * its tail through pi still gets them, and the record already holds them.
+ * Read from the elements, never from pi's version: an element this does not
+ * recognize stays in the tail, which costs tokens but never a declaration.
  */
 export function preludeLength(list: readonly unknown[], api: string): number {
-	if (!PROMPT_IN_LIST.has(api)) return 0;
-	const role = isObject(list[0]) ? list[0].role : undefined;
-	return role === "system" || role === "developer" ? 1 : 0;
+	let at = api.endsWith("-responses") && isToolsItem(list[0]) ? 1 : 0;
+	if (PROMPT_IN_LIST.has(api) && isInstruction(list[at])) at++;
+	return at;
 }
 
 /**
@@ -334,7 +367,13 @@ export function orderLikeBranch<T extends readonly unknown[]>(order: readonly st
 export function withBranchToolOrder(payload: WirePayload, order: readonly string[], api: string): WirePayload {
 	if (order.length === 0) return payload;
 	const reorder = (tools: unknown[]) => orderLikeBranch(order, tools);
-	return mapTools(payload, api, toolsHolder(api) === "config" ? (groups) => mapGroupDeclarations(groups, reorder) : reorder);
+	const out = mapTools(payload, api, toolsHolder(api) === "config" ? (groups) => mapGroupDeclarations(groups, reorder) : reorder);
+	// A Responses request that declares its starting tools in a leading item.
+	const list = payloadList(out, api);
+	const head = api.endsWith("-responses") ? leadingToolsItem(out.tools, list) : undefined;
+	if (!head) return out;
+	const tools = reorder(head.tools);
+	return tools === head.tools ? out : { ...out, [listKey(api)]: [{ ...head, tools }, ...list.slice(1)] };
 }
 
 /** Google's tool groups with each group's function declarations mapped by `fn`: `groups` itself when `fn` returns every input. */
@@ -463,8 +502,92 @@ export function appendPoint(list: readonly unknown[], api: string): number {
 export function spliceRequest(base: RecordedRequest, payload: WirePayload, api: string): WirePayload {
 	const list = payloadList(payload, api);
 	const tail = list.slice(preludeLength(list, api));
-	const prefix = structuredClone(base.list.slice(0, appendPoint(base.list, api)));
-	return { ...withRecordedHead(payload, base.head, api, loadedInList(base.list)), [listKey(api)]: [...prefix, ...tail] };
+	const at = appendPoint(base.list, api);
+	const out = underRecordedHead(base, payload, api, [...structuredClone(base.list.slice(0, at)), ...tail]);
+	return api.endsWith("-responses") && !Array.isArray(base.head.tools) ? withLiveDeclarations(out, payload, api, base, at) : out;
+}
+
+/**
+ * `list` under the record's head (`withRecordedHead`), with pi's declarations
+ * merged where the record keeps its tools. A Responses record with a top-level
+ * `tools` array merges pi's starting tools wherever pi put them (a pi 1.4.0
+ * head item on a session recorded by an earlier pi), so a new tool or a changed
+ * schema reaches the array. One that declares in its list takes no top-level
+ * `tools` from pi: an `additional_tools` item cannot replace a top-level tool,
+ * and a top-level array ahead of the input would miss the cache;
+ * `withLiveDeclarations` declares what it lacks.
+ */
+function underRecordedHead(base: RecordedRequest, payload: WirePayload, api: string, list: unknown[]): WirePayload {
+	let live = payload;
+	if (api.endsWith("-responses")) {
+		const liveItem = leadingToolsItem(payload.tools, payloadList(payload, api));
+		if (Array.isArray(base.head.tools)) live = liveItem ? { ...payload, tools: liveItem.tools } : payload;
+		else if (leadingToolsItem(base.head.tools, base.list)) {
+			const { tools: _live, ...withoutTools } = payload;
+			live = withoutTools;
+		}
+	}
+	return { ...withRecordedHead(live, base.head, api, loadedInList(base.list)), [listKey(api)]: list };
+}
+
+/** Every declaration a list's own items make (`additional_tools`, `tool_search_output`), by name in list order; a later one replaces an earlier one, as the API reads them. */
+function listDeclarations(list: readonly unknown[]): Map<string, unknown> {
+	const out = new Map<string, unknown>();
+	for (const item of list) {
+		if (!isObject(item) || (item.type !== "additional_tools" && item.type !== "tool_search_output") || !Array.isArray(item.tools)) continue;
+		for (const tool of item.tools) {
+			const name = toolName(tool);
+			if (name !== undefined) out.set(name, tool);
+		}
+	}
+	return out;
+}
+
+/** Every declaration a Responses body makes, by name, wherever it sits: its top-level `tools`, then its list's items. */
+export function responsesDeclarations(payload: WirePayload, api: string): Map<string, unknown> {
+	const out = new Map<string, unknown>();
+	for (const tool of Array.isArray(payload.tools) ? payload.tools : []) {
+		const name = toolName(tool);
+		if (name !== undefined) out.set(name, tool);
+	}
+	for (const [name, tool] of listDeclarations(payloadList(payload, api))) out.set(name, tool);
+	return out;
+}
+
+/**
+ * `out` declaring every tool pi's own rendering (`live`) declares, for a
+ * Responses record without a top-level `tools` array (one with an array gets
+ * pi's tools through the head merge): a splice keeps the record's head and
+ * drops pi's, so a tool pi added mid-epoch, or one whose input schema changed,
+ * would otherwise go undeclared. It goes in an `additional_tools` item at the
+ * append point `at`, after the cached prefix; a later item replaces an earlier
+ * item's declaration of the same name.
+ */
+function withLiveDeclarations(out: WirePayload, live: WirePayload, api: string, base: RecordedRequest, at: number): WirePayload {
+	const recordItem = leadingToolsItem(base.head.tools, base.list);
+	const liveItem = leadingToolsItem(live.tools, payloadList(live, api));
+	// The usual request: pi's head item is the record's, and every other
+	// declaration pi made rides the tail it sends.
+	if (recordItem && liveItem && contentHash(liveItem) === base.hashes[0]) return out;
+	const sent = responsesDeclarations(out, api);
+	const needed = [...responsesDeclarations(live, api)].filter(([name, tool]) => {
+		const current = sent.get(name);
+		return current === undefined || (recordItem !== undefined && contentHash(inputSchemaOf(current)) !== contentHash(inputSchemaOf(tool)));
+	});
+	if (needed.length === 0) return out;
+	const tools = needed.map(([, tool]) => stripMarkers(tool));
+	const list = payloadList(out, api);
+	return { ...out, [listKey(api)]: [...list.slice(0, at), toolsItemFor(tools, liveItem ?? recordItem), ...list.slice(at)] };
+}
+
+/**
+ * Every tool name a recorded request declares: its head's declarations, and
+ * for a Responses record the ones in its list (a leading `additional_tools`
+ * item, the items `tool_search` loads ride). `eager` drops head declarations
+ * marked `defer_loading`; a list declaration is always eager.
+ */
+export function recordedToolNames(record: Pick<RecordedRequest, "head" | "list">, { eager = false } = {}): Set<string> {
+	return new Set([...declaredToolNames(record.head, { eager }), ...loadedInList(record.list)]);
 }
 
 /** The first `cache_control` marker on a list element or one of its content blocks. */
@@ -494,23 +617,16 @@ export function recordedBody(base: RecordedRequest, payload: WirePayload, api: s
 		if (isObject(target)) target.cache_control = mark;
 		else if (!blocks) last.cache_control = mark;
 	}
-	return withRequestFields({ ...withRecordedHead(payload, base.head, api, loadedInList(base.list)), [listKey(api)]: list }, payload);
+	return withRequestFields(underRecordedHead(base, payload, api, list), payload);
 }
 
 /**
- * The tools a Responses list declares itself, at the point a tool_search
- * loaded them (an `additional_tools` item, a `tool_search_output`): pi renders
- * such a tool eager again once its load is in the recorded prefix, and the
- * head must not declare it twice.
+ * The tools a Responses list declares itself: a leading `additional_tools`
+ * item (pi 1.4.0 and later), and the items a `tool_search` load rides (an
+ * `additional_tools` item, a `tool_search_output`). pi renders a loaded tool
+ * eager again once its load is in the recorded prefix, and the head must not
+ * declare it twice.
  */
 export function loadedInList(list: readonly unknown[]): Set<string> {
-	const names = new Set<string>();
-	for (const item of list) {
-		if (!isObject(item) || (item.type !== "additional_tools" && item.type !== "tool_search_output") || !Array.isArray(item.tools)) continue;
-		for (const tool of item.tools) {
-			const name = toolName(tool);
-			if (name !== undefined) names.add(name);
-		}
-	}
-	return names;
+	return new Set(listDeclarations(list).keys());
 }

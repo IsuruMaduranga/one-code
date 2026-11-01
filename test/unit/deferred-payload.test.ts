@@ -6,6 +6,7 @@ import {
 	supportsToolReferences,
 	toolSearchLoads,
 } from "../../extensions/lib/deferred.ts";
+import { type Item, real, toolsItem as headWith } from "./helpers/responses-fixture.ts";
 
 describe("supportsToolReferences", () => {
 	it("is first-party Claude 4.5+ and Haiku 4.5 or later, not older Haikus or gateways", () => {
@@ -330,6 +331,38 @@ describe("stabilizeResponsesToolLoads", () => {
 		const copy = structuredClone(body);
 		stabilizeResponsesToolLoads(body, isDeferred, loads, { supportsAdditionalTools: true });
 		expect(body).toEqual(copy);
+	});
+
+	describe("on pi 1.4.0's shape, tools in a leading additional_tools item (real elements, fixtures/responses-pi-1.4.0.json)", () => {
+		const starting = real.headItem.tools;
+		const webFetch = new Map([[`${String(real.loadCall.call_id)}|${String(real.loadCall.id)}`, ["web_fetch"]]]);
+		const deferredWeb = (name: string) => name === "web_fetch";
+		const body = (input: unknown[]) => ({ ...real.body, input: [headWith([...starting, real.webFetch]), real.prompt, real.userStack, ...input] });
+
+		it("takes the loaded tool out of the head item into an item before its loading output, leaving no top-level tools", () => {
+			const out = stabilizeResponsesToolLoads(body([real.loadCall, real.loadOutput]), deferredWeb, webFetch, { supportsAdditionalTools: true, supportsToolSearch: true });
+			expect(out?.tools).toBeUndefined();
+			expect(out?.input).toEqual([real.headItem, real.prompt, real.userStack, real.loadCall, headWith([real.webFetch]), real.loadOutput]);
+		});
+
+		it("uses an additional_tools item whatever the compat says: the request already declares in items", () => {
+			const out = stabilizeResponsesToolLoads(body([real.loadCall, real.loadOutput]), deferredWeb, webFetch, { supportsToolSearch: true });
+			expect((out?.input as Item[])[4]).toEqual({ type: "additional_tools", role: "developer", tools: [real.webFetch] });
+		});
+
+		it("leaves the head alone when the loading output is not in the payload (a later request, its load already recorded)", () => {
+			expect(stabilizeResponsesToolLoads(body([]), deferredWeb, webFetch, { supportsAdditionalTools: true })).toBeUndefined();
+		});
+
+		it("leaves a payload alone when pi already placed the load itself", () => {
+			const native = { ...real.body, input: [real.headItem, real.prompt, real.loadCall, real.loadOutput, headWith([real.webFetch])] };
+			expect(stabilizeResponsesToolLoads(native, deferredWeb, webFetch, { supportsAdditionalTools: true })).toBeUndefined();
+		});
+
+		it("leaves a payload whose tools it cannot find alone", () => {
+			const unknown = { ...real.body, input: [{ type: "tools_update", tools: [...starting, real.webFetch] }, real.loadCall, real.loadOutput] };
+			expect(stabilizeResponsesToolLoads(unknown, deferredWeb, webFetch, { supportsAdditionalTools: true })).toBeUndefined();
+		});
 	});
 });
 

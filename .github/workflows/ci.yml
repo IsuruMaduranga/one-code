@@ -62,3 +62,16 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/pi-floor" --no-save --legacy-peer-deps --no-audit --no-fund "@earendil-works/pi-coding-agent@$min"
       - run: node test/e2e/pi-floor-smoke.mjs "$RUNNER_TEMP/pi-floor/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
       - run: node test/e2e/pi-floor-smoke.mjs node_modules/@earendil-works/pi-coding-agent/dist/cli.js
+      # The ledger reads the Responses tool shape from the bytes; this renders
+      # requests through the oldest pi-ai and checks the readers understand them.
+      # pi-ai sits nested under the agent when its shrinkwrap pins it, else
+      # hoisted beside it: take the one Node would load for the agent.
+      - name: Responses shape contract on the oldest pi
+        run: |
+          floor="$RUNNER_TEMP/pi-floor/node_modules/@earendil-works"
+          for dir in "$floor/pi-coding-agent/node_modules/@earendil-works/pi-ai" "$floor/pi-ai"; do
+            if [ -f "$dir/package.json" ]; then export ONE_CODE_PI_AI="$dir"; break; fi
+          done
+          if [ -z "${ONE_CODE_PI_AI:-}" ]; then echo "pi-ai not found under $floor" >&2; exit 1; fi
+          echo "pi-ai: $ONE_CODE_PI_AI ($(node -p "require('$ONE_CODE_PI_AI/package.json').version"))"
+          npx vitest run test/unit/responses-shape-contract.test.ts

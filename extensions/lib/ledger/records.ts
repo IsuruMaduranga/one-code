@@ -122,6 +122,8 @@ export interface PendingRecordData extends RecordBase {
 	raw?: boolean;
 	/** Rides this call's result when the request carries it. */
 	toolCallId?: string;
+	/** Rides the user message stamped at this time when the request carries it. */
+	promptTimestamp?: number;
 	/** `user-prepend` only: placed once per request, however many are pending (the shared caveat). */
 	once?: boolean;
 	/** `user-prepend` only: on a request that does not open with a prompt, it rides the tail instead of waiting for one. */
@@ -240,6 +242,7 @@ const SHAPE: { [K in RecordKind]: (data: Record<string, unknown>) => boolean } =
 		(d.placement === undefined || d.placement === "last-append" || d.placement === "user-prepend") &&
 		(d.raw === undefined || typeof d.raw === "boolean") &&
 		(d.toolCallId === undefined || isString(d.toolCallId)) &&
+		(d.promptTimestamp === undefined || typeof d.promptTimestamp === "number") &&
 		(d.once === undefined || typeof d.once === "boolean") &&
 		(d.orTail === undefined || typeof d.orTail === "boolean") &&
 		(d.untilCompaction === undefined || typeof d.untilCompaction === "boolean") &&

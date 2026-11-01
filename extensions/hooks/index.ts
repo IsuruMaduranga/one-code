@@ -67,7 +67,7 @@ import {
 } from "./protocol.ts";
 import { type HookCommand, type HooksSource, loadHookSettings } from "./settings.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
-import { REMINDER_CHANNEL, wrapReminder } from "../lib/reminders.ts";
+import { REMINDER_CHANNEL, type ReminderPayload, wrapReminder } from "../lib/reminders.ts";
 import { type ChildHookCall, type ChildHookResult, type HookBridge, SUBAGENT_HOOK_CHANNEL, type SubagentHookPayload } from "./subagent-bridge.ts";
 import { projectHooksApproved } from "./trust.ts";
 import { PromptContextRouter } from "./prompt-context.ts";
@@ -421,7 +421,9 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	pi.on("message_start", async (event) => {
 		const gen = sessionGen;
 		const message = event.message;
-		const emit = (text: string) => pi.events.emit(REMINDER_CHANNEL, { text, placement: "last-append" });
+		// Pinned to its prompt: when that prompt's request fails, the next prompt's
+		// request resends it with its own context, not with this one's.
+		const emit = (text: string) => pi.events.emit(REMINDER_CHANNEL, { text, placement: "last-append", promptTimestamp: message.timestamp } satisfies ReminderPayload);
 		if (message.role === "user") {
 			if (promptContext.isEmpty) return;
 			// A queued message delivers as typed, so an exact match is its own; the
