@@ -1,5 +1,5 @@
 {
-	"fetchedAt": "2026-10-18T06:11:57.814Z",
+	"fetchedAt": "2026-10-31T21:46:56.376Z",
 	"source": "https://openrouter.ai/api/v1/models",
 	"payload": {
 		"data": [
@@ -461,18 +461,6 @@
 				}
 			},
 			{
-				"id": "arcee-ai/trinity-large-thinking",
-				"created": 1775058318,
-				"hugging_face_id": "arcee-ai/Trinity-Large-Thinking",
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.00000025",
-					"completion": "0.0000008"
-				}
-			},
-			{
 				"id": "bytedance-seed/seed-1.6",
 				"created": 1766504997,
 				"supported_parameters": [
@@ -626,8 +614,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000032",
-					"completion": "0.00000089"
+					"prompt": "0.0000002574",
+					"completion": "0.0000010287"
 				}
 			},
 			{
@@ -652,18 +640,6 @@
 				"pricing": {
 					"prompt": "0.00000025",
 					"completion": "0.00000095"
-				}
-			},
-			{
-				"id": "deepseek/deepseek-r1",
-				"created": 1737381095,
-				"hugging_face_id": "deepseek-ai/DeepSeek-R1",
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.0000007",
-					"completion": "0.0000025"
 				}
 			},
 			{
@@ -698,8 +674,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000028",
-					"completion": "0.00000042"
+					"prompt": "0.00000026",
+					"completion": "0.00000038"
 				}
 			},
 			{
@@ -734,8 +710,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000001",
-					"completion": "0.0000003"
+					"prompt": "0.000000119",
+					"completion": "0.000000238"
 				}
 			},
 			{
@@ -758,8 +734,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000002088",
-					"completion": "0.0000004176"
+					"prompt": "0.0000016",
+					"completion": "0.0000032"
 				}
 			},
 			{
@@ -770,8 +746,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000066",
-					"completion": "0.00000198"
+					"prompt": "0.000000115",
+					"completion": "0.000004"
 				}
 			},
 			{
@@ -782,8 +758,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000000648",
-					"completion": "0.000000144"
+					"prompt": "0.000000045",
+					"completion": "0.0000005"
 				}
 			},
 			{
@@ -880,28 +856,6 @@
 				}
 			},
 			{
-				"id": "google/gemini-2.5-flash-lite:batch",
-				"created": 1753200276,
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.00000005",
-					"completion": "0.0000002"
-				}
-			},
-			{
-				"id": "google/gemini-2.5-flash:batch",
-				"created": 1750172488,
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.00000015",
-					"completion": "0.00000125"
-				}
-			},
-			{
 				"id": "google/gemini-2.5-pro",
 				"created": 1750169544,
 				"supported_parameters": [
@@ -921,17 +875,6 @@
 				"pricing": {
 					"prompt": "0.00000125",
 					"completion": "0.00001"
-				}
-			},
-			{
-				"id": "google/gemini-2.5-pro:batch",
-				"created": 1750169544,
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.000000625",
-					"completion": "0.000005"
 				}
 			},
 			{
@@ -1372,15 +1315,6 @@
 				}
 			},
 			{
-				"id": "ibm-granite/granite-4.0-h-micro",
-				"created": 1760927695,
-				"hugging_face_id": "ibm-granite/granite-4.0-h-micro",
-				"pricing": {
-					"prompt": "0.000000017",
-					"completion": "0.000000112"
-				}
-			},
-			{
 				"id": "ibm-granite/granite-4.2-8b",
 				"created": 1788206780,
 				"hugging_face_id": "ibm-granite/granite-4.2-8b",
@@ -1389,7 +1323,7 @@
 				],
 				"pricing": {
 					"prompt": "0.00000006",
-					"completion": "0.00000025"
+					"completion": "0.00000015"
 				}
 			},
 			{
@@ -1412,6 +1346,17 @@
 				"pricing": {
 					"prompt": "0.00000004",
 					"completion": "0.00000015"
+				}
+			},
+			{
+				"id": "inception/mercury-3",
+				"created": 1792158337,
+				"supported_parameters": [
+					"tools"
+				],
+				"pricing": {
+					"prompt": "0.0000001",
+					"completion": "0.00000035"
 				}
 			},
 			{
@@ -1465,6 +1410,18 @@
 				"pricing": {
 					"prompt": "0.00000003",
 					"completion": "0.00000015"
+				}
+			},
+			{
+				"id": "liquid/lfm-2.5-2.6b",
+				"created": 1786470519,
+				"hugging_face_id": "LiquidAI/LFM2.5-2.6B",
+				"supported_parameters": [
+					"tools"
+				],
+				"pricing": {
+					"prompt": "0.00000035",
+					"completion": "0.0000005"
 				}
 			},
 			{
@@ -1698,15 +1655,6 @@
 				}
 			},
 			{
-				"id": "microsoft/wizardlm-2-8x22b",
-				"created": 1713225600,
-				"hugging_face_id": "microsoft/WizardLM-2-8x22B",
-				"pricing": {
-					"prompt": "0.00000062",
-					"completion": "0.00000062"
-				}
-			},
-			{
 				"id": "minimax/minimax-01",
 				"created": 1736915462,
 				"hugging_face_id": "MiniMaxAI/MiniMax-Text-01",
@@ -1795,6 +1743,18 @@
 				}
 			},
 			{
+				"id": "minimax/minimax-m3.1-flash",
+				"created": 1792379569,
+				"hugging_face_id": "MiniMaxAI/MiniMax-M3.1-Flash",
+				"supported_parameters": [
+					"tools"
+				],
+				"pricing": {
+					"prompt": "0.000000075",
+					"completion": "0.0000003"
+				}
+			},
+			{
 				"id": "mistralai/codestral-2508",
 				"created": 1754079630,
 				"supported_parameters": [
@@ -1803,17 +1763,6 @@
 				"pricing": {
 					"prompt": "0.0000003",
 					"completion": "0.0000009"
-				}
-			},
-			{
-				"id": "mistralai/codestral-2508:batch",
-				"created": 1754079630,
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.00000015",
-					"completion": "0.00000045"
 				}
 			},
 			{
@@ -1865,18 +1814,6 @@
 				}
 			},
 			{
-				"id": "mistralai/ministral-8b-2512:batch",
-				"created": 1764681654,
-				"hugging_face_id": "mistralai/Ministral-3-8B-Instruct-2512",
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.000000075",
-					"completion": "0.000000075"
-				}
-			},
-			{
 				"id": "mistralai/mistral-large",
 				"created": 1708905600,
 				"supported_parameters": [
@@ -1910,25 +1847,15 @@
 				}
 			},
 			{
-				"id": "mistralai/mistral-large-2512:batch",
-				"created": 1764624472,
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.00000025",
-					"completion": "0.00000075"
-				}
-			},
-			{
 				"id": "mistralai/mistral-large-4-0",
 				"created": 1791294122,
+				"hugging_face_id": "mistralai/Mistral-Large-4-1T-A52B",
 				"supported_parameters": [
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000068",
-					"completion": "0.00000209"
+					"prompt": "0.0000007",
+					"completion": "0.0000021"
 				}
 			},
 			{
@@ -1976,17 +1903,6 @@
 				}
 			},
 			{
-				"id": "mistralai/mistral-medium-3.1:batch",
-				"created": 1755095639,
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.0000002",
-					"completion": "0.000001"
-				}
-			},
-			{
 				"id": "mistralai/mistral-nemo",
 				"created": 1721347200,
 				"hugging_face_id": "mistralai/Mistral-Nemo-Instruct-2407",
@@ -2031,18 +1947,6 @@
 				}
 			},
 			{
-				"id": "mistralai/mistral-small-2603:batch",
-				"created": 1773695685,
-				"hugging_face_id": "mistralai/Mistral-Small-4-119B-2603",
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.000000075",
-					"completion": "0.0000003"
-				}
-			},
-			{
 				"id": "mistralai/mistral-small-3.1-24b-instruct",
 				"created": 1742238937,
 				"hugging_face_id": "mistralai/Mistral-Small-3.1-24B-Instruct-2503",
@@ -2062,8 +1966,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000009375",
-					"completion": "0.00000025"
+					"prompt": "0.000000075",
+					"completion": "0.0000002"
 				}
 			},
 			{
@@ -2176,8 +2080,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000006712",
-					"completion": "0.00000335"
+					"prompt": "0.0000006",
+					"completion": "0.0000035"
 				}
 			},
 			{
@@ -2188,8 +2092,19 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.000000304",
-					"completion": "0.000011936"
+					"prompt": "0.000000192",
+					"completion": "0.000015"
+				}
+			},
+			{
+				"id": "moonshotai/kimi-k3.1-pro",
+				"created": 1792778188,
+				"supported_parameters": [
+					"tools"
+				],
+				"pricing": {
+					"prompt": "0.000002",
+					"completion": "0.00001"
 				}
 			},
 			{
@@ -2300,20 +2215,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000008",
-					"completion": "0.00000045"
-				}
-			},
-			{
-				"id": "nvidia/nemotron-3-super-120b-a12b:free",
-				"created": 1773245239,
-				"hugging_face_id": "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8",
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0",
-					"completion": "0"
+					"prompt": "0.0000003",
+					"completion": "0.0000024"
 				}
 			},
 			{
@@ -2390,8 +2293,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000001",
-					"completion": "0.0000004"
+					"prompt": "0.00000015",
+					"completion": "0.0000005"
 				}
 			},
 			{
@@ -2412,17 +2315,6 @@
 				"pricing": {
 					"prompt": "-1",
 					"completion": "-1"
-				}
-			},
-			{
-				"id": "openai/gpt-3.5-turbo",
-				"created": 1685232000,
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.0000005",
-					"completion": "0.0000015"
 				}
 			},
 			{
@@ -2448,25 +2340,6 @@
 				}
 			},
 			{
-				"id": "openai/gpt-3.5-turbo-instruct",
-				"created": 1695859200,
-				"pricing": {
-					"prompt": "0.0000015",
-					"completion": "0.000002"
-				}
-			},
-			{
-				"id": "openai/gpt-3.5-turbo:batch",
-				"created": 1685232000,
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.00000025",
-					"completion": "0.00000075"
-				}
-			},
-			{
 				"id": "openai/gpt-4",
 				"created": 1685232000,
 				"supported_parameters": [
@@ -2475,17 +2348,6 @@
 				"pricing": {
 					"prompt": "0.00003",
 					"completion": "0.00006"
-				}
-			},
-			{
-				"id": "openai/gpt-4-turbo",
-				"created": 1712620800,
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.00001",
-					"completion": "0.00003"
 				}
 			},
 			{
@@ -3356,6 +3218,50 @@
 				}
 			},
 			{
+				"id": "openai/gpt-6.1-terra",
+				"created": 1793038409,
+				"supported_parameters": [
+					"tools"
+				],
+				"pricing": {
+					"prompt": "0.000001",
+					"completion": "0.000005"
+				}
+			},
+			{
+				"id": "openai/gpt-6.1-terra-pro",
+				"created": 1793038556,
+				"supported_parameters": [
+					"tools"
+				],
+				"pricing": {
+					"prompt": "0.000001",
+					"completion": "0.000005"
+				}
+			},
+			{
+				"id": "openai/gpt-6.1-terra-pro:batch",
+				"created": 1793038556,
+				"supported_parameters": [
+					"tools"
+				],
+				"pricing": {
+					"prompt": "0.0000005",
+					"completion": "0.0000025"
+				}
+			},
+			{
+				"id": "openai/gpt-6.1-terra:batch",
+				"created": 1793038409,
+				"supported_parameters": [
+					"tools"
+				],
+				"pricing": {
+					"prompt": "0.0000005",
+					"completion": "0.0000025"
+				}
+			},
+			{
 				"id": "openai/gpt-audio",
 				"created": 1768862569,
 				"supported_parameters": [
@@ -3461,25 +3367,6 @@
 				}
 			},
 			{
-				"id": "openai/o1",
-				"created": 1734459999,
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.000015",
-					"completion": "0.00006"
-				}
-			},
-			{
-				"id": "openai/o1-pro",
-				"created": 1742423211,
-				"pricing": {
-					"prompt": "0.00015",
-					"completion": "0.0006"
-				}
-			},
-			{
 				"id": "openai/o3",
 				"created": 1744823457,
 				"supported_parameters": [
@@ -3488,28 +3375,6 @@
 				"pricing": {
 					"prompt": "0.000002",
 					"completion": "0.000008"
-				}
-			},
-			{
-				"id": "openai/o3-mini",
-				"created": 1738351721,
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.0000011",
-					"completion": "0.0000044"
-				}
-			},
-			{
-				"id": "openai/o3-mini-high",
-				"created": 1739372611,
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.0000011",
-					"completion": "0.0000044"
 				}
 			},
 			{
@@ -3543,28 +3408,6 @@
 				"pricing": {
 					"prompt": "0.000001",
 					"completion": "0.000004"
-				}
-			},
-			{
-				"id": "openai/o4-mini",
-				"created": 1744820942,
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.0000011",
-					"completion": "0.0000044"
-				}
-			},
-			{
-				"id": "openai/o4-mini-high",
-				"created": 1744824212,
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.0000011",
-					"completion": "0.0000044"
 				}
 			},
 			{
@@ -3651,6 +3494,17 @@
 				}
 			},
 			{
+				"id": "particle-ai/particle-1",
+				"created": 1793207893,
+				"supported_parameters": [
+					"tools"
+				],
+				"pricing": {
+					"prompt": "0.00000005",
+					"completion": "0.0000005"
+				}
+			},
+			{
 				"id": "perceptron/perceptron-mk1",
 				"created": 1778597029,
 				"pricing": {
@@ -3710,54 +3564,6 @@
 				}
 			},
 			{
-				"id": "poolside/laguna-s-2.1",
-				"created": 1784652683,
-				"hugging_face_id": "poolside/Laguna-S-2.1",
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.00000009",
-					"completion": "0.00000018"
-				}
-			},
-			{
-				"id": "poolside/laguna-s-2.1:free",
-				"created": 1784652683,
-				"hugging_face_id": "poolside/Laguna-S-2.1",
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0",
-					"completion": "0"
-				}
-			},
-			{
-				"id": "poolside/laguna-xs-2.1",
-				"created": 1783002429,
-				"hugging_face_id": "poolside/Laguna-XS-2.1",
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.00000006",
-					"completion": "0.00000012"
-				}
-			},
-			{
-				"id": "poolside/laguna-xs-2.1:free",
-				"created": 1783002429,
-				"hugging_face_id": "poolside/Laguna-XS-2.1",
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0",
-					"completion": "0"
-				}
-			},
-			{
 				"id": "prism-ml/ternary-bonsai-2-27b",
 				"created": 1789754046,
 				"hugging_face_id": "prism-ml/Ternary-Bonsai-2-27B-gguf",
@@ -3767,6 +3573,18 @@
 				"pricing": {
 					"prompt": "0.000000075",
 					"completion": "0.0000005"
+				}
+			},
+			{
+				"id": "prism-ml/ternary-bonsai-2-9b",
+				"created": 1792130995,
+				"hugging_face_id": "prism-ml/Ternary-Bonsai-2-9B-gguf",
+				"supported_parameters": [
+					"tools"
+				],
+				"pricing": {
+					"prompt": "0.00000008",
+					"completion": "0.00000013"
 				}
 			},
 			{
@@ -3878,7 +3696,7 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000009",
+					"prompt": "0.0000001",
 					"completion": "0.0000003"
 				}
 			},
@@ -3951,18 +3769,6 @@
 				"pricing": {
 					"prompt": "0.00000009",
 					"completion": "0.0000011"
-				}
-			},
-			{
-				"id": "qwen/qwen3-next-80b-a3b-thinking",
-				"created": 1757612284,
-				"hugging_face_id": "Qwen/Qwen3-Next-80B-A3B-Thinking",
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.00000015",
-					"completion": "0.0000012"
 				}
 			},
 			{
@@ -4045,7 +3851,7 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000015",
+					"prompt": "0.00000014",
 					"completion": "0.000001"
 				}
 			},
@@ -4069,8 +3875,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000001",
-					"completion": "0.00000015"
+					"prompt": "0.00000017",
+					"completion": "0.00000025"
 				}
 			},
 			{
@@ -4114,8 +3920,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000025",
-					"completion": "0.000002"
+					"prompt": "0.00000045",
+					"completion": "0.0000027"
 				}
 			},
 			{
@@ -4126,8 +3932,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000015",
-					"completion": "0.000001"
+					"prompt": "0.0000001",
+					"completion": "0.0000009"
 				}
 			},
 			{
@@ -4216,8 +4022,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000024",
-					"completion": "0.0000022"
+					"prompt": "0.00000004",
+					"completion": "0.0000023"
 				}
 			},
 			{
@@ -4266,6 +4072,18 @@
 				}
 			},
 			{
+				"id": "recursive/flint-v1.0:free",
+				"created": 1792622765,
+				"hugging_face_id": "RecursiveSI/flint",
+				"supported_parameters": [
+					"tools"
+				],
+				"pricing": {
+					"prompt": "0",
+					"completion": "0"
+				}
+			},
+			{
 				"id": "reflection/beam-1.0-501b-a23b",
 				"created": 1792160499,
 				"hugging_face_id": "reflection/Beam-1.0-501B-A23B",
@@ -4273,8 +4091,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.000001",
-					"completion": "0.000003"
+					"prompt": "0.00000025",
+					"completion": "0.000001"
 				}
 			},
 			{
@@ -4380,15 +4198,6 @@
 				}
 			},
 			{
-				"id": "sao10k/l3.3-euryale-70b",
-				"created": 1734535928,
-				"hugging_face_id": "Sao10K/L3.3-70B-Euryale-v2.3",
-				"pricing": {
-					"prompt": "0.00000065",
-					"completion": "0.00000075"
-				}
-			},
-			{
 				"id": "scaledown/extract",
 				"created": 1791893351,
 				"pricing": {
@@ -4484,8 +4293,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.000000132",
-					"completion": "0.000000528"
+					"prompt": "0.0000000825",
+					"completion": "0.00000033"
 				}
 			},
 			{
@@ -4508,8 +4317,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.000000834",
-					"completion": "0.000002501"
+					"prompt": "0.0000007506",
+					"completion": "0.0000022509"
 				}
 			},
 			{
@@ -4641,25 +4450,14 @@
 				}
 			},
 			{
-				"id": "upstage/solar-pro-3",
-				"created": 1769481200,
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.00000015",
-					"completion": "0.0000006"
-				}
-			},
-			{
 				"id": "upstage/solar-pro4",
 				"created": 1786371636,
 				"supported_parameters": [
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000009",
-					"completion": "0.00000036"
+					"prompt": "0.00000015",
+					"completion": "0.0000006"
 				}
 			},
 			{
@@ -4763,8 +4561,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000014",
-					"completion": "0.00000028"
+					"prompt": "0.0000004",
+					"completion": "0.000002"
 				}
 			},
 			{
@@ -4775,8 +4573,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.000000435",
-					"completion": "0.00000087"
+					"prompt": "0.00000048",
+					"completion": "0.0000018"
 				}
 			},
 			{
@@ -4894,8 +4692,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000054",
-					"completion": "0.00000198"
+					"prompt": "0.0000006",
+					"completion": "0.0000022"
 				}
 			},
 			{
@@ -4941,8 +4739,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.000000966",
-					"completion": "0.000003036"
+					"prompt": "0.0000014",
+					"completion": "0.0000044"
 				}
 			},
 			{
@@ -4953,8 +4751,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000062",
-					"completion": "0.00000242"
+					"prompt": "0.000000006",
+					"completion": "0.0000068"
 				}
 			},
 			{
@@ -4965,8 +4763,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.000000079",
-					"completion": "0.0000048"
+					"prompt": "0.0000000699",
+					"completion": "0.0000014"
 				}
 			},
 			{
@@ -4977,8 +4775,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.000000048",
-					"completion": "0.0000002"
+					"prompt": "0.0000000149",
+					"completion": "0.0000001543"
 				}
 			},
 			{
@@ -5089,8 +4887,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000005",
-					"completion": "0.0000006"
+					"prompt": "0.0000000141",
+					"completion": "0.00000011"
 				}
 			},
 			{
@@ -5100,7 +4898,7 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000012",
+					"prompt": "0.0000001035",
 					"completion": "0.000008"
 				}
 			},
@@ -5111,8 +4909,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000000151",
-					"completion": "0.00000045"
+					"prompt": "0.0000000474",
+					"completion": "0.0000003"
 				}
 			},
 			{
@@ -5144,8 +4942,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000027",
-					"completion": "0.000014"
+					"prompt": "0.0000001495",
+					"completion": "0.00000715"
 				}
 			},
 			{
@@ -5199,8 +4997,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.000002",
-					"completion": "0.000012"
+					"prompt": "0.000001",
+					"completion": "0.000005"
 				}
 			},
 			{
@@ -5232,8 +5030,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.000000048",
-					"completion": "0.0000002"
+					"prompt": "0.0000000149",
+					"completion": "0.0000001543"
 				}
 			},
 			{
@@ -5243,8 +5041,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000000632",
-					"completion": "0.0000044"
+					"prompt": "0.0000000699",
+					"completion": "0.0000014"
 				}
 			}
 		]
