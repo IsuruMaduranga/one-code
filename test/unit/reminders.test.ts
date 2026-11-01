@@ -204,6 +204,15 @@ describe("renderReminders: one-shots", () => {
 		expect(blockTexts(gone.messages[1])).toEqual(["next", wrapReminder("context")]);
 	});
 
+	it("finds a `/skill:` prompt pi restamped when it rebuilt the session, but never a later user message", () => {
+		// pi persists a custom message at message_end with a new time: after /reload the pin is a few ms early.
+		const rebuilt = render([custom("skill run", 1003), user("next", 1500)], { oneShots: [shot("skill's context", { promptTimestamp: 1000 })] });
+		expect(blockTexts(rebuilt.messages[0])).toEqual(["skill run", wrapReminder("skill's context")]);
+		const later = render([user("other", 1003), user("next", 1500)], { oneShots: [shot("context", { promptTimestamp: 1000 })] });
+		expect(blockTexts(later.messages[0])).toEqual(["other"]);
+		expect(blockTexts(later.messages[1])).toEqual(["next", wrapReminder("context")]);
+	});
+
 	it("puts a breadcrumb before the opening prompt's text, after the stack, raw, and once per `once` text", () => {
 		const crumbs = [shot("caveat", { placement: "user-prepend", raw: true, once: true, id: "a" }), shot("cmd", { placement: "user-prepend", raw: true, id: "b" }), shot("caveat", { placement: "user-prepend", raw: true, once: true, id: "c" })];
 		const result = render([user("hi", 1)], { epoch: true, stack: [stack("ctx")], oneShots: crumbs });

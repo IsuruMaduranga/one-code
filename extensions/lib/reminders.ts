@@ -392,7 +392,7 @@ export function renderReminders(messages: readonly AgentMessage[], input: Render
 		const own = shot.toolCallId
 			? messages.findIndex((m) => m.role === "toolResult" && (m as { toolCallId?: string }).toolCallId === shot.toolCallId)
 			: shot.promptTimestamp !== undefined
-				? messages.findIndex((m) => isStickyCarrier(m) && stamp(m) === shot.promptTimestamp)
+				? promptAt(messages, shot.promptTimestamp)
 				: -1;
 		const at = own !== -1 ? own : tail;
 		if (at === -1) continue;
@@ -412,6 +412,22 @@ export function renderReminders(messages: readonly AgentMessage[], input: Render
 
 function stamp(message: AgentMessage): number {
 	return (message as { timestamp?: number }).timestamp ?? 0;
+}
+
+/** How much later pi may stamp a custom message it rebuilt from the session than the one it delivered. */
+const RESTAMP_WINDOW_MS = 1000;
+
+/**
+ * The prompt a one-shot's `promptTimestamp` names, or -1 when the request does
+ * not carry it. pi stores a custom message (a `/skill:` invocation) with the
+ * time it persisted it, at `message_end`, so after `/reload` or resume the
+ * rebuilt message is stamped a little after the delivered one the pin took;
+ * a user message keeps its own stamp.
+ */
+function promptAt(messages: readonly AgentMessage[], timestamp: number): number {
+	const exact = messages.findIndex((m) => isStickyCarrier(m) && stamp(m) === timestamp);
+	if (exact !== -1) return exact;
+	return messages.findIndex((m) => m.role === "custom" && stamp(m) > timestamp && stamp(m) - timestamp < RESTAMP_WINDOW_MS);
 }
 
 /**
