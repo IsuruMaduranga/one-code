@@ -5,6 +5,7 @@ import {
 	captureRequest,
 	extendPayload,
 	forkOutputRoom,
+	forkBaselineNames,
 	forkRequestPayload,
 	lastCovered,
 	toolNames,
@@ -15,6 +16,7 @@ import {
 	replayOutputCap,
 	replayTail,
 } from "../../extensions/lib/request-replay.ts";
+import responsesFixture from "./fixtures/responses-pi-1.4.0.json" with { type: "json" };
 
 const anthropic = { api: "anthropic-messages", provider: "anthropic", id: "claude-sonnet-5" };
 const marker = { type: "ephemeral", ttl: "1h" };
@@ -326,6 +328,62 @@ describe("forks: the parent's captured request, then the fork's own tail", () =>
 		const responses = captureRequest({ ...anthropic, api: "openai-responses" }, { input: [{ role: "developer", content: "parent" }, { role: "user", content: "hi" }] }, covers) as RequestCapture;
 		const outResponses = forkRequestPayload(responses, { input: [{ role: "developer", content: "fork" }, { type: "function_call", name: "read" }] }, new Set());
 		expect(outResponses.input).toEqual([{ role: "developer", content: "parent" }, { role: "user", content: "hi" }, { type: "function_call", name: "read" }]);
+	});
+});
+
+describe("forks on pi 1.4.0's Responses shape, tools in a leading additional_tools item (real elements, fixtures/responses-pi-1.4.0.json)", () => {
+	type Item = Record<string, unknown>;
+	const real = responsesFixture as unknown as Record<string, Item> & { headItem: Item & { tools: Item[] } };
+	const covers = { role: "user", timestamp: 30 };
+	const api = { ...anthropic, api: "openai-responses", provider: "openai", id: "gpt-6.1-sol" };
+	const headWith = (tools: Item[]) => ({ ...real.headItem, tools });
+	const parent = { ...real.body, input: [real.headItem, real.prompt, real.userStack, real.environment] };
+	const capture = () => captureRequest(api, parent, covers) as RequestCapture;
+	const declared = (payload: Item) => [
+		...((payload.tools as Item[] | undefined) ?? []).map((tool) => tool.name),
+		...(payload.input as Item[]).flatMap((item) => (item.type === "additional_tools" ? (item.tools as Item[]).map((tool) => tool.name) : [])),
+	];
+	const handback = { type: "function", name: "SubagentHandback", description: "Hand the result back", parameters: { type: "object" }, strict: false };
+	const forkTask = { role: "user", content: [{ type: "input_text", text: "fork task" }] };
+
+	it("measures the baseline from the head item", () => {
+		expect([...forkBaselineNames({ input: [real.headItem] }, "openai-responses")]).toEqual(real.headItem.tools.map((tool) => tool.name));
+		expect([...forkBaselineNames({ tools: real.headItem.tools, input: [] }, "openai-responses")]).toEqual(real.headItem.tools.map((tool) => tool.name));
+	});
+
+	it("keeps the parent's input as its prefix, adds no top-level tools, and drops the child's own prelude", () => {
+		const child = { ...real.body, input: [real.headItem, { role: "developer", content: "the fork's prompt" }, forkTask] };
+		const out = forkRequestPayload(capture(), child, forkBaselineNames(child, "openai-responses"));
+		expect(out.tools).toBeUndefined();
+		expect(out.input).toEqual([...parent.input, forkTask]);
+	});
+
+	it("keeps a tool the fork loaded, where its tool_search placed it", () => {
+		const child = { ...real.body, input: [real.headItem, { role: "developer", content: "p" }, forkTask, real.loadCall, headWith([handback]), real.loadOutput] };
+		const out = forkRequestPayload(capture(), child, forkBaselineNames({ input: [real.headItem] }, "openai-responses"));
+		expect(out.input).toEqual([...parent.input, forkTask, real.loadCall, headWith([handback]), real.loadOutput]);
+		expect(declared(out).filter((name) => name === "SubagentHandback")).toHaveLength(1);
+	});
+
+	it("declares a tool the fork gained outside its tail in an item after the parent's prefix, the same bytes every request", () => {
+		const child = { ...real.body, input: [headWith([...real.headItem.tools, handback]), { role: "developer", content: "p" }, forkTask] };
+		const baseline = forkBaselineNames({ input: [real.headItem] }, "openai-responses");
+		const out = forkRequestPayload(capture(), child, baseline);
+		const input = out.input as Item[];
+		expect(input.slice(0, parent.input.length)).toEqual(parent.input);
+		expect(input[parent.input.length]).toEqual({ type: "additional_tools", role: "developer", tools: [handback] });
+		expect(forkRequestPayload(capture(), child, baseline)).toEqual(out);
+	});
+
+	it("on a pi 1.3.0 capture, appends a gained tool to the top-level tools and never declares a name twice", () => {
+		const old = captureRequest(api, { ...real.body, tools: real.headItem.tools, input: [real.prompt, real.userStack] }, covers) as RequestCapture;
+		const child = { ...real.body, input: [headWith([...real.headItem.tools, handback]), { role: "developer", content: "p" }, forkTask, real.loadCall, headWith([real.webFetch, real.headItem.tools[0]]), real.loadOutput] };
+		const out = forkRequestPayload(old, child, forkBaselineNames({ input: [real.headItem] }, "openai-responses"));
+		const names = declared(out);
+		expect(names.filter((name) => name === "SubagentHandback")).toHaveLength(1);
+		expect(names.filter((name) => name === "web_fetch")).toHaveLength(1);
+		expect(new Set(names).size).toBe(names.length);
+		expect((out.tools as Item[]).at(-1)).toEqual(handback);
 	});
 });
 

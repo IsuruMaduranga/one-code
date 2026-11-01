@@ -26,7 +26,7 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
-import { type AffinityModel, affinityHeaders, captureMatches, forkOutputRoom, forkRequestPayload, MIN_REPLAY_OUTPUT_TOKENS, type RequestCapture, toolNames, uncoveredMessages } from "../lib/request-replay.ts";
+import { type AffinityModel, affinityHeaders, captureMatches, forkOutputRoom, forkRequestPayload, forkBaselineNames, MIN_REPLAY_OUTPUT_TOKENS, type RequestCapture, uncoveredMessages } from "../lib/request-replay.ts";
 
 type ModelRef = { api?: string; provider?: string; id?: string };
 
@@ -75,7 +75,7 @@ export function forkCacheExtension(capture: RequestCapture) {
 			if (!shaped || !captureMatches(capture, ctx.model as ModelRef | undefined)) return undefined;
 			shaped = false;
 			const payload = event.payload as Record<string, unknown>;
-			baseline ??= new Set(toolNames(payload.tools));
+			baseline ??= forkBaselineNames(payload, capture.api);
 			return forkRequestPayload(capture, payload, baseline);
 		});
 	};
