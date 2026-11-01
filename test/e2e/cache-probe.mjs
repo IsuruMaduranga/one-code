@@ -42,7 +42,6 @@
  *   6. The system prompt is sent once per request: request 1's prompt
  *      (`system`, `instructions`, or the list's first system or developer
  *      message) appears once, never again further down the list.
- *
  *   7. With `--late-tool NAME` (cache-probe-late-tool.sh): NAME is absent from
  *      request 1, rides every later request's `tools` as `defer_loading: true`
  *      once it appears, and is announced either by a reference-form
@@ -189,9 +188,9 @@ checkStable("conversation head (to the first user message)", conversationHead, {
 checkStable("eager tools", eagerTools, { downgrade: eagerLoadOk });
 
 // 5. Declarations: never shrink, never doubled, a loaded tool stays declared.
-const declaredSets = requests.map((p) => new Set(declaredNames(p)));
-requests.forEach((p, i) => {
-	const names = declaredNames(p);
+const declaredLists = requests.map(declaredNames);
+const declaredSets = declaredLists.map((names) => new Set(names));
+declaredLists.forEach((names, i) => {
 	const doubled = [...new Set(names.filter((name, at) => names.indexOf(name) !== at))];
 	if (doubled.length > 0) failures.push(`request ${i + 1} declares ${doubled.join(", ")} more than once`);
 	if (i > 0) {
@@ -223,7 +222,7 @@ for (const load of toolLoads) {
 
 // 6. The system prompt once per request.
 const asJson = (value) => JSON.stringify(withoutCacheControl(value));
-const isInstruction = (item) => (item?.role === "system" || item?.role === "developer") && item.type === undefined;
+const isInstruction = (item) => (item?.role === "system" || item?.role === "developer") && (item.type === undefined || item.type === "message");
 const promptOf = (p) => {
 	if (p.system !== undefined) return { field: "system", text: asJson(p.system) };
 	if (p.instructions !== undefined) return { field: "instructions", text: asJson(p.instructions) };

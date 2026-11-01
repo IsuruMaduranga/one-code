@@ -6,7 +6,7 @@ import {
 	supportsToolReferences,
 	toolSearchLoads,
 } from "../../extensions/lib/deferred.ts";
-import responsesFixture from "./fixtures/responses-pi-1.4.0.json" with { type: "json" };
+import { type Item, real, toolsItem as headWith } from "./helpers/responses-fixture.ts";
 
 describe("supportsToolReferences", () => {
 	it("is first-party Claude 4.5+ and Haiku 4.5 or later, not older Haikus or gateways", () => {
@@ -334,10 +334,7 @@ describe("stabilizeResponsesToolLoads", () => {
 	});
 
 	describe("on pi 1.4.0's shape, tools in a leading additional_tools item (real elements, fixtures/responses-pi-1.4.0.json)", () => {
-		type Item = Record<string, unknown>;
-		const real = responsesFixture as unknown as Record<string, Item> & { headItem: Item & { tools: Item[] } };
 		const starting = real.headItem.tools;
-		const headWith = (tools: Item[]) => ({ ...real.headItem, tools });
 		const webFetch = new Map([[`${String(real.loadCall.call_id)}|${String(real.loadCall.id)}`, ["web_fetch"]]]);
 		const deferredWeb = (name: string) => name === "web_fetch";
 		const body = (input: unknown[]) => ({ ...real.body, input: [headWith([...starting, real.webFetch]), real.prompt, real.userStack, ...input] });

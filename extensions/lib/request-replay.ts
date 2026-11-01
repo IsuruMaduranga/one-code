@@ -22,7 +22,7 @@
 import type { Message } from "@earendil-works/pi-ai";
 import { settleSystemMessages } from "./ledger/layout.ts";
 import { isObject } from "./ledger/records.ts";
-import { appendPoint, isToolsItem, listKey, preludeLength, responsesDeclarations, stripMarkers, toolName } from "./ledger/wire.ts";
+import { appendPoint, isToolsItem, leadingToolsItem, listKey, loadedInList, preludeLength, responsesDeclarations, stripMarkers, toolName, toolsItemFor } from "./ledger/wire.ts";
 import { estimateMessageTokens } from "./pi-ai-estimate.ts";
 
 /** The compaction extension publishes a RequestCapture here, or undefined when none is valid. */
@@ -334,37 +334,35 @@ export function forkRequestPayload(capture: RequestCapture, child: Record<string
 	const key = listKey(capture.api);
 	const base = capture.payload[key] as unknown[];
 	const childList = Array.isArray(child[key]) ? (child[key] as WireMessage[]) : [];
-	const responses = capture.api.endsWith("-responses");
-	// What the capture declares, wherever it keeps its tools (pi 1.4.0 keeps a
-	// Responses request's in a leading `additional_tools` item, findings §78).
-	const parentDeclared = new Set(responses ? responsesDeclarations(capture.payload, capture.api).keys() : toolNames(capture.payload.tools));
-	// The child's own system messages and prelude go; a Responses load item its
+	const parentDeclared = captureDeclarations(capture);
+	// The child's own prelude and system messages go; a Responses load item its
 	// tool_search placed in the tail stays, less what the capture declares.
-	const tail = childList.slice(responses ? preludeLength(childList, capture.api) : 0).flatMap((entry): WireMessage[] => {
-		if (responses && isToolsItem(entry)) {
+	const tail = childList.slice(preludeLength(childList, capture.api)).flatMap((entry): WireMessage[] => {
+		if (isToolsItem(entry)) {
 			const tools = entry.tools.filter((tool) => !parentDeclared.has(toolName(tool) ?? ""));
 			return tools.length > 0 ? [{ ...entry, tools } as WireMessage] : [];
 		}
 		return entry.role !== "system" && entry.role !== "developer" ? [entry] : [];
 	});
-	const childHead = responses && isToolsItem(childList[0]) ? childList[0].tools : [];
-	const childTools = [...(Array.isArray(child.tools) ? child.tools : []), ...childHead];
-	const inTail = responses ? new Set(responsesDeclarations({ [key]: tail }, capture.api).keys()) : new Set<string>();
+	const childTools = [...(Array.isArray(child.tools) ? child.tools : []), ...(leadingToolsItem(child.tools, childList)?.tools ?? [])];
+	const inTail = loadedInList(tail);
 	const gained = forkGainedTools(parentDeclared, childTools.filter((tool) => !inTail.has(toolName(tool) ?? "")), baseline, tail);
-	// A gained tool goes where the capture keeps its tools: appended to its
-	// top-level array, else in an item at the start of the fork's tail (after
-	// the parent's prefix, which it then keeps).
-	const topLevel = Array.isArray(capture.payload.tools) || !responses;
-	const ownTail = gained.length > 0 && !topLevel ? [{ type: "additional_tools", role: "developer", tools: gained } as WireMessage, ...tail] : tail;
+	// A gained tool goes where the capture keeps its tools: in an item at the
+	// start of the fork's tail when the capture declares in a leading item
+	// (after the parent's prefix, which it then keeps), else appended to the
+	// top-level array.
+	const parentItem = leadingToolsItem(capture.payload.tools, base);
+	const ownTail = gained.length > 0 && parentItem ? [toolsItemFor(gained, parentItem) as WireMessage, ...tail] : tail;
 	const out: Record<string, unknown> = { ...capture.payload, [key]: capture.api === "anthropic-messages" ? settleSystemMessages(appendTurns(base, ownTail), capture.api, base.length) : [...base, ...ownTail] };
-	if (topLevel) {
-		const tools = forkTools(capture.payload.tools, child.tools, gained);
+	if (!parentItem) {
+		const parentTools = capture.payload.tools;
+		const tools = Array.isArray(parentTools) ? (gained.length > 0 ? [...parentTools, ...gained] : parentTools) : Array.isArray(child.tools) ? stripMarkers(child.tools) : undefined;
 		if (tools) out.tools = tools;
 	}
 	const capKey = CAP_PATHS[capture.api].find((path) => capAt(capture.payload, path) !== undefined);
 	// Appended tool schemas spend room too; the parent's own tools are already in its cap.
 	const tailRoom = forkOutputRoom(capture, ownTail);
-	const room = tailRoom === undefined ? undefined : tailRoom - (topLevel && gained.length > 0 ? Math.ceil(JSON.stringify(gained).length / 4) : 0);
+	const room = tailRoom === undefined ? undefined : tailRoom - (!parentItem && gained.length > 0 ? Math.ceil(JSON.stringify(gained).length / 4) : 0);
 	let result = out;
 	if (capKey && room !== undefined) {
 		// Never above the room: the fork chose the fallback before this when too little was left.
@@ -378,6 +376,15 @@ export function forkRequestPayload(capture: RequestCapture, child: Record<string
 /** The tool names a fork's first request declares, wherever it keeps them: the baseline its later gains are measured from. */
 export function forkBaselineNames(payload: Record<string, unknown>, api: string): Set<string> {
 	return new Set(api.endsWith("-responses") ? responsesDeclarations(payload, api).keys() : toolNames(payload.tools));
+}
+
+/** What each capture declares, computed once: every request of a fork splices the same capture. */
+const declaredByCapture = new WeakMap<RequestCapture, Set<string>>();
+
+function captureDeclarations(capture: RequestCapture): Set<string> {
+	let names = declaredByCapture.get(capture);
+	if (!names) declaredByCapture.set(capture, (names = forkBaselineNames(capture.payload, capture.api)));
+	return names;
 }
 
 /**
@@ -409,12 +416,6 @@ function forkGainedTools(declared: ReadonlySet<string>, child: readonly unknown[
 			return name !== undefined && !declared.has(name) && (!baseline.has(name) || referenced.has(name));
 		}),
 	);
-}
-
-/** The fork's top-level tools: the capture's, then the gained ones; the child's own when the capture has none. */
-function forkTools(parent: unknown, child: unknown, gained: readonly unknown[]): unknown[] | undefined {
-	if (!Array.isArray(parent)) return Array.isArray(child) ? stripMarkers(child) : undefined;
-	return gained.length > 0 ? [...parent, ...gained] : parent;
 }
 
 /** Tool names the tail's `tool_reference` blocks load (Anthropic tool search). */

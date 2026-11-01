@@ -16,7 +16,7 @@ import {
 	replayOutputCap,
 	replayTail,
 } from "../../extensions/lib/request-replay.ts";
-import responsesFixture from "./fixtures/responses-pi-1.4.0.json" with { type: "json" };
+import { declaredNames as declared, type Item, real, toolsItem as headWith } from "./helpers/responses-fixture.ts";
 
 const anthropic = { api: "anthropic-messages", provider: "anthropic", id: "claude-sonnet-5" };
 const marker = { type: "ephemeral", ttl: "1h" };
@@ -332,17 +332,10 @@ describe("forks: the parent's captured request, then the fork's own tail", () =>
 });
 
 describe("forks on pi 1.4.0's Responses shape, tools in a leading additional_tools item (real elements, fixtures/responses-pi-1.4.0.json)", () => {
-	type Item = Record<string, unknown>;
-	const real = responsesFixture as unknown as Record<string, Item> & { headItem: Item & { tools: Item[] } };
 	const covers = { role: "user", timestamp: 30 };
 	const api = { ...anthropic, api: "openai-responses", provider: "openai", id: "gpt-6.1-sol" };
-	const headWith = (tools: Item[]) => ({ ...real.headItem, tools });
 	const parent = { ...real.body, input: [real.headItem, real.prompt, real.userStack, real.environment] };
 	const capture = () => captureRequest(api, parent, covers) as RequestCapture;
-	const declared = (payload: Item) => [
-		...((payload.tools as Item[] | undefined) ?? []).map((tool) => tool.name),
-		...(payload.input as Item[]).flatMap((item) => (item.type === "additional_tools" ? (item.tools as Item[]).map((tool) => tool.name) : [])),
-	];
 	const handback = { type: "function", name: "SubagentHandback", description: "Hand the result back", parameters: { type: "object" }, strict: false };
 	const forkTask = { role: "user", content: [{ type: "input_text", text: "fork task" }] };
 

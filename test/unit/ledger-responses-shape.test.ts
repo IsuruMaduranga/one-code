@@ -7,24 +7,17 @@
  */
 import { describe, expect, it } from "vitest";
 import { preludeLength, recordedBody, recordedRequest, recordedToolNames, spliceRequest, withBranchToolOrder } from "../../extensions/lib/ledger/wire.ts";
-import fixture from "./fixtures/responses-pi-1.4.0.json" with { type: "json" };
+import { declaredNames as declarations, type Item, real, toolsItem } from "./helpers/responses-fixture.ts";
 
-type Item = Record<string, unknown>;
 const api = "openai-responses";
 const codex = "openai-codex-responses";
 const identity = { api, provider: "openai", model: "gpt-6.1-sol", auth: "key" };
-const { body, headItem, prompt, userStack, environment, configuration, loadCall, loadOutput, budget, webFetch } = fixture as unknown as Record<string, Item> & { headItem: Item & { tools: Item[] } };
+const { body, headItem, prompt, userStack, environment, configuration, loadCall, loadOutput, budget, webFetch } = real;
 const startingTools = headItem.tools;
 
 const recorded = (payload: Item, at = api) => recordedRequest(payload, { ...identity, api: at });
 const input = (payload: Item) => payload.input as Item[];
-/** Every name the body declares, once per declaration: top-level `tools` and its items. */
-const declarations = (payload: Item): string[] => [
-	...((payload.tools as Item[] | undefined) ?? []).map((tool) => String(tool.name)),
-	...input(payload).flatMap((item) => (item.type === "additional_tools" ? (item.tools as Item[]).map((tool) => String(tool.name)) : [])),
-];
 const prompts = (payload: Item) => input(payload).filter((item) => JSON.stringify(item) === JSON.stringify(prompt)).length;
-const toolsItem = (tools: Item[]) => ({ ...headItem, tools });
 
 /** Request 1 on pi 1.4.0, as recorded: the head item, the prompt, the first-message stack. */
 const request1 = { ...body, input: [headItem, prompt, userStack, environment, configuration] };

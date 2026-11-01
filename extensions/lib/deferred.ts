@@ -14,7 +14,7 @@ import { createHash } from "node:crypto";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { toolResultsOnBranch } from "./branch-restore.ts";
 import { parseClaudeId } from "./claude-id.ts";
-import { isToolsItem } from "./ledger/wire.ts";
+import { leadingToolsItem, toolsItemFor } from "./ledger/wire.ts";
 import { RESPONSES_APIS } from "./system-role.ts";
 import { ADDENDUM_HEAD } from "./tool-additions.ts";
 import { normalizeToolName } from "../permissions/matcher.ts";
@@ -536,7 +536,7 @@ export function stabilizeResponsesToolLoads(
 	// Where the request declares its starting tools: a top-level array (pi 1.0
 	// to 1.3, and models pi does not flag), or an `additional_tools` item at the
 	// head of the input (pi 1.4.0 and later, findings §78). Read from the bytes.
-	const headItem = Array.isArray(payload.tools) ? undefined : isToolsItem(input[0]) ? input[0] : undefined;
+	const headItem = leadingToolsItem(payload.tools, input);
 	const tools = headItem ? headItem.tools : payload.tools;
 	if (!Array.isArray(tools)) return undefined;
 
@@ -567,13 +567,12 @@ export function stabilizeResponsesToolLoads(
 	}
 	if (movedAt.size === 0) return undefined;
 
-	// A request that declares in items takes another item at the load; the
-	// top-level shape takes what the model's compat supports.
-	const itemCompat: ToolLoadCompat = headItem ? { supportsAdditionalTools: true } : compat;
+	// A request that declares in items takes another item, shaped like its
+	// head; the top-level shape takes what the model's compat supports.
 	const nextInput: unknown[] = [];
 	(input as WireItem[]).forEach((item, index) => {
 		const moved = movedAt.get(index);
-		if (moved) nextInput.push(...toolLoadItems(moved, String(item.call_id), itemCompat));
+		if (moved) nextInput.push(...(headItem ? [toolsItemFor(moved, headItem)] : toolLoadItems(moved, String(item.call_id), compat)));
 		nextInput.push(headItem && index === 0 ? { ...headItem, tools: kept } : item);
 	});
 	return headItem ? { ...payload, input: nextInput } : { ...payload, tools: kept, input: nextInput };
@@ -581,7 +580,7 @@ export function stabilizeResponsesToolLoads(
 
 /** pi-ai's native items for tools added at one point of a Responses conversation. */
 function toolLoadItems(tools: WireItem[], loaderCallId: string, compat: ToolLoadCompat): WireItem[] {
-	if (compat.supportsAdditionalTools) return [{ type: "additional_tools", role: "developer", tools }];
+	if (compat.supportsAdditionalTools) return [toolsItemFor(tools)];
 	const names = tools.map((tool) => String(tool.name));
 	const callId = `pi_tool_load_${createHash("sha256").update(`${loaderCallId}:${names.join(",")}`).digest("hex").slice(0, 16)}`;
 	return [
