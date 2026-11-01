@@ -1,5 +1,5 @@
 {
-	"fetchedAt": "2026-10-31T21:46:56.376Z",
+	"fetchedAt": "2026-11-01T12:46:45.941Z",
 	"source": "https://openrouter.ai/api/v1/models",
 	"payload": {
 		"data": [
@@ -1750,8 +1750,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.000000075",
-					"completion": "0.0000003"
+					"prompt": "0.00000015",
+					"completion": "0.0000006"
 				}
 			},
 			{
@@ -3314,8 +3314,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000015",
-					"completion": "0.0000006"
+					"prompt": "0.000000017",
+					"completion": "0.000000062"
 				}
 			},
 			{
@@ -3338,8 +3338,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.000000018",
-					"completion": "0.00000009"
+					"prompt": "0.00000003",
+					"completion": "0.00000013"
 				}
 			},
 			{
@@ -4022,8 +4022,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000004",
-					"completion": "0.0000023"
+					"prompt": "0.00000015",
+					"completion": "0.000001875"
 				}
 			},
 			{
@@ -4293,8 +4293,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000000825",
-					"completion": "0.00000033"
+					"prompt": "0.000000132",
+					"completion": "0.000000528"
 				}
 			},
 			{
@@ -4317,8 +4317,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000007506",
-					"completion": "0.0000022509"
+					"prompt": "0.000000834",
+					"completion": "0.000002501"
 				}
 			},
 			{
@@ -4763,8 +4763,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000000699",
-					"completion": "0.0000014"
+					"prompt": "0.00000008",
+					"completion": "0.0000036"
 				}
 			},
 			{
@@ -4775,8 +4775,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000000149",
-					"completion": "0.0000001543"
+					"prompt": "0.0000000285",
+					"completion": "0.0000000923"
 				}
 			},
 			{
@@ -4887,8 +4887,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000000141",
-					"completion": "0.00000011"
+					"prompt": "0.000000035",
+					"completion": "0.0000005"
 				}
 			},
 			{
@@ -4909,7 +4909,7 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000000474",
+					"prompt": "0.0000000434",
 					"completion": "0.0000003"
 				}
 			},
@@ -5030,8 +5030,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000000149",
-					"completion": "0.0000001543"
+					"prompt": "0.0000000285",
+					"completion": "0.0000000923"
 				}
 			},
 			{
