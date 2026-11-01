@@ -1,0 +1,523 @@
+{
+ "_source": "pi 1.4.0, openai/gpt-6.1-sol, One Code at bb36319 (working-docs/findings/78-pi-1.4.0.md). Real elements; the long prompt, user-stack and environment texts are shortened, every other byte is as sent.",
+ "body": {
+  "model": "gpt-6.1-sol",
+  "stream": true,
+  "prompt_cache_key": "01a193f9-4af3-77dc-83bc-8ccdaf53ea55",
+  "store": false,
+  "max_output_tokens": 128000,
+  "reasoning": {
+   "effort": "medium",
+   "summary": "auto"
+  },
+  "include": [
+   "reasoning.encrypted_content"
+  ]
+ },
+ "headItem": {
+  "type": "additional_tools",
+  "role": "developer",
+  "tools": [
+   {
+    "type": "function",
+    "name": "read",
+    "description": "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.",
+    "parameters": {
+     "type": "object",
+     "required": [
+      "path",
+      "offset",
+      "limit"
+     ],
+     "properties": {
+      "path": {
+       "type": "string",
+       "description": "Path to the file to read (relative or absolute)"
+      },
+      "offset": {
+       "anyOf": [
+        {
+         "type": "number",
+         "description": "Line number to start reading from (1-indexed)"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "limit": {
+       "anyOf": [
+        {
+         "type": "number",
+         "description": "Maximum number of lines to read"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      }
+     },
+     "additionalProperties": false
+    },
+    "strict": true
+   },
+   {
+    "type": "function",
+    "name": "bash",
+    "description": "Executes a bash command and returns its output.\n\n- Each call starts in the session's working directory and a `cd` does not carry over, so prefer absolute paths — `cd` in a compound command can trigger a permission prompt. Shell state (env vars, functions) does not persist.\n- Command output is displayed to you, not reliably to the user.\n- `timeout` is in milliseconds: default 120000, max 600000 for a foreground command.\n- `run_in_background` runs the command detached: it keeps running across turns and re-invokes you when it exits. No `&` needed. Foreground `sleep` is blocked; use monitor with an until-loop to wait on a condition.\n\n# Git\n- Interactive flags (`-i`, e.g. `git rebase -i`, `git add -i`) are not supported in this environment.\n- Use the `gh` CLI for GitHub operations (PRs, issues, API).\n- Commit or push only when the user asks. If on the default branch, branch first.\n- End git commit messages and PR bodies with the attribution lines given in the conversation's system-reminder, when one is present.",
+    "parameters": {
+     "type": "object",
+     "required": [
+      "command",
+      "timeout",
+      "description",
+      "run_in_background"
+     ],
+     "properties": {
+      "command": {
+       "type": "string",
+       "description": "The command to execute"
+      },
+      "timeout": {
+       "anyOf": [
+        {
+         "type": "number",
+         "description": "Optional timeout in milliseconds (max 600000 for a foreground command)"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "description": {
+       "anyOf": [
+        {
+         "type": "string",
+         "description": "Clear, concise description of what this command does in active voice. Never use words like \"complex\" or \"risk\" in the description - just describe what it does.\n\nSay what the command does in plain words: do not echo the command's text, its flags, or file paths - the user reads this description, often without seeing the command.\n\nFor simple commands (git, npm, standard CLI tools), keep it brief (5-10 words):\n- ls → \"List files in current directory\"\n- git status → \"Show working tree status\"\n- npm install → \"Install package dependencies\"\n\nFor commands that are harder to parse at a glance (piped commands, obscure flags, etc.), add enough context to clarify what it does:\n- find . -name \"*.tmp\" -exec rm {} \\; → \"Find and delete all .tmp files recursively\"\n- git reset --hard origin/main → \"Discard all local changes and match remote main\"\n- curl -s url | jq '.data[]' → \"Fetch JSON from URL and extract data array elements\""
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "run_in_background": {
+       "anyOf": [
+        {
+         "type": "boolean",
+         "description": "Set to true to run this command in the background."
+        },
+        {
+         "type": "null"
+        }
+       ]
+      }
+     },
+     "additionalProperties": false
+    },
+    "strict": true
+   },
+   {
+    "type": "function",
+    "name": "edit",
+    "description": "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes. The file must have been read in this conversation, with the read tool or a shell command that printed the whole file as it is on disk (such as cat), or the edit is refused; if it changed on disk since, read it again first.",
+    "parameters": {
+     "type": "object",
+     "required": [
+      "path",
+      "edits"
+     ],
+     "properties": {
+      "path": {
+       "type": "string",
+       "description": "Path to the file to edit (relative or absolute)"
+      },
+      "edits": {
+       "type": "array",
+       "items": {
+        "type": "object",
+        "required": [
+         "oldText",
+         "newText"
+        ],
+        "properties": {
+         "oldText": {
+          "type": "string",
+          "description": "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call."
+         },
+         "newText": {
+          "type": "string",
+          "description": "Replacement text for this targeted edit."
+         }
+        },
+        "additionalProperties": false
+       },
+       "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead."
+      }
+     },
+     "additionalProperties": false
+    },
+    "strict": true
+   },
+   {
+    "type": "function",
+    "name": "write",
+    "description": "Writes a file to the local filesystem, overwriting if one exists.\n\nWhen to use: creating a new file, or fully replacing one you've already read. Overwriting an existing file you haven't read will fail. For partial changes, use edit instead.",
+    "parameters": {
+     "type": "object",
+     "required": [
+      "path",
+      "content"
+     ],
+     "properties": {
+      "path": {
+       "type": "string",
+       "description": "Path to the file to write (relative or absolute)"
+      },
+      "content": {
+       "type": "string",
+       "description": "Content to write to the file"
+      }
+     },
+     "additionalProperties": false
+    },
+    "strict": true
+   },
+   {
+    "type": "function",
+    "name": "tool_search",
+    "description": "Fetches full schema definitions for deferred tools so they can be called.\n\nDeferred tools appear by name in <system-reminder> messages. Until fetched, only the name is known — there is no parameter schema, so the tool cannot be invoked. This tool takes a query, matches it against the deferred tool list, and loads the matched tools' full schemas so they become callable exactly like any tool defined at the top of the prompt.\n\nQuery forms:\n- `select:web_fetch,notebook_edit` — fetch these exact tools by name\n- `notebook jupyter` — keyword search, up to max_results best matches\n- `+slack send` — require \"slack\" in the name, rank by remaining terms",
+    "parameters": {
+     "type": "object",
+     "required": [
+      "query"
+     ],
+     "properties": {
+      "query": {
+       "type": "string",
+       "description": "Tool names (`select:a,b`) or keywords describing the capability needed"
+      },
+      "max_results": {
+       "type": "integer",
+       "minimum": 1,
+       "maximum": 20,
+       "description": "Maximum tools to load (default 5)"
+      }
+     }
+    },
+    "strict": false
+   },
+   {
+    "type": "function",
+    "name": "ask_user_question",
+    "description": "Use this tool only when you are blocked on a decision that is genuinely the user's to make: one you cannot resolve from the request, the code, or sensible defaults.\n\nUsage notes:\n- Users will always be able to select \"Other\" to provide custom text input\n- Use multiSelect: true to allow multiple answers to be selected for a question\n- If you recommend a specific option, make that the first option in the list and add \"(Recommended)\" at the end of the label\n\nPlan mode note: To switch into plan mode, use enter_plan_mode (not this tool). Once in plan mode, use this tool to clarify requirements or choose between approaches BEFORE finalizing your plan. Do NOT use this tool to ask \"Is my plan ready?\", \"Should I proceed?\", or otherwise reference \"the plan\" in questions — plan approval goes through exit_plan_mode.\n\nReserve this for decisions where the user's answer changes what you do next — not for choices with a conventional default or facts you can verify in the codebase yourself. In those cases pick the obvious option, mention it in your response, and proceed.\n\nPreview feature:\nUse the optional `preview` field on options when presenting concrete artifacts that users need to visually compare:\n- ASCII mockups of UI layouts or components\n- Code snippets showing different implementations\n- Diagram variations\n- Configuration examples\n\nPreview content is rendered as markdown in a monospace box. Multi-line text with newlines is supported. When any option has a preview, the UI switches to a side-by-side layout with a vertical option list on the left and preview on the right. Do not use previews for simple preference questions where labels and descriptions suffice. Note: previews are only supported for single-select questions (not multiSelect).\n",
+    "parameters": {
+     "type": "object",
+     "required": [
+      "questions"
+     ],
+     "properties": {
+      "questions": {
+       "type": "array",
+       "items": {
+        "type": "object",
+        "required": [
+         "question",
+         "header",
+         "options"
+        ],
+        "properties": {
+         "question": {
+          "type": "string",
+          "description": "The complete question to ask the user. Should be clear, specific, and end with a question mark. Example: \"Which library should we use for date formatting?\" If multiSelect is true, phrase it accordingly, e.g. \"Which features do you want to enable?\""
+         },
+         "header": {
+          "type": "string",
+          "description": "Very short label displayed as a chip/tag (max 12 chars). Examples: \"Auth method\", \"Library\", \"Approach\"."
+         },
+         "options": {
+          "type": "array",
+          "items": {
+           "type": "object",
+           "required": [
+            "label"
+           ],
+           "properties": {
+            "label": {
+             "type": "string",
+             "description": "The display text for this option that the user will see and select. Should be concise (1-5 words) and clearly describe the choice."
+            },
+            "description": {
+             "type": "string",
+             "description": "Explanation of what this option means or what will happen if chosen. Useful for providing context about trade-offs or implications."
+            },
+            "preview": {
+             "type": "string",
+             "description": "Optional preview content rendered when this option is focused. Use for mockups, code snippets, or visual comparisons that help users compare options. See the tool description for the expected content format."
+            }
+           }
+          },
+          "minItems": 2,
+          "maxItems": 4,
+          "description": "The available choices for this question. Must have 2-4 options. Each option should be a distinct, mutually exclusive choice (unless multiSelect is enabled). There should be no 'Other' option, that will be provided automatically."
+         },
+         "multiSelect": {
+          "type": "boolean",
+          "description": "Set to true to allow the user to select multiple options instead of just one. Use when choices are not mutually exclusive."
+         }
+        }
+       },
+       "minItems": 1,
+       "maxItems": 4,
+       "description": "Questions to ask the user (1-4 questions)"
+      }
+     }
+    },
+    "strict": false
+   },
+   {
+    "type": "function",
+    "name": "skill",
+    "description": "Invoke a skill.\n\nA skill is a packaged set of instructions the user or project has set up for a particular kind of task (deploy steps, a review checklist, a repo-specific workflow). Available skills appear in a system-reminder listing with one-line descriptions. When the task at hand is one a listed skill covers, call this tool first — the skill's instructions load into the turn for you to follow in place of your default approach. Users may also ask for one by name (`/<name>`, or \"slash command\"); that's a request to invoke it.\n\n- `skill`: exact name from the listing, no leading slash. Plugin skills are named `<plugin>:<skill>`.\n- `args`: optional arguments to pass through.\n\nOnly names from the listing (or that the user typed explicitly) are valid. Built-in CLI commands (`/help`, `/clear`, …) aren't skills. Use `list` to see what is available.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "skill": {
+       "type": "string",
+       "description": "Exact skill name, no leading slash"
+      },
+      "args": {
+       "type": "string",
+       "description": "Arguments to pass through to the skill"
+      },
+      "list": {
+       "type": "boolean",
+       "description": "List available skills instead of invoking one"
+      }
+     }
+    },
+    "strict": false
+   },
+   {
+    "type": "function",
+    "name": "schedule_wakeup",
+    "description": "Schedule when to resume work in /loop dynamic mode — the user invoked /loop without an interval, asking you to self-pace iterations of a specific task.\n\nDo NOT schedule a short-interval wakeup to poll for background work you started — when harness-tracked work finishes, you are re-invoked automatically, so polling is wasted. Instead schedule a long fallback (1200s+) so the loop survives if the work hangs or never notifies. The exception is external work the harness cannot track (a CI run, a deploy, a remote queue) — there, pick a delay matched to how fast that state actually changes.\n\nPass the same /loop prompt back via `prompt` each turn so the next firing repeats the task. For an autonomous /loop (no user prompt), pass the literal sentinel `<<autonomous-loop-dynamic>>` as `prompt` instead — the runtime resolves it back to the autonomous-loop instructions at fire time. (There is a similar `<<autonomous-loop>>` sentinel for cron_create-based autonomous loops; do not confuse the two — schedule_wakeup always uses the `-dynamic` variant.) To end the loop, call this tool with `stop: true` (omit every other field) — the loop ends immediately and no further wakeups fire.\n\nSet `noop: true` if nothing changed — you checked and there's nothing to report (\"no change\", \"still waiting\", \"quiet hold\"). Set `noop: false` if something happened worth keeping — you edited a file, posted a message, advanced state, or surfaced a finding. Consecutive `noop: true` ticks are collapsed in the user's terminal view and tracked as a streak, so long quiet holds stay legible to the user without scrolling. Omit `noop` when stopping (`stop: true`).\n\n## Picking delaySeconds\n\nThe Anthropic prompt cache decides how expensive a wake-up is: waking inside the cache TTL re-reads your conversation context cached (fast, cheap); waking past it re-reads everything uncached. The TTL depends on how the session is billed: Claude subscriber sessions get a 1-hour TTL (dropping to 5 minutes during usage overage), while API-key, Bedrock, and Vertex sessions default to 5 minutes.\n\nIn either regime: never schedule extra wakeups just to keep the cache warm — they cost more than the cache miss they avoid. Match the delay to what you're actually waiting for: when actively polling external state the harness can't notify you about (a CI run, a deploy, a remote queue), pick the delay from how fast that state actually changes; for idle ticks with no specific signal to watch, default to **1200s–1800s** (20–30 min) — the user can always interrupt if they need you sooner.\n\nOn a 5-minute TTL only, two refinements: under 300s (60s–270s) the cache stays warm, so prefer 270s over 300s when actively polling (300s is the worst-of-both — you pay the miss without amortizing it); and commit to 1200s+ rather than repeated ~300s waits, so one cache miss buys a long wait.\n\nThe runtime clamps to [60, 3600], so you don't need to clamp yourself.\n\n## The reason field\n\nOne short sentence on what you chose and why. Goes to telemetry and is shown back to the user. \"watching CI run\" beats \"waiting.\" The user reads this to understand what you're doing without having to predict your cadence in advance — make it specific.\n",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "delaySeconds": {
+       "type": "number",
+       "description": "Seconds from now to wake up. Clamped to [60, 3600] by the runtime. Required unless `stop` is true."
+      },
+      "reason": {
+       "type": "string",
+       "description": "One short sentence explaining the chosen delay. Goes to telemetry and is shown to the user. Be specific. Required unless `stop` is true."
+      },
+      "prompt": {
+       "type": "string",
+       "description": "The /loop input to fire on wake-up. Pass the same /loop input verbatim each turn so the next firing re-enters the skill and continues the loop. For autonomous /loop (no user prompt), pass the literal sentinel `<<autonomous-loop-dynamic>>` instead (the dynamic-pacing variant, not the cron_create-mode `<<autonomous-loop>>`). Required unless `stop` is true."
+      },
+      "stop": {
+       "type": "boolean",
+       "description": "Set to true to end the dynamic loop immediately instead of scheduling another wakeup. When true, all other fields are ignored and no further wakeups fire."
+      },
+      "noop": {
+       "type": "boolean",
+       "description": "true = nothing changed (you checked and there is nothing to report). false = something happened worth keeping (edited a file, posted a message, advanced state, surfaced a finding). Consecutive noop:true ticks are collapsed in the user's terminal view and tracked as a streak. Required unless `stop` is true."
+      }
+     }
+    },
+    "strict": false
+   },
+   {
+    "type": "function",
+    "name": "Agent",
+    "description": "Launch a new agent to handle complex, multi-step tasks. Each agent type has specific capabilities and tools available to it.\n\nAvailable agent types are listed in <system-reminder> messages in the conversation.\n\nWhen using the Agent tool, specify a subagent_type to select an agent: `\"fork\"` forks yourself (the fork inherits your full conversation context and always runs on your model — a `model` override is rejected); any other type — or omitting it — starts a fresh agent (general-purpose by default).\n\n## When to use\n\nReach for this when the task matches an available agent type, when you have independent work to run in parallel, or when answering would mean reading across several files — delegate it and you keep the conclusion, not the file dumps. For a single-fact lookup where you already know the file, symbol, or value, search directly. Once you've delegated a search, don't also run it yourself — wait for the result.\n\nA fork runs in the background and keeps its tool output out of your context. If you are the fork, execute directly — don't re-delegate. Subagents run in the background; you'll be notified when one completes. Never fabricate or predict a pending agent's results — the notification is never something you write yourself; if the user asks before it arrives, say it's still running.\n\n- The agent's final report is not shown to the user — relay what matters.\n- Use SendMessage with the agent's ID or name to continue a previously spawned agent with its context intact; a new Agent call starts fresh (except subagent_type: \"fork\", which inherits your context).\n- Each agent type's model, reasoning effort, and tools come from its definition (`.claude/agents/*.md` frontmatter).\n- `isolation: \"worktree\"` gives the agent its own git worktree (auto-cleaned if unchanged).\n\n## How agents run\n\n- Call task_output only if your next step cannot proceed without the result (block=true waits); stop a run with task_stop. Both are deferred — load them with tool_search first.\n- In a one-shot print session the call blocks and returns the report directly — no notification follows.\n- Give a complete, self-contained task: the agent cannot ask follow-up questions.\n- Each run gets a name — SendMessage reaches it live while it runs and continues it after it finishes. `action: \"list\"` re-prints the agent catalog.",
+    "parameters": {
+     "type": "object",
+     "required": [
+      "task"
+     ],
+     "properties": {
+      "subagent_type": {
+       "type": "string",
+       "description": "The agent to run — a name from the \"Available agents\" system reminder (general-purpose when omitted), or \"fork\" to clone this conversation. To run several in parallel, issue multiple Agent tool calls in one turn."
+      },
+      "task": {
+       "type": "string",
+       "description": "The task — a complete, self-contained instruction (the agent cannot ask follow-ups)."
+      },
+      "prompt": {
+       "type": "string",
+       "description": "Alias of `task` (Claude Code's name for it) — the task for the agent to perform."
+      },
+      "description": {
+       "type": "string",
+       "description": "A short (3-5 word) description of the task, shown as the run's title."
+      },
+      "name": {
+       "type": "string",
+       "description": "Name for this run, usable later with SendMessage (default: <agent>-<n>)"
+      },
+      "model": {
+       "type": "string",
+       "description": "Override the agent's model for this call: \"sonnet\"/\"opus\"/\"haiku\"/\"fable\" (resolved within this session's provider), \"inherit\", or an exact provider/model-id — see the subagent-models reminder for what is available. Rejected for fork runs (a fork keeps this conversation's model)"
+      },
+      "allow_expensive": {
+       "type": "boolean",
+       "description": "Confirm a per-call `model` that costs more per token than this session's model. Set it only when the user explicitly asked for that model"
+      },
+      "thinking": {
+       "type": "string",
+       "enum": [
+        "off",
+        "minimal",
+        "low",
+        "medium",
+        "high"
+       ],
+       "description": "Override the reasoning effort for this call. Rejected for fork runs (a fork keeps this conversation's settings)"
+      },
+      "isolation": {
+       "type": "string",
+       "enum": [
+        "worktree"
+       ],
+       "description": "Run the agent in its own git worktree so its file edits are isolated from the main checkout"
+      },
+      "action": {
+       "type": "string",
+       "enum": [
+        "run",
+        "list"
+       ],
+       "description": "\"run\" (the default) executes; \"list\" only browses the agent catalog and ignores run options"
+      }
+     }
+    },
+    "strict": false
+   },
+   {
+    "type": "function",
+    "name": "list_agents",
+    "description": "List the agents spawned in this session — their names, types, and current status — so you know which ones SendMessage can reach. `running` is executing now; `resident` is idle but reachable live; `finished` is resumable from its session. This lists running/spawned instances, not the agent catalog (use Agent action:'list' for that).",
+    "parameters": {
+     "type": "object",
+     "properties": {}
+    },
+    "strict": false
+   },
+   {
+    "type": "function",
+    "name": "workflow",
+    "description": "Execute a workflow script that orchestrates multiple subagents deterministically. Workflows run in the background — this tool returns immediately with a task ID, and a <task-notification> arrives when the workflow completes. Use /workflows to watch live progress.\n\nONLY call this tool when the user has explicitly opted into multi-agent orchestration. Workflows can spawn dozens of agents and consume a large amount of tokens; the user must request that scale, not have it inferred. Explicit opt-in means one of:\n- The user included the keyword \"ultracode\" in their prompt (you'll see a system-reminder confirming it).\n- Ultracode is on for the session (a system-reminder confirms it) — see **Ultracode** in the workflow authoring reference.\n- The user directly asked you to run a workflow or use multi-agent orchestration in their own words (\"use a workflow\", \"run a workflow\", \"fan out agents\", \"orchestrate this with subagents\"). The ask must be in the user's words — a task that would merely benefit from a workflow does not count.\n- The user invoked a skill or slash command whose instructions tell you to call Workflow.\n- The user asked you to run a specific named or saved workflow.\n\nFor any other task — even one that would clearly benefit from parallelism — do NOT call this tool. Use the Agent tool (if available) for individual subagents, or briefly describe what a multi-agent workflow could do and how much it would roughly cost, and ask the user whether to run it. Mention they can ask for one with \"use a workflow\" in a future message to skip the ask.\n\nEvery script must begin with `export const meta = {...}`: a PURE LITERAL (no variables, calls or interpolation) giving the workflow's `name`, a one-line `description` (shown in the permission dialog) and optionally `phases` — one `{ title, detail? }` per phase() call, titles matched exactly. Pass the script inline via `script` — do not write it to a file first, and do not also set the tool's `name` input (that selects a saved workflow); it is plain JavaScript, not TypeScript.\n\nThe canonical multi-stage pattern — pipeline by default, each dimension verifies as soon as its review completes:\n  export const meta = {\n    name: 'review-changes',\n    description: 'Review changed files across dimensions, verify each finding',\n    phases: [{ title: 'Review' }, { title: 'Verify' }],\n  }\n  const DIMENSIONS = [{key: 'bugs', prompt: '...'}, {key: 'perf', prompt: '...'}]\n  const results = await pipeline(\n    DIMENSIONS,\n    d => agent(d.prompt, {label: `review:${d.key}`, phase: 'Review', schema: FINDINGS_SCHEMA}),\n    review => parallel(review.findings.map(f => () =>\n      agent(`Adversarially verify: ${f.title}`, {label: `verify:${f.file}`, phase: 'Verify', schema: VERDICT_SCHEMA})\n        .then(v => ({...f, verdict: v}))\n    ))\n  )\n  const confirmed = results.flat().filter(Boolean).filter(f => f.verdict?.isReal)\n  return { confirmed }\n  // Dimension 'bugs' findings verify while dimension 'perf' is still reviewing. No wasted wall-clock.\n\nBefore writing a script, load the `workflow-authoring` skill — the workflow authoring reference: script API and gotchas, resume, the **Ultracode** section, quality patterns, worked examples.\n\nThis session has the default workflow size guideline: medium — keep workflows under 10 agents. This is a guideline, not a hard limit — follow it unless the user's prompt calls for a different scale. The user can raise or remove it with `workflowSizeGuideline` in ~/.onecode/settings.json.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "script": {
+       "type": "string",
+       "description": "Self-contained workflow script. Must begin with `export const meta = { name, description, phases }` (pure literal, no computed values) followed by the script body using agent()/parallel()/pipeline()/phase()."
+      },
+      "name": {
+       "type": "string",
+       "description": "Name of a saved workflow from .claude/workflows/ or ~/.claude/workflows/. Resolves to a self-contained script."
+      },
+      "args": {
+       "description": "Optional input value exposed to the script as the global `args`, verbatim. Pass arrays/objects as actual JSON values, NOT as a JSON-encoded string — a stringified list breaks `args.filter`/`args.map` in the script. Use for parameterized named workflows (e.g. a research question)."
+      },
+      "scriptPath": {
+       "type": "string",
+       "description": "Path to a workflow script file on disk. Every workflow invocation persists its script under the session directory and returns the path in the tool result. To iterate, edit that file with write/edit and re-invoke workflow with the same `scriptPath` instead of re-sending the full script. Takes precedence over `script` and `name`."
+      },
+      "resumeFromRunId": {
+       "type": "string",
+       "pattern": "^wf_[a-z0-9-]{6,}$",
+       "description": "Run ID of a prior workflow invocation to resume from. Completed agent() calls with unchanged (prompt, opts) return their cached results instantly; only edited or new calls re-run. Same-session only. Stop the prior run first (/workflows stop) before resuming."
+      },
+      "tokenBudget": {
+       "type": "integer",
+       "minimum": 1000,
+       "description": "Output-token target shared by the run and nested workflows. Stops new and queued agents once reached; already-running agents may exceed it. Exposed as budget {total, spent(), remaining()}"
+      },
+      "sync": {
+       "type": "boolean",
+       "description": "Run in the foreground, blocking until the workflow finishes (default: background)"
+      }
+     }
+    },
+    "strict": false
+   }
+  ]
+ },
+ "prompt": {
+  "role": "developer",
+  "content": "You are One Code, an interactive agent."
+ },
+ "userStack": {
+  "role": "user",
+  "content": [
+   {
+    "type": "input_text",
+    "text": "<system-reminder>context</system-reminder>"
+   }
+  ]
+ },
+ "environment": {
+  "role": "developer",
+  "content": "# Environment"
+ },
+ "configuration": {
+  "type": "configuration_update",
+  "reasoning": {
+   "effort": "high"
+  }
+ },
+ "loadCall": {
+  "type": "function_call",
+  "id": "fc_06c5657efa8b2a7f016ae664bc76d887d29e8424d6e47f5dc7",
+  "call_id": "call_x9evjzSGSQqCJFPvZ8KEeECy",
+  "name": "tool_search",
+  "arguments": "{\"query\":\"select:web_fetch\"}"
+ },
+ "loadOutput": {
+  "type": "function_call_output",
+  "call_id": "call_x9evjzSGSQqCJFPvZ8KEeECy",
+  "output": "Loaded web_fetch. These tools are now callable."
+ },
+ "budget": {
+  "role": "developer",
+  "content": "<total_tokens>14984387 tokens left</total_tokens>"
+ },
+ "webFetch": {
+  "type": "function",
+  "name": "web_fetch",
+  "description": "Fetch a URL and return its readable content as markdown. Navigation and boilerplate are stripped. Pass `prompt` to have a small fast model answer it from the full page instead of returning the page itself — prefer that for long pages (on an Anthropic API-key session, Anthropic's server-side fetch answers it). Without `prompt`, long pages are windowed; pass `offset` to continue reading. Responses are cached for 15 minutes. Cross-host redirects are reported instead of followed; call again with the new URL to follow one.",
+  "parameters": {
+   "type": "object",
+   "required": [
+    "url"
+   ],
+   "properties": {
+    "url": {
+     "type": "string",
+     "description": "URL to fetch (http is upgraded to https)"
+    },
+    "prompt": {
+     "type": "string",
+     "description": "Question to answer from the page. A small same-provider model reads the whole page and returns just the answer, keeping long pages out of context. Omit to get the raw page markdown"
+    },
+    "offset": {
+     "type": "integer",
+     "minimum": 0,
+     "description": "Character offset to resume from for a long page"
+    },
+    "max_chars": {
+     "type": "integer",
+     "minimum": 1000,
+     "maximum": 100000,
+     "description": "Characters to return (default 30000)"
+    }
+   }
+  },
+  "strict": false
+ }
+}

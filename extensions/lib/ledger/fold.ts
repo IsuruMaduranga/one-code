@@ -29,7 +29,7 @@
  * Pure: no pi imports.
  */
 import { type Coverage, type EntryLike, type EpochCause, type PendingRecordData, readRecord, type RequestIdentity, type RequestRecordData, sameIdentity, type ToldFact } from "./records.ts";
-import { declaredToolNames, type RecordedRequest } from "./wire.ts";
+import { declaredToolNames, isToolsItem, type RecordedRequest, toolName } from "./wire.ts";
 
 export type { EpochCause };
 
@@ -133,6 +133,12 @@ function omittedIds(branch: readonly EntryLike[]): Set<string> {
 }
 
 /** Fold the branch (root first, as `getBranch()` returns it). `identity` is the live request identity, for epoch detection. */
+/** The tools a request declares at its head: its head's declarations, then a leading Responses `additional_tools` item's (pi 1.4.0 and later). */
+function headToolNames(request: Pick<RecordedRequest, "head" | "list">): string[] {
+	const item = request.list[0];
+	return [...declaredToolNames(request.head), ...(isToolsItem(item) ? item.tools.flatMap((tool) => toolName(tool) ?? []) : [])];
+}
+
 export function foldBranch(branch: readonly EntryLike[], identity?: RequestIdentity): LedgerFold {
 	const blobs = new Map<string, unknown>();
 	let told = toldOf([]);
@@ -169,7 +175,7 @@ export function foldBranch(branch: readonly EntryLike[], identity?: RequestIdent
 				base = open.request;
 				resetSinceBase = undefined;
 				// Requests mostly share their head: the last counted one's adds no name.
-				if (open.request.headHash !== orderedHead) for (const name of declaredToolNames(open.request.head)) toolOrder.add(name);
+				if (open.request.headHash !== orderedHead || isToolsItem(open.request.list[0])) for (const name of headToolNames(open.request)) toolOrder.add(name);
 				orderedHead = open.request.headHash;
 			}
 		} else {

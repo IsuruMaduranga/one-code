@@ -14,6 +14,7 @@ import { createHash } from "node:crypto";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { toolResultsOnBranch } from "./branch-restore.ts";
 import { parseClaudeId } from "./claude-id.ts";
+import { isToolsItem } from "./ledger/wire.ts";
 import { RESPONSES_APIS } from "./system-role.ts";
 import { ADDENDUM_HEAD } from "./tool-additions.ts";
 import { normalizeToolName } from "../permissions/matcher.ts";
@@ -502,20 +503,24 @@ export function responsesToolLoadCompat(model: ResponsesToolLoadModel | undefine
 type WireItem = Record<string, unknown>;
 
 /**
- * A Responses request whose `tools` array stays request 1's whatever
+ * A Responses request whose starting tools stay request 1's whatever
  * `tool_search` has loaded since: the OpenAI side of
  * {@link stabilizeDeferredTools}. pi 0.86 and later put a loaded tool into
  * `tools` for One Code (its forced system prompt collapses tool changes into
  * the head, findings §7), so every load re-cached the whole conversation (0
  * cached tokens on the request after a load on `openai-codex`, findings §45).
  *
- * A loaded registry tool leaves `tools` and enters the input right before the
+ * The starting tools are a top-level `tools` array (pi 1.0 to 1.3, and
+ * models pi does not flag) or, from pi 1.4.0, an `additional_tools` item at
+ * the head of the input (findings §78); this reads which from the payload.
+ * A loaded registry tool leaves that list and enters the input right before the
  * `function_call_output` of the `tool_search` call that loaded it, in pi-ai's
  * own native shape (`convertResponsesMessages` `appendSystemToolAdditions`):
- * an `additional_tools` developer item when the model supports one, else a
- * `tool_search_call` + `tool_search_output` pair whose tools carry
- * `defer_loading: true`. A tool the model called before that output, or whose
- * loading output is not on the wire, stays in `tools`.
+ * an `additional_tools` developer item when the request already declares in
+ * items or the model supports one, else a `tool_search_call` +
+ * `tool_search_output` pair whose tools carry `defer_loading: true`. A tool
+ * the model called before that output, or whose loading output is not on the
+ * wire, stays where pi declared it.
  *
  * Returns undefined (leave the payload alone) when nothing moves. Never
  * mutates its input.
@@ -526,9 +531,14 @@ export function stabilizeResponsesToolLoads(
 	loads: ToolSearchLoads,
 	compat: ToolLoadCompat,
 ): Record<string, unknown> | undefined {
-	const tools = payload.tools;
 	const input = payload.input;
-	if (!Array.isArray(tools) || !Array.isArray(input) || loads.size === 0) return undefined;
+	if (!Array.isArray(input) || loads.size === 0) return undefined;
+	// Where the request declares its starting tools: a top-level array (pi 1.0
+	// to 1.3, and models pi does not flag), or an `additional_tools` item at the
+	// head of the input (pi 1.4.0 and later, findings §78). Read from the bytes.
+	const headItem = Array.isArray(payload.tools) ? undefined : isToolsItem(input[0]) ? input[0] : undefined;
+	const tools = headItem ? headItem.tools : payload.tools;
+	if (!Array.isArray(tools)) return undefined;
 
 	// Input index of each tool output and of each tool's first call. pi sends a
 	// call id as `<call_id>|<item_id>`; the wire's `call_id` is the first part.
@@ -557,13 +567,16 @@ export function stabilizeResponsesToolLoads(
 	}
 	if (movedAt.size === 0) return undefined;
 
+	// A request that declares in items takes another item at the load; the
+	// top-level shape takes what the model's compat supports.
+	const itemCompat: ToolLoadCompat = headItem ? { supportsAdditionalTools: true } : compat;
 	const nextInput: unknown[] = [];
 	(input as WireItem[]).forEach((item, index) => {
 		const moved = movedAt.get(index);
-		if (moved) nextInput.push(...toolLoadItems(moved, String(item.call_id), compat));
-		nextInput.push(item);
+		if (moved) nextInput.push(...toolLoadItems(moved, String(item.call_id), itemCompat));
+		nextInput.push(headItem && index === 0 ? { ...headItem, tools: kept } : item);
 	});
-	return { ...payload, tools: kept, input: nextInput };
+	return headItem ? { ...payload, input: nextInput } : { ...payload, tools: kept, input: nextInput };
 }
 
 /** pi-ai's native items for tools added at one point of a Responses conversation. */
