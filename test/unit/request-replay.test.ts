@@ -368,6 +368,14 @@ describe("forks on pi 1.4.0's Responses shape, tools in a leading additional_too
 		expect(forkRequestPayload(capture(), child, baseline)).toEqual(out);
 	});
 
+	it("on a capture that declares no tools, sends the child's own, wherever the child declared them", () => {
+		const bare = captureRequest(api, { ...real.body, input: [real.prompt, real.userStack] }, covers) as RequestCapture;
+		const child = { ...real.body, input: [real.headItem, { role: "developer", content: "p" }, forkTask] };
+		const out = forkRequestPayload(bare, child, forkBaselineNames(child, "openai-responses"));
+		expect((out.tools as Item[]).map((tool) => tool.name)).toEqual(real.headItem.tools.map((tool) => tool.name));
+		expect(out.input).toEqual([real.prompt, real.userStack, forkTask]);
+	});
+
 	it("on a pi 1.3.0 capture, appends a gained tool to the top-level tools and never declares a name twice", () => {
 		const old = captureRequest(api, { ...real.body, tools: real.headItem.tools, input: [real.prompt, real.userStack] }, covers) as RequestCapture;
 		const child = { ...real.body, input: [headWith([...real.headItem.tools, handback]), { role: "developer", content: "p" }, forkTask, real.loadCall, headWith([real.webFetch, real.headItem.tools[0]]), real.loadOutput] };

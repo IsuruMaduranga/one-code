@@ -107,6 +107,14 @@ describe("spliceRequest on a pi 1.3.0 record continued under pi 1.4.0", () => {
 		expect(prompts(out)).toBe(1);
 		expect(input(out).slice(0, 3)).toEqual([prompt, userStack, environment]);
 	});
+
+	it("takes a changed input schema from pi's head item into the top-level tools", () => {
+		const schema = { type: "object", properties: { path: { type: "string" } } };
+		const changed = startingTools.map((tool) => (tool.name === "read" ? { ...tool, parameters: schema } : tool));
+		const out = spliceRequest(base, tail2(changed), api);
+		expect((out.tools as Item[]).find((tool) => tool.name === "read")?.parameters).toEqual(schema);
+		expect(input(out).some((item) => item.type === "additional_tools")).toBe(false);
+	});
 });
 
 describe("spliceRequest on Codex under pi 1.4.0", () => {

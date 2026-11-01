@@ -504,19 +504,29 @@ export function spliceRequest(base: RecordedRequest, payload: WirePayload, api: 
 	const tail = list.slice(preludeLength(list, api));
 	const at = appendPoint(base.list, api);
 	const out = underRecordedHead(base, payload, api, [...structuredClone(base.list.slice(0, at)), ...tail]);
-	return api.endsWith("-responses") ? withLiveDeclarations(out, payload, api, base, at) : out;
+	return api.endsWith("-responses") && !Array.isArray(base.head.tools) ? withLiveDeclarations(out, payload, api, base, at) : out;
 }
 
 /**
- * `list` under the record's head (`withRecordedHead`). A Responses record that
- * declares its starting tools in its list takes no top-level `tools` from pi:
- * an `additional_tools` item cannot replace a top-level tool, and a top-level
- * array ahead of the input would miss the cache. `withLiveDeclarations`
- * declares what the record lacks.
+ * `list` under the record's head (`withRecordedHead`), with pi's declarations
+ * merged where the record keeps its tools. A Responses record with a top-level
+ * `tools` array merges pi's starting tools wherever pi put them (a pi 1.4.0
+ * head item on a session recorded by an earlier pi), so a new tool or a changed
+ * schema reaches the array. One that declares in its list takes no top-level
+ * `tools` from pi: an `additional_tools` item cannot replace a top-level tool,
+ * and a top-level array ahead of the input would miss the cache;
+ * `withLiveDeclarations` declares what it lacks.
  */
 function underRecordedHead(base: RecordedRequest, payload: WirePayload, api: string, list: unknown[]): WirePayload {
-	const { tools: _live, ...withoutTools } = payload;
-	const live = api.endsWith("-responses") && leadingToolsItem(base.head.tools, base.list) ? withoutTools : payload;
+	let live = payload;
+	if (api.endsWith("-responses")) {
+		const liveItem = leadingToolsItem(payload.tools, payloadList(payload, api));
+		if (Array.isArray(base.head.tools)) live = liveItem ? { ...payload, tools: liveItem.tools } : payload;
+		else if (leadingToolsItem(base.head.tools, base.list)) {
+			const { tools: _live, ...withoutTools } = payload;
+			live = withoutTools;
+		}
+	}
 	return { ...withRecordedHead(live, base.head, api, loadedInList(base.list)), [listKey(api)]: list };
 }
 
@@ -545,14 +555,13 @@ export function responsesDeclarations(payload: WirePayload, api: string): Map<st
 }
 
 /**
- * `out` declaring every tool pi's own rendering (`live`) declares: a splice
- * keeps the record's head and drops pi's, so a tool pi added mid-epoch, or one
- * whose input schema changed, would otherwise go undeclared. It is declared
- * where the record keeps its tools: appended to the top-level `tools` (which
- * `withRecordedHead` already merged, so only a tool pi declared in an item
- * reaches here), or, for a record that declares in its list, in an
- * `additional_tools` item at the append point `at`, after the cached prefix.
- * A later item replaces an earlier item's declaration of the same name.
+ * `out` declaring every tool pi's own rendering (`live`) declares, for a
+ * Responses record without a top-level `tools` array (one with an array gets
+ * pi's tools through the head merge): a splice keeps the record's head and
+ * drops pi's, so a tool pi added mid-epoch, or one whose input schema changed,
+ * would otherwise go undeclared. It goes in an `additional_tools` item at the
+ * append point `at`, after the cached prefix; a later item replaces an earlier
+ * item's declaration of the same name.
  */
 function withLiveDeclarations(out: WirePayload, live: WirePayload, api: string, base: RecordedRequest, at: number): WirePayload {
 	const recordItem = leadingToolsItem(base.head.tools, base.list);
@@ -567,7 +576,6 @@ function withLiveDeclarations(out: WirePayload, live: WirePayload, api: string, 
 	});
 	if (needed.length === 0) return out;
 	const tools = needed.map(([, tool]) => stripMarkers(tool));
-	if (!recordItem && Array.isArray(out.tools)) return { ...out, tools: [...out.tools, ...tools] };
 	const list = payloadList(out, api);
 	return { ...out, [listKey(api)]: [...list.slice(0, at), toolsItemFor(tools, liveItem ?? recordItem), ...list.slice(at)] };
 }

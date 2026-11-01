@@ -354,15 +354,18 @@ export function forkRequestPayload(capture: RequestCapture, child: Record<string
 	const parentItem = leadingToolsItem(capture.payload.tools, base);
 	const ownTail = gained.length > 0 && parentItem ? [toolsItemFor(gained, parentItem) as WireMessage, ...tail] : tail;
 	const out: Record<string, unknown> = { ...capture.payload, [key]: capture.api === "anthropic-messages" ? settleSystemMessages(appendTurns(base, ownTail), capture.api, base.length) : [...base, ...ownTail] };
+	// A capture that declares no tools at its head takes the child's own,
+	// wherever the child declared them.
+	const parentTools = capture.payload.tools;
+	const appended = !parentItem && Array.isArray(parentTools) ? gained : [];
 	if (!parentItem) {
-		const parentTools = capture.payload.tools;
-		const tools = Array.isArray(parentTools) ? (gained.length > 0 ? [...parentTools, ...gained] : parentTools) : Array.isArray(child.tools) ? stripMarkers(child.tools) : undefined;
+		const tools = Array.isArray(parentTools) ? (appended.length > 0 ? [...parentTools, ...appended] : parentTools) : childTools.length > 0 ? stripMarkers(childTools) : undefined;
 		if (tools) out.tools = tools;
 	}
 	const capKey = CAP_PATHS[capture.api].find((path) => capAt(capture.payload, path) !== undefined);
 	// Appended tool schemas spend room too; the parent's own tools are already in its cap.
 	const tailRoom = forkOutputRoom(capture, ownTail);
-	const room = tailRoom === undefined ? undefined : tailRoom - (!parentItem && gained.length > 0 ? Math.ceil(JSON.stringify(gained).length / 4) : 0);
+	const room = tailRoom === undefined ? undefined : tailRoom - (appended.length > 0 ? Math.ceil(JSON.stringify(appended).length / 4) : 0);
 	let result = out;
 	if (capKey && room !== undefined) {
 		// Never above the room: the fork chose the fallback before this when too little was left.

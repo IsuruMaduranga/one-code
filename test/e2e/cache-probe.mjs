@@ -37,7 +37,8 @@
  *      one at `input[0]` for models flagged for mid-conversation system
  *      messages and additional tools) and `tool_search_output` items. The set
  *      of declared names never shrinks from one request to the next, no name
- *      is declared twice in one request, and a tool `tool_search` loaded is
+ *      is declared twice with the same bytes in one request (a later
+ *      declaration may change a schema), and a tool `tool_search` loaded is
  *      declared in every request from the one carrying that load's result.
  *   6. The system prompt is sent once per request: request 1's prompt
  *      (`system`, `instructions`, or the list's first system or developer
@@ -188,11 +189,23 @@ checkStable("conversation head (to the first user message)", conversationHead, {
 checkStable("eager tools", eagerTools, { downgrade: eagerLoadOk });
 
 // 5. Declarations: never shrink, never doubled, a loaded tool stays declared.
-const declaredLists = requests.map(declaredNames);
-const declaredSets = declaredLists.map((names) => new Set(names));
-declaredLists.forEach((names, i) => {
-	const doubled = [...new Set(names.filter((name, at) => names.indexOf(name) !== at))];
-	if (doubled.length > 0) failures.push(`request ${i + 1} declares ${doubled.join(", ")} more than once`);
+const declaredSets = requests.map((p) => new Set(declaredNames(p)));
+/** Names declared more than once with the same bytes: a later declaration that changes a schema replaces the earlier one, an identical one is a duplicate. */
+const duplicated = (p) => {
+	const seen = new Map();
+	const out = new Set();
+	for (const tool of [...(Array.isArray(p?.tools) ? p.tools : []), ...listOf(p).flatMap((item) => ((item?.type === "additional_tools" || item?.type === "tool_search_output") && Array.isArray(item.tools) ? item.tools : []))]) {
+		const name = toolNameOf(tool);
+		if (name === undefined) continue;
+		const bytes = JSON.stringify(withoutCacheControl({ ...tool, defer_loading: undefined }));
+		if (seen.get(name) === bytes) out.add(name);
+		seen.set(name, bytes);
+	}
+	return [...out];
+};
+requests.forEach((p, i) => {
+	const doubled = duplicated(p);
+	if (doubled.length > 0) failures.push(`request ${i + 1} declares ${doubled.join(", ")} more than once with the same bytes`);
 	if (i > 0) {
 		const lost = [...declaredSets[i - 1]].filter((name) => !declaredSets[i].has(name));
 		if (lost.length > 0) failures.push(`request ${i + 1} no longer declares ${lost.join(", ")}, which request ${i} declared`);
