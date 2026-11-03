@@ -174,6 +174,19 @@ describe("loadProjectInstructions", () => {
 			expect(agent.map((file) => file.path)).toEqual([join(repo, "CLAUDE.md"), join(repo, "CLAUDE.local.md")]);
 		});
 
+		it("fits the files only the classifier reads together, within what the agent's files leave", () => {
+			writeFileSync(join(repo, "CLAUDE.md"), "claude rule");
+			mkdirSync(join(repo, ".claude", "rules"), { recursive: true });
+			// Two path-conditional rules, each under half the window, together over it.
+			writeFileSync(join(repo, ".claude", "rules", "a.md"), `---\npaths: ["a/**"]\n---\nRULE-A ${BIG}`);
+			writeFileSync(join(repo, ".claude", "rules", "b.md"), `---\npaths: ["b/**"]\n---\nRULE-B ${BIG} and more`);
+			const text = loadProjectInstructions(repo, home, Math.ceil(3 * T)) ?? "";
+			expect(text).toContain("claude rule");
+			expect(text).toContain("RULE-A");
+			expect(text).not.toContain("RULE-B");
+			expect(text).toContain("b.md (applies to b)\n(Not shown:");
+		});
+
 		it("skips a file only the classifier reads when it alone is over the share", () => {
 			writeFileSync(join(repo, "CLAUDE.md"), "claude rule");
 			mkdirSync(join(repo, ".claude", "rules"), { recursive: true });

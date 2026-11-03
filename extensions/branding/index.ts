@@ -22,7 +22,8 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { basename, dirname, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { getAgentDir, SettingsManager, VERSION as PI_VERSION } from "@earendil-works/pi-coding-agent";
+// pi's loader maps this import to pi's own module, so keyText reads the keybindings pi loaded.
+import { getAgentDir, keyText as piKeyText, SettingsManager, VERSION as PI_VERSION } from "@earendil-works/pi-coding-agent";
 import { piVersionWarning } from "../lib/pi-version.ts";
 import { handleCompactionKeep } from "./compaction-keep.ts";
 import { handleReplacedBuiltins } from "./replaced-builtins.ts";
@@ -64,6 +65,19 @@ export interface BannerInput {
 	subagents?: string;
 	/** Compact resource sections, shown when pi's own listing is silenced. */
 	sections?: StartupSection[];
+	/** pi's `keyText`: the user's key for a pi binding, "" when unbound; the defaults without it. */
+	keyText?: (binding: string) => string;
+}
+
+/** The user's key for a pi binding: `fallback` without `keyText` (or when it throws), null when unbound. */
+export function boundKey(keyText: ((binding: string) => string) | undefined, binding: string, fallback: string): string | null {
+	if (!keyText) return fallback;
+	try {
+		const key = keyText(binding);
+		return typeof key === "string" ? key || null : fallback;
+	} catch {
+		return fallback;
+	}
 }
 
 /**
@@ -92,18 +106,22 @@ export const WORDMARK = WORDMARK_RAW.map((r) => r + " ".repeat(WORDMARK_WIDTH - 
  * prefixes and the opt-in keyword nobody could guess. Everything else lives in
  * pi's own /hotkeys listing, which the line points at.
  */
-const HINTS: [key: string, what: string][] = [
+/** pi's keyText over a binding named as a string. */
+const userKey = (binding: string): string => piKeyText(binding as Parameters<typeof piKeyText>[0]);
+
+/** The startup hints; a third field names the pi binding whose user key replaces the default. */
+const HINTS: [key: string, what: string, binding?: string][] = [
 	// First so it survives narrow terminals: the pointer to everything else.
 	["/hotkeys", "all keys"],
 	// pi calls this dial "thinking" and reserves shift+tab for it; we present
 	// it as Claude Code's "effort" so the key and /effort agree on the name.
-	["shift+tab", "effort"],
+	["shift+tab", "effort", "app.thinking.cycle"],
 	// Claude Code cycles permission modes on shift+tab; pi owns that key, and
 	// ctrl+q is the one ctrl+letter both pi and terminals leave free — except
 	// on Windows and WSL, where pi takes ctrl+q and the key is alt+m.
 	[modeCycleKey(), "permissions"],
-	["ctrl+t", "thinking"],
-	["ctrl+o", "expand output"],
+	["ctrl+t", "thinking", "app.thinking.toggle"],
+	["ctrl+o", "expand output", "app.tools.expand"],
 	["/", "commands"],
 	["!", "bash"],
 	// A keyword rather than a binding — an opt-in feature nobody knows the
@@ -183,7 +201,12 @@ export function bannerLines(
 		.join(paint("muted", " · "));
 	// Narrow terminals drop whole trailing hints (the /hotkeys pointer is
 	// first, so it always survives) instead of cutting one mid-word.
-	const hints = fitItems(HINTS, ([key, what]) => key.length + 1 + what.length, budget)
+	// A rebound pi key shows as bound; an unbound one drops its hint.
+	const bound = HINTS.flatMap(([key, what, binding]): [string, string][] => {
+		const shown = binding ? boundKey(input.keyText, binding, key) : key;
+		return shown ? [[shown, what]] : [];
+	});
+	const hints = fitItems(bound, ([key, what]) => key.length + 1 + what.length, budget)
 		.map(([key, what]) => `${paint("accent", key)} ${paint("muted", what)}`)
 		.join(paint("muted", " · "));
 	const sections = sectionSummary(input.sections ?? [], paint);
@@ -199,8 +222,11 @@ export function bannerLines(
 	return width === undefined ? assembled : assembled.map((line) => truncateLine(line, width));
 }
 
-/** Collapsed-thinking placeholder — pi paints it in thinkingText + italic. */
-const THINKING_LABEL = "✻ Thinking… (ctrl+t to expand)";
+/** Collapsed-thinking placeholder, naming the user's key for pi's thinking toggle; pi paints it in thinkingText + italic. */
+export function thinkingLabel(keyText?: (binding: string) => string): string {
+	const key = boundKey(keyText, "app.thinking.toggle", "ctrl+t");
+	return key ? `✻ Thinking… (${key} to expand)` : "✻ Thinking…";
+}
 
 /** Claude Code-style input marker, painted in the editor's left gutter. A heavy
  * chevron (U+276F), one column wide so the two-column gutter still aligns. */
@@ -421,7 +447,7 @@ export default function brandingExtension(pi: ExtensionAPI) {
 		lastTitle = undefined;
 		live = true;
 		setTimeout(() => retitle(ctx), 0).unref?.();
-		ctx.ui.setHiddenThinkingLabel(THINKING_LABEL);
+		ctx.ui.setHiddenThinkingLabel(thinkingLabel(userKey));
 		installPromptMarker(ctx as unknown as Parameters<typeof installPromptMarker>[0], argumentHints, agentView);
 		try {
 			readFileHints(promptTemplateFiles(ctx.cwd, os.homedir(), getAgentDir()));
@@ -509,6 +535,7 @@ export default function brandingExtension(pi: ExtensionAPI) {
 					...bannerLines(
 						{
 							version,
+							keyText: userKey,
 							model: modelLabel ?? "none",
 							cwd: ctx.cwd,
 							mode: bannerModeLabel(permissionModeDisplay(permissionStatus ?? { mode: "default", paused: false })),

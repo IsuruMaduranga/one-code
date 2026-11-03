@@ -31,7 +31,7 @@ describe("instruction budget", () => {
 		const one = [{ path: "/a", content: BIG }];
 		expect(fitToWindow(one, 2 * T - 1).skipped).toEqual([{ path: "/a", tokens: T, contextWindow: 2 * T - 1 }]);
 		expect(fitToWindow(one, 2 * T).skipped).toEqual([]);
-		expect(fitToWindow(one, undefined)).toEqual({ files: one, skipped: [] });
+		expect(fitToWindow(one, undefined)).toEqual({ files: one, skipped: [], loaded: T });
 		expect(fitToWindow(one, 0).skipped).toEqual([]);
 	});
 
@@ -60,6 +60,14 @@ describe("instruction budget", () => {
 		expect(fit.files[2]).toBe(files[2]);
 		// Together within the share: all load.
 		expect(fitToWindow(files, 6 * T).skipped).toEqual([]);
+	});
+
+	it("counts tokens other loaded files already take", () => {
+		const one = [{ path: "/nested", content: BIG }];
+		// Alone it fits half of 3T; beside T already loaded it does not.
+		expect(fitToWindow(one, 3 * T).skipped).toEqual([]);
+		expect(fitToWindow(one, 3 * T, { used: T }).skipped.map((file) => file.path)).toEqual(["/nested"]);
+		expect(fitToWindow(one, 3 * T, { used: T }).loaded).toBe(T);
 	});
 
 	it("skips the earlier of two files of one size, keeping the more specific", () => {
@@ -187,6 +195,24 @@ describe("claude-context: an oversized instruction file", () => {
 		const keys = recorded.flatMap((entry) => ((entry as { data?: { keys?: string[] } }).data?.keys ?? []));
 		expect(keys.some((key) => key.endsWith(join("src", "CLAUDE.md")))).toBe(true);
 		expect(keys.some((key) => key.endsWith("rules.md"))).toBe(false);
+	});
+
+	it("gives a nested file only what the loaded top-level files leave of the half", async () => {
+		// Root: about 0.4 of the window; the nested file alone about 0.35, so together they pass the half.
+		writeFileSync(join(dir, "CLAUDE.md"), body("ROOT-RULES"));
+		writeFileSync(join(dir, "CLAUDE.local.md"), "Small.\n");
+		mkdirSync(join(dir, "src"));
+		const nestedBody = `NESTED ${"y".repeat(20_000)}\n`;
+		writeFileSync(join(dir, "src", "CLAUDE.md"), nestedBody);
+		const window = Math.ceil(tokens("ROOT-RULES") / 0.4);
+		const ctx = createFakeCtx({ cwd: dir, hasUI: true, model: model(window) });
+		await fake.fireOne("session_start", {}, ctx);
+		expect(block()).toContain("ROOT-RULES");
+		await fake.fire("tool_result", { toolName: "read", toolCallId: "r2", input: { path: "src/a.ts" }, isError: false, content: [] }, ctx);
+		const attached = reminders.filter((r) => r.toolCallId === "r2").map((r) => r.text ?? "");
+		expect(attached).toHaveLength(1);
+		expect(attached[0]).not.toContain("NESTED");
+		expect(attached[0]).toContain("This file is not loaded");
 	});
 
 	it("attaches a nested file over the line as the note, with a warning", async () => {

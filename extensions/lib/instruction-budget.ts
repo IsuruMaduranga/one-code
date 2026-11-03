@@ -3,7 +3,8 @@
  * instructions blocks (a CLAUDE.md-family file, AGENTS.md or ONECODE.md, with
  * any imports it inlines) may together take at most half of the model's context
  * window; past it, the largest are not loaded until the rest fit. A nested
- * instruction file attached on read is judged alone. A skipped file's slot
+ * instruction file attached on read gets what the loaded ones leave of that
+ * half. A skipped file's slot
  * carries a note with its path and size, so the model knows the rules exist
  * and reads the parts it needs, and the user is warned. Instruction files
  * are rendered into message 1 at every epoch, so compaction cannot reclaim their
@@ -47,23 +48,26 @@ export function classifierInstructionNote(tokens: number, contextWindow: number)
 }
 
 /**
- * The files fitted to the budget: while their total is over the share, the
- * largest is replaced by `note` (its path, descriptor and imports kept), so a
- * file over the share alone always goes first. Between files of one size the
- * earlier goes (a farther or more global file; the later ones are the more
- * specific). Returns the fitted files in their order and the ones replaced, in
- * their order too. No known window, no budget.
+ * The files fitted to the budget: while their total, plus `used` tokens other
+ * loaded instruction files already take, is over the share, the largest is
+ * replaced by `note` (its path, descriptor and imports kept), so a file over
+ * the share alone always goes first. Between files of one size the earlier
+ * goes (a farther or more global file; the later ones are the more specific).
+ * Returns the fitted files in their order, the ones replaced in their order
+ * too, and the tokens the loaded ones take (`used` included). No known
+ * window, no budget.
  */
 export function fitToWindow<T extends { path: string; content: string; imported?: string[] }>(
 	files: readonly T[],
 	contextWindow: number | undefined,
-	note: (tokens: number, contextWindow: number, imported?: readonly string[]) => string = skippedInstructionNote,
-): { files: T[]; skipped: SkippedInstruction[] } {
-	if (!contextWindow || contextWindow <= 0) return { files: [...files], skipped: [] };
-	const limit = contextWindow * INSTRUCTION_WINDOW_SHARE;
+	opts: { note?: (tokens: number, contextWindow: number, imported?: readonly string[]) => string; used?: number } = {},
+): { files: T[]; skipped: SkippedInstruction[]; loaded: number } {
 	const tokens = files.map((file) => estimateTextTokens(file.content));
-	let total = tokens.reduce((sum, n) => sum + n, 0);
-	if (total <= limit) return { files: [...files], skipped: [] };
+	let total = tokens.reduce((sum, n) => sum + n, opts.used ?? 0);
+	if (!contextWindow || contextWindow <= 0) return { files: [...files], skipped: [], loaded: total };
+	const limit = contextWindow * INSTRUCTION_WINDOW_SHARE;
+	if (total <= limit) return { files: [...files], skipped: [], loaded: total };
+	const note = opts.note ?? skippedInstructionNote;
 	const skip = new Set<number>();
 	// Largest first; Array.prototype.sort is stable, so a tie keeps file order.
 	for (const index of tokens.map((_, i) => i).sort((a, b) => tokens[b] - tokens[a])) {
@@ -77,14 +81,14 @@ export function fitToWindow<T extends { path: string; content: string; imported?
 		skipped.push({ path: file.path, tokens: tokens[index], contextWindow });
 		return { ...file, content: note(tokens[index], contextWindow, file.imported) };
 	});
-	return { files: fitted, skipped };
+	return { files: fitted, skipped, loaded: total };
 }
 
 /** The user's warning for a skipped file; `path` is the display path. */
 export function skippedInstructionWarning(path: string, file: Pick<SkippedInstruction, "tokens" | "contextWindow">): string {
 	return (
 		`${path} (~${formatTokens(file.tokens)} tokens) is not loaded: instruction files may take at most half of this model's ` +
-		`${formatTokens(file.contextWindow)}-token context window, and it is the largest past that; the model sees its path instead · /memory to trim it`
+		`${formatTokens(file.contextWindow)}-token context window; the model sees its path instead · /memory to trim it`
 	);
 }
 

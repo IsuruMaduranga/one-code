@@ -20,7 +20,7 @@
  */
 
 import { dirname, join } from "node:path";
-import { agentSkippedInstructions, ancestorDirs, discoverContextFiles, discoverOneCodeFiles } from "../lib/claude-context.ts";
+import { agentInstructionSections, ancestorDirs, discoverContextFiles, discoverOneCodeFiles } from "../lib/claude-context.ts";
 import { readExternalIncludesApproval } from "../lib/claude-external-includes.ts";
 import { classifierInstructionNote, fitToWindow } from "../lib/instruction-budget.ts";
 import { discoverRules, type RuleFile } from "../lib/claude-rules.ts";
@@ -61,9 +61,9 @@ function conditionalRules(cwd: string, home: string, homeClaudeDir: string, incl
  * (lib/instruction-budget.ts, against `contextWindow`, the session model's):
  * then a note replaces it in its labelled slot, so the files that make the
  * agent survivable cannot push every call past the classifier's window. The
- * skipped set is the agent's own, computed over the agent's sections; a file
- * only the classifier reads (a path-conditional rule, AGENTS.md beside
- * CLAUDE.md) is skipped only when it alone is over the share. A transcript too
+ * agent's files are skipped exactly as the agent skips them; the files only
+ * the classifier reads (path-conditional rules, AGENTS.md beside CLAUDE.md)
+ * share what the agent's loaded files leave of the half. A transcript too
  * large for that window is not judged (`decisions/auto-mode.md`).
  */
 export function loadProjectInstructions(cwd: string, home: string, contextWindow?: number): string | undefined {
@@ -84,10 +84,18 @@ export function loadProjectInstructions(cwd: string, home: string, contextWindow
 	for (const file of discoverOneCodeFiles({ cwd, homeOneCodeDir: oneCodeStateDir(process.env, home), home })) add(file);
 
 	if (files.length === 0) return undefined;
-	const agentSkipped = new Map(agentSkippedInstructions({ cwd, home, homeClaudeDir, contextWindow }).map((file) => [tryRealpath(file.path) ?? file.path, file]));
+	// The agent's own fit decides its files; the files only the classifier reads
+	// share what the agent's loaded ones leave of the half, the largest going first.
+	const sections = agentInstructionSections({ cwd, home, homeClaudeDir });
+	const agentFit = fitToWindow([...sections.contextFiles, ...sections.oneCodeFiles], contextWindow);
+	const realKey = (path: string) => tryRealpath(path) ?? path;
+	const agentFiles = new Set([...sections.contextFiles, ...sections.oneCodeFiles].map((file) => realKey(file.path)));
+	const skipped = new Map(agentFit.skipped.map((file) => [realKey(file.path), file]));
+	const ownFit = fitToWindow(files.filter((file) => !agentFiles.has(file.key)), contextWindow, { used: agentFit.loaded });
+	for (const file of ownFit.skipped) skipped.set(realKey(file.path), file);
 	const shown = files.map((file) => {
-		const skipped = agentSkipped.get(file.key) ?? fitToWindow([file], contextWindow).skipped[0];
-		return skipped ? { ...file, content: classifierInstructionNote(skipped.tokens, skipped.contextWindow) } : file;
+		const over = skipped.get(file.key);
+		return over ? { ...file, content: classifierInstructionNote(over.tokens, over.contextWindow) } : file;
 	});
 	return shown.map((file) => `# ${file.path}${file.globs ? ` (applies to ${file.globs.join(", ")})` : ""}\n${file.content.trim()}`).join("\n\n");
 }

@@ -386,6 +386,7 @@ describe("ask_user_question in the TUI", () => {
 		const ctx = createFakeCtx({ hasUI: true, mode: "interactive", ui: { custom: async (...args: unknown[]) => { calls.push(args); return undefined; } } });
 		const questions = [{ question: "Which database?", header: "DB", options: [{ label: "Postgres" }, { label: "SQLite" }] }];
 		await fake.tools.get("ask_user_question")!.execute("q1", { questions }, undefined, undefined, ctx);
-		expect(calls[0][1]).toEqual({ blocked: { kind: "question", message: "Which database?" } });
+		// A fixed label, never the model's question text: the report leaves the transcript.
+		expect(calls[0][1]).toEqual({ blocked: { kind: "question", message: "Question" } });
 	});
 });

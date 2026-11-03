@@ -227,12 +227,14 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	const fitFiles = (current: ReturnType<typeof readFiles>) => {
 		const fit = fitToWindow([...current.contextFiles, ...current.oneCodeFiles], contextWindow);
 		const split = current.contextFiles.length;
-		return { contextFiles: fit.files.slice(0, split), oneCodeFiles: fit.files.slice(split), skipped: fit.skipped };
+		return { contextFiles: fit.files.slice(0, split), oneCodeFiles: fit.files.slice(split), skipped: fit.skipped, loaded: fit.loaded };
 	};
 	/** What a fit changes in the blocks' text: the skipped files and the sizes their notes state. */
 	const skipKey = (skipped: readonly SkippedInstruction[]) => skipped.map((file) => `${file.path}\0${file.tokens}\0${file.contextWindow}`).join("\n");
 	/** The files the live blocks skip, and the ones the user was last told of. */
 	let live: SkippedInstruction[] = [];
+	/** The tokens the live blocks' loaded instruction files take: a nested file gets what they leave of the half. */
+	let liveLoaded = 0;
 	let toldPaths = new Set<string>();
 	const warnSkipped = (ctx: ExtensionContext, file: SkippedInstruction) => {
 		if (ctx.hasUI) queueNotice(pi.events, ctx, "warning", skippedInstructionWarning(tildify(file.path, os.homedir()), file));
@@ -261,6 +263,7 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	 */
 	const emitInstructions = (current: ReturnType<typeof readFiles>, fit = fitFiles(current)) => {
 		live = fit.skipped;
+		liveLoaded = fit.loaded;
 		const instructions = buildClaudeMdBlock({ contextFiles: fit.contextFiles, memoryIndex: current.memoryIndex });
 		if (instructions) {
 			pi.events.emit(REMINDER_CHANNEL, {
@@ -520,9 +523,10 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 			if (attachedNested.has(file.key)) continue;
 			attachedNested.add(file.key);
 			shown.push(file.key);
-			// Over half the window, the note rides in its place (lib/instruction-budget.ts),
-			// and its imports are not shown: a later read may still attach one.
-			const fit = fitToWindow([file], contextWindow);
+			// Past what the loaded top-level files leave of the half, the note rides in
+			// its place (lib/instruction-budget.ts), and its imports are not shown: a
+			// later read may still attach one.
+			const fit = fitToWindow([file], contextWindow, { used: liveLoaded });
 			for (const over of fit.skipped) warnSkipped(ctx, over);
 			if (fit.skipped.length === 0) {
 				for (const imported of file.imported) {
