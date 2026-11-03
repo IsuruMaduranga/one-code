@@ -15,7 +15,7 @@
  * hide` / `/tasks show` toggle it here; the key's hint is always on screen.
  */
 
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "../lib/string-enum.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { restoreLatestDetails } from "../lib/branch-restore.ts";
