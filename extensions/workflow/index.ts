@@ -51,6 +51,7 @@ import { buildRunReport, type RunHandle, WorkflowRunManager } from "./run-manage
 import {
 	ccToolRenderers,
 	customMessageText,
+	expandHintFor,
 	notificationComponent,
 	safeThemeBold,
 	safeThemePaint,
@@ -188,8 +189,8 @@ export default function workflowExtension(pi: ExtensionAPI) {
 		);
 	};
 
-	pi.registerMessageRenderer("one-code:workflow-result", (message, { expanded }, theme) =>
-		notificationComponent(theme, customMessageText(message.content), expanded),
+	pi.registerMessageRenderer("one-code:workflow-result", (message, options, theme) =>
+		notificationComponent(theme, customMessageText(message.content), options.expanded, undefined, expandHintFor(options)),
 	);
 
 	// The description carries the session's size guideline (description.ts);

@@ -375,3 +375,17 @@ describe("formatDecline", () => {
 		expect(out).toContain("don't call ask_user_question again");
 	});
 });
+
+describe("ask_user_question in the TUI", () => {
+	it("reports the wait to the terminal as a question (pi 1.5.0's `blocked`)", async () => {
+		const { createFakeCtx, createFakePi } = await import("./helpers/fake-pi.ts");
+		const { default: askUserExtension } = await import("../../extensions/ask-user/index.ts");
+		const fake = createFakePi();
+		askUserExtension(fake.pi as never);
+		const calls: unknown[][] = [];
+		const ctx = createFakeCtx({ hasUI: true, mode: "interactive", ui: { custom: async (...args: unknown[]) => { calls.push(args); return undefined; } } });
+		const questions = [{ question: "Which database?", header: "DB", options: [{ label: "Postgres" }, { label: "SQLite" }] }];
+		await fake.tools.get("ask_user_question")!.execute("q1", { questions }, undefined, undefined, ctx);
+		expect(calls[0][1]).toEqual({ blocked: { kind: "question", message: "Which database?" } });
+	});
+});

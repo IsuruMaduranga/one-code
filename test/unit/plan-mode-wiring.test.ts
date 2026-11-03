@@ -268,6 +268,9 @@ describe("exit_plan_mode and the mode before planning (PERMISSIONS-REVIEW-2026-0
 		// The fixed choice for the same mode is not listed twice; auto is still offered.
 		expect(text.match(/auto-accept edits/g)).toHaveLength(1);
 		expect(text).toContain("Approve — auto mode");
+		// The dialog reports the wait to the terminal as a permission (pi 1.5.0's `blocked`).
+		const custom = (ctx.ui as { custom: { mock: { calls: unknown[][] } } }).custom;
+		expect(custom.mock.calls[0][1]).toEqual({ blocked: { kind: "permission", message: "Plan approval" } });
 	});
 
 	it.each([

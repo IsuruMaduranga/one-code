@@ -25,6 +25,7 @@ import {
 	countNoun,
 	displayToolPath,
 	EXPAND_HINT,
+	expandHintFor,
 	elbowIndent,
 	linesComponent,
 	rejectedFileHead,
@@ -70,14 +71,14 @@ function wrapLine(line: string, width: number): string[] {
 }
 
 /** The content's first lines (all when expanded), wrapped to `width`, with the `… +N lines` trailer. */
-export function contentPreviewLines(theme: ThemeLike, content: string, width: number, expanded: boolean): string[] {
+export function contentPreviewLines(theme: ThemeLike, content: string, width: number, expanded: boolean, hint: string | null = EXPAND_HINT): string[] {
 	const total = countLines(content);
 	const source = (content || "(No content)").split("\n");
 	if (content.endsWith("\n")) source.pop();
 	const shown = expanded ? source : source.slice(0, WRITE_PREVIEW_LINES);
 	const out = shown.flatMap((line) => wrapLine(line, width).map((part) => theme.fg("toolOutput", part)));
 	const hidden = total - shown.length;
-	if (!expanded && hidden > 0) out.push(theme.fg("dim", `… +${countNoun(hidden, "line")} (${EXPAND_HINT})`));
+	if (!expanded && hidden > 0) out.push(theme.fg("dim", `… +${countNoun(hidden, "line")}${hint ? ` (${hint})` : ""}`));
 	return out;
 }
 
@@ -114,10 +115,10 @@ export function updateSummary(theme: ThemeLike, diff: string): string {
 }
 
 /** The waiting call's preview body, wrapped to `width`: the diff for an overwrite it could diff, the new content otherwise. */
-export function writePreviewLines(theme: ThemeLike, preview: WriteDetails, content: string, width: number, expanded: boolean): string[] {
+export function writePreviewLines(theme: ThemeLike, preview: WriteDetails, content: string, width: number, expanded: boolean, hint: string | null = EXPAND_HINT): string[] {
 	return preview.kind === "update" && preview.diff !== undefined
 		? diffPreviewLines(theme, preview.diff, width)
-		: contentPreviewLines(theme, content, width, expanded);
+		: contentPreviewLines(theme, content, width, expanded, hint);
 }
 
 /**
@@ -125,17 +126,17 @@ export function writePreviewLines(theme: ThemeLike, preview: WriteDetails, conte
  * line, then the content preview or the diff, wrapped to `width`. `path` is
  * the display path.
  */
-export function writeResultLines(theme: ThemeLike, details: WriteDetails | undefined, path: string, content: string, width: number, expanded: boolean): string[] {
+export function writeResultLines(theme: ThemeLike, details: WriteDetails | undefined, path: string, content: string, width: number, expanded: boolean, hint: string | null = EXPAND_HINT): string[] {
 	if (details?.kind === "update" && details.diff !== undefined) {
 		return [updateSummary(theme, details.diff), ...diffPreviewLines(theme, details.diff, width)];
 	}
 	const head = `Wrote ${theme.bold(String(countLines(content)))} lines to ${theme.bold(sanitizeDisplayText(path))}`;
-	return [head, ...contentPreviewLines(theme, content, width, expanded)];
+	return [head, ...contentPreviewLines(theme, content, width, expanded, hint)];
 }
 
 /** A write rejected without a reason: "User rejected write to <path>" and the first lines it would have written. */
-export function rejectedWriteLines(theme: ThemeLike, path: string, content: string, width: number, expanded: boolean): string[] {
-	return [rejectedFileHead(theme, "write", path), ...contentPreviewLines(theme, content, width, expanded)];
+export function rejectedWriteLines(theme: ThemeLike, path: string, content: string, width: number, expanded: boolean, hint: string | null = EXPAND_HINT): string[] {
+	return [rejectedFileHead(theme, "write", path), ...contentPreviewLines(theme, content, width, expanded, hint)];
 }
 
 /** The I/O the renderers need, injected so this module stays pure. */
@@ -215,7 +216,7 @@ export function createWriteRenderers(
 				if (!preview?.preview) return [header];
 				const cached = preview.lines;
 				if (cached && cached.width === width && cached.expanded === expanded) return [header, ...cached.lines];
-				const body = writePreviewLines(theme, preview.preview, preview.content, width - 2, expanded).map((line) => `  ${line}`);
+				const body = writePreviewLines(theme, preview.preview, preview.content, width - 2, expanded, expandHintFor(context)).map((line) => `  ${line}`);
 				preview.lines = { width, expanded, lines: body };
 				return [header, ...body];
 			});
@@ -228,10 +229,10 @@ export function createWriteRenderers(
 			const shownPath = displayToolPath(path, context.cwd);
 			if (context.isError) {
 				if (userDenialKind(textContent(stripReminderBlocks(result))) !== "stop") return fallbackResult(result, options, theme, context);
-				return linesComponent((width) => elbowIndent(rejectedWriteLines(theme, shownPath, content, width - 5, options.expanded)));
+				return linesComponent((width) => elbowIndent(rejectedWriteLines(theme, shownPath, content, width - 5, options.expanded, expandHintFor(context))));
 			}
 			const details = result?.details as WriteDetails | undefined;
-			return linesComponent((width) => elbowIndent(writeResultLines(theme, details, shownPath, content, width - 5, options.expanded)));
+			return linesComponent((width) => elbowIndent(writeResultLines(theme, details, shownPath, content, width - 5, options.expanded, expandHintFor(context))));
 		},
 	};
 }

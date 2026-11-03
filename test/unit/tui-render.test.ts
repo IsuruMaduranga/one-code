@@ -15,6 +15,8 @@ import {
 	notificationComponent,
 	notificationUserMarkdown,
 	resultLines,
+	expandHintFor,
+	EXPAND_HINT,
 	SPINNER_COLORS,
 	SPINNER_INTERVAL_MS,
 	spinnerBulletColor,
@@ -672,5 +674,22 @@ describe("wrapHints", () => {
 	});
 	it("cuts a single hint wider than the row with an ellipsis", () => {
 		expect(wrapHints("averyveryverylonghint · x", 10)).toEqual(["averyvery…", "x"]);
+	});
+});
+
+describe("the expand hint follows the user's keybinding (pi 1.5.0 keyText)", () => {
+	it("names the bound key, drops the hint when unbound, and keeps ctrl+o on an older pi", () => {
+		expect(expandHintFor({ keyText: (binding: string) => (binding === "app.tools.expand" ? "alt+e" : "") })).toBe("alt+e to expand");
+		expect(expandHintFor({ keyText: () => "" })).toBeNull();
+		expect(expandHintFor({ isError: false })).toBe(EXPAND_HINT);
+		expect(expandHintFor(undefined)).toBe(EXPAND_HINT);
+		expect(expandHintFor({ keyText: () => { throw new Error("no keybindings"); } })).toBe(EXPAND_HINT);
+	});
+
+	it("puts the hint in the collapsed trailer, or leaves the trailer bare", () => {
+		const text = Array.from({ length: 9 }, (_, i) => `line ${i}`).join("\n");
+		const plain: ThemeLike = { fg: (_c, t) => t, bold: (t) => t, italic: (t) => t };
+		expect(resultLines(plain, text, false, false, 5, "alt+e to expand").at(-1)?.trim()).toBe("… +4 lines (alt+e to expand)");
+		expect(resultLines(plain, text, false, false, 5, null).at(-1)?.trim()).toBe("… +4 lines");
 	});
 });

@@ -91,7 +91,8 @@ export default function askUserExtension(pi: ExtensionAPI) {
 						cache = undefined;
 					},
 				};
-			});
+				// pi 1.5.0 reports the wait to the terminal (OSC 7501) while the panel shows; older pi ignores it.
+			}, { blocked: { kind: "question", message: questions.length === 1 ? questions[0].question : `${questions.length} questions` } });
 
 			if (!outcome || outcome.kind === "cancel") {
 				const partial = outcome?.kind === "cancel" ? outcome.answers : [];

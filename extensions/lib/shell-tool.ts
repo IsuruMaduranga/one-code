@@ -24,7 +24,7 @@ import { withClaudeCodeShellText } from "./shell-result.ts";
 import { bashParserReady } from "./bash-parser.ts";
 import type { ShellSpawn } from "./shell-spawn.ts";
 import { keepSpillReadable } from "./spill-file.ts";
-import { ccWrapBuiltinRenderers, linesComponent, resultLines } from "./tui-render.ts";
+import { ccWrapBuiltinRenderers, expandHintFor, linesComponent, resultLines } from "./tui-render.ts";
 import { registerVariantTool } from "./tool-variants.ts";
 
 // The completion notification carries status + exit code + where the output is,
@@ -174,7 +174,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 				const line = options.expanded
 					? `Running in the background (task ${details.taskId}${details.logPath ? ` · log: ${details.logPath}` : ""})`
 					: "Running in the background (↓ to manage)";
-				return linesComponent(() => resultLines(theme as any, line, options.expanded, false));
+				return linesComponent(() => resultLines(theme as any, line, options.expanded, false, undefined, expandHintFor(context)));
 			}
 			return wrapped.renderResult(result, options, theme, context);
 		}) as ToolDefinition<P>["renderResult"],
