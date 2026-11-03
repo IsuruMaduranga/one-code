@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadProjectInstructions } from "../../extensions/auto-mode/instructions.ts";
 import { buildClaudeMdBlock, discoverContextFiles, instructionRule } from "../../extensions/lib/claude-context.ts";
 import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
+import { classifierInstructionNote } from "../../extensions/lib/instruction-budget.ts";
+import { estimateTextTokens } from "../../extensions/lib/pi-ai-estimate.ts";
 
 let root: string;
 let repo: string;
@@ -142,5 +144,37 @@ describe("loadProjectInstructions", () => {
 		expect(text).toContain("agents rule");
 		expect(text).not.toContain("dot claude rule");
 		expect(text).not.toContain("rules dir rule");
+	});
+
+	describe("the session model's window", () => {
+		/** 24,000 characters, and pi-ai's estimate for them (its chars-per-token depends on pi's version). */
+		const BIG = "x".repeat(24_000);
+		const T = estimateTextTokens(BIG);
+
+		it("replaces a file over half the window with a note in its labelled slot, never a cut", () => {
+			writeFileSync(join(repo, "CLAUDE.md"), `never force push\n${BIG}`);
+			writeFileSync(join(repo, "AGENTS.md"), "never push to main");
+			const text = loadProjectInstructions(repo, home, T) ?? "";
+			const tokens = estimateTextTokens(`never force push\n${BIG}`);
+			expect(text).toContain(`# ${join(repo, "CLAUDE.md")}\n${classifierInstructionNote(tokens, T)}`);
+			expect(text).not.toContain("never force push");
+			expect(text).not.toContain("xxxx");
+			expect(text).toContain("never push to main");
+			expect(classifierInstructionNote(tokens, T)).toContain("Leaving it out grants no permission.");
+		});
+
+		it("sends files that each fit whole, even when together they pass the share", () => {
+			writeFileSync(join(repo, "CLAUDE.md"), `claude ${BIG}`);
+			writeFileSync(join(repo, "AGENTS.md"), `agents ${BIG}`);
+			const text = loadProjectInstructions(repo, home, 2 * T + 10) ?? "";
+			expect(text).toContain(`claude ${BIG}`);
+			expect(text).toContain(`agents ${BIG}`);
+		});
+
+		it("skips nothing without a known window", () => {
+			writeFileSync(join(repo, "CLAUDE.md"), BIG);
+			expect(loadProjectInstructions(repo, home)).toContain(BIG);
+			expect(loadProjectInstructions(repo, home, 0)).toContain(BIG);
+		});
 	});
 });

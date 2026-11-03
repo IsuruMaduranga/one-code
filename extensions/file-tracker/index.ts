@@ -25,6 +25,7 @@ import { createReadToolDefinition, type ExtensionAPI, type ExtensionContext, typ
 import { pathArgument } from "../auto-mode/paths.ts";
 import { bashParserReady } from "../lib/bash-parser.ts";
 import { discoverContextFiles, instructionRule } from "../lib/claude-context.ts";
+import { fitToWindow } from "../lib/instruction-budget.ts";
 import { readExternalIncludesApproval } from "../lib/claude-external-includes.ts";
 import { inContextEntries, latestCompaction } from "../lib/compaction-boundary.ts";
 import { autoMemoryEnabled } from "../lib/auto-memory.ts";
@@ -197,15 +198,19 @@ function pathOf(input: unknown, cwd: string): string | undefined {
  * they `@`-import, and the auto-memory index), the plan file, the files a
  * `read` in the kept turns returned (`kept`) and the files a kept bash call
  * showed in full (`keptShell`), both absolute as recorded. Claude Code's
- * restore skips them; they stay read.
+ * restore skips them; they stay read. A file over half the model's window
+ * rides message 1 as a note (lib/instruction-budget.ts): neither it nor its
+ * imports are shown.
  */
 function inContextFiles(ctx: ExtensionContext, branch: readonly { type: string; customType?: string; data?: unknown }[], kept: string[], keptShell: string[]): Set<string> {
 	const home = homedir();
 	// Use the context loader's import confinement and approval: a literal
 	// unapproved @import is not evidence that its file is still in context.
-	const stack = discoverContextFiles({ cwd: ctx.cwd, home, homeClaudeDir: claudeConfigDir(), rule: instructionRule(home),
+	const files = discoverContextFiles({ cwd: ctx.cwd, home, homeClaudeDir: claudeConfigDir(), rule: instructionRule(home),
 		includeExternal: readExternalIncludesApproval(ctx.cwd, home).approved,
-	}).flatMap((file) => [file.path, ...(file.imported ?? [])]);
+	});
+	const skipped = new Set(fitToWindow(files, ctx.model?.contextWindow).skipped.map((file) => file.path));
+	const stack = files.flatMap((file) => (skipped.has(file.path) ? [] : [file.path, ...(file.imported ?? [])]));
 	return new Set(
 		[...stack, autoMemoryEnabled(ctx.cwd) ? join(projectMemoryDir(ctx.cwd, home), "MEMORY.md") : undefined, planFileOnBranch(branch), ...kept, ...keptShell]
 			.filter((path): path is string => typeof path === "string")

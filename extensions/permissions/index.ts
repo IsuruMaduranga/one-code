@@ -561,14 +561,18 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	// Keyed by cwd: a worktree-isolated child classifies against ITS checkout's
 	// CLAUDE.md/AGENTS.md, and must not poison the cache the main agent's own
 	// calls (a different cwd) read for the rest of the session. The main
-	// session's calls read the entered worktree's. Dropped where the agent's own
-	// instructions are read again: a session start and a compaction.
+	// session's calls read the entered worktree's. And by the session model's
+	// window, which decides the files left out as for the agent: the block opens
+	// the cached classifier prefix, so it changes on a model switch, never per
+	// call. Dropped where the agent's own instructions are read again: a
+	// session start and a compaction.
 	const projectInstructionsByCwd = new Map<string, string | undefined>();
-	const instructionsFor = (cwd: string): string | undefined => {
-		if (!projectInstructionsByCwd.has(cwd)) {
-			projectInstructionsByCwd.set(cwd, loadProjectInstructions(cwd, os.homedir()));
+	const instructionsFor = (cwd: string, contextWindow: number | undefined): string | undefined => {
+		const key = `${cwd}\0${contextWindow ?? ""}`;
+		if (!projectInstructionsByCwd.has(key)) {
+			projectInstructionsByCwd.set(key, loadProjectInstructions(cwd, os.homedir(), contextWindow));
 		}
-		return projectInstructionsByCwd.get(cwd);
+		return projectInstructionsByCwd.get(key);
 	};
 	const pauseTracker = sessionGate.pause;
 	const denials = sessionGate.denials;
@@ -811,7 +815,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				toolName,
 				transcript: [...history, ...(resolvedPaths ? [{ kind: "resolved-paths" as const, resolvedPaths }] : []), ...(action ? [action] : [])],
 				userMessages: [...userMessages],
-				claudeMd: instructionsFor(cwd),
+				claudeMd: instructionsFor(cwd, ctx.model?.contextWindow),
 				username: classifierUsername,
 				environment: autoConfig.environment,
 				// AutoModeConfig is structurally a RuleExtras; the user's own deny rules
@@ -2304,7 +2308,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				transcript: [...transcript, ...childEntries],
 				userMessages: [...userMessages],
 				// The main session's instructions, read where its own calls read them.
-				claudeMd: instructionsFor(workCwd(ctx.cwd)),
+				claudeMd: instructionsFor(workCwd(ctx.cwd), ctx.model?.contextWindow),
 				username: classifierUsername,
 				environment: autoConfig.environment,
 				// AutoModeConfig is structurally a RuleExtras; the user's own deny rules

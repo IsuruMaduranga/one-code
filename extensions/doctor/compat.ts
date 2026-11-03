@@ -26,8 +26,10 @@ import { AUTO_MEMORY_KEY as AUTO_MEMORY } from "../lib/auto-memory.ts";
 import { CONFIG_MODE_KEY, claudeSourcesOn } from "../lib/config-mode.ts";
 import { claudeJsonPath, claudeUserDir, oneCodeStateDir } from "../lib/paths.ts";
 import { claudeUserSettingsPath, managedSettingsPaths, settingsPaths } from "../lib/claude-settings.ts";
-import { discoverContextFilePaths, instructionRule } from "../lib/claude-context.ts";
+import { discoverContextFilePaths, discoverContextFiles, discoverOneCodeFiles, instructionRule } from "../lib/claude-context.ts";
+import { readExternalIncludesApproval } from "../lib/claude-external-includes.ts";
 import { CLAUDE_MD_CHAR_LIMIT, claudeMdLimitWarning, projectMemoryDir } from "../lib/memory.ts";
+import { combinedInstructionWarning, fitToWindow, skippedInstructionWarning } from "../lib/instruction-budget.ts";
 import { indexLimitStatus } from "../lib/memory-content.ts";
 import { readDisabledMcpServers } from "../lib/mcp-overrides.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
@@ -322,6 +324,8 @@ export interface CompatInput {
 	piConfigDirName?: string;
 	/** MCP servers other extensions registered, as the session loads them. */
 	registeredMcpServers?: readonly RegisteredServer[];
+	/** The session model's context window: a context file over half of it is not loaded. */
+	contextWindow?: number;
 }
 
 export function collectCompat(input: CompatInput): CompatReport {
@@ -356,6 +360,23 @@ export function collectCompat(input: CompatInput): CompatReport {
 		}
 	}
 
+	// The session's window budget, over the sections it loads (imports inlined,
+	// ONECODE.md included): a section over half the window is not loaded.
+	const budget = (() => {
+		if (!input.contextWindow) return undefined;
+		const includeExternal = readExternalIncludesApproval(cwd, home).approved;
+		return fitToWindow([
+			...discoverContextFiles({ cwd, homeClaudeDir: claudeDir, rule: instructionRule(home), home, includeExternal }),
+			...discoverOneCodeFiles({ cwd, homeOneCodeDir: oneCodeStateDir(env, home), home, includeExternal }),
+		], input.contextWindow);
+	})();
+	const fix = "Trim it below half of the model's context window, split it into files the model reads when needed, or switch to a model with a larger window.";
+	for (const file of budget?.skipped ?? []) findings.push({ level: "warn", text: skippedInstructionWarning(shortenHome(file.path, home), file), fix });
+	if (budget?.overTotal && budget.skipped.length === 0 && input.contextWindow) {
+		findings.push({ level: "warn", text: combinedInstructionWarning(input.contextWindow), fix: "Trim the largest instruction files; /memory lists them." });
+	}
+	const skippedPaths = new Set(budget?.skipped.map((file) => file.path));
+
 	// Context files, sized — the block every turn pays for.
 	const contextFiles: ContextFileReport[] = discoverContextFilePaths({
 		cwd,
@@ -370,7 +391,8 @@ export function collectCompat(input: CompatInput): CompatReport {
 			// unreadable: reported as 0 chars
 		}
 		const warning = claudeMdLimitWarning(basename(path), chars);
-		if (warning) {
+		// A skipped file's warning above already names it.
+		if (warning && !skippedPaths.has(path)) {
 			findings.push({ level: "warn", text: `${shortenHome(path, home)}: ${warning}`, fix: `Trim it below ${CLAUDE_MD_CHAR_LIMIT / 1000}k chars, or run /doctor fix to have the model propose what to cut.` });
 		}
 		return { path, descriptor, chars, overLimit: warning !== null };

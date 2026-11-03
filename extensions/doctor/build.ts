@@ -229,6 +229,7 @@ export function buildDoctorReport({ env, registry, session }: BuildInput): Docto
 		bundledAgentsDir: BUNDLED_AGENTS_DIR,
 		piConfigDirName: env.piConfigDirName,
 		registeredMcpServers: env.registeredMcpServers,
+		contextWindow: session.model?.contextWindow,
 	});
 	findings.push(...compat.findings);
 	sections.push(importedConfigSection(compat, env.home));

@@ -25,6 +25,7 @@ import os from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { claudeMdLimitWarning, combinedLimitWarning, projectMemoryDir } from "../lib/memory.ts";
+import { fitToWindow } from "../lib/instruction-budget.ts";
 import {
 	INDEX_NEAR_LIMIT_REMINDER,
 	INDEX_OVER_LIMIT_ERROR,
@@ -97,7 +98,8 @@ export default function memoryExtension(pi: ExtensionAPI) {
 				const warning = claudeMdLimitWarning(entryName(entry), content.length);
 				if (warning) {
 					anyPerFile = true;
-					ctx.ui.notify(warning, "warning");
+					// Over half the window, claude-context warns that it is not loaded instead.
+					if (fitToWindow([{ path: entry.path, content }], ctx.model?.contextWindow).skipped.length === 0) ctx.ui.notify(warning, "warning");
 				}
 			}
 			if (!anyPerFile) {

@@ -43,7 +43,9 @@ import {
 } from "../lib/claude-context.ts";
 import { collectGitStatus, GIT_SNAPSHOT_OWNER_CHANNEL } from "../lib/git-status.ts";
 import { readMemoryIndex } from "../lib/memory-index.ts";
-import { claudeConfigDir, oneCodeStateDir, tryRealpath } from "../lib/paths.ts";
+import { claudeConfigDir, oneCodeStateDir, tildify, tryRealpath } from "../lib/paths.ts";
+import { combinedInstructionWarning, fitToWindow, restoredInstructionNotice, type SkippedInstruction, skippedInstructionWarning } from "../lib/instruction-budget.ts";
+import { queueNotice } from "../lib/notices.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, toldBlockFact } from "../lib/reminders.ts";
 import { inContextEntries } from "../lib/compaction-boundary.ts";
 import { compactionGitStatus, contextBlockFacts, contextFingerprints, dateFingerprint, FACT_KEYS, instructionFacts, liveFingerprints, type LiveFingerprints, resumeFactsNotice } from "../lib/context-facts.ts";
@@ -182,15 +184,11 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	let livePrints: { atStart: LiveFingerprints; atCompaction: () => LiveFingerprints } | undefined;
 	/** True until this process's first request inside an epoch has compared the epoch's facts with the live workspace. */
 	let resumeCheck = true;
-	const readFiles = (cwd: string) => {
-		const oneCodeFiles = discoverOneCodeFiles({ cwd, homeOneCodeDir: oneCodeStateDir(), home: os.homedir(), includeExternal });
-		return {
-			contextFiles: discoverContextFiles({ cwd, homeClaudeDir: claudeConfigDir(), rule: instructionRule(os.homedir()), home: os.homedir(), includeExternal }),
-			memoryIndex: readMemoryIndex(cwd),
-			oneCodeFiles,
-			oneCode: buildOneCodeBlock(oneCodeFiles),
-		};
-	};
+	const readFiles = (cwd: string) => ({
+		contextFiles: discoverContextFiles({ cwd, homeClaudeDir: claudeConfigDir(), rule: instructionRule(os.homedir()), home: os.homedir(), includeExternal }),
+		memoryIndex: readMemoryIndex(cwd),
+		oneCodeFiles: discoverOneCodeFiles({ cwd, homeOneCodeDir: oneCodeStateDir(), home: os.homedir(), includeExternal }),
+	});
 	let files: ReturnType<typeof readFiles> | undefined;
 	const adoptFiles = (current: ReturnType<typeof readFiles>) => {
 		files = current;
@@ -199,11 +197,13 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	/**
 	 * The files message 1 carries (or imports): never attached again on a read.
 	 * Taken when an epoch renders the blocks; a resumed epoch's are taken from
-	 * the live files at start, the closest knowledge this process has.
+	 * the live files at start, the closest knowledge this process has. A skipped
+	 * file counts as shown (it is too large to attach), its imports do not.
 	 */
 	const adoptShown = (current: ReturnType<typeof readFiles>) => {
+		const skippedPaths = new Set(live.skipped.map((file) => file.path));
 		startupShown = new Set([...current.contextFiles, ...current.oneCodeFiles].flatMap((file) =>
-			[file.path, ...(file.imported ?? collectImportedPaths(readOrEmpty(file.path), dirname(file.path), { home: os.homedir() }))],
+			skippedPaths.has(file.path) ? [file.path] : [file.path, ...(file.imported ?? collectImportedPaths(readOrEmpty(file.path), dirname(file.path), { home: os.homedir() }))],
 		).map((path) => tryRealpath(path) ?? path));
 		for (const path of startupShown) attachedNested.add(path);
 	};
@@ -220,12 +220,51 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		catch (error) { ctx.ui.notify(`Could not remember external CLAUDE.md include approval: ${String(error)}`, "error"); }
 	};
 	/**
+	 * The current model's context window: a file over half of it is skipped
+	 * (lib/instruction-budget.ts). Every model switch opens an epoch, so the live
+	 * blocks built with the new window are what the next request renders.
+	 */
+	let contextWindow: number | undefined;
+	/** The instruction files fitted to the current window: both blocks' files in one budget. */
+	const fitFiles = (current: ReturnType<typeof readFiles>) => {
+		const fit = fitToWindow([...current.contextFiles, ...current.oneCodeFiles], contextWindow);
+		const split = current.contextFiles.length;
+		return { contextFiles: fit.files.slice(0, split), oneCodeFiles: fit.files.slice(split), skipped: fit.skipped, overTotal: fit.overTotal };
+	};
+	/** What a fit changes in the blocks' text: the skipped files and the sizes their notes state. */
+	const skipKey = (skipped: readonly SkippedInstruction[]) => skipped.map((file) => `${file.path}\0${file.tokens}\0${file.contextWindow}`).join("\n");
+	/** The live blocks' fit, and what the user was last told of it. */
+	let live: { skipped: SkippedInstruction[]; overTotal: boolean } = { skipped: [], overTotal: false };
+	let told: { paths: Set<string>; overTotal: boolean } = { paths: new Set(), overTotal: false };
+	const warnSkipped = (ctx: ExtensionContext, file: SkippedInstruction) => {
+		if (ctx.hasUI) queueNotice(pi.events, ctx, "warning", skippedInstructionWarning(tildify(file.path, os.homedir()), file));
+	};
+	/**
+	 * Tell the user what changed in the live fit since they were last told: a
+	 * newly skipped file, one that loads again, files that together pass the
+	 * share. Said at startup and before each prompt, so cycling models says it once.
+	 */
+	const announceFit = (ctx: ExtensionContext) => {
+		const paths = new Set(live.skipped.map((file) => file.path));
+		for (const file of live.skipped) if (!told.paths.has(file.path)) warnSkipped(ctx, file);
+		if (ctx.hasUI) {
+			// Only a file still loaded is restored; a deleted one has nothing to say.
+			const loaded = new Set([...(files?.contextFiles ?? []), ...(files?.oneCodeFiles ?? [])].map((file) => file.path));
+			for (const path of told.paths) if (!paths.has(path) && loaded.has(path)) queueNotice(pi.events, ctx, "info", restoredInstructionNotice(tildify(path, os.homedir()), contextWindow));
+			if (contextWindow && live.overTotal && !told.overTotal && live.skipped.length === 0) queueNotice(pi.events, ctx, "warning", combinedInstructionWarning(contextWindow));
+		}
+		told = { paths, overTotal: live.overTotal };
+	};
+	/**
 	 * The instructions and ONECODE.md blocks as live state, read in `cwd`. They
 	 * render when an epoch opens; inside one, message 1 is the record, so a
 	 * change here (a /config approval, an edited file) shows at the next epoch.
+	 * A file over half the window rides as a note naming its path; the facts
+	 * still describe the files on disk.
 	 */
-	const emitInstructions = (current: ReturnType<typeof readFiles>) => {
-		const instructions = buildClaudeMdBlock(current);
+	const emitInstructions = (current: ReturnType<typeof readFiles>, fit = fitFiles(current)) => {
+		live = { skipped: fit.skipped, overTotal: fit.overTotal };
+		const instructions = buildClaudeMdBlock({ contextFiles: fit.contextFiles, memoryIndex: current.memoryIndex });
 		if (instructions) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text: instructions,
@@ -242,9 +281,10 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		}
 		// One Code's own instructions ride in a separate block AFTER the instructions
 		// block, so they take precedence over CLAUDE.md (higher order = closer to the user text).
-		if (current.oneCode) {
+		const oneCode = buildOneCodeBlock(fit.oneCodeFiles);
+		if (oneCode) {
 			pi.events.emit(REMINDER_CHANNEL, {
-				text: current.oneCode,
+				text: oneCode,
 				key: ONECODE_REMINDER_KEY,
 				placement: "first-prepend",
 				order: CONTEXT_ORDER.oneCodeMd,
@@ -312,8 +352,14 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		},
 	});
 	const drainApproval = async () => { startupConsentReady(pi.events); await approvalPending; };
-	pi.on("before_agent_start", drainApproval);
+	pi.on("before_agent_start", async (_event, ctx) => {
+		const gen = sessionGeneration;
+		await drainApproval();
+		if (gen === sessionGeneration) announceFit(ctx);
+	});
 	pi.on("session_shutdown", () => {
+		// A model_select before the next session_start must not rebuild this session's files.
+		files = undefined;
 		resetConsentDialogs();
 		++sessionGeneration;
 		approvalAbort.abort();
@@ -342,7 +388,10 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		// default the CLAUDE.md family, or the project's AGENTS.md files when it
 		// has no CLAUDE.md, byte-exact with Claude Code either way. ONECODE.md
 		// rides its own higher-precedence block.
+		contextWindow = ctx.model?.contextWindow;
 		refreshInstructions(ctx.cwd);
+		told = { paths: new Set(), overTotal: false };
+		announceFit(ctx);
 		email = resolveEmail(ctx.cwd);
 		attachedNested = new Set();
 		if (files) adoptShown(files);
@@ -423,9 +472,7 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	pi.on("session_compact", (_event, ctx) => refreshForCompaction(ctx));
 	function refreshForCompaction(ctx: ExtensionContext) {
 		const cwd = sessionWorkCwd(entered, ctx.cwd);
-		const current = readFiles(cwd);
-		adoptFiles(current);
-		emitInstructions(current);
+		refreshInstructions(cwd);
 		// Only discarded carriers need reattachment; pi can retain the recent read/tool-result tail.
 		keepRetainedAttachments(ctx);
 		email = resolveEmail(cwd);
@@ -433,6 +480,16 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		emitContextBlock(compactionGitStatus(gitStatus), true);
 		emitDate(localDate());
 	}
+
+	// A model switch opens an epoch: rebuild the live blocks for its window when
+	// the fit changes their text. The user hears of it before the next prompt.
+	pi.on("model_select", (event) => {
+		contextWindow = event.model?.contextWindow;
+		if (!files) return;
+		const fit = fitFiles(files);
+		if (skipKey(fit.skipped) !== skipKey(live.skipped)) emitInstructions(files, fit);
+		else live = { skipped: fit.skipped, overTotal: fit.overTotal };
+	});
 
 	// A branch switch leaves the attachments of the branch left behind; the new one may lack them.
 	pi.on("session_tree", (_event, ctx) => {
@@ -467,11 +524,17 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 			if (attachedNested.has(file.key)) continue;
 			attachedNested.add(file.key);
 			shown.push(file.key);
-			for (const imported of file.imported) {
-				attachedNested.add(imported);
-				shown.push(imported);
+			// Over half the window, the note rides in its place (lib/instruction-budget.ts),
+			// and its imports are not shown: a later read may still attach one.
+			const fit = fitToWindow([file], contextWindow);
+			for (const over of fit.skipped) warnSkipped(ctx, over);
+			if (fit.skipped.length === 0) {
+				for (const imported of file.imported) {
+					attachedNested.add(imported);
+					shown.push(imported);
+				}
 			}
-			pi.events.emit(REMINDER_CHANNEL, { text: nestedInstructionText(file), toolCallId: event.toolCallId });
+			pi.events.emit(REMINDER_CHANNEL, { text: nestedInstructionText(fit.files[0]), toolCallId: event.toolCallId });
 		}
 		// Recorded with the queued text: both are on the branch now (the text as a
 		// pending one-shot bound to this result), so a quit before the request
