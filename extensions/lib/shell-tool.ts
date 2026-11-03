@@ -174,7 +174,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 				const line = options.expanded
 					? `Running in the background (task ${details.taskId}${details.logPath ? ` · log: ${details.logPath}` : ""})`
 					: "Running in the background (↓ to manage)";
-				return linesComponent(() => resultLines(theme as any, line, options.expanded, false, undefined, expandHintFor(context)));
+				return linesComponent(() => resultLines(theme as any, line, options.expanded, false, { hint: expandHintFor(context) }));
 			}
 			return wrapped.renderResult(result, options, theme, context);
 		}) as ToolDefinition<P>["renderResult"],

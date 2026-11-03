@@ -40,6 +40,8 @@ import { findGitRoot } from "./git.ts";
 import { tryReadFile } from "./plugins.ts";
 import { absoluteFrom, claudeManagedDir, claudeUserDir, expandTilde, isPathAtOrUnder, oneCodeStateDir, tryRealpath } from "./paths.ts";
 import { discoverRules, MAX_INSTRUCTION_BYTES, readRuleInstructions, type RuleFile, type RuleOptions } from "./claude-rules.ts";
+import { readExternalIncludesApproval } from "./claude-external-includes.ts";
+import { fitToWindow, type SkippedInstruction } from "./instruction-budget.ts";
 
 /** One instruction section. Legacy content stays raw; new parsed files carry CC's trimmed startup body. */
 export interface ContextFile {
@@ -850,4 +852,28 @@ export function buildContextBlock(opts: { email?: string | null; gitStatus?: str
 /** The date reminder's inner text, sent whether or not any CLAUDE.md exists. */
 export function dateBlock(date: string): string {
 	return `Today's date is ${date}.`;
+}
+
+/**
+ * The agent's instruction sections, as claude-context loads them: the files
+ * `instructionRule` picks (the CLAUDE.md family, or AGENTS.md) and ONECODE.md,
+ * imports inlined. The one source for every consumer of the window budget
+ * (claude-context, /doctor, file-tracker, the memory warning, the classifier),
+ * so they all judge the same set. `includeExternal` defaults to the project's
+ * saved approval; claude-context passes the session's own.
+ */
+export function agentInstructionSections(opts: { cwd: string; home: string; homeClaudeDir?: string; homeOneCodeDir?: string; includeExternal?: boolean }): { contextFiles: ContextFile[]; oneCodeFiles: ContextFile[] } {
+	const { cwd, home } = opts;
+	const includeExternal = opts.includeExternal ?? readExternalIncludesApproval(cwd, home).approved;
+	return {
+		contextFiles: discoverContextFiles({ cwd, homeClaudeDir: opts.homeClaudeDir ?? claudeUserDir(home), rule: instructionRule(home), home, includeExternal }),
+		oneCodeFiles: discoverOneCodeFiles({ cwd, homeOneCodeDir: opts.homeOneCodeDir ?? oneCodeStateDir(process.env, home), home, includeExternal }),
+	};
+}
+
+/** The sections the agent's window budget skips for `contextWindow` (lib/instruction-budget.ts); none without a window. */
+export function agentSkippedInstructions(opts: Parameters<typeof agentInstructionSections>[0] & { contextWindow: number | undefined }): SkippedInstruction[] {
+	if (!opts.contextWindow) return [];
+	const { contextFiles, oneCodeFiles } = agentInstructionSections(opts);
+	return fitToWindow([...contextFiles, ...oneCodeFiles], opts.contextWindow).skipped;
 }

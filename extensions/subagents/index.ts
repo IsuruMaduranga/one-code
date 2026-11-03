@@ -1259,7 +1259,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			const details = (message as { details?: { taskId?: unknown; name?: unknown } }).details;
 			const agentName = (from: string): string | undefined =>
 				liveRuns.get(from)?.name ?? (details?.taskId === from && typeof details.name === "string" ? details.name : undefined);
-			return notificationComponent(theme, customMessageText(message.content), options.expanded, agentName, expandHintFor(options));
+			return notificationComponent(theme, customMessageText(message.content), options.expanded, { agentName, hint: expandHintFor(options) });
 		});
 	}
 

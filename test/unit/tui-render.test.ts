@@ -85,7 +85,7 @@ describe("callLine / resultLines", () => {
 	});
 
 	it("draws the elbow on the first line and a trailer when collapsed", () => {
-		const lines = resultLines(theme, "a\nb\nc", false, false, 2);
+		const lines = resultLines(theme, "a\nb\nc", false, false, { maxCollapsed: 2 });
 		expect(lines[0]).toBe("  ⎿  <muted>a</>");
 		expect(lines[1]).toBe("     <muted>b</>");
 		expect(lines[2]).toContain("+1 lines");
@@ -271,9 +271,9 @@ describe("notificationComponent: agent messages, Claude Code's transcript look",
 
 	it("names the agent instead of its task id when the name is known", () => {
 		const name = (from: string) => (from === "a94a90cbdda8038c4" ? "explore-2" : undefined);
-		expect(notificationComponent(theme, wire, false, name).render(200)[0]).toContain("› Message from @explore-2");
-		expect(notificationComponent(theme, wire, true, name).render(400)[0]).toContain("› Message from explore-2");
-		expect(notificationComponent(theme, wire, false, () => undefined).render(200)[0]).toContain("› Message from @a94a90cbdda8038c4");
+		expect(notificationComponent(theme, wire, false, { agentName: name }).render(200)[0]).toContain("› Message from @explore-2");
+		expect(notificationComponent(theme, wire, true, { agentName: name }).render(400)[0]).toContain("› Message from explore-2");
+		expect(notificationComponent(theme, wire, false, { agentName: () => undefined }).render(200)[0]).toContain("› Message from @a94a90cbdda8038c4");
 	});
 
 	it("expands to the header, the preamble and the indented report, guard and pointer hidden", () => {
@@ -689,7 +689,7 @@ describe("the expand hint follows the user's keybinding (pi 1.5.0 keyText)", () 
 	it("puts the hint in the collapsed trailer, or leaves the trailer bare", () => {
 		const text = Array.from({ length: 9 }, (_, i) => `line ${i}`).join("\n");
 		const plain: ThemeLike = { fg: (_c, t) => t, bold: (t) => t, italic: (t) => t };
-		expect(resultLines(plain, text, false, false, 5, "alt+e to expand").at(-1)?.trim()).toBe("… +4 lines (alt+e to expand)");
-		expect(resultLines(plain, text, false, false, 5, null).at(-1)?.trim()).toBe("… +4 lines");
+		expect(resultLines(plain, text, false, false, { hint: "alt+e to expand" }).at(-1)?.trim()).toBe("… +4 lines (alt+e to expand)");
+		expect(resultLines(plain, text, false, false, { hint: null }).at(-1)?.trim()).toBe("… +4 lines");
 	});
 });

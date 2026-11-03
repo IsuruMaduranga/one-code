@@ -465,6 +465,15 @@ export function expandHintFor(source: unknown): string | null {
 	}
 }
 
+/** The hint as a trailer's tail: ` (hint)` or `, hint`, nothing when there is no key. */
+export function hintSuffix(hint: string | null, form: "paren" | "comma"): string {
+	if (!hint) return "";
+	return form === "paren" ? ` (${hint})` : `, ${hint}`;
+}
+
+/** An omitted hint is `EXPAND_HINT`; null stays null (no key). */
+const hintOrDefault = (hint: string | null | undefined): string | null => (hint === undefined ? EXPAND_HINT : hint);
+
 /** Split result text into shown lines + hidden count for the collapsed view. */
 export function collapseLines(
 	text: string,
@@ -565,11 +574,11 @@ export function callLine(
  * The text is a tool's output (a shell, an MCP server, a web page), so its
  * escape sequences and control characters are removed before it is painted.
  */
-export function resultLines(theme: ThemeLike, text: string, expanded: boolean, isError: boolean, maxCollapsed = 5, hint: string | null = EXPAND_HINT): string[] {
-	const { lines, hidden } = collapseLines(sanitizeDisplayText(text), expanded, maxCollapsed);
+export function resultLines(theme: ThemeLike, text: string, expanded: boolean, isError: boolean, opts: { maxCollapsed?: number; hint?: string | null } = {}): string[] {
+	const { lines, hidden } = collapseLines(sanitizeDisplayText(text), expanded, opts.maxCollapsed ?? 5);
 	const color = isError ? "error" : "muted";
 	const out = lines.map((line, i) => (i === 0 ? `  ⎿  ${theme.fg(color, line)}` : `     ${theme.fg(color, line)}`));
-	if (hidden > 0) out.push(`     ${theme.fg("dim", `… +${hidden} lines${hint ? ` (${hint})` : ""}`)}`);
+	if (hidden > 0) out.push(`     ${theme.fg("dim", `… +${hidden} lines${hintSuffix(hintOrDefault(opts.hint), "paren")}`)}`);
 	return out;
 }
 
@@ -701,7 +710,7 @@ export function ccToolRenderers<TArgs = any, TDetails = any>(
 				link = undefined;
 			}
 			return linesComponent((width) => {
-				const lines = resultLines(theme, text, options.expanded, context.isError, spec.maxCollapsedLines, expandHintFor(context));
+				const lines = resultLines(theme, text, options.expanded, context.isError, { maxCollapsed: spec.maxCollapsedLines, hint: expandHintFor(context) });
 				if (link && lines.length > 0) {
 					// Truncation drops a cut link's closing escape and leaves the
 					// hyperlink open, so a link that does not fit goes in as plain text.
@@ -891,7 +900,7 @@ export function ccWrapBuiltinRenderers<TArgs = any>(
 			if (!inner) {
 				const text = textContent(result);
 				if (!text) return linesComponent(() => []);
-				return linesComponent(() => resultLines(theme, text, options.expanded, context.isError, undefined, expandHintFor(context)));
+				return linesComponent(() => resultLines(theme, text, options.expanded, context.isError, { hint: expandHintFor(context) }));
 			}
 			// Same memoization as the call wrapper: settled results are static.
 			const cache = new Map<number, string[]>();
@@ -942,12 +951,13 @@ export function formatFireTime(ms: number): string {
  * `✻ Running scheduled task (Sep 11 12:03pm)` line, the prompt itself under it
  * on ctrl+o (the prompt is the turn's input, verbatim — findings §21).
  */
-export function scheduledTaskComponent(theme: ThemeLike, prompt: string, firedAt: number, expanded: boolean, label = "Running scheduled task", suffix = "", hint: string | null = EXPAND_HINT): TuiComponent {
+export function scheduledTaskComponent(theme: ThemeLike, prompt: string, firedAt: number, expanded: boolean, opts: { label?: string; suffix?: string; hint?: string | null } = {}): TuiComponent {
 	const lines = sanitizeDisplayText(prompt).trim().split("\n");
-	const headline = `${label} (${formatFireTime(firedAt)})${suffix}`;
+	const headline = `${opts.label ?? "Running scheduled task"} (${formatFireTime(firedAt)})${opts.suffix ?? ""}`;
+	const hint = hintOrDefault(opts.hint);
 	return linesComponent(() => {
 		if (!expanded) {
-			return [`${theme.fg("dim", "✻")} ${theme.fg("dim", headline)}${theme.fg("dim", ` (+${lines.length} lines${hint ? `, ${hint}` : ""})`)}`];
+			return [`${theme.fg("dim", "✻")} ${theme.fg("dim", headline)}${theme.fg("dim", ` (+${lines.length} lines${hintSuffix(hint, "comma")})`)}`];
 		}
 		return [`${theme.fg("dim", "✻")} ${theme.fg("dim", headline)}`, ...lines.map((l) => `  ${theme.fg("muted", l)}`)];
 	});
@@ -999,7 +1009,9 @@ export function notificationUserMarkdown(text: string): string | undefined {
  * wire address): the headline reads `› Message from @<name>`, falling back to
  * the address when the name is unknown.
  */
-export function notificationComponent(theme: ThemeLike, text: string, expanded: boolean, agentName?: (from: string) => string | undefined, expandHint: string | null = EXPAND_HINT): TuiComponent {
+export function notificationComponent(theme: ThemeLike, text: string, expanded: boolean, opts: { agentName?: (from: string) => string | undefined; hint?: string | null } = {}): TuiComponent {
+	const { agentName } = opts;
+	const expandHint = hintOrDefault(opts.hint);
 	// An agent's completion pointer says nothing the message above it does not;
 	// CC's transcript shows the message alone. Bodies carry shell output and
 	// agent replies, so control characters are removed before parsing.
@@ -1014,7 +1026,7 @@ export function notificationComponent(theme: ThemeLike, text: string, expanded: 
 		// Body lines wrap to the terminal (CC wraps its long preamble line) rather
 		// than being cut; continuation lines start at column 0, as CC's do.
 		const body = (lines: string[]) => lines.flatMap((l) => wrapPlainText(`  ${l}`, width).map((w) => muted(w)));
-		const hint = (lines: string[]) => (lines.length > 0 ? dim(` (+${lines.length} lines${expandHint ? `, ${expandHint}` : ""})`) : "");
+		const hint = (lines: string[]) => (lines.length > 0 ? dim(` (+${lines.length} lines${hintSuffix(expandHint, "comma")})`) : "");
 		for (const frame of frames) {
 			if (frame.kind === "agent-message") {
 				// Claude Code's look: `› Message from @ID (ctrl+o to expand)` collapsed;

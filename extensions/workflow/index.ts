@@ -190,7 +190,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 	};
 
 	pi.registerMessageRenderer("one-code:workflow-result", (message, options, theme) =>
-		notificationComponent(theme, customMessageText(message.content), options.expanded, undefined, expandHintFor(options)),
+		notificationComponent(theme, customMessageText(message.content), options.expanded, { hint: expandHintFor(options) }),
 	);
 
 	// The description carries the session's size guideline (description.ts);

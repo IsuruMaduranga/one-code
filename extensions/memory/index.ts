@@ -25,7 +25,6 @@ import os from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { claudeMdLimitWarning, combinedLimitWarning, projectMemoryDir } from "../lib/memory.ts";
-import { fitToWindow } from "../lib/instruction-budget.ts";
 import {
 	INDEX_NEAR_LIMIT_REMINDER,
 	INDEX_OVER_LIMIT_ERROR,
@@ -33,7 +32,7 @@ import {
 	stampFrontmatter,
 } from "../lib/memory-content.ts";
 import { type ConfigMode, CONFIG_MODE_KEY, claudeSourcesOn, configMode, configModeFromEnv, savedConfigMode } from "../lib/config-mode.ts";
-import { isClaudeLocation } from "../lib/claude-context.ts";
+import { agentSkippedInstructions, isClaudeLocation } from "../lib/claude-context.ts";
 import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
 import { claudeConfigDir, comparablePath, isPathAtOrUnder, oneCodeStateDir, tildify, tryRealpath } from "../lib/paths.ts";
 import { resolveThroughLinks } from "../auto-mode/paths.ts";
@@ -88,21 +87,22 @@ export default function memoryExtension(pi: ExtensionAPI) {
 		// suppressed if a single file already fired, so a lone big file isn't
 		// reported twice.
 		if (ctx.hasUI) {
-			const read = memoryEntriesFor(ctx.cwd).flatMap((entry) => {
-				if (entry.kind !== "file" || !entry.exists) return [];
-				const content = tryReadFile(entry.path);
-				return content == null ? [] : [{ entry, path: entry.path, content }];
-			});
-			// A file the window budget skips gets claude-context's warning instead.
-			const skipped = new Set(fitToWindow(read, ctx.model?.contextWindow).skipped.map((file) => file.path));
+			// A file the agent's window budget skips gets claude-context's warning
+			// instead; asked only once a file is over the char limit.
+			let skipped: Set<string> | undefined;
+			const isSkipped = (path: string) =>
+				(skipped ??= new Set(agentSkippedInstructions({ cwd: ctx.cwd, home: os.homedir(), contextWindow: ctx.model?.contextWindow }).map((file) => file.path))).has(path);
 			let total = 0;
 			let anyPerFile = false;
-			for (const { entry, content } of read) {
+			for (const entry of memoryEntriesFor(ctx.cwd)) {
+				if (entry.kind !== "file" || !entry.exists) continue;
+				const content = tryReadFile(entry.path);
+				if (content == null) continue;
 				total += content.length;
 				const warning = claudeMdLimitWarning(entryName(entry), content.length);
 				if (warning) {
 					anyPerFile = true;
-					if (!skipped.has(entry.path)) ctx.ui.notify(warning, "warning");
+					if (!isSkipped(entry.path)) ctx.ui.notify(warning, "warning");
 				}
 			}
 			if (!anyPerFile) {

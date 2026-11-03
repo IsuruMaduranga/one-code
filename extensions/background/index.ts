@@ -272,7 +272,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	// `task-notification` (bash uses it too). A fired wakeup or loop tick is the
 	// prompt verbatim, shown behind Claude Code's "Running scheduled task" line.
 	pi.registerMessageRenderer("task-notification", (message, options, theme) =>
-		notificationComponent(theme, customMessageText(message.content), options.expanded, undefined, expandHintFor(options)),
+		notificationComponent(theme, customMessageText(message.content), options.expanded, { hint: expandHintFor(options) }),
 	);
 	// A notification that opens the session's first turn is a user message
 	// (lib/notifications.ts, "First turn of a session"); pi draws those as
@@ -287,7 +287,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		pi.registerMessageRenderer(customType, (message, options, theme) => {
 			const fold = message.details as FoldDetails | undefined;
 			const suffix = fold?.noOpStreak ? foldSuffix(fold.noOpStreak, formatFireTime(fold.streakStartedAt ?? Date.now())) : "";
-			return scheduledTaskComponent(theme, customMessageText(message.content), (message as { timestamp?: number }).timestamp ?? Date.now(), options.expanded, label, suffix, expandHintFor(options));
+			return scheduledTaskComponent(theme, customMessageText(message.content), (message as { timestamp?: number }).timestamp ?? Date.now(), options.expanded, { label, suffix, hint: expandHintFor(options) });
 		});
 	}
 

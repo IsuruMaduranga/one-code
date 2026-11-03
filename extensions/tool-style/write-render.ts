@@ -26,6 +26,7 @@ import {
 	displayToolPath,
 	EXPAND_HINT,
 	expandHintFor,
+	hintSuffix,
 	elbowIndent,
 	linesComponent,
 	rejectedFileHead,
@@ -78,7 +79,7 @@ export function contentPreviewLines(theme: ThemeLike, content: string, width: nu
 	const shown = expanded ? source : source.slice(0, WRITE_PREVIEW_LINES);
 	const out = shown.flatMap((line) => wrapLine(line, width).map((part) => theme.fg("toolOutput", part)));
 	const hidden = total - shown.length;
-	if (!expanded && hidden > 0) out.push(theme.fg("dim", `… +${countNoun(hidden, "line")}${hint ? ` (${hint})` : ""}`));
+	if (!expanded && hidden > 0) out.push(theme.fg("dim", `… +${countNoun(hidden, "line")}${hintSuffix(hint, "paren")}`));
 	return out;
 }
 
@@ -115,7 +116,7 @@ export function updateSummary(theme: ThemeLike, diff: string): string {
 }
 
 /** The waiting call's preview body, wrapped to `width`: the diff for an overwrite it could diff, the new content otherwise. */
-export function writePreviewLines(theme: ThemeLike, preview: WriteDetails, content: string, width: number, expanded: boolean, hint: string | null = EXPAND_HINT): string[] {
+export function writePreviewLines(theme: ThemeLike, preview: WriteDetails, content: string, width: number, expanded: boolean, hint: string | null): string[] {
 	return preview.kind === "update" && preview.diff !== undefined
 		? diffPreviewLines(theme, preview.diff, width)
 		: contentPreviewLines(theme, content, width, expanded, hint);
@@ -126,7 +127,7 @@ export function writePreviewLines(theme: ThemeLike, preview: WriteDetails, conte
  * line, then the content preview or the diff, wrapped to `width`. `path` is
  * the display path.
  */
-export function writeResultLines(theme: ThemeLike, details: WriteDetails | undefined, path: string, content: string, width: number, expanded: boolean, hint: string | null = EXPAND_HINT): string[] {
+export function writeResultLines(theme: ThemeLike, details: WriteDetails | undefined, path: string, content: string, width: number, expanded: boolean, hint: string | null): string[] {
 	if (details?.kind === "update" && details.diff !== undefined) {
 		return [updateSummary(theme, details.diff), ...diffPreviewLines(theme, details.diff, width)];
 	}
@@ -135,7 +136,7 @@ export function writeResultLines(theme: ThemeLike, details: WriteDetails | undef
 }
 
 /** A write rejected without a reason: "User rejected write to <path>" and the first lines it would have written. */
-export function rejectedWriteLines(theme: ThemeLike, path: string, content: string, width: number, expanded: boolean, hint: string | null = EXPAND_HINT): string[] {
+export function rejectedWriteLines(theme: ThemeLike, path: string, content: string, width: number, expanded: boolean, hint: string | null): string[] {
 	return [rejectedFileHead(theme, "write", path), ...contentPreviewLines(theme, content, width, expanded, hint)];
 }
 

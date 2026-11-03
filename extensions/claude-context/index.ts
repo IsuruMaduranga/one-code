@@ -27,14 +27,13 @@ import os from "node:os";
 import { dirname } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
+	agentInstructionSections,
 	buildClaudeMdBlock,
 	buildContextBlock,
 	buildOneCodeBlock,
 	collectImportedPaths,
 	dateBlock,
 	dateChangeReminder,
-	discoverContextFiles,
-	discoverOneCodeFiles,
 	externalInstructionIncludes,
 	localDate,
 	instructionRule,
@@ -185,9 +184,8 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	/** True until this process's first request inside an epoch has compared the epoch's facts with the live workspace. */
 	let resumeCheck = true;
 	const readFiles = (cwd: string) => ({
-		contextFiles: discoverContextFiles({ cwd, homeClaudeDir: claudeConfigDir(), rule: instructionRule(os.homedir()), home: os.homedir(), includeExternal }),
+		...agentInstructionSections({ cwd, home: os.homedir(), homeClaudeDir: claudeConfigDir(), homeOneCodeDir: oneCodeStateDir(), includeExternal }),
 		memoryIndex: readMemoryIndex(cwd),
-		oneCodeFiles: discoverOneCodeFiles({ cwd, homeOneCodeDir: oneCodeStateDir(), home: os.homedir(), includeExternal }),
 	});
 	let files: ReturnType<typeof readFiles> | undefined;
 	const adoptFiles = (current: ReturnType<typeof readFiles>) => {
@@ -220,8 +218,8 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		catch (error) { ctx.ui.notify(`Could not remember external CLAUDE.md include approval: ${String(error)}`, "error"); }
 	};
 	/**
-	 * The current model's context window: a file over half of it is skipped
-	 * (lib/instruction-budget.ts). Every model switch opens an epoch, so the live
+	 * The current model's context window: past half of it, the largest
+	 * instruction files are skipped (lib/instruction-budget.ts). Every model switch opens an epoch, so the live
 	 * blocks built with the new window are what the next request renders.
 	 */
 	let contextWindow: number | undefined;
@@ -258,7 +256,7 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	 * The instructions and ONECODE.md blocks as live state, read in `cwd`. They
 	 * render when an epoch opens; inside one, message 1 is the record, so a
 	 * change here (a /config approval, an edited file) shows at the next epoch.
-	 * A file over half the window rides as a note naming its path; the facts
+	 * A file the window budget skips rides as a note naming its path; the facts
 	 * still describe the files on disk.
 	 */
 	const emitInstructions = (current: ReturnType<typeof readFiles>, fit = fitFiles(current)) => {

@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { visibleWidth } from "../../extensions/lib/text-width.ts";
-import type { ThemeLike } from "../../extensions/lib/tui-render.ts";
+import { EXPAND_HINT, type ThemeLike } from "../../extensions/lib/tui-render.ts";
 import { userDenialText } from "../../extensions/lib/user-denial.ts";
 import {
 	contentPreviewLines,
@@ -84,17 +84,17 @@ describe("writeDetails", () => {
 
 describe("writeResultLines", () => {
 	it("says Wrote N lines to the path, then the first lines", () => {
-		const out = writeResultLines(plain, { kind: "create" }, "notes/hello.txt", "hi\nthere\n", 80, false);
+		const out = writeResultLines(plain, { kind: "create" }, "notes/hello.txt", "hi\nthere\n", 80, false, EXPAND_HINT);
 		expect(out).toEqual(["Wrote 2 lines to notes/hello.txt", "hi", "there"]);
 	});
 
 	it("says what an overwrite changed, then its diff", () => {
-		const out = writeResultLines(plain, { kind: "update", diff: "-1 old\n+1 new" }, "a.txt", "new", 80, false);
+		const out = writeResultLines(plain, { kind: "update", diff: "-1 old\n+1 new" }, "a.txt", "new", 80, false, EXPAND_HINT);
 		expect(out).toEqual(["Added 1 line, removed 1 line", "-1 old", "+1 new"]);
 	});
 
 	it("falls back to the create view when an overwrite has no diff", () => {
-		expect(writeResultLines(plain, { kind: "update" }, "a.txt", "x", 80, false)[0]).toBe("Wrote 1 lines to a.txt");
+		expect(writeResultLines(plain, { kind: "update" }, "a.txt", "x", 80, false, EXPAND_HINT)[0]).toBe("Wrote 1 lines to a.txt");
 	});
 });
 

@@ -63,6 +63,7 @@ export function fitToWindow<T extends { path: string; content: string; imported?
 	const limit = contextWindow * INSTRUCTION_WINDOW_SHARE;
 	const tokens = files.map((file) => estimateTextTokens(file.content));
 	let total = tokens.reduce((sum, n) => sum + n, 0);
+	if (total <= limit) return { files: [...files], skipped: [] };
 	const skip = new Set<number>();
 	// Largest first; Array.prototype.sort is stable, so a tie keeps file order.
 	for (const index of tokens.map((_, i) => i).sort((a, b) => tokens[b] - tokens[a])) {

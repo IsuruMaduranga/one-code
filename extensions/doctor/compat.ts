@@ -26,10 +26,9 @@ import { AUTO_MEMORY_KEY as AUTO_MEMORY } from "../lib/auto-memory.ts";
 import { CONFIG_MODE_KEY, claudeSourcesOn } from "../lib/config-mode.ts";
 import { claudeJsonPath, claudeUserDir, oneCodeStateDir } from "../lib/paths.ts";
 import { claudeUserSettingsPath, managedSettingsPaths, settingsPaths } from "../lib/claude-settings.ts";
-import { discoverContextFilePaths, discoverContextFiles, discoverOneCodeFiles, instructionRule } from "../lib/claude-context.ts";
-import { readExternalIncludesApproval } from "../lib/claude-external-includes.ts";
+import { agentSkippedInstructions, discoverContextFilePaths, instructionRule } from "../lib/claude-context.ts";
 import { CLAUDE_MD_CHAR_LIMIT, claudeMdLimitWarning, projectMemoryDir } from "../lib/memory.ts";
-import { fitToWindow, skippedInstructionWarning } from "../lib/instruction-budget.ts";
+import { skippedInstructionWarning } from "../lib/instruction-budget.ts";
 import { indexLimitStatus } from "../lib/memory-content.ts";
 import { readDisabledMcpServers } from "../lib/mcp-overrides.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
@@ -324,7 +323,7 @@ export interface CompatInput {
 	piConfigDirName?: string;
 	/** MCP servers other extensions registered, as the session loads them. */
 	registeredMcpServers?: readonly RegisteredServer[];
-	/** The session model's context window: a context file over half of it is not loaded. */
+	/** The session model's context window: past half of it, the largest context files are not loaded. */
 	contextWindow?: number;
 }
 
@@ -362,17 +361,10 @@ export function collectCompat(input: CompatInput): CompatReport {
 
 	// The session's window budget, over the sections it loads (imports inlined,
 	// ONECODE.md included): past half the window, the largest are not loaded.
-	const budget = (() => {
-		if (!input.contextWindow) return undefined;
-		const includeExternal = readExternalIncludesApproval(cwd, home).approved;
-		return fitToWindow([
-			...discoverContextFiles({ cwd, homeClaudeDir: claudeDir, rule: instructionRule(home), home, includeExternal }),
-			...discoverOneCodeFiles({ cwd, homeOneCodeDir: oneCodeStateDir(env, home), home, includeExternal }),
-		], input.contextWindow);
-	})();
+	const skipped = agentSkippedInstructions({ cwd, home, homeClaudeDir: claudeDir, homeOneCodeDir: oneCodeStateDir(env, home), contextWindow: input.contextWindow });
 	const fix = "Trim the instruction files below half of the model's context window together, split this one into files the model reads when needed, or switch to a model with a larger window.";
-	for (const file of budget?.skipped ?? []) findings.push({ level: "warn", text: skippedInstructionWarning(shortenHome(file.path, home), file), fix });
-	const skippedPaths = new Set(budget?.skipped.map((file) => file.path));
+	for (const file of skipped) findings.push({ level: "warn", text: skippedInstructionWarning(shortenHome(file.path, home), file), fix });
+	const skippedPaths = new Set(skipped.map((file) => file.path));
 
 	// Context files, sized — the block every turn pays for.
 	const contextFiles: ContextFileReport[] = discoverContextFilePaths({

@@ -20,9 +20,9 @@
  */
 
 import { dirname, join } from "node:path";
-import { ancestorDirs, discoverContextFiles, discoverOneCodeFiles, instructionRule } from "../lib/claude-context.ts";
+import { agentSkippedInstructions, ancestorDirs, discoverContextFiles, discoverOneCodeFiles } from "../lib/claude-context.ts";
 import { readExternalIncludesApproval } from "../lib/claude-external-includes.ts";
-import { classifierInstructionNote, fitToWindow, type SkippedInstruction } from "../lib/instruction-budget.ts";
+import { classifierInstructionNote, fitToWindow } from "../lib/instruction-budget.ts";
 import { discoverRules, type RuleFile } from "../lib/claude-rules.ts";
 import { claudeSourcesOn } from "../lib/config-mode.ts";
 import { claudeManagedDir, claudeUserDir, oneCodeStateDir, tryRealpath } from "../lib/paths.ts";
@@ -51,17 +51,6 @@ function conditionalRules(cwd: string, home: string, homeClaudeDir: string, incl
 	);
 }
 
-/** The files the agent's window budget skips, by real path: its own sections, as claude-context fits them. */
-function agentSkippedFiles(cwd: string, home: string, homeClaudeDir: string, contextWindow: number | undefined): Map<string, SkippedInstruction> {
-	if (!contextWindow) return new Map();
-	const includeExternal = readExternalIncludesApproval(cwd, home).approved;
-	const sections = [
-		...discoverContextFiles({ cwd, homeClaudeDir, rule: instructionRule(home), home, includeExternal }),
-		...discoverOneCodeFiles({ cwd, homeOneCodeDir: oneCodeStateDir(process.env, home), home, includeExternal }),
-	];
-	return new Map(fitToWindow(sections, contextWindow).skipped.map((file) => [tryRealpath(file.path) ?? file.path, file]));
-}
-
 /**
  * Concatenated instruction files in the agent's order (managed and global,
  * then each directory from the farthest down, ONECODE.md last), each labelled
@@ -81,13 +70,13 @@ export function loadProjectInstructions(cwd: string, home: string, contextWindow
 	const claude = claudeSourcesOn();
 	const homeClaudeDir = claudeUserDir(home);
 	const includeExternal = claude && readExternalIncludesApproval(cwd, home).approved;
-	const files: InstructionFile[] = [];
+	const files: (InstructionFile & { key: string })[] = [];
 	const seen = new Set<string>();
 	const add = (file: InstructionFile) => {
 		const key = tryRealpath(file.path) ?? file.path;
 		if (seen.has(key) || !file.content.trim()) return;
 		seen.add(key);
-		files.push(file);
+		files.push({ path: file.path, content: file.content, globs: file.globs, key });
 	};
 	if (claude) for (const rule of conditionalRules(cwd, home, homeClaudeDir, includeExternal)) add(rule);
 	const rule = claude ? "claude-md-and-agents-md" : "agents-md";
@@ -95,11 +84,10 @@ export function loadProjectInstructions(cwd: string, home: string, contextWindow
 	for (const file of discoverOneCodeFiles({ cwd, homeOneCodeDir: oneCodeStateDir(process.env, home), home })) add(file);
 
 	if (files.length === 0) return undefined;
-	const agentSkipped = agentSkippedFiles(cwd, home, homeClaudeDir, contextWindow);
+	const agentSkipped = new Map(agentSkippedInstructions({ cwd, home, homeClaudeDir, contextWindow }).map((file) => [tryRealpath(file.path) ?? file.path, file]));
 	const shown = files.map((file) => {
-		const skipped = agentSkipped.get(tryRealpath(file.path) ?? file.path);
-		if (skipped) return { ...file, content: classifierInstructionNote(skipped.tokens, skipped.contextWindow) };
-		return fitToWindow([file], contextWindow, classifierInstructionNote).files[0];
+		const skipped = agentSkipped.get(file.key) ?? fitToWindow([file], contextWindow).skipped[0];
+		return skipped ? { ...file, content: classifierInstructionNote(skipped.tokens, skipped.contextWindow) } : file;
 	});
 	return shown.map((file) => `# ${file.path}${file.globs ? ` (applies to ${file.globs.join(", ")})` : ""}\n${file.content.trim()}`).join("\n\n");
 }
