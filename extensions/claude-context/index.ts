@@ -44,7 +44,7 @@ import {
 import { collectGitStatus, GIT_SNAPSHOT_OWNER_CHANNEL } from "../lib/git-status.ts";
 import { readMemoryIndex } from "../lib/memory-index.ts";
 import { claudeConfigDir, oneCodeStateDir, tildify, tryRealpath } from "../lib/paths.ts";
-import { combinedInstructionWarning, fitToWindow, restoredInstructionNotice, type SkippedInstruction, skippedInstructionWarning } from "../lib/instruction-budget.ts";
+import { fitToWindow, restoredInstructionNotice, type SkippedInstruction, skippedInstructionWarning } from "../lib/instruction-budget.ts";
 import { queueNotice } from "../lib/notices.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, toldBlockFact } from "../lib/reminders.ts";
 import { inContextEntries } from "../lib/compaction-boundary.ts";
@@ -201,7 +201,7 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	 * file counts as shown (it is too large to attach), its imports do not.
 	 */
 	const adoptShown = (current: ReturnType<typeof readFiles>) => {
-		const skippedPaths = new Set(live.skipped.map((file) => file.path));
+		const skippedPaths = new Set(live.map((file) => file.path));
 		startupShown = new Set([...current.contextFiles, ...current.oneCodeFiles].flatMap((file) =>
 			skippedPaths.has(file.path) ? [file.path] : [file.path, ...(file.imported ?? collectImportedPaths(readOrEmpty(file.path), dirname(file.path), { home: os.homedir() }))],
 		).map((path) => tryRealpath(path) ?? path));
@@ -229,31 +229,30 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	const fitFiles = (current: ReturnType<typeof readFiles>) => {
 		const fit = fitToWindow([...current.contextFiles, ...current.oneCodeFiles], contextWindow);
 		const split = current.contextFiles.length;
-		return { contextFiles: fit.files.slice(0, split), oneCodeFiles: fit.files.slice(split), skipped: fit.skipped, overTotal: fit.overTotal };
+		return { contextFiles: fit.files.slice(0, split), oneCodeFiles: fit.files.slice(split), skipped: fit.skipped };
 	};
 	/** What a fit changes in the blocks' text: the skipped files and the sizes their notes state. */
 	const skipKey = (skipped: readonly SkippedInstruction[]) => skipped.map((file) => `${file.path}\0${file.tokens}\0${file.contextWindow}`).join("\n");
-	/** The live blocks' fit, and what the user was last told of it. */
-	let live: { skipped: SkippedInstruction[]; overTotal: boolean } = { skipped: [], overTotal: false };
-	let told: { paths: Set<string>; overTotal: boolean } = { paths: new Set(), overTotal: false };
+	/** The files the live blocks skip, and the ones the user was last told of. */
+	let live: SkippedInstruction[] = [];
+	let toldPaths = new Set<string>();
 	const warnSkipped = (ctx: ExtensionContext, file: SkippedInstruction) => {
 		if (ctx.hasUI) queueNotice(pi.events, ctx, "warning", skippedInstructionWarning(tildify(file.path, os.homedir()), file));
 	};
 	/**
 	 * Tell the user what changed in the live fit since they were last told: a
-	 * newly skipped file, one that loads again, files that together pass the
-	 * share. Said at startup and before each prompt, so cycling models says it once.
+	 * newly skipped file, or one that loads again. Said at startup and before
+	 * each prompt, so cycling models says it once.
 	 */
 	const announceFit = (ctx: ExtensionContext) => {
-		const paths = new Set(live.skipped.map((file) => file.path));
-		for (const file of live.skipped) if (!told.paths.has(file.path)) warnSkipped(ctx, file);
+		const paths = new Set(live.map((file) => file.path));
+		for (const file of live) if (!toldPaths.has(file.path)) warnSkipped(ctx, file);
 		if (ctx.hasUI) {
 			// Only a file still loaded is restored; a deleted one has nothing to say.
 			const loaded = new Set([...(files?.contextFiles ?? []), ...(files?.oneCodeFiles ?? [])].map((file) => file.path));
-			for (const path of told.paths) if (!paths.has(path) && loaded.has(path)) queueNotice(pi.events, ctx, "info", restoredInstructionNotice(tildify(path, os.homedir()), contextWindow));
-			if (contextWindow && live.overTotal && !told.overTotal && live.skipped.length === 0) queueNotice(pi.events, ctx, "warning", combinedInstructionWarning(contextWindow));
+			for (const path of toldPaths) if (!paths.has(path) && loaded.has(path)) queueNotice(pi.events, ctx, "info", restoredInstructionNotice(tildify(path, os.homedir()), contextWindow));
 		}
-		told = { paths, overTotal: live.overTotal };
+		toldPaths = paths;
 	};
 	/**
 	 * The instructions and ONECODE.md blocks as live state, read in `cwd`. They
@@ -263,7 +262,7 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	 * still describe the files on disk.
 	 */
 	const emitInstructions = (current: ReturnType<typeof readFiles>, fit = fitFiles(current)) => {
-		live = { skipped: fit.skipped, overTotal: fit.overTotal };
+		live = fit.skipped;
 		const instructions = buildClaudeMdBlock({ contextFiles: fit.contextFiles, memoryIndex: current.memoryIndex });
 		if (instructions) {
 			pi.events.emit(REMINDER_CHANNEL, {
@@ -390,7 +389,7 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		// rides its own higher-precedence block.
 		contextWindow = ctx.model?.contextWindow;
 		refreshInstructions(ctx.cwd);
-		told = { paths: new Set(), overTotal: false };
+		toldPaths = new Set();
 		announceFit(ctx);
 		email = resolveEmail(ctx.cwd);
 		attachedNested = new Set();
@@ -487,8 +486,7 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		contextWindow = event.model?.contextWindow;
 		if (!files) return;
 		const fit = fitFiles(files);
-		if (skipKey(fit.skipped) !== skipKey(live.skipped)) emitInstructions(files, fit);
-		else live = { skipped: fit.skipped, overTotal: fit.overTotal };
+		if (skipKey(fit.skipped) !== skipKey(live)) emitInstructions(files, fit);
 	});
 
 	// A branch switch leaves the attachments of the branch left behind; the new one may lack them.

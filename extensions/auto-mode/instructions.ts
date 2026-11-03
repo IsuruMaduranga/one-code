@@ -20,9 +20,9 @@
  */
 
 import { dirname, join } from "node:path";
-import { ancestorDirs, discoverContextFiles, discoverOneCodeFiles } from "../lib/claude-context.ts";
+import { ancestorDirs, discoverContextFiles, discoverOneCodeFiles, instructionRule } from "../lib/claude-context.ts";
 import { readExternalIncludesApproval } from "../lib/claude-external-includes.ts";
-import { classifierInstructionNote, fitToWindow } from "../lib/instruction-budget.ts";
+import { classifierInstructionNote, fitToWindow, type SkippedInstruction } from "../lib/instruction-budget.ts";
 import { discoverRules, type RuleFile } from "../lib/claude-rules.ts";
 import { claudeSourcesOn } from "../lib/config-mode.ts";
 import { claudeManagedDir, claudeUserDir, oneCodeStateDir, tryRealpath } from "../lib/paths.ts";
@@ -51,17 +51,31 @@ function conditionalRules(cwd: string, home: string, homeClaudeDir: string, incl
 	);
 }
 
+/** The files the agent's window budget skips, by real path: its own sections, as claude-context fits them. */
+function agentSkippedFiles(cwd: string, home: string, homeClaudeDir: string, contextWindow: number | undefined): Map<string, SkippedInstruction> {
+	if (!contextWindow) return new Map();
+	const includeExternal = readExternalIncludesApproval(cwd, home).approved;
+	const sections = [
+		...discoverContextFiles({ cwd, homeClaudeDir, rule: instructionRule(home), home, includeExternal }),
+		...discoverOneCodeFiles({ cwd, homeOneCodeDir: oneCodeStateDir(process.env, home), home, includeExternal }),
+	];
+	return new Map(fitToWindow(sections, contextWindow).skipped.map((file) => [tryRealpath(file.path) ?? file.path, file]));
+}
+
 /**
  * Concatenated instruction files in the agent's order (managed and global,
  * then each directory from the farthest down, ONECODE.md last), each labelled
  * with its path so the classifier can tell project convention from
  * user-global preference; undefined when there are none. A file is whole, as
  * Claude Code's classifier gets the agent's CLAUDE.md (a cut would drop the
- * restrictions past it), unless it takes over half of `contextWindow`, the
- * session model's: then, as for the agent, a note replaces it in its labelled
- * slot (lib/instruction-budget.ts), so a huge file cannot push every call past
- * the classifier's window. A transcript too large for that window is not
- * judged (`decisions/auto-mode.md`).
+ * restrictions past it), unless the agent's window budget skips it
+ * (lib/instruction-budget.ts, against `contextWindow`, the session model's):
+ * then a note replaces it in its labelled slot, so the files that make the
+ * agent survivable cannot push every call past the classifier's window. The
+ * skipped set is the agent's own, computed over the agent's sections; a file
+ * only the classifier reads (a path-conditional rule, AGENTS.md beside
+ * CLAUDE.md) is skipped only when it alone is over the share. A transcript too
+ * large for that window is not judged (`decisions/auto-mode.md`).
  */
 export function loadProjectInstructions(cwd: string, home: string, contextWindow?: number): string | undefined {
 	const claude = claudeSourcesOn();
@@ -81,5 +95,11 @@ export function loadProjectInstructions(cwd: string, home: string, contextWindow
 	for (const file of discoverOneCodeFiles({ cwd, homeOneCodeDir: oneCodeStateDir(process.env, home), home })) add(file);
 
 	if (files.length === 0) return undefined;
-	return fitToWindow(files, contextWindow, classifierInstructionNote).files.map((file) => `# ${file.path}${file.globs ? ` (applies to ${file.globs.join(", ")})` : ""}\n${file.content.trim()}`).join("\n\n");
+	const agentSkipped = agentSkippedFiles(cwd, home, homeClaudeDir, contextWindow);
+	const shown = files.map((file) => {
+		const skipped = agentSkipped.get(tryRealpath(file.path) ?? file.path);
+		if (skipped) return { ...file, content: classifierInstructionNote(skipped.tokens, skipped.contextWindow) };
+		return fitToWindow([file], contextWindow, classifierInstructionNote).files[0];
+	});
+	return shown.map((file) => `# ${file.path}${file.globs ? ` (applies to ${file.globs.join(", ")})` : ""}\n${file.content.trim()}`).join("\n\n");
 }

@@ -24,13 +24,13 @@ import { join } from "node:path";
 import { createReadToolDefinition, type ExtensionAPI, type ExtensionContext, type SessionCompactEvent } from "@earendil-works/pi-coding-agent";
 import { pathArgument } from "../auto-mode/paths.ts";
 import { bashParserReady } from "../lib/bash-parser.ts";
-import { discoverContextFiles, instructionRule } from "../lib/claude-context.ts";
+import { discoverContextFiles, discoverOneCodeFiles, instructionRule } from "../lib/claude-context.ts";
 import { fitToWindow } from "../lib/instruction-budget.ts";
 import { readExternalIncludesApproval } from "../lib/claude-external-includes.ts";
 import { inContextEntries, latestCompaction } from "../lib/compaction-boundary.ts";
 import { autoMemoryEnabled } from "../lib/auto-memory.ts";
 import { projectMemoryDir } from "../lib/memory.ts";
-import { claudeConfigDir, comparablePath, isPathAtOrUnder, tryRealpath } from "../lib/paths.ts";
+import { claudeConfigDir, comparablePath, isPathAtOrUnder, oneCodeStateDir, tryRealpath } from "../lib/paths.ts";
 import { estimateTextTokens } from "../lib/pi-ai-estimate.ts";
 import { planFileOnBranch } from "../lib/plan-mode-channels.ts";
 import { REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
@@ -206,10 +206,11 @@ function inContextFiles(ctx: ExtensionContext, branch: readonly { type: string; 
 	const home = homedir();
 	// Use the context loader's import confinement and approval: a literal
 	// unapproved @import is not evidence that its file is still in context.
-	const files = discoverContextFiles({ cwd: ctx.cwd, home, homeClaudeDir: claudeConfigDir(), rule: instructionRule(home),
-		includeExternal: readExternalIncludesApproval(ctx.cwd, home).approved,
-	});
-	const skipped = new Set(fitToWindow(files, ctx.model?.contextWindow).skipped.map((file) => file.path));
+	const includeExternal = readExternalIncludesApproval(ctx.cwd, home).approved;
+	const files = discoverContextFiles({ cwd: ctx.cwd, home, homeClaudeDir: claudeConfigDir(), rule: instructionRule(home), includeExternal });
+	// The budget is over both blocks' sections, as claude-context fits them.
+	const oneCode = discoverOneCodeFiles({ cwd: ctx.cwd, homeOneCodeDir: oneCodeStateDir(), home, includeExternal });
+	const skipped = new Set(fitToWindow([...files, ...oneCode], ctx.model?.contextWindow).skipped.map((file) => file.path));
 	const stack = files.flatMap((file) => (skipped.has(file.path) ? [] : [file.path, ...(file.imported ?? [])]));
 	return new Set(
 		[...stack, autoMemoryEnabled(ctx.cwd) ? join(projectMemoryDir(ctx.cwd, home), "MEMORY.md") : undefined, planFileOnBranch(branch), ...kept, ...keptShell]

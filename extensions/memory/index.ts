@@ -88,18 +88,21 @@ export default function memoryExtension(pi: ExtensionAPI) {
 		// suppressed if a single file already fired, so a lone big file isn't
 		// reported twice.
 		if (ctx.hasUI) {
+			const read = memoryEntriesFor(ctx.cwd).flatMap((entry) => {
+				if (entry.kind !== "file" || !entry.exists) return [];
+				const content = tryReadFile(entry.path);
+				return content == null ? [] : [{ entry, path: entry.path, content }];
+			});
+			// A file the window budget skips gets claude-context's warning instead.
+			const skipped = new Set(fitToWindow(read, ctx.model?.contextWindow).skipped.map((file) => file.path));
 			let total = 0;
 			let anyPerFile = false;
-			for (const entry of memoryEntriesFor(ctx.cwd)) {
-				if (entry.kind !== "file" || !entry.exists) continue;
-				const content = tryReadFile(entry.path);
-				if (content == null) continue;
+			for (const { entry, content } of read) {
 				total += content.length;
 				const warning = claudeMdLimitWarning(entryName(entry), content.length);
 				if (warning) {
 					anyPerFile = true;
-					// Over half the window, claude-context warns that it is not loaded instead.
-					if (fitToWindow([{ path: entry.path, content }], ctx.model?.contextWindow).skipped.length === 0) ctx.ui.notify(warning, "warning");
+					if (!skipped.has(entry.path)) ctx.ui.notify(warning, "warning");
 				}
 			}
 			if (!anyPerFile) {

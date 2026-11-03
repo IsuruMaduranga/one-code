@@ -143,7 +143,7 @@ describe("collectCompat: content", () => {
 		write(join(cwd, "CLAUDE.md"), "x".repeat(41_000));
 		const compat = collectCompat({ ...input(), contextWindow: 10_000 });
 		const texts = compat.findings.map((f) => f.text);
-		expect(texts.some((t) => t.includes("CLAUDE.md is ~") && t.includes("over half of this model's 10k-token context window, so it is not loaded"))).toBe(true);
+		expect(texts.some((t) => t.includes("CLAUDE.md (~") && t.includes("is not loaded: instruction files may take at most half of this model's 10k-token context window"))).toBe(true);
 		expect(texts.some((t) => t.includes("over the 40.0k-char limit"))).toBe(false);
 		// A window it fits keeps the 40k warning.
 		expect(collectCompat({ ...input(), contextWindow: 1_000_000 }).findings.some((f) => f.text.includes("over the 40.0k-char limit"))).toBe(true);

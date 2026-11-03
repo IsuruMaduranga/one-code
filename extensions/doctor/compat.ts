@@ -29,7 +29,7 @@ import { claudeUserSettingsPath, managedSettingsPaths, settingsPaths } from "../
 import { discoverContextFilePaths, discoverContextFiles, discoverOneCodeFiles, instructionRule } from "../lib/claude-context.ts";
 import { readExternalIncludesApproval } from "../lib/claude-external-includes.ts";
 import { CLAUDE_MD_CHAR_LIMIT, claudeMdLimitWarning, projectMemoryDir } from "../lib/memory.ts";
-import { combinedInstructionWarning, fitToWindow, skippedInstructionWarning } from "../lib/instruction-budget.ts";
+import { fitToWindow, skippedInstructionWarning } from "../lib/instruction-budget.ts";
 import { indexLimitStatus } from "../lib/memory-content.ts";
 import { readDisabledMcpServers } from "../lib/mcp-overrides.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
@@ -361,7 +361,7 @@ export function collectCompat(input: CompatInput): CompatReport {
 	}
 
 	// The session's window budget, over the sections it loads (imports inlined,
-	// ONECODE.md included): a section over half the window is not loaded.
+	// ONECODE.md included): past half the window, the largest are not loaded.
 	const budget = (() => {
 		if (!input.contextWindow) return undefined;
 		const includeExternal = readExternalIncludesApproval(cwd, home).approved;
@@ -370,11 +370,8 @@ export function collectCompat(input: CompatInput): CompatReport {
 			...discoverOneCodeFiles({ cwd, homeOneCodeDir: oneCodeStateDir(env, home), home, includeExternal }),
 		], input.contextWindow);
 	})();
-	const fix = "Trim it below half of the model's context window, split it into files the model reads when needed, or switch to a model with a larger window.";
+	const fix = "Trim the instruction files below half of the model's context window together, split this one into files the model reads when needed, or switch to a model with a larger window.";
 	for (const file of budget?.skipped ?? []) findings.push({ level: "warn", text: skippedInstructionWarning(shortenHome(file.path, home), file), fix });
-	if (budget?.overTotal && budget.skipped.length === 0 && input.contextWindow) {
-		findings.push({ level: "warn", text: combinedInstructionWarning(input.contextWindow), fix: "Trim the largest instruction files; /memory lists them." });
-	}
 	const skippedPaths = new Set(budget?.skipped.map((file) => file.path));
 
 	// Context files, sized — the block every turn pays for.

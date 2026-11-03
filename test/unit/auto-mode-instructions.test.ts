@@ -163,12 +163,25 @@ describe("loadProjectInstructions", () => {
 			expect(classifierInstructionNote(tokens, T)).toContain("Leaving it out grants no permission.");
 		});
 
-		it("sends files that each fit whole, even when together they pass the share", () => {
+		it("leaves out exactly the files the agent leaves out: the largest past half the window", () => {
 			writeFileSync(join(repo, "CLAUDE.md"), `claude ${BIG}`);
-			writeFileSync(join(repo, "AGENTS.md"), `agents ${BIG}`);
-			const text = loadProjectInstructions(repo, home, 2 * T + 10) ?? "";
+			writeFileSync(join(repo, "CLAUDE.local.md"), `local ${BIG} and more`);
+			const window = 2 * estimateTextTokens(`claude ${BIG}`) + 10;
+			const text = loadProjectInstructions(repo, home, window) ?? "";
 			expect(text).toContain(`claude ${BIG}`);
-			expect(text).toContain(`agents ${BIG}`);
+			expect(text).toContain(`# ${join(repo, "CLAUDE.local.md")}\n${classifierInstructionNote(estimateTextTokens(`local ${BIG} and more`), window)}`);
+			const agent = discoverContextFiles({ cwd: repo, homeClaudeDir: join(home, ".claude"), rule: instructionRule(home), home });
+			expect(agent.map((file) => file.path)).toEqual([join(repo, "CLAUDE.md"), join(repo, "CLAUDE.local.md")]);
+		});
+
+		it("skips a file only the classifier reads when it alone is over the share", () => {
+			writeFileSync(join(repo, "CLAUDE.md"), "claude rule");
+			mkdirSync(join(repo, ".claude", "rules"), { recursive: true });
+			writeFileSync(join(repo, ".claude", "rules", "big.md"), `---\npaths: ["src/**"]\n---\n${BIG}`);
+			const text = loadProjectInstructions(repo, home, T) ?? "";
+			expect(text).toContain("claude rule");
+			expect(text).not.toContain("xxxx");
+			expect(text).toContain("big.md (applies to src)\n(Not shown:");
 		});
 
 		it("skips nothing without a known window", () => {

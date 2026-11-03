@@ -1,9 +1,10 @@
 /**
- * An instruction file over half the model's context window is not loaded: its
- * slot carries a note with its path and size, and the user is warned at
+ * Instruction files may take at most half the model's context window; past it
+ * the largest are not loaded. A skipped file's slot carries a note with its
+ * path and size, and the user is warned at
  * startup, before the prompt after a model switch that crosses the line, and on
- * a nested attach (decisions/memory-state.md, "An instruction file over half
- * the window is skipped, and both sides are told").
+ * a nested attach (decisions/memory-state.md, "Instruction files may take half
+ * the window; past it the largest are skipped").
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -11,7 +12,6 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import claudeContextExtension from "../../extensions/claude-context/index.ts";
 import {
-	combinedInstructionWarning,
 	fitToWindow,
 	restoredInstructionNotice,
 	skippedInstructionNote,
@@ -31,7 +31,7 @@ describe("instruction budget", () => {
 		const one = [{ path: "/a", content: BIG }];
 		expect(fitToWindow(one, 2 * T - 1).skipped).toEqual([{ path: "/a", tokens: T, contextWindow: 2 * T - 1 }]);
 		expect(fitToWindow(one, 2 * T).skipped).toEqual([]);
-		expect(fitToWindow(one, undefined)).toEqual({ files: one, skipped: [], overTotal: false });
+		expect(fitToWindow(one, undefined)).toEqual({ files: one, skipped: [] });
 		expect(fitToWindow(one, 0).skipped).toEqual([]);
 	});
 
@@ -40,32 +40,46 @@ describe("instruction budget", () => {
 			{ path: "/p/CLAUDE.md", descriptor: "project", content: BIG },
 			{ path: "/p/CLAUDE.local.md", descriptor: "local", content: "small\n" },
 		];
-		const { files: fitted, skipped, overTotal } = fitToWindow(files, T);
+		const { files: fitted, skipped } = fitToWindow(files, T);
 		expect(skipped).toEqual([{ path: "/p/CLAUDE.md", tokens: T, contextWindow: T }]);
 		expect(fitted[0]).toEqual({ path: "/p/CLAUDE.md", descriptor: "project", content: skippedInstructionNote(T, T) });
 		expect(fitted[1]).toBe(files[1]);
-		expect(overTotal).toBe(false);
 	});
 
-	it("loads files that each fit, and says when together they pass the share", () => {
+	it("skips the largest of files that each fit until the rest fit together", () => {
+		const larger = `${BIG}${"y".repeat(4_000)}`;
 		const files = [
 			{ path: "/a", content: BIG },
-			{ path: "/b", content: BIG },
+			{ path: "/b", content: larger },
+			{ path: "/c", content: "small" },
 		];
-		expect(fitToWindow(files, 2 * T)).toEqual({ files, skipped: [], overTotal: true });
-		expect(fitToWindow(files, 4 * T).overTotal).toBe(false);
+		// Half of 3T is 1.5T: /a and /b each fit, together they do not; /b is the larger.
+		const fit = fitToWindow(files, 3 * T);
+		expect(fit.skipped.map((file) => file.path)).toEqual(["/b"]);
+		expect(fit.files[0]).toBe(files[0]);
+		expect(fit.files[2]).toBe(files[2]);
+		// Together within the share: all load.
+		expect(fitToWindow(files, 6 * T).skipped).toEqual([]);
+	});
+
+	it("skips the earlier of two files of one size, keeping the more specific", () => {
+		const files = [
+			{ path: "/global", content: BIG },
+			{ path: "/project", content: BIG },
+		];
+		expect(fitToWindow(files, 3 * T).skipped.map((file) => file.path)).toEqual(["/global"]);
 	});
 
 	it("tells the model the size, the window, the files a section inlines, and to read what it needs", () => {
 		expect(skippedInstructionNote(210_000, 200_000)).toBe(
-			"This file is not loaded: it is about 210,000 tokens, more than half of this model's 200,000-token context window. " +
+			"This file is not loaded: it is about 210,000 tokens, and instruction files may take at most half of this model's 200,000-token context window. " +
 				"Read the parts of it that bear on your task when you need them.\n",
 		);
 		expect(skippedInstructionNote(210_000, 200_000, ["/p/big.md"])).toMatch(/^This file and the files it imports \(\/p\/big\.md\) are not loaded: together they are about 210,000 tokens/);
 	});
 
 	it("formats sizes as pi does", () => {
-		expect(skippedInstructionWarning("~/CLAUDE.md", { tokens: 600_000, contextWindow: 1_000_000 })).toContain("~600k tokens, over half of this model's 1.0M-token context window");
+		expect(skippedInstructionWarning("~/CLAUDE.md", { tokens: 600_000, contextWindow: 1_000_000 })).toContain("~/CLAUDE.md (~600k tokens) is not loaded: instruction files may take at most half of this model's 1.0M-token context window");
 	});
 });
 
@@ -143,16 +157,17 @@ describe("claude-context: an oversized instruction file", () => {
 		expect(reminders.filter((r) => r.key === "claude-context")).toHaveLength(emitted);
 	});
 
-	it("warns once when files that each fit together pass the share", async () => {
+	it("skips the larger of two files that each fit when together they pass the share, warning once", async () => {
 		writeFileSync(join(dir, "CLAUDE.md"), body("HALF-A"));
-		writeFileSync(join(dir, "CLAUDE.local.md"), body("HALF-B"));
-		const ctx = createFakeCtx({ cwd: dir, hasUI: true, model: model(2 * tokens("HALF-A") + 10) });
+		writeFileSync(join(dir, "CLAUDE.local.md"), body("HALF-BIGGER"));
+		const window = 2 * tokens("HALF-A") + 10;
+		const ctx = createFakeCtx({ cwd: dir, hasUI: true, model: model(window) });
 		await fake.fireOne("session_start", {}, ctx);
 		expect(block()).toContain("HALF-A");
-		expect(block()).toContain("HALF-B");
+		expect(block()).not.toContain("HALF-BIGGER");
 		await prompt(ctx);
 		await prompt(ctx);
-		expect(await notified(ctx)).toEqual([{ message: combinedInstructionWarning(2 * tokens("HALF-A") + 10), type: "warning" }]);
+		expect(await notified(ctx)).toEqual([{ message: skippedInstructionWarning("~/CLAUDE.local.md", { tokens: tokens("HALF-BIGGER"), contextWindow: window }), type: "warning" }]);
 	});
 
 	it("is loaded whole when the model's window is unknown", async () => {
