@@ -86,6 +86,19 @@ describe("instruction budget", () => {
 		expect(fit.loaded).toBeLessThanOrEqual(window / 2);
 	});
 
+	it("passes over a file no larger than its note to skip a smaller one that frees tokens", () => {
+		const imported = Array.from({ length: 50 }, (_, i) => `/p/some/long/directory/path/imported-${i}.md`);
+		const files = [
+			{ path: "/a", content: "a".repeat(1_200), imported },
+			{ path: "/b", content: "b".repeat(800) },
+		];
+		const [a, b] = files.map((file) => estimateTextTokens(file.content));
+		expect(estimateTextTokens(skippedInstructionNote(a, 0, imported))).toBeGreaterThanOrEqual(a);
+		const window = 2 * (a + estimateTextTokens(skippedInstructionNote(b, 0)) + 20);
+		expect(a + b).toBeGreaterThan(window / 2);
+		expect(fitToWindow(files, window).skipped.map((file) => file.path)).toEqual(["/b"]);
+	});
+
 	it("keeps a file no larger than its note", () => {
 		const files = [{ path: "/tiny", content: "tiny rules" }];
 		expect(fitToWindow(files, 2).skipped).toEqual([]);

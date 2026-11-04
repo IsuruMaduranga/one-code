@@ -75,8 +75,8 @@ export function fitToWindow<T extends { path: string; content: string; imported?
 		if (total <= limit) break;
 		const text = note(tokens[index], contextWindow, files[index].imported);
 		const noteTokens = estimateTextTokens(text);
-		// The note takes its own tokens; a file no larger than its note is kept, and so are the smaller ones after it.
-		if (noteTokens >= tokens[index]) break;
+		// The note takes its own tokens: a file no larger than its note (one listing many imports) is kept.
+		if (noteTokens >= tokens[index]) continue;
 		notes.set(index, text);
 		total += noteTokens - tokens[index];
 	}
