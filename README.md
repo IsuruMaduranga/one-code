@@ -29,6 +29,8 @@ its scope.
 [Differences from Claude Code](docs/guide/differences-from-claude-code.md) ·
 [Command reference](docs/guide/reference.md)
 
+If One Code is useful to you, a ⭐ on GitHub helps other people find it.
+
 ## 🚀 Get started
 
 Install **Node.js 22.19 or later**, then run:
