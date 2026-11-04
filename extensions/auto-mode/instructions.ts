@@ -23,6 +23,7 @@ import { dirname, join } from "node:path";
 import { agentInstructionSections, ancestorDirs, discoverContextFiles, discoverOneCodeFiles } from "../lib/claude-context.ts";
 import { readExternalIncludesApproval } from "../lib/claude-external-includes.ts";
 import { classifierInstructionNote, fitToWindow } from "../lib/instruction-budget.ts";
+import { estimateTextTokens } from "../lib/pi-ai-estimate.ts";
 import { discoverRules, type RuleFile } from "../lib/claude-rules.ts";
 import { claudeSourcesOn } from "../lib/config-mode.ts";
 import { claudeManagedDir, claudeUserDir, oneCodeStateDir, tryRealpath } from "../lib/paths.ts";
@@ -91,7 +92,14 @@ export function loadProjectInstructions(cwd: string, home: string, contextWindow
 	const realKey = (path: string) => tryRealpath(path) ?? path;
 	const agentFiles = new Set([...sections.contextFiles, ...sections.oneCodeFiles].map((file) => realKey(file.path)));
 	const skipped = new Map(agentFit.skipped.map((file) => [realKey(file.path), file]));
-	const ownFit = fitToWindow(files.filter((file) => !agentFiles.has(file.key)), contextWindow, { used: agentFit.loaded, note: classifierInstructionNote });
+	// The agent's files as this prompt renders them: a skipped one is the classifier's own (longer) note.
+	let agentShown = 0;
+	for (const file of files) {
+		if (!agentFiles.has(file.key)) continue;
+		const over = skipped.get(file.key);
+		agentShown += estimateTextTokens(over ? classifierInstructionNote(over.tokens, over.contextWindow) : file.content);
+	}
+	const ownFit = fitToWindow(files.filter((file) => !agentFiles.has(file.key)), contextWindow, { used: agentShown, note: classifierInstructionNote });
 	for (const file of ownFit.skipped) skipped.set(realKey(file.path), file);
 	const shown = files.map((file) => {
 		const over = skipped.get(file.key);

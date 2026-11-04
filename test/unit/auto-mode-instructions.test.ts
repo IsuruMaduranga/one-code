@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadProjectInstructions } from "../../extensions/auto-mode/instructions.ts";
 import { buildClaudeMdBlock, discoverContextFiles, instructionRule } from "../../extensions/lib/claude-context.ts";
 import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
-import { classifierInstructionNote } from "../../extensions/lib/instruction-budget.ts";
+import { classifierInstructionNote, skippedInstructionNote } from "../../extensions/lib/instruction-budget.ts";
 import { estimateTextTokens } from "../../extensions/lib/pi-ai-estimate.ts";
 
 let root: string;
@@ -173,6 +173,25 @@ describe("loadProjectInstructions", () => {
 			expect(text).toContain(`# ${join(repo, "CLAUDE.local.md")}\n${classifierInstructionNote(estimateTextTokens(`local ${BIG} and more`), window)}`);
 			const agent = discoverContextFiles({ cwd: repo, homeClaudeDir: join(home, ".claude"), rule: instructionRule(home), home });
 			expect(agent.map((file) => file.path)).toEqual([join(repo, "CLAUDE.md"), join(repo, "CLAUDE.local.md")]);
+		});
+
+		it("counts a skipped agent file by the note this prompt renders for it", () => {
+			writeFileSync(join(repo, "CLAUDE.md"), `claude ${BIG}`);
+			const window = T; // the agent's file alone is over half
+			const agentTokens = estimateTextTokens(`claude ${BIG}`);
+			const classifierNote = estimateTextTokens(classifierInstructionNote(agentTokens, window));
+			const agentNote = estimateTextTokens(skippedInstructionNote(agentTokens, window));
+			expect(agentNote).toBeLessThan(classifierNote);
+			// A rule that fits beside the agent's shorter note, not beside the classifier's.
+			const target = Math.floor(window / 2) - classifierNote + 1;
+			let body = "RULE-A ";
+			while (estimateTextTokens(body) < target) body += "z";
+			expect(agentNote + estimateTextTokens(body)).toBeLessThanOrEqual(window / 2);
+			mkdirSync(join(repo, ".claude", "rules"), { recursive: true });
+			writeFileSync(join(repo, ".claude", "rules", "a.md"), `---\npaths: ["a/**"]\n---\n${body}`);
+			const text = loadProjectInstructions(repo, home, window) ?? "";
+			expect(text).not.toContain("RULE-A");
+			expect(text).toContain("a.md (applies to a)\n(Not shown:");
 		});
 
 		it("fits the files only the classifier reads together, within what the agent's files leave", () => {
