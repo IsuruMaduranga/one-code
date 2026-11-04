@@ -456,12 +456,18 @@ export const EXPAND_HINT = "ctrl+o to expand";
 export function expandHintFor(source: unknown): string | null {
 	const keyText = (source as { keyText?: unknown } | undefined)?.keyText;
 	if (typeof keyText !== "function") return EXPAND_HINT;
+	const key = boundKey((binding) => (keyText as (binding: string) => unknown).call(source, binding), "app.tools.expand", "ctrl+o");
+	return key ? `${key} to expand` : null;
+}
+
+/** The user's key for a pi binding (pi's `keyText`): `fallback` without `keyText`, when it throws or returns a non-string; null when unbound. */
+export function boundKey(keyText: ((binding: string) => unknown) | undefined, binding: string, fallback: string): string | null {
+	if (!keyText) return fallback;
 	try {
-		const key = (keyText as (binding: string) => unknown).call(source, "app.tools.expand");
-		if (typeof key !== "string") return EXPAND_HINT;
-		return key ? `${key} to expand` : null;
+		const key = keyText(binding);
+		return typeof key === "string" ? key || null : fallback;
 	} catch {
-		return EXPAND_HINT;
+		return fallback;
 	}
 }
 

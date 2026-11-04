@@ -43,8 +43,9 @@ import {
 	shouldDefaultFlushOutputPad,
 	shouldDefaultHideThinking,
 	type StartupSection,
+	thinkingLabel,
 } from "./startup.ts";
-import { linesComponent, safeThemeInverse, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
+import { boundKey, linesComponent, safeThemeInverse, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { AGENT_VIEW_CHANNEL, type AgentViewAnnouncement, type AgentViewTarget } from "../lib/agent-view.ts";
 import { markAssistantMarkdown } from "./assistant-marker.ts";
 import { PROMPT_PADDING, PromptEditor } from "./prompt-editor.ts";
@@ -67,17 +68,6 @@ export interface BannerInput {
 	sections?: StartupSection[];
 	/** pi's `keyText`: the user's key for a pi binding, "" when unbound; the defaults without it. */
 	keyText?: (binding: string) => string;
-}
-
-/** The user's key for a pi binding: `fallback` without `keyText` (or when it throws), null when unbound. */
-export function boundKey(keyText: ((binding: string) => string) | undefined, binding: string, fallback: string): string | null {
-	if (!keyText) return fallback;
-	try {
-		const key = keyText(binding);
-		return typeof key === "string" ? key || null : fallback;
-	} catch {
-		return fallback;
-	}
 }
 
 /**
@@ -220,12 +210,6 @@ export function bannerLines(
 
 	const assembled = [...head, ...textColumn];
 	return width === undefined ? assembled : assembled.map((line) => truncateLine(line, width));
-}
-
-/** Collapsed-thinking placeholder, naming the user's key for pi's thinking toggle; pi paints it in thinkingText + italic. */
-export function thinkingLabel(keyText?: (binding: string) => string): string {
-	const key = boundKey(keyText, "app.thinking.toggle", "ctrl+t");
-	return key ? `✻ Thinking… (${key} to expand)` : "✻ Thinking…";
 }
 
 /** Claude Code-style input marker, painted in the editor's left gutter. A heavy
