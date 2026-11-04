@@ -251,12 +251,11 @@ describe("claude-context: an oversized instruction file", () => {
 		const read = (path: string, toolCallId: string) => fake.fire("tool_result", { toolName: "read", toolCallId, input: { path }, isError: false, content: [] }, ctx);
 		const attached = (toolCallId: string) => reminders.filter((r) => r.toolCallId === toolCallId).map((r) => r.text ?? "");
 		const result = (toolCallId: string) => ({ type: "message", message: { role: "toolResult", toolCallId, toolName: "read", content: [], isError: false, timestamp: 1 } });
-		const shownEntries = () => fake.appendedEntries.map((entry) => ({ type: "custom", ...entry }));
 
 		await read("a/x.ts", "r1");
 		expect(attached("r1")[0]).toContain("NESTED-A");
 		// A resumed branch that still holds r1 counts it from the recorded entry.
-		branch = [result("r1"), ...shownEntries()];
+		branch = [result("r1"), ...fake.branch];
 		await fake.fire("session_tree", {}, ctx);
 		await read("b/x.ts", "r2");
 		expect(attached("r2")[0]).not.toContain("NESTED-B");

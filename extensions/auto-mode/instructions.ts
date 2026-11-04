@@ -92,18 +92,15 @@ export function loadProjectInstructions(cwd: string, home: string, contextWindow
 	const realKey = (path: string) => tryRealpath(path) ?? path;
 	const agentFiles = new Set([...sections.contextFiles, ...sections.oneCodeFiles].map((file) => realKey(file.path)));
 	const skipped = new Map(agentFit.skipped.map((file) => [realKey(file.path), file]));
-	// The agent's files as this prompt renders them: a skipped one is the classifier's own (longer) note.
-	let agentShown = 0;
-	for (const file of files) {
-		if (!agentFiles.has(file.key)) continue;
-		const over = skipped.get(file.key);
-		agentShown += estimateTextTokens(over ? classifierInstructionNote(over.tokens, over.contextWindow) : file.content);
-	}
-	const ownFit = fitToWindow(files.filter((file) => !agentFiles.has(file.key)), contextWindow, { used: agentShown, note: classifierInstructionNote });
-	for (const file of ownFit.skipped) skipped.set(realKey(file.path), file);
-	const shown = files.map((file) => {
+	/** A file as this prompt shows it: a skipped one is the classifier's note. */
+	const render = (file: (typeof files)[number]) => {
 		const over = skipped.get(file.key);
 		return over ? { ...file, content: classifierInstructionNote(over.tokens, over.contextWindow) } : file;
-	});
+	};
+	// The agent's files count as rendered here, a skipped one at the classifier's (longer) note.
+	const agentShown = files.reduce((sum, file) => (agentFiles.has(file.key) ? sum + estimateTextTokens(render(file).content) : sum), 0);
+	const ownFit = fitToWindow(files.filter((file) => !agentFiles.has(file.key)), contextWindow, { used: agentShown, note: classifierInstructionNote });
+	for (const file of ownFit.skipped) skipped.set(realKey(file.path), file);
+	const shown = files.map(render);
 	return shown.map((file) => `# ${file.path}${file.globs ? ` (applies to ${file.globs.join(", ")})` : ""}\n${file.content.trim()}`).join("\n\n");
 }

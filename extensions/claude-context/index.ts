@@ -121,7 +121,8 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		const shown = shownByResult.get(toolCallId) ?? { keys: new Set<string>(), tokens: 0 };
 		const before = shown.keys.size;
 		for (const key of keys) shown.keys.add(key);
-		if (shown.keys.size === before && tokens === 0) return;
+		// Tokens come only with newly attached files, so no new key means nothing new to record.
+		if (shown.keys.size === before) return;
 		shown.tokens += tokens;
 		shownByResult.set(toolCallId, shown);
 		// Recorded on the branch, so a resume or a /tree switch knows what is already in context.
