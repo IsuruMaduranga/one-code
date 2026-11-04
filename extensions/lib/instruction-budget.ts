@@ -3,8 +3,8 @@
  * instructions blocks (a CLAUDE.md-family file, AGENTS.md or ONECODE.md, with
  * any imports it inlines) may together take at most half of the model's context
  * window; past it, the largest are not loaded until the rest fit. A nested
- * instruction file attached on read gets what the loaded ones leave of that
- * half. A skipped file's slot
+ * instruction file attached on read gets what the loaded ones, and the nested
+ * ones still in context, leave of that half. A skipped file's slot
  * carries a note with its path and size, so the model knows the rules exist
  * and reads the parts it needs, and the user is warned. Instruction files
  * are rendered into message 1 at every epoch, so compaction cannot reclaim their
@@ -54,8 +54,9 @@ export function classifierInstructionNote(tokens: number, contextWindow: number)
  * the share alone always goes first. Between files of one size the earlier
  * goes (a farther or more global file; the later ones are the more specific).
  * Returns the fitted files in their order, the ones replaced in their order
- * too, and the tokens the loaded ones take (`used` included). No known
- * window, no budget.
+ * too, and the tokens the fitted ones take, notes and `used` included. A
+ * caller that renders a different note passes it as `note`, so its size is
+ * what is counted. No known window, no budget.
  */
 export function fitToWindow<T extends { path: string; content: string; imported?: string[] }>(
 	files: readonly T[],
@@ -68,18 +69,23 @@ export function fitToWindow<T extends { path: string; content: string; imported?
 	const limit = contextWindow * INSTRUCTION_WINDOW_SHARE;
 	if (total <= limit) return { files: [...files], skipped: [], loaded: total };
 	const note = opts.note ?? skippedInstructionNote;
-	const skip = new Set<number>();
+	const notes = new Map<number, string>();
 	// Largest first; Array.prototype.sort is stable, so a tie keeps file order.
 	for (const index of tokens.map((_, i) => i).sort((a, b) => tokens[b] - tokens[a])) {
 		if (total <= limit) break;
-		skip.add(index);
-		total -= tokens[index];
+		const text = note(tokens[index], contextWindow, files[index].imported);
+		const noteTokens = estimateTextTokens(text);
+		// The note takes its own tokens; a file no larger than its note is kept, and so are the smaller ones after it.
+		if (noteTokens >= tokens[index]) break;
+		notes.set(index, text);
+		total += noteTokens - tokens[index];
 	}
 	const skipped: SkippedInstruction[] = [];
 	const fitted = files.map((file, index) => {
-		if (!skip.has(index)) return file;
+		const text = notes.get(index);
+		if (text === undefined) return file;
 		skipped.push({ path: file.path, tokens: tokens[index], contextWindow });
-		return { ...file, content: note(tokens[index], contextWindow, file.imported) };
+		return { ...file, content: text };
 	});
 	return { files: fitted, skipped, loaded: total };
 }

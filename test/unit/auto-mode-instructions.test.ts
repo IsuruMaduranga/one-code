@@ -166,7 +166,8 @@ describe("loadProjectInstructions", () => {
 		it("leaves out exactly the files the agent leaves out: the largest past half the window", () => {
 			writeFileSync(join(repo, "CLAUDE.md"), `claude ${BIG}`);
 			writeFileSync(join(repo, "CLAUDE.local.md"), `local ${BIG} and more`);
-			const window = 2 * estimateTextTokens(`claude ${BIG}`) + 10;
+			// Room for the first file and the note in the second's slot, not for both files.
+			const window = 2 * estimateTextTokens(`claude ${BIG}`) + 400;
 			const text = loadProjectInstructions(repo, home, window) ?? "";
 			expect(text).toContain(`claude ${BIG}`);
 			expect(text).toContain(`# ${join(repo, "CLAUDE.local.md")}\n${classifierInstructionNote(estimateTextTokens(`local ${BIG} and more`), window)}`);

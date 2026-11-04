@@ -67,7 +67,28 @@ describe("instruction budget", () => {
 		// Alone it fits half of 3T; beside T already loaded it does not.
 		expect(fitToWindow(one, 3 * T).skipped).toEqual([]);
 		expect(fitToWindow(one, 3 * T, { used: T }).skipped.map((file) => file.path)).toEqual(["/nested"]);
-		expect(fitToWindow(one, 3 * T, { used: T }).loaded).toBe(T);
+		// The note in its slot counts.
+		expect(fitToWindow(one, 3 * T, { used: T }).loaded).toBe(T + estimateTextTokens(skippedInstructionNote(T, 3 * T)));
+	});
+
+	it("counts the note's tokens, so the notes and the kept files together stay within the share", () => {
+		const files = [
+			{ path: "/a", content: BIG },
+			{ path: "/b", content: `${BIG}${"y".repeat(400)}` },
+		];
+		const note = (tokens: number, window: number) => `${skippedInstructionNote(tokens, window)}${"n".repeat(1_000)}`;
+		const noteTokens = estimateTextTokens(note(T, 0));
+		// Half of this window holds /a alone, but not /a beside /b's note: both go.
+		const window = 2 * T + noteTokens;
+		expect(fitToWindow(files, window).skipped.map((file) => file.path)).toEqual(["/b"]);
+		const fit = fitToWindow(files, window, { note });
+		expect(fit.skipped.map((file) => file.path)).toEqual(["/a", "/b"]);
+		expect(fit.loaded).toBeLessThanOrEqual(window / 2);
+	});
+
+	it("keeps a file no larger than its note", () => {
+		const files = [{ path: "/tiny", content: "tiny rules" }];
+		expect(fitToWindow(files, 2).skipped).toEqual([]);
 	});
 
 	it("skips the earlier of two files of one size, keeping the more specific", () => {
@@ -168,7 +189,8 @@ describe("claude-context: an oversized instruction file", () => {
 	it("skips the larger of two files that each fit when together they pass the share, warning once", async () => {
 		writeFileSync(join(dir, "CLAUDE.md"), body("HALF-A"));
 		writeFileSync(join(dir, "CLAUDE.local.md"), body("HALF-BIGGER"));
-		const window = 2 * tokens("HALF-A") + 10;
+		// Room for HALF-A and the note in HALF-BIGGER's slot, not for both files.
+		const window = 2 * tokens("HALF-A") + 400;
 		const ctx = createFakeCtx({ cwd: dir, hasUI: true, model: model(window) });
 		await fake.fireOne("session_start", {}, ctx);
 		expect(block()).toContain("HALF-A");
@@ -213,6 +235,38 @@ describe("claude-context: an oversized instruction file", () => {
 		expect(attached).toHaveLength(1);
 		expect(attached[0]).not.toContain("NESTED");
 		expect(attached[0]).toContain("This file is not loaded");
+	});
+
+	it("gives a nested file only what the nested files still in context leave of the half", async () => {
+		writeFileSync(join(dir, "CLAUDE.md"), "Root rules.\n");
+		mkdirSync(join(dir, "a"));
+		mkdirSync(join(dir, "b"));
+		writeFileSync(join(dir, "a", "CLAUDE.md"), body("NESTED-A"));
+		writeFileSync(join(dir, "b", "CLAUDE.md"), body("NESTED-B"));
+		// Each fits the half alone (about 0.4 of the window); together they do not.
+		const window = Math.ceil(tokens("NESTED-A") / 0.4);
+		let branch: unknown[] = [];
+		const ctx = createFakeCtx({ cwd: dir, hasUI: true, model: model(window), sessionManager: { getBranch: () => branch } });
+		await fake.fireOne("session_start", {}, ctx);
+		const read = (path: string, toolCallId: string) => fake.fire("tool_result", { toolName: "read", toolCallId, input: { path }, isError: false, content: [] }, ctx);
+		const attached = (toolCallId: string) => reminders.filter((r) => r.toolCallId === toolCallId).map((r) => r.text ?? "");
+		const result = (toolCallId: string) => ({ type: "message", message: { role: "toolResult", toolCallId, toolName: "read", content: [], isError: false, timestamp: 1 } });
+		const shownEntries = () => fake.appendedEntries.map((entry) => ({ type: "custom", ...entry }));
+
+		await read("a/x.ts", "r1");
+		expect(attached("r1")[0]).toContain("NESTED-A");
+		// A resumed branch that still holds r1 counts it from the recorded entry.
+		branch = [result("r1"), ...shownEntries()];
+		await fake.fire("session_tree", {}, ctx);
+		await read("b/x.ts", "r2");
+		expect(attached("r2")[0]).not.toContain("NESTED-B");
+		expect(attached("r2")[0]).toContain("This file is not loaded");
+
+		// A branch without r1 frees its share.
+		branch = [];
+		await fake.fire("session_tree", {}, ctx);
+		await read("b/y.ts", "r3");
+		expect(attached("r3")[0]).toContain("NESTED-B");
 	});
 
 	it("attaches a nested file over the line as the note, with a warning", async () => {

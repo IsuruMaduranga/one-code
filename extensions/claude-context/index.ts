@@ -111,26 +111,39 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	 */
 	let startupShown = new Set<string>();
 	let attachedNested = new Set<string>();
-	/** Where a nested instruction actually landed: a persisted result or a pinned request tail. */
-	const shownByResult = new Map<string, Set<string>>();
-	const remember = (toolCallId: string | undefined, keys: Iterable<string>) => {
+	/**
+	 * Where a nested instruction actually landed (a persisted result or a pinned
+	 * request tail), and the tokens of the instruction text it attached.
+	 */
+	const shownByResult = new Map<string, { keys: Set<string>; tokens: number }>();
+	const remember = (toolCallId: string | undefined, keys: Iterable<string>, tokens = 0) => {
 		if (!toolCallId) return;
-		const shown = shownByResult.get(toolCallId) ?? new Set<string>();
-		const before = shown.size;
-		for (const key of keys) shown.add(key);
-		if (shown.size === before) return;
+		const shown = shownByResult.get(toolCallId) ?? { keys: new Set<string>(), tokens: 0 };
+		const before = shown.keys.size;
+		for (const key of keys) shown.keys.add(key);
+		if (shown.keys.size === before && tokens === 0) return;
+		shown.tokens += tokens;
 		shownByResult.set(toolCallId, shown);
 		// Recorded on the branch, so a resume or a /tree switch knows what is already in context.
-		pi.appendEntry(NESTED_SHOWN_ENTRY, { toolCallId, keys: [...shown] });
+		pi.appendEntry(NESTED_SHOWN_ENTRY, { toolCallId, keys: [...shown.keys], tokens: shown.tokens });
+	};
+	/** The tokens the nested instruction text still in context takes: it shares the half with the loaded top-level files. */
+	const nestedLoaded = () => {
+		let total = 0;
+		for (const shown of shownByResult.values()) total += shown.tokens;
+		return total;
 	};
 	/** Rebuild what the branch's own results showed (a resume, a /tree switch), then keep what is still in context. */
 	const restoreAttachments = (ctx: ExtensionContext) => {
 		shownByResult.clear();
 		for (const entry of ctx.sessionManager.getBranch() as { type: string; customType?: string; data?: unknown }[]) {
 			if (entry.type !== "custom" || entry.customType !== NESTED_SHOWN_ENTRY) continue;
-			const data = entry.data as { toolCallId?: unknown; keys?: unknown } | undefined;
+			const data = entry.data as { toolCallId?: unknown; keys?: unknown; tokens?: unknown } | undefined;
 			if (typeof data?.toolCallId !== "string" || !Array.isArray(data.keys)) continue;
-			shownByResult.set(data.toolCallId, new Set(data.keys.filter((key): key is string => typeof key === "string")));
+			shownByResult.set(data.toolCallId, {
+				keys: new Set(data.keys.filter((key): key is string => typeof key === "string")),
+				tokens: typeof data.tokens === "number" ? data.tokens : 0,
+			});
 		}
 		keepRetainedAttachments(ctx);
 	};
@@ -139,8 +152,8 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		const kept = new Set(inContextEntries(ctx.sessionManager.getBranch()).flatMap((entry) =>
 			entry.type === "message" && entry.message.role === "toolResult" ? [entry.message.toolCallId] : [],
 		));
-		for (const [id, keys] of shownByResult) {
-			if (kept.has(id)) for (const key of keys) attachedNested.add(key);
+		for (const [id, shown] of shownByResult) {
+			if (kept.has(id)) for (const key of shown.keys) attachedNested.add(key);
 			else shownByResult.delete(id);
 		}
 	};
@@ -233,7 +246,7 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	const skipKey = (skipped: readonly SkippedInstruction[]) => skipped.map((file) => `${file.path}\0${file.tokens}\0${file.contextWindow}`).join("\n");
 	/** The files the live blocks skip, and the ones the user was last told of. */
 	let live: SkippedInstruction[] = [];
-	/** The tokens the live blocks' loaded instruction files take: a nested file gets what they leave of the half. */
+	/** The tokens the live blocks' fitted instruction files take: a nested file gets what they and `nestedLoaded()` leave of the half. */
 	let liveLoaded = 0;
 	let toldPaths = new Set<string>();
 	const warnSkipped = (ctx: ExtensionContext, file: SkippedInstruction) => {
@@ -519,14 +532,18 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		// queue pins them to this result at the next request; unbound, the next result
 		// in a parallel batch took them, beside another file (battery round 7).
 		const shown: string[] = [];
+		const before = liveLoaded + nestedLoaded();
+		let used = before;
 		for (const file of files) {
 			if (attachedNested.has(file.key)) continue;
 			attachedNested.add(file.key);
 			shown.push(file.key);
-			// Past what the loaded top-level files leave of the half, the note rides in
-			// its place (lib/instruction-budget.ts), and its imports are not shown: a
-			// later read may still attach one.
-			const fit = fitToWindow([file], contextWindow, { used: liveLoaded });
+			// Past what the loaded top-level files and the nested ones in context (this
+			// read's included) leave of the half, the note rides in its place
+			// (lib/instruction-budget.ts), and its imports are not shown: a later read
+			// may still attach one.
+			const fit = fitToWindow([file], contextWindow, { used });
+			used = fit.loaded;
 			for (const over of fit.skipped) warnSkipped(ctx, over);
 			if (fit.skipped.length === 0) {
 				for (const imported of file.imported) {
@@ -539,6 +556,6 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		// Recorded with the queued text: both are on the branch now (the text as a
 		// pending one-shot bound to this result), so a quit before the request
 		// keeps them in step, and an abandoned /tree branch takes both away.
-		remember(event.toolCallId, shown);
+		remember(event.toolCallId, shown, used - before);
 	});
 }
