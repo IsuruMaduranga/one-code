@@ -18,7 +18,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "../lib/string-enum.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { restoreLatestDetails } from "../lib/branch-restore.ts";

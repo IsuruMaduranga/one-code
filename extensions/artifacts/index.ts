@@ -12,7 +12,7 @@ import { randomBytes } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename } from "node:path";
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "../lib/string-enum.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { readJsonFile } from "../lib/atomic-write.ts";

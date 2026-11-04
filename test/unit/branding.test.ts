@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { modeCycleKey } from "../../extensions/lib/keys.ts";
 import { WORDMARK, WORDMARK_WIDTH, bannerLines, bannerModeLabel, sectionSummary, truncateLine } from "../../extensions/branding/index.ts";
-import { shouldDefaultFlushOutputPad, shouldDefaultHideThinking } from "../../extensions/branding/startup.ts";
+import { shouldDefaultFlushOutputPad, shouldDefaultHideThinking, thinkingLabel } from "../../extensions/branding/startup.ts";
+import { boundKey } from "../../extensions/lib/tui-render.ts";
 
 // Identity paint keeps assertions about layout free of colour codes.
 const plain = (_color: string, text: string) => text;
@@ -169,5 +170,26 @@ describe("shouldDefaultFlushOutputPad", () => {
 
 	it("does not touch a settings file it cannot parse", () => {
 		expect(shouldDefaultFlushOutputPad("{broken")).toBe(false);
+	});
+});
+
+describe("startup hints and the thinking label follow pi's keybindings", () => {
+	const plain = (_c: string, t: string) => t;
+	const keys: Record<string, string> = { "app.tools.expand": "alt+e", "app.thinking.toggle": "", "app.thinking.cycle": "shift+tab" };
+	const keyText = (binding: string) => keys[binding] ?? "";
+
+	it("shows a rebound key, drops an unbound one, and keeps the default without keyText", () => {
+		const text = bannerLines({ version: "0.1.0", cwd: "/p", mode: "default", keyText }, plain).join("\n");
+		expect(text).toContain("alt+e expand output");
+		expect(text).not.toContain("ctrl+o");
+		expect(text).not.toContain(" thinking ·");
+		expect(bannerLines({ version: "0.1.0", cwd: "/p", mode: "default" }, plain).join("\n")).toContain("ctrl+o expand output");
+	});
+
+	it("names the toggle key in the hidden-thinking label, or none when unbound", () => {
+		expect(thinkingLabel()).toBe("✻ Thinking… (ctrl+t to expand)");
+		expect(thinkingLabel(() => "f2")).toBe("✻ Thinking… (f2 to expand)");
+		expect(thinkingLabel(() => "")).toBe("✻ Thinking…");
+		expect(boundKey(() => { throw new Error("no keybindings"); }, "app.tools.expand", "ctrl+o")).toBe("ctrl+o");
 	});
 });

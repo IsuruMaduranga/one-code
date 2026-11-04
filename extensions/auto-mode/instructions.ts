@@ -20,8 +20,10 @@
  */
 
 import { dirname, join } from "node:path";
-import { ancestorDirs, discoverContextFiles, discoverOneCodeFiles } from "../lib/claude-context.ts";
+import { agentInstructionSections, ancestorDirs, discoverContextFiles, discoverOneCodeFiles } from "../lib/claude-context.ts";
 import { readExternalIncludesApproval } from "../lib/claude-external-includes.ts";
+import { classifierInstructionNote, fitToWindow } from "../lib/instruction-budget.ts";
+import { estimateTextTokens } from "../lib/pi-ai-estimate.ts";
 import { discoverRules, type RuleFile } from "../lib/claude-rules.ts";
 import { claudeSourcesOn } from "../lib/config-mode.ts";
 import { claudeManagedDir, claudeUserDir, oneCodeStateDir, tryRealpath } from "../lib/paths.ts";
@@ -54,22 +56,28 @@ function conditionalRules(cwd: string, home: string, homeClaudeDir: string, incl
  * Concatenated instruction files in the agent's order (managed and global,
  * then each directory from the farthest down, ONECODE.md last), each labelled
  * with its path so the classifier can tell project convention from
- * user-global preference; undefined when there are none. Every file is whole,
- * as Claude Code's classifier gets the agent's CLAUDE.md: a cut would drop the
- * restrictions past it. A transcript too large for the classifier's window is
- * not judged (`decisions/auto-mode.md`).
+ * user-global preference; undefined when there are none. A file is whole, as
+ * Claude Code's classifier gets the agent's CLAUDE.md (a cut would drop the
+ * restrictions past it), unless the agent's window budget skips it
+ * (lib/instruction-budget.ts, against `contextWindow`, the session model's):
+ * then a note replaces it in its labelled slot, so the files that make the
+ * agent survivable cannot push every call past the classifier's window. The
+ * agent's files are skipped exactly as the agent skips them; the files only
+ * the classifier reads (path-conditional rules, AGENTS.md beside CLAUDE.md)
+ * share what the agent's loaded files leave of the half. A transcript too
+ * large for that window is not judged (`decisions/auto-mode.md`).
  */
-export function loadProjectInstructions(cwd: string, home: string): string | undefined {
+export function loadProjectInstructions(cwd: string, home: string, contextWindow?: number): string | undefined {
 	const claude = claudeSourcesOn();
 	const homeClaudeDir = claudeUserDir(home);
 	const includeExternal = claude && readExternalIncludesApproval(cwd, home).approved;
-	const files: InstructionFile[] = [];
+	const files: (InstructionFile & { key: string })[] = [];
 	const seen = new Set<string>();
 	const add = (file: InstructionFile) => {
 		const key = tryRealpath(file.path) ?? file.path;
 		if (seen.has(key) || !file.content.trim()) return;
 		seen.add(key);
-		files.push(file);
+		files.push({ path: file.path, content: file.content, globs: file.globs, key });
 	};
 	if (claude) for (const rule of conditionalRules(cwd, home, homeClaudeDir, includeExternal)) add(rule);
 	const rule = claude ? "claude-md-and-agents-md" : "agents-md";
@@ -77,5 +85,22 @@ export function loadProjectInstructions(cwd: string, home: string): string | und
 	for (const file of discoverOneCodeFiles({ cwd, homeOneCodeDir: oneCodeStateDir(process.env, home), home })) add(file);
 
 	if (files.length === 0) return undefined;
-	return files.map((file) => `# ${file.path}${file.globs ? ` (applies to ${file.globs.join(", ")})` : ""}\n${file.content.trim()}`).join("\n\n");
+	// The agent's own fit decides its files; the files only the classifier reads
+	// share what the agent's loaded ones leave of the half, the largest going first.
+	const sections = agentInstructionSections({ cwd, home, homeClaudeDir });
+	const agentFit = fitToWindow([...sections.contextFiles, ...sections.oneCodeFiles], contextWindow);
+	const realKey = (path: string) => tryRealpath(path) ?? path;
+	const agentFiles = new Set([...sections.contextFiles, ...sections.oneCodeFiles].map((file) => realKey(file.path)));
+	const skipped = new Map(agentFit.skipped.map((file) => [realKey(file.path), file]));
+	/** A file as this prompt shows it: a skipped one is the classifier's note. */
+	const render = (file: (typeof files)[number]) => {
+		const over = skipped.get(file.key);
+		return over ? { ...file, content: classifierInstructionNote(over.tokens, over.contextWindow) } : file;
+	};
+	// The agent's files count as rendered here, a skipped one at the classifier's (longer) note.
+	const agentShown = files.reduce((sum, file) => (agentFiles.has(file.key) ? sum + estimateTextTokens(render(file).content) : sum), 0);
+	const ownFit = fitToWindow(files.filter((file) => !agentFiles.has(file.key)), contextWindow, { used: agentShown, note: classifierInstructionNote });
+	for (const file of ownFit.skipped) skipped.set(realKey(file.path), file);
+	const shown = files.map(render);
+	return shown.map((file) => `# ${file.path}${file.globs ? ` (applies to ${file.globs.join(", ")})` : ""}\n${file.content.trim()}`).join("\n\n");
 }

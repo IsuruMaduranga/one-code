@@ -475,6 +475,33 @@ describe("file-tracker wiring", () => {
 		}
 	});
 
+	it("does not count a CLAUDE.md over half the window as in context after a compaction", async () => {
+		const home = path("home");
+		const project = path("project-big");
+		mkdirSync(project);
+		stubHome(home);
+		vi.stubEnv("ONECODE_STATE_DIR", join(home, ".onecode"));
+		vi.stubEnv("CLAUDE_CONFIG_DIR", join(home, ".claude"));
+		resetConfigModeForTest("claude-compatible");
+		try {
+			const big = join(project, "CLAUDE.md");
+			writeFileSync(big, `BIG-RULES ${"x".repeat(24_000)}\n`);
+			const emitted: string[] = [];
+			fake.events.on(REMINDER_CHANNEL, (data) => emitted.push((data as { text: string }).text));
+			const branch = [{ type: "compaction", id: "c", firstKeptEntryId: "c" }];
+			// A 1,000-token window: message 1 carries only a note for this file.
+			const context = createFakeCtx({ cwd: project, model: { provider: "t", id: "small", api: "t", contextWindow: 1_000 }, sessionManager: { getSessionId: () => "s", getBranch: () => branch } });
+			await fake.fireOne("tool_result", { toolName: "read", input: { path: big }, isError: false }, context);
+			await fake.fire("session_compact", { compactionEntry: branch[0], fromExtension: true, reason: "manual", willRetry: false }, context);
+			const result = await fake.fireOne<{ block?: boolean }>("tool_call", { toolName: "write", input: { path: big } }, context);
+			// Either the restore brought its contents back, or the read state is gone: never read but unseen.
+			expect(result?.block === true || emitted.some((text) => text.includes("BIG-RULES"))).toBe(true);
+		} finally {
+			vi.unstubAllEnvs();
+			resetConfigModeForTest();
+		}
+	});
+
 	it("keeps a kept file stale when it changed on disk, so the edit guard still holds", async () => {
 		const kept = path("kept-stale.ts");
 		writeFileSync(kept, "seen by the model");

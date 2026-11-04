@@ -91,7 +91,10 @@ export default function askUserExtension(pi: ExtensionAPI) {
 						cache = undefined;
 					},
 				};
-			});
+				// pi 1.5.0 reports the wait to the terminal (OSC 7501) while the panel shows; older
+				// pi ignores it. A fixed label: the report leaves the transcript, and pi sends
+				// dialog titles there, never model-written text.
+			}, { blocked: { kind: "question", message: questions.length === 1 ? "Question" : `${questions.length} questions` } });
 
 			if (!outcome || outcome.kind === "cancel") {
 				const partial = outcome?.kind === "cancel" ? outcome.answers : [];

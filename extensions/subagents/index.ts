@@ -24,7 +24,7 @@ import os from "node:os";
 import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "../lib/string-enum.ts";
 import type { Api, Message, Model } from "@earendil-works/pi-ai";
 import { type AgentToolResult, defineTool, getAgentDir, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
@@ -92,7 +92,7 @@ import {
 	withReview,
 } from "../lib/notifications.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
-import { ccToolRenderers, customMessageText, liveUiCtx, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
+import { ccToolRenderers, customMessageText, expandHintFor, liveUiCtx, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { deriveActivity, type FinishOutcome, LiveRunRegistry } from "./live-runs.ts";
 import { DELEGATION_STEER } from "./delegation-steer.ts";
 import { awaitHandBackReview } from "./hand-back-review.ts";
@@ -1255,11 +1255,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	// agent, from the live registry or the message's own details (a resumed
 	// session has no live runs).
 	for (const customType of ["subagent-message", "subagent-result"]) {
-		pi.registerMessageRenderer(customType, (message, { expanded }, theme) => {
+		pi.registerMessageRenderer(customType, (message, options, theme) => {
 			const details = (message as { details?: { taskId?: unknown; name?: unknown } }).details;
 			const agentName = (from: string): string | undefined =>
 				liveRuns.get(from)?.name ?? (details?.taskId === from && typeof details.name === "string" ? details.name : undefined);
-			return notificationComponent(theme, customMessageText(message.content), expanded, agentName);
+			return notificationComponent(theme, customMessageText(message.content), options.expanded, { agentName, hint: expandHintFor(options) });
 		});
 	}
 

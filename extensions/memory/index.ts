@@ -32,7 +32,7 @@ import {
 	stampFrontmatter,
 } from "../lib/memory-content.ts";
 import { type ConfigMode, CONFIG_MODE_KEY, claudeSourcesOn, configMode, configModeFromEnv, savedConfigMode } from "../lib/config-mode.ts";
-import { isClaudeLocation } from "../lib/claude-context.ts";
+import { agentSkippedInstructions, isClaudeLocation } from "../lib/claude-context.ts";
 import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
 import { claudeConfigDir, comparablePath, isPathAtOrUnder, oneCodeStateDir, tildify, tryRealpath } from "../lib/paths.ts";
 import { resolveThroughLinks } from "../auto-mode/paths.ts";
@@ -87,6 +87,11 @@ export default function memoryExtension(pi: ExtensionAPI) {
 		// suppressed if a single file already fired, so a lone big file isn't
 		// reported twice.
 		if (ctx.hasUI) {
+			// A file the agent's window budget skips gets claude-context's warning
+			// instead; asked only once a file is over the char limit.
+			let skipped: Set<string> | undefined;
+			const isSkipped = (path: string) =>
+				(skipped ??= new Set(agentSkippedInstructions({ cwd: ctx.cwd, home: os.homedir(), contextWindow: ctx.model?.contextWindow }).map((file) => file.path))).has(path);
 			let total = 0;
 			let anyPerFile = false;
 			for (const entry of memoryEntriesFor(ctx.cwd)) {
@@ -97,7 +102,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 				const warning = claudeMdLimitWarning(entryName(entry), content.length);
 				if (warning) {
 					anyPerFile = true;
-					ctx.ui.notify(warning, "warning");
+					if (!isSkipped(entry.path)) ctx.ui.notify(warning, "warning");
 				}
 			}
 			if (!anyPerFile) {

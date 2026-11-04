@@ -20,6 +20,7 @@ import { projectConfigDir, userConfigDir } from "../lib/config-mode.ts";
 import { BUNDLED_SKILLS_DIR, scanSkills } from "../lib/skill-scan.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
 import { oneCodeStateDir } from "../lib/paths.ts";
+import { boundKey } from "../lib/tui-render.ts";
 
 export interface StartupSection {
 	label: string;
@@ -126,4 +127,10 @@ export function collectStartupSections(cwd: string, home: string, packageThemesD
 		{ label: "themes", items: themeNames(packageThemesDir) },
 	];
 	return sections.filter((s) => s.items.length > 0);
+}
+
+/** Collapsed-thinking placeholder, naming the user's key for pi's thinking toggle; pi paints it in thinkingText + italic. */
+export function thinkingLabel(keyText?: (binding: string) => string): string {
+	const key = boundKey(keyText, "app.thinking.toggle", "ctrl+t");
+	return key ? `✻ Thinking… (${key} to expand)` : "✻ Thinking…";
 }

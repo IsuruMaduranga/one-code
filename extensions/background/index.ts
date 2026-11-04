@@ -26,7 +26,7 @@ import { persistedFilePreview, persistIfLarge, sessionResultsDir } from "../lib/
 import { detachedSpawnOptions, KILL_GRACE_MS, rememberProcessGroup, stopProcessTree, waitForChildExit } from "../lib/process-tree.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { bashSpawn, spawnShellCommand } from "../lib/shell-spawn.ts";
-import { ccToolRenderers, customMessageText, formatFireTime, liveUiCtx, notificationComponent, notificationUserMarkdown, scheduledTaskComponent } from "../lib/tui-render.ts";
+import { ccToolRenderers, customMessageText, expandHintFor, formatFireTime, liveUiCtx, notificationComponent, notificationUserMarkdown, scheduledTaskComponent } from "../lib/tui-render.ts";
 import {
 	type BackgroundTask,
 	BackgroundRegistry,
@@ -271,8 +271,8 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	// instead (ctrl+o expands). One registration covers every emitter of
 	// `task-notification` (bash uses it too). A fired wakeup or loop tick is the
 	// prompt verbatim, shown behind Claude Code's "Running scheduled task" line.
-	pi.registerMessageRenderer("task-notification", (message, { expanded }, theme) =>
-		notificationComponent(theme, customMessageText(message.content), expanded),
+	pi.registerMessageRenderer("task-notification", (message, options, theme) =>
+		notificationComponent(theme, customMessageText(message.content), options.expanded, { hint: expandHintFor(options) }),
 	);
 	// A notification that opens the session's first turn is a user message
 	// (lib/notifications.ts, "First turn of a session"); pi draws those as
@@ -284,10 +284,10 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	for (const customType of ["wakeup", "cron"]) {
 		// Claude Code: "Claude resuming /loop wakeup (…)" for a wakeup; the model here may not be Claude.
 		const label = customType === "wakeup" ? "Resuming /loop wakeup" : undefined;
-		pi.registerMessageRenderer(customType, (message, { expanded }, theme) => {
+		pi.registerMessageRenderer(customType, (message, options, theme) => {
 			const fold = message.details as FoldDetails | undefined;
 			const suffix = fold?.noOpStreak ? foldSuffix(fold.noOpStreak, formatFireTime(fold.streakStartedAt ?? Date.now())) : "";
-			return scheduledTaskComponent(theme, customMessageText(message.content), (message as { timestamp?: number }).timestamp ?? Date.now(), expanded, label, suffix);
+			return scheduledTaskComponent(theme, customMessageText(message.content), (message as { timestamp?: number }).timestamp ?? Date.now(), options.expanded, { label, suffix, hint: expandHintFor(options) });
 		});
 	}
 

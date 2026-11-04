@@ -139,6 +139,16 @@ describe("collectCompat: content", () => {
 		expect(compat.findings.some((f) => f.text.includes("over the 40.0k-char limit"))).toBe(true);
 	});
 
+	it("names a file over half the model's window as not loaded, in place of the 40k warning", () => {
+		write(join(cwd, "CLAUDE.md"), "x".repeat(41_000));
+		const compat = collectCompat({ ...input(), contextWindow: 10_000 });
+		const texts = compat.findings.map((f) => f.text);
+		expect(texts.some((t) => t.includes("CLAUDE.md (~") && t.includes("is not loaded: instruction files may take at most half of this model's 10k-token context window"))).toBe(true);
+		expect(texts.some((t) => t.includes("over the 40.0k-char limit"))).toBe(false);
+		// A window it fits keeps the 40k warning.
+		expect(collectCompat({ ...input(), contextWindow: 1_000_000 }).findings.some((f) => f.text.includes("over the 40.0k-char limit"))).toBe(true);
+	});
+
 	it("counts agents, skills and command templates, and flags a skill without a description", () => {
 		write(join(home, ".claude", "agents", "reviewer.md"), "---\nname: reviewer\ndescription: reviews\n---\nBody");
 		write(join(cwd, ".claude", "agents", "empty.md"), "---\nname: empty\n---\n");

@@ -448,7 +448,8 @@ export default function planModeExtension(pi: ExtensionAPI) {
 						frame = undefined;
 					},
 				};
-			});
+				// pi 1.5.0 reports the wait to the terminal (OSC 7501) while the dialog shows; older pi ignores it.
+			}, { blocked: { kind: "permission", message: "Plan approval" } });
 			const decision = await runPlanApproval(
 				options,
 				showDialog,

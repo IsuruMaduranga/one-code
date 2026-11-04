@@ -49,7 +49,7 @@ function corpus(): string[] {
 		out.add(`\x1b[${n}~`);
 		for (const m of mods.slice(1)) for (const e of events) out.add(`\x1b[${n}${m}${e}~`);
 	}
-	for (const f of "ABCDHF") {
+	for (const f of "ABCDHFPQS") {
 		out.add(`\x1b[${f}`);
 		for (const m of mods.slice(1)) for (const e of events) out.add(`\x1b[1${m}${e}${f}`);
 	}

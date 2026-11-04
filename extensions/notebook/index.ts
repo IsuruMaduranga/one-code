@@ -6,7 +6,7 @@
 
 import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "../lib/string-enum.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";

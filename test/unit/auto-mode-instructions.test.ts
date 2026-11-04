@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadProjectInstructions } from "../../extensions/auto-mode/instructions.ts";
 import { buildClaudeMdBlock, discoverContextFiles, instructionRule } from "../../extensions/lib/claude-context.ts";
 import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
+import { classifierInstructionNote, skippedInstructionNote } from "../../extensions/lib/instruction-budget.ts";
+import { estimateTextTokens } from "../../extensions/lib/pi-ai-estimate.ts";
 
 let root: string;
 let repo: string;
@@ -142,5 +144,83 @@ describe("loadProjectInstructions", () => {
 		expect(text).toContain("agents rule");
 		expect(text).not.toContain("dot claude rule");
 		expect(text).not.toContain("rules dir rule");
+	});
+
+	describe("the session model's window", () => {
+		/** 24,000 characters, and pi-ai's estimate for them (its chars-per-token depends on pi's version). */
+		const BIG = "x".repeat(24_000);
+		const T = estimateTextTokens(BIG);
+
+		it("replaces a file over half the window with a note in its labelled slot, never a cut", () => {
+			writeFileSync(join(repo, "CLAUDE.md"), `never force push\n${BIG}`);
+			writeFileSync(join(repo, "AGENTS.md"), "never push to main");
+			const text = loadProjectInstructions(repo, home, T) ?? "";
+			const tokens = estimateTextTokens(`never force push\n${BIG}`);
+			expect(text).toContain(`# ${join(repo, "CLAUDE.md")}\n${classifierInstructionNote(tokens, T)}`);
+			expect(text).not.toContain("never force push");
+			expect(text).not.toContain("xxxx");
+			expect(text).toContain("never push to main");
+			expect(classifierInstructionNote(tokens, T)).toContain("Leaving it out grants no permission.");
+		});
+
+		it("leaves out exactly the files the agent leaves out: the largest past half the window", () => {
+			writeFileSync(join(repo, "CLAUDE.md"), `claude ${BIG}`);
+			writeFileSync(join(repo, "CLAUDE.local.md"), `local ${BIG} and more`);
+			// Room for the first file and the note in the second's slot, not for both files.
+			const window = 2 * estimateTextTokens(`claude ${BIG}`) + 400;
+			const text = loadProjectInstructions(repo, home, window) ?? "";
+			expect(text).toContain(`claude ${BIG}`);
+			expect(text).toContain(`# ${join(repo, "CLAUDE.local.md")}\n${classifierInstructionNote(estimateTextTokens(`local ${BIG} and more`), window)}`);
+			const agent = discoverContextFiles({ cwd: repo, homeClaudeDir: join(home, ".claude"), rule: instructionRule(home), home });
+			expect(agent.map((file) => file.path)).toEqual([join(repo, "CLAUDE.md"), join(repo, "CLAUDE.local.md")]);
+		});
+
+		it("counts a skipped agent file by the note this prompt renders for it", () => {
+			writeFileSync(join(repo, "CLAUDE.md"), `claude ${BIG}`);
+			const window = T; // the agent's file alone is over half
+			const agentTokens = estimateTextTokens(`claude ${BIG}`);
+			const classifierNote = estimateTextTokens(classifierInstructionNote(agentTokens, window));
+			const agentNote = estimateTextTokens(skippedInstructionNote(agentTokens, window));
+			expect(agentNote).toBeLessThan(classifierNote);
+			// A rule that fits beside the agent's shorter note, not beside the classifier's.
+			const target = Math.floor(window / 2) - classifierNote + 1;
+			let body = "RULE-A ";
+			while (estimateTextTokens(body) < target) body += "z";
+			expect(agentNote + estimateTextTokens(body)).toBeLessThanOrEqual(window / 2);
+			mkdirSync(join(repo, ".claude", "rules"), { recursive: true });
+			writeFileSync(join(repo, ".claude", "rules", "a.md"), `---\npaths: ["a/**"]\n---\n${body}`);
+			const text = loadProjectInstructions(repo, home, window) ?? "";
+			expect(text).not.toContain("RULE-A");
+			expect(text).toContain("a.md (applies to a)\n(Not shown:");
+		});
+
+		it("fits the files only the classifier reads together, within what the agent's files leave", () => {
+			writeFileSync(join(repo, "CLAUDE.md"), "claude rule");
+			mkdirSync(join(repo, ".claude", "rules"), { recursive: true });
+			// Two path-conditional rules, each under half the window, together over it.
+			writeFileSync(join(repo, ".claude", "rules", "a.md"), `---\npaths: ["a/**"]\n---\nRULE-A ${BIG}`);
+			writeFileSync(join(repo, ".claude", "rules", "b.md"), `---\npaths: ["b/**"]\n---\nRULE-B ${BIG} and more`);
+			const text = loadProjectInstructions(repo, home, Math.ceil(3 * T)) ?? "";
+			expect(text).toContain("claude rule");
+			expect(text).toContain("RULE-A");
+			expect(text).not.toContain("RULE-B");
+			expect(text).toContain("b.md (applies to b)\n(Not shown:");
+		});
+
+		it("skips a file only the classifier reads when it alone is over the share", () => {
+			writeFileSync(join(repo, "CLAUDE.md"), "claude rule");
+			mkdirSync(join(repo, ".claude", "rules"), { recursive: true });
+			writeFileSync(join(repo, ".claude", "rules", "big.md"), `---\npaths: ["src/**"]\n---\n${BIG}`);
+			const text = loadProjectInstructions(repo, home, T) ?? "";
+			expect(text).toContain("claude rule");
+			expect(text).not.toContain("xxxx");
+			expect(text).toContain("big.md (applies to src)\n(Not shown:");
+		});
+
+		it("skips nothing without a known window", () => {
+			writeFileSync(join(repo, "CLAUDE.md"), BIG);
+			expect(loadProjectInstructions(repo, home)).toContain(BIG);
+			expect(loadProjectInstructions(repo, home, 0)).toContain(BIG);
+		});
 	});
 });

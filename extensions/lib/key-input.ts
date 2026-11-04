@@ -31,7 +31,14 @@ const LOCK_MASK = 64 + 128;
 
 const CODEPOINTS = { escape: 27, tab: 9, enter: 13, space: 32, backspace: 127, kpEnter: 57414 } as const;
 const ARROW_CODEPOINTS = { up: -1, down: -2, right: -3, left: -4 } as const;
-const FUNCTIONAL_CODEPOINTS = { delete: -10, insert: -11, pageUp: -12, pageDown: -13, home: -14, end: -15 } as const;
+const FUNCTIONAL_CODEPOINTS = {
+	delete: -10, insert: -11, pageUp: -12, pageDown: -13, home: -14, end: -15,
+	f1: -21, f2: -22, f3: -23, f4: -24, f5: -25, f6: -26, f7: -27, f8: -28, f9: -29, f10: -30, f11: -31, f12: -32,
+} as const;
+
+/** Kitty's Private Use Area for functional keys (F13-F35, media, modifiers): a CSI u codepoint in it is never text (pi-tui 1.5.0). */
+const KITTY_FUNCTIONAL_PUA_START = 57344;
+const KITTY_FUNCTIONAL_PUA_END = 63743;
 
 /** Kitty keypad codes and the keys they stand for. */
 const KITTY_FUNCTIONAL_KEY_EQUIVALENTS = new Map<number, number>([
@@ -175,6 +182,18 @@ function parseKittySequence(data: string): ParsedSequence | undefined {
 			6: FUNCTIONAL_CODEPOINTS.pageDown,
 			7: FUNCTIONAL_CODEPOINTS.home,
 			8: FUNCTIONAL_CODEPOINTS.end,
+			11: FUNCTIONAL_CODEPOINTS.f1,
+			12: FUNCTIONAL_CODEPOINTS.f2,
+			13: FUNCTIONAL_CODEPOINTS.f3,
+			14: FUNCTIONAL_CODEPOINTS.f4,
+			15: FUNCTIONAL_CODEPOINTS.f5,
+			17: FUNCTIONAL_CODEPOINTS.f6,
+			18: FUNCTIONAL_CODEPOINTS.f7,
+			19: FUNCTIONAL_CODEPOINTS.f8,
+			20: FUNCTIONAL_CODEPOINTS.f9,
+			21: FUNCTIONAL_CODEPOINTS.f10,
+			23: FUNCTIONAL_CODEPOINTS.f11,
+			24: FUNCTIONAL_CODEPOINTS.f12,
 		};
 		const codepoint = funcCodes[Number.parseInt(func[1], 10)];
 		if (codepoint !== undefined) {
@@ -188,6 +207,12 @@ function parseKittySequence(data: string): ParsedSequence | undefined {
 			modifier: Number.parseInt(homeEnd[1], 10) - 1,
 			eventType: parseEventType(homeEnd[2]),
 		};
+	}
+	// F1, F2, F4 (pi-tui 1.5.0): F3 comes as \x1b[13~, since \x1b[1;<mod>R is a cursor position report.
+	const fKey = data.match(/^\x1b\[(?:1;(\d+)(?::(\d+))?)?([PQS])$/);
+	if (fKey) {
+		const codes: Record<string, number> = { P: FUNCTIONAL_CODEPOINTS.f1, Q: FUNCTIONAL_CODEPOINTS.f2, S: FUNCTIONAL_CODEPOINTS.f4 };
+		return { codepoint: codes[fKey[3]], modifier: (fKey[1] ? Number.parseInt(fKey[1], 10) : 1) - 1, eventType: parseEventType(fKey[2]) };
 	}
 	return undefined;
 }
@@ -233,6 +258,7 @@ const NAMED_CODEPOINTS = new Map<number, string>([
 	[FUNCTIONAL_CODEPOINTS.end, "end"],
 	[FUNCTIONAL_CODEPOINTS.pageUp, "pageUp"],
 	[FUNCTIONAL_CODEPOINTS.pageDown, "pageDown"],
+	...Array.from({ length: 12 }, (_, i) => [FUNCTIONAL_CODEPOINTS.f1 - i, `f${i + 1}`] as [number, string]),
 	[ARROW_CODEPOINTS.up, "up"],
 	[ARROW_CODEPOINTS.down, "down"],
 	[ARROW_CODEPOINTS.left, "left"],
@@ -396,13 +422,13 @@ export function keyId(data: string, options?: ParseKeyOptions): string | undefin
 /** pi-tui's `isKeyRelease`: the kitty protocol's release event (flag 2). Pasted text never counts. */
 export function isKeyRelease(data: string): boolean {
 	if (data.includes("\x1b[200~")) return false;
-	return /:3[u~ABCDHF]/.test(data);
+	return /:3[u~ABCDHFPQS]/.test(data);
 }
 
 /** pi-tui's `isKeyRepeat`: the kitty protocol's auto-repeat event (flag 2). */
 export function isKeyRepeat(data: string): boolean {
 	if (data.includes("\x1b[200~")) return false;
-	return /:2[u~ABCDHF]/.test(data);
+	return /:2[u~ABCDHFPQS]/.test(data);
 }
 
 const KITTY_PRINTABLE_ALLOWED_MODIFIERS = MODIFIERS.shift | LOCK_MASK;
@@ -422,6 +448,7 @@ export function decodePrintableKey(data: string): string | undefined {
 		if (modifier & MODIFIERS.shift && typeof shiftedKey === "number") effective = shiftedKey;
 		effective = normalizeKittyFunctionalCodepoint(effective);
 		if (!Number.isFinite(effective) || effective < 32) return undefined;
+		if (effective >= KITTY_FUNCTIONAL_PUA_START && effective <= KITTY_FUNCTIONAL_PUA_END) return undefined;
 		try {
 			return String.fromCodePoint(effective);
 		} catch {

@@ -24,7 +24,7 @@
 
 import { mkdirSync } from "node:fs";
 import { extname, relative } from "node:path";
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "../lib/string-enum.ts";
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
