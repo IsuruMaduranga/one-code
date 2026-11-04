@@ -1,5 +1,5 @@
 {
-	"fetchedAt": "2026-11-03T21:06:30.123Z",
+	"fetchedAt": "2026-11-04T09:28:50.628Z",
 	"source": "https://huggingface.co/api/models/",
 	"payload": {
 		"ByteDance-Seed/UI-TARS-1.5-7B": 8292166656,
@@ -158,6 +158,7 @@
 		"tencent/Hy-MT2-7B": 8029540352,
 		"tencent/Hy3": 298786155776,
 		"tencent/Hy3-preview": 298786155776,
+		"tencent/Hy4": null,
 		"tencent/Hy4-preview": 779960992733,
 		"thedrummer/cydonia-24b-v4.1": 23572403200,
 		"thinkingmachines/Inkling": 952377623626,

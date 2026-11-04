@@ -1,5 +1,5 @@
 {
-	"fetchedAt": "2026-11-03T21:06:30.123Z",
+	"fetchedAt": "2026-11-04T09:28:50.628Z",
 	"source": "https://openrouter.ai/api/v1/models",
 	"payload": {
 		"data": [
@@ -747,7 +747,7 @@
 				],
 				"pricing": {
 					"prompt": "0.000000115",
-					"completion": "0.000004"
+					"completion": "0.0000046"
 				}
 			},
 			{
@@ -770,8 +770,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000015",
-					"completion": "0.0000006"
+					"prompt": "0.0000003",
+					"completion": "0.0000012"
 				}
 			},
 			{
@@ -1237,8 +1237,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000008",
-					"completion": "0.00000024"
+					"prompt": "0.000000078",
+					"completion": "0.000000235"
 				}
 			},
 			{
@@ -1323,7 +1323,7 @@
 				],
 				"pricing": {
 					"prompt": "0.00000006",
-					"completion": "0.00000015"
+					"completion": "0.00000025"
 				}
 			},
 			{
@@ -1515,8 +1515,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000002",
-					"completion": "0.00000052"
+					"prompt": "0.0000001",
+					"completion": "0.00000032"
 				}
 			},
 			{
@@ -1747,8 +1747,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.000000075",
-					"completion": "0.0000003"
+					"prompt": "0.00000015",
+					"completion": "0.0000006"
 				}
 			},
 			{
@@ -2089,8 +2089,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.000000276",
-					"completion": "0.0000096"
+					"prompt": "0.0000002",
+					"completion": "0.000016"
 				}
 			},
 			{
@@ -4283,8 +4283,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000000825",
-					"completion": "0.00000033"
+					"prompt": "0.000000132",
+					"completion": "0.000000528"
 				}
 			},
 			{
@@ -4300,6 +4300,18 @@
 				}
 			},
 			{
+				"id": "tencent/hy4",
+				"created": 1793766031,
+				"hugging_face_id": "tencent/Hy4",
+				"supported_parameters": [
+					"tools"
+				],
+				"pricing": {
+					"prompt": "0.000000417",
+					"completion": "0.0000012505"
+				}
+			},
+			{
 				"id": "tencent/hy4-preview",
 				"created": 1787897375,
 				"hugging_face_id": "tencent/Hy4-preview",
@@ -4307,8 +4319,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000007506",
-					"completion": "0.0000022509"
+					"prompt": "0.000000834",
+					"completion": "0.000002501"
 				}
 			},
 			{
@@ -4787,8 +4799,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000000313",
-					"completion": "0.0000000784"
+					"prompt": "0.0000000269",
+					"completion": "0.0000000996"
 				}
 			},
 			{
@@ -4910,8 +4922,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.000000035",
-					"completion": "0.000000315"
+					"prompt": "0.000000032",
+					"completion": "0.000000288"
 				}
 			},
 			{
@@ -4965,8 +4977,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.000000151",
-					"completion": "0.0000105354"
+					"prompt": "0.00000019",
+					"completion": "0.00000894"
 				}
 			},
 			{
@@ -5053,8 +5065,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000000313",
-					"completion": "0.0000000784"
+					"prompt": "0.0000000269",
+					"completion": "0.0000000996"
 				}
 			},
 			{
