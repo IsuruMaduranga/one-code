@@ -8,7 +8,7 @@
  * Chat Completions SSE, picked from the URL). When the newest user text says
  * GOLDEN_TOOLS and no tool result has come back yet, the reply makes the
  * scripted calls in TOOL_CALLS (successes, error paths, a command the auto-mode
- * classifier judges, a deferred-tool load), plus a subagent when it also says
+ * classifier judges, a deferred-tool load, the user questions), plus a subagent when it also says
  * GOLDEN_AGENT, and a second round of notebook edits under GOLDEN_NOTEBOOK. The auto-mode classifier gets a verdict instead: severity 60
  * at stage 1, so stage 2 runs too, and severity 10 at stage 2, so the call is
  * allowed and the subagent's own requests are recorded. Every other reply is a
@@ -35,6 +35,21 @@ const TOOL_CALLS: ToolCall[] = [
 	{ id: "toolu_golden_5", name: "bash", input: { command: "rm -f ../golden-outside.txt" } },
 	{ id: "toolu_golden_6", name: "tool_search", input: { query: "select:notebook_edit" } },
 ];
+/**
+ * ask_user_question in every result shape: golden-requests.mjs answers the
+ * session's dialogs by header (A picks the first option, B types its own
+ * answer, C asks to chat, D cancels, E answers its first question and cancels
+ * the second); a one-shot run has no UI and gets the no-dialog error.
+ */
+const ask = (header: string, question: string) => ({ header, question, options: [{ label: "Alpha", description: "the first" }, { label: "Beta" }] });
+const ASK_CALLS: ToolCall[] = [
+	{ questions: [ask("Golden A", "Pick one?")] },
+	{ questions: [ask("Golden B", "Type one?")] },
+	{ questions: [ask("Golden C", "Discuss?")] },
+	{ questions: [ask("Golden D", "Cancel?")] },
+	{ questions: [ask("Golden E1", "First?"), ask("Golden E2", "Second?")] },
+].map((input, i) => ({ id: `toolu_golden_ask_${i}`, name: "ask_user_question", input }));
+
 /** Round 1 also reads the notebooks when the user text says GOLDEN_NOTEBOOK (the edit guard wants a read first). */
 const NOTEBOOK_READS: ToolCall[] = ["nb1", "nb2", "nb3", "nb4", "nb5", "notjupyter"].map((name, i) => ({ id: `toolu_golden_nbread_${i}`, name: "read", input: { path: `${name}.ipynb` } }));
 
@@ -122,7 +137,7 @@ function scriptedCalls(messages: Array<{ role?: string; content?: unknown }>): T
 	const after = messages.slice(goldenAt + 1).filter((m) => m.role !== "system");
 	const replies = after.filter((m) => m.role === "assistant").length;
 	if (replies === 0) {
-		return [...TOOL_CALLS, ...(text.includes("GOLDEN_NOTEBOOK") ? NOTEBOOK_READS : []), ...(text.includes("GOLDEN_AGENT") ? [AGENT_CALL] : [])];
+		return [...TOOL_CALLS, ...ASK_CALLS, ...(text.includes("GOLDEN_NOTEBOOK") ? NOTEBOOK_READS : []), ...(text.includes("GOLDEN_AGENT") ? [AGENT_CALL] : [])];
 	}
 	const last = after.at(-1);
 	if (replies === 1 && last && isResults(last) && text.includes("GOLDEN_NOTEBOOK")) return NOTEBOOK_CALLS;

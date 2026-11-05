@@ -148,7 +148,9 @@ async function runConfig(config) {
 		// the turn, so their place in the dump varies; sorting on the serialized
 		// body makes the order stable.
 		const ordered = config.mode === "print" ? requests : requests.map((r) => [JSON.stringify(r), r]).sort(([a], [b]) => (a < b ? -1 : 1)).map(([, r]) => r);
-		return { dialogs: normalize(outcome.dialogs), requests: ordered };
+		// Parallel tool calls open their dialogs in any order: sort them too.
+		const dialogs = normalize(outcome.dialogs).sort((a, b) => (JSON.stringify(a) < JSON.stringify(b) ? -1 : 1));
+		return { dialogs, requests: ordered };
 	} catch (error) {
 		throw new Error(`${config.name}: ${error.message ?? error}`);
 	} finally {
@@ -178,9 +180,11 @@ function runPrint(config, { cwd, env }) {
 
 /**
  * Drive one RPC session: each prompt in SESSION_PROMPTS, with a manual
- * compaction between them. Every dialog is cancelled and its title recorded,
- * so a change in what asks the user shows up in the snapshot too. Resolves
- * with `{ problem }` or `{ dialogs }`.
+ * compaction between them. The fixture's ask_user_question dialogs are
+ * answered by their header (dialogAnswer); every other dialog is cancelled,
+ * so nothing is ever approved by accident. Each dialog is recorded, so a
+ * change in what asks the user shows up in the snapshot too. Resolves with
+ * `{ problem }` or `{ dialogs }`.
  */
 function runSession(config, { cwd, env }) {
 	return new Promise((resolveRun) => {
@@ -225,8 +229,11 @@ function runSession(config, { cwd, env }) {
 					continue;
 				}
 				if (event.type === "extension_ui_request" && ["select", "confirm", "input", "editor"].includes(event.method)) {
-					dialogs.push({ method: event.method, title: event.title ?? event.message ?? "" });
-					child.stdin.write(`${JSON.stringify({ type: "extension_ui_response", id: event.id, cancelled: true })}\n`);
+					const title = event.title ?? event.message ?? "";
+					const answer = dialogAnswer(event.method, title, event.options);
+					dialogs.push({ method: event.method, title, answer: answer ?? "(cancelled)" });
+					const response = answer === undefined ? { cancelled: true } : { value: answer };
+					child.stdin.write(`${JSON.stringify({ type: "extension_ui_response", id: event.id, ...response })}\n`);
 				} else if (event.type === "response" && event.success === false) {
 					finish(`command ${event.command} failed: ${event.error ?? JSON.stringify(event)}`);
 				} else if (event.type === "response" && event.command === "compact") {
@@ -238,6 +245,21 @@ function runSession(config, { cwd, env }) {
 		});
 		next();
 	});
+}
+
+/**
+ * The answer to one of the fixture's ask_user_question dialogs, picked by its
+ * header (golden-fixture.ts ASK_CALLS), or undefined to cancel: every dialog
+ * that is not one of those is cancelled.
+ */
+function dialogAnswer(method, title, options = []) {
+	const header = /^Golden (A|B|C|E1)\b/.exec(title)?.[1];
+	if (!header) return undefined;
+	if (method === "input") return header === "B" ? "a typed golden answer" : undefined;
+	if (method !== "select") return undefined;
+	if (header === "A" || header === "E1") return options[0];
+	if (header === "B") return options.find((option) => option === "Type my own answer");
+	return options.find((option) => option === "Chat about this");
 }
 
 /** A function that replaces every per-machine and per-run value of one run with a placeholder. */
