@@ -7,6 +7,7 @@ import { childExtensionPaths } from "../../extensions/lib/child-extensions.ts";
 import { feature, profiledPi } from "../../extensions/lib/feature.ts";
 import { activeProfile, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile.ts";
 import type { Profile } from "../../extensions/lib/profile-contract.ts";
+import { discoverPlugins, invalidatePluginsCache } from "../../extensions/lib/plugins.ts";
 import { decide } from "../../extensions/permissions/matcher.ts";
 import { createFakePi } from "./helpers/fake-pi.ts";
 
@@ -116,5 +117,17 @@ describe("permission gate and tool switches", () => {
 		expect(decide({ ...base, mode: "default", toolName: "ballerina_reference" }).decision).toBe("allow");
 		setActiveProfileForTest(undefined);
 		expect(decide({ ...base, mode: "default", toolName: "ballerina_reference" }).decision).not.toBe("allow");
+	});
+});
+
+describe("the plugins feature switch", () => {
+	it("hides every plugin from discovery, so no plugin resource reaches another feature", () => {
+		use({ features: { plugins: false } });
+		invalidatePluginsCache();
+		const found = discoverPlugins({ claudePluginsDir: "/nonexistent/claude", oneCodeRoot: "/nonexistent/onecode", cwd: "/", home: "/nonexistent" } as never);
+		expect(found.plugins).toEqual([]);
+		expect(found.agentDirs).toEqual([]);
+		expect(found.skills).toEqual([]);
+		expect(found.mcpConfigs).toEqual([]);
 	});
 });

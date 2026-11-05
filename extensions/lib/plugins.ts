@@ -28,6 +28,7 @@
  * two plugins can both ship a `commit` command.
  */
 
+import { featureEnabled } from "./profile.ts";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import os from "node:os";
 import { basename, join, resolve, sep } from "node:path";
@@ -335,7 +336,19 @@ export function invalidatePluginsCache(): void {
 	box.current = undefined;
 }
 
+/** What discovery reports when the profile turns the plugins feature off: no plugin, so no plugin resource anywhere. */
+function noPlugins(): DiscoveredPlugins {
+	return { plugins: [], enabledPlugins: [], agentDirs: [], skills: [], commands: [], mcpConfigs: [], mcpConfigPlugins: new Map(), byPlugin: new Map() };
+}
+
+/**
+ * Every installed plugin and the resources of the enabled ones. With the
+ * profile's plugins feature off it reports none, so the agents, skills,
+ * commands, hooks, MCP and LSP servers that other features read from plugins
+ * go with it (lib/profile.ts).
+ */
 export function discoverPlugins(roots: DiscoverRoots): DiscoveredPlugins {
+	if (!featureEnabled("plugins")) return noPlugins();
 	const claudeDir = roots.claudePluginsDir;
 	const key = [claudeDir ?? "", roots.oneCodeRoot, roots.cwd, roots.home].join("\n");
 	if (box.current?.key === key) return box.current.result;
