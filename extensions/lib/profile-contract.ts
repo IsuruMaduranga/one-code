@@ -14,6 +14,7 @@ import type { BtwText } from "../btw/text.ts";
 import type { EffortText } from "../effort/text.ts";
 import type { InitText } from "../init/text.ts";
 import type { NotebookText } from "../notebook/text.ts";
+import type { PlanModeText } from "../plan-mode/text.ts";
 import type { RecapText } from "../recap/text.ts";
 import type { SessionTitleText } from "../session-title/text.ts";
 import type { SystemPromptText } from "../system-prompt/text.ts";
@@ -44,6 +45,7 @@ export interface ProfileText {
 	btw?: BtwText;
 	recap?: RecapText;
 	effort?: EffortText;
+	planMode?: PlanModeText;
 	/** Used by the worktree tools, subagents and workflows (each guards isolated sessions with it). */
 	worktreeGuard?: WorktreeGuardText;
 }

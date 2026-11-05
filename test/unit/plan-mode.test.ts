@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { visibleWidth } from "../../extensions/lib/text-width.ts";
 import { wrapProse } from "../../extensions/lib/tui-render.ts";
-import { buildPlanModeReminder } from "../../extensions/plan-mode/reminder.ts";
+import { buildPlanModeReminder } from "../../profile/plan-mode/reminder.ts";
 import { randomSlug } from "../../extensions/plan-mode/slug.ts";
 import {
 	clampOffset,

@@ -33,28 +33,14 @@ import { ccToolRenderers, safeThemePaint } from "../lib/tui-render.ts";
 import { userDenialText } from "../lib/user-denial.ts";
 import type { PermissionMode } from "../permissions/matcher.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../permissions/modes.ts";
-import { buildPlanModeReminder } from "./reminder.ts";
+import { requireText } from "../lib/profile.ts";
 import { randomSlug } from "./slug.ts";
 import { readState, recordState } from "../lib/ledger/state.ts";
 
 /** A plan file larger than this is named after a compaction, not inlined: the model reads it when it needs it. */
 const PLAN_REFERENCE_CHARS = 40_000;
 
-/** The plan the summary replaced, re-attached after a compaction. */
-function planFileReferenceText(path: string, content: string): string {
-	if (content.length > PLAN_REFERENCE_CHARS) return `A plan file exists from plan mode at: ${path}\n\nIt is too large to include here (${content.length.toLocaleString("en-US")} characters); read it before continuing.\n\nIf this plan is relevant to the current work and not already complete, continue working on it.`;
-	return `A plan file exists from plan mode at: ${path}\n\nPlan contents:\n\n${content}\n\nIf this plan is relevant to the current work and not already complete, continue working on it.`;
-}
-
 import { PLAN_ENTRY_STATE, parsePlanRun, type PlanRun } from "./run-state.ts";
-import {
-	approvedPlanText,
-	ENTER_PLAN_MODE_DESCRIPTION,
-	enteredPlanModeText,
-	enterPlanModeDescription,
-	EXIT_PLAN_MODE_DESCRIPTION,
-	exitedPlanModeText,
-} from "./texts.ts";
 import { createMarkdownProse } from "../subagents/prose.ts";
 import type { ProseRenderer } from "../subagents/panel-render.ts";
 import {
@@ -86,6 +72,7 @@ const MODE_NAMES: Record<PermissionMode, string> = {
 };
 
 function planModeExtension(pi: ExtensionAPI) {
+	const text = requireText("planMode");
 	/** The last mode broadcast by permissions; undefined until the first status arrives. */
 	let currentMode: string | undefined;
 	/**
@@ -103,7 +90,7 @@ function planModeExtension(pi: ExtensionAPI) {
 	 * The current run as the branch recorded it when plan mode came on: its plan
 	 * file, whether that file existed then (which picks Claude Code's "Plan File
 	 * Info" line, fixed for the run so the sticky block stays byte-identical turn
-	 * after turn, plan-mode/reminder.ts), and the mode it came from, offered
+	 * after turn, the profile's reminder), and the mode it came from, offered
 	 * first on exit (Claude Code's ExitPlanMode restores `prePlanMode`). Read
 	 * from the branch every time, never kept here, so a /reload, a resume and a
 	 * /tree each see the run of the branch they land on. Until 2026-09-05 the
@@ -184,7 +171,7 @@ function planModeExtension(pi: ExtensionAPI) {
 		}
 		pi.events.emit(PLAN_FILE_CHANNEL, { path });
 		pi.events.emit(REMINDER_CHANNEL, {
-			text: buildPlanModeReminder(path, run.existed),
+			text: text.reminder({ planFile: path, planExists: run.existed }),
 			key: "permission-mode",
 			placement: "sticky-append",
 			toolCallId,
@@ -271,7 +258,9 @@ function planModeExtension(pi: ExtensionAPI) {
 			// an unreadable path (a directory, no permission) attaches nothing.
 		}
 		if (!content.trim()) return;
-		pi.events.emit(REMINDER_CHANNEL, { text: planFileReferenceText(path, content), placement: "user-prepend", orTail: true, untilCompaction: true });
+		// The plan the summary replaced; a large one is named, not inlined: the model reads it when it needs it.
+		const reattached = text.reattached({ planFile: path, content: content.length > PLAN_REFERENCE_CHARS ? undefined : content, chars: content.length });
+		pi.events.emit(REMINDER_CHANNEL, { text: reattached, placement: "user-prepend", orTail: true, untilCompaction: true });
 	});
 
 	/**
@@ -288,7 +277,7 @@ function planModeExtension(pi: ExtensionAPI) {
 			name: "enter_plan_mode",
 			label: "Enter plan mode",
 			...ccToolRenderers("Enter plan mode"),
-			description: ENTER_PLAN_MODE_DESCRIPTION,
+			description: text.descriptions.enter_plan_mode("short"),
 			parameters: Type.Object({}),
 			async execute(toolCallId, _params, _signal, _onUpdate, ctx) {
 				pi.events.emit(MODE_CHANNEL, { mode: "plan", toolCallId });
@@ -298,19 +287,19 @@ function planModeExtension(pi: ExtensionAPI) {
 				// the tool result too so the model can start writing this same turn.
 				const path = ensurePlanFile(ctx);
 				return {
-					content: [{ type: "text", text: enteredPlanModeText(path) }],
+					content: [{ type: "text", text: text.entered(path) }],
 					details: { planFilePath: path },
 				};
 			},
 		}),
-		enterPlanModeDescription,
+		text.descriptions.enter_plan_mode,
 	);
 
 	pi.registerTool({
 		name: "exit_plan_mode",
 		label: "Exit plan mode",
 		...ccToolRenderers("Exit plan mode"),
-		description: EXIT_PLAN_MODE_DESCRIPTION,
+		description: text.descriptions.exit_plan_mode,
 		parameters: Type.Object({}),
 		async execute(toolCallId, _params, signal, _onUpdate, ctx) {
 			// Guard the out-of-sequence call: without this, a cold exit_plan_mode
@@ -322,7 +311,7 @@ function planModeExtension(pi: ExtensionAPI) {
 					content: [
 						{
 							type: "text",
-							text: "Not in plan mode, so there is no plan to approve. Call enter_plan_mode first, build the plan in the file it names, then call exit_plan_mode.",
+							text: text.notInPlanMode,
 						},
 					],
 					details: {},
@@ -336,7 +325,7 @@ function planModeExtension(pi: ExtensionAPI) {
 					content: [
 						{
 							type: "text",
-							text: `No plan to approve: ${path} is missing or empty. Write your plan there first, then call exit_plan_mode again.`,
+							text: text.emptyPlan(path),
 						},
 					],
 					details: { planFilePath: path },
@@ -355,7 +344,7 @@ function planModeExtension(pi: ExtensionAPI) {
 					content: [
 						{
 							type: "text",
-							text: `Plan approval needs an interactive session, and this one has no user to approve it. The session stays in plan mode; the plan is recorded at ${path} for the user to review. Do not try to implement it here.`,
+							text: text.noApprover(path),
 						},
 					],
 					details: { planFilePath: path, plan, approved: false },
@@ -463,9 +452,9 @@ function planModeExtension(pi: ExtensionAPI) {
 				pi.events.emit(MODE_CHANNEL, { mode: picked.mode, toolCallId });
 				// Claude Code's exit reminder, queued from execute so it is written
 				// into this result after the mode notice.
-				pi.events.emit(REMINDER_CHANNEL, { text: exitedPlanModeText(path), toolCallId });
+				pi.events.emit(REMINDER_CHANNEL, { text: text.exited(path), toolCallId });
 				return {
-					content: [{ type: "text", text: approvedPlanText(path, plan) }],
+					content: [{ type: "text", text: text.approved({ planFile: path, plan }) }],
 					details: { plan, approved: true },
 				};
 			}

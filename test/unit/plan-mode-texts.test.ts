@@ -20,7 +20,7 @@ import {
 	enterPlanModeDescription,
 	EXIT_PLAN_MODE_DESCRIPTION,
 	exitedPlanModeText,
-} from "../../extensions/plan-mode/texts.ts";
+} from "../../profile/plan-mode/texts.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
 const OPUS = { provider: "anthropic", id: "claude-opus-4-8", api: "anthropic-messages" };

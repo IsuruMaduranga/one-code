@@ -5,7 +5,7 @@
  * file-based"); only the wording follows Claude Code.
  */
 
-import type { DescriptionForm } from "../lib/tool-variants.ts";
+import type { DescriptionForm } from "../../extensions/lib/tool-variants.ts";
 
 /**
  * Claude Code's EnterPlanMode description, which prefers plan mode for any

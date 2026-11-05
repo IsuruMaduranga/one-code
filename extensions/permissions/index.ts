@@ -153,7 +153,7 @@ const PROMPT_WAITS_FOR_PANEL = "A permission request is waiting. Close this pane
 
 const DENIED_NON_INTERACTIVE =
 	"Permission required but this session is non-interactive, so the user cannot approve the call. It was blocked. Only pre-approved tools can run here; work within those, or ask the user to re-run interactively or with an allow rule / --dangerously-skip-permissions.";
-// Must agree with the plan-mode reminder (plan-mode/reminder.ts): the plan is
+// Must agree with the plan-mode reminder (profile/plan-mode/reminder.ts): the plan is
 // built in the plan file and approved through exit_plan_mode, never presented
 // as chat text. A denial that said "present your plan to the user instead"
 // contradicted the reminder in the same turn.
