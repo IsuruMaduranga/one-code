@@ -81,7 +81,7 @@ const CONFIGS = [
 	{ name: "session-anthropic-tiny", model: ANTHROPIC, tier: "tiny", mode: "session" },
 	{ name: "session-openrouter-cheap", model: OPENROUTER, tier: "cheap", mode: "session" },
 ];
-const PROMPTS = { print: "Reply with OK.", tools: "GOLDEN_TOOLS GOLDEN_AGENT GOLDEN_NOTEBOOK GOLDEN_TASKS GOLDEN_WEB_FETCH GOLDEN_SEARCH GOLDEN_SKILL GOLDEN_MCP GOLDEN_LSP GOLDEN_HOOKS GOLDEN_MEMORY GOLDEN_CRON GOLDEN_MONITOR GOLDEN_LOOP GOLDEN_WORKTREE: make the scripted calls." };
+const PROMPTS = { print: "Reply with OK.", tools: "GOLDEN_TOOLS GOLDEN_AGENT GOLDEN_NOTEBOOK GOLDEN_TASKS GOLDEN_WEB_FETCH GOLDEN_SEARCH GOLDEN_SKILL GOLDEN_MCP GOLDEN_LSP GOLDEN_HOOKS GOLDEN_MEMORY GOLDEN_CRON GOLDEN_MONITOR GOLDEN_LOOP GOLDEN_ARTIFACT GOLDEN_WORKTREE: make the scripted calls." };
 
 /** A format 4.4 notebook (no cell ids, so nothing random) with the given code cells. */
 const notebook = (...sources) =>
@@ -231,7 +231,10 @@ async function runConfig(config) {
 			TZ: "UTC",
 			// Keys for the canned Brave and Tavily replies (golden-fixture.ts SEARCH_ROUNDS),
 			// and the stub language server first on PATH (LSP_ROUNDS).
-			...(config.mode === "tools" ? { BRAVE_SEARCH_API_KEY: "golden-brave", TAVILY_API_KEY: "golden-tavily", PATH: `${bin}:${process.env.PATH}` } : {}),
+			// SSH_CONNECTION keeps the artifact tool from opening a real browser (ARTIFACT_ROUNDS).
+			...(config.mode === "tools"
+				? { BRAVE_SEARCH_API_KEY: "golden-brave", TAVILY_API_KEY: "golden-tavily", PATH: `${bin}:${process.env.PATH}`, SSH_CONNECTION: "golden 22 golden 22" }
+				: {}),
 			...config.env,
 		};
 		const outcome = config.mode === "session" ? await runSession(config, { cwd: project, env }) : await runPrint(config, { cwd: project, env });
@@ -403,6 +406,9 @@ function makeNormalizer({ home, project, root }) {
 		out = out.replace(/\b(recurring job |one-shot task |Cancelled job |with id ')[0-9a-f]{8}\b/g, "$1<JOB_ID>");
 		out = out.replace(/^[0-9a-f]{8}( — )/gm, "<JOB_ID>$1");
 		out = out.replace(/^[0-9a-f]{8}$/, "<JOB_ID>").replace(/("id":")[0-9a-f]{8}"/g, '$1<JOB_ID>"');
+		// An artifact id's random suffix (artifacts/store.ts) and its list line's update time.
+		out = out.replace(/\b(golden-report-)[0-9a-f]{6}\b/g, "$1<SUFFIX>");
+		out = out.replace(/(updated <DATE> )\d{2}:\d{2}( UTC)/g, "$1<HH:MM>$2");
 		// The wakeup's clock time (background/wakeup.ts formatScheduled).
 		out = out.replace(/(Next wakeup scheduled for )\d{2}:\d{2}:\d{2}/g, "$1<CLOCK>");
 		// Background task ids (background/registry.ts generateTaskId): "b" and 7 hex digits.

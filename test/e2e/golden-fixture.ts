@@ -18,7 +18,7 @@
  * GOLDEN_HOOKS (golden-hook.mjs), MEMORY.md near and over its limit under
  * GOLDEN_MEMORY, the cron tools and schedule_wakeup under GOLDEN_CRON, the
  * monitor and task tools under GOLDEN_MONITOR, the /loop skill under
- * GOLDEN_LOOP and the worktree
+ * GOLDEN_LOOP, the artifact tool under GOLDEN_ARTIFACT and the worktree
  * tools under GOLDEN_WORKTREE after all of them. The auto-mode classifier gets a verdict instead: severity 60
  * at stage 1, so stage 2 runs too, and severity 10 at stage 2, so the call is
  * allowed and the subagent's own requests are recorded. Every other reply is a
@@ -485,6 +485,36 @@ const LOOP_ROUNDS: ToolCall[][] = [
 ];
 
 /**
+ * The artifact tool under GOLDEN_ARTIFACT (golden-requests.mjs sets
+ * SSH_CONNECTION, so no browser opens and the result says so): load it; an
+ * empty store's list, every publish refusal, an unknown id and a delete with
+ * none; publish a page and an empty one; publish the page again (a new
+ * version) and list; open the gallery and the page, and a delete this
+ * one-shot run cannot confirm. golden-requests.mjs replaces the id's random
+ * suffix and the update time.
+ */
+const ar = (id: string, input: ToolCall["input"], name = "artifact"): ToolCall => ({ id: `toolu_golden_artifact_${id}`, name, input });
+const artifactId = (messages: Messages) => /artifact (golden-report-[0-9a-f]{6})/.exec(JSON.stringify(messages))?.[1] ?? "missing";
+const ARTIFACT_ROUNDS: ToolCall[][] = [
+	[ar("load", { query: "select:artifact" }, "tool_search")],
+	[
+		ar("page", { path: "golden.html", content: "<!doctype html>\n<title>Golden report</title>\n<p>Golden.</p>\n" }, "write"),
+		ar("empty_page", { path: "empty.html", content: "" }, "write"),
+		ar("list_empty", { action: "list" }),
+		ar("no_path", {}),
+		ar("not_html", { file_path: "README.md" }),
+		ar("missing", { file_path: "missing.html" }),
+		ar("directory", { file_path: ".claude" }),
+		ar("unknown", { action: "open", id: "nope" }),
+		ar("delete_none", { action: "delete" }),
+	],
+	[ar("publish", { file_path: "golden.html", description: "A golden page." }), ar("publish_empty", { file_path: "empty.html" })],
+	[ar("update", { file_path: "golden.html" })],
+	[ar("list", { action: "list" })],
+	[ar("gallery", { action: "open" }), ar("open", (messages) => ({ action: "open", id: artifactId(messages) })), ar("delete", (messages) => ({ action: "delete", id: artifactId(messages) }))],
+];
+
+/**
  * Plan mode under GOLDEN_PLAN, on its own (the session scenario's last
  * prompt): load the tools, exit before entering, enter, exit with an empty
  * plan, write the plan to the file enter_plan_mode named, and exit for
@@ -573,6 +603,7 @@ function roundsFor(text: string): ToolCall[][] {
 	if (has("GOLDEN_CRON")) rounds.push(...CRON_ROUNDS);
 	if (has("GOLDEN_MONITOR")) rounds.push(...MONITOR_ROUNDS);
 	if (has("GOLDEN_LOOP")) rounds.push(...LOOP_ROUNDS);
+	if (has("GOLDEN_ARTIFACT")) rounds.push(...ARTIFACT_ROUNDS);
 	if (has("GOLDEN_WORKTREE")) rounds.push(...WORKTREE_ROUNDS);
 	return rounds;
 }
