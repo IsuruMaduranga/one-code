@@ -210,7 +210,7 @@ function runPrint(config, { cwd, env }) {
 /**
  * Drive one RPC session: each prompt in SESSION_PROMPTS, with a manual
  * compaction between them, then a /btw side question (its answer notice is
- * recorded) and /init. The fixture's ask_user_question dialogs are
+ * recorded), /init, and ultracode switched on and off with a turn after each. The fixture's ask_user_question dialogs are
  * answered by their header (dialogAnswer); every other dialog is cancelled,
  * so nothing is ever approved by accident. Each dialog is recorded, so a
  * change in what asks the user shows up in the snapshot too. Resolves with
@@ -226,6 +226,11 @@ function runSession(config, { cwd, env }) {
 			{ type: "prompt", message: SESSION_PROMPTS[1] },
 			{ type: "prompt", message: "/btw What is the golden project?", until: "notify" },
 			{ type: "prompt", message: "/init" },
+			// Ultracode on, a turn with its standing reminder, off, a turn with the off notice.
+			{ type: "prompt", message: "/effort ultracode", until: "notify" },
+			{ type: "prompt", message: SESSION_PROMPTS[1] },
+			{ type: "prompt", message: "/effort high", until: "notify" },
+			{ type: "prompt", message: SESSION_PROMPTS[1] },
 		];
 		let step = -1;
 		const dialogs = [];
