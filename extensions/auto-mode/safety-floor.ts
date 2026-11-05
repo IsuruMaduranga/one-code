@@ -37,6 +37,8 @@ import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code
 import { CATALOG_CACHE_TAIL, catalogCacheFiles } from "../lib/model-catalog-data.ts";
 import { claudeJsonPath, comparablePath, oneCodeStateDir } from "../lib/paths.ts";
 import { isWritingTool, resolveForContainment, toAbsolute, toAbsoluteBash } from "./paths.ts";
+import type { FloorTarget } from "./text.ts";
+import { autoModeWords } from "./words.ts";
 
 /** The same comparison form resolveForContainment's output is in (lib/paths.ts). */
 const fold = comparablePath;
@@ -184,34 +186,32 @@ export interface FloorInput {
  * would be false and a read-only search can pass rewritten without it.
  */
 const PATTERN_TOKEN = /^!|[*?[]/;
-const PATTERN_REASON = "its pattern ";
 
-const REASON = (token: string) =>
-	CATALOG_FILE_NAME.test(token)
-		? `it writes ${token}, a model catalog that decides the model tier the auto-mode checks that contain this agent depend on`
-		: PATTERN_TOKEN.test(token)
-			? `${PATTERN_REASON}${token} can select a file that holds the permission rules and auto-mode configuration that contain this agent`
-			: `it writes ${token}, which holds the permission rules and auto-mode configuration that contain this agent`;
+const REASON = (token: string): FloorTarget => ({
+	kind: CATALOG_FILE_NAME.test(token) ? "catalog" : PATTERN_TOKEN.test(token) ? "pattern" : "control",
+	token,
+});
 
-/** The model-facing block text for a floor reason. The floor re-checks a rewrite, and the classifier still judges it. */
-export function safetyFloorBlockText(reason: string): string {
-	const opening = `Auto mode blocked this call without consulting the classifier: ${reason}.`;
-	if (reason.startsWith(PATTERN_REASON)) {
-		return `${opening} A command that may touch the gate's own configuration is never auto-approved. If this is a read-only search, rewrite it without the wildcard or negated pattern (for example \`grep -r --exclude-dir=node_modules\`); otherwise ask the user to run it themselves.`;
-	}
-	return `${opening} Writes to the gate's own configuration are never auto-approved. Do not retry or route around this; ask the user to make the change themselves.`;
+/** The model-facing block text for a floor target, in the profile's words. The floor re-checks a rewrite, and the classifier still judges it. */
+export function safetyFloorBlockText(target: FloorTarget): string {
+	return autoModeWords().floorBlock(target);
+}
+
+/** The floor's reason for the decision log, in the profile's words. */
+export function safetyFloorReason(target: FloorTarget): string {
+	return autoModeWords().floorReason(target);
 }
 
 /** A cached catalog's file name, to word the reason (a false match only rewords it). */
 const CATALOG_FILE_NAME = /(^|[/\\])(models-dev|openrouter|huggingface|refresh-failed)\.json$/i;
 
 /**
- * Reason text when this call writes a safety-control file, undefined otherwise.
+ * What this call writes that the floor protects, undefined otherwise.
  * Paths are resolved through symlinks (dangling leaves and not-yet-existing
  * files included), so linking a settings file elsewhere and writing the link
  * does not slip past.
  */
-export function safetyControlWrite({ toolName, input, cwd, home, oneCodeProjectSettings }: FloorInput): string | undefined {
+export function safetyControlWrite({ toolName, input, cwd, home, oneCodeProjectSettings }: FloorInput): FloorTarget | undefined {
 	const perRepoSettings = oneCodeProjectSettings ?? oneCodeProjectSettingsPath(cwd, home);
 
 	if (isWritingTool(toolName)) {

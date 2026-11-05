@@ -51,6 +51,17 @@ import {
 	withAuthBaseUrl,
 } from "./model-select.ts";
 import { actionLength, MAX_ACTION_CHARS } from "./transcript.ts";
+import type { ClassifierBlock, UnusableClassifier } from "./text.ts";
+import { autoModeWords } from "./words.ts";
+
+/** A verdict that blocks without one: the classifier could not judge the call. */
+const noVerdict = (block: ClassifierBlock, extra: Partial<ClassifyVerdict> = {}): ClassifyVerdict => ({
+	decision: "block",
+	reason: autoModeWords().classifierBlock(block),
+	tier: "unmatched",
+	noVerdict: true,
+	...extra,
+});
 
 /** A slow classifier stalls every tool call, so the wait is capped per stage. */
 export const CLASSIFIER_TIMEOUT_MS = 30_000;
@@ -298,10 +309,10 @@ function remainingCandidates(deps: ClassifierDeps): { candidates: Candidate[]; n
  * Every candidate is gone and one refused the classifier's prompt: the call is
  * not judged, and the user is told once how to go on.
  */
-function refusalStop(deps: ClassifierDeps, unusable: readonly string[] = []): ClassifyVerdict {
+function refusalStop(deps: ClassifierDeps, unusable: readonly UnusableClassifier[] = []): ClassifyVerdict {
 	const refused = [...deps.state.refused].join(", ");
 	// A model that failed this call for another cause has its own fix: name it too.
-	const others = unusable.length > 0 ? ` ${unusable.join("; ")}.` : "";
+	const others = unusable.length > 0 ? ` ${unusable.map((u) => `${u.model} cannot be used (${u.error})`).join("; ")}.` : "";
 	notifyOnce(
 		deps,
 		"refusal-stop",
@@ -309,12 +320,7 @@ function refusalStop(deps: ClassifierDeps, unusable: readonly string[] = []): Cl
 			`Calls are not judged and do not run. Switch to manual approval (${modeCycleKey()} cycles permission modes), or choose another classifier with /auto-mode model <provider/id>.`,
 		"warning",
 	);
-	return {
-		decision: "block",
-		reason: `Auto mode has no classifier: ${refused} refused the classifier's prompt as a possible usage-policy violation.${others}`,
-		tier: "unmatched",
-		noVerdict: true,
-	};
+	return noVerdict({ kind: "noClassifierLeft", refused: [...deps.state.refused], unusable: [...unusable] });
 }
 
 function notifyOnce(deps: ClassifierDeps, key: string, message: string, level: "info" | "warning", notice?: ClassifierNotice) {
@@ -331,7 +337,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 	const { candidates, notices } = remainingCandidates(deps);
 	if (candidates.length === 0) {
 		if (deps.state.refused.size > 0) return refusalStop(deps);
-		return { decision: "block", reason: "No model is available to run the auto-mode classifier.", tier: "unmatched", noVerdict: true };
+		return noVerdict({ kind: "noModel" });
 	}
 
 	// Automatic-selection fallback explanations are surfaced once per distinct message.
@@ -343,12 +349,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 	// that is refused with its size, never judged from a prefix.
 	const actionChars = deps.reviewOnly ? 0 : actionLength(request.transcript);
 	if (actionChars > MAX_ACTION_CHARS) {
-		return {
-			decision: "block",
-			reason: `This call is ${actionChars} characters, more than the ${MAX_ACTION_CHARS} the auto-mode classifier reviews in full. Split it into smaller calls.`,
-			tier: "unmatched",
-			noVerdict: true,
-		};
+		return noVerdict({ kind: "actionTooLong", chars: actionChars, max: MAX_ACTION_CHARS });
 	}
 
 	// buildPayload builds the ~110KB ruleset once and returns the grounding index
@@ -392,7 +393,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 	let lastError = "";
 	let sawTimeout = false;
 	/** Candidates rejected this call as unusable, with their errors. */
-	const unusable: string[] = [];
+	const unusable: UnusableClassifier[] = [];
 	let timedOutKey: string | undefined;
 	/** The timed-out candidate's own error: a later candidate's failure must not relabel it. */
 	let timedOutError = "";
@@ -570,28 +571,17 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 			lastError = error instanceof Error ? error.message : String(error);
 
 			if (kind === "cancelled") {
-				return { decision: "block", reason: "Auto-mode classification was cancelled.", tier: "unmatched", noVerdict: true };
+				return noVerdict({ kind: "cancelled" });
 			}
 			// The provider is authoritative about its token window. Do not clip the
 			// history or retry another model: the gate must offer manual approval
 			// interactively, or stop a headless run, rather than invent a verdict.
 			if (kind === "transcript-too-long" || (kind === "error" && isClassifierTranscriptTooLong(lastError))) {
-				return {
-					decision: "block",
-					reason: `Classifier transcript exceeded context window (${key}). The action was not judged. Compact the session (/compact) and continue.`,
-					tier: "unmatched",
-					noVerdict: true,
-					transcriptTooLong: true,
-				};
+				return noVerdict({ kind: "transcriptTooLong", model: key }, { transcriptTooLong: true });
 			}
 			if (kind === "truncated") {
 				if (debug) process.stderr.write(`[auto-mode] ${key} ${request.toolName} → verdict truncated at maxTokens\n`);
-				return {
-					decision: "block",
-					reason: "The approval classifier's reply was cut off by its output limit before the verdict completed.",
-					tier: "unmatched",
-					noVerdict: true,
-				};
+				return noVerdict({ kind: "truncated" });
 			}
 			if (kind === "error") {
 				// The provider refused the thinking-off request outright (metadata gap:
@@ -611,7 +601,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 				}
 				// A substantive, non-transient failure that is not "model unusable here":
 				// surface it rather than papering over something about to clear.
-				return { decision: "block", reason: `The auto-mode classifier returned no verdict (${providerErrorSummary(lastError)}).`, tier: "unmatched", noVerdict: true };
+				return noVerdict({ kind: "providerError", summary: providerErrorSummary(lastError) });
 			}
 			if (kind === "timeout") {
 				// Transient — do NOT reject the model, it may be fine next call. Step to
@@ -653,7 +643,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 			// unavailable: this model is not usable here — step over it and record it.
 			reject(key);
 			deps.onModelUnusable?.(key, lastError);
-			unusable.push(`${key} cannot be used (${lastError})`);
+			unusable.push({ model: key, error: String(lastError) });
 			notifyOnce(
 				deps,
 				`rejected:${key}`,
@@ -670,22 +660,13 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 	if (sawTimeout) {
 		const model = timedOutKey ? timedOutKey.split("/").pop() : undefined;
 		const network = isTransportFailure(timedOutError);
-		return {
-			decision: "block",
-			tier: "timeout",
-			noVerdict: true,
-			reason:
-				`Auto mode could not screen this ${request.toolName} call${network ? "" : " in time"} — the approval classifier${model ? ` (${model})` : ""} ` +
-				`is temporarily unavailable (${network ? `network error: ${timedOutError}` : "timed out"}), so the call was not judged either way.`,
-		};
+		return noVerdict(
+			{ kind: "unavailable", tool: request.toolName, ...(model ? { model } : {}), ...(network ? { networkError: String(timedOutError) } : {}) },
+			{ tier: "timeout" },
+		);
 	}
 
 	if (deps.state.refused.size > 0) return refusalStop(deps, unusable);
 	// Every candidate was unusable — say which knob fixes it.
-	return {
-		decision: "block",
-		reason: `No usable auto-mode classifier model (last error: ${lastError}).`,
-		tier: "unmatched",
-		noVerdict: true,
-	};
+	return noVerdict({ kind: "noUsableModel", lastError: String(lastError) });
 }

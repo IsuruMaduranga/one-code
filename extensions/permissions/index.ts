@@ -60,7 +60,7 @@ import { describeCandidate } from "../auto-mode/model-select.ts";
 import { conflictingPathArguments, isWithin, resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
 import { DenialStore, denialInputKey, permissionGrantedMessage } from "../auto-mode/denials.ts";
 import { PauseTracker, unattendedPromptNotice, unattendedPromptTimeoutMs } from "../auto-mode/pause.ts";
-import { safetyControlWrite, safetyFloorBlockText } from "../auto-mode/safety-floor.ts";
+import { safetyControlWrite, safetyFloorBlockText, safetyFloorReason } from "../auto-mode/safety-floor.ts";
 import { isExecutionPrimitivePath, isSensitivePath } from "../auto-mode/sensitive.ts";
 import { analyzeShellCommand } from "../auto-mode/shell-analysis.ts";
 import { bashParserReady, bashParserUnavailable } from "../lib/bash-parser.ts";
@@ -1502,10 +1502,10 @@ function permissionsExtension(pi: ExtensionAPI) {
 			// since editing your own settings by hand is legitimate.
 			autoConfig ??= loadAutoModeConfig(os.homedir());
 			if (mode === "auto" || !ctx.hasUI) {
-				logDecision(ctx, { tool: event.toolName, subject, outcome: "block", source: "floor", reason: floorReason });
+				logDecision(ctx, { tool: event.toolName, subject, outcome: "block", source: "floor", reason: safetyFloorReason(floorReason) });
 				return { block: true, reason: safetyFloorBlockText(floorReason) };
 			}
-			logDecision(ctx, { tool: event.toolName, subject, outcome: "prompt", source: "floor", reason: floorReason });
+			logDecision(ctx, { tool: event.toolName, subject, outcome: "prompt", source: "floor", reason: safetyFloorReason(floorReason) });
 		} else if (result.decision === "classify") {
 			// The exact call the user approved in /permissions after the classifier
 			// denied it runs once without the classifier (auto-mode/denials.ts). Deny
@@ -1632,7 +1632,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 				subject: matchSubject,
 				outcome: approved(choice, grant) ? "allow" : "block",
 				source: "user",
-				reason: floorReason ?? "resume after pause",
+				reason: floorReason ? safetyFloorReason(floorReason) : "resume after pause",
 			});
 		}
 
@@ -1794,7 +1794,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		// would let an inattentive "Yes" — or a prompt-injected child — defeat the one
 		// control the classifier itself can't be trusted to enforce.
 		if (floorReason) {
-			if (ctx) logDecision(ctx, { tool: toolName, subject, outcome: "block", source: "floor", reason: floorReason });
+			if (ctx) logDecision(ctx, { tool: toolName, subject, outcome: "block", source: "floor", reason: safetyFloorReason(floorReason) });
 			return { block: true, reason: safetyFloorBlockText(floorReason) };
 		}
 

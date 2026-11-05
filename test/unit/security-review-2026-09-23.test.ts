@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { checkOptions, READ_ONLY_SPECS } from "../../extensions/auto-mode/read-only-options.ts";
-import { safetyControlWrite, shellNamesControlFile } from "../../extensions/auto-mode/safety-floor.ts";
+import { safetyControlWrite, safetyFloorReason, shellNamesControlFile } from "../../extensions/auto-mode/safety-floor.ts";
 import { analyzeShellCommand, parseCommand } from "../../extensions/auto-mode/shell-analysis.ts";
 import { configRunsProgram } from "../../extensions/auto-mode/git-checkout-programs.ts";
 import { gitStatusMeta, gitStatusMetaArgs } from "../../extensions/auto-mode/git-status-meta.ts";
@@ -37,7 +37,10 @@ afterEach(() => {
 });
 
 const verdict = (command: string) => analyzeShellCommand({ command, cwd, home }).verdict;
-const floor = (command: string, toolName = "bash") => safetyControlWrite({ toolName, input: { command }, cwd, home });
+const floor = (command: string, toolName = "bash") => {
+	const target = safetyControlWrite({ toolName, input: { command }, cwd, home });
+	return target && safetyFloorReason(target);
+};
 
 describe("H1: read-only commands are proved by their options, not their name", () => {
 	it("escalates git subcommands carrying options that write, delete or run a program", () => {

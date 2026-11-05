@@ -11,6 +11,7 @@
 import type { Profile } from "../extensions/lib/profile-contract.ts";
 import { artifacts } from "./artifacts/index.ts";
 import { askUser } from "./ask-user/index.ts";
+import { autoMode } from "./auto-mode/index.ts";
 import { background } from "./background/index.ts";
 import { btw } from "./btw/index.ts";
 import { compaction } from "./compaction/index.ts";
@@ -41,5 +42,5 @@ export const profile: Profile = {
 	features: {},
 	tools: {},
 	childExtensions: [],
-	text: { systemPrompt, notebook, askUser, tasks, worktree, worktreeGuard, webFetch, webSearch, nativeWeb, sessionTitle, init, btw, recap, effort, planMode, skill, mcp, lsp, hooks, memory, background, artifacts, toolStyle, contextBudget, fileTracker, compaction, workflow },
+	text: { systemPrompt, notebook, askUser, tasks, worktree, worktreeGuard, webFetch, webSearch, nativeWeb, sessionTitle, init, btw, recap, effort, planMode, skill, mcp, lsp, hooks, memory, background, artifacts, toolStyle, contextBudget, fileTracker, compaction, workflow, autoMode },
 };

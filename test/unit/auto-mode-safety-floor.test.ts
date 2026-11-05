@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { isSafetyControlTarget, safetyControlWrite, safetyFloorBlockText } from "../../extensions/auto-mode/safety-floor.ts";
+import { isSafetyControlTarget, safetyControlWrite, safetyFloorBlockText, safetyFloorReason } from "../../extensions/auto-mode/safety-floor.ts";
 import { analyzeShellCommand } from "../../extensions/auto-mode/shell-analysis.ts";
 import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
 import { oneCodeProjectSettingsPath } from "../../extensions/lib/one-code-settings.ts";
@@ -24,8 +24,11 @@ afterEach(() => {
 	rmSync(cwd, { recursive: true, force: true });
 });
 
-const check = (toolName: string, input: Record<string, unknown>) =>
-	safetyControlWrite({ toolName, input, cwd, home });
+/** The floor's reason as the decision log words it, undefined when it lets the call through. */
+const check = (toolName: string, input: Record<string, unknown>) => {
+	const target = safetyControlWrite({ toolName, input, cwd, home });
+	return target && safetyFloorReason(target);
+};
 
 /** A path as it is spelled inside a bash command line: forward slashes (a backslash is an escape there). */
 const sh = forwardSlashes;
@@ -397,14 +400,17 @@ describe("safetyControlWrite: the reason for a pattern match", () => {
 	])("words a wildcard or negated pattern as one that can select a control file: %s", (command, token) => {
 		const reason = check("bash", { command });
 		expect(reason).toBe(`its pattern ${token} can select a file that holds the permission rules and auto-mode configuration that contain this agent`);
-		expect(safetyFloorBlockText(reason!)).toContain("rewrite it without the wildcard or negated pattern");
-		expect(safetyFloorBlockText(reason!)).not.toContain("Do not retry");
+		const block = safetyFloorBlockText(safetyControlWrite({ toolName: "bash", input: { command }, cwd, home })!);
+		expect(block).toContain("rewrite it without the wildcard or negated pattern");
+		expect(block).not.toContain("Do not retry");
 	});
 
 	it("still stops a negated find that deletes, and keeps the literal wording for a named file", () => {
 		expect(check("bash", { command: `find . -type f -not -path "./src/*" -delete` })).toMatch(/^its pattern \.\/src\/\* can select/);
 		const literal = check("write", { path: ".claude/settings.json", content: "{}" });
 		expect(literal).toMatch(/^it writes /);
-		expect(safetyFloorBlockText(literal!)).toContain("Do not retry or route around this; ask the user to make the change themselves.");
+		expect(safetyFloorBlockText(safetyControlWrite({ toolName: "write", input: { path: ".claude/settings.json", content: "{}" }, cwd, home })!)).toContain(
+			"Do not retry or route around this; ask the user to make the change themselves.",
+		);
 	});
 });

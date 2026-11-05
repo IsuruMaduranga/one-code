@@ -20,6 +20,8 @@
  * starts empty.
  */
 
+import { autoModeWords } from "./words.ts";
+
 /** Claude Code's `MAX_DENIALS`. */
 export const MAX_DENIALS = 20;
 
@@ -117,8 +119,8 @@ export class DenialStore {
 
 /**
  * The message the model gets when the user approves denials in `/permissions`:
- * Claude Code's wording, verbatim (findings §33).
+ * Claude Code's wording, verbatim (findings §33), from the profile.
  */
 export function permissionGrantedMessage(displays: readonly string[]): string {
-	return `Permission granted for: ${displays.join(", ")}. You may now retry ${displays.length === 1 ? "this command" : "these commands"} if you would like.`;
+	return autoModeWords().permissionGranted({ displays });
 }

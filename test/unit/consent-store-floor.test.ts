@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { safetyControlWrite } from "../../extensions/auto-mode/safety-floor.ts";
+import { safetyControlWrite, safetyFloorReason } from "../../extensions/auto-mode/safety-floor.ts";
 import { consentStorePath, consentStorePaths } from "../../extensions/lib/consent-stores.ts";
 import { forwardSlashes } from "../../extensions/lib/paths.ts";
 import { approvalStorePath as hooksStore } from "../../extensions/hooks/trust.ts";
@@ -32,7 +32,10 @@ afterEach(() => {
 	else process.env.ONECODE_STATE_DIR = savedState;
 });
 
-const check = (toolName: string, input: Record<string, unknown>) => safetyControlWrite({ toolName, input, cwd, home });
+const check = (toolName: string, input: Record<string, unknown>) => {
+	const target = safetyControlWrite({ toolName, input, cwd, home });
+	return target && safetyFloorReason(target);
+};
 
 describe("the consent stores", () => {
 	it("are the files the trust modules read", () => {

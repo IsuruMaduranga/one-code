@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { powershellPathTokens, safetyControlWrite } from "../../extensions/auto-mode/safety-floor.ts";
+import { powershellPathTokens, safetyControlWrite, safetyFloorReason } from "../../extensions/auto-mode/safety-floor.ts";
 
 const home = "/home/u";
 const cwd = "/home/u/proj";
-const floor = (command: string) => safetyControlWrite({ toolName: "powershell", input: { command }, cwd, home });
+const floor = (command: string) => {
+	const target = safetyControlWrite({ toolName: "powershell", input: { command }, cwd, home });
+	return target && safetyFloorReason(target);
+};
 
 describe("powershellPathTokens", () => {
 	it("extracts path-shaped tokens, expanding $env:USERPROFILE, $HOME and ~, forward-slashed", () => {

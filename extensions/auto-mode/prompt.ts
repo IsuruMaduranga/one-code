@@ -22,6 +22,7 @@ import {
 } from "./classifier-prompt.ts";
 import { buildCategoryIndex, groundCategory, normalizeName, type RuleIndex } from "./rules.ts";
 import { clip, transcriptBlocks, type TranscriptEntry } from "./transcript.ts";
+import { autoModeWords } from "./words.ts";
 
 export interface ClassifyRequest {
 	/**
@@ -232,7 +233,7 @@ export function parseStage2(text: string, index: RuleIndex, userMessages: string
 	if (severity === null) {
 		return {
 			decision: "block",
-			reason: "The approval classifier's reply carried no severity, so the verdict could not be read.",
+			reason: autoModeWords().classifierBlock({ kind: "noSeverity" }),
 			tier: "unmatched",
 			raw,
 			noVerdict: true,
@@ -249,8 +250,7 @@ export function parseStage2(text: string, index: RuleIndex, userMessages: string
 			if (!intentQuoted(intent, userMessages)) {
 				return {
 					decision: "block",
-					reason:
-						"The classifier cleared this as something the user asked for, but could not point to the user's own words asking for it.",
+					reason: autoModeWords().classifierBlock({ kind: "intentUnverified" }),
 					tier: "soft_deny",
 					ruleId: "intent-unverified",
 					// The full quote, not a clip: the mismatch class is only diagnosable
@@ -273,9 +273,7 @@ export function parseStage2(text: string, index: RuleIndex, userMessages: string
 	if (!rule) {
 		return {
 			decision: "block",
-			reason: category
-				? `The approval classifier blocked this as "${category}", which is not a rule that could be matched.`
-				: "The approval classifier blocked this without naming a rule.",
+			reason: autoModeWords().classifierBlock({ kind: "unmatchedRule", ...(category ? { category } : {}) }),
 			tier: "unmatched",
 			ruleId: category,
 			raw,

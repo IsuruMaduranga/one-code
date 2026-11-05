@@ -11,6 +11,7 @@
 
 import type { ArtifactsText } from "../artifacts/text.ts";
 import type { AskUserText } from "../ask-user/text.ts";
+import type { AutoModeText } from "../auto-mode/text.ts";
 import type { BackgroundText } from "../background/text.ts";
 import type { BtwText } from "../btw/text.ts";
 import type { CompactionText } from "../compaction/text.ts";
@@ -72,6 +73,8 @@ export interface ProfileText {
 	fileTracker?: FileTrackerText;
 	compaction?: CompactionText;
 	workflow?: WorkflowText;
+	/** Read by the permission gate, which always runs: a profile must supply it. */
+	autoMode?: AutoModeText;
 	/** Used by the worktree tools, subagents and workflows (each guards isolated sessions with it). */
 	worktreeGuard?: WorktreeGuardText;
 }
