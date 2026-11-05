@@ -12,6 +12,7 @@ import type { Profile } from "../extensions/lib/profile-contract.ts";
 import { askUser } from "./ask-user/index.ts";
 import { nativeWeb } from "./native-web/index.ts";
 import { notebook } from "./notebook/index.ts";
+import { sessionTitle } from "./session-title/index.ts";
 import { systemPrompt } from "./system-prompt/index.ts";
 import { tasks } from "./tasks/index.ts";
 import { webFetch } from "./web-fetch/index.ts";
@@ -23,5 +24,5 @@ export const profile: Profile = {
 	features: {},
 	tools: {},
 	childExtensions: [],
-	text: { systemPrompt, notebook, askUser, tasks, worktree, worktreeGuard, webFetch, webSearch, nativeWeb },
+	text: { systemPrompt, notebook, askUser, tasks, worktree, worktreeGuard, webFetch, webSearch, nativeWeb, sessionTitle },
 };

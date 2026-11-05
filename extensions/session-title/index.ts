@@ -9,7 +9,7 @@
  * of the first message, and `session_info_changed` lets the branding extension
  * retitle the terminal — but never fills it by itself.
  *
- * Shape (title.ts holds the strings): the cheapest capable contained model
+ * Shape (the profile holds the strings, text.ts): the cheapest capable contained model
  * (pickEconomicalContainedModel — CC's Haiku analog, the same pick the recap
  * makes), CC's naming instruction as the system prompt, the first prose
  * wrapped in `<session>` tags, no tools, thinking off, ~a line of output.
@@ -30,12 +30,14 @@ import { pickEconomicalContainedModel } from "../lib/model-tier.ts";
 import { sessionOutlivesTurn } from "../lib/notifications.ts";
 import { isUserRun } from "../lib/prompt-options.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
-import { firstUserText, isNameableText, parseTitle, SESSION_TITLE_PROMPT, sessionTitleInput } from "./title.ts";
+import { requireText } from "../lib/profile.ts";
+import { firstUserText, isNameableText, parseTitle, sessionTitleInput } from "./title.ts";
 
 const TITLE_MAX_TOKENS = 128; // a noun phrase, with room for a JSON wrapper
 const TITLE_TIMEOUT_MS = 30_000;
 
 function sessionTitleExtension(pi: ExtensionAPI) {
+	const words = requireText("sessionTitle");
 	/** One attempt per session, like CC's `haikuTitleAttemptedRef`. */
 	let attempted = false;
 	let inFlight: AbortController | undefined;
@@ -89,8 +91,8 @@ function sessionTitleExtension(pi: ExtensionAPI) {
 					return completeSimple(
 						baseUrl ? ({ ...choice.model, baseUrl } as Model<Api>) : choice.model,
 						{
-							systemPrompt: SESSION_TITLE_PROMPT,
-							messages: [{ role: "user", content: sessionTitleInput(text), timestamp: Date.now() }],
+							systemPrompt: words.system,
+							messages: [{ role: "user", content: sessionTitleInput(words, text), timestamp: Date.now() }],
 							tools: [],
 						},
 						{
