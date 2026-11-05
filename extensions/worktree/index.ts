@@ -33,7 +33,7 @@ import { worktreePowershellGuardReason } from "./powershell-guards.ts";
 import { bashParserReady } from "../lib/bash-parser.ts";
 import { ORIGINAL_COMMAND_CHANNEL, type OriginalCommandRecord } from "../lib/original-command.ts";
 import { requireText } from "../lib/profile.ts";
-import type { EnterWorktreeFailure, RemoveBlocker } from "./text.ts";
+import type { EnterWorktreeFailure, RemoveBlocker, WorktreeGuardRefusal } from "./text.ts";
 import { rewriteToolInput, validateWorktreeName } from "./rewrite.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 import { findProjectRoot, HARNESS_GIT_CONFIG, HARNESS_GIT_NO_HOOKS, repositoryWorktrees } from "../lib/git.ts";
@@ -94,6 +94,8 @@ function isWorktreeState(value: unknown): value is WorktreeState {
 
 function worktreeExtension(pi: ExtensionAPI) {
 	const text = requireText("worktree");
+	const guardWords = requireText("worktreeGuard");
+	const block = (refusal: WorktreeGuardRefusal) => ({ block: true, reason: guardWords.refusal(refusal) });
 	let state: WorktreeState | undefined;
 
 	const applyState = (next: WorktreeState | undefined, toolCallId?: string) => {
@@ -176,9 +178,9 @@ function worktreeExtension(pi: ExtensionAPI) {
 			if (typeof command === "string") {
 				await bashParserReady();
 				const others = await otherWorktrees(command, state.path);
-				if (others === undefined) return { block: true, reason: unlistedWorktreesReason(state.path) };
-				const reason = worktreeBashGuardReason({ command, worktreePath: state.path, sharedRoot: state.sharedRoot, otherWorktrees: others });
-				if (reason) return { block: true, reason };
+				if (others === undefined) return block(unlistedWorktreesReason(state.path));
+				const refusal = worktreeBashGuardReason({ command, worktreePath: state.path, sharedRoot: state.sharedRoot, otherWorktrees: others });
+				if (refusal) return block(refusal);
 			}
 		}
 		if (event.toolName === "powershell") {
@@ -186,9 +188,9 @@ function worktreeExtension(pi: ExtensionAPI) {
 			const command = (event.input as Record<string, unknown>).command;
 			if (typeof command === "string") {
 				const others = await otherWorktrees(command, state.path);
-				if (others === undefined) return { block: true, reason: unlistedWorktreesReason(state.path) };
-				const reason = worktreePowershellGuardReason({ command, worktreePath: state.path, sharedRoot: state.sharedRoot, otherWorktrees: others });
-				if (reason) return { block: true, reason };
+				if (others === undefined) return block(unlistedWorktreesReason(state.path));
+				const refusal = worktreePowershellGuardReason({ command, worktreePath: state.path, sharedRoot: state.sharedRoot, otherWorktrees: others });
+				if (refusal) return block(refusal);
 			}
 		}
 		const { originalCommand } = rewriteToolInput(event.toolName, event.input as Record<string, unknown>, state.path);

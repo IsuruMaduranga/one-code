@@ -7,11 +7,18 @@ import {
 	describeIsolation,
 	registerWorktreeIsolation,
 	releaseWorktreeIsolation,
-	worktreeBashWriteGuardReason,
+	worktreeBashWriteGuardReason as bashWriteRefusal,
 	worktreeGuardFactory,
 	worktreeIsolationFor,
-	worktreeWriteGuardReason,
+	worktreeWriteGuardReason as writeRefusal,
 } from "../../extensions/lib/worktree-isolation.ts";
+import type { WorktreeGuardRefusal } from "../../extensions/worktree/text.ts";
+import { worktreeGuard } from "../../profile/worktree/guard.ts";
+
+/** A guard's refusal in One Code's words, so each case checks the decision and the text the model reads. */
+const worded = (refusal: WorktreeGuardRefusal | undefined) => refusal && worktreeGuard.refusal(refusal);
+const worktreeWriteGuardReason = (input: Parameters<typeof writeRefusal>[0]) => worded(writeRefusal(input));
+const worktreeBashWriteGuardReason = (input: Parameters<typeof bashWriteRefusal>[0]) => worded(bashWriteRefusal(input));
 import { captureToolCallHandler } from "./helpers/permission-gate-harness.ts";
 
 describe("worktree isolation registry", () => {

@@ -20,6 +20,7 @@ import { toAbsolute } from "../auto-mode/paths.ts";
 import { gitSubcommand } from "../auto-mode/shell-analysis.ts";
 import { powershellInjectionSyntax, powershellStatements, statementCommand } from "../permissions/powershell-rules.ts";
 import { containsPath, isolated, sharedRepositoryRoots, stashReason, type WorktreeGuardContext } from "./guards.ts";
+import type { WorktreeGuardRefusal } from "./text.ts";
 
 /** git as a word (`git`, `GIT`, `git.exe`); PowerShell resolves commands case-insensitively. */
 const mentionsGit = (text: string) => /\bgit(?:\.exe)?\b/i.test(text);
@@ -70,26 +71,21 @@ function locationTarget(args: string[]): string | undefined {
 	return positional;
 }
 
-export function worktreePowershellGuardReason(context: WorktreeGuardContext): string | undefined {
+export function worktreePowershellGuardReason(context: WorktreeGuardContext): WorktreeGuardRefusal | undefined {
 	const { command, worktreePath } = context;
 	const sharedRoots = sharedRepositoryRoots(context);
 	if (!mentionsGit(command)) return undefined;
-	const plainGit = `Run git as its own plain statement, with literal paths inside ${worktreePath} (no script blocks, call operators or nested shells).`;
 
 	const statements = powershellStatements(command);
 	if (statements === undefined) {
-		return isolated(worktreePath, "this command's quoting could not be followed, so the repository its git commands target cannot be verified", plainGit);
+		return isolated(worktreePath, { kind: "unfollowedQuoting" });
 	}
 	const syntax = powershellInjectionSyntax(command);
 	if (syntax) {
-		return isolated(worktreePath, `this command runs git next to ${syntax}, so the repository it targets cannot be verified`, plainGit);
+		return isolated(worktreePath, { kind: "besideSyntax", syntax });
 	}
 	if (REPOSITORY_ENV.test(command)) {
-		return isolated(
-			worktreePath,
-			"this command sets GIT_DIR, GIT_WORK_TREE or GIT_COMMON_DIR, which can point git at another repository",
-			`Drop the variable and run git from ${worktreePath}.`,
-		);
+		return isolated(worktreePath, { kind: "repositoryVariable" });
 	}
 
 	/** Directory the current statement runs in; undefined = not statically known. */
@@ -115,7 +111,7 @@ export function worktreePowershellGuardReason(context: WorktreeGuardContext): st
 		if (cmd !== "git") continue;
 
 		if (dir === undefined) {
-			return isolated(worktreePath, "a preceding directory change makes the repository this git command targets unverifiable", `Use literal paths inside ${worktreePath} instead.`);
+			return isolated(worktreePath, { kind: "precedingCd" });
 		}
 
 		let effective = dir;
@@ -128,12 +124,12 @@ export function worktreePowershellGuardReason(context: WorktreeGuardContext): st
 			const inlined = lower.startsWith("--git-dir=") || lower.startsWith("--work-tree=");
 			const configWorktree = word === "-c" && /^core\.worktree=/i.test(args[i + 1] ?? "");
 			if (lower === "--config-env" || lower.startsWith("--config-env=")) {
-				return isolated(worktreePath, "`git --config-env` reads its configuration at runtime, so the repository it targets cannot be verified", `Use literal paths inside ${worktreePath} instead.`);
+				return isolated(worktreePath, { kind: "configEnv" });
 			}
 			if (pathFlag || inlined || configWorktree) {
 				const raw = inlined ? word.slice(word.indexOf("=") + 1) : configWorktree ? args[i + 1].slice(args[i + 1].indexOf("=") + 1) : args[i + 1];
 				if (!raw || dynamicPath(raw)) {
-					return isolated(worktreePath, `\`git ${word}\` computes its repository target at runtime, so it cannot be verified`, `Use literal paths inside ${worktreePath} instead.`);
+					return isolated(worktreePath, { kind: "runtimeFlag", flag: word });
 				}
 				const target = resolvePowershellPath(effective, raw);
 				if (word === "-C") effective = target;
@@ -148,11 +144,7 @@ export function worktreePowershellGuardReason(context: WorktreeGuardContext): st
 		for (const target of targets) {
 			if (containsPath(worktreePath, target)) continue;
 			if (sharedRoots.some((root) => containsPath(root, target))) {
-				return isolated(
-					worktreePath,
-					`this git command targets ${target}, which is the shared checkout or another worktree of the same repository`,
-					`Run the equivalent against ${worktreePath}.`,
-				);
+				return isolated(worktreePath, { kind: "sharedTarget", target });
 			}
 		}
 		if (targets.some((target) => containsPath(worktreePath, target))) {

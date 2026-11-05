@@ -2,7 +2,14 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { namesGit, worktreeBashGuardReason } from "../../extensions/worktree/guards.ts";
+import { namesGit, worktreeBashGuardReason as refusalFor, type WorktreeGuardContext } from "../../extensions/worktree/guards.ts";
+import { worktreeGuard } from "../../profile/worktree/guard.ts";
+
+/** The guard's refusal in One Code's words, so each case checks the decision and the text the model reads. */
+const worktreeBashGuardReason = (context: WorktreeGuardContext) => {
+	const refusal = refusalFor(context);
+	return refusal && worktreeGuard.refusal(refusal);
+};
 
 const WT = "/repo/.claude/worktrees/wt1";
 const guard = (command: string) => worktreeBashGuardReason({ command, worktreePath: WT, sharedRoot: "/repo" });

@@ -1,6 +1,14 @@
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { worktreePowershellGuardReason } from "../../extensions/worktree/powershell-guards.ts";
+import type { WorktreeGuardContext } from "../../extensions/worktree/guards.ts";
+import { worktreePowershellGuardReason as refusalFor } from "../../extensions/worktree/powershell-guards.ts";
+import { worktreeGuard } from "../../profile/worktree/guard.ts";
+
+/** The guard's refusal in One Code's words, so each case checks the decision and the text the model reads. */
+const worktreePowershellGuardReason = (context: WorktreeGuardContext) => {
+	const refusal = refusalFor(context);
+	return refusal && worktreeGuard.refusal(refusal);
+};
 
 const WT = "/repo/.claude/worktrees/wt1";
 const guard = (command: string) => worktreePowershellGuardReason({ command, worktreePath: WT, sharedRoot: "/repo" });

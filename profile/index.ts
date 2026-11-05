@@ -13,11 +13,12 @@ import { askUser } from "./ask-user/index.ts";
 import { notebook } from "./notebook/index.ts";
 import { systemPrompt } from "./system-prompt/index.ts";
 import { tasks } from "./tasks/index.ts";
+import { worktreeGuard } from "./worktree/guard.ts";
 import { worktree } from "./worktree/index.ts";
 
 export const profile: Profile = {
 	features: {},
 	tools: {},
 	childExtensions: [],
-	text: { systemPrompt, notebook, askUser, tasks, worktree },
+	text: { systemPrompt, notebook, askUser, tasks, worktree, worktreeGuard },
 };

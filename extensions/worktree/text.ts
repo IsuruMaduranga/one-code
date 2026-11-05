@@ -71,3 +71,53 @@ export interface WorktreeText {
 		removed(session: WorktreeSessionView): string;
 	};
 }
+
+/**
+ * Why a git command in a worktree-isolated session cannot be shown to target
+ * that worktree (guards.ts, powershell-guards.ts). The last four are
+ * PowerShell's.
+ */
+export type GitTargetProblem =
+	| { kind: "unlisted" }
+	| { kind: "tooComplex" }
+	| { kind: "stdinFed" }
+	| { kind: "cdInLoop" }
+	| { kind: "cdInPipeline" }
+	/** `wrapper`: the command git runs behind, as written (`sudo`, `env`). */
+	| { kind: "wrapper"; wrapper: string }
+	| { kind: "findExec" }
+	| { kind: "precedingCd" }
+	/** `name`: the variable or config key (`GIT_DIR`, `core.worktree`). */
+	| { kind: "runtimeEnv"; name: string }
+	/** `flag`: the option as written (`-C`, `--git-dir=$X`). */
+	| { kind: "runtimeFlag"; flag: string }
+	/** `target`: the shared checkout or sibling worktree the command reaches. */
+	| { kind: "sharedTarget"; target: string }
+	| { kind: "unfollowedQuoting" }
+	/** `syntax`: what the command uses, as permissions/powershell-rules.ts powershellInjectionSyntax names it. */
+	| { kind: "besideSyntax"; syntax: string }
+	| { kind: "repositoryVariable" }
+	| { kind: "configEnv" };
+
+/** A stash form that collides with parallel sessions on the shared stash stack. */
+export type StashRisk = "untagged" | "pop" | "clear" | "drop" | "branch";
+
+/** Why a guard refused a tool call in a worktree-isolated session. */
+export type WorktreeGuardRefusal =
+	| { kind: "gitTarget"; worktreePath: string; problem: GitTargetProblem }
+	/** `command`: the stash form as the guard names it (`git stash`, `git stash save`). */
+	| { kind: "stash"; risk: StashRisk; command: string }
+	/**
+	 * An isolated subagent's write lands in the shared checkout
+	 * (lib/worktree-isolation.ts). `target`: the path as written; `inCommand`:
+	 * a shell command writes it; `mapped`: the same path in the worktree.
+	 */
+	| { kind: "sharedCheckoutWrite"; worktreePath: string; sharedRoot: string; target: string; inCommand: boolean; mapped: string };
+
+/**
+ * The guard refusals' words. Not tied to one feature: the worktree tools,
+ * subagents and workflows all run isolated sessions.
+ */
+export interface WorktreeGuardText {
+	refusal(refusal: WorktreeGuardRefusal): string;
+}

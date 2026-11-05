@@ -31,6 +31,7 @@
 import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
 import { isWithin, resolveForContainment, toAbsoluteBash } from "../auto-mode/paths.ts";
+import type { GitTargetProblem, StashRisk, WorktreeGuardRefusal } from "./text.ts";
 import { gitSubcommand, INLINE_SCRIPT_SHELLS, isUnknownTilde, leadTokens, LOOPS, movesDirectory, parseCommand, resolvePayload, scopedTracker, type Token } from "../auto-mode/shell-analysis.ts";
 
 export interface WorktreeGuardContext {
@@ -64,9 +65,8 @@ export const sharedRepositoryRoots = ({ sharedRoot, otherWorktrees }: Pick<Workt
 /** Expansion syntax the guard cannot resolve statically. */
 const hasExpansion = (value: string) => /[$`]/.test(value);
 
-export const isolated = (worktreePath: string, problem: string, fix: string): string =>
-	`This session is isolated in the worktree ${worktreePath}, but ${problem}. ` +
-	`Refusing to run it — a worktree-isolated session's git operations must target its own worktree. ${fix}`;
+/** A git command that cannot be shown to target the session's own worktree. */
+export const isolated = (worktreePath: string, problem: GitTargetProblem): WorktreeGuardRefusal => ({ kind: "gitTarget", worktreePath, problem });
 
 /**
  * Whether a shell command may run git, so its targets need the repository's
@@ -85,23 +85,11 @@ export function namesGit(command: string): boolean {
 }
 
 /** The worktree list could not be read, so a git command's target cannot be checked: refuse it. */
-export const unlistedWorktreesReason = (worktreePath: string): string =>
-	isolated(
-		worktreePath,
-		"the repository's worktrees could not be listed, so the repository this git command targets cannot be verified",
-		`Retry; if it keeps failing, run git from ${worktreePath} without -C, --git-dir or --work-tree.`,
-	);
+export const unlistedWorktreesReason = (worktreePath: string): WorktreeGuardRefusal => isolated(worktreePath, { kind: "unlisted" });
 
-function stashMessage(form: string, hazard: string): string {
-	return (
-		`Blocked: \`${form}\` — the git stash stack is shared between the main checkout and every worktree of this repository, and parallel sessions may push or pop entries concurrently; ${hazard}. ` +
-		"Prefer a temporary WIP commit on this worktree's branch to set work aside. If you must stash: " +
-		'`git stash push -u -m "<unique-tag>"`, capture your entry\'s SHA with `git stash list --format=\'%H %gs\'`, ' +
-		"restore with `git stash apply <sha>` (not pop), and drop your entry only after re-finding it by tag."
-	);
-}
+const stash = (risk: StashRisk, command: string): WorktreeGuardRefusal => ({ kind: "stash", risk, command });
 
-export function stashReason(rest: Pick<Token, "value">[]): string | undefined {
+export function stashReason(rest: Pick<Token, "value">[]): WorktreeGuardRefusal | undefined {
 	const words = rest.map((t) => t.value);
 	const sub = words.find((w) => !w.startsWith("-"));
 	// `-m` may ride in a short-flag bundle (`git stash push -um wip`).
@@ -110,28 +98,25 @@ export function stashReason(rest: Pick<Token, "value">[]): string | undefined {
 	);
 	if (sub === undefined || sub === "push" || sub === "save") {
 		if (tagged) return undefined;
-		return stashMessage(
-			sub ? `git stash ${sub}` : "git stash",
-			"an untagged entry cannot be reliably re-found once other sessions push their own",
-		);
+		return stash("untagged", sub ? `git stash ${sub}` : "git stash");
 	}
 	if (sub === "pop") {
-		return stashMessage("git stash pop", "`pop` resolves stash indexes at apply time, so it can grab or destroy another session's entry");
+		return stash("pop", "git stash pop");
 	}
 	if (sub === "clear") {
-		return stashMessage("git stash clear", "`clear` deletes every session's stashes, not just yours");
+		return stash("clear", "git stash clear");
 	}
 	if (sub === "drop") {
 		const ref = words.slice(words.indexOf("drop") + 1).find((w) => !w.startsWith("-"));
 		if (!ref) {
-			return stashMessage("git stash drop", "a ref-less `drop` deletes whatever is currently stash@{0}, which may be another session's entry");
+			return stash("drop", "git stash drop");
 		}
 	}
 	if (sub === "branch") {
 		// `git stash branch <name> [<stash>]`: without the stash ref it pops stash@{0}.
 		const operands = words.slice(words.indexOf("branch") + 1).filter((w) => !w.startsWith("-"));
 		if (operands.length < 2) {
-			return stashMessage("git stash branch", "without a stash ref, `branch` pops whatever is currently stash@{0}, which may be another session's entry");
+			return stash("branch", "git stash branch");
 		}
 	}
 	return undefined;
@@ -144,7 +129,7 @@ const GIT_REPOSITORY_ENV = /^(GIT_DIR|GIT_WORK_TREE|GIT_COMMON_DIR)=/;
 const exportsLikeExport = (cmd: string, args: Token[]) =>
 	cmd === "export" || ((cmd === "declare" || cmd === "typeset") && args.some((arg) => /^-[a-zA-Z]*x/.test(arg.value)));
 
-export function worktreeBashGuardReason(context: WorktreeGuardContext): string | undefined {
+export function worktreeBashGuardReason(context: WorktreeGuardContext): WorktreeGuardRefusal | undefined {
 	return guardScript(context.command, context.worktreePath, sharedRepositoryRoots(context), context.worktreePath, 0).reason;
 }
 
@@ -196,15 +181,9 @@ const mentionsGit = (text: string): boolean => /\bgit\b/.test(text.replace(/[\\'
  * refused if git appears anywhere in it, and a `cd` in it leaves the directory
  * unknown.
  */
-function unverifiedScript(command: string, worktreePath: string, mayMove: boolean): { reason?: string; moves?: boolean } {
+function unverifiedScript(command: string, worktreePath: string, mayMove: boolean): { reason?: WorktreeGuardRefusal; moves?: boolean } {
 	if (!mentionsGit(command)) return { moves: mayMove && /\b(?:cd|pushd|popd)\b/.test(command) };
-	return {
-		reason: isolated(
-			worktreePath,
-			"this command is too complex to verify that its git operations stay inside the worktree",
-			`Break it into plain, separate git commands with literal paths and run them from ${worktreePath}.`,
-		),
-	};
+	return { reason: isolated(worktreePath, { kind: "tooComplex" }) };
 }
 
 /** How many directories a segment may run in before the guard treats its directory as unknown. */
@@ -216,18 +195,12 @@ function guardScript(
 	sharedRoots: readonly string[],
 	startDir: string | undefined,
 	depth: number,
-): { reason?: string; moves?: boolean } {
+): { reason?: WorktreeGuardRefusal; moves?: boolean } {
 	const { segments, parseFailed } = parseCommand(command);
 	if (parseFailed || segments.length === 0) return unverifiedScript(command, worktreePath, parseFailed);
 
-	// Claude Code's exact refusal for stdin-fed git (one static string for
-	// both mechanisms) — keep it byte-identical to the capture.
-	const stdinFed = () =>
-		isolated(
-			worktreePath,
-			"this command feeds git its arguments from stdin at runtime (xargs/parallel), so the repository it targets cannot be verified",
-			`Run the equivalent from ${worktreePath} without the redirect.`,
-		);
+	// Claude Code has one refusal for both stdin mechanisms (the profile words it).
+	const stdinFed = () => isolated(worktreePath, { kind: "stdinFed" });
 
 	/** Directory the current segment runs in; undefined = not statically known. */
 	let dir: string | undefined = startDir;
@@ -265,13 +238,7 @@ function guardScript(
 	const movesOrEvals = (seg: (typeof segments)[number]) => movesDirectory(seg) || resolvePayload(leadTokens(seg)).command === "eval";
 	const movesInLoop = segments.some((seg) => seg.enclosing.some((construct) => LOOPS.has(construct)) && movesOrEvals(seg));
 	if (movesInLoop && segments.some(runsGit)) {
-		return {
-			reason: isolated(
-				worktreePath,
-				"this command changes directory inside a loop, so the repository its git commands target cannot be verified",
-				`Break it into plain, separate git commands with literal paths and run them from ${worktreePath}.`,
-			),
-		};
+		return { reason: isolated(worktreePath, { kind: "cdInLoop" }) };
 	}
 	// The last member of a pipeline runs in the current shell under `shopt -s
 	// lastpipe`, so its `cd` may move every later command.
@@ -283,16 +250,10 @@ function guardScript(
 		(cd, index) => cd.pipelineShell && movesDirectory(cd) && segments.slice(index + 1).some((seg) => inShell(seg, cd.pipelineShell!) && runsGit(seg)),
 	);
 	if (pipeMoved) {
-		return {
-			reason: isolated(
-				worktreePath,
-				"this command changes directory in the last command of a pipeline, which can run in the current shell, so the repository its git commands target cannot be verified",
-				`Break it into plain, separate git commands with literal paths and run them from ${worktreePath}.`,
-			),
-		};
+		return { reason: isolated(worktreePath, { kind: "cdInPipeline" }) };
 	}
 
-	const checkSegment = (seg: (typeof segments)[number]): string | undefined => {
+	const checkSegment = (seg: (typeof segments)[number]): WorktreeGuardRefusal | undefined => {
 		const tokens = leadTokens(seg);
 		const rawLead = tokens[0]?.value;
 		if (!rawLead) return undefined;
@@ -331,11 +292,7 @@ function guardScript(
 			const runsScript = INLINE_SCRIPT_SHELLS.has(wide.command) || SCRIPT_RUNNERS.has(wide.command);
 			const shellScript = runsScript && wide.args.some((arg) => mentionsGit(arg.value));
 			if (wide.command === "git" || shellScript || wide.scripts.some(mentionsGit)) {
-				return isolated(
-					worktreePath,
-					`this command runs git through ${rawLead}, which can change the repository it targets`,
-					`Run git directly, with literal paths inside ${worktreePath}.`,
-				);
+				return isolated(worktreePath, { kind: "wrapper", wrapper: rawLead });
 			}
 		}
 
@@ -374,11 +331,7 @@ function guardScript(
 			args.some((a) => ["-exec", "-execdir", "-ok", "-okdir"].includes(a.value)) &&
 			args.some((a) => a.value === "git")
 		) {
-			return isolated(
-				worktreePath,
-				"this command assembles git invocations at runtime (find -exec), so the repositories they target cannot be verified",
-				"Run the git commands directly, with explicit literal paths, instead of assembling them at runtime.",
-			);
+			return isolated(worktreePath, { kind: "findExec" });
 		}
 
 		if (exportsLikeExport(cmd, args)) {
@@ -394,11 +347,7 @@ function guardScript(
 		if (cmd !== "git") return undefined;
 
 		if (dir === undefined) {
-			return isolated(
-				worktreePath,
-				"a preceding directory change makes the repository this git command targets unverifiable",
-				`Use literal paths inside ${worktreePath} instead.`,
-			);
+			return isolated(worktreePath, { kind: "precedingCd" });
 		}
 
 		// Effective repository target: the tracked cwd, adjusted by global flags.
@@ -406,12 +355,7 @@ function guardScript(
 		const extraTargets: string[] = [];
 		// `GIT_DIR=… git`, `env GIT_WORK_TREE=… git`, and an earlier `export`:
 		// the environment spelling of `--git-dir` / `--work-tree`.
-		const envRefusal = (name: string) =>
-			isolated(
-				worktreePath,
-				`\`${name}\` points git at a repository that is decided at runtime, so it cannot be verified`,
-				`Drop the ${name} setting and run git from ${worktreePath}.`,
-			);
+		const envRefusal = (name: string) => isolated(worktreePath, { kind: "runtimeEnv", name });
 		const prefix = tokens.slice(0, tokens.length - args.length - 1);
 		const assigned = new Map(exportedGitEnv);
 		for (const token of prefix) {
@@ -445,11 +389,7 @@ function guardScript(
 				const pathToken = inlined ? args[i] : args[i + 1];
 				const raw = inlined ? value.slice(value.indexOf("=") + 1) : pathToken?.value;
 				if (!raw || hasExpansion(raw) || pathToken?.dynamic || pathToken?.glob || isUnknownTilde(raw)) {
-					return isolated(
-						worktreePath,
-						`\`git ${value}\` computes its repository target at runtime, so it cannot be verified`,
-						`Use literal paths inside ${worktreePath} instead.`,
-					);
+					return isolated(worktreePath, { kind: "runtimeFlag", flag: value });
 				}
 				const resolved = toAbsoluteBash(effective, raw, homedir());
 				if (value === "-C") effective = resolved;
@@ -464,11 +404,7 @@ function guardScript(
 		for (const target of targets) {
 			if (containsPath(worktreePath, target)) continue;
 			if (sharedRoots.some((root) => containsPath(root, target))) {
-				return isolated(
-					worktreePath,
-					`this git command targets ${target}, which is the shared checkout or another worktree of the same repository`,
-					`Run the equivalent against ${worktreePath}.`,
-				);
+				return isolated(worktreePath, { kind: "sharedTarget", target });
 			}
 			// An unrelated repository elsewhere on disk — not this guard's concern.
 		}

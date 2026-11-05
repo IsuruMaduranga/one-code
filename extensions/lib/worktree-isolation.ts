@@ -30,6 +30,8 @@ import { WORKTREE_CHANNEL, type WorktreeLocation } from "./worktree-channel.ts";
 import { isWithin, isWritingTool, pathArgument, resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
 import { analyzeShellCommand } from "../auto-mode/shell-analysis.ts";
 import { namesGit, unlistedWorktreesReason, worktreeBashGuardReason } from "../worktree/guards.ts";
+import type { WorktreeGuardRefusal } from "../worktree/text.ts";
+import { requireText } from "./profile.ts";
 
 export interface WorktreeIsolation {
 	/** The isolated worktree the run works in. */
@@ -120,9 +122,14 @@ export function sharedCheckoutWriteTarget(target: string, cwd: string, isolation
 	return join(worktreePath, tail);
 }
 
-const refusal = (isolation: WorktreeIsolation, what: string, mapped: string): string =>
-	`This agent is isolated in the worktree ${isolation.worktreePath}, but ${what} is in the shared checkout ${isolation.sharedRoot}. ` +
-	`Refusing the write — an isolated agent's changes belong in its own worktree. Write the corresponding path there instead: ${mapped}`;
+const refusal = (isolation: WorktreeIsolation, target: string, inCommand: boolean, mapped: string): WorktreeGuardRefusal => ({
+	kind: "sharedCheckoutWrite",
+	worktreePath: isolation.worktreePath,
+	sharedRoot: isolation.sharedRoot,
+	target,
+	inCommand,
+	mapped,
+});
 
 /**
  * Refuse a file-tool write (`edit`/`write`/`notebook_edit`) from an isolated
@@ -137,10 +144,10 @@ export function worktreeWriteGuardReason(input: {
 	cwd: string;
 	isolation: WorktreeIsolation;
 	home?: string;
-}): string | undefined {
+}): WorktreeGuardRefusal | undefined {
 	if (!isWritingTool(input.toolName) || !input.target) return undefined;
 	const mapped = sharedCheckoutWriteTarget(input.target, input.cwd, input.isolation, input.home);
-	return mapped ? refusal(input.isolation, input.target, mapped) : undefined;
+	return mapped ? refusal(input.isolation, input.target, false, mapped) : undefined;
 }
 
 /**
@@ -153,13 +160,13 @@ export function worktreeWriteGuardReason(input: {
  * the permission gate and, in auto mode, the classifier instead — steering, not
  * a sandbox (same contract as extensions/worktree/guards.ts). Pure; exported for tests.
  */
-export function worktreeBashWriteGuardReason(input: { command: string; cwd: string; isolation: WorktreeIsolation; home?: string }): string | undefined {
+export function worktreeBashWriteGuardReason(input: { command: string; cwd: string; isolation: WorktreeIsolation; home?: string }): WorktreeGuardRefusal | undefined {
 	const home = input.home ?? homedir();
 	const evidence = analyzeShellCommand({ command: input.command, cwd: input.cwd, home });
 	for (const write of evidence.writes) {
 		// The target as the shell reaches it (Git Bash spellings converted), judged like a file-tool path.
 		const mapped = sharedCheckoutWriteTarget(write.absolute, input.cwd, input.isolation, home);
-		if (mapped) return refusal(input.isolation, `this command writes to ${write.token}, which`, mapped);
+		if (mapped) return refusal(input.isolation, write.token, true, mapped);
 	}
 	return undefined;
 }
@@ -178,6 +185,8 @@ export function worktreeGuardFactory(cwd: string): InlineExtension {
 		name: "agent-worktree-guard",
 		hidden: true,
 		factory: (pi) => {
+			const words = requireText("worktreeGuard");
+			const block = (refusal: WorktreeGuardRefusal | undefined) => (refusal ? { block: true, reason: words.refusal(refusal) } : undefined);
 			pi.on("tool_call", async (event, ctx) => {
 				const runCwd = ctx?.cwd ?? cwd;
 				const isolation = worktreeIsolationFor(runCwd);
@@ -187,14 +196,13 @@ export function worktreeGuardFactory(cwd: string): InlineExtension {
 					if (typeof input.command !== "string") return undefined;
 					// Every worktree of the repository, as the main session's guard checks: a linked one may live outside the shared root.
 					const others = namesGit(input.command) ? await repositoryWorktrees(isolation.worktreePath) : [];
-					if (others === undefined) return { block: true, reason: unlistedWorktreesReason(isolation.worktreePath) };
-					const reason =
+					if (others === undefined) return block(unlistedWorktreesReason(isolation.worktreePath));
+					return block(
 						worktreeBashGuardReason({ command: input.command, worktreePath: isolation.worktreePath, sharedRoot: isolation.sharedRoot, otherWorktrees: others }) ??
-						worktreeBashWriteGuardReason({ command: input.command, cwd: runCwd, isolation });
-					return reason ? { block: true, reason } : undefined;
+							worktreeBashWriteGuardReason({ command: input.command, cwd: runCwd, isolation }),
+					);
 				}
-				const reason = worktreeWriteGuardReason({ toolName: event.toolName, target: pathArgument(input), cwd: runCwd, isolation });
-				return reason ? { block: true, reason } : undefined;
+				return block(worktreeWriteGuardReason({ toolName: event.toolName, target: pathArgument(input), cwd: runCwd, isolation }));
 			});
 		},
 	};
