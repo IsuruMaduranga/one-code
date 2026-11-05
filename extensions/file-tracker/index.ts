@@ -33,6 +33,7 @@ import { projectMemoryDir } from "../lib/memory.ts";
 import { claudeConfigDir, comparablePath, isPathAtOrUnder, tryRealpath } from "../lib/paths.ts";
 import { estimateTextTokens } from "../lib/pi-ai-estimate.ts";
 import { planFileOnBranch } from "../lib/plan-mode-channels.ts";
+import { requireText } from "../lib/profile.ts";
 import { REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
 import { resolveToolPath } from "../lib/tool-path.ts";
 import { parseRules, ruleMatches } from "../permissions/matcher.ts";
@@ -42,14 +43,7 @@ import { type RestoredRead, restoreBlocks, restoreCandidates } from "./restore.t
 import { fileToolResultContent } from "./results.ts";
 import { shellReadPaths, shownInFull } from "./shell-reads.ts";
 import { sessionWorkCwd, WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
-import {
-	describeChanges,
-	CHILD_CHANGE_REMINDER, EXTERNAL_CHANGE_REMINDER,
-	type FileStamp,
-	FileTracker,
-	STALE_REASON,
-	UNREAD_REASON,
-} from "./tracker.ts";
+import { describeChanges, type FileStamp, FileTracker } from "./tracker.ts";
 
 const GUARDED_TOOLS = new Set(["edit", "write", "notebook_edit"]);
 const READ_TOOLS = new Set(["read", "notebook_edit"]);
@@ -251,6 +245,7 @@ async function readAgain(read: ReturnType<typeof createReadToolDefinition>, path
 }
 
 function fileTrackerExtension(pi: ExtensionAPI) {
+	const words = requireText("fileTracker");
 	let tracker = new FileTracker();
 	/**
 	 * The files each bash call showed in full, by call id, decided where the
@@ -335,7 +330,7 @@ function fileTrackerExtension(pi: ExtensionAPI) {
 			// Unkeyed: a key would let this notice replace an undelivered earlier one
 			// whose versions the branch already counts as told.
 			pi.events.emit(REMINDER_CHANNEL, {
-				text: `These files changed on disk since you last read them in this conversation: ${changed.map((file) => file.path).join(", ")}. Read them again before editing them.`,
+				text: words.changedWhileAway({ paths: changed.map((file) => file.path) }),
 				notified: changed,
 			} satisfies ReminderPayload);
 		}
@@ -380,8 +375,8 @@ function fileTrackerExtension(pi: ExtensionAPI) {
 
 		// Creating a new file needs no prior read.
 		if (status === "absent" || status === "fresh") return undefined;
-		if (status === "unread") return { block: true, reason: UNREAD_REASON(path, event.toolName) };
-		return { block: true, reason: STALE_REASON(path) };
+		if (status === "unread") return { block: true, reason: words.unread({ path, tool: event.toolName }) };
+		return { block: true, reason: words.stale({ path }) };
 	});
 
 	pi.on("tool_result", async (event, ctx) => {
@@ -414,7 +409,7 @@ function fileTrackerExtension(pi: ExtensionAPI) {
 			cwd: ctx.cwd,
 			existedBefore,
 			isEmptyFile: () => statIfPresent(path)?.size === 0,
-		});
+		}, words);
 		if (!content && !observation) return undefined;
 		return {
 			...(content ? { content } : {}),
@@ -466,7 +461,7 @@ function fileTrackerExtension(pi: ExtensionAPI) {
 			const read = createReadToolDefinition(ctx.cwd);
 			const reads: RestoredRead[] = await Promise.all(candidates.map(async (path) => ({ path, text: await readAgain(read, path, ctx) })));
 			const shownText = new Map(reads.map(({ path, text }) => [path, text]));
-			const { blocks, restored } = restoreBlocks(reads, estimateTextTokens);
+			const { blocks, restored } = restoreBlocks(reads, estimateTextTokens, words);
 			// The block that shows a file records what it showed, so a reload or a
 			// resume counts the file read exactly where the branch holds the block
 			// (replay.ts filesSeenOnBranch). The file counts as read only when the
@@ -549,7 +544,7 @@ function fileTrackerExtension(pi: ExtensionAPI) {
 			const current = stamp ? readIfPresent(path) : undefined;
 			if (stamp === undefined || current === undefined) {
 				tracker.forget(path);
-				detailed.push({ text: `${path} no longer exists; it was deleted or moved after you last read or wrote it.` });
+				detailed.push({ text: words.deleted({ path }) });
 				continue;
 			}
 			tracker.recordStamp(path, stamp);
@@ -560,7 +555,7 @@ function fileTrackerExtension(pi: ExtensionAPI) {
 			const version = { path, sha256: sha256(current) };
 			if (detailed.length < DETAILED_CHANGE_REMINDERS_PER_TURN) {
 				const excerpt = describeChanges(previous, current);
-				if (excerpt) detailed.push({ text: byChild ? CHILD_CHANGE_REMINDER(path, childAgent, excerpt) : EXTERNAL_CHANGE_REMINDER(path, excerpt), notified: version });
+				if (excerpt) detailed.push({ text: byChild ? words.changedByAgent({ path, agent: childAgent, excerpt }) : words.changedOnDisk({ path, excerpt }), notified: version });
 			} else {
 				overflow.push(version);
 			}
@@ -572,7 +567,7 @@ function fileTrackerExtension(pi: ExtensionAPI) {
 		for (const { text, notified } of detailed) pi.events.emit(REMINDER_CHANNEL, { text, ...(notified ? { notified: [notified] } : {}) } satisfies ReminderPayload);
 		if (overflow.length > 0) {
 			pi.events.emit(REMINDER_CHANNEL, {
-				text: `${overflow.length} more file(s) you read earlier changed on disk since: ${overflow.map((file) => file.path).join(", ")}. Re-read any of them before editing it.`,
+				text: words.moreChanged({ paths: overflow.map((file) => file.path) }),
 				notified: overflow,
 			} satisfies ReminderPayload);
 		}

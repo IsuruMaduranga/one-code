@@ -8,9 +8,10 @@
  * comes back as a read call and its result, a larger one as a note to read it
  * again, while the total stays within 50,000 tokens (findings §47). Each is
  * its own `<system-reminder>` block at the start of the next user message,
- * worded as Claude Code words them with One Code's tool name and argument
- * (`read`, `path`).
+ * worded by the profile (text.ts).
  */
+
+import type { FileTrackerText } from "./text.ts";
 
 export const RESTORE_MAX_FILES = 5;
 export const RESTORE_FILE_MAX_TOKENS = 5_000;
@@ -43,14 +44,14 @@ export type RestoreBlock = { text: string; restores?: string };
  * only while the running total stays within the overall cap. `restored` lists
  * the files whose contents went back into context.
  */
-export function restoreBlocks(reads: RestoredRead[], estimateTokens: (text: string) => number): { blocks: RestoreBlock[]; restored: string[] } {
+export function restoreBlocks(reads: RestoredRead[], estimateTokens: (text: string) => number, words: FileTrackerText): { blocks: RestoreBlock[]; restored: string[] } {
 	const blocks: RestoreBlock[] = [];
 	const restored: string[] = [];
 	let total = 0;
 	for (const { path, text } of reads) {
 		if (text === undefined) continue;
 		const fits = estimateTokens(text) <= RESTORE_FILE_MAX_TOKENS;
-		const fileBlocks: RestoreBlock[] = fits ? [{ text: readCallBlock(path) }, { text: readResultBlock(text), restores: path }] : [{ text: tooLargeNote(path) }];
+		const fileBlocks: RestoreBlock[] = fits ? [{ text: words.restoredCall({ path }) }, { text: words.restoredResult({ text }), restores: path }] : [{ text: words.tooLargeToRestore({ path }) }];
 		const tokens = fileBlocks.reduce((sum, block) => sum + estimateTokens(block.text), 0);
 		if (total + tokens > RESTORE_TOTAL_MAX_TOKENS) continue;
 		total += tokens;
@@ -59,8 +60,3 @@ export function restoreBlocks(reads: RestoredRead[], estimateTokens: (text: stri
 	}
 	return { blocks, restored };
 }
-
-export const readCallBlock = (path: string) => `Called the read tool with the following input: ${JSON.stringify({ path })}`;
-export const readResultBlock = (text: string) => `Result of calling the read tool:\n${text}`;
-export const tooLargeNote = (path: string) =>
-	`Note: ${path} was read before the last conversation was summarized, but the contents are too large to include. Use read tool if you need to access it.`;

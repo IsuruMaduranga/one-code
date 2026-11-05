@@ -7,8 +7,11 @@
  * the model from clobbering someone else's edit — including its own edits made
  * through bash, which no tool hook can see.
  *
- * This module holds the state machine; `index.ts` wires it to pi's events.
+ * This module holds the state machine; `index.ts` wires it to pi's events
+ * and the profile words what the model hears (text.ts).
  */
+
+import type { ChangeExcerpt } from "./text.ts";
 
 export type FreshnessStatus = "fresh" | "unread" | "stale" | "absent";
 
@@ -150,14 +153,10 @@ export class FileTracker {
 	}
 }
 
-export interface ChangeExcerpt {
-	firstChangedLine: number;
-	text: string;
-}
-
 /**
  * Renders the changed region of a file the way Claude Code does: the *new* lines,
- * numbered, with a little context. Deliberately not a full diff — the model needs
+ * numbered, with a little context, at most `maxLines` of them (the rest are
+ * counted). Deliberately not a full diff — the model needs
  * to know what the file says now, not the history of how it got there.
  */
 export function describeChanges(
@@ -189,34 +188,6 @@ export function describeChanges(
 	const shown = after.slice(start, end).slice(0, maxLines);
 
 	const numbered = shown.map((line, index) => `${start + index + 1}\t${line}`).join("\n");
-	const truncated = end - start > maxLines ? `\n… ${end - start - maxLines} more changed lines` : "";
-
-	return { firstChangedLine: prefix + 1, text: `${numbered}${truncated}` };
+	return { firstChangedLine: prefix + 1, numbered, moreLines: Math.max(0, end - start - maxLines) };
 }
 
-export const UNREAD_REASON = (path: string, tool: string) =>
-	`Read ${path} before using ${tool} on it. The file exists and has not been read in this conversation, so an edit could silently discard content you have not seen. A shell read counts only when it printed the whole file as it is on disk (a plain \`cat\`); after a partial one (head, sed -n, a pipe, or output cut off at the size limit) or another version of it (such as \`git show HEAD:<file>\`), use the read tool.`;
-
-/**
- * The same notice when one of this session's subagents or workflow agents
- * changed the file (lib/child-writes.ts): saying "someone else, a formatter or
- * a command" there sent the model looking for an outside cause.
- */
-export const CHILD_CHANGE_REMINDER = (path: string, agent: string | undefined, excerpt: ChangeExcerpt) =>
-	`Note: ${path} was changed by ${agent ? `the agent "${agent}"` : "an agent"} you started in this session since you last read it. Take it as the current state. Here are the relevant changes (shown with line numbers); re-read the file before editing it:\n${excerpt.text}`;
-
-export const STALE_REASON = (path: string) =>
-	`${path} has changed on disk since you last read it — someone else, a formatter, or a command may have modified it. Read it again before editing, or your change would overwrite theirs.`;
-
-/**
- * Claude Code's `edited_text_file` attachment text, plus One Code's closing
- * clause telling the model to re-read before editing: Claude Code marks the
- * file as read when it attaches the snippet, we deliberately do not (the
- * stale-edit guard keeps firing), so without that clause the model's next
- * edit is blocked and costs a round trip. The "take it as the current state
- * rather than reverting it" steer is Claude Code's: without it a model
- * mid-edit tends to restore its own version and narrate linter noise
- * (STEERING-REVIEW-2026-09-05 M5).
- */
-export const EXTERNAL_CHANGE_REMINDER = (path: string, excerpt: ChangeExcerpt) =>
-	`Note: ${path} changed on disk since you last read it. That's usually deliberate, so take it as the current state rather than reverting it; if the change looks wrong, say so rather than undoing it yourself — otherwise no need to call it out. Here are the relevant changes (shown with line numbers); re-read the file before editing it:\n${excerpt.text}`;

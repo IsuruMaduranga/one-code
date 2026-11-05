@@ -15,6 +15,7 @@ import { background } from "./background/index.ts";
 import { btw } from "./btw/index.ts";
 import { contextBudget } from "./context-budget/index.ts";
 import { effort } from "./effort/index.ts";
+import { fileTracker } from "./file-tracker/index.ts";
 import { hooks } from "./hooks/index.ts";
 import { init } from "./init/index.ts";
 import { lsp } from "./lsp/index.ts";
@@ -38,5 +39,5 @@ export const profile: Profile = {
 	features: {},
 	tools: {},
 	childExtensions: [],
-	text: { systemPrompt, notebook, askUser, tasks, worktree, worktreeGuard, webFetch, webSearch, nativeWeb, sessionTitle, init, btw, recap, effort, planMode, skill, mcp, lsp, hooks, memory, background, artifacts, toolStyle, contextBudget },
+	text: { systemPrompt, notebook, askUser, tasks, worktree, worktreeGuard, webFetch, webSearch, nativeWeb, sessionTitle, init, btw, recap, effort, planMode, skill, mcp, lsp, hooks, memory, background, artifacts, toolStyle, contextBudget, fileTracker },
 };

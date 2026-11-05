@@ -10,11 +10,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import fileTrackerExtension from "../../extensions/file-tracker/index.ts";
 import { fileToolResultContent } from "../../extensions/file-tracker/results.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { fileTracker } from "../../profile/file-tracker/index.ts";
 
 const STATE = " (file state is current in your context — no need to read it back)";
 const text = (t: string) => [{ type: "text", text: t }];
 const rewritten = (toolName: string, isError: boolean, t: string, extra: Record<string, unknown> = {}) =>
-	fileToolResultContent({ toolName, isError, content: text(t), path: "/p/notes.txt", cwd: "/p", ...extra })?.[0]?.text;
+	fileToolResultContent({ toolName, isError, content: text(t), path: "/p/notes.txt", cwd: "/p", ...extra }, fileTracker)?.[0]?.text;
 
 describe("Claude Code's file tool texts", () => {
 	it("write: created for a new file, updated for an existing one", () => {
@@ -51,7 +52,7 @@ describe("Claude Code's file tool texts", () => {
 		expect(rewritten("write", true, "Successfully wrote to notes.txt")).toBeUndefined();
 		expect(rewritten("bash", false, "Successfully wrote to notes.txt")).toBeUndefined();
 		const content = [...text("Successfully wrote to notes.txt"), { type: "text", text: "<total_tokens>9 tokens left</total_tokens>" }];
-		expect(fileToolResultContent({ toolName: "write", isError: false, content, path: "/p/notes.txt", cwd: "/p" })?.[1]).toBe(content[1]);
+		expect(fileToolResultContent({ toolName: "write", isError: false, content, path: "/p/notes.txt", cwd: "/p" }, fileTracker)?.[1]).toBe(content[1]);
 	});
 });
 
