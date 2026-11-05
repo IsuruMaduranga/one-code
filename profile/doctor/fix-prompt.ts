@@ -1,5 +1,5 @@
 /**
- * The `/doctor fix` prompt (pure): Claude Code's in-session `/doctor` is a
+ * One Code's `/doctor fix` prompt (the profile's `text.doctor`): Claude Code's in-session `/doctor` is a
  * model-driven setup checkup (a ~44 KB bundled skill in 2.1.267, captured in
  * `tools/cc-doctor-skill-2.1.267.md`); this is its One Code counterpart. The
  * deterministic report is attached first — the model does not re-derive what
@@ -22,25 +22,8 @@
  * kept in substance. Rationale: working-docs/decisions/doctor.md.
  */
 
-import { modeCycleKey } from "../lib/keys.ts";
-import { UPGRADE_COMMANDS } from "../lib/update-check.mjs";
+import type { FixPromptInput } from "../../extensions/doctor/text.ts";
 
-export interface FixPromptInput {
-	/** The rendered deterministic report, plain text. */
-	reportText: string;
-	install: "app" | "pi-package";
-	oneCodeVersion: string;
-	/** pi's sessions root, `<agentDir>/sessions` (other projects' directories live here — out of scope). */
-	sessionsDir: string;
-	/** THIS project's session directory under it — the only transcripts the permission gate lets a session read (Claude Code's own rule). */
-	sessionDir: string;
-	oneCodeSettingsPath: string;
-	oneCodeProjectSettingsPath: string;
-	/** True when auto mode is writing `auto-mode-decisions.jsonl` next to the session files. */
-	decisionLogEnabled: boolean;
-	/** True in independent mode (lib/config-mode.ts), where none of Claude Code's files are read. */
-	independent?: boolean;
-}
 
 /** The ground rule that maps the Claude Code paths the prompt names to independent mode's own. */
 const INDEPENDENT_RULE =
@@ -53,8 +36,8 @@ export function doctorFixPrompt(input: FixPromptInput): string {
 			: "`npm view one-code-extension version --registry https://registry.npmjs.org/`";
 	const upgradeCommand =
 		input.install === "app"
-			? `\`${UPGRADE_COMMANDS.npm}\` (or \`${UPGRADE_COMMANDS.brew}\` for a Homebrew install)`
-			: `\`${UPGRADE_COMMANDS["pi-package"]}\``;
+			? `\`${input.upgradeCommands.npm}\` (or \`${input.upgradeCommands.brew}\` for a Homebrew install)`
+			: `\`${input.upgradeCommands["pi-package"]}\``;
 
 	return `# One Code Doctor
 
@@ -122,7 +105,7 @@ Installed: ${input.oneCodeVersion} (${input.install === "app" ? "the bundled one
 
 ## Check 8 — permission mode (report only)
 
-Auto mode is One Code's shipped default. If the report shows a different mode pinned by \`permissions.defaultMode\` in \`~/.claude/settings.json\` or a managed file, say so in one line and leave it — One Code does not edit those files, and the user can change the mode with ${modeCycleKey()} or \`--permission-mode\`. If a repository file pins \`auto\` or \`bypassPermissions\`, the report already explains why it is ignored.
+Auto mode is One Code's shipped default. If the report shows a different mode pinned by \`permissions.defaultMode\` in \`~/.claude/settings.json\` or a managed file, say so in one line and leave it — One Code does not edit those files, and the user can change the mode with ${input.modeCycleKey} or \`--permission-mode\`. If a repository file pins \`auto\` or \`bypassPermissions\`, the report already explains why it is ignored.
 
 ## Check 9 — pre-approve frequently denied read-only commands
 

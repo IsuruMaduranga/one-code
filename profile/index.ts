@@ -16,6 +16,7 @@ import { background } from "./background/index.ts";
 import { btw } from "./btw/index.ts";
 import { compaction } from "./compaction/index.ts";
 import { contextBudget } from "./context-budget/index.ts";
+import { doctor } from "./doctor/index.ts";
 import { effort } from "./effort/index.ts";
 import { fileTracker } from "./file-tracker/index.ts";
 import { hooks } from "./hooks/index.ts";
@@ -43,5 +44,5 @@ export const profile: Profile = {
 	features: {},
 	tools: {},
 	childExtensions: [],
-	text: { systemPrompt, notebook, askUser, tasks, worktree, worktreeGuard, webFetch, webSearch, nativeWeb, sessionTitle, init, btw, recap, effort, planMode, skill, mcp, lsp, hooks, memory, background, artifacts, toolStyle, contextBudget, fileTracker, compaction, workflow, autoMode, shell },
+	text: { systemPrompt, notebook, askUser, tasks, worktree, worktreeGuard, webFetch, webSearch, nativeWeb, sessionTitle, init, btw, recap, effort, planMode, skill, mcp, lsp, hooks, memory, background, artifacts, toolStyle, contextBudget, fileTracker, compaction, workflow, autoMode, shell, doctor },
 };

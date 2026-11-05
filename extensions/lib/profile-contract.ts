@@ -15,6 +15,7 @@ import type { AutoModeText } from "../auto-mode/text.ts";
 import type { BackgroundText } from "../background/text.ts";
 import type { BtwText } from "../btw/text.ts";
 import type { CompactionText } from "../compaction/text.ts";
+import type { DoctorText } from "../doctor/text.ts";
 import type { ContextBudgetText } from "../context-budget/text.ts";
 import type { EffortText } from "../effort/text.ts";
 import type { FileTrackerText } from "../file-tracker/text.ts";
@@ -78,6 +79,7 @@ export interface ProfileText {
 	autoMode?: AutoModeText;
 	/** Used by bash and powershell (lib/shell-tool.ts). */
 	shell?: ShellText;
+	doctor?: DoctorText;
 	/** Used by the worktree tools, subagents and workflows (each guards isolated sessions with it). */
 	worktreeGuard?: WorktreeGuardText;
 }

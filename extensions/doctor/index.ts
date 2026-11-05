@@ -49,7 +49,9 @@ import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../permissions
 import { persistSubagentModel } from "../subagents/default-model.ts";
 import { buildDoctorReport, oneCodeVersion } from "./build.ts";
 import { installKind, keepView, replacedBuiltinsView } from "./builtins.ts";
-import { doctorFixPrompt } from "./fix-prompt.ts";
+import { requireText } from "../lib/profile.ts";
+import { modeCycleKey } from "../lib/keys.ts";
+import { UPGRADE_COMMANDS } from "../lib/update-check.mjs";
 import { computePresets, describePresetChanges, findPreset, PRESET_NAMES, presetsSection } from "./presets.ts";
 import { type DoctorReport, renderDoctorReport, renderDoctorText, renderSection } from "./report.ts";
 import { lookupLatestVersion } from "./update-lookup.ts";
@@ -192,7 +194,7 @@ function doctorExtension(pi: ExtensionAPI) {
 			return false;
 		}
 		const home = os.homedir();
-		const prompt = doctorFixPrompt({
+		const prompt = requireText("doctor").fixPrompt({
 			reportText: renderDoctorText(report, 100),
 			install: installKind(),
 			oneCodeVersion: oneCodeVersion(),
@@ -202,6 +204,8 @@ function doctorExtension(pi: ExtensionAPI) {
 			oneCodeProjectSettingsPath: oneCodeProjectSettingsPath(ctx.cwd, home),
 			decisionLogEnabled: loadAutoModeConfig(home).logDecisions,
 			independent: configMode() === "independent",
+			modeCycleKey: modeCycleKey(),
+			upgradeCommands: UPGRADE_COMMANDS,
 		});
 		await sendUserMessage(ctx, promptCommandText("doctor", "", prompt));
 		return true;

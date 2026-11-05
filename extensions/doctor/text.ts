@@ -1,0 +1,31 @@
+/**
+ * What the doctor extension needs from a profile (types only): the prompt
+ * `/doctor fix` sends the model. The report it attaches is the same text the
+ * panel shows the user (report.ts), passed in rendered; the base runs the
+ * checks.
+ */
+
+export interface FixPromptInput {
+	/** The rendered deterministic report, plain text. */
+	reportText: string;
+	install: "app" | "pi-package";
+	oneCodeVersion: string;
+	/** pi's sessions root, `<agentDir>/sessions` (other projects' directories live here — out of scope). */
+	sessionsDir: string;
+	/** THIS project's session directory under it — the only transcripts the permission gate lets a session read (Claude Code's own rule). */
+	sessionDir: string;
+	oneCodeSettingsPath: string;
+	oneCodeProjectSettingsPath: string;
+	/** True when auto mode is writing `auto-mode-decisions.jsonl` next to the session files. */
+	decisionLogEnabled: boolean;
+	/** True in independent mode (lib/config-mode.ts), where none of Claude Code's files are read. */
+	independent?: boolean;
+	/** The key that cycles permission modes, as the TUI names it. */
+	modeCycleKey: string;
+	/** The commands that upgrade each install. */
+	upgradeCommands: { npm: string; brew: string; "pi-package": string };
+}
+
+export interface DoctorText {
+	fixPrompt(input: FixPromptInput): string;
+}
