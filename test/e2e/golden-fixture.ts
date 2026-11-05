@@ -297,6 +297,26 @@ const WORKTREE_ROUNDS: ToolCall[][] = [
 ];
 
 /**
+ * The skill tool under GOLDEN_SKILL, against the project skills
+ * golden-requests.mjs writes: list, a call that forgot the name, an unknown
+ * name, golden-echo with its argument and without (the missing-argument
+ * note), and each refusal (manual-only, off, user-only).
+ */
+const sk = (id: string, input: Record<string, unknown>): ToolCall => ({ id: `toolu_golden_skill_${id}`, name: "skill", input });
+const SKILL_ROUNDS: ToolCall[][] = [
+	[
+		sk("list", { list: true }),
+		sk("no_name", { args: "golden" }),
+		sk("unknown", { skill: "nope" }),
+		sk("echo", { skill: "/golden-echo", args: "golden" }),
+		sk("echo_bare", { skill: "golden-echo" }),
+		sk("manual", { skill: "golden-manual" }),
+		sk("off", { skill: "golden-off" }),
+		sk("hidden", { skill: "golden-hidden" }),
+	],
+];
+
+/**
  * Plan mode under GOLDEN_PLAN, on its own (the session scenario's last
  * prompt): load the tools, exit before entering, enter, exit with an empty
  * plan, write the plan to the file enter_plan_mode named, and exit for
@@ -377,6 +397,7 @@ function roundsFor(text: string): ToolCall[][] {
 	for (const round of later) if (round.length > 0) rounds.push(round);
 	if (has("GOLDEN_WEB_FETCH")) rounds.push(...WEB_FETCH_ROUNDS);
 	if (has("GOLDEN_SEARCH")) rounds.push(...SEARCH_ROUNDS);
+	if (has("GOLDEN_SKILL")) rounds.push(...SKILL_ROUNDS);
 	if (has("GOLDEN_WORKTREE")) rounds.push(...WORKTREE_ROUNDS);
 	return rounds;
 }

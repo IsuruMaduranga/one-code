@@ -81,7 +81,7 @@ const CONFIGS = [
 	{ name: "session-anthropic-tiny", model: ANTHROPIC, tier: "tiny", mode: "session" },
 	{ name: "session-openrouter-cheap", model: OPENROUTER, tier: "cheap", mode: "session" },
 ];
-const PROMPTS = { print: "Reply with OK.", tools: "GOLDEN_TOOLS GOLDEN_AGENT GOLDEN_NOTEBOOK GOLDEN_TASKS GOLDEN_WEB_FETCH GOLDEN_SEARCH GOLDEN_WORKTREE: make the scripted calls." };
+const PROMPTS = { print: "Reply with OK.", tools: "GOLDEN_TOOLS GOLDEN_AGENT GOLDEN_NOTEBOOK GOLDEN_TASKS GOLDEN_WEB_FETCH GOLDEN_SEARCH GOLDEN_SKILL GOLDEN_WORKTREE: make the scripted calls." };
 
 /** A format 4.4 notebook (no cell ids, so nothing random) with the given code cells. */
 const notebook = (...sources) =>
@@ -119,6 +119,25 @@ function makeGitProject(project, home) {
 	rmSync(join(project, ".claude", "worktrees", "gone"), { recursive: true, force: true });
 }
 
+/** The tools scenario's project skills (golden-fixture.ts SKILL_ROUNDS), by name: frontmatter lines and body. */
+const PROJECT_SKILLS = {
+	"golden-echo": ["description: Echo a word for the golden snapshot.", 'argument-hint: "<word>"', "Echo this word back: $ARGUMENTS"],
+	"golden-manual": ["description: A skill only the user may start.", "disable-model-invocation: true", "Manual steps."],
+	"golden-off": ["description: A skill turned off.", "Off steps."],
+	"golden-hidden": ["description: A user-only skill.", "Hidden steps."],
+};
+
+/** Writes the project skills, and turns golden-off off and golden-hidden user-only (lib/skill-overrides.ts). */
+function writeProjectSkills(project, agentDir) {
+	for (const [name, lines] of Object.entries(PROJECT_SKILLS)) {
+		const dir = join(project, ".claude", "skills", name);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "SKILL.md"), `---\nname: ${name}\n${lines.slice(0, -1).join("\n")}\n---\n\n${lines.at(-1)}\n`);
+	}
+	mkdirSync(join(agentDir, "plugins"), { recursive: true });
+	writeFileSync(join(agentDir, "plugins", "skill-overrides.json"), `${JSON.stringify({ "project:golden-off": "off", "project:golden-hidden": "user-only" }, null, 2)}\n`);
+}
+
 const SESSION_PROMPTS = ["GOLDEN_TOOLS: read README.md and run echo golden.", "Reply with OK."];
 
 /** The parent's environment without anything that steers pi or One Code. */
@@ -144,6 +163,7 @@ async function runConfig(config) {
 		writeFileSync(join(project, "README.md"), "# Golden project\n\nA fixed project for the golden request snapshot.\n");
 		if (config.mode === "tools") {
 			for (const [name, content] of Object.entries(NOTEBOOK_FILES)) writeFileSync(join(project, name), content);
+			writeProjectSkills(project, agentDir);
 			makeGitProject(project, home);
 		}
 		const settings = withCompactionKeepBackfilled({
