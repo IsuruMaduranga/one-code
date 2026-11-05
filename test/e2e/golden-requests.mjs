@@ -81,7 +81,7 @@ const CONFIGS = [
 	{ name: "session-anthropic-tiny", model: ANTHROPIC, tier: "tiny", mode: "session" },
 	{ name: "session-openrouter-cheap", model: OPENROUTER, tier: "cheap", mode: "session" },
 ];
-const PROMPTS = { print: "Reply with OK.", tools: "GOLDEN_TOOLS GOLDEN_AGENT GOLDEN_NOTEBOOK GOLDEN_TASKS GOLDEN_WEB_FETCH GOLDEN_SEARCH GOLDEN_SKILL GOLDEN_MCP GOLDEN_LSP GOLDEN_WORKTREE: make the scripted calls." };
+const PROMPTS = { print: "Reply with OK.", tools: "GOLDEN_TOOLS GOLDEN_AGENT GOLDEN_NOTEBOOK GOLDEN_TASKS GOLDEN_WEB_FETCH GOLDEN_SEARCH GOLDEN_SKILL GOLDEN_MCP GOLDEN_LSP GOLDEN_HOOKS GOLDEN_WORKTREE: make the scripted calls." };
 
 /** A format 4.4 notebook (no cell ids, so nothing random) with the given code cells. */
 const notebook = (...sources) =>
@@ -150,6 +150,28 @@ function writeMcpServers(home) {
 	writeFileSync(join(home, ".claude.json"), `${JSON.stringify({ mcpServers }, null, 2)}\n`);
 }
 
+/**
+ * User-scope hooks (no consent dialog) running golden-hook.mjs: the tool hooks
+ * and SessionStart, UserPromptSubmit and Stop in the tools scenario
+ * (golden-fixture.ts HOOK_ROUNDS), the compaction hooks in the session
+ * scenario.
+ */
+function writeHooks(home, mode) {
+	const hook = (kind, extra = {}) => ({ hooks: [{ type: "command", command: `"${process.execPath}" "${join(repo, "test/e2e/golden-hook.mjs")}" ${kind}`, ...extra }] });
+	const hooks =
+		mode === "tools"
+			? {
+					PreToolUse: [{ matcher: "Bash", ...hook("pre") }, { matcher: "Bash", hooks: [{ ...hook("slow").hooks[0], timeout: 1 }] }],
+					PostToolUse: [{ matcher: "Bash|Write", ...hook("post") }],
+					SessionStart: [hook("session")],
+					UserPromptSubmit: [hook("prompt")],
+					Stop: [hook("stop")],
+				}
+			: { PreCompact: [hook("precompact")], PostCompact: [hook("postcompact")] };
+	mkdirSync(join(home, ".claude"), { recursive: true });
+	writeFileSync(join(home, ".claude", "settings.json"), `${JSON.stringify({ hooks }, null, 2)}\n`);
+}
+
 /** The tools scenario's `gopls`: a wrapper that runs the stub language server (golden-fixture.ts LSP_ROUNDS). */
 function writeLanguageServer(bin) {
 	mkdirSync(bin, { recursive: true });
@@ -188,6 +210,7 @@ async function runConfig(config) {
 			writeLanguageServer(bin);
 			makeGitProject(project, home);
 		}
+		if (config.mode !== "print") writeHooks(home, config.mode);
 		const settings = withCompactionKeepBackfilled({
 			quietStartup: true,
 			packages: [repo],

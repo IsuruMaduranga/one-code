@@ -14,7 +14,8 @@
  * GOLDEN_WEB_FETCH (against canned golden.example pages), web_search under
  * GOLDEN_SEARCH (against canned search backends), the skill tool under
  * GOLDEN_SKILL, the MCP tools under GOLDEN_MCP (golden-mcp-server.mjs),
- * lsp_diagnostics under GOLDEN_LSP (golden-lsp-server.mjs) and the worktree
+ * lsp_diagnostics under GOLDEN_LSP (golden-lsp-server.mjs), the hooks under
+ * GOLDEN_HOOKS (golden-hook.mjs) and the worktree
  * tools under GOLDEN_WORKTREE after all of them. The auto-mode classifier gets a verdict instead: severity 60
  * at stage 1, so stage 2 runs too, and severity 10 at stage 2, so the call is
  * allowed and the subagent's own requests are recorded. Every other reply is a
@@ -380,6 +381,21 @@ const LSP_ROUNDS: ToolCall[][] = [
 ];
 
 /**
+ * The hooks under GOLDEN_HOOKS, against golden-hook.mjs (golden-requests.mjs
+ * configures it as user-scope hooks): Bash commands whose marker picks the
+ * PreToolUse answer (each block reason, the timeout, the output limit, added
+ * context) or the PostToolUse one (a block, added context, an empty
+ * replacement), then a write the PostToolUse hook rewrites like a formatter.
+ */
+const hk = (id: string, name: string, input: Record<string, unknown>): ToolCall => ({ id: `toolu_golden_hook_${id}`, name, input });
+const hookCommand = (marker: string) => hk(marker.replace(/-/g, "_"), "bash", { command: `echo ${marker}` });
+const HOOK_ROUNDS: ToolCall[][] = [
+	["hook-reason", "hook-exit2", "hook-deny", "hook-ask", "hook-halt", "hook-block", "hook-flood", "hook-context", "hook-timeout"].map(hookCommand),
+	["hook-post-block", "hook-post-context", "hook-post-empty"].map(hookCommand),
+	[hk("format", "write", { path: "hooked.txt", content: "as the model wrote it\n" })],
+];
+
+/**
  * Plan mode under GOLDEN_PLAN, on its own (the session scenario's last
  * prompt): load the tools, exit before entering, enter, exit with an empty
  * plan, write the plan to the file enter_plan_mode named, and exit for
@@ -463,6 +479,7 @@ function roundsFor(text: string): ToolCall[][] {
 	if (has("GOLDEN_SKILL")) rounds.push(...SKILL_ROUNDS);
 	if (has("GOLDEN_MCP")) rounds.push(...MCP_ROUNDS);
 	if (has("GOLDEN_LSP")) rounds.push(...LSP_ROUNDS);
+	if (has("GOLDEN_HOOKS")) rounds.push(...HOOK_ROUNDS);
 	if (has("GOLDEN_WORKTREE")) rounds.push(...WORKTREE_ROUNDS);
 	return rounds;
 }
