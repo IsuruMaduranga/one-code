@@ -63,22 +63,17 @@ import { LEDGER_SENT_CHANNEL, type LedgerSent } from "../lib/ledger/plan.ts";
 import { claudeCodeCut, type CutEntry, doomedMessages } from "./cut.ts";
 import { fitToBudget, replayFits, withoutUsage } from "./fit.ts";
 import { withoutThinking } from "./kept-thinking.ts";
-import { buildCompactionInstruction, COMPACTION_MAX_TOKENS, continuationSummary, extractSummary } from "./prompt.ts";
+import { COMPACTION_MAX_TOKENS, extractSummary } from "./prompt.ts";
+import type { CompactionText, KeptTail, KeptTailLandmark } from "./text.ts";
+import { requireText } from "../lib/profile.ts";
 
 /** Compaction reads a whole context window; give it more room than the classifier's 30s. */
 const COMPACTION_TIMEOUT_MS = 120_000;
 
-/**
- * The system prompt of a standalone (non-replay) request. The session's own is
- * left out along with the tools: neither helps a request that cannot hit the
- * cache, and together they cost ~20k tokens the doomed span needs on an overflow.
- */
-export const STANDALONE_SYSTEM_PROMPT =
-	"You are the coding assistant from the conversation below, asked to summarize it so work can continue in a fresh context. Respond with text only.";
-
 type Preparation = Pick<SessionBeforeCompactEvent["preparation"], "messagesToSummarize" | "turnPrefixMessages" | "isSplitTurn" | "previousSummary">;
 
 function compactionExtension(pi: ExtensionAPI) {
+	const words = requireText("compaction");
 	const hookInstructions = new WeakMap<AbortSignal, string>();
 	pi.events.on(PRECOMPACT_INSTRUCTIONS_CHANNEL, (data) => {
 		const { signal, instructions } = data as PreCompactInstructions;
@@ -192,15 +187,16 @@ function compactionExtension(pi: ExtensionAPI) {
 			// Otherwise (no capture yet, an overflow, a nearly full window) the
 			// standalone shape summarizes the doomed span pi isolated. An overflow
 			// never replays, so its replay request is not even built.
-			const replay = capture && event.reason !== "overflow" ? replayRequest(pi, capture, event, preparation, wire?.reply, model.api) : undefined;
+			const replay = capture && event.reason !== "overflow" ? replayRequest(pi, capture, event, preparation, wire?.reply, model.api, words) : undefined;
 			const replaying = replay !== undefined && replayFits(event.reason, model, replay, maxTokens);
 			const request = replaying
 				? replay
 				: standaloneRequest(
 						model,
 						preparation,
-						buildCompactionInstruction({ reason: event.reason, customInstructions: event.customInstructions }),
+						words.instruction({ reason: event.reason, customInstructions: event.customInstructions }),
 						maxTokens,
+						words,
 					);
 			// A replay goes out as the session's own last request body with the
 			// reply and the instruction appended, so it reads the cache that request
@@ -288,7 +284,7 @@ function compactionExtension(pi: ExtensionAPI) {
 			return {
 				compaction: {
 					// Undefined in --no-session runs; the pointer line is dropped.
-					summary: continuationSummary(summary, ctx.sessionManager.getSessionFile()),
+					summary: words.continuation({ summary, transcriptPath: ctx.sessionManager.getSessionFile() }),
 					firstKeptEntryId,
 					tokensBefore: event.preparation.tokensBefore,
 					usage: result.usage,
@@ -341,6 +337,7 @@ function replayRequest(
 	preparation: Preparation,
 	reply: AgentMessage | undefined,
 	api: string | undefined,
+	words: CompactionText,
 ): Context {
 	// The reply that answered the captured request is part of the conversation
 	// pi is compacting, and the last message the replayed body gains.
@@ -351,7 +348,7 @@ function replayRequest(
 		.map((name) => byName.get(name))
 		.filter((tool) => tool !== undefined)
 		.map(({ name, description, parameters }) => ({ name, description, parameters }) as Tool);
-	const instruction = buildCompactionInstruction({
+	const instruction = words.instruction({
 		reason: event.reason,
 		customInstructions: event.customInstructions,
 		keptTail: keptTailOf(conversation, preparation, api),
@@ -367,10 +364,10 @@ function replayRequest(
  * tools, a one-line system prompt. Gets no kept-tail note: it holds only the doomed span. If it fails,
  * pi's own compaction serves. Exported for the unit test.
  */
-export function standaloneRequest(model: Model<Api>, preparation: Preparation, instruction: string, maxTokens: number): Context {
+export function standaloneRequest(model: Model<Api>, preparation: Preparation, instruction: string, maxTokens: number, words: CompactionText): Context {
 	const span = withoutThinking(withoutUsage(convertToLlm(reconstructFromEntries(preparation))), model.api);
 	const messages = [...span, instructionMessage(instruction)];
-	return fitToBudget(model, { systemPrompt: STANDALONE_SYSTEM_PROMPT, messages }, maxTokens).request;
+	return fitToBudget(model, { systemPrompt: words.standaloneSystemPrompt, messages }, maxTokens, words.clearedResult).request;
 }
 
 const instructionMessage = (instruction: string): Message => ({ role: "user", content: instruction, timestamp: Date.now() });
@@ -404,7 +401,7 @@ export function keptTailOf(
 	captured: readonly TailMessage[],
 	preparation: Preparation,
 	api?: string,
-): { count: number; landmark?: string } | undefined {
+): KeptTail | undefined {
 	const doomed: { role: string }[] = [...(preparation.previousSummary ? [{ role: "compactionSummary" }] : []), ...doomedMessages(preparation)];
 	if (doomed.length === 0 || doomed.length > captured.length) return undefined;
 	for (let i = 0; i < doomed.length; i++) {
@@ -422,16 +419,16 @@ export function keptTailOf(
 }
 
 /** How the note points at the first kept message, or undefined when nothing identifies it. */
-function landmarkOf(message: TailMessage): string | undefined {
-	if (message.role === "toolResult" && typeof message.toolName === "string") return `the result of the ${message.toolName} call`;
+function landmarkOf(message: TailMessage): KeptTailLandmark | undefined {
+	if (message.role === "toolResult" && typeof message.toolName === "string") return { kind: "toolResult", tool: message.toolName };
 	const content = Array.isArray(message.content) ? (message.content as { type?: string; text?: string; name?: unknown; arguments?: unknown }[]) : [];
 	const text = typeof message.content === "string" ? message.content : content.find((b) => b?.type === "text" && b.text?.trim())?.text;
 	const opening = oneLine(text);
-	if (opening) return `the message that opens "${opening}"`;
+	if (opening) return { kind: "opens", text: opening };
 	const call = content.find((b) => b?.type === "toolCall" && typeof b.name === "string");
 	if (message.role === "assistant" && call) {
 		const hint = oneLine(callHint(call.arguments));
-		return `the assistant message that calls ${call.name as string}${hint ? ` (${hint})` : ""}`;
+		return { kind: "calls", tool: call.name as string, ...(hint ? { hint } : {}) };
 	}
 	return undefined;
 }

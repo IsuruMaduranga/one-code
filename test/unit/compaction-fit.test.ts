@@ -20,7 +20,8 @@ import {
 	STANDALONE_SUMMARY_TOKENS,
 	withoutUsage,
 } from "../../extensions/compaction/fit.ts";
-import { STANDALONE_SYSTEM_PROMPT, standaloneRequest } from "../../extensions/compaction/index.ts";
+import { standaloneRequest } from "../../extensions/compaction/index.ts";
+import { compaction } from "../../profile/compaction/index.ts";
 
 const model = (contextWindow: number, maxTokens = 8000) => ({ contextWindow, maxTokens }) as Model<Api>;
 const user = (text: string): Message => ({ role: "user", content: text, timestamp: 1 });
@@ -71,7 +72,7 @@ describe("replayFits (H2)", () => {
 describe("fitToBudget", () => {
 	it("returns the request untouched when the clamp already leaves room", () => {
 		const req = request([user("hi"), assistant(), toolResult("x".repeat(400))]);
-		const { request: out, cleared } = fitToBudget(model(200_000), req, 32_000);
+		const { request: out, cleared } = fitToBudget(model(200_000), req, 32_000, compaction.clearedResult);
 		expect(cleared).toBe(0);
 		expect(out).toEqual(req);
 		expect(out.messages).not.toBe(req.messages);
@@ -84,7 +85,7 @@ describe("fitToBudget", () => {
 		// 30.1k of tool results on a 40k window: 40k − 30.1k − 4 096 ≈ 5.8k < 8 192, so
 		// the big one goes; then ~25k of room remain.
 		const req = request([user("read them"), assistant(), big, assistant(), medium, assistant(), small, assistant("done")]);
-		const { request: out, cleared } = fitToBudget(model(40_000), req, 32_000);
+		const { request: out, cleared } = fitToBudget(model(40_000), req, 32_000, compaction.clearedResult);
 		expect(cleared).toBe(1);
 		expect(clampMaxTokensToContext(model(40_000), out, 32_000)).toBeGreaterThanOrEqual(STANDALONE_SUMMARY_TOKENS);
 		const clearedText = (out.messages[2].content as { text: string }[])[0].text;
@@ -99,7 +100,7 @@ describe("fitToBudget", () => {
 
 	it("keeps clearing until the clamp is satisfied and never touches user or assistant text", () => {
 		const req = request([user(tokensOf(8_000)), toolResult(tokensOf(8_000)), assistant(tokensOf(8_000)), toolResult(tokensOf(8_000))]);
-		const { request: out, cleared } = fitToBudget(model(30_000), req, 32_000);
+		const { request: out, cleared } = fitToBudget(model(30_000), req, 32_000, compaction.clearedResult);
 		expect(cleared).toBe(2);
 		expect(out.messages[0]).toBe(req.messages[0]);
 		expect(out.messages[2]).toBe(req.messages[2]);
@@ -107,14 +108,14 @@ describe("fitToBudget", () => {
 
 	it("stops when nothing is left to clear (the provider then decides)", () => {
 		const req = request([user(tokensOf(50_000))]);
-		expect(fitToBudget(model(40_000), req, 32_000)).toEqual({ request: { ...req, messages: [...req.messages] }, cleared: 0 });
+		expect(fitToBudget(model(40_000), req, 32_000, compaction.clearedResult)).toEqual({ request: { ...req, messages: [...req.messages] }, cleared: 0 });
 	});
 });
 
 describe("clearToolResult", () => {
 	it("keeps the tool result's identity fields and drops images", () => {
 		const withImage = toolResult("text", { content: [{ type: "text", text: "text" }, { type: "image", data: "…", mimeType: "image/png" }], details: { n: 1 } });
-		const out = clearToolResult(withImage) as { toolCallId: string; toolName: string; details: unknown; content: { type: string; text: string }[] };
+		const out = clearToolResult(withImage, compaction.clearedResult) as { toolCallId: string; toolName: string; details: unknown; content: { type: string; text: string }[] };
 		expect(out.toolCallId).toBe("t");
 		expect(out.toolName).toBe("read");
 		expect(out.details).toEqual({ n: 1 });
@@ -124,7 +125,7 @@ describe("clearToolResult", () => {
 
 	it("leaves non-tool-result messages alone", () => {
 		const u = user("a");
-		expect(clearToolResult(u)).toBe(u);
+		expect(clearToolResult(u, compaction.clearedResult)).toBe(u);
 	});
 });
 
@@ -152,8 +153,8 @@ describe("standaloneRequest", () => {
 
 	it("sends the doomed span with the one-line system prompt, the instruction last, and no tools", () => {
 		const doomed = [user("a"), assistant(), toolResult("r"), assistant()];
-		const req = standaloneRequest(model(200_000), preparation(doomed), "instruction", 32_000);
-		expect(req.systemPrompt).toBe(STANDALONE_SYSTEM_PROMPT);
+		const req = standaloneRequest(model(200_000), preparation(doomed), "instruction", 32_000, compaction);
+		expect(req.systemPrompt).toBe(compaction.standaloneSystemPrompt);
 		expect(req.tools).toBeUndefined();
 		expect(req.messages.slice(0, 4)).toEqual(doomed);
 		expect(req.messages[4]).toMatchObject({ role: "user", content: "instruction" });
@@ -161,13 +162,13 @@ describe("standaloneRequest", () => {
 
 	it("zeroes the span's assistant usage (the clamp must count the standalone request, not the session's)", () => {
 		const doomed = [user("a"), assistant("t", { input: 1, output: 1, cacheRead: 1, cacheWrite: 1, totalTokens: 54_264 }), toolResult("r")];
-		const req = standaloneRequest(model(40_000), preparation(doomed), "instruction", 32_000);
+		const req = standaloneRequest(model(40_000), preparation(doomed), "instruction", 32_000, compaction);
 		expect((req.messages[1] as { usage: { totalTokens: number } }).usage.totalTokens).toBe(0);
 		expect(clampMaxTokensToContext(model(40_000), req, 32_000)).toBeGreaterThanOrEqual(STANDALONE_SUMMARY_TOKENS);
 	});
 
 	it("reattaches a previous summary as the leading (user-rendered) compaction summary", () => {
-		const req = standaloneRequest(model(200_000), preparation([user("a"), assistant()], "earlier"), "instruction", 32_000);
+		const req = standaloneRequest(model(200_000), preparation([user("a"), assistant()], "earlier"), "instruction", 32_000, compaction);
 		expect(req.messages[0]).toMatchObject({ role: "user" });
 		expect(JSON.stringify(req.messages[0].content)).toContain("earlier");
 		expect(req.messages).toHaveLength(4);
@@ -177,7 +178,7 @@ describe("standaloneRequest", () => {
 		// A 40k window holding ~50k tokens of tool results: the shape that used to
 		// come back with max_tokens 1 (probe P1) now fits.
 		const doomed = [user("read all six"), assistant(), toolResult(tokensOf(30_000)), assistant(), toolResult(tokensOf(20_000)), assistant()];
-		const req = standaloneRequest(model(40_000), preparation(doomed), "instruction", 32_000);
+		const req = standaloneRequest(model(40_000), preparation(doomed), "instruction", 32_000, compaction);
 		expect(clampMaxTokensToContext(model(40_000), req, 32_000)).toBeGreaterThanOrEqual(STANDALONE_SUMMARY_TOKENS);
 		expect((req.messages[2].content as { text: string }[])[0].text).toContain("cleared to fit the compaction request");
 	});

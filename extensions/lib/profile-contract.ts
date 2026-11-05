@@ -13,6 +13,7 @@ import type { ArtifactsText } from "../artifacts/text.ts";
 import type { AskUserText } from "../ask-user/text.ts";
 import type { BackgroundText } from "../background/text.ts";
 import type { BtwText } from "../btw/text.ts";
+import type { CompactionText } from "../compaction/text.ts";
 import type { ContextBudgetText } from "../context-budget/text.ts";
 import type { EffortText } from "../effort/text.ts";
 import type { FileTrackerText } from "../file-tracker/text.ts";
@@ -68,6 +69,7 @@ export interface ProfileText {
 	/** Also read by the system prompt, for its last line. */
 	contextBudget?: ContextBudgetText;
 	fileTracker?: FileTrackerText;
+	compaction?: CompactionText;
 	/** Used by the worktree tools, subagents and workflows (each guards isolated sessions with it). */
 	worktreeGuard?: WorktreeGuardText;
 }

@@ -73,7 +73,7 @@ export function replayFits(reason: "manual" | "threshold" | "overflow", model: M
  * failure). Nothing but tool results is touched. Returns a new context with
  * new messages — the inputs are never mutated.
  */
-export function fitToBudget(model: Model<Api>, request: Context, maxTokens: number): { request: Context; cleared: number } {
+export function fitToBudget(model: Model<Api>, request: Context, maxTokens: number, note: ClearedNote): { request: Context; cleared: number } {
 	const messages = [...request.messages];
 	const fitted: Context = { ...request, messages };
 	const candidates = messages
@@ -84,7 +84,7 @@ export function fitToBudget(model: Model<Api>, request: Context, maxTokens: numb
 	let cleared = 0;
 	for (const { index } of candidates) {
 		if (clampMaxTokensToContext(model, normalizeContext(fitted), maxTokens) >= STANDALONE_SUMMARY_TOKENS) break;
-		messages[index] = clearToolResult(messages[index]);
+		messages[index] = clearToolResult(messages[index], note);
 		cleared++;
 	}
 	return { request: fitted, cleared };
@@ -110,15 +110,16 @@ export function withoutUsage(messages: readonly Message[]): Message[] {
 	);
 }
 
-/** A tool result reduced to its opening text and a note; images are dropped. */
-export function clearToolResult(message: Message): Message {
+/** The profile's note for a cleared result (text.ts CompactionText.clearedResult). */
+export type ClearedNote = (p: { omittedChars: number; images: number }) => string;
+
+/** A tool result reduced to its opening text and the profile's note; images are dropped. */
+export function clearToolResult(message: Message, clearedNote: ClearedNote): Message {
 	if (message.role !== "toolResult") return message;
 	const text = contentText(message.content);
 	const head = text.slice(0, CLEARED_RESULT_HEAD_CHARS);
 	const omitted = text.length - head.length;
 	const images = message.content.filter((block) => block.type !== "text").length;
-	const note = `[Tool result cleared to fit the compaction request: ${omitted} more characters${
-		images > 0 ? ` and ${images} image${images === 1 ? "" : "s"}` : ""
-	} omitted. The full result is in the session transcript.]`;
+	const note = clearedNote({ omittedChars: omitted, images });
 	return { ...message, content: [{ type: "text", text: head ? `${head}\n${note}` : note }] };
 }
