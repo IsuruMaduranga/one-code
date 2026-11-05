@@ -26,6 +26,7 @@
  * and pi's event bus only delivers to listeners already registered.
  */
 
+import { feature } from "../lib/feature.ts";
 import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import {
@@ -79,7 +80,7 @@ const UNAVAILABLE_MODE = "deferred-unavailable";
 type SessionLike = { getBranch?: () => unknown[] };
 const branchOf = (session: SessionLike | undefined) => (session?.getBranch?.() ?? []) as EntryLike[];
 
-export default function toolSearchExtension(pi: ExtensionAPI) {
+function toolSearchExtension(pi: ExtensionAPI) {
 	// Owned here (see lib/deferred.ts): the only instance, fed over DEFER_CHANNEL.
 	const deferredRegistry = new DeferredRegistry();
 	// Names WITHHOLD_CHANNEL removed from the registry, kept only so a direct
@@ -532,3 +533,5 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		},
 	});
 }
+
+export default feature("tool-search", toolSearchExtension);

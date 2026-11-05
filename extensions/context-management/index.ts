@@ -38,6 +38,7 @@
  * for an anthropic-messages endpoint you have confirmed accepts it.
  */
 
+import { feature } from "../lib/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isAnthropicOAuth } from "../lib/anthropic-auth.ts";
 import { looksLikeAnthropicRequest } from "../lib/anthropic-payload.ts";
@@ -149,7 +150,7 @@ export function sessionRequestHeaders<H extends Record<string, string | null>>(
 	return { ...headers, "anthropic-beta": anthropicBetas(isAnthropicOAuth(), anthropic?.compat) };
 }
 
-export default function contextManagementExtension(pi: ExtensionAPI) {
+function contextManagementExtension(pi: ExtensionAPI) {
 	const flag = () => process.env.CC_CLEAR_THINKING;
 
 	// Prompt-cache TTL for the main session: one hour in the interactive modes,
@@ -177,3 +178,5 @@ export default function contextManagementExtension(pi: ExtensionAPI) {
 		return withClearThinking(payload);
 	});
 }
+
+export default feature("context-management", contextManagementExtension);

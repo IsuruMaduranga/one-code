@@ -16,6 +16,7 @@
  * children persist their sessions per run to make that possible).
  */
 
+import { feature } from "../lib/feature.ts";
 import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../lib/child-writes.ts";
 import { canShowCustomUi } from "../lib/headless-output.ts";
 import { existsSync, mkdirSync, readdirSync, renameSync, writeFileSync, readFileSync } from "node:fs";
@@ -292,7 +293,7 @@ const BLOCK_ORDER: Record<SubagentBlockKey, number> = {
 /** The `one-code:state` key of the models this account refused (lib/model-unusable.ts). */
 const REFUSED_MODELS_STATE = "subagents:refused-models";
 
-export default function subagentsExtension(pi: ExtensionAPI) {
+function subagentsExtension(pi: ExtensionAPI) {
 	const requestTier = sessionModelTier(pi);
 	const registry = new RunRegistry();
 	/**
@@ -3201,3 +3202,5 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		},
 	});
 }
+
+export default feature("subagents", subagentsExtension);

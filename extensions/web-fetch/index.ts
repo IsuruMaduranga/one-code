@@ -16,6 +16,7 @@
  * answer from a successful fetch.
  */
 
+import { feature } from "../lib/feature.ts";
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { recordUsage } from "../lib/usage-bus.ts";
@@ -137,7 +138,7 @@ async function answerFromPage(
 	}
 }
 
-export default function webFetchExtension(pi: ExtensionAPI) {
+function webFetchExtension(pi: ExtensionAPI) {
 	// Same 15-minute window Claude Code documents, so repeated reads of one page
 	// during a task don't re-download it.
 	const cache = new Map<string, CacheEntry>();
@@ -394,3 +395,5 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 		keywords: ["fetch", "url", "webpage", "web page", "read page", "http", "download", "docs", "article"],
 	});
 }
+
+export default feature("web-fetch", webFetchExtension);

@@ -28,6 +28,7 @@
  * subagent through the subagents extension (lib/btw-fork.ts).
  */
 
+import { feature } from "../lib/feature.ts";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import {
 	convertToLlm,
@@ -72,7 +73,7 @@ interface BtwForkEntry {
 	taskId: string;
 }
 
-export default function btwExtension(pi: ExtensionAPI) {
+function btwExtension(pi: ExtensionAPI) {
 	// The fork entry's `/btw` row is drawn as pi draws a user prompt, with the
 	// padding pi read from settings at startup.
 	let outputPad = 1;
@@ -377,3 +378,5 @@ export default function btwExtension(pi: ExtensionAPI) {
 		},
 	});
 }
+
+export default feature("btw", btwExtension);

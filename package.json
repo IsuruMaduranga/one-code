@@ -86,6 +86,7 @@
 	},
 	"files": [
 		"extensions/",
+		"profile/",
 		"agents/",
 		"skills/",
 		"themes/",

@@ -11,12 +11,13 @@
  * active tool surface.
  */
 
+import { feature } from "../lib/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { sessionModelTier } from "../lib/session-model-tier.ts";
 import { mergeGrepWindows } from "./grep-merge.ts";
 import { withSearchTools } from "./tools.ts";
 
-export default function searchToolsExtension(pi: ExtensionAPI) {
+function searchToolsExtension(pi: ExtensionAPI) {
 	const requestTier = sessionModelTier(pi);
 	const apply = () => {
 		const tier = requestTier();
@@ -41,3 +42,5 @@ export default function searchToolsExtension(pi: ExtensionAPI) {
 		return text === first.text ? undefined : { content: [{ ...first, text }, ...event.content.slice(1)] };
 	});
 }
+
+export default feature("search-tools", searchToolsExtension);

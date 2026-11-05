@@ -26,6 +26,7 @@
  * all three off.
  */
 
+import { feature } from "../lib/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
 import { totalTokensBlock, TurnBudget, turnTokenBudget } from "./budget.ts";
@@ -33,7 +34,7 @@ import { totalTokensBlock, TurnBudget, turnTokenBudget } from "./budget.ts";
 const USER_MESSAGE_KEY = "total-tokens";
 const FIRST_PROMPT_KEY = "total-tokens-first";
 
-export default function contextBudgetExtension(pi: ExtensionAPI) {
+function contextBudgetExtension(pi: ExtensionAPI) {
 	const enabled = () => process.env.CC_TOTAL_TOKENS !== "0";
 	const budget = new TurnBudget(turnTokenBudget());
 	/** True between the first agent_start of a turn and agent_settled. */
@@ -84,3 +85,5 @@ export default function contextBudgetExtension(pi: ExtensionAPI) {
 		} satisfies ReminderPayload);
 	});
 }
+
+export default feature("context-budget", contextBudgetExtension);

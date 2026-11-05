@@ -19,6 +19,7 @@
  * told (RENDER_CHANNEL), never by rewriting message 1.
  */
 
+import { feature } from "../lib/feature.ts";
 import { getCurrentSystemMessage } from "@earendil-works/pi-ai";
 import type { BuildSystemPromptOptions, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { environmentBlock, modelLine } from "../lib/environment-block.ts";
@@ -45,7 +46,7 @@ function scratchpadChangedNote(dir: string): string {
 	return `This session's scratchpad directory is now ${dir}. Use it for temporary files instead of the scratchpad named earlier in this conversation.`;
 }
 
-export default function systemPromptExtension(pi: ExtensionAPI) {
+function systemPromptExtension(pi: ExtensionAPI) {
 	const requestTier = sessionModelTier(pi);
 	let cachedEnv: EnvironmentInfo | undefined;
 	let cachedKey = "";
@@ -192,3 +193,5 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 		if (prompt !== undefined) request.prompt = prompt;
 	});
 }
+
+export default feature("system-prompt", systemPromptExtension);

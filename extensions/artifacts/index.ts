@@ -8,6 +8,7 @@
  * ("Artifacts").
  */
 
+import { feature } from "../lib/feature.ts";
 import { randomBytes } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
@@ -118,7 +119,7 @@ async function confirmDelete(ctx: ExtensionContext, meta: ArtifactMeta, signal?:
 	return approved === true && !signal?.aborted;
 }
 
-export default function artifactsExtension(pi: ExtensionAPI) {
+function artifactsExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "artifact",
 		label: "Artifact",
@@ -286,3 +287,5 @@ export default function artifactsExtension(pi: ExtensionAPI) {
 		},
 	});
 }
+
+export default feature("artifacts", artifactsExtension);

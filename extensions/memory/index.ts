@@ -20,6 +20,7 @@
  *   opens in the external $EDITOR/$VISUAL (or the OS opener), as CC does.
  */
 
+import { feature } from "../lib/feature.ts";
 import { mkdirSync, readFileSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
@@ -70,7 +71,7 @@ function memoryEntriesFor(cwd: string): MemoryEntry[] {
 	});
 }
 
-export default function memoryExtension(pi: ExtensionAPI) {
+function memoryExtension(pi: ExtensionAPI) {
 	let dir: string | undefined;
 	let dirReal = "";
 
@@ -317,3 +318,5 @@ function openMemoryPanel(
 		};
 	});
 }
+
+export default feature("memory", memoryExtension);

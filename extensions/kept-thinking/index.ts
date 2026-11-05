@@ -12,11 +12,12 @@
  * compaction), so each capture carries the stripped history the session sent.
  */
 
+import { feature } from "../lib/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { signsThinking, withoutKeptThinking } from "../compaction/kept-thinking.ts";
 import { latestCompaction } from "../lib/compaction-boundary.ts";
 
-export default function keptThinkingExtension(pi: ExtensionAPI) {
+function keptThinkingExtension(pi: ExtensionAPI) {
 	pi.on("context", (event, ctx) => {
 		const api = ctx.model?.api;
 		// Only a signing API pays for the branch walk.
@@ -25,3 +26,5 @@ export default function keptThinkingExtension(pi: ExtensionAPI) {
 		return messages ? { messages } : undefined;
 	});
 }
+
+export default feature("kept-thinking", keptThinkingExtension);

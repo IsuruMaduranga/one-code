@@ -1,4 +1,5 @@
 /** Reject damaged OpenRouter streams before tool execution, without changing the request prefix. */
+import { feature } from "../lib/feature.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { notifyOrPrint } from "../lib/headless-output.ts";
 import { TURN_FAILED_CHANNEL, type TurnFailedEvent } from "../lib/interrupt.ts";
@@ -26,7 +27,7 @@ const FIRST_CONTENT_IDLE_MS = 300_000;
 const STREAM_IDLE_MS = 90_000;
 const TOOL_CALL_IDLE_MS = 60_000;
 
-export default function toolCallCorruptionExtension(pi: ExtensionAPI) {
+function toolCallCorruptionExtension(pi: ExtensionAPI) {
 	toolCallCorruptionGuard(pi, { announce: true });
 }
 
@@ -235,3 +236,5 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 		if (!sessionOutlivesTurn(ctx.mode)) await Promise.all(pending.values());
 	});
 }
+
+export default feature("tool-call-corruption", toolCallCorruptionExtension);

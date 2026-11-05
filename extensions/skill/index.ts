@@ -13,6 +13,7 @@
  * `before_agent_start`'s systemPromptOptions rather than rediscovered here.
  */
 
+import { feature } from "../lib/feature.ts";
 import { readFileSync, statSync } from "node:fs";
 import os from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
@@ -99,7 +100,7 @@ const isBundled = (path: string): boolean => resolve(path).startsWith(BUNDLED_RO
 const CODE_REVIEW_PATH = join(BUNDLED_ROOT, "code-review", "SKILL.md");
 const CODE_REVIEW_CELLS = join(BUNDLED_ROOT, "code-review", "cells");
 
-export default function skillExtension(pi: ExtensionAPI) {
+function skillExtension(pi: ExtensionAPI) {
 	const requestTier = sessionModelTier(pi);
 	// pi draws a user message as markdown, so a typed skill, `/init` and
 	// `/doctor` showed their whole expanded prompt; show the command line.
@@ -853,3 +854,5 @@ export default function skillExtension(pi: ExtensionAPI) {
 		},
 	});
 }
+
+export default feature("skill", skillExtension);

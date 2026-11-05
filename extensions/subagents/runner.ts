@@ -25,7 +25,7 @@ import type { HookBridge } from "../hooks/subagent-bridge.ts";
 import { findConfigured, modelSpec } from "../lib/model-policy.ts";
 import { isModelUnavailableError } from "../auto-mode/model-select.ts";
 import { type AgentDefinition, agentToolOptions, unusableAllowlistError } from "./agents.ts";
-import { CHILD_EXTENSION_PATHS } from "../lib/child-extensions.ts";
+import { childExtensionPaths } from "../lib/child-extensions.ts";
 import { type HandbackSlot, SUBAGENT_HANDBACK, subagentHandbackExtension } from "../lib/subagent-handback.ts";
 import type { RequestCapture } from "../lib/request-replay.ts";
 import { forkCacheExtension } from "./fork-cache.ts";
@@ -282,7 +282,7 @@ export class SubagentRuntime {
 			agentDir: getAgentDir(),
 			systemPrompt,
 			neverGate: NEVER_GATE,
-			extraExtensionPaths: CHILD_EXTENSION_PATHS,
+			extraExtensionPaths: childExtensionPaths(),
 			// Every child hands back through SubagentHandback (deferred in a fork,
 			// lib/subagent-handback.ts). Inline extensions load after the paths
 			// above, so the fork-cache one, last, sees the final body.

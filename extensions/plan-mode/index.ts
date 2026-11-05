@@ -19,6 +19,7 @@
  * that prompt. before_agent_start also re-announces the existing state.
  */
 
+import { feature } from "../lib/feature.ts";
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -84,7 +85,7 @@ const MODE_NAMES: Record<PermissionMode, string> = {
 	dontAsk: "dontAsk",
 };
 
-export default function planModeExtension(pi: ExtensionAPI) {
+function planModeExtension(pi: ExtensionAPI) {
 	/** The last mode broadcast by permissions; undefined until the first status arrives. */
 	let currentMode: string | undefined;
 	/**
@@ -502,3 +503,5 @@ export default function planModeExtension(pi: ExtensionAPI) {
 		keywords: ["plan", "approve", "approval", "present", "finish planning"],
 	});
 }
+
+export default feature("plan-mode", planModeExtension);

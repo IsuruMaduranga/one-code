@@ -32,6 +32,7 @@ const ALLOWED: Record<string, string> = {
 	"extensions/lib/model-catalog-data.ts inflight": "catalog refreshes in flight, shared by concurrent callers",
 	"extensions/lib/model-tier.ts overrideMemo": "memo of the tier overrides file",
 	"extensions/lib/model-tier.ts overridesPinned": "test pin of the tier overrides",
+	"extensions/lib/profile.ts active": "memo of the shipped profile resolved against the process environment, both constant for the process",
 	"extensions/lib/process-tree.ts groupReaper": "process resource: the reaper timer for remembered groups",
 	"extensions/lib/process-tree.ts exitHookInstalled": "process resource: one exit listener per module instance, each killing its own children",
 	"extensions/lib/process-tree.ts rememberedGroups": "process resource: the groups the reaper and the signal listeners kill",

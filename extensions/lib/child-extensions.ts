@@ -32,6 +32,8 @@
 
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { featureOfEntry } from "./features.ts";
+import { activeProfile } from "./profile.ts";
 
 const EXTENSIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -50,3 +52,18 @@ export const CHILD_EXTENSIONS = [
 
 export const CHILD_EXTENSION_PATHS = CHILD_EXTENSIONS.map((name) =>
 	name.includes("/") ? join(EXTENSIONS_DIR, `${name}.ts`) : join(EXTENSIONS_DIR, name, "index.ts"));
+
+/**
+ * What a child session loads under the profile in force: the base entries
+ * whose feature is on (an off feature's entry would no-op anyway; leaving it
+ * out keeps the child's load list honest), then the profile's own child
+ * extensions (`Profile.childExtensions`), after every base entry.
+ */
+export function childExtensionPaths(): string[] {
+	const profile = activeProfile();
+	const base = CHILD_EXTENSIONS.filter((name) => {
+		const id = featureOfEntry(name.includes("/") ? `${name}.ts` : `${name}/index.ts`);
+		return id === undefined || profile.features.has(id);
+	}).map((name) => (name.includes("/") ? join(EXTENSIONS_DIR, `${name}.ts`) : join(EXTENSIONS_DIR, name, "index.ts")));
+	return [...base, ...profile.childExtensionPaths];
+}

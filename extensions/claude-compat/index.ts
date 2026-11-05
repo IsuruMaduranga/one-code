@@ -17,6 +17,7 @@
  * CLAUDE.md needs no handling — pi discovers it natively alongside AGENTS.md.
  */
 
+import { feature } from "../lib/feature.ts";
 import { existsSync } from "node:fs";
 import os from "node:os";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -54,8 +55,10 @@ export function claudeResourcePaths(
 	};
 }
 
-export default function claudeCompatExtension(pi: ExtensionAPI) {
+function claudeCompatExtension(pi: ExtensionAPI) {
 	pi.on("resources_discover", (event) => {
 		return claudeResourcePaths(event.cwd, os.homedir(), claudeConfigDir(), BUNDLED_SKILLS_DIR);
 	});
 }
+
+export default feature("claude-compat", claudeCompatExtension);

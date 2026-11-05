@@ -35,6 +35,7 @@
  * summary style, never a broken compaction. CC_COMPACTION=0 opts out.
  */
 
+import { feature } from "../lib/feature.ts";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Context, Message, Model, Tool } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
@@ -77,7 +78,7 @@ export const STANDALONE_SYSTEM_PROMPT =
 
 type Preparation = Pick<SessionBeforeCompactEvent["preparation"], "messagesToSummarize" | "turnPrefixMessages" | "isSplitTurn" | "previousSummary">;
 
-export default function compactionExtension(pi: ExtensionAPI) {
+function compactionExtension(pi: ExtensionAPI) {
 	const hookInstructions = new WeakMap<AbortSignal, string>();
 	pi.events.on(PRECOMPACT_INSTRUCTIONS_CHANNEL, (data) => {
 		const { signal, instructions } = data as PreCompactInstructions;
@@ -478,3 +479,5 @@ function reconstructFromEntries(preparation: Preparation): AgentMessage[] {
 			]
 		: doomed;
 }
+
+export default feature("compaction", compactionExtension);

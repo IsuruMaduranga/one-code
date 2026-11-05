@@ -30,6 +30,7 @@
  * apart: pi-ai clamps a request's cap to the window's room, down to 1.
  */
 
+import { feature } from "../lib/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { sessionIdentity } from "../lib/anthropic-auth.ts";
 import { notifyOrPrint } from "../lib/headless-output.ts";
@@ -42,7 +43,7 @@ import { appendPoint, encodeRequest, hasWarmCap, listKey, type RecordedRequest, 
 import { type AffinityModel, affinityHeaders } from "../lib/request-replay.ts";
 import { extensionVersion } from "../lib/package-version.ts";
 
-export default function ledgerWireExtension(pi: ExtensionAPI) {
+function ledgerWireExtension(pi: ExtensionAPI) {
 	const by = extensionVersion();
 	/** The plan of the last `context` pass; a warm re-runs only this hook and reuses it. */
 	let plan: RequestPlan | undefined;
@@ -152,3 +153,5 @@ export default function ledgerWireExtension(pi: ExtensionAPI) {
 		return payload === live ? undefined : payload;
 	});
 }
+
+export default feature("ledger", ledgerWireExtension);

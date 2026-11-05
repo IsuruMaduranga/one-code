@@ -15,6 +15,7 @@
  * hide` / `/tasks show` toggle it here; the key's hint is always on screen.
  */
 
+import { feature } from "../lib/feature.ts";
 import { StringEnum } from "../lib/string-enum.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -55,7 +56,7 @@ interface TaskDetails {
 const TASK_TOOLS = new Set(["task_create", "task_get", "task_list", "task_update"]);
 const TASK_KEYWORDS = ["task", "todo", "plan", "progress", "dependencies", "tracking"];
 
-export default function tasksExtension(pi: ExtensionAPI) {
+function tasksExtension(pi: ExtensionAPI) {
 	const requestTier = sessionModelTier(pi);
 	const store = new TaskStore();
 	const toggleKey = taskToggleKey();
@@ -267,3 +268,5 @@ export default function tasksExtension(pi: ExtensionAPI) {
 		handler: (ctx) => setWidgetHidden(!widgetHidden, ctx),
 	});
 }
+
+export default feature("tasks", tasksExtension);

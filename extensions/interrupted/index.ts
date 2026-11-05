@@ -15,6 +15,7 @@
  * turn too, but gets no note: the user has already said what to do instead.
  */
 
+import { feature } from "../lib/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { wasInterrupted } from "../lib/interrupt.ts";
 import { SEND_NOW_CHANNEL } from "../lib/send-now-channel.ts";
@@ -23,7 +24,7 @@ import { INTERRUPTED_TEXT } from "./line.ts";
 
 const ENTRY_TYPE = "one-code:interrupted";
 
-export default function interruptedExtension(pi: ExtensionAPI) {
+function interruptedExtension(pi: ExtensionAPI) {
 	pi.registerEntryRenderer(ENTRY_TYPE, (_entry, _options, theme) => {
 		const paint = safeThemePaint(theme);
 		return linesComponent(() => [paint("dim", INTERRUPTED_TEXT)]);
@@ -45,3 +46,5 @@ export default function interruptedExtension(pi: ExtensionAPI) {
 		pi.appendEntry(ENTRY_TYPE);
 	});
 }
+
+export default feature("interrupted", interruptedExtension);

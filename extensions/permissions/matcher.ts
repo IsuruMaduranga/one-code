@@ -7,6 +7,7 @@
  * existing ~/.claude/settings.json files work unchanged.
  */
 
+import { isProfileAutoAllowed, isToolDisabled } from "../lib/profile.ts";
 import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
@@ -788,6 +789,11 @@ export const AUTO_ALLOWED_TOOLS = new Set<string>([
 	"SendMessage",
 ]);
 
+/** A tool that runs without approval: the base's set, plus any the profile marks `autoAllow` (lib/profile.ts). */
+export function isAutoAllowedTool(tool: string): boolean {
+	return AUTO_ALLOWED_TOOLS.has(tool) || isProfileAutoAllowed(tool);
+}
+
 export interface DecideInput {
 	toolName: string;
 	subject: string;
@@ -928,7 +934,9 @@ export interface Decision {
 		/** A read tool outside the working space, refused by `blockReadsOutsideWorkingDirectories`. */
 		| "blocked-outside-read"
 		/** A read, or an acceptEdits write, whose path is outside the working directory. */
-		| "working-dir";
+		| "working-dir"
+		/** A tool the profile turned off (lib/profile.ts). */
+		| "profile-disabled";
 }
 
 /**
@@ -1042,6 +1050,10 @@ export function decide(params: DecideInput): Decision {
 		return { decision: "ask", rule, cause: rule ? "rule" : "tier" };
 	};
 
+	// A tool the profile turned off is refused in every mode, bypass included:
+	// it should never have been callable, whatever path it arrived by.
+	if (isToolDisabled(normalizeToolName(toolName))) return { decision: "deny", cause: "profile-disabled" };
+
 	const denyRule = deny.find((r) => ruleMatches(r, toolName, subject, cwd));
 	if (denyRule) return { decision: "deny", rule: denyRule, cause: "rule" };
 
@@ -1049,7 +1061,7 @@ export function decide(params: DecideInput): Decision {
 
 	const tier = toolTier(toolName);
 	const tool = normalizeToolName(toolName);
-	if (mode === "plan" && tier !== "safe" && !AUTO_ALLOWED_TOOLS.has(normalizeToolName(toolName))) {
+	if (mode === "plan" && tier !== "safe" && !isAutoAllowedTool(normalizeToolName(toolName))) {
 		// Plan mode's one writable file (~/.onecode/plans/<slug>.md, which
 		// protected-paths already excepts as working space).
 		const planFile = params.planFilePath;
@@ -1306,7 +1318,7 @@ export function decide(params: DecideInput): Decision {
 		}
 		return outsideWorkingDir();
 	}
-	if (AUTO_ALLOWED_TOOLS.has(tool)) return { decision: "allow", cause: "tier" };
+	if (isAutoAllowedTool(tool)) return { decision: "allow", cause: "tier" };
 	// Auto mode skips the classifier for an edit acceptEdits would allow, on a
 	// model that gets Claude Code's fast paths: anywhere in the working space,
 	// workspace directories and execution-primitive files included. Outside it

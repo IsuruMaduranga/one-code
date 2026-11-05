@@ -28,6 +28,7 @@
  * WebFetch lives in `extensions/web-fetch` (our own); this file only owns search.
  */
 
+import { feature } from "../lib/feature.ts";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { homedir } from "node:os";
 import { Type } from "typebox";
@@ -73,7 +74,7 @@ interface SearchDetails {
 	error?: unknown;
 }
 
-export default function webExtension(pi: ExtensionAPI) {
+function webExtension(pi: ExtensionAPI) {
 	// url_context + its active-tools sync, and the vendor web_search we override below.
 	webSearchPackage(pi);
 
@@ -263,3 +264,5 @@ export default function webExtension(pi: ExtensionAPI) {
 	pi.on("session_tree", (_event, ctx) => deferUrlContextIfGemini(ctx.model));
 	pi.on("model_select", (event) => deferUrlContextIfGemini(event.model));
 }
+
+export default feature("web", webExtension);

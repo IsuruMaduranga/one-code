@@ -23,6 +23,7 @@
  * reopened file resumes on.
  */
 
+import { feature } from "../lib/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { sessionIdentity } from "../lib/anthropic-auth.ts";
 import { foldSession } from "../lib/ledger/fold-memo.ts";
@@ -30,7 +31,7 @@ import { LEDGER_PLAN_CHANNEL, planRequest } from "../lib/ledger/plan.ts";
 import { makeRecord, RECORD } from "../lib/ledger/records.ts";
 import { extensionVersion } from "../lib/package-version.ts";
 
-export default function ledgerExtension(pi: ExtensionAPI) {
+function ledgerExtension(pi: ExtensionAPI) {
 	const by = extensionVersion();
 
 	pi.on("session_tree", (event) => {
@@ -44,3 +45,5 @@ export default function ledgerExtension(pi: ExtensionAPI) {
 		return tailStart > 0 ? { messages: event.messages.slice(tailStart) } : undefined;
 	});
 }
+
+export default feature("ledger", ledgerExtension);

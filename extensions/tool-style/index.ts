@@ -26,6 +26,7 @@
  * session_start/model_select and removes them for frontier models.
  */
 
+import { feature } from "../lib/feature.ts";
 import { readFile, stat } from "node:fs/promises";
 import type { ExtensionAPI, ExtensionToolContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
@@ -105,7 +106,7 @@ const readBefore: WriteRenderDeps["readBefore"] = async (raw, cwd) => {
 
 const writeDeps: WriteRenderDeps = { readBefore, diff: (before, after) => generateDiffString(before, after).diff };
 
-export default function toolStyleExtension(pi: ExtensionAPI) {
+function toolStyleExtension(pi: ExtensionAPI) {
 	for (const spec of BUILTINS) {
 		const base = spec.create(process.cwd());
 		const forCwd = perCwd(spec.create);
@@ -140,3 +141,5 @@ export default function toolStyleExtension(pi: ExtensionAPI) {
 		registerFormTool(pi, definition, (form) => describe(form, base.description));
 	}
 }
+
+export default feature("tool-style", toolStyleExtension);

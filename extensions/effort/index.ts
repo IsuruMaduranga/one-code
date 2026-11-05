@@ -21,6 +21,7 @@
  * same shape the permissions extension uses for plan mode.
  */
 
+import { feature } from "../lib/feature.ts";
 import os from "node:os";
 import { join } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
@@ -103,7 +104,7 @@ const OFF_TOLD = toldBlockFact(STANDING_TOLD_KEY, ULTRACODE_OFF_REMINDER);
 /** The `one-code:state` key ultracode is recorded under on the branch. */
 const ULTRACODE_STATE = "ultracode";
 
-export default function effortExtension(pi: ExtensionAPI) {
+function effortExtension(pi: ExtensionAPI) {
 	let ultracodeActive = false;
 	/**
 	 * The level ultracode actually settled on. Not always xhigh: pi clamps to
@@ -368,3 +369,5 @@ export default function effortExtension(pi: ExtensionAPI) {
 	});
 	pi.on("session_tree", (_event, ctx) => followBranch(ctx, true));
 }
+
+export default feature("effort", effortExtension);

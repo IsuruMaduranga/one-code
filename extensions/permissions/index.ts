@@ -17,6 +17,7 @@
  *   write to `.git/hooks` or `.claude`.
  */
 
+import { feature } from "../lib/feature.ts";
 import os from "node:os";
 import { join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
@@ -158,6 +159,8 @@ const DENIED_NON_INTERACTIVE =
 // contradicted the reminder in the same turn.
 const DENIED_PLAN_MODE =
 	"You are in plan mode: only read-only tools may run, and edit/write are limited to the plan file. This call was blocked. Keep investigating with read-only tools and build the plan in the plan file named in the plan-mode reminder; finish the turn with ask_user_question or exit_plan_mode, not by presenting the plan as chat text.";
+/** A call to a tool the profile turned off (lib/profile.ts); it reaches the gate only by a stale or injected route. */
+const DENIED_PROFILE_DISABLED = "That tool is not available in this harness, so the call was blocked. Continue with the tools you have.";
 const DENIED_DONT_ASK =
 	"Permission mode is dontAsk: anything that would normally prompt the user is denied instead. Only pre-approved tools can run; work within those, or tell the user which allow rule would unblock you.";
 const DENIED_PROTECTED_PATH =
@@ -252,6 +255,8 @@ const denyReason = (result: { cause?: string; rule?: { raw?: string } }): string
 			return DENIED_OUTSIDE_WORKING_DIR;
 		case "mode":
 			return DENIED_DONT_ASK;
+		case "profile-disabled":
+			return DENIED_PROFILE_DISABLED;
 		default:
 			return DENIED_BY_RULE(result.rule?.raw ?? "deny");
 	}
@@ -296,7 +301,7 @@ const askOptions = (grant: SessionGrant | undefined) => (grant ? [YES, grant.lab
 const approved = (choice: string | undefined, grant: SessionGrant | undefined) =>
 	choice === YES || (grant !== undefined && choice === grant.label);
 
-export default function permissionsExtension(pi: ExtensionAPI) {
+function permissionsExtension(pi: ExtensionAPI) {
 	// The background hand-back review rides the same steered path as agent
 	// completions; render it the same compact way (full body on ctrl+o).
 	pi.registerFlag("permission-mode", {
@@ -2700,3 +2705,5 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		},
 	});
 }
+
+export default feature("permissions", permissionsExtension);

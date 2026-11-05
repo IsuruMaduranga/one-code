@@ -11,12 +11,13 @@
  * have the word go to the model as a chat message.
  */
 
+import { feature } from "../lib/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createUserMessageSender } from "../lib/notifications.ts";
 import { promptCommandText } from "../skill/invoke.ts";
 import { INIT_PROMPT } from "./prompt.ts";
 
-export default function initExtension(pi: ExtensionAPI) {
+function initExtension(pi: ExtensionAPI) {
 	const sendUserMessage = createUserMessageSender(pi);
 	pi.registerCommand("init", {
 		description: "Initialize a new CLAUDE.md file with codebase documentation",
@@ -25,3 +26,5 @@ export default function initExtension(pi: ExtensionAPI) {
 		},
 	});
 }
+
+export default feature("init", initExtension);

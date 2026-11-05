@@ -27,6 +27,7 @@
  * overrides the 5-minute delay.
  */
 
+import { feature } from "../lib/feature.ts";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { convertToLlm, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -58,7 +59,7 @@ interface RecapData {
 	content: string;
 }
 
-export default function recapExtension(pi: ExtensionAPI) {
+function recapExtension(pi: ExtensionAPI) {
 	pi.registerEntryRenderer<RecapData>(ENTRY_TYPE, (entry, _options, theme) => {
 		const content = entry.data?.content;
 		if (!content) return undefined;
@@ -201,3 +202,5 @@ export default function recapExtension(pi: ExtensionAPI) {
 		releaseSideCalls(ctx.sessionManager.getSessionId());
 	});
 }
+
+export default feature("recap", recapExtension);

@@ -44,6 +44,7 @@
  * (settings, consent, logging) and a payload naming the child.
  */
 
+import { feature } from "../lib/feature.ts";
 import { randomUUID } from "node:crypto";
 import { contentText } from "@earendil-works/pi-ai";
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -130,7 +131,7 @@ function isStopContinuation(event: unknown): boolean {
 	return run.messageType === "custom" && run.message?.customType === STOP_CONTINUATION_TYPE;
 }
 
-export default function hooksExtension(pi: ExtensionAPI) {
+function hooksExtension(pi: ExtensionAPI) {
 	const workCwd = followWorkCwd(pi.events);
 	let stopHookBlocks = 0;
 	/** Prompt, session and compaction hook context, as a one-shot the next request carries (lib/reminders.ts). */
@@ -701,3 +702,5 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		await dispatchSessionStart(ctx, "compact", sessionGen);
 	});
 }
+
+export default feature("hooks", hooksExtension);

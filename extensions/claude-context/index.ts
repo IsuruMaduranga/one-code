@@ -21,6 +21,7 @@
  * extension (jiti gives each extension its own module instance).
  */
 
+import { feature } from "../lib/feature.ts";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import os from "node:os";
@@ -86,7 +87,7 @@ function readOrEmpty(path: string): string {
 /** A tool result and the nested instruction files it carried into context (`remember`). */
 const NESTED_SHOWN_ENTRY = "one-code:nested-instructions-shown";
 
-export default function claudeContextExtension(pi: ExtensionAPI) {
+function claudeContextExtension(pi: ExtensionAPI) {
 	const resetConsentDialogs = installConsentDialogs(pi.events);
 	/** The account email stand-in, resolved at session start. */
 	let email: string | null = null;
@@ -560,3 +561,5 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		remember(event.toolCallId, shown, used - before);
 	});
 }
+
+export default feature("claude-context", claudeContextExtension);

@@ -15,13 +15,14 @@
  * and without the mark.
  */
 
+import { feature } from "../lib/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { looksLikeAnthropicRequest } from "../lib/anthropic-payload.ts";
 import { isFirstPartyAnthropic } from "../lib/anthropic-server-tools.ts";
 import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../lib/ledger/plan.ts";
 import { baseMark, withPreviousMark } from "../lib/previous-mark.ts";
 
-export default function cacheMarksExtension(pi: ExtensionAPI) {
+function cacheMarksExtension(pi: ExtensionAPI) {
 	if (process.env.CC_CACHE_MARKS === "0") return;
 	/** The plan of the request being sent; a warm reuses it. */
 	let plan: RequestPlan | undefined;
@@ -40,3 +41,5 @@ export default function cacheMarksExtension(pi: ExtensionAPI) {
 		return next === payload ? undefined : next;
 	});
 }
+
+export default feature("cache-marks", cacheMarksExtension);

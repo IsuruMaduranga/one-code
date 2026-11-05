@@ -16,6 +16,7 @@
  * that went through bash and never touched an intercepted tool.
  */
 
+import { feature } from "../lib/feature.ts";
 import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../lib/child-writes.ts";
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -249,7 +250,7 @@ async function readAgain(read: ReturnType<typeof createReadToolDefinition>, path
 	}
 }
 
-export default function fileTrackerExtension(pi: ExtensionAPI) {
+function fileTrackerExtension(pi: ExtensionAPI) {
 	let tracker = new FileTracker();
 	/**
 	 * The files each bash call showed in full, by call id, decided where the
@@ -604,3 +605,5 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 		return undefined;
 	});
 }
+
+export default feature("file-tracker", fileTrackerExtension);

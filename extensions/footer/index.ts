@@ -17,6 +17,7 @@
  * Set CC_FOOTER=0 to keep pi's built-in footer instead.
  */
 
+import { feature } from "../lib/feature.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { linesComponent, safeThemePaint } from "../lib/tui-render.ts";
 import { formatModel, isRealModel } from "../permissions/modes.ts";
@@ -26,7 +27,7 @@ import { buildFooterLines, computeMainUsage, footerLocation, type FooterData } f
 import { WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
 import { fetchPrNumber, nextPrPollDelay, PR_SLOW_LOOKUP_MS } from "./pr.ts";
 
-export default function footerExtension(pi: ExtensionAPI) {
+function footerExtension(pi: ExtensionAPI) {
 	if (process.env.CC_FOOTER === "0") return;
 
 	// All-in cost + latest cache-hit, recomputed only when the session's entries
@@ -215,3 +216,5 @@ export default function footerExtension(pi: ExtensionAPI) {
 function safeThinkingLevel(ctx: ExtensionContext): string | undefined {
 	return ctx.thinkingLevel;
 }
+
+export default feature("footer", footerExtension);

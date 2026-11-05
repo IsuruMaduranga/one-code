@@ -22,6 +22,7 @@
  * Claude Code has no other LSP tools; navigation goes through grep/find.
  */
 
+import { feature } from "../lib/feature.ts";
 import { mkdirSync } from "node:fs";
 import { extname, relative } from "node:path";
 import { StringEnum } from "../lib/string-enum.ts";
@@ -68,7 +69,7 @@ interface PluginRouting {
 	diagnostics: string[];
 }
 
-export default function lspExtension(pi: ExtensionAPI) {
+function lspExtension(pi: ExtensionAPI) {
 	const clients = new Map<string, LspClient>();
 	const startFailures = new Map<string, string>();
 	const warned = new Set<string>();
@@ -451,3 +452,5 @@ export default function lspExtension(pi: ExtensionAPI) {
 		keywords: ["diagnostics", "errors", "type error", "typecheck", "compile", "lint", "lsp"],
 	});
 }
+
+export default feature("lsp", lspExtension);

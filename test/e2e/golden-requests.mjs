@@ -12,6 +12,10 @@
  *   node test/e2e/golden-requests.mjs --update  rewrite the snapshot files
  *   node test/e2e/golden-requests.mjs --only anthropic-tiny
  *   node test/e2e/golden-requests.mjs --dir /tmp/golden
+ *   node test/e2e/golden-requests.mjs --sweep   one turn per optional feature
+ *       turned off (ONECODE_FEATURES_OFF), plus a tool-switch check
+ *       (ONECODE_TOOLS_OFF): each run must finish and send a request, and the
+ *       turned-off tools must be missing from it
  *
  * Each run gets a fresh HOME (so no real CLAUDE.md, settings or memory leaks
  * in), pi's agent dir under it with this repo as the only package and the
@@ -103,6 +107,7 @@ async function runConfig(config) {
 		ONECODE_NO_UPDATE_CHECK: "1",
 		SHELL: "/bin/zsh",
 		TZ: "UTC",
+		...config.env,
 	};
 	const fail = (message) => {
 		rmSync(root, { recursive: true, force: true });
@@ -256,6 +261,32 @@ function showSides(expected, actual) {
 	const cut = (s) => `${i > 200 ? "…" : ""}${s.slice(Math.max(0, i - 200), i + 300)}${s.length > i + 300 ? "…" : ""}`;
 	return { e: cut(e), a: cut(a) };
 }
+
+/** --sweep: see the header. Exits the process with the outcome. */
+async function sweep() {
+	const { FEATURE_IDS, FEATURES } = await import("../../extensions/lib/features.ts");
+	const optional = FEATURE_IDS.filter((id) => !FEATURES[id].required);
+	const runs = optional.map((id) => ({ label: `${id} off`, config: { name: `sweep-${id}`, model: ANTHROPIC, tier: "frontier", mode: "print", env: { ONECODE_FEATURES_OFF: id } } }));
+	const toolsOff = ["notebook_edit", "edit", "web_fetch"];
+	runs.push({ label: `tools ${toolsOff.join(", ")} off`, toolsOff, config: { name: "sweep-tools", model: ANTHROPIC, tier: "frontier", mode: "print", env: { ONECODE_TOOLS_OFF: toolsOff.join(",") } } });
+	let bad = 0;
+	for (const run of runs) {
+		try {
+			const { requests } = await runConfig(run.config);
+			const main = requests.find((r) => Array.isArray(r.body.tools) && r.body.tools.length > 0) ?? requests[0];
+			const names = (main?.body.tools ?? []).map((t) => t.name ?? t.function?.name);
+			const leaked = (run.toolsOff ?? []).filter((name) => names.includes(name));
+			if (leaked.length > 0) throw new Error(`turned-off tools still sent: ${leaked.join(", ")}`);
+			console.log(`ok    ${run.label} (${requests.length} request(s), ${names.length} tools)`);
+		} catch (error) {
+			bad += 1;
+			console.log(`FAIL  ${run.label}: ${String(error.message ?? error).slice(0, 1500)}`);
+		}
+	}
+	console.log(`${runs.length - bad}/${runs.length} sweep runs ok`);
+	process.exit(bad > 0 ? 1 : 0);
+}
+if (args.includes("--sweep")) await sweep();
 
 mkdirSync(goldenDir, { recursive: true });
 let failed = false;

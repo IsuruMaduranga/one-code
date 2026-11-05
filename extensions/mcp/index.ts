@@ -15,6 +15,7 @@
  * the prompt; one-shots and subagent children await it (findings §15).
  */
 
+import { feature } from "../lib/feature.ts";
 import os from "node:os";
 import { isDeepStrictEqual } from "node:util";
 import { CONFIG_DIR_NAME, getAgentDir, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -88,7 +89,7 @@ function unknownServerError(name: string) {
 /** pi's own `mcp.json` files, read because our `/mcp` replaces pi 0.99's built-in MCP (config.ts). */
 const piMcpConfigs = (cwd: string) => piMcpConfigPaths(getAgentDir(), cwd, CONFIG_DIR_NAME);
 
-export default function mcpExtension(pi: ExtensionAPI) {
+function mcpExtension(pi: ExtensionAPI) {
 	const connections = new Map<string, Connection>();
 	let failures: FailedConnection[] = [];
 	const registered = new Map<string, { server: string; tool: string }>();
@@ -971,3 +972,5 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		},
 	});
 }
+
+export default feature("mcp", mcpExtension);

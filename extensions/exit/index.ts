@@ -16,10 +16,11 @@
  * a Claude Code user needs, without patching pi.
  */
 
+import { feature } from "../lib/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { ONE_SHOT_COMMAND_FAILED_CHANNEL, type RunOutcome, RunOutcomeLatch, TURN_FAILED_CHANNEL } from "../lib/interrupt.ts";
 
-export default function exitExtension(pi: ExtensionAPI) {
+function exitExtension(pi: ExtensionAPI) {
 	const outcome = new RunOutcomeLatch();
 	let settled: RunOutcome | undefined;
 	// The harness stopped the turn in progress: its run ends "aborted", which
@@ -57,3 +58,5 @@ export default function exitExtension(pi: ExtensionAPI) {
 		},
 	});
 }
+
+export default feature("exit", exitExtension);

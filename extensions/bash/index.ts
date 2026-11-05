@@ -18,6 +18,7 @@
  * detaches.
  */
 
+import { feature } from "../lib/feature.ts";
 import { join } from "node:path";
 import type { BashSpawnContext, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createBashToolDefinition, createLocalBashOperations, getAgentDir } from "@earendil-works/pi-coding-agent";
@@ -38,7 +39,7 @@ const BashParams = Type.Object({
 	run_in_background: Type.Optional(Type.Boolean({ description: BASH_PARAMS.run_in_background })),
 });
 
-export default function bashExtension(pi: ExtensionAPI) {
+function bashExtension(pi: ExtensionAPI) {
 	bashTool(pi, { announce: true });
 }
 
@@ -110,3 +111,5 @@ export function bashTool(pi: ExtensionAPI, { announce }: { announce: boolean }) 
 		return { operations: withChildProcessEnv(createLocalBashOperations({ shellPath }), () => piShellEnv(join(getAgentDir(), "bin"))) };
 	});
 }
+
+export default feature("bash", bashExtension);

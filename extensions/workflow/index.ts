@@ -23,6 +23,7 @@
  * delivers the message. On older pi a queued message does not arm.
  */
 
+import { feature } from "../lib/feature.ts";
 import { prepareWorkflowArguments } from "./args.ts";
 import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../lib/child-writes.ts";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -129,7 +130,7 @@ const WorkflowParams = Type.Object({
 	),
 });
 
-export default function workflowExtension(pi: ExtensionAPI) {
+function workflowExtension(pi: ExtensionAPI) {
 	// Models the account refused this session (classifier/subagent reports, lib/model-unusable.ts):
 	// workflow agents share the subagent selector, so they resolve around them too.
 	const unusableModels = new Set<string>();
@@ -696,3 +697,5 @@ async function openWorkflowViewer(
 		};
 	});
 }
+
+export default feature("workflow", workflowExtension);

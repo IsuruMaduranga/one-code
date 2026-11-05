@@ -13,6 +13,7 @@
  * Set `CC_NO_BANNER=1` to keep pi's original header.
  */
 
+import { feature } from "../lib/feature.ts";
 import { existsSync, readFileSync } from "node:fs";
 import { ARGUMENT_HINT_CHANNEL, type ArgumentHint, type CommandHint, frontmatterCommandHint, hintForInput, PI_BUILTIN_HINTS } from "../lib/argument-hints.ts";
 import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
@@ -320,7 +321,7 @@ function applyOutputPadDefault(): void {
 	}
 }
 
-export default function brandingExtension(pi: ExtensionAPI) {
+function brandingExtension(pi: ExtensionAPI) {
 	/**
 	 * pi's merged `quietStartup` (global settings with the project's
 	 * `.pi/settings.json` over them), so the banner and pi agree on whether pi
@@ -556,3 +557,5 @@ export default function brandingExtension(pi: ExtensionAPI) {
 		}
 	});
 }
+
+export default feature("branding", brandingExtension);

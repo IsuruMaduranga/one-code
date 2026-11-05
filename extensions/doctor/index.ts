@@ -1,3 +1,4 @@
+import { feature } from "../lib/feature.ts";
 import type { Api, Model } from "@earendil-works/pi-ai";
 /**
  * doctor extension — `/doctor`, One Code's setup checkup.
@@ -63,7 +64,7 @@ import { panelUi } from "../lib/panel-focus.ts";
 /** Rows the panel may take; the terminal's own height caps it (boundedDockHeight). */
 export const DOCTOR_PANEL_MAX_HEIGHT = 40;
 
-export default function doctorExtension(pi: ExtensionAPI) {
+function doctorExtension(pi: ExtensionAPI) {
 	const requestTier = sessionModelTier(pi);
 	const sendUserMessage = createUserMessageSender(pi);
 	// Models the account refused this session (lib/model-unusable.ts): the report
@@ -351,3 +352,5 @@ export default function doctorExtension(pi: ExtensionAPI) {
 		},
 	});
 }
+
+export default feature("doctor", doctorExtension);

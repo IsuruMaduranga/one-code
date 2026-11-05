@@ -21,6 +21,7 @@
  * emits `session_start`.
  */
 
+import { feature } from "../lib/feature.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createPowerShellToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -39,7 +40,7 @@ const PowerShellParams = Type.Object({
 	run_in_background: Type.Optional(Type.Boolean({ description: "Set to true to run this command in the background." })),
 });
 
-export default function powershellExtension(pi: ExtensionAPI) {
+function powershellExtension(pi: ExtensionAPI) {
 	powershellTool(pi, { announce: true });
 }
 
@@ -94,3 +95,5 @@ export function powershellTool(pi: ExtensionAPI, { announce }: { announce: boole
 	// pi restores the selected branch's tool loadout at a /tree switch.
 	pi.on("session_tree", () => reconcile());
 }
+
+export default feature("powershell", powershellExtension);

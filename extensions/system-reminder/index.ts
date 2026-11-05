@@ -21,6 +21,7 @@
  * only), and shapes the tail's `<total_tokens>` lines (lib/turn-budget-layout.ts).
  */
 
+import { feature } from "../lib/feature.ts";
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { CLEAR_AT_BETA, MID_CONVERSATION_SYSTEM_BETA, reseatMessageMark, withBetas } from "../lib/anthropic-payload.ts";
@@ -57,7 +58,7 @@ function oneShotOf(item: PendingRecordData): OneShot {
 /** The `one-code:state` key prefix of a sticky state's recorded start. */
 const STICKY_START_PREFIX = "sticky-start:";
 
-export default function systemReminderExtension(pi: ExtensionAPI) {
+function systemReminderExtension(pi: ExtensionAPI) {
 	const alive = sessionAlive(pi);
 	const by = extensionVersion();
 	const live = new LiveReminders();
@@ -222,3 +223,5 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 		return payload === event.payload ? undefined : payload;
 	});
 }
+
+export default feature("system-reminder", systemReminderExtension);

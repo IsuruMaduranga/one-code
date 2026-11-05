@@ -21,6 +21,7 @@
  * has nowhere to show) and under CC_SESSION_TITLE=0.
  */
 
+import { feature } from "../lib/feature.ts";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -34,7 +35,7 @@ import { firstUserText, isNameableText, parseTitle, SESSION_TITLE_PROMPT, sessio
 const TITLE_MAX_TOKENS = 128; // a noun phrase, with room for a JSON wrapper
 const TITLE_TIMEOUT_MS = 30_000;
 
-export default function sessionTitleExtension(pi: ExtensionAPI) {
+function sessionTitleExtension(pi: ExtensionAPI) {
 	/** One attempt per session, like CC's `haikuTitleAttemptedRef`. */
 	let attempted = false;
 	let inFlight: AbortController | undefined;
@@ -121,3 +122,5 @@ export default function sessionTitleExtension(pi: ExtensionAPI) {
 		}
 	}
 }
+
+export default feature("session-title", sessionTitleExtension);

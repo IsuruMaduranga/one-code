@@ -25,10 +25,11 @@
  * they are the same user action as far as the model is concerned.
  */
 
+import { feature } from "../lib/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { announceLocalCommand } from "../lib/local-command.ts";
 
-export default function clearExtension(pi: ExtensionAPI) {
+function clearExtension(pi: ExtensionAPI) {
 	pi.registerCommand("clear", {
 		description: "Clear the conversation and start fresh (same as /new)",
 		handler: async (_args, ctx) => {
@@ -40,3 +41,5 @@ export default function clearExtension(pi: ExtensionAPI) {
 		if ((event as { reason?: string }).reason === "new") announceLocalCommand(pi, { name: "clear" });
 	});
 }
+
+export default feature("clear", clearExtension);

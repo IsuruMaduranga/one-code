@@ -4,6 +4,7 @@
  * until needed).
  */
 
+import { feature } from "../lib/feature.ts";
 import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { StringEnum } from "../lib/string-enum.ts";
@@ -15,7 +16,7 @@ import { applyEdit, type EditMode, type Notebook, notebookErrorHint, parseNotebo
 import { resolveToolPath } from "../lib/tool-path.ts";
 import { NOTEBOOK_EDIT_DESCRIPTION } from "./description.ts";
 
-export default function notebookExtension(pi: ExtensionAPI) {
+function notebookExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "notebook_edit",
 		label: "Notebook Edit",
@@ -94,3 +95,5 @@ export default function notebookExtension(pi: ExtensionAPI) {
 
 	pi.events.emit(DEFER_CHANNEL, { name: "notebook_edit", keywords: ["notebook", "jupyter", "ipynb", "cell"] });
 }
+
+export default feature("notebook", notebookExtension);

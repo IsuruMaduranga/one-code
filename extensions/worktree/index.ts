@@ -12,6 +12,7 @@
  * the new branch.
  */
 
+import { feature } from "../lib/feature.ts";
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
@@ -97,7 +98,7 @@ function isWorktreeState(value: unknown): value is WorktreeState {
 	return typeof s?.path === "string" && typeof s.originalCwd === "string" && typeof s.sharedRoot === "string" && typeof s.createdByUs === "boolean";
 }
 
-export default function worktreeExtension(pi: ExtensionAPI) {
+function worktreeExtension(pi: ExtensionAPI) {
 	let state: WorktreeState | undefined;
 
 	const reminderFor = (s: WorktreeState) =>
@@ -420,3 +421,5 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 		pi.events.emit(DEFER_CHANNEL, { name, keywords });
 	}
 }
+
+export default feature("worktree", worktreeExtension);

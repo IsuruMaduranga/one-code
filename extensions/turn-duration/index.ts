@@ -13,6 +13,7 @@
  * background shells outlive the turn, `· N shells still running`.
  */
 
+import { feature } from "../lib/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { trackShellTasks } from "../lib/shell-tasks.ts";
 import { dimMarkedLine } from "../lib/tui-render.ts";
@@ -29,7 +30,7 @@ interface TurnDurationData {
 	runningShells?: number;
 }
 
-export default function turnDurationExtension(pi: ExtensionAPI) {
+function turnDurationExtension(pi: ExtensionAPI) {
 	const shellTasks = trackShellTasks(pi);
 
 	pi.registerEntryRenderer<TurnDurationData>(ENTRY_TYPE, (entry, _options, theme) => {
@@ -62,3 +63,5 @@ export default function turnDurationExtension(pi: ExtensionAPI) {
 		});
 	});
 }
+
+export default feature("turn-duration", turnDurationExtension);

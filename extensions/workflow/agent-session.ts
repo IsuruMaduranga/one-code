@@ -33,7 +33,7 @@ import type { HookBridge } from "../hooks/subagent-bridge.ts";
 import { summarizeArgs } from "../lib/tui-render.ts";
 import { type AgentDefinition, agentFileSources, agentToolOptions, discoverAgents, unusableAllowlistError } from "../subagents/agents.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
-import { CHILD_EXTENSION_PATHS } from "../lib/child-extensions.ts";
+import { childExtensionPaths } from "../lib/child-extensions.ts";
 import { oneTurnHandbackSlot, subagentHandbackExtension } from "../lib/subagent-handback.ts";
 import type { SubagentDefault } from "../subagents/default-model.ts";
 import { expensiveModelGate, resolveSubagentModel, subagentModelMenu } from "../subagents/model-select.ts";
@@ -299,7 +299,7 @@ export class AgentRunner {
 				cwd: this.options.cwd,
 				agentDir: getAgentDir(),
 				systemPrompt: agentDef?.systemPrompt,
-				extraExtensionPaths: CHILD_EXTENSION_PATHS,
+				extraExtensionPaths: childExtensionPaths(),
 				// claude-context (a child extension) injects the CLAUDE.md instructions itself.
 				noContextFiles: true,
 				extraFactories: [deferLikeParentExtension(this.options.getParentDeferred?.() ?? [], injectedByParent([])), ...(handback ? [subagentHandbackExtension(handback)] : [])],

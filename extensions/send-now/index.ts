@@ -19,6 +19,7 @@
  * dequeue with alt+up fires none). TUI only.
  */
 
+import { feature } from "../lib/feature.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SEND_NOW_CHANNEL } from "../lib/send-now-channel.ts";
 import { safeThemePaint, truncateLine } from "../lib/tui-render.ts";
@@ -29,7 +30,7 @@ const IDLE_WAIT_MS = 10_000;
 /** How long a held `ctrl+x` waits for its `ctrl+s` before the chord is dropped. */
 const CHORD_TIMEOUT_MS = 1_000;
 
-export default function sendNowExtension(pi: ExtensionAPI) {
+function sendNowExtension(pi: ExtensionAPI) {
 	let unsubscribe: (() => void) | undefined;
 	// Bumped on every session start and shutdown, so a send now still waiting
 	// for the aborted turn never acts on a replaced or closed session.
@@ -131,3 +132,5 @@ export default function sendNowExtension(pi: ExtensionAPI) {
 		});
 	});
 }
+
+export default feature("send-now", sendNowExtension);

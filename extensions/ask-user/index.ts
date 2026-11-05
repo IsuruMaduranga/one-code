@@ -11,6 +11,7 @@
  * pulled in a second, conflicting TypeBox.
  */
 
+import { feature } from "../lib/feature.ts";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { canShowCustomUi } from "../lib/headless-output.ts";
@@ -44,7 +45,7 @@ const AskParams = Type.Object({
 	),
 });
 
-export default function askUserExtension(pi: ExtensionAPI) {
+function askUserExtension(pi: ExtensionAPI) {
 	// Claude Code's AskUserQuestion text, short or long by the model's tier
 	// (description.ts, lib/tool-variants.ts); registered again when the form changes.
 	const tool = defineTool({
@@ -123,3 +124,5 @@ export default function askUserExtension(pi: ExtensionAPI) {
 	});
 	registerFormTool(pi, tool, askDescription);
 }
+
+export default feature("ask-user", askUserExtension);

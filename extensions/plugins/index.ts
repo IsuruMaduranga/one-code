@@ -16,6 +16,7 @@
  * ~/.claude is read-only here, always.
  */
 
+import { feature } from "../lib/feature.ts";
 import { randomUUID } from "node:crypto";
 import { readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -110,7 +111,7 @@ function safeDiscover(roots: ReturnType<typeof defaultDiscoverRoots>): Discovere
 	}
 }
 
-export default function pluginsExtension(pi: ExtensionAPI) {
+function pluginsExtension(pi: ExtensionAPI) {
 	const sendUserMessage = createUserMessageSender(pi);
 	const getPermissionBridge = watchPermissionBridge(pi);
 	const workCwd = followWorkCwd(pi.events);
@@ -596,3 +597,5 @@ function registerPluginCommand(pi: ExtensionAPI, plugin: Plugin, name: string, p
 		},
 	});
 }
+
+export default feature("plugins", pluginsExtension);

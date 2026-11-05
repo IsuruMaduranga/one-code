@@ -1,4 +1,5 @@
 /** User-only model-upgrade advice. No reminders, transcript entries, or request hooks. */
+import { feature } from "../lib/feature.ts";
 import { homedir } from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { modelSpec } from "../lib/model-policy.ts";
@@ -8,7 +9,7 @@ import { queueNotice } from "../lib/notices.ts";
 import { sessionOutlivesTurn } from "../lib/notifications.ts";
 import { readSuggestNewerModels } from "../lib/one-code-settings.ts";
 
-export default function newerModelExtension(pi: ExtensionAPI) {
+function newerModelExtension(pi: ExtensionAPI) {
 	const shown = new Set<string>();
 	const unusable = new Set<string>();
 	pi.events.on(MODEL_UNUSABLE_CHANNEL, (data) => unusable.add((data as ModelUnusableEvent).model));
@@ -29,3 +30,5 @@ export default function newerModelExtension(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => suggest(ctx));
 	pi.on("model_select", (event, ctx) => suggest(ctx, event.model));
 }
+
+export default feature("newer-model", newerModelExtension);

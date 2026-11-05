@@ -35,6 +35,7 @@
  * one chosen.
  */
 
+import { feature } from "../lib/feature.ts";
 import { join } from "node:path";
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isObject } from "../lib/ledger/records.ts";
@@ -80,7 +81,7 @@ interface Settled {
 /** A switch the branch records, as `model_select` or a shutdown left it. */
 type Unannounced = Omit<Settled, "saved"> & { saved?: boolean };
 
-export default function modelDefaultExtension(pi: ExtensionAPI) {
+function modelDefaultExtension(pi: ExtensionAPI) {
 	let pending: { provider: string; id: string; name: string; notify: (message: string) => void } | undefined;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	const announce = (name: string, saved: boolean) => announceLocalCommand(pi, { name: "model", stdout: modelSwitchStdout(name, saved), key: BREADCRUMB_KEY });
@@ -158,3 +159,5 @@ export default function modelDefaultExtension(pi: ExtensionAPI) {
 		announce(name, typeof saved === "boolean" ? saved : save(provider, id, notify));
 	});
 }
+
+export default feature("model-default", modelDefaultExtension);

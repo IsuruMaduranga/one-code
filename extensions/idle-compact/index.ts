@@ -20,6 +20,7 @@
  * Code's notice. Failures are silent, as in Claude Code.
  */
 
+import { feature } from "../lib/feature.ts";
 import { type ExtensionAPI, type ExtensionContext, getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { hasOneHourCache } from "../lib/anthropic-payload.ts";
 import { modelSpec } from "../lib/model-policy.ts";
@@ -41,7 +42,7 @@ function autoCompactionOn(cwd: string): boolean {
 	}
 }
 
-export default function idleCompactExtension(pi: ExtensionAPI) {
+function idleCompactExtension(pi: ExtensionAPI) {
 	pi.registerEntryRenderer(ENTRY_TYPE, (_entry, _options, theme) => dimMarkedLine(theme, NOTICE_MARK, IDLE_COMPACT_NOTICE));
 
 	let sessionCtx: ExtensionContext | undefined;
@@ -117,3 +118,5 @@ export default function idleCompactExtension(pi: ExtensionAPI) {
 		sessionCtx = undefined;
 	});
 }
+
+export default feature("idle-compact", idleCompactExtension);

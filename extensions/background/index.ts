@@ -18,6 +18,7 @@
  * model schedules the loop itself.
  */
 
+import { feature } from "../lib/feature.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { whenAborted } from "../lib/abort.ts";
@@ -194,7 +195,7 @@ function foldEntry(entry: { type: string; timestamp?: string; customType?: strin
 	return { kind: "other" };
 }
 
-export default function backgroundExtension(pi: ExtensionAPI) {
+function backgroundExtension(pi: ExtensionAPI) {
 	// After session_shutdown the captured ctx throws on every access and the
 	// notifier is inert; a monitor whose command ends later (its shell was
 	// killed, the orphaned command finished) must repaint nothing and say
@@ -1031,3 +1032,5 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		lastCtx = undefined;
 	});
 }
+
+export default feature("background", backgroundExtension);
