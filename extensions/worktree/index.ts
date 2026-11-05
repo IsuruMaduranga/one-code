@@ -32,7 +32,8 @@ import { namesGit, unlistedWorktreesReason, worktreeBashGuardReason } from "./gu
 import { worktreePowershellGuardReason } from "./powershell-guards.ts";
 import { bashParserReady } from "../lib/bash-parser.ts";
 import { ORIGINAL_COMMAND_CHANNEL, type OriginalCommandRecord } from "../lib/original-command.ts";
-import { enterWorktreeDescription, ENTER_WORKTREE_PARAMS, EXIT_WORKTREE_DESCRIPTION, EXIT_WORKTREE_PARAMS } from "./descriptions.ts";
+import { requireText } from "../lib/profile.ts";
+import type { EnterWorktreeFailure, RemoveBlocker } from "./text.ts";
 import { rewriteToolInput, validateWorktreeName } from "./rewrite.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 import { findProjectRoot, HARNESS_GIT_CONFIG, HARNESS_GIT_NO_HOOKS, repositoryWorktrees } from "../lib/git.ts";
@@ -72,13 +73,6 @@ async function listWorktreePaths(cwd: string): Promise<string[]> {
 		.map((line) => line.slice("worktree ".length));
 }
 
-/**
- * The worktree git-isolation guard, said when the session enters: before it,
- * GPT-6 Sol and Astra both ran a read-only `git -C <main checkout> status`
- * and met the refusal with no warning (2026-10-04 self-test).
- */
-const ISOLATION_NOTE = "Git commands aimed at the main checkout or another worktree of this repository are refused until you exit.";
-
 /** The `one-code:state` key of the worktree paths the branch was already told are gone. */
 const MISSING_REPORTED_STATE = "worktree:missing-reported";
 
@@ -99,12 +93,8 @@ function isWorktreeState(value: unknown): value is WorktreeState {
 }
 
 function worktreeExtension(pi: ExtensionAPI) {
+	const text = requireText("worktree");
 	let state: WorktreeState | undefined;
-
-	const reminderFor = (s: WorktreeState) =>
-		`Worktree session active: you are working in the git worktree at ${s.path}` +
-		`${s.branch ? ` (branch ${s.branch})` : ""}, not in ${s.originalCwd}. ` +
-		"Relative paths and bash commands already run there. Use exit_worktree to leave when the user asks.";
 
 	const applyState = (next: WorktreeState | undefined, toolCallId?: string) => {
 		state = next;
@@ -113,7 +103,7 @@ function worktreeExtension(pi: ExtensionAPI) {
 		pi.events.emit(WORKTREE_CHANNEL, location);
 		if (next) {
 			pi.events.emit(REMINDER_CHANNEL, {
-				text: reminderFor(next),
+				text: text.reminder(next),
 				key: REMINDER_KEY,
 				placement: "sticky-append",
 				toolCallId,
@@ -153,7 +143,7 @@ function worktreeExtension(pi: ExtensionAPI) {
 			if (!reported.includes(restored.path)) {
 				recordState(pi, MISSING_REPORTED_STATE, [...reported, restored.path]);
 				pi.events.emit(REMINDER_CHANNEL, {
-					text: `Left worktree session; back in ${restored.originalCwd}. The worktree at ${restored.path} no longer exists.`,
+					text: text.missingOnRestore(restored),
 				});
 			}
 			restored = undefined;
@@ -174,7 +164,7 @@ function worktreeExtension(pi: ExtensionAPI) {
 		if (!state) return;
 		if (WORKTREE_TOOLS.has(event.toolName)) return;
 		if (!existsSync(state.path)) {
-			return { block: true, reason: `The active worktree at ${state.path} no longer exists. Use exit_worktree with action: "keep" to return to ${state.originalCwd}, or enter_worktree with path to switch to an existing worktree. No tool has run in the original checkout.` };
+			return { block: true, reason: text.activeMissing(state) };
 		}
 		if (["Agent", "SendMessage", "workflow"].includes(event.toolName)) return;
 		if (event.toolName === "bash" || event.toolName === "monitor") {
@@ -212,20 +202,20 @@ function worktreeExtension(pi: ExtensionAPI) {
 		name: "enter_worktree",
 		label: "Enter Worktree",
 		...ccToolRenderers("Enter Worktree"),
-		description: enterWorktreeDescription(projectConfigDirName()),
+		description: text.descriptions.enter_worktree(projectConfigDirName()),
 		parameters: Type.Object({
-			name: Type.Optional(Type.String({ description: ENTER_WORKTREE_PARAMS.name })),
-			path: Type.Optional(Type.String({ description: ENTER_WORKTREE_PARAMS.path })),
+			name: Type.Optional(Type.String({ description: text.params.enter.name })),
+			path: Type.Optional(Type.String({ description: text.params.enter.path })),
 		}),
 		async execute(toolCallId, params, _signal, _onUpdate, ctx) {
-			const fail = (text: string) => ({ content: [{ type: "text" as const, text }], details: {} as WorktreeDetails, isError: true });
+			const fail = (failure: EnterWorktreeFailure) => ({ content: [{ type: "text" as const, text: text.enter.failed(failure) }], details: {} as WorktreeDetails, isError: true });
 
-			if (params.name && params.path) return fail("Pass either `name` or `path`, not both.");
+			if (params.name && params.path) return fail({ kind: "nameAndPath" });
 			// An empty `path` string is falsy, so without this it would fall through
 			// to *creating* a new worktree instead of reporting the bad argument —
 			// the mirror of the empty-`name` case, which is already rejected below.
 			if (params.path !== undefined && params.path.length === 0) {
-				return fail("`path` was empty — pass an existing worktree path from `git worktree list`, or omit `path` to create a new worktree.");
+				return fail({ kind: "emptyPath" });
 			}
 
 			let repoRoot: string;
@@ -233,7 +223,7 @@ function worktreeExtension(pi: ExtensionAPI) {
 				// git prints `C:/…` on Windows; resolve gives the native form every path built from it shares.
 				repoRoot = resolve(await git(["rev-parse", "--show-toplevel"], ctx.cwd));
 			} catch {
-				return fail("enter_worktree needs a git repository; this directory is not one.");
+				return fail({ kind: "notARepository" });
 			}
 
 			const sharedRoot = findProjectRoot(repoRoot) ?? repoRoot;
@@ -244,22 +234,22 @@ function worktreeExtension(pi: ExtensionAPI) {
 				const wanted = comparablePath(tryRealpath(requested) ?? requested);
 				const listed = known.find((p) => comparablePath(tryRealpath(p) ?? p) === wanted);
 				const target = listed === undefined ? undefined : resolve(listed);
-				if (!target) return fail(`${params.path} is not a worktree of this repository. Known worktrees:\n${known.join("\n")}`);
-				if (!existsSync(target)) return fail(`Worktree ${target} no longer exists. Choose an existing worktree from \`git worktree list\`.`);
+				if (!target) return fail({ kind: "notListed", path: params.path, known });
+				if (!existsSync(target)) return fail({ kind: "listedMissing", path: target });
 				// The branch is display-only here (footer, reminder): a detached HEAD
 				// leaves it unset silently, a failing git is reported in the result text.
 				let branch: string | undefined;
-				let branchNote = "";
+				let branchError: string | undefined;
 				try {
 					const ref = await git(["rev-parse", "--abbrev-ref", "HEAD"], target);
 					if (ref && ref !== "HEAD") branch = ref;
 				} catch (error) {
-					branchNote = ` Its branch could not be read (${(error as Error).message.split("\n")[0]}).`;
+					branchError = (error as Error).message.split("\n")[0];
 				}
 				const next: WorktreeState = { path: target, branch, createdByUs: false, originalCwd: ctx.cwd, sharedRoot };
 				applyState(next, toolCallId);
 				return {
-					content: [{ type: "text", text: `Switched into existing worktree ${target}${branch ? ` (branch ${branch})` : ""}.${branchNote} All work now happens there; exit_worktree returns to ${ctx.cwd}. ${ISOLATION_NOTE}` }],
+					content: [{ type: "text", text: text.enter.switched({ session: next, branchError }) }],
 					details: { worktreeState: next } satisfies WorktreeDetails,
 				};
 			}
@@ -268,17 +258,17 @@ function worktreeExtension(pi: ExtensionAPI) {
 			// created. A session entered via `path` has createdByUs:false, and
 			// without gating on `state` alone a create-new call silently abandoned it.
 			if (state) {
-				return fail(`Already in a worktree session (${state.path}). exit_worktree first, or switch with \`path\` to another worktree.`);
+				return fail({ kind: "alreadyActive", path: state.path });
 			}
 
 			const name = params.name ?? `wt-${randomBytes(3).toString("hex")}`;
-			const nameError = validateWorktreeName(name);
-			if (nameError) return fail(`Invalid worktree name "${name}": ${nameError}`);
+			const nameProblem = validateWorktreeName(name);
+			if (nameProblem) return fail({ kind: "invalidName", name, problem: nameProblem });
 
 			// Hooks are disabled by the git wrapper; checkout filters must go through
 			// the normal shell permission gate rather than execute implicitly here.
 			const program = checkoutGitRunsProgram(repoRoot, homedir(), []);
-			if (program) return fail(`Could not create worktree safely: ${program}. Create it with a permission-reviewed \`git worktree add\` command, then enter it with \`path\`.`);
+			if (program) return fail({ kind: "checkoutRunsProgram", program });
 
 			// `.onecode/worktrees` in independent mode (lib/config-mode.ts).
 			const worktreesDir = join(projectConfigDir(repoRoot), "worktrees");
@@ -288,7 +278,7 @@ function worktreeExtension(pi: ExtensionAPI) {
 			if (!existsSync(ignorePath)) writeFileSync(ignorePath, "*\n");
 
 			const path = join(worktreesDir, name);
-			if (existsSync(path)) return fail(`Worktree ${path} already exists — pass it as \`path\` to switch into it.`);
+			if (existsSync(path)) return fail({ kind: "exists", path });
 
 			const branch = name.replace(/\//g, "-");
 			let baseCommit: string;
@@ -296,18 +286,13 @@ function worktreeExtension(pi: ExtensionAPI) {
 				baseCommit = await git(["rev-parse", "HEAD"], ctx.cwd);
 				await git(["worktree", "add", "-b", branch, path, "HEAD"], repoRoot);
 			} catch (error) {
-				return fail(`Could not create worktree: ${(error as Error).message}`);
+				return fail({ kind: "createFailed", osMessage: (error as Error).message });
 			}
 
 			const next: WorktreeState = { path, branch, baseCommit, createdByUs: true, originalCwd: ctx.cwd, sharedRoot };
 			applyState(next, toolCallId);
 			return {
-				content: [
-					{
-						type: "text",
-						text: `Created worktree ${path} on branch ${branch} (from HEAD ${baseCommit.slice(0, 8)}). All commands and relative paths now run there; exit_worktree returns to ${ctx.cwd}. ${ISOLATION_NOTE}`,
-					},
-				],
+				content: [{ type: "text", text: text.enter.created({ session: next, baseCommit }) }],
 				details: { worktreeState: next } satisfies WorktreeDetails,
 			};
 		},
@@ -317,15 +302,15 @@ function worktreeExtension(pi: ExtensionAPI) {
 		name: "exit_worktree",
 		label: "Exit Worktree",
 		...ccToolRenderers("Exit Worktree"),
-		description: EXIT_WORKTREE_DESCRIPTION,
+		description: text.descriptions.exit_worktree,
 		parameters: Type.Object({
-			action: StringEnum(["keep", "remove"] as const, { description: EXIT_WORKTREE_PARAMS.action }),
-			discard_changes: Type.Optional(Type.Boolean({ description: EXIT_WORKTREE_PARAMS.discard_changes })),
+			action: StringEnum(["keep", "remove"] as const, { description: text.params.exit.action }),
+			discard_changes: Type.Optional(Type.Boolean({ description: text.params.exit.discard_changes })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			if (!state) {
 				return {
-					content: [{ type: "text", text: "No worktree session is active; nothing to exit." }],
+					content: [{ type: "text", text: text.exit.noSession }],
 					details: {} satisfies WorktreeDetails,
 				};
 			}
@@ -334,50 +319,36 @@ function worktreeExtension(pi: ExtensionAPI) {
 			if (params.action === "keep") {
 				applyState(undefined);
 				return {
-					content: [
-						{
-							type: "text",
-							text: `Left worktree session; back in ${current.originalCwd}. ` + (existsSync(current.path)
-								? `The worktree remains at ${current.path}${current.branch ? ` (branch ${current.branch})` : ""} — re-enter it with enter_worktree (path: "${current.path}").`
-								: `The worktree at ${current.path} no longer exists. No branch was removed.`),
-						},
-					],
+					content: [{ type: "text", text: text.exit.kept({ session: current, exists: existsSync(current.path) }) }],
 					details: { worktreeState: null } satisfies WorktreeDetails,
 				};
 			}
 
 			if (!current.createdByUs) {
 				return {
-					content: [
-						{ type: "text", text: `This worktree (${current.path}) was not created by enter_worktree in this session — exit with action: "keep" and remove it manually if intended.` },
-					],
+					content: [{ type: "text", text: text.exit.notCreatedHere(current) }],
 					details: {} satisfies WorktreeDetails,
 					isError: true,
 				};
 			}
 
 			if (!params.discard_changes) {
-				const blockers: string[] = [];
+				const blockers: RemoveBlocker[] = [];
 				try {
 					const dirty = await git(["status", "--porcelain", "--untracked-files=all"], current.path);
-					if (dirty) blockers.push(`Uncommitted files:\n${dirty}`);
+					if (dirty) blockers.push({ kind: "uncommitted", files: dirty });
 					if (current.baseCommit && current.branch) {
 						const ahead = await git(["rev-list", "--count", "HEAD", `refs/heads/${current.branch}`, `^${current.baseCommit}`], current.path);
-						if (ahead !== "0") blockers.push(`${ahead} commit(s) on HEAD or ${current.branch} not on the original branch.`);
+						if (ahead !== "0") blockers.push({ kind: "commitsAhead", count: ahead, branch: current.branch });
 					} else {
-						blockers.push("Could not verify commits without the original branch and base commit.");
+						blockers.push({ kind: "baseUnknown" });
 					}
 				} catch {
-					blockers.push("Could not verify the worktree is clean.");
+					blockers.push({ kind: "statusUnknown" });
 				}
 				if (blockers.length > 0) {
 					return {
-						content: [
-							{
-								type: "text",
-								text: `Refusing to remove ${current.path}:\n\n${blockers.join("\n\n")}\n\nConfirm with the user, then re-invoke with discard_changes: true — or exit with action: "keep".`,
-							},
-						],
+						content: [{ type: "text", text: text.exit.removeRefused({ session: current, blockers }) }],
 						details: {} satisfies WorktreeDetails,
 						isError: true,
 					};
@@ -388,7 +359,7 @@ function worktreeExtension(pi: ExtensionAPI) {
 				await git(["worktree", "remove", ...(params.discard_changes ? ["--force"] : []), current.path], current.originalCwd);
 			} catch (error) {
 				return {
-					content: [{ type: "text", text: `Could not remove the worktree: ${(error as Error).message}` }],
+					content: [{ type: "text", text: text.exit.removeFailed((error as Error).message) }],
 					details: {} satisfies WorktreeDetails,
 					isError: true,
 				};
@@ -401,23 +372,20 @@ function worktreeExtension(pi: ExtensionAPI) {
 					await git(["branch", "-D", current.branch], current.originalCwd);
 				} catch (error) {
 					return {
-						content: [{ type: "text", text: `Removed worktree ${current.path}; back in ${current.originalCwd}, but could not delete branch ${current.branch}: ${(error as Error).message}. Inspect the branch before removing it manually.` }],
+						content: [{ type: "text", text: text.exit.branchDeleteFailed({ session: current, branch: current.branch, osMessage: (error as Error).message }) }],
 						details: { worktreeState: null } satisfies WorktreeDetails,
 						isError: true,
 					};
 				}
 			}
 			return {
-				content: [{ type: "text", text: `Removed worktree ${current.path}${current.branch ? ` and branch ${current.branch}` : ""}; back in ${current.originalCwd}.` }],
+				content: [{ type: "text", text: text.exit.removed(current) }],
 				details: { worktreeState: null } satisfies WorktreeDetails,
 			};
 		},
 	});
 
-	for (const [name, keywords] of Object.entries({
-		enter_worktree: ["worktree", "isolate", "branch", "checkout"],
-		exit_worktree: ["worktree", "leave", "return", "cleanup"],
-	})) {
+	for (const [name, keywords] of Object.entries(text.searchKeywords)) {
 		pi.events.emit(DEFER_CHANNEL, { name, keywords });
 	}
 }

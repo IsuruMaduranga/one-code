@@ -23,7 +23,7 @@ import { WEB_SEARCH_LONG_DESCRIPTION, WEB_SEARCH_SHORT_DESCRIPTION } from "../..
 import webSearchExtension from "../../extensions/web/index.ts";
 import { WEB_FETCH_LONG_DESCRIPTION, WEB_FETCH_SHORT_DESCRIPTION } from "../../extensions/web-fetch/description.ts";
 import webFetchExtension from "../../extensions/web-fetch/index.ts";
-import { ENTER_WORKTREE_DESCRIPTION, EXIT_WORKTREE_DESCRIPTION } from "../../extensions/worktree/descriptions.ts";
+import { ENTER_WORKTREE_DESCRIPTION, EXIT_WORKTREE_DESCRIPTION } from "../../profile/worktree/descriptions.ts";
 import { descriptionForm, registerVariantTool } from "../../extensions/lib/tool-variants.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 

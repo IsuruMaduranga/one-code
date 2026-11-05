@@ -88,10 +88,10 @@ describe("validateWorktreeName", () => {
 	});
 
 	it("rejects bad characters, dot segments, and over-long names", () => {
-		expect(validateWorktreeName("has space")).toBeDefined();
-		expect(validateWorktreeName("a/../b")).toBeDefined();
-		expect(validateWorktreeName("x".repeat(65))).toBeDefined();
-		expect(validateWorktreeName("")).toBeDefined();
+		expect(validateWorktreeName("has space")).toBe("characters");
+		expect(validateWorktreeName("a/../b")).toBe("dotSegment");
+		expect(validateWorktreeName("x".repeat(65))).toBe("length");
+		expect(validateWorktreeName("")).toBe("length");
 	});
 });
 

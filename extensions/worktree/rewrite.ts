@@ -12,6 +12,7 @@
 import { isAbsolute, resolve } from "node:path";
 import { powershellQuote, shellQuote } from "../lib/shell-quote.ts";
 import { normalizeToolPath } from "../lib/tool-path.ts";
+import type { WorktreeNameProblem } from "./text.ts";
 
 /** Tools whose `path` argument is relative to the session cwd. */
 const PATH_TOOLS = new Set(["read", "edit", "write", "notebook_edit", "grep", "find", "ls", "lsp_diagnostics"]);
@@ -79,12 +80,10 @@ export function rewriteToolInput(
 	return {};
 }
 
-/** Validates an EnterWorktree name: /-separated segments of [A-Za-z0-9._-], ≤64 chars total. */
-export function validateWorktreeName(name: string): string | undefined {
-	if (name.length === 0 || name.length > 64) return "name must be 1-64 characters";
-	if (!/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/.test(name)) {
-		return "each /-separated segment may contain only letters, digits, dots, underscores, and dashes";
-	}
-	if (name.split("/").some((seg) => seg === "." || seg === "..")) return "segments may not be . or ..";
+/** What is wrong with an enter_worktree name, if anything: /-separated segments of [A-Za-z0-9._-], ≤64 chars total. */
+export function validateWorktreeName(name: string): WorktreeNameProblem | undefined {
+	if (name.length === 0 || name.length > 64) return "length";
+	if (!/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/.test(name)) return "characters";
+	if (name.split("/").some((seg) => seg === "." || seg === "..")) return "dotSegment";
 	return undefined;
 }
