@@ -4,7 +4,10 @@ import systemReminderExtension from "../../extensions/system-reminder/index.ts";
 import { deferredAddendumText } from "../../extensions/lib/deferred.ts";
 import { wrapReminder } from "../../extensions/lib/reminders.ts";
 import { subagentHandbackExtension, SUBAGENT_HANDBACK_LOAD_FIRST } from "../../extensions/lib/subagent-handback.ts";
-import { TOOLS_AVAILABLE, withToolAdditions } from "../../extensions/lib/tool-additions.ts";
+import { withToolAdditions } from "../../extensions/lib/tool-additions.ts";
+import { toolSearch } from "../../profile/tool-search/index.ts";
+
+const TOOLS_AVAILABLE = toolSearch.toolsAvailable;
 import { withTurnBudgetMessages } from "../../extensions/lib/turn-budget-layout.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";

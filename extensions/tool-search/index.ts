@@ -26,7 +26,7 @@
  * and pi's event bus only delivers to listeners already registered.
  */
 
-import { activeProfile, toolSwitch } from "../lib/profile.ts";
+import { activeProfile, requireText, toolSwitch } from "../lib/profile.ts";
 import { feature } from "../lib/feature.ts";
 import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -82,6 +82,7 @@ type SessionLike = { getBranch?: () => unknown[] };
 const branchOf = (session: SessionLike | undefined) => (session?.getBranch?.() ?? []) as EntryLike[];
 
 function toolSearchExtension(pi: ExtensionAPI) {
+	const words = requireText("toolSearch");
 	// Owned here (see lib/deferred.ts): the only instance, fed over DEFER_CHANNEL.
 	const deferredRegistry = new DeferredRegistry();
 	// Names WITHHOLD_CHANNEL removed from the registry, kept only so a direct
@@ -450,14 +451,11 @@ function toolSearchExtension(pi: ExtensionAPI) {
 		name: "tool_search",
 		label: "Tool Search",
 		...ccToolRenderers("Tool Search"),
-		description:
-			"Fetches full schema definitions for deferred tools so they can be called.\n\nDeferred tools appear by name in <system-reminder> messages. Until fetched, only the name is known — there is no parameter schema, so the tool cannot be invoked. This tool takes a query, matches it against the deferred tool list, and loads the matched tools' full schemas so they become callable exactly like any tool defined at the top of the prompt.\n\nQuery forms:\n- `select:web_fetch,notebook_edit` — fetch these exact tools by name\n- `notebook jupyter` — keyword search, up to max_results best matches\n- `+slack send` — require \"slack\" in the name, rank by remaining terms",
-		promptSnippet: "Load additional tool schemas on demand",
+		description: words.description,
+		promptSnippet: words.promptSnippet,
 		parameters: Type.Object({
-			query: Type.String({ description: "Tool names (`select:a,b`) or keywords describing the capability needed" }),
-			max_results: Type.Optional(
-				Type.Integer({ minimum: 1, maximum: 20, description: "Maximum tools to load (default 5)" }),
-			),
+			query: Type.String({ description: words.params.query }),
+			max_results: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, description: words.params.maxResults })),
 		}),
 		async execute(toolCallId, params) {
 			const available = searchableTools();
@@ -483,25 +481,17 @@ function toolSearchExtension(pi: ExtensionAPI) {
 			// spelling hint. Both notes quote the model's own spelling.
 			const withdrawn = [...new Set(notFound.filter((n) => withheldNames.has(n.name)).map((n) => n.asWritten))];
 			const missing = [...new Set(notFound.filter((n) => !withheldNames.has(n.name)).map((n) => n.asWritten))];
-			const notFoundNote =
-				(missing.length > 0
-					? ` Not found (not deferred tool names — check spelling, or search by keyword instead of \`select:\`): ${missing.join(", ")}.`
-					: "") +
-				(withdrawn.length > 0 ? ` Withdrawn for the current model (do not retry): ${withdrawn.join(", ")}.` : "");
 
 			if (matches.length === 0 && eager.length > 0) {
 				return {
-					content: [{ type: "text", text: `Already loaded: ${eager.join(", ")}.${notFoundNote}` }],
+					content: [{ type: "text", text: words.result({ added: [], already: eager, refused: [], missing, withdrawn }) }],
 					details: { matches: eager, added: [] as string[], notFound, refused: [] as string[] },
 				};
 			}
 
 			if (matches.length === 0) {
-				const names = available.map((t) => t.name).join(", ") || "(none)";
 				return {
-					content: [
-						{ type: "text", text: `No tools matched "${params.query}".${notFoundNote} Tools that can be loaded: ${names}` },
-					],
+					content: [{ type: "text", text: words.noMatch({ query: params.query, missing, withdrawn, loadable: available.map((t) => t.name) }) }],
 					details: { matches: [] as string[], added: [] as string[], notFound, refused: [] as string[] },
 					isError: true,
 				};
@@ -523,19 +513,8 @@ function toolSearchExtension(pi: ExtensionAPI) {
 
 			const loaded = [...new Set([...matchNames, ...eager])].filter((name) => now.has(name));
 			const already = loaded.filter((name) => !added.includes(name));
-			const refusedNote =
-				refused.length > 0 ? ` Could not load ${refused.join(", ")}: this session's tool list (pi's --tools) leaves them out, so they cannot be called.` : "";
 			return {
-				content: [
-					{
-						type: "text",
-						text:
-							([
-								added.length > 0 ? `Loaded ${added.join(", ")}. These tools are now callable.` : "",
-								already.length > 0 ? `Already loaded: ${already.join(", ")}.` : "",
-							].filter(Boolean).join(" ") + refusedNote + notFoundNote).trim(),
-					},
-				],
+				content: [{ type: "text", text: words.result({ added, already, refused, missing, withdrawn }) }],
 				details: { matches: loaded, added, notFound, refused },
 				isError: loaded.length === 0,
 			};

@@ -17,13 +17,8 @@
 
 import { MID_CONVERSATION_SYSTEM_BETA, MID_CONVERSATION_TOOL_CHANGES_BETA, reseatMessageMark } from "./anthropic-payload.ts";
 import { byWireCallId, systemRoleLayout, type WireMessage, type WirePart, withoutParts } from "./system-role.ts";
+import { toolSearchWords } from "../tool-search/words.ts";
 
-/** The first line of the stored addendum; the names follow, one per line. */
-export const ADDENDUM_HEAD =
-	"Additional deferred tools became available via tool_search since this conversation started (they registered after the first request). Same rules: load with tool_search \"select:<name>\" before calling.";
-
-/** Claude Code's sentence before the names, in its tool-addition message. */
-export const TOOLS_AVAILABLE = "The following tools just became available and are ready to use:";
 
 /** Claude Code's betas for a reference-form tool addition in a system message. */
 export const TOOL_ADDITION_BETAS = [MID_CONVERSATION_SYSTEM_BETA, MID_CONVERSATION_TOOL_CHANGES_BETA];
@@ -38,14 +33,14 @@ export function supportsToolAdditions(model: { id?: string; provider?: string; a
 	return (model.compat as { supportsMidConvoToolChanges?: boolean } | undefined)?.supportsMidConvoToolChanges === true;
 }
 
-const OPEN = `<system-reminder>\n${ADDENDUM_HEAD}\n`;
 const CLOSE = "\n</system-reminder>";
 
-/** The names a whole framed addendum block lists; undefined for any other text. */
+/** The names a whole framed addendum block lists (its head line is the profile's); undefined for any other text. */
 export function addendumNames(text: string): string[] | undefined {
-	if (!text.startsWith(OPEN) || !text.endsWith(CLOSE)) return undefined;
+	const open = `<system-reminder>\n${toolSearchWords().addendumHead}\n`;
+	if (!text.startsWith(open) || !text.endsWith(CLOSE)) return undefined;
 	return text
-		.slice(OPEN.length, -CLOSE.length)
+		.slice(open.length, -CLOSE.length)
 		.split("\n")
 		.filter((line) => line.length > 0);
 }
@@ -119,7 +114,7 @@ export function withToolAdditions(
 		out.push(kept.length === parts.length ? message : { ...message, content: kept }, {
 			role: "system",
 			content: [
-				{ type: "text", text: [TOOLS_AVAILABLE, ...unique].join("\n") },
+				{ type: "text", text: [toolSearchWords().toolsAvailable, ...unique].join("\n") },
 				...(references ? unique.map((name) => ({ type: "tool_addition", tool: { type: "tool_reference", name } })) : []),
 			],
 		});

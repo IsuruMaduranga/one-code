@@ -37,6 +37,7 @@ import { systemPrompt } from "./system-prompt/index.ts";
 import { tasks } from "./tasks/index.ts";
 import { toolCallCorruption } from "./tool-call-corruption/index.ts";
 import { toolResults } from "./tool-results/index.ts";
+import { toolSearch } from "./tool-search/index.ts";
 import { toolStyle } from "./tool-style/index.ts";
 import { webFetch } from "./web-fetch/index.ts";
 import { webSearch } from "./web-search/index.ts";
@@ -48,5 +49,5 @@ export const profile: Profile = {
 	features: {},
 	tools: {},
 	childExtensions: [],
-	text: { systemPrompt, notebook, askUser, tasks, worktree, worktreeGuard, webFetch, webSearch, nativeWeb, sessionTitle, init, btw, recap, effort, planMode, skill, mcp, lsp, hooks, memory, background, artifacts, toolStyle, contextBudget, fileTracker, compaction, workflow, autoMode, shell, doctor, notifications, toolResults, toolCallCorruption, context },
+	text: { systemPrompt, notebook, askUser, tasks, worktree, worktreeGuard, webFetch, webSearch, nativeWeb, sessionTitle, init, btw, recap, effort, planMode, skill, mcp, lsp, hooks, memory, background, artifacts, toolStyle, contextBudget, fileTracker, compaction, workflow, autoMode, shell, doctor, notifications, toolResults, toolCallCorruption, context, toolSearch },
 };

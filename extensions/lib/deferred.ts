@@ -16,7 +16,7 @@ import { toolResultsOnBranch } from "./branch-restore.ts";
 import { parseClaudeId } from "./claude-id.ts";
 import { leadingToolsItem, toolsItemFor } from "./ledger/wire.ts";
 import { RESPONSES_APIS } from "./system-role.ts";
-import { ADDENDUM_HEAD } from "./tool-additions.ts";
+import { toolSearchWords } from "../tool-search/words.ts";
 import { normalizeToolName } from "../permissions/matcher.ts";
 
 import { DEFER_CHANNEL, type DeferRequest } from "./deferred-channel.ts";
@@ -124,10 +124,7 @@ export class DeferredRegistry {
  * loaded tool is simply callable, and the sentence says as much.
  */
 export function deferredReminderText(tools: Array<Pick<SearchableTool, "name"> & Partial<SearchableTool>>): string {
-	return [
-		'The following deferred tools are available via tool_search. Their schemas are NOT loaded — calling one directly fails with "Tool <name> not found" until you load it. Use tool_search with query "select:<name>[,<name>...]" to load tool schemas before calling them (once loaded, a tool stays callable for the rest of the session):',
-		...tools.map((t) => t.name),
-	].join("\n");
+	return [toolSearchWords().listingHead, ...tools.map((t) => t.name)].join("\n");
 }
 
 /**
@@ -137,7 +134,7 @@ export function deferredReminderText(tools: Array<Pick<SearchableTool, "name"> &
  * this rides the tail instead, so the cached prefix holds.
  */
 export function deferredAddendumText(added: readonly string[]): string {
-	return [ADDENDUM_HEAD, ...added].join("\n");
+	return [toolSearchWords().addendumHead, ...added].join("\n");
 }
 
 /**
@@ -148,7 +145,7 @@ export function deferredAddendumText(added: readonly string[]): string {
  * not found".
  */
 export function deferredRemovedText(removed: readonly string[]): string {
-	return ["The following deferred tools are no longer available. tool_search cannot load them and calls to them fail; do not use them:", ...removed].join("\n");
+	return [toolSearchWords().removedHead, ...removed].join("\n");
 }
 
 /** The loader every deferred tool sits behind. */
@@ -444,8 +441,15 @@ function withToolReferences(message: WireMessage, referencesAt: ReadonlyMap<stri
 	return { ...message, content: withBreakpointOnLast([...blocks, ...siblings], movedBreakpoint) };
 }
 
-/** `tool_search`'s plain success sentence, which the references stand in for. */
-const LOADED_SENTENCE = /^Loaded [^\n]*\. These tools are now callable\.(?=\n|$)/;
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** `tool_search`'s plain success sentence, which the references stand in for: the profile's, around the names. */
+function loadedSentence(): RegExp {
+	const words = toolSearchWords();
+	const probe = words.result({ added: ["\u0000"], already: [], refused: [], missing: [], withdrawn: [] });
+	const at = probe.indexOf("\u0000");
+	return new RegExp(`^${escapeRegExp(probe.slice(0, at))}[^\\n]*${escapeRegExp(probe.slice(at + 1))}(?=\\n|$)`);
+}
 
 /**
  * The text beside the references: Claude Code's "Tool loaded." in place of the
@@ -453,7 +457,7 @@ const LOADED_SENTENCE = /^Loaded [^\n]*\. These tools are now callable\.(?=\n|$)
  * sentence with a not-found note, and anything after it, stays as it was.
  */
 function withClaudeCodeLoadText(text: string): string {
-	return text.replace(LOADED_SENTENCE, "Tool loaded.");
+	return text.replace(loadedSentence(), toolSearchWords().toolLoaded);
 }
 
 /**
@@ -613,10 +617,7 @@ export function resultText(result: unknown): string {
  * to recover from the bare error on its own.
  */
 export function deferredMissReminderText(name: string): string {
-	return [
-		`\`${name}\` is a deferred tool — its schema is not loaded, so that call failed with "Tool ${name} not found".`,
-		`Load it first with tool_search (\`select:${name}\`), then reissue the call. It stays callable for the rest of the session once loaded.`,
-	].join(" ");
+	return toolSearchWords().missReminder({ name });
 }
 
 /**
@@ -625,7 +626,7 @@ export function deferredMissReminderText(name: string): string {
  * tool_search out (`deferralEnabled`): nothing can load them now.
  */
 export function loaderUnavailableReminderText(): string {
-	return "tool_search is not available in this session, so it cannot load the deferred tools listed earlier in this conversation. Use only the tools defined for this session.";
+	return toolSearchWords().loaderUnavailable;
 }
 
 /**
@@ -636,7 +637,7 @@ export function loaderUnavailableReminderText(): string {
  * tool_search" advice, which would just fail again.
  */
 export function withheldMissReminderText(name: string): string {
-	return `\`${name}\` failed with "Tool ${name} not found" because it was withdrawn for the current model — it is not a deferred tool you can load with tool_search. Do not retry it; continue without it.`;
+	return toolSearchWords().withheldMiss({ name });
 }
 
 /**
@@ -645,7 +646,7 @@ export function withheldMissReminderText(name: string): string {
  * no longer runs: a setting turned it off, or an extension stopped offering it.
  */
 export function unavailableToolReminderText(name: string): string {
-	return `\`${name}\` failed with "Tool ${name} not found" because it is no longer available in this session, although it is still declared. Do not retry it; continue without it.`;
+	return toolSearchWords().unavailable({ name });
 }
 
 export interface SearchMatch {

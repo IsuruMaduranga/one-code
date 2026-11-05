@@ -32,6 +32,7 @@ import type { SkillText } from "../skill/text.ts";
 import type { SystemPromptText } from "../system-prompt/text.ts";
 import type { TasksText } from "../tasks/text.ts";
 import type { ToolStyleText } from "../tool-style/text.ts";
+import type { ToolSearchText } from "../tool-search/text.ts";
 import type { WebFetchText } from "../web-fetch/text.ts";
 import type { WorkflowText } from "../workflow/text.ts";
 import type { WebSearchText } from "../web/text.ts";
@@ -91,6 +92,8 @@ export interface ProfileText {
 	toolCallCorruption?: ToolCallCorruptionText;
 	/** The first-message context (instructions, context block, date, environment, git status): every session sends it, so a profile must supply it. */
 	context?: ContextText;
+	/** tool-search is part of the required core: a profile must supply it. */
+	toolSearch?: ToolSearchText;
 	/** Used by the worktree tools, subagents and workflows (each guards isolated sessions with it). */
 	worktreeGuard?: WorktreeGuardText;
 }
