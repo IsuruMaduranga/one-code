@@ -81,7 +81,20 @@ const CONFIGS = [
 	{ name: "session-anthropic-tiny", model: ANTHROPIC, tier: "tiny", mode: "session" },
 	{ name: "session-openrouter-cheap", model: OPENROUTER, tier: "cheap", mode: "session" },
 ];
-const PROMPTS = { print: "Reply with OK.", tools: "GOLDEN_TOOLS GOLDEN_AGENT: make the scripted calls." };
+const PROMPTS = { print: "Reply with OK.", tools: "GOLDEN_TOOLS GOLDEN_AGENT GOLDEN_NOTEBOOK: make the scripted calls." };
+
+/** A format 4.4 notebook (no cell ids, so nothing random) with the given code cells. */
+const notebook = (...sources) =>
+	`${JSON.stringify({ nbformat: 4, nbformat_minor: 4, metadata: {}, cells: sources.map((source) => ({ cell_type: "code", metadata: {}, source: [source], outputs: [], execution_count: null })) }, null, 1)}\n`;
+/** The files the tools scenario's notebook round edits (golden-fixture.ts NOTEBOOK_CALLS). */
+const NOTEBOOK_FILES = {
+	"nb1.ipynb": notebook("print(1)"),
+	"nb2.ipynb": notebook("print(1)"),
+	"nb3.ipynb": notebook("print(1)"),
+	"nb4.ipynb": notebook("print(1)", "print(2)"),
+	"nb5.ipynb": notebook("print(1)", "print(2)"),
+	"notjupyter.ipynb": "{}\n",
+};
 const SESSION_PROMPTS = ["GOLDEN_TOOLS: read README.md and run echo golden.", "Reply with OK."];
 
 /** The parent's environment without anything that steers pi or One Code. */
@@ -105,6 +118,7 @@ async function runConfig(config) {
 		mkdirSync(join(home, ".onecode"), { recursive: true });
 		mkdirSync(project, { recursive: true });
 		writeFileSync(join(project, "README.md"), "# Golden project\n\nA fixed project for the golden request snapshot.\n");
+		if (config.mode === "tools") for (const [name, content] of Object.entries(NOTEBOOK_FILES)) writeFileSync(join(project, name), content);
 		const settings = withCompactionKeepBackfilled({
 			quietStartup: true,
 			packages: [repo],

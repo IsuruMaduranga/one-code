@@ -9,7 +9,7 @@
  * GOLDEN_TOOLS and no tool result has come back yet, the reply makes the
  * scripted calls in TOOL_CALLS (successes, error paths, a command the auto-mode
  * classifier judges, a deferred-tool load), plus a subagent when it also says
- * GOLDEN_AGENT. The auto-mode classifier gets a verdict instead: severity 60
+ * GOLDEN_AGENT, and a second round of notebook edits under GOLDEN_NOTEBOOK. The auto-mode classifier gets a verdict instead: severity 60
  * at stage 1, so stage 2 runs too, and severity 10 at stage 2, so the call is
  * allowed and the subagent's own requests are recorded. Every other reply is a
  * fixed text shaped like a compaction summary, which serves every turn and
@@ -35,6 +35,29 @@ const TOOL_CALLS: ToolCall[] = [
 	{ id: "toolu_golden_5", name: "bash", input: { command: "rm -f ../golden-outside.txt" } },
 	{ id: "toolu_golden_6", name: "tool_search", input: { query: "select:notebook_edit" } },
 ];
+/** Round 1 also reads the notebooks when the user text says GOLDEN_NOTEBOOK (the edit guard wants a read first). */
+const NOTEBOOK_READS: ToolCall[] = ["nb1", "nb2", "nb3", "nb4", "nb5", "notjupyter"].map((name, i) => ({ id: `toolu_golden_nbread_${i}`, name: "read", input: { path: `${name}.ipynb` } }));
+
+/**
+ * Round 2 under GOLDEN_NOTEBOOK, after round 1's results: each edit mode once,
+ * each on its own notebook so parallel calls cannot race, and every failure
+ * path the tool names. The notebooks are format 4.4, whose cells carry no
+ * random ids (golden-requests.mjs writes them).
+ */
+const NOTEBOOK_CALLS: ToolCall[] = [
+	{ path: "nb1.ipynb", cell_id: "cell-0", new_source: "print(2)" },
+	{ path: "nb2.ipynb", edit_mode: "append", new_source: "x = 1", cell_type: "code" },
+	{ path: "nb3.ipynb", edit_mode: "insert", cell_id: "cell-0", new_source: "# Notes", cell_type: "markdown" },
+	{ path: "nb4.ipynb", edit_mode: "delete", cell_id: "cell-1" },
+	{ path: "nb5.ipynb", edit_mode: "delete" },
+	{ path: "nb5.ipynb", cell_id: "zzz", new_source: "x" },
+	{ path: "nb5.ipynb", cell_id: "cell-0" },
+	{ path: "nb5.ipynb", edit_mode: "append", new_source: "x" },
+	{},
+	{ path: "absent.ipynb", cell_id: "cell-0", new_source: "x" },
+	{ path: "notjupyter.ipynb", cell_id: "cell-0", new_source: "x" },
+].map((input, i) => ({ id: `toolu_golden_nb_${i}`, name: "notebook_edit", input }));
+
 /** Added when the user text also says GOLDEN_AGENT: a subagent run (blocking only in one-shot modes). */
 const AGENT_CALL: ToolCall = { id: "toolu_golden_7", name: "Agent", input: { description: "Golden check", task: "Reply with OK.", subagent_type: "general-purpose" } };
 
@@ -85,17 +108,25 @@ function chatReply(calls: ToolCall[] | undefined, text: string): string {
 }
 
 /**
- * The scripted calls when the newest user message asks for them and no
- * assistant reply has followed it, else undefined. Mid-conversation `system`
- * messages may sit after it, so the search skips them.
+ * The scripted calls for this request, else undefined. Round 1 answers the
+ * GOLDEN_TOOLS user message itself (no assistant reply after it yet); round 2,
+ * under GOLDEN_NOTEBOOK, answers round 1's results (exactly one assistant
+ * reply after it, and the newest turn is tool results). Mid-conversation
+ * `system` messages may sit anywhere after it, so the search skips them.
  */
 function scriptedCalls(messages: Array<{ role?: string; content?: unknown }>): ToolCall[] | undefined {
-	const userAt = messages.findLastIndex((m) => m.role === "user");
-	if (userAt < 0) return undefined;
-	const text = JSON.stringify(messages[userAt].content);
-	if (!text.includes("GOLDEN_TOOLS") || text.includes("tool_result")) return undefined;
-	if (messages.slice(userAt + 1).some((m) => m.role === "assistant" || m.role === "tool")) return undefined;
-	return text.includes("GOLDEN_AGENT") ? [...TOOL_CALLS, AGENT_CALL] : TOOL_CALLS;
+	const isResults = (m: { role?: string; content?: unknown }) => m.role === "tool" || (m.role === "user" && JSON.stringify(m.content).includes("tool_result"));
+	const goldenAt = messages.findLastIndex((m) => m.role === "user" && !isResults(m) && JSON.stringify(m.content).includes("GOLDEN_TOOLS"));
+	if (goldenAt < 0 || messages.slice(goldenAt + 1).some((m) => m.role === "user" && !isResults(m))) return undefined;
+	const text = JSON.stringify(messages[goldenAt].content);
+	const after = messages.slice(goldenAt + 1).filter((m) => m.role !== "system");
+	const replies = after.filter((m) => m.role === "assistant").length;
+	if (replies === 0) {
+		return [...TOOL_CALLS, ...(text.includes("GOLDEN_NOTEBOOK") ? NOTEBOOK_READS : []), ...(text.includes("GOLDEN_AGENT") ? [AGENT_CALL] : [])];
+	}
+	const last = after.at(-1);
+	if (replies === 1 && last && isResults(last) && text.includes("GOLDEN_NOTEBOOK")) return NOTEBOOK_CALLS;
+	return undefined;
 }
 
 export default function goldenFixture(_pi: ExtensionAPI) {
