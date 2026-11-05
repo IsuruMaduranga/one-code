@@ -31,6 +31,7 @@ import type { SystemPromptText } from "../system-prompt/text.ts";
 import type { TasksText } from "../tasks/text.ts";
 import type { ToolStyleText } from "../tool-style/text.ts";
 import type { WebFetchText } from "../web-fetch/text.ts";
+import type { WorkflowText } from "../workflow/text.ts";
 import type { WebSearchText } from "../web/text.ts";
 import type { WorktreeGuardText, WorktreeText } from "../worktree/text.ts";
 import type { NativeWebText } from "./native-web-text.ts";
@@ -70,6 +71,7 @@ export interface ProfileText {
 	contextBudget?: ContextBudgetText;
 	fileTracker?: FileTrackerText;
 	compaction?: CompactionText;
+	workflow?: WorkflowText;
 	/** Used by the worktree tools, subagents and workflows (each guards isolated sessions with it). */
 	worktreeGuard?: WorktreeGuardText;
 }

@@ -41,6 +41,7 @@ import { withoutUnusable } from "../lib/model-unusable.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "../subagents/worktree.ts";
 import type { AgentCallOptions, AgentCallResult, AgentEffort, AgentRunUpdate, KeptWorktree } from "./types.ts";
 import { WorkflowScriptError } from "./types.ts";
+import { workflowWords } from "./words.ts";
 import { type DeferRequest, deferLikeParentExtension, injectedByParent } from "../lib/deferred.ts";
 
 const MAX_SCHEMA_RETRIES = 2;
@@ -111,9 +112,7 @@ export async function judgeWorkflowDelegation(input: {
 }): Promise<void> {
 	if (!input.bridge) {
 		if (input.liveMode === "auto") {
-			throw new Error(
-				"agent() refused: auto mode's classifier is only reachable through the parent session, which this run has no link to",
-			);
+			throw new Error(workflowWords().callProblem({ kind: "noClassifierLink" }));
 		}
 		return;
 	}
@@ -123,7 +122,7 @@ export async function judgeWorkflowDelegation(input: {
 		cwd: input.cwd,
 		signal: input.signal,
 	});
-	if (verdict?.block) throw new Error(`agent() refused by the permission gate: ${verdict.reason}`);
+	if (verdict?.block) throw new Error(workflowWords().callProblem({ kind: "refusedByGate", reason: String(verdict.reason) }));
 }
 
 /**
@@ -179,14 +178,18 @@ export function resolveWorkflowAgentModel(input: WorkflowModelInput): {
 			defaultSource: fallback.source,
 			requireImageInput: supportsImageInput(input.sessionModel),
 		});
-		const reason = resolution.unresolvedReason ?? `agent() model "${resolution.unresolved}" is not available.`;
-		throw new WorkflowScriptError(`${reason}\n${menu.join("\n")}\nAny exact provider/model-id also resolves.`);
+		throw new WorkflowScriptError(
+			workflowWords().callProblem({
+				kind: "modelUnavailable",
+				model: resolution.unresolved,
+				...(resolution.unresolvedReason ? { reason: resolution.unresolvedReason } : {}),
+				menu,
+			}),
+		);
 	}
 	const gate = expensiveModelGate(resolution, input.sessionModel, input.opts.allowExpensive);
 	if (gate) {
-		throw new WorkflowScriptError(
-			`${gate}\nIf the user explicitly asked for this model, pass allowExpensive: true; otherwise pick a cheaper model or omit opts.model.`,
-		);
+		throw new WorkflowScriptError(workflowWords().callProblem({ kind: "expensiveModel", gate }));
 	}
 	return {
 		model: resolution.model,
@@ -254,8 +257,8 @@ export class AgentRunner {
 		if (opts.agentType) {
 			agentDef = this.agentCatalog.find((a) => a.name === opts.agentType);
 			if (!agentDef) {
-				const known = this.agentCatalog.map((a) => a.name).join(", ") || "(none)";
-				throw new WorkflowScriptError(`agent() agentType "${opts.agentType}" is not defined. Known agents: ${known}`);
+				const known = this.agentCatalog.map((a) => a.name);
+				throw new WorkflowScriptError(workflowWords().callProblem({ kind: "unknownAgentType", agentType: opts.agentType, known }));
 			}
 		}
 
@@ -316,7 +319,7 @@ export class AgentRunner {
 				customTools,
 				sessionManager: SessionManager.inMemory(cwd),
 			},
-			onError: (error) => this.options.onNotice?.(`${opts.label ?? "agent"}: extension error in ${error.event}: ${error.error}`),
+			onError: (error) => this.options.onNotice?.(workflowWords().notice({ kind: "extensionError", label: opts.label, event: error.event, error: `${error.error}` })),
 		}).catch(async (error: unknown) => {
 			// Not yet under the prompt's try/finally: a session that fails to open
 			// must not leak the worktree and its branch.
@@ -368,9 +371,9 @@ export class AgentRunner {
 			if (unusable) throw new WorkflowScriptError(unusable);
 			// A stop during the waits above (MCP tools still connecting, the warm
 			// gate) aborted a session that was idle: never send the first request.
-			if (signal.aborted) throw new WorkflowScriptError("aborted");
+			if (signal.aborted) throw new WorkflowScriptError(workflowWords().runStop({ kind: "agentAborted" }));
 			await session.prompt(this.buildPrompt(prompt, Boolean(opts.schema)));
-			if (signal.aborted) throw new WorkflowScriptError("aborted");
+			if (signal.aborted) throw new WorkflowScriptError(workflowWords().runStop({ kind: "agentAborted" }));
 
 			let value: unknown;
 			if (opts.schema) {
@@ -379,7 +382,7 @@ export class AgentRunner {
 				// The handed-back report, else the agent's last message.
 				value = handback?.report ?? finalAssistantText(session.messages);
 				if (typeof value !== "string" || !value.trim()) {
-					throw new Error("subagent produced no output");
+					throw new Error(workflowWords().agentFailure({ kind: "noOutput" }));
 				}
 				// Never cut: a long answer is saved to the run directory and the script
 				// gets Claude Code's <persisted-output> block naming the file, which a
@@ -434,7 +437,7 @@ export class AgentRunner {
 	private async settleWorktree(worktree: Worktree, label: string | undefined, error: unknown): Promise<void> {
 		if (await cleanupWorktree(this.options.cwd, worktree)) return;
 		const kept: KeptWorktree = { path: worktree.path, branch: worktree.branch };
-		this.options.onNotice?.(`${label ?? "agent"}: worktree kept at ${kept.path} (branch ${kept.branch}) with its changes or commits`);
+		this.options.onNotice?.(workflowWords().notice({ kind: "worktreeKept", label, path: kept.path, branch: kept.branch }));
 		if (error instanceof Error) (error as Error & { keptWorktree?: KeptWorktree }).keptWorktree = kept;
 	}
 
@@ -451,10 +454,7 @@ export class AgentRunner {
 	}
 
 	private buildPrompt(prompt: string, structured: boolean): string {
-		if (!structured) {
-			return `${prompt}\n\nThe report you hand back through SubagentHandback is returned verbatim to an orchestration script, not shown to a human — hand back the requested data/report only.`;
-		}
-		return `${prompt}\n\nWhen you are done, you MUST call the \`structured_output\` tool exactly once with your final result. Its arguments are the only output the caller receives.`;
+		return workflowWords().agentPrompt({ prompt, structured });
 	}
 
 	private async resolveStructuredOutput(
@@ -463,15 +463,15 @@ export class AgentRunner {
 		signal: AbortSignal,
 	): Promise<unknown> {
 		for (let attempt = 0; attempt < MAX_SCHEMA_RETRIES && !capture.called; attempt++) {
-			if (signal.aborted) throw new WorkflowScriptError("aborted");
-			await session.prompt("You have not produced your result yet. Call the `structured_output` tool now with your final answer.");
+			if (signal.aborted) throw new WorkflowScriptError(workflowWords().runStop({ kind: "agentAborted" }));
+			await session.prompt(workflowWords().structuredNudge);
 		}
 		if (capture.called) return capture.value;
 		// Last resort: extract a JSON object from the final assistant text.
 		const text = finalAssistantText(session.messages);
 		const extracted = extractJsonObject(text);
 		if (extracted !== undefined) return extracted;
-		throw new Error("subagent never produced structured output");
+		throw new Error(workflowWords().agentFailure({ kind: "noStructuredOutput" }));
 	}
 
 	dispose(): void {
@@ -487,13 +487,13 @@ function buildStructuredOutputTool(schema: Record<string, unknown>, capture: { c
 	return {
 		name: "structured_output",
 		label: "Structured Output",
-		description: "Return the final machine-readable result for this task. Call exactly once, as your last action.",
+		description: workflowWords().structuredOutputTool.description,
 		parameters: Type.Unsafe(schema as never) as never,
 		async execute(_toolCallId: string, params: unknown) {
 			capture.called = true;
 			capture.value = params;
 			return {
-				content: [{ type: "text" as const, text: "Structured output received." }],
+				content: [{ type: "text" as const, text: workflowWords().structuredOutputTool.received }],
 				details: params,
 				terminate: true,
 			};

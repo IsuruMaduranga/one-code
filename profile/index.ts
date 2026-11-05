@@ -33,6 +33,7 @@ import { tasks } from "./tasks/index.ts";
 import { toolStyle } from "./tool-style/index.ts";
 import { webFetch } from "./web-fetch/index.ts";
 import { webSearch } from "./web-search/index.ts";
+import { workflow } from "./workflow/index.ts";
 import { worktreeGuard } from "./worktree/guard.ts";
 import { worktree } from "./worktree/index.ts";
 
@@ -40,5 +41,5 @@ export const profile: Profile = {
 	features: {},
 	tools: {},
 	childExtensions: [],
-	text: { systemPrompt, notebook, askUser, tasks, worktree, worktreeGuard, webFetch, webSearch, nativeWeb, sessionTitle, init, btw, recap, effort, planMode, skill, mcp, lsp, hooks, memory, background, artifacts, toolStyle, contextBudget, fileTracker, compaction },
+	text: { systemPrompt, notebook, askUser, tasks, worktree, worktreeGuard, webFetch, webSearch, nativeWeb, sessionTitle, init, btw, recap, effort, planMode, skill, mcp, lsp, hooks, memory, background, artifacts, toolStyle, contextBudget, fileTracker, compaction, workflow },
 };

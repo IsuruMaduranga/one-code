@@ -35,7 +35,9 @@ import { Type } from "typebox";
 import { recordUsage } from "../lib/usage-bus.ts";
 import { readWorkflowSettings } from "../lib/one-code-settings.ts";
 import { registerVariantTool } from "../lib/tool-variants.ts";
-import { workflowDescription } from "./description.ts";
+import type { WorkflowText } from "./text.ts";
+import { workflowWords } from "./words.ts";
+import { requireText } from "../lib/profile.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent } from "../lib/model-unusable.ts";
 import { whenAborted } from "../lib/abort.ts";
 import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, taskNotification, taskStatusOf, workflowSummary } from "../lib/notifications.ts";
@@ -80,57 +82,22 @@ import { panelUi } from "../lib/panel-focus.ts";
 import { dockRowsReporter, trackDockRows } from "../lib/dock-rows.ts";
 import { queryDeferred } from "../lib/deferred.ts";
 
-/**
- * Claude Code's own arming reminder, verbatim in intent: the keyword is a
- * standing opt-in for the turn, delivered as a system-reminder rather than
- * anything the model has to notice on its own.
- */
-const ULTRACODE_REMINDER =
-	'The user included the keyword "ultracode", opting this turn into multi-agent orchestration — use the workflow tool to fulfill the request.';
-
-// Claude Code's parameter texts, with One Code's tool names; `name` also
-// names the personal directory, and a run is stopped with /workflows stop.
-const WorkflowParams = Type.Object({
-	script: Type.Optional(
-		Type.String({
-			description:
-				"Self-contained workflow script. Must begin with `export const meta = { name, description, phases }` (pure literal, no computed values) followed by the script body using agent()/parallel()/pipeline()/phase().",
-		}),
-	),
-	name: Type.Optional(
-		Type.String({ description: `Name of a saved workflow from ${projectConfigDirName()}/workflows/ or ~/${projectConfigDirName()}/workflows/. Resolves to a self-contained script.` }),
-	),
-	args: Type.Optional(
-		Type.Any({
-			description:
-				"Optional input value exposed to the script as the global `args`, verbatim. Pass arrays/objects as actual JSON values, NOT as a JSON-encoded string — a stringified list breaks `args.filter`/`args.map` in the script. Use for parameterized named workflows (e.g. a research question).",
-		}),
-	),
-	scriptPath: Type.Optional(
-		Type.String({
-			description:
-				"Path to a workflow script file on disk. Every workflow invocation persists its script under the session directory and returns the path in the tool result. To iterate, edit that file with write/edit and re-invoke workflow with the same `scriptPath` instead of re-sending the full script. Takes precedence over `script` and `name`.",
-		}),
-	),
-	resumeFromRunId: Type.Optional(
-		Type.String({
-			pattern: "^wf_[a-z0-9-]{6,}$",
-			description:
-				"Run ID of a prior workflow invocation to resume from. Completed agent() calls with unchanged (prompt, opts) return their cached results instantly; only edited or new calls re-run. Same-session only. Stop the prior run first (/workflows stop) before resuming.",
-		}),
-	),
-	tokenBudget: Type.Optional(
-		Type.Integer({
-			minimum: 1000,
-			description: "Output-token target shared by the run and nested workflows. Stops new and queued agents once reached; already-running agents may exceed it. Exposed as budget {total, spent(), remaining()}",
-		}),
-	),
-	sync: Type.Optional(
-		Type.Boolean({ description: "Run in the foreground, blocking until the workflow finishes (default: background)" }),
-	),
-});
+/** The tool's parameters, described in the profile's words. */
+function workflowParams(text: WorkflowText) {
+	const d = text.params({ configDir: projectConfigDirName() });
+	return Type.Object({
+		script: Type.Optional(Type.String({ description: d.script })),
+		name: Type.Optional(Type.String({ description: d.name })),
+		args: Type.Optional(Type.Any({ description: d.args })),
+		scriptPath: Type.Optional(Type.String({ description: d.scriptPath })),
+		resumeFromRunId: Type.Optional(Type.String({ pattern: "^wf_[a-z0-9-]{6,}$", description: d.resumeFromRunId })),
+		tokenBudget: Type.Optional(Type.Integer({ minimum: 1000, description: d.tokenBudget })),
+		sync: Type.Optional(Type.Boolean({ description: d.sync })),
+	});
+}
 
 function workflowExtension(pi: ExtensionAPI) {
+	const text = requireText("workflow");
 	// Models the account refused this session (classifier/subagent reports, lib/model-unusable.ts):
 	// workflow agents share the subagent selector, so they resolve around them too.
 	const unusableModels = new Set<string>();
@@ -212,10 +179,10 @@ function workflowExtension(pi: ExtensionAPI) {
 					? `Running in background · /workflows to monitor and save · ${result.details.runId ?? ""}`.trimEnd()
 					: undefined,
 		}),
-		description: workflowDescription("medium", false),
+		description: text.description({ guideline: "medium", configured: false }),
 		prepareArguments: prepareWorkflowArguments as never,
-		promptSnippet: "Run a script that orchestrates many subagents (opt-in ultracode mode)",
-		parameters: WorkflowParams,
+		promptSnippet: text.promptSnippet,
+		parameters: workflowParams(text),
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			lastCtx = ctx;
 			const sessionDir = ctx.sessionManager.getSessionDir();
@@ -225,13 +192,11 @@ function workflowExtension(pi: ExtensionAPI) {
 				// Settings that turn workflows off also refuse a call that reaches
 				// the tool anyway (a later setActiveTools can bring it back).
 				if (!workflowsEnabled) {
-					throw new WorkflowScriptError(
-						"Workflows are turned off: enableWorkflows is false or disableWorkflows is true in One Code's user or project settings. Turn them back on there and start a new session.",
-					);
+					throw new WorkflowScriptError(text.refused({ kind: "turnedOff" }));
 				}
 				// `scriptPath` takes precedence over `script` and `name`, as in Claude Code.
 				if (params.scriptPath) {
-					if (!existsSync(params.scriptPath)) throw new WorkflowScriptError(`scriptPath ${params.scriptPath} does not exist`);
+					if (!existsSync(params.scriptPath)) throw new WorkflowScriptError(text.refused({ kind: "scriptPathMissing", path: params.scriptPath }));
 					script = readFileSync(params.scriptPath, "utf8");
 				}
 				script ??= params.script;
@@ -239,21 +204,19 @@ function workflowExtension(pi: ExtensionAPI) {
 					const saved = findSavedWorkflow(ctx.cwd, os.homedir(), params.name);
 					if (!saved) {
 						const known = discoverSavedWorkflows(ctx.cwd, os.homedir()).map((w) => w.name);
-						throw new WorkflowScriptError(
-							`No saved workflow named "${params.name}". Available: ${known.join(", ") || "(none)"}`,
-						);
+						throw new WorkflowScriptError(text.refused({ kind: "unknownSaved", name: params.name, known }));
 					}
 					script = readFileSync(saved.path, "utf8");
 				}
 				if (!script && params.resumeFromRunId) {
 					const storedScript = join(sessionDir, "workflows", params.resumeFromRunId, "script.js");
 					if (!existsSync(storedScript)) {
-						throw new WorkflowScriptError(`resumeFromRunId ${params.resumeFromRunId} has no stored script`);
+						throw new WorkflowScriptError(text.refused({ kind: "noStoredScript", runId: params.resumeFromRunId }));
 					}
 					script = readFileSync(storedScript, "utf8");
 				}
 				if (!script) {
-					throw new WorkflowScriptError("Pass one of: script, scriptPath, name, or resumeFromRunId");
+					throw new WorkflowScriptError(text.refused({ kind: "nothingToRun" }));
 				}
 
 				const configuredDefault = applicableSubagentDefault(loadSubagentDefault(os.homedir()), ctx.model);
@@ -298,17 +261,16 @@ function workflowExtension(pi: ExtensionAPI) {
 						});
 					};
 					handle.on("progress", onProgress);
-					const unhookAbort = whenAborted(signal, () => handle.abort("tool call aborted"));
+					const unhookAbort = whenAborted(signal, () => handle.abort(text.runStop({ kind: "stopped", by: "toolCall" })));
 					try {
 						await handle.finished;
 					} finally {
 						unhookAbort();
 						handle.removeListener("progress", onProgress);
 					}
-					const oneShotPrefix = forcedSync ? `${oneShotNote("workflow")}\n\n` : "";
 					return {
 						// The script's path, as the background result gives it: a failed run is fixed by editing it and re-running with scriptPath.
-						content: [{ type: "text", text: `${oneShotPrefix}${buildRunReport(handle)}\nscript: ${handle.scriptPath}` }],
+						content: [{ type: "text", text: text.ranToEnd({ ...(forcedSync ? { note: oneShotNote("workflow") } : {}), report: buildRunReport(handle), scriptPath: handle.scriptPath }) }],
 						details: { runId: handle.runId, status: handle.status, scriptPath: handle.scriptPath },
 						isError: handle.status !== "completed",
 					};
@@ -319,12 +281,7 @@ function workflowExtension(pi: ExtensionAPI) {
 					content: [
 						{
 							type: "text",
-							text:
-								`Workflow **${handle.meta.name}** ${handle.resumed ? "resumed" : "started"} in the background.\n` +
-								`runId: ${handle.runId}\nscript: ${handle.scriptPath}\n` +
-								"The result will arrive as a task notification when the run finishes. " +
-								"You know nothing about its outcome until then — do not predict it. " +
-								"The user can watch with /workflows and stop with /workflows stop.",
+							text: text.started({ name: handle.meta.name, resumed: handle.resumed, runId: handle.runId, scriptPath: handle.scriptPath }),
 						},
 					],
 					details: { runId: handle.runId, background: true, scriptPath: handle.scriptPath },
@@ -356,7 +313,7 @@ function workflowExtension(pi: ExtensionAPI) {
 	const applyWorkflowSettings = (cwd: string) => {
 		const settings = readWorkflowSettings(cwd, os.homedir());
 		workflowsEnabled = settings.enabled;
-		setWorkflowDescription(workflowDescription(settings.sizeGuideline, settings.sizeConfigured));
+		setWorkflowDescription(text.description({ guideline: settings.sizeGuideline, configured: settings.sizeConfigured }));
 		if (withholdIfOff()) {
 			workflowWithheld = true;
 		} else if (settings.enabled && workflowWithheld) {
@@ -382,10 +339,10 @@ function workflowExtension(pi: ExtensionAPI) {
 				return "Dynamic workflows dialog dismissed";
 			}
 			if (action === "stop" && runId) {
-				const stopped = manager.abort(runId, "stopped via /workflows");
-				const text = stopped ? `Stopping ${runId}…` : `No running workflow ${runId}`;
-				ctx.ui.notify(text, stopped ? "info" : "error");
-				return text;
+				const stopped = manager.abort(runId, text.runStop({ kind: "stopped", by: "command" }));
+				const message = stopped ? `Stopping ${runId}…` : `No running workflow ${runId}`;
+				ctx.ui.notify(message, stopped ? "info" : "error");
+				return message;
 			}
 			if (action === "log" && runId) {
 				const handle = manager.get(runId);
@@ -437,12 +394,12 @@ function workflowExtension(pi: ExtensionAPI) {
 	pi.on("input", (event) => {
 		if (!workflowsEnabled || ultracodeMode || !/\bultracode\b/i.test(event.text)) return undefined;
 		if (event.streamingBehavior) queuedKeyword.hold(event.text, true);
-		else pi.events.emit(REMINDER_CHANNEL, { text: ULTRACODE_REMINDER });
+		else pi.events.emit(REMINDER_CHANNEL, { text: text.ultracodeReminder });
 		return undefined;
 	});
 	pi.on("message_start", (event) => {
 		if (queuedKeyword.isEmpty || event.message.role !== "user") return;
-		if (queuedKeyword.release(contentText(event.message.content, ""))) pi.events.emit(REMINDER_CHANNEL, { text: ULTRACODE_REMINDER, placement: "last-append" });
+		if (queuedKeyword.release(contentText(event.message.content, ""))) pi.events.emit(REMINDER_CHANNEL, { text: text.ultracodeReminder, placement: "last-append" });
 	});
 	pi.on("agent_settled", () => queuedKeyword.clear());
 
@@ -501,7 +458,7 @@ function workflowExtension(pi: ExtensionAPI) {
 						return ctx.isIdle() ? { consume: true } : undefined;
 					case "stop": {
 						const run = widget.selectedRun();
-						if (run) manager.abort(run.runId, "stopped from status strip");
+						if (run) manager.abort(run.runId, text.runStop({ kind: "stopped", by: "statusStrip" }));
 						return { consume: true };
 					}
 					case "open": {
@@ -536,7 +493,7 @@ function workflowExtension(pi: ExtensionAPI) {
 	pi.on("session_shutdown", () => {
 		// Fires on /clear, /new and /resume too (findings §8): after this the ctx
 		// is invalid, so nothing below may paint on it.
-		manager.abortAll("session ended");
+		manager.abortAll(text.runStop({ kind: "stopped", by: "session" }));
 		widget.dispose();
 		lastCtx = undefined;
 	});
@@ -675,7 +632,7 @@ async function openWorkflowViewer(
 					}
 					case "stop": {
 						const run = snapshots()[state.runIndex];
-						const stopped = run && manager.abort(run.runId, "stopped from viewer");
+						const stopped = run && manager.abort(run.runId, workflowWords().runStop({ kind: "stopped", by: "viewer" }));
 						state.notice = stopped ? `stopping ${run.runId}…` : "workflow is not running";
 						break;
 					}

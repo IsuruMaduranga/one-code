@@ -29,6 +29,7 @@ import { runWorkflowScript } from "./vm-runtime.ts";
 import type { AgentRecord, RunProgressEvent, RunStatus, WorkflowMeta } from "./types.ts";
 import { WorkflowScriptError } from "./types.ts";
 import type { ViewerRunSnapshot } from "./viewer.ts";
+import { workflowWords } from "./words.ts";
 import type { DeferRequest } from "../lib/deferred.ts";
 
 const WALL_CLOCK_CAP_MS = 30 * 60 * 1000;
@@ -146,9 +147,10 @@ function formatEvent(event: RunProgressEvent): string | undefined {
 		case "agentStart":
 			return `⏳ ${event.label}${event.phase ? ` [${event.phase}]` : ""}`;
 		case "agentEnd": {
-			const kept = event.worktree ? ` · worktree kept at ${event.worktree.path}` : "";
+			const words = workflowWords().progress;
+			const kept = event.worktree ? ` · ${words.worktreeKept({ path: event.worktree.path })}` : "";
 			if (event.text) return `✗ ${event.label}: ${event.text}${kept}`;
-			return `✓ ${event.label}${event.replayed ? " (replayed)" : ""}${event.tokens ? ` · ${event.tokens.output} out` : ""}${kept}`;
+			return `✓ ${event.label}${event.replayed ? ` ${words.replayed}` : ""}${event.tokens ? ` · ${words.outputTokens({ tokens: event.tokens.output })}` : ""}${kept}`;
 		}
 		default:
 			return undefined;
@@ -213,7 +215,7 @@ export class WorkflowRunManager {
 		const resumed = Boolean(options.resumeFromRunId);
 		const runId = options.resumeFromRunId ?? `wf_${randomBytes(5).toString("hex")}`;
 		if (!/^wf_[a-z0-9-]{6,}$/.test(runId)) {
-			throw new WorkflowScriptError(`Invalid runId "${runId}"`);
+			throw new WorkflowScriptError(workflowWords().refused({ kind: "invalidRunId", runId }));
 		}
 		const runDir = join(options.sessionDir, "workflows", runId);
 		const journalPath = join(runDir, "journal.jsonl");
@@ -221,10 +223,10 @@ export class WorkflowRunManager {
 		let replay: ReplayCursor | undefined;
 		if (resumed) {
 			if (this.runs.get(runId)?.status === "running") {
-				throw new WorkflowScriptError(`Run ${runId} is still running — stop it before resuming`);
+				throw new WorkflowScriptError(workflowWords().refused({ kind: "stillRunning", runId }));
 			}
 			if (!existsSync(runDir)) {
-				throw new WorkflowScriptError(`resumeFromRunId ${runId} not found under ${join(options.sessionDir, "workflows")}`);
+				throw new WorkflowScriptError(workflowWords().refused({ kind: "runNotFound", runId, dir: join(options.sessionDir, "workflows") }));
 			}
 			replay = new ReplayCursor(readJournal(journalPath));
 		}
@@ -246,7 +248,7 @@ export class WorkflowRunManager {
 		replay: ReplayCursor | undefined,
 	): Promise<void> {
 		const wallClock = setTimeout(
-			() => handle.abort(`wall-clock cap reached (${WALL_CLOCK_CAP_MS / 60000} minutes)`),
+			() => handle.abort(workflowWords().runStop({ kind: "wallClock", minutes: WALL_CLOCK_CAP_MS / 60000 })),
 			WALL_CLOCK_CAP_MS,
 		);
 		wallClock.unref?.();
@@ -308,16 +310,16 @@ export class WorkflowRunManager {
 		let label: string;
 		if (typeof nameOrRef === "string") {
 			const saved = findSavedWorkflow(options.cwd, os.homedir(), nameOrRef);
-			if (!saved) throw new WorkflowScriptError(`workflow("${nameOrRef}"): no saved workflow with that name`);
+			if (!saved) throw new WorkflowScriptError(workflowWords().callProblem({ kind: "nestedUnknown", name: nameOrRef }));
 			source = readFileSync(saved.path, "utf8");
 			label = nameOrRef;
 		} else if (nameOrRef && typeof nameOrRef === "object" && typeof (nameOrRef as { scriptPath?: unknown }).scriptPath === "string") {
 			const path = (nameOrRef as { scriptPath: string }).scriptPath;
-			if (!existsSync(path)) throw new WorkflowScriptError(`workflow({scriptPath}): ${path} does not exist`);
+			if (!existsSync(path)) throw new WorkflowScriptError(workflowWords().callProblem({ kind: "nestedPathMissing", path }));
 			source = readFileSync(path, "utf8");
 			label = path;
 		} else {
-			throw new WorkflowScriptError("workflow() takes a saved-workflow name or {scriptPath}");
+			throw new WorkflowScriptError(workflowWords().callProblem({ kind: "nestedBadRef" }));
 		}
 
 		const { meta, body } = parseWorkflowScript(source);
@@ -348,35 +350,28 @@ function defaultConcurrency(): number {
 	return Math.min(MAX_CONCURRENCY, Math.max(1, os.cpus().length - 2));
 }
 
-/** Human/LLM-facing completion report, delivered as the followUp message. */
+/** Human/LLM-facing completion report, delivered as the followUp message (the profile words it). */
 export function buildRunReport(handle: RunHandle): string {
+	const words = workflowWords();
 	const state = handle.state;
-	const duration = handle.finishedAt ? Math.round((handle.finishedAt - handle.startedAt) / 1000) : 0;
-	const statsLine = state
-		? `${state.agentCount()} agent(s), ${state.outputTokens()} output tokens, $${state.cost().toFixed(4)}, ${duration}s`
-		: `${duration}s`;
-
-	const kept = keptWorktreesSection(handle.agents.list());
-	if (handle.status === "completed") {
-		const resultText =
-			handle.result === undefined
-				? "(script returned no value)"
-				: previewValue(handle.result, RESULT_CAP, "\n… (truncated)");
-		return `Workflow **${handle.meta.name}** (${handle.runId}) completed — ${statsLine}.\n\nResult:\n${resultText}${kept}`;
-	}
-
-	const tail = handle.recentEvents.slice(-5).join("\n");
-	return `Workflow **${handle.meta.name}** (${handle.runId}) ${handle.status} — ${statsLine}.\nReason: ${handle.errorMessage ?? "unknown"}${tail ? `\nRecent progress:\n${tail}` : ""}\nCompleted agent calls are journaled; re-invoke the workflow tool with resumeFromRunId: "${handle.runId}" to continue from where it stopped.${kept}`;
-}
-
-/**
- * The report's list of isolation worktrees the run's agents left work in:
- * their edits and commits live only there, so the model must be told where
- * to review and merge them. Empty when every worktree was removed.
- */
-function keptWorktreesSection(agents: readonly AgentRecord[]): string {
-	const kept = agents.filter((agent) => agent.worktree);
-	if (kept.length === 0) return "";
-	const lines = kept.map((agent) => `- ${agent.label}: ${agent.worktree!.path}${agent.worktree!.branch ? ` (branch ${agent.worktree!.branch})` : ""}`);
-	return `\n\nWorktrees kept with agents' changes or commits (review or merge them):\n${lines.join("\n")}`;
+	const seconds = handle.finishedAt ? Math.round((handle.finishedAt - handle.startedAt) / 1000) : 0;
+	// The isolation worktrees the run's agents left work in: their edits and
+	// commits live only there, so the model must be told where to review and
+	// merge them.
+	const keptWorktrees = handle.agents
+		.list()
+		.filter((agent) => agent.worktree)
+		.map((agent) => ({ label: agent.label, path: agent.worktree!.path, ...(agent.worktree!.branch ? { branch: agent.worktree!.branch } : {}) }));
+	const completed = handle.status === "completed";
+	return words.report({
+		name: handle.meta.name,
+		runId: handle.runId,
+		status: handle.status as "completed" | "failed" | "aborted",
+		...(state ? { stats: { agents: state.agentCount(), outputTokens: state.outputTokens(), cost: state.cost() } } : {}),
+		seconds,
+		...(completed && handle.result !== undefined ? { result: previewValue(handle.result, RESULT_CAP, words.resultTruncated) } : {}),
+		...(completed ? {} : { reason: handle.errorMessage }),
+		progress: completed ? [] : handle.recentEvents.slice(-5),
+		keptWorktrees,
+	});
 }

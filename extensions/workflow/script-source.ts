@@ -15,7 +15,11 @@
  */
 
 import { parse } from "acorn";
+import type { ScriptProblem, WorkflowText } from "./text.ts";
 import { type WorkflowMeta, WorkflowScriptError } from "./types.ts";
+import { workflowWords } from "./words.ts";
+
+const problem = (p: ScriptProblem) => new WorkflowScriptError(workflowWords().scriptProblem(p));
 
 /** Property keys that would let a "literal" reach into prototypes. */
 const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
@@ -33,20 +37,24 @@ export const SCRIPT_GLOBALS = [
 	"budget",
 ] as const;
 
-const DETERMINISM_PRELUDE = `
-Math.random = () => { throw new Error("Math.random() is unavailable in a workflow (it breaks resume); vary agent prompts by index or pass randomness in via args"); };
+/** The guard the script runs behind: wall-clock and randomness calls throw, in the profile's words. */
+function determinismPrelude(words: WorkflowText["determinism"]): string {
+	const say = (text: string) => JSON.stringify(text);
+	return `
+Math.random = () => { throw new Error(${say(words.random)}); };
 globalThis.Date = new Proxy(Date, {
 	construct(target, ctorArgs, newTarget) {
-		if (ctorArgs.length === 0) throw new Error("new Date() with no arguments is unavailable in a workflow (it breaks resume); pass timestamps in via args");
+		if (ctorArgs.length === 0) throw new Error(${say(words.dateNoArgs)});
 		return Reflect.construct(target, ctorArgs, newTarget);
 	},
-	apply() { throw new Error("Date() is unavailable in a workflow (it breaks resume); pass timestamps in via args"); },
+	apply() { throw new Error(${say(words.dateCall)}); },
 	get(target, prop, receiver) {
-		if (prop === "now") return () => { throw new Error("Date.now() is unavailable in a workflow (it breaks resume); pass timestamps in via args"); };
+		if (prop === "now") return () => { throw new Error(${say(words.dateNow)}); };
 		return Reflect.get(target, prop, receiver);
 	},
 });
 `;
+}
 
 export interface ParsedScript {
 	meta: WorkflowMeta;
@@ -70,7 +78,7 @@ function evaluateLiteral(node: Node, path: string): unknown {
 			const expressions = node.expressions as Node[];
 			const quasis = node.quasis as Array<{ value: { cooked?: string } }>;
 			if (expressions.length > 0) {
-				throw new WorkflowScriptError(`\`${path}\` must be a pure literal: template interpolation is not allowed`);
+				throw problem({ kind: "notLiteral", path, detail: "interpolation" });
 			}
 			return quasis.map((q) => q.value.cooked ?? "").join("");
 		}
@@ -81,13 +89,13 @@ function evaluateLiteral(node: Node, path: string): unknown {
 			if (operator === "-" && argument.type === "Literal" && typeof literal === "number") {
 				return -literal;
 			}
-			throw new WorkflowScriptError(`\`${path}\` must be a pure literal: unsupported expression`);
+			throw problem({ kind: "notLiteral", path, detail: "expression" });
 		}
 		case "ArrayExpression":
 			return (node.elements as (Node | null)[]).map((el, i) => {
-				if (!el) throw new WorkflowScriptError(`\`${path}[${i}]\` must not be a hole`);
+				if (!el) throw problem({ kind: "hole", path: `${path}[${i}]` });
 				if (el.type === "SpreadElement") {
-					throw new WorkflowScriptError(`\`${path}\` must be a pure literal: spread is not allowed`);
+					throw problem({ kind: "notLiteral", path, detail: "spread" });
 				}
 				return evaluateLiteral(el, `${path}[${i}]`);
 			});
@@ -95,48 +103,48 @@ function evaluateLiteral(node: Node, path: string): unknown {
 			const out: Record<string, unknown> = {};
 			for (const prop of node.properties as Node[]) {
 				if (prop.type !== "Property") {
-					throw new WorkflowScriptError(`\`${path}\` must be a pure literal: spread/methods are not allowed`);
+					throw problem({ kind: "notLiteral", path, detail: "spreadOrMethod" });
 				}
 				if (prop.computed) {
-					throw new WorkflowScriptError(`\`${path}\` must be a pure literal: computed keys are not allowed`);
+					throw problem({ kind: "notLiteral", path, detail: "computedKey" });
 				}
 				const key = prop.key as Node;
 				const name =
 					key.type === "Identifier" ? (key.name as string) : key.type === "Literal" ? String((key as { value?: unknown }).value) : undefined;
 				if (name === undefined) {
-					throw new WorkflowScriptError(`\`${path}\` must be a pure literal: unsupported key`);
+					throw problem({ kind: "notLiteral", path, detail: "key" });
 				}
 				if (FORBIDDEN_KEYS.has(name)) {
-					throw new WorkflowScriptError(`\`${path}\` must not contain the key "${name}"`);
+					throw problem({ kind: "forbiddenKey", path, key: name });
 				}
 				out[name] = evaluateLiteral(prop.value as Node, `${path}.${name}`);
 			}
 			return out;
 		}
 		default:
-			throw new WorkflowScriptError(`\`${path}\` must be a pure literal (objects, arrays, strings, numbers, booleans)`);
+			throw problem({ kind: "notLiteral", path, detail: "other" });
 	}
 }
 
 function validateMeta(value: unknown): WorkflowMeta {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) {
-		throw new WorkflowScriptError("`meta` must be an object literal");
+		throw problem({ kind: "metaNotObject" });
 	}
 	const meta = value as Record<string, unknown>;
 	if (typeof meta.name !== "string" || !meta.name.trim()) {
-		throw new WorkflowScriptError("`meta.name` must be a non-empty string");
+		throw problem({ kind: "metaField", field: "name" });
 	}
 	if (typeof meta.description !== "string" || !meta.description.trim()) {
-		throw new WorkflowScriptError("`meta.description` must be a non-empty string");
+		throw problem({ kind: "metaField", field: "description" });
 	}
 	if (meta.whenToUse !== undefined && typeof meta.whenToUse !== "string") {
-		throw new WorkflowScriptError("`meta.whenToUse` must be a string");
+		throw problem({ kind: "metaField", field: "whenToUse" });
 	}
 	if (meta.phases !== undefined) {
-		if (!Array.isArray(meta.phases)) throw new WorkflowScriptError("`meta.phases` must be an array");
+		if (!Array.isArray(meta.phases)) throw problem({ kind: "metaField", field: "phases" });
 		for (const phase of meta.phases) {
 			if (typeof phase !== "object" || phase === null || typeof (phase as { title?: unknown }).title !== "string") {
-				throw new WorkflowScriptError("each entry of `meta.phases` needs a `title` string");
+				throw problem({ kind: "metaField", field: "phaseTitle" });
 			}
 		}
 	}
@@ -154,16 +162,16 @@ export function parseWorkflowScript(source: string): ParsedScript {
 			allowReturnOutsideFunction: true,
 		}) as unknown as { body: Node[] };
 	} catch (error) {
-		throw new WorkflowScriptError(`Workflow script does not parse: ${(error as Error).message}`);
+		throw problem({ kind: "parse", osMessage: (error as Error).message });
 	}
 
 	const first = ast.body[0];
 	if (!first || first.type !== "ExportNamedDeclaration") {
-		throw new WorkflowScriptError("Workflow scripts must begin with `export const meta = {...}`");
+		throw problem({ kind: "noMeta" });
 	}
 	const declaration = first.declaration as Node | null;
 	if (!declaration || declaration.type !== "VariableDeclaration" || (declaration.kind as string) !== "const") {
-		throw new WorkflowScriptError("Workflow scripts must begin with `export const meta = {...}`");
+		throw problem({ kind: "noMeta" });
 	}
 	const declarators = declaration.declarations as Node[];
 	const declarator = declarators[0];
@@ -172,16 +180,16 @@ export function parseWorkflowScript(source: string): ParsedScript {
 		(declarator.id as Node).type !== "Identifier" ||
 		((declarator.id as Node).name as string) !== "meta"
 	) {
-		throw new WorkflowScriptError("The first statement must export exactly one binding named `meta`");
+		throw problem({ kind: "metaBinding" });
 	}
 	const init = declarator.init as Node | null;
 	if (!init || init.type !== "ObjectExpression") {
-		throw new WorkflowScriptError("`meta` must be an object literal — no variables, calls, or spreads");
+		throw problem({ kind: "metaNotLiteral" });
 	}
 
 	for (const node of ast.body.slice(1)) {
 		if (node.type === "ExportNamedDeclaration" || node.type === "ExportDefaultDeclaration" || node.type === "ImportDeclaration") {
-			throw new WorkflowScriptError("Workflow scripts cannot use import/export beyond the leading `export const meta`");
+			throw problem({ kind: "importExport" });
 		}
 	}
 
@@ -197,5 +205,5 @@ export function parseWorkflowScript(source: string): ParsedScript {
  */
 export function wrapScriptBody(body: string): string {
 	const bindings = SCRIPT_GLOBALS.join(", ");
-	return `"use strict";\n${DETERMINISM_PRELUDE}\nconst { ${bindings} } = __workflow__;\n(async () => {\n${body}\n})();`;
+	return `"use strict";\n${determinismPrelude(workflowWords().determinism)}\nconst { ${bindings} } = __workflow__;\n(async () => {\n${body}\n})();`;
 }
