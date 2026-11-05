@@ -85,9 +85,3 @@ export function combinedLimitWarning(totalChars: number): string | null {
 	const k = (n: number) => `${(n / 1000).toFixed(1)}k`;
 	return `Project instructions total ${k(totalChars)} chars, over the ${k(CLAUDE_MD_CHAR_LIMIT)}-char limit · /memory to free up context`;
 }
-
-
-/** First-turn reminder carrying the MEMORY.md index, framed like Claude Code's. */
-export function memoryIndexReminder(indexPath: string, content: string): string {
-	return `Contents of ${indexPath} (user's auto-memory, persists across conversations):\n\n${content.trim()}`;
-}

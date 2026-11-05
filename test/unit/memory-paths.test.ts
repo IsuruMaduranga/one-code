@@ -7,7 +7,8 @@ import memoryExtension from "../../extensions/memory/index.ts";
 import { resolveThroughLinks } from "../../extensions/auto-mode/paths.ts";
 import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
 import { projectMemoryDir } from "../../extensions/lib/memory.ts";
-import { INDEX_OVER_LIMIT_ERROR } from "../../extensions/lib/memory-content.ts";
+import { INDEX_MAX_CHARS, INDEX_MAX_LINES } from "../../extensions/lib/memory-content.ts";
+import { memory } from "../../profile/memory/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 
@@ -61,7 +62,7 @@ describe("memory file-tool paths", () => {
 		const [result] = await fake.fire("tool_result", {
 			toolName: "write", input: { path: spellings[spelling](path) }, isError: false, content: [{ type: "text", text: "Written" }],
 		}, ctx);
-		expect(result).toMatchObject({ isError: true, content: expect.arrayContaining([{ type: "text", text: INDEX_OVER_LIMIT_ERROR }]) });
+		expect(result).toMatchObject({ isError: true, content: expect.arrayContaining([{ type: "text", text: memory.indexOverLimit({ maxLines: INDEX_MAX_LINES, maxChars: INDEX_MAX_CHARS }) }]) });
 	});
 
 	it("does not stamp an absolute traversal out of memory", async () => {

@@ -26,12 +26,8 @@ import os from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { claudeMdLimitWarning, combinedLimitWarning, projectMemoryDir } from "../lib/memory.ts";
-import {
-	INDEX_NEAR_LIMIT_REMINDER,
-	INDEX_OVER_LIMIT_ERROR,
-	indexLimitStatus,
-	stampFrontmatter,
-} from "../lib/memory-content.ts";
+import { INDEX_MAX_CHARS, INDEX_MAX_LINES, indexLimitStatus, stampFrontmatter } from "../lib/memory-content.ts";
+import { requireText } from "../lib/profile.ts";
 import { type ConfigMode, CONFIG_MODE_KEY, claudeSourcesOn, configMode, configModeFromEnv, savedConfigMode } from "../lib/config-mode.ts";
 import { agentSkippedInstructions, isClaudeLocation } from "../lib/claude-context.ts";
 import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
@@ -72,6 +68,8 @@ function memoryEntriesFor(cwd: string): MemoryEntry[] {
 }
 
 function memoryExtension(pi: ExtensionAPI) {
+	const text = requireText("memory");
+	const limits = { maxLines: INDEX_MAX_LINES, maxChars: INDEX_MAX_CHARS };
 	let dir: string | undefined;
 	let dirReal = "";
 
@@ -158,10 +156,10 @@ function memoryExtension(pi: ExtensionAPI) {
 		}
 		const status = indexLimitStatus(index);
 		if (status === "near") {
-			pi.events.emit(REMINDER_CHANNEL, { text: INDEX_NEAR_LIMIT_REMINDER });
+			pi.events.emit(REMINDER_CHANNEL, { text: text.indexNearLimit(limits) });
 		} else if (status === "over") {
 			return {
-				content: [...(event.content ?? []), { type: "text", text: INDEX_OVER_LIMIT_ERROR }],
+				content: [...(event.content ?? []), { type: "text", text: text.indexOverLimit(limits) }],
 				isError: true,
 			};
 		}

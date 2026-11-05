@@ -16,6 +16,7 @@ import type { HooksText } from "../hooks/text.ts";
 import type { InitText } from "../init/text.ts";
 import type { LspText } from "../lsp/text.ts";
 import type { McpText } from "../mcp/text.ts";
+import type { MemoryText } from "../memory/text.ts";
 import type { NotebookText } from "../notebook/text.ts";
 import type { PlanModeText } from "../plan-mode/text.ts";
 import type { RecapText } from "../recap/text.ts";
@@ -54,6 +55,7 @@ export interface ProfileText {
 	mcp?: McpText;
 	lsp?: LspText;
 	hooks?: HooksText;
+	memory?: MemoryText;
 	/** Used by the worktree tools, subagents and workflows (each guards isolated sessions with it). */
 	worktreeGuard?: WorktreeGuardText;
 }

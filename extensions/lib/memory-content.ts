@@ -103,10 +103,6 @@ export function indexLimitStatus(content: string): "ok" | "near" | "over" {
 	return "ok";
 }
 
-export const INDEX_NEAR_LIMIT_REMINDER = `MEMORY.md is approaching its load limit (only the first ${INDEX_MAX_LINES} lines or 25KB are loaded each session). Shorten it now: keep one line per entry, move detail into topic files in the memory directory, and merge or drop stale entries.`;
-
-export const INDEX_OVER_LIMIT_ERROR = `MEMORY.md is over its load limit (${INDEX_MAX_LINES} lines / 25KB): everything past the limit is dropped the next time it is loaded. The write succeeded, but rewrite the index now — one line per entry, move detail into topic files, merge or drop stale entries.`;
-
 /**
  * Stamp safe YAML memory headers, retaining the originating session on updates.
  * Claude Code's ue/Mt preserve originSessionId; Dn declines unsafe rewrites.

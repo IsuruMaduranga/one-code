@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { memoryDir, memoryIndexReminder, projectSlug } from "../../extensions/lib/memory.ts";
+import { memoryDir, projectSlug } from "../../extensions/lib/memory.ts";
 import { memoryPromptSection } from "../../profile/system-prompt/memory.ts";
 import {
 	INDEX_MAX_CHARS,
@@ -178,14 +178,5 @@ The fact body.
 	it("leaves files without frontmatter untouched (MEMORY.md stays unstamped)", () => {
 		const index = "# Memory index\n\n- [A](a.md) — hook\n";
 		expect(stampFrontmatter(index, "s", "t")).toBe(index);
-	});
-});
-
-describe("memoryIndexReminder", () => {
-	it("frames the index as auto-memory and carries the content", () => {
-		const reminder = memoryIndexReminder("/m/MEMORY.md", "- [A](a.md) — hook\n");
-		expect(reminder).toContain("/m/MEMORY.md");
-		expect(reminder).toContain("auto-memory");
-		expect(reminder).toContain("- [A](a.md) — hook");
 	});
 });
