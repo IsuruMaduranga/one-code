@@ -13,8 +13,9 @@
  * at stage 1, so stage 2 runs too, and severity 10 at stage 2, so the call is
  * allowed and the subagent's own requests are recorded. Every other reply is a
  * fixed text shaped like a compaction summary, which serves every turn and
- * side call (session title, compaction) alike. Any other fetch goes to the
- * network as usual.
+ * side call (session title, compaction) alike. Any other fetch (a catalog
+ * refresh, an update check) is refused with a 503, so a run never reaches the
+ * network and never depends on what it would have returned.
  */
 import { appendFileSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -101,18 +102,18 @@ export default function goldenFixture(_pi: ExtensionAPI) {
 	if ((globalThis.fetch as { [WRAPPED]?: true })[WRAPPED]) return;
 	const out = process.env.GOLDEN_DUMP;
 	if (!out) throw new Error("golden-fixture: set GOLDEN_DUMP to the file the request bodies go to");
-	const original = globalThis.fetch.bind(globalThis);
 	const wrapped = (async (input: string | URL | Request, init?: RequestInit) => {
 		const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+		const offline = () => new Response("golden fixture: offline", { status: 503 });
 		const raw = init?.body;
-		if (typeof raw !== "string") return original(input, init);
+		if (typeof raw !== "string") return offline();
 		let body: { messages?: unknown };
 		try {
 			body = JSON.parse(raw);
 		} catch {
-			return original(input, init);
+			return offline();
 		}
-		if (!Array.isArray(body.messages)) return original(input, init);
+		if (!Array.isArray(body.messages)) return offline();
 		appendFileSync(out, `${JSON.stringify({ url, body })}\n`);
 		const anthropic = url.includes("anthropic.com");
 		const verdict = classifierVerdict(raw);

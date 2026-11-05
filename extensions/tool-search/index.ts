@@ -243,10 +243,16 @@ function toolSearchExtension(pi: ExtensionAPI) {
 	// built-ins included (lib/profile.ts).
 	const profileDisabled = activeProfile().disabledTools;
 	const neverActive = () => (profileDisabled.size === 0 ? withheldNames : new Set([...withheldNames, ...profileDisabled]));
+	// Tools the profile defers, adopted here however they were registered: pi's
+	// built-ins and a child's injected tools never pass a defer request.
+	const profileDeferred = [...activeProfile().tools].filter(([, sw]) => sw.deferred === true).map(([name]) => name);
 	const reconcile = (owner: SessionLike | undefined, model: typeof currentModel) => {
 		if (!alive()) return;
 		const all = pi.getAllTools();
 		const registered = new Set(all.map((tool) => tool.name));
+		const adopted = profileDeferred.filter((name) => registered.has(name) && !deferredRegistry.has(name) && !withheldNames.has(name));
+		for (const name of adopted) deferredRegistry.add({ name });
+		if (adopted.length > 0 && sessionStarted) publishListing();
 		if (!deferralEnabled(all)) {
 			// Nothing is deferred without the loader, but a withheld tool is still
 			// never active: a /tree switch restores a loadout from before it left.
@@ -329,12 +335,19 @@ function toolSearchExtension(pi: ExtensionAPI) {
 
 	pi.events.on(DEFER_CHANNEL, (data) => {
 		const request = data as DeferRequest;
+		// A withheld tool brought back is available again, deferred or not.
+		if (request?.name) withheldNames.delete(request.name);
 		// The profile's choice wins: a tool it turns off or keeps up front is never deferred.
 		const sw = request?.name ? toolSwitch(request.name) : undefined;
-		if (sw?.enabled === false || sw?.deferred === false) return;
+		if (sw?.enabled === false) return;
+		if (sw?.deferred === false) {
+			// Brought back after a withhold: an up-front tool is active again.
+			const active = pi.getActiveTools();
+			const registered = pi.getAllTools().some((tool) => tool.name === request.name);
+			if (alive() && registered && !active.includes(request.name)) pi.setActiveTools([...active, request.name]);
+			return;
+		}
 		deferredRegistry.add(request);
-		// A withheld tool brought back is deferred again.
-		if (request?.name) withheldNames.delete(request.name);
 		// A defer arriving after the session_start pass (MCP servers connect
 		// asynchronously and register their tools then) would otherwise leave the
 		// tool eager AND unlisted.
@@ -346,7 +359,9 @@ function toolSearchExtension(pi: ExtensionAPI) {
 
 	pi.events.on(WITHHOLD_CHANNEL, (data) => {
 		const name = (data as { name?: string } | undefined)?.name;
-		if (!name || !deferredRegistry.remove(name)) return;
+		// A tool the profile keeps up front was never in the registry; it is
+		// withheld all the same (the base's model gates still apply to it).
+		if (!name || (!deferredRegistry.remove(name) && toolSwitch(name)?.deferred !== false)) return;
 		withheldNames.add(name);
 		if (!alive()) return;
 		reconcileNow();

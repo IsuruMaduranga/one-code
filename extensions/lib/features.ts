@@ -10,7 +10,9 @@
  * the registry, the manifest, the child list and the wrappers agree.
  *
  * `required` marks the safety core and the request pipeline: a profile that
- * turns one off fails at load.
+ * turns one off fails at load. `guard` marks a feature that guards tool calls
+ * (the user's hooks, read-before-edit): a product's profile may turn it off,
+ * the off-only environment variable may not.
  */
 
 export interface FeatureSpec {
@@ -18,6 +20,8 @@ export interface FeatureSpec {
 	entries: readonly string[];
 	/** Part of the safety core or the request pipeline; never off. */
 	required?: true;
+	/** Guards tool calls: only a profile, never the environment, turns it off. */
+	guard?: true;
 }
 
 export const FEATURES = {
@@ -29,13 +33,13 @@ export const FEATURES = {
 	"system-reminder": { entries: ["system-reminder/index.ts"], required: true },
 	"claude-context": { entries: ["claude-context/index.ts"] },
 	"tool-call-corruption": { entries: ["tool-call-corruption/index.ts", "tool-call-corruption/child.ts"] },
-	hooks: { entries: ["hooks/index.ts"] },
+	hooks: { entries: ["hooks/index.ts"], guard: true },
 	"tool-search": { entries: ["tool-search/index.ts"], required: true },
 	"search-tools": { entries: ["search-tools/index.ts"] },
 	"tool-style": { entries: ["tool-style/index.ts"] },
 	plugins: { entries: ["plugins/index.ts"] },
 	worktree: { entries: ["worktree/index.ts"] },
-	"file-tracker": { entries: ["file-tracker/index.ts"] },
+	"file-tracker": { entries: ["file-tracker/index.ts"], guard: true },
 	memory: { entries: ["memory/index.ts"] },
 	permissions: { entries: ["permissions/index.ts"], required: true },
 	"ask-user": { entries: ["ask-user/index.ts"] },
@@ -81,6 +85,11 @@ export const FEATURE_IDS = Object.keys(FEATURES) as FeatureId[];
 
 export function isFeatureId(value: string): value is FeatureId {
 	return Object.hasOwn(FEATURES, value);
+}
+
+/** A feature that guards tool calls (see the header). */
+export function isGuardFeature(id: string): boolean {
+	return isFeatureId(id) && "guard" in FEATURES[id];
 }
 
 /** The feature an entry file belongs to (`bash/child.ts` → `bash`), or undefined. */

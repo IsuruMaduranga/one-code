@@ -13,11 +13,18 @@ import type { FeatureId } from "./features.ts";
 
 /** A profile's switches for one tool, by its registered name. Omitted fields keep the base's choice. */
 export interface ToolSwitch {
-	/** false: the tool is never registered, never active, and a call to it is denied. */
+	/**
+	 * false: the tool is never registered, never active, and a call to it is
+	 * denied. The harness's plumbing (`PINNED_TOOLS` in lib/profile.ts) can't be
+	 * turned off or deferred.
+	 */
 	enabled?: boolean;
 	/** true: behind `tool_search`; false: in the tool list from the first request. Fixed at load. */
 	deferred?: boolean;
-	/** true: runs without a permission prompt, like `tool_search` and `skill`. */
+	/**
+	 * true: runs without a permission prompt, like `tool_search` and `skill`.
+	 * Plan mode still holds such a tool to its read-only rules.
+	 */
 	autoAllow?: boolean;
 }
 
@@ -30,7 +37,10 @@ export interface Profile {
 	 * Extension entry files, relative to the profile folder, that in-process
 	 * child sessions (subagents, workflow agents) load after the base's own
 	 * child extensions. The main session loads a product's extensions from the
-	 * product's own package.
+	 * product's own package, after the base's. Either way they load after the
+	 * request pipeline (`ledger/wire`, cache-marks), so a product extension
+	 * must not shape the request tail in a `context` or payload hook; it adds
+	 * tools, commands, reminders and prompt sections.
 	 */
 	childExtensions: readonly string[];
 }

@@ -789,9 +789,15 @@ export const AUTO_ALLOWED_TOOLS = new Set<string>([
 	"SendMessage",
 ]);
 
-/** A tool that runs without approval: the base's set, plus any the profile marks `autoAllow` (lib/profile.ts). */
-export function isAutoAllowedTool(tool: string): boolean {
-	return AUTO_ALLOWED_TOOLS.has(tool) || toolSwitch(tool)?.autoAllow === true;
+/**
+ * A tool that runs without approval: the base's set, plus any the profile
+ * marks `autoAllow` (lib/profile.ts). The profile keys tools by their
+ * registered name, so both the raw and the normalized spelling are looked up.
+ * Plan mode does not use this: the base's set is plan-safe by construction,
+ * a product's auto-allowed tool need not be.
+ */
+export function isAutoAllowedTool(rawName: string, tool: string = normalizeToolName(rawName)): boolean {
+	return AUTO_ALLOWED_TOOLS.has(tool) || (toolSwitch(rawName) ?? toolSwitch(tool))?.autoAllow === true;
 }
 
 export interface DecideInput {
@@ -1053,7 +1059,7 @@ export function decide(params: DecideInput): Decision {
 	const tool = normalizeToolName(toolName);
 	// A tool the profile turned off is refused in every mode, bypass included:
 	// it should never have been callable, whatever path it arrived by.
-	if (isToolDisabled(tool)) return { decision: "deny", cause: "profile-disabled" };
+	if (isToolDisabled(toolName) || isToolDisabled(tool)) return { decision: "deny", cause: "profile-disabled" };
 
 	const denyRule = deny.find((r) => ruleMatches(r, toolName, subject, cwd));
 	if (denyRule) return { decision: "deny", rule: denyRule, cause: "rule" };
@@ -1061,7 +1067,7 @@ export function decide(params: DecideInput): Decision {
 	if (mode === "bypassPermissions") return { decision: "allow", cause: "mode" };
 
 	const tier = toolTier(toolName);
-	if (mode === "plan" && tier !== "safe" && !isAutoAllowedTool(tool)) {
+	if (mode === "plan" && tier !== "safe" && !AUTO_ALLOWED_TOOLS.has(tool)) {
 		// Plan mode's one writable file (~/.onecode/plans/<slug>.md, which
 		// protected-paths already excepts as working space).
 		const planFile = params.planFilePath;
@@ -1318,7 +1324,7 @@ export function decide(params: DecideInput): Decision {
 		}
 		return outsideWorkingDir();
 	}
-	if (isAutoAllowedTool(tool)) return { decision: "allow", cause: "tier" };
+	if (isAutoAllowedTool(toolName, tool)) return { decision: "allow", cause: "tier" };
 	// Auto mode skips the classifier for an edit acceptEdits would allow, on a
 	// model that gets Claude Code's fast paths: anywhere in the working space,
 	// workspace directories and execution-primitive files included. Outside it

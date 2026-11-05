@@ -6,26 +6,25 @@
  * - **Feature switch.** A feature the profile turns off never runs its
  *   factory, in the main session and in child sessions alike.
  * - **Tool registration.** The factory gets a view of `pi` that never
- *   registers a tool the profile turns off, drops such a tool from every
- *   `setActiveTools` list, and defers a tool the profile defers right after
- *   it registers. Tools registered later (MCP servers, plugin LSP tools) pass
- *   through the same view.
+ *   registers a tool the profile turns off and drops such a tool from every
+ *   `setActiveTools` list. Tools registered later (MCP servers, plugin LSP
+ *   tools) pass through the same view.
  * - **Fail closed.** An invalid profile (a required feature off, an unknown
  *   feature, a pinned tool off) stops the process with the reason, so the
  *   harness never runs without its safety core.
  *
  * The rest of the tool switches live where each mechanism already has its
  * one home: tool-search keeps disabled tools out of the active set (pi's
- * built-ins included) and ignores deferral requests the profile overrides;
+ * built-ins included), adopts the tools the profile defers and ignores
+ * deferral requests the profile overrides;
  * child sessions exclude disabled tools through pi's own `excludeTools`
  * (subagents/agents.ts `agentToolOptions`); the permission gate denies a call
  * to a disabled tool whatever path it arrived by (permissions/matcher.ts).
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { DEFER_CHANNEL } from "./deferred-channel.ts";
 import type { FeatureId } from "./features.ts";
-import { activeProfile, featureEnabled, isToolDisabled, toolSwitch } from "./profile.ts";
+import { activeProfile, featureEnabled, isToolDisabled } from "./profile.ts";
 
 /** `pi` as the profile lets an extension register tools: see the header. */
 export function profiledPi(pi: ExtensionAPI): ExtensionAPI {
@@ -34,9 +33,7 @@ export function profiledPi(pi: ExtensionAPI): ExtensionAPI {
 		get(target, key) {
 			if (key === "registerTool") {
 				return (tool: Parameters<ExtensionAPI["registerTool"]>[0]) => {
-					if (isToolDisabled(tool.name)) return;
-					target.registerTool(tool);
-					if (toolSwitch(tool.name)?.deferred === true) target.events.emit(DEFER_CHANNEL, { name: tool.name });
+					if (!isToolDisabled(tool.name)) target.registerTool(tool);
 				};
 			}
 			if (key === "setActiveTools") {

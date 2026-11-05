@@ -16,8 +16,9 @@
  *   node test/e2e/golden-requests.mjs --sweep   one turn per optional feature
  *       turned off (ONECODE_FEATURES_OFF), plus a tool-switch check
  *       (ONECODE_TOOLS_OFF): each run must finish and send a request, and the
- *       turned-off tools must be missing from it; with --dir, each run's
- *       requests are written there for inspection
+ *       turned-off tools must be missing from it; a guard feature (hooks,
+ *       the edit guard) turned off from the environment must stop pi at
+ *       startup instead; with --dir, each run's requests are written there
  *
  * Each run gets a fresh HOME (so no real CLAUDE.md, settings or memory leaks
  * in), pi's agent dir under it with this repo as the only package and the
@@ -38,7 +39,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { withCompactionKeepBackfilled } from "../../extensions/lib/compaction-keep.mjs";
-import { FEATURE_IDS, FEATURES } from "../../extensions/lib/features.ts";
+import { FEATURE_IDS, FEATURES, isGuardFeature } from "../../extensions/lib/features.ts";
 import { projectSlug } from "../../extensions/lib/memory.ts";
 import { withReplacedBuiltinsOff } from "../../extensions/lib/replaced-builtins.mjs";
 
@@ -309,7 +310,12 @@ const mainBody = (requests) => (requests.find((r) => Array.isArray(r.body.tools)
 /** --sweep: see the header. Exits the process with the outcome. */
 async function sweep() {
 	const optional = FEATURE_IDS.filter((id) => !FEATURES[id].required);
-	const runs = optional.map((id) => ({ label: `${id} off`, config: { name: `sweep-${id}`, model: ANTHROPIC, tier: "frontier", mode: "print", env: { ONECODE_FEATURES_OFF: id } } }));
+	const runs = optional.map((id) => ({
+		label: `${id} off`,
+		// Only a profile may turn a guard feature off: from the environment it must fail closed.
+		mustFail: isGuardFeature(id) ? "it guards tool calls" : undefined,
+		config: { name: `sweep-${id}`, model: ANTHROPIC, tier: "frontier", mode: "print", env: { ONECODE_FEATURES_OFF: id } },
+	}));
 	const toolsOff = ["notebook_edit", "edit", "web_fetch"];
 	runs.push({ label: `tools ${toolsOff.join(", ")} off`, toolsOff, config: { name: "sweep-tools", model: ANTHROPIC, tier: "frontier", mode: "print", env: { ONECODE_TOOLS_OFF: toolsOff.join(",") } } });
 	// The all-on baseline runs in the same pool; the tools a run loses against
@@ -327,6 +333,16 @@ async function sweep() {
 	const stillNamed = [];
 	outcomes.forEach((outcome, index) => {
 		const run = runs[index];
+		if (run.mustFail) {
+			const message = outcome.ok ? "" : String(outcome.error.message ?? outcome.error);
+			if (message.includes(run.mustFail)) {
+				console.log(`ok    ${run.label} (refused at startup, as it must be)`);
+			} else {
+				bad += 1;
+				console.log(`FAIL  ${run.label}: expected a refusal naming "${run.mustFail}"${outcome.ok ? ", but it ran" : `: ${message.slice(0, 600)}`}`);
+			}
+			return;
+		}
 		if (!outcome.ok) {
 			bad += 1;
 			console.log(`FAIL  ${run.label}: ${String(outcome.error.message ?? outcome.error).slice(0, 1500)}`);

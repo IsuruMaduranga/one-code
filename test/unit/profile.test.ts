@@ -13,7 +13,9 @@ import { DEFER_CHANNEL } from "../../extensions/lib/deferred.ts";
 import { watchMcpTools } from "../../extensions/lib/mcp-share.ts";
 import { scanSkills } from "../../extensions/lib/skill-scan.ts";
 import { decide } from "../../extensions/permissions/matcher.ts";
-import { agentToolOptions } from "../../extensions/subagents/agents.ts";
+import { ALLOWLIST_ESSENTIALS, agentToolOptions } from "../../extensions/subagents/agents.ts";
+import { PINNED_TOOLS } from "../../extensions/lib/profile.ts";
+import { WITHHOLD_CHANNEL } from "../../extensions/lib/deferred.ts";
 import toolSearchExtension from "../../extensions/tool-search/index.ts";
 import { createFakePi } from "./helpers/fake-pi.ts";
 import { makeToolSearchFakePi } from "./helpers/tool-search-fake-pi.ts";
@@ -38,6 +40,18 @@ describe("resolveProfile", () => {
 		const resolved = resolveProfile({ ...empty, tools: { web_fetch: { deferred: false } } }, { ONECODE_TOOLS_OFF: "web_fetch, notebook_edit" }, "/p");
 		expect(resolved.tools.get("web_fetch")).toEqual({ deferred: false, enabled: false });
 		expect(resolved.tools.get("notebook_edit")).toEqual({ enabled: false });
+	});
+
+	it("pins every tool a child cannot work without", () => {
+		for (const name of ALLOWLIST_ESSENTIALS) expect(PINNED_TOOLS.has(name), name).toBe(true);
+		expect(() => resolveProfile({ ...empty, tools: { SubagentHandback: { enabled: false } } }, {}, "/p")).toThrow(/"SubagentHandback" cannot be turned off/);
+		expect(() => resolveProfile(empty, { ONECODE_TOOLS_OFF: "structured_output" }, "/p")).toThrow(/"structured_output" cannot be turned off/);
+	});
+
+	it("lets only a profile, never the environment, turn off a guard feature", () => {
+		expect(resolveProfile({ ...empty, features: { hooks: false } }, {}, "/p").features.has("hooks")).toBe(false);
+		expect(() => resolveProfile(empty, { ONECODE_FEATURES_OFF: "hooks" }, "/p")).toThrow(/cannot turn off "hooks": it guards tool calls/);
+		expect(() => resolveProfile(empty, { ONECODE_FEATURES_OFF: "file-tracker" }, "/p")).toThrow(/cannot turn off "file-tracker"/);
 	});
 
 	it("refuses turning off or deferring tool_search", () => {
@@ -93,16 +107,6 @@ describe("feature()", () => {
 		expect(fake.getActiveTools()).toEqual(["read", "web_fetch"]);
 	});
 
-	it("defers a tool the profile defers as it registers", () => {
-		use({ tools: { web_fetch: { deferred: true } } });
-		const fake = createFakePi();
-		const deferred: string[] = [];
-		fake.events.on(DEFER_CHANNEL, (data) => deferred.push((data as { name: string }).name));
-		const pi = profiledPi(fake.pi as never);
-		pi.registerTool(tool("web_fetch") as never);
-		pi.registerTool(tool("notebook_edit") as never);
-		expect(deferred).toEqual(["web_fetch"]);
-	});
 });
 
 describe("tool-search and the tool switches", () => {
@@ -118,6 +122,31 @@ describe("tool-search and the tool switches", () => {
 		const listing = fake.reminders.filter((r) => r.key === "deferred-tools").at(-1)?.text ?? "";
 		expect(listing).toContain("web_fetch");
 		expect(listing).not.toContain("notebook_edit");
+	});
+
+	it("defers a tool the profile defers however it was registered, a built-in included", () => {
+		use({ tools: { grep: { deferred: true } } });
+		const fake = makeToolSearchFakePi(["read", "grep"]);
+		toolSearchExtension(fake.pi as never);
+		fake.allTools.push({ name: "read", description: "read tool" }, { name: "grep", description: "grep tool" });
+		fake.addDeferred("web_fetch");
+		fake.pi.fire("session_start", {});
+		const listing = fake.reminders.filter((r) => r.key === "deferred-tools").at(-1)?.text ?? "";
+		expect(listing).toContain("grep");
+		expect(fake.activeTools()).not.toContain("grep");
+	});
+
+	it("still withholds a tool the profile keeps up front", () => {
+		use({ tools: { task_create: { deferred: false } } });
+		const fake = makeToolSearchFakePi(["read"]);
+		toolSearchExtension(fake.pi as never);
+		fake.addDeferred("task_create");
+		fake.pi.fire("session_start", {});
+		expect(fake.activeTools()).toContain("task_create");
+		fake.pi.events.emit(WITHHOLD_CHANNEL, { name: "task_create" });
+		expect(fake.activeTools()).not.toContain("task_create");
+		fake.pi.events.emit(DEFER_CHANNEL, { name: "task_create" });
+		expect(fake.activeTools()).toContain("task_create");
 	});
 });
 
@@ -138,6 +167,18 @@ describe("permission gate and tool switches", () => {
 		for (const mode of ["default", "auto", "bypassPermissions", "acceptEdits"] as const) {
 			expect(decide({ ...base, mode, toolName: "notebook_edit" })).toEqual({ decision: "deny", cause: "profile-disabled" });
 		}
+	});
+
+	it("matches a switch by the tool's registered name, whatever its case", () => {
+		use({ tools: { BallerinaReference: { autoAllow: true }, NotebookTool: { enabled: false } } });
+		expect(decide({ ...base, mode: "default", toolName: "BallerinaReference" }).decision).toBe("allow");
+		expect(decide({ ...base, mode: "default", toolName: "NotebookTool" })).toEqual({ decision: "deny", cause: "profile-disabled" });
+	});
+
+	it("keeps plan mode's rules for a profile's auto-allowed tool", () => {
+		use({ tools: { ballerina_build: { autoAllow: true } } });
+		expect(decide({ ...base, mode: "plan", toolName: "ballerina_build" }).decision).not.toBe("allow");
+		expect(decide({ ...base, mode: "plan", toolName: "tool_search" }).decision).toBe("allow");
 	});
 
 	it("allows a tool the profile marks autoAllow without a prompt", () => {

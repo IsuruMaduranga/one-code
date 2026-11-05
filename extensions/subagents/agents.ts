@@ -239,7 +239,7 @@ export function discoverAgents(sources: Array<string | AgentSource | CodeAgents>
  * `structured_output`. Claude Code's allowlist never strips its own plumbing
  * either.
  */
-const ALLOWLIST_ESSENTIALS = ["SendMessage", SUBAGENT_HANDBACK, "tool_search", "structured_output"];
+export const ALLOWLIST_ESSENTIALS = ["SendMessage", SUBAGENT_HANDBACK, "tool_search", "structured_output"];
 
 /** Apply an agent's allowlist to pi's `tools` option, keeping the essentials. */
 export function childToolAllowlist(tools: string[] | undefined): string[] | undefined {

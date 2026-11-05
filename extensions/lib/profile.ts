@@ -4,8 +4,9 @@
  * (pure, apart from reading the environment and the profile module).
  *
  * Two environment variables can only turn things OFF, never on, so they can't
- * weaken the safety core: `ONECODE_FEATURES_OFF` (feature ids) and
- * `ONECODE_TOOLS_OFF` (tool names), each a comma-separated list. They exist so
+ * weaken the safety core: `ONECODE_FEATURES_OFF` (feature ids, never a guard
+ * feature such as hooks) and `ONECODE_TOOLS_OFF` (tool names), each a
+ * comma-separated list. They exist so
  * tests and the golden runs can check a product's switches without a second
  * profile folder.
  *
@@ -16,13 +17,18 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { profile as shippedProfile } from "../../profile/index.ts";
-import { enabledFeatures, type FeatureId, featureProblems } from "./features.ts";
+import { enabledFeatures, type FeatureId, featureProblems, isGuardFeature } from "./features.ts";
 import type { Profile, ToolSwitch } from "./profile-contract.ts";
 
 export const PROFILE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../profile");
 
-/** Tools a profile may neither turn off nor defer: every deferred tool is reached through it. */
-const PINNED_TOOLS = new Set(["tool_search"]);
+/**
+ * Tools a profile may neither turn off nor defer: the harness's own plumbing.
+ * `tool_search` reaches every deferred tool; a child reports through
+ * `SendMessage` and `SubagentHandback`, and a workflow agent with a schema
+ * through `structured_output` (subagents/agents.ts ALLOWLIST_ESSENTIALS).
+ */
+export const PINNED_TOOLS: ReadonlySet<string> = new Set(["tool_search", "SendMessage", "SubagentHandback", "structured_output"]);
 
 export interface ResolvedProfile {
 	features: ReadonlySet<FeatureId>;
@@ -47,10 +53,12 @@ function envList(env: NodeJS.ProcessEnv, name: string): string[] {
  */
 export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profileDir: string): ResolvedProfile {
 	const featureMap: Partial<Record<string, boolean>> = { ...profile.features };
-	for (const id of envList(env, "ONECODE_FEATURES_OFF")) featureMap[id] = false;
+	const envOff = envList(env, "ONECODE_FEATURES_OFF");
+	for (const id of envOff) featureMap[id] = false;
 	const tools = new Map<string, ToolSwitch>(Object.entries(profile.tools));
 	for (const name of envList(env, "ONECODE_TOOLS_OFF")) tools.set(name, { ...tools.get(name), enabled: false });
 	const problems = featureProblems(featureMap);
+	for (const id of envOff.filter(isGuardFeature)) problems.push(`ONECODE_FEATURES_OFF cannot turn off "${id}": it guards tool calls (only a profile can)`);
 	for (const name of PINNED_TOOLS) {
 		const sw = tools.get(name);
 		if (sw?.enabled === false) problems.push(`"${name}" cannot be turned off`);
