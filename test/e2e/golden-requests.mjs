@@ -15,7 +15,8 @@
  *   node test/e2e/golden-requests.mjs --sweep   one turn per optional feature
  *       turned off (ONECODE_FEATURES_OFF), plus a tool-switch check
  *       (ONECODE_TOOLS_OFF): each run must finish and send a request, and the
- *       turned-off tools must be missing from it
+ *       turned-off tools must be missing from it; with --dir, each run's
+ *       requests are written there for inspection
  *
  * Each run gets a fresh HOME (so no real CLAUDE.md, settings or memory leaks
  * in), pi's agent dir under it with this repo as the only package and the
@@ -270,13 +271,28 @@ async function sweep() {
 	const toolsOff = ["notebook_edit", "edit", "web_fetch"];
 	runs.push({ label: `tools ${toolsOff.join(", ")} off`, toolsOff, config: { name: "sweep-tools", model: ANTHROPIC, tier: "frontier", mode: "print", env: { ONECODE_TOOLS_OFF: toolsOff.join(",") } } });
 	let bad = 0;
+	const toolNames = (body) => (body?.tools ?? []).map((t) => t.name ?? t.function?.name);
+	const mainBody = (requests) => (requests.find((r) => Array.isArray(r.body.tools) && r.body.tools.length > 0) ?? requests[0])?.body;
+	// The tools a run loses against an all-on baseline, and which of them the
+	// request's text still names (a whole-word match, so a plain English word
+	// like "edit" can be a false hit): text that should follow the switches.
+	const baseline = new Set(toolNames(mainBody((await runConfig({ name: "sweep-baseline", model: ANTHROPIC, tier: "frontier", mode: "print" })).requests)));
+	const stillNamed = [];
 	for (const run of runs) {
 		try {
 			const { requests } = await runConfig(run.config);
+			if (args.includes("--dir")) {
+				mkdirSync(goldenDir, { recursive: true });
+				writeFileSync(join(goldenDir, `${run.config.name}.json`), `${JSON.stringify(requests, null, 1)}\n`);
+			}
 			const main = requests.find((r) => Array.isArray(r.body.tools) && r.body.tools.length > 0) ?? requests[0];
 			const names = (main?.body.tools ?? []).map((t) => t.name ?? t.function?.name);
 			const leaked = (run.toolsOff ?? []).filter((name) => names.includes(name));
 			if (leaked.length > 0) throw new Error(`turned-off tools still sent: ${leaked.join(", ")}`);
+			const body = mainBody(requests);
+			const text = JSON.stringify({ system: body?.system, messages: body?.messages, tools: body?.tools });
+			const named = [...baseline].filter((name) => !names.includes(name) && new RegExp(`(^|[^A-Za-z_])${name}([^A-Za-z_]|$)`).test(text));
+			if (named.length > 0) stillNamed.push(`${run.label}: ${named.join(", ")}`);
 			console.log(`ok    ${run.label} (${requests.length} request(s), ${names.length} tools)`);
 		} catch (error) {
 			bad += 1;
@@ -284,6 +300,7 @@ async function sweep() {
 		}
 	}
 	console.log(`${runs.length - bad}/${runs.length} sweep runs ok`);
+	if (stillNamed.length > 0) console.log(`\nText still naming a removed tool (report only until the text follows the switches):\n  ${stillNamed.join("\n  ")}`);
 	process.exit(bad > 0 ? 1 : 0);
 }
 if (args.includes("--sweep")) await sweep();
