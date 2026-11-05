@@ -111,6 +111,8 @@ function makeGitProject(project, home) {
 	git("config", "commit.gpgsign", "false");
 	mkdirSync(join(project, ".claude", "worktrees"), { recursive: true });
 	writeFileSync(join(project, ".claude", "worktrees", ".gitignore"), "*\n");
+	// One Code's own instructions file, so the context carries the oneCodeMd block.
+	writeFileSync(join(project, "ONECODE.md"), "Golden One Code instructions: reply plainly.\n");
 	git("add", "-A");
 	git("commit", "-q", "-m", "Golden project");
 	git("branch", "dup");
