@@ -10,14 +10,16 @@
  * scripted calls in TOOL_CALLS (successes, error paths, a command the auto-mode
  * classifier judges, a deferred-tool load, the user questions), plus a subagent when it also says
  * GOLDEN_AGENT, notebook edits under GOLDEN_NOTEBOOK and the task tools
- * steps under GOLDEN_TASKS, each in later rounds, and the worktree tools under
- * GOLDEN_WORKTREE after all of them. The auto-mode classifier gets a verdict instead: severity 60
+ * steps under GOLDEN_TASKS, each in later rounds, then web_fetch under
+ * GOLDEN_WEB_FETCH (against canned golden.example pages) and the worktree
+ * tools under GOLDEN_WORKTREE after all of them. The auto-mode classifier gets a verdict instead: severity 60
  * at stage 1, so stage 2 runs too, and severity 10 at stage 2, so the call is
  * allowed and the subagent's own requests are recorded. Every other reply is a
  * fixed text shaped like a compaction summary, which serves every turn and
- * side call (session title, compaction) alike. Any other fetch (a catalog
- * refresh, an update check) is refused with a 503, so a run never reaches the
- * network and never depends on what it would have returned.
+ * side call (session title, compaction) alike. A fetch of a golden.example
+ * page gets the canned page (PAGES); any other fetch (a catalog refresh, an
+ * update check) is refused with a 503, so a run never reaches the network and
+ * never depends on what it would have returned.
  */
 import { appendFileSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -96,6 +98,61 @@ const TASK_ROUNDS: ToolCall[][] = [
 	],
 	[tc("delete", "task_update", { taskId: "1", status: "deleted" })],
 ];
+
+/**
+ * web_fetch under GOLDEN_WEB_FETCH, against the canned pages in PAGES: load it,
+ * then every result in one parallel round (an article, a page with no article
+ * structure, JSON, a windowed text page, a followed same-host redirect, a
+ * cross-host redirect with and without a prompt, a redirect loop, a binary
+ * file, a 404, each rejected URL form, an http upgrade, and a prompt the
+ * reader answers after the server-side fetch falls back on Anthropic).
+ */
+const wf = (id: string, input: Record<string, unknown>): ToolCall => ({ id: `toolu_golden_wf_${id}`, name: "web_fetch", input });
+const WEB_FETCH_ROUNDS: ToolCall[][] = [
+	[{ id: "toolu_golden_wf_load", name: "tool_search", input: { query: "select:web_fetch" } }],
+	[
+		wf("article", { url: "https://golden.example/article" }),
+		wf("plain", { url: "https://golden.example/plain" }),
+		wf("json", { url: "https://golden.example/data.json" }),
+		wf("windowed", { url: "https://golden.example/notes.txt", max_chars: 1000 }),
+		wf("next_window", { url: "https://golden.example/notes.txt", max_chars: 1000, offset: 1000 }),
+		wf("hop", { url: "https://golden.example/hop" }),
+		wf("away", { url: "https://golden.example/away" }),
+		wf("away_prompt", { url: "https://golden.example/away", prompt: "What moved?" }),
+		wf("loop", { url: "https://golden.example/loop" }),
+		wf("pdf", { url: "https://golden.example/file.pdf" }),
+		wf("missing", { url: "https://golden.example/missing" }),
+		wf("invalid", { url: "not a url" }),
+		wf("scheme", { url: "ftp://golden.example/file" }),
+		wf("credentials", { url: "https://user:secret@golden.example/article" }),
+		wf("localhost", { url: "http://localhost:3000/" }),
+		wf("upgrade", { url: "http://golden.example/article" }),
+		wf("prompt", { url: "https://golden.example/article", prompt: "What does the article say?" }),
+	],
+];
+
+/** The canned site web_fetch reads under GOLDEN_WEB_FETCH, by path. */
+const PAGES: Record<string, { status?: number; type?: string; body?: string; location?: string }> = {
+	"/article": {
+		type: "text/html; charset=utf-8",
+		body: "<html><head><title>Golden article</title></head><body><nav>Home | About</nav><article><h1>Golden article</h1><p>The golden article has one paragraph of real content, long enough for the reader to keep as the article body.</p><p>A second paragraph says the snapshot is stable.</p></article><footer>Footer</footer></body></html>",
+	},
+	"/plain": { type: "text/html", body: "<html><body><div>Just a line.</div></body></html>" },
+	"/data.json": { type: "application/json", body: '{"golden": true, "items": [1, 2, 3]}\n' },
+	"/notes.txt": { type: "text/plain", body: Array.from({ length: 30 }, (_, i) => `Line ${i + 1} of the golden notes, padded to fifty characters.`).join("\n") },
+	"/hop": { status: 302, location: "/article" },
+	"/away": { status: 301, location: "https://elsewhere.example/page" },
+	"/loop": { status: 302, location: "/loop" },
+	"/file.pdf": { type: "application/pdf", body: "%PDF-1.4" },
+};
+
+/** A canned response for a golden.example page; every other page is a 404. */
+function page(url: string): Response {
+	const found = PAGES[new URL(url).pathname];
+	if (!found) return new Response("Not here", { status: 404, statusText: "Not Found", headers: { "content-type": "text/plain" } });
+	if (found.location) return new Response(null, { status: found.status, headers: { location: found.location } });
+	return new Response(found.body, { status: 200, headers: { "content-type": found.type ?? "text/plain" } });
+}
 
 /**
  * The worktree tools under GOLDEN_WORKTREE, after every other round (inside a
@@ -194,6 +251,7 @@ function roundsFor(text: string): ToolCall[][] {
 		later[i] = [...(later[i] ?? []), ...round];
 	});
 	for (const round of later) if (round.length > 0) rounds.push(round);
+	if (has("GOLDEN_WEB_FETCH")) rounds.push(...WEB_FETCH_ROUNDS);
 	if (has("GOLDEN_WORKTREE")) rounds.push(...WORKTREE_ROUNDS);
 	return rounds;
 }
@@ -224,6 +282,7 @@ export default function goldenFixture(_pi: ExtensionAPI) {
 	const wrapped = (async (input: string | URL | Request, init?: RequestInit) => {
 		const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
 		const offline = () => new Response("golden fixture: offline", { status: 503 });
+		if (new URL(url).hostname === "golden.example") return page(url);
 		const raw = init?.body;
 		if (typeof raw !== "string") return offline();
 		let body: { messages?: unknown };
