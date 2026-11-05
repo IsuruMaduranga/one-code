@@ -81,7 +81,7 @@ const CONFIGS = [
 	{ name: "session-anthropic-tiny", model: ANTHROPIC, tier: "tiny", mode: "session" },
 	{ name: "session-openrouter-cheap", model: OPENROUTER, tier: "cheap", mode: "session" },
 ];
-const PROMPTS = { print: "Reply with OK.", tools: "GOLDEN_TOOLS GOLDEN_AGENT GOLDEN_NOTEBOOK GOLDEN_TASKS GOLDEN_WEB_FETCH GOLDEN_SEARCH GOLDEN_SKILL GOLDEN_MCP GOLDEN_LSP GOLDEN_HOOKS GOLDEN_MEMORY GOLDEN_CRON GOLDEN_MONITOR GOLDEN_LOOP GOLDEN_ARTIFACT GOLDEN_FILES GOLDEN_WORKFLOW GOLDEN_AUTOMODE GOLDEN_WORKTREE: make the scripted calls." };
+const PROMPTS = { print: "Reply with OK.", tools: "GOLDEN_TOOLS GOLDEN_AGENT GOLDEN_NOTEBOOK GOLDEN_TASKS GOLDEN_WEB_FETCH GOLDEN_SEARCH GOLDEN_SKILL GOLDEN_MCP GOLDEN_LSP GOLDEN_HOOKS GOLDEN_MEMORY GOLDEN_CRON GOLDEN_MONITOR GOLDEN_LOOP GOLDEN_ARTIFACT GOLDEN_FILES GOLDEN_WORKFLOW GOLDEN_AUTOMODE GOLDEN_SHELL GOLDEN_WORKTREE: make the scripted calls." };
 
 /** A format 4.4 notebook (no cell ids, so nothing random) with the given code cells. */
 const notebook = (...sources) =>
@@ -424,7 +424,7 @@ function makeNormalizer({ home, project, root }) {
 		// The wakeup's clock time (background/wakeup.ts formatScheduled).
 		out = out.replace(/(Next wakeup scheduled for )\d{2}:\d{2}:\d{2}/g, "$1<CLOCK>");
 		// Background task ids (background/registry.ts generateTaskId): "b" and 7 hex digits.
-		out = out.replace(/\b(task |Monitor |subagents\/|tasks\/)b[0-9a-f]{7}\b/g, "$1<TASK_ID>");
+		out = out.replace(/\b(task |Monitor |subagents\/|tasks\/|bash\/)b[0-9a-f]{7}\b/g, "$1<TASK_ID>");
 		// A workflow run's id (workflow/run-manager.ts) and the seconds it took.
 		out = out.replace(/\bwf_[0-9a-f]{10}\b/g, "wf_<RUN_ID>");
 		out = out.replace(/(output tokens, \$\d+\.\d{4}, )\d+s\b/g, "$1<SECS>s");

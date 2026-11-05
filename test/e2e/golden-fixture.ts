@@ -22,7 +22,8 @@
  * refusals and change notices under GOLDEN_FILES, a file too large to
  * restore after compaction under GOLDEN_BIGFILE (the session scenario), the
  * workflow tool under GOLDEN_WORKFLOW, auto mode's blocks under
- * GOLDEN_AUTOMODE and the worktree tools under GOLDEN_WORKTREE after all of them. The auto-mode classifier gets a verdict instead: severity 60
+ * GOLDEN_AUTOMODE, the bash guards and background runs under GOLDEN_SHELL
+ * and the worktree tools under GOLDEN_WORKTREE after all of them. The auto-mode classifier gets a verdict instead: severity 60
  * at stage 1, so stage 2 runs too, and severity 10 at stage 2, so the call is
  * allowed and the subagent's own requests are recorded. Every other reply is a
  * fixed text shaped like a compaction summary, which serves every turn and
@@ -598,6 +599,29 @@ const AUTOMODE_ROUNDS: ToolCall[][] = [
 ];
 
 /**
+ * The bash guards and background runs under GOLDEN_SHELL, all in one round:
+ * a long sleep, chained short sleeps, a polling loop, two ways to detach, an
+ * editor, watch, an interactive rebase and add, and two background commands
+ * a one-shot run holds to the end, one past its timeout.
+ */
+const sh = (id: string, input: ToolCall["input"]): ToolCall => ({ id: `toolu_golden_shell_${id}`, name: "bash", input });
+const SHELL_ROUNDS: ToolCall[][] = [
+	[
+		sh("sleep", { command: "sleep 5" }),
+		sh("sleeps", { command: "sleep 1 && sleep 1 && echo after" }),
+		sh("poll", { command: "while true; do sleep 1; done" }),
+		sh("nohup", { command: "nohup true" }),
+		sh("amp", { command: "true &" }),
+		sh("editor", { command: "vim golden.txt" }),
+		sh("watch", { command: "watch ls" }),
+		sh("rebase", { command: "git rebase -i HEAD~1" }),
+		sh("add", { command: "git add -p" }),
+		sh("bg", { command: "echo golden-bg", run_in_background: true, description: "golden background" }),
+		sh("bg_timeout", { command: "sleep 3", run_in_background: true, timeout: 1000, description: "golden deadline" }),
+	],
+];
+
+/**
  * GOLDEN_BIGFILE (the session scenario, before its first compaction): make a
  * file past the restore's per-file cap and read it, so the restore sends the
  * note in place of its contents.
@@ -733,6 +757,7 @@ function roundsFor(text: string): ToolCall[][] {
 	if (has("GOLDEN_FILES")) rounds.push(...FILE_ROUNDS);
 	if (has("GOLDEN_WORKFLOW")) rounds.push(...WORKFLOW_ROUNDS);
 	if (has("GOLDEN_AUTOMODE")) rounds.push(...AUTOMODE_ROUNDS);
+	if (has("GOLDEN_SHELL")) rounds.push(...SHELL_ROUNDS);
 	if (has("GOLDEN_BIGFILE")) rounds.push(...BIGFILE_ROUNDS);
 	if (has("GOLDEN_WORKTREE")) rounds.push(...WORKTREE_ROUNDS);
 	return rounds;
