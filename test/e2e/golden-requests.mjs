@@ -209,7 +209,8 @@ function runPrint(config, { cwd, env }) {
 
 /**
  * Drive one RPC session: each prompt in SESSION_PROMPTS, with a manual
- * compaction between them. The fixture's ask_user_question dialogs are
+ * compaction between them, then a /btw side question (its answer notice is
+ * recorded) and /init. The fixture's ask_user_question dialogs are
  * answered by their header (dialogAnswer); every other dialog is cancelled,
  * so nothing is ever approved by accident. Each dialog is recorded, so a
  * change in what asks the user shows up in the snapshot too. Resolves with
@@ -218,10 +219,13 @@ function runPrint(config, { cwd, env }) {
 function runSession(config, { cwd, env }) {
 	return new Promise((resolveRun) => {
 		const child = spawn(process.execPath, [piCli, "--mode", "rpc", "--model", config.model, "-e", fixture], { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
+		// A /btw answers through a notice, not a turn, so its step waits for that notice.
 		const steps = [
 			{ type: "prompt", message: SESSION_PROMPTS[0] },
 			{ type: "compact" },
 			{ type: "prompt", message: SESSION_PROMPTS[1] },
+			{ type: "prompt", message: "/btw What is the golden project?", until: "notify" },
+			{ type: "prompt", message: "/init" },
 		];
 		let step = -1;
 		const dialogs = [];
@@ -239,7 +243,8 @@ function runSession(config, { cwd, env }) {
 		const next = () => {
 			step += 1;
 			if (step >= steps.length) return finish();
-			child.stdin.write(`${JSON.stringify({ id: `step-${step}`, ...steps[step] })}\n`);
+			const { until: _until, ...command } = steps[step];
+			child.stdin.write(`${JSON.stringify({ id: `step-${step}`, ...command })}\n`);
 		};
 		child.stderr.on("data", (chunk) => {
 			stderr += chunk;
@@ -263,6 +268,9 @@ function runSession(config, { cwd, env }) {
 					dialogs.push({ method: event.method, title, answer: answer ?? "(cancelled)" });
 					const response = answer === undefined ? { cancelled: true } : { value: answer };
 					child.stdin.write(`${JSON.stringify({ type: "extension_ui_response", id: event.id, ...response })}\n`);
+				} else if (event.type === "extension_ui_request" && event.method === "notify" && steps[step]?.until === "notify") {
+					dialogs.push({ method: "notify", title: event.message ?? "" });
+					next();
 				} else if (event.type === "response" && event.success === false) {
 					finish(`command ${event.command} failed: ${event.error ?? JSON.stringify(event)}`);
 				} else if (event.type === "response" && event.command === "compact") {
