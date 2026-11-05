@@ -17,7 +17,8 @@
  * lsp_diagnostics under GOLDEN_LSP (golden-lsp-server.mjs), the hooks under
  * GOLDEN_HOOKS (golden-hook.mjs), MEMORY.md near and over its limit under
  * GOLDEN_MEMORY, the cron tools and schedule_wakeup under GOLDEN_CRON, the
- * monitor and task tools under GOLDEN_MONITOR and the worktree
+ * monitor and task tools under GOLDEN_MONITOR, the /loop skill under
+ * GOLDEN_LOOP and the worktree
  * tools under GOLDEN_WORKTREE after all of them. The auto-mode classifier gets a verdict instead: severity 60
  * at stage 1, so stage 2 runs too, and severity 10 at stage 2, so the call is
  * allowed and the subagent's own requests are recorded. Every other reply is a
@@ -466,6 +467,24 @@ const MONITOR_ROUNDS: ToolCall[][] = [
 ];
 
 /**
+ * The /loop skill's body under GOLDEN_LOOP, in each form: a prompt with an
+ * interval, no prompt (self-paced), an interval alone, a trailing "every"
+ * clause; then the same no-prompt forms once a loop-tasks file exists. A
+ * fire needs time to pass, so the tick texts are not reached here.
+ */
+const lp = (id: string, name: string, input: Record<string, unknown>): ToolCall => ({ id: `toolu_golden_loop_${id}`, name, input });
+const LOOP_ROUNDS: ToolCall[][] = [
+	[
+		lp("explicit", "skill", { skill: "loop", args: "check the deploy every 20m" }),
+		lp("bare", "skill", { skill: "loop" }),
+		lp("interval", "skill", { skill: "loop", args: "5m" }),
+		lp("every", "skill", { skill: "loop", args: "every 2 hours" }),
+	],
+	[lp("tasks", "write", { path: ".claude/loop.md", content: "- golden task one\n- golden task two\n" })],
+	[lp("bare_file", "skill", { skill: "loop" }), lp("interval_file", "skill", { skill: "loop", args: "10m" })],
+];
+
+/**
  * Plan mode under GOLDEN_PLAN, on its own (the session scenario's last
  * prompt): load the tools, exit before entering, enter, exit with an empty
  * plan, write the plan to the file enter_plan_mode named, and exit for
@@ -553,6 +572,7 @@ function roundsFor(text: string): ToolCall[][] {
 	if (has("GOLDEN_MEMORY")) rounds.push(...MEMORY_ROUNDS);
 	if (has("GOLDEN_CRON")) rounds.push(...CRON_ROUNDS);
 	if (has("GOLDEN_MONITOR")) rounds.push(...MONITOR_ROUNDS);
+	if (has("GOLDEN_LOOP")) rounds.push(...LOOP_ROUNDS);
 	if (has("GOLDEN_WORKTREE")) rounds.push(...WORKTREE_ROUNDS);
 	return rounds;
 }
