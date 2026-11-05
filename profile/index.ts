@@ -9,6 +9,7 @@
  */
 
 import type { Profile } from "../extensions/lib/profile-contract.ts";
+import { askUser } from "./ask-user/index.ts";
 import { notebook } from "./notebook/index.ts";
 import { systemPrompt } from "./system-prompt/index.ts";
 
@@ -16,5 +17,5 @@ export const profile: Profile = {
 	features: {},
 	tools: {},
 	childExtensions: [],
-	text: { systemPrompt, notebook },
+	text: { systemPrompt, notebook, askUser },
 };

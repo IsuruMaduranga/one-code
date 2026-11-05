@@ -17,49 +17,50 @@ import { Type } from "typebox";
 import { canShowCustomUi } from "../lib/headless-output.ts";
 import { ccToolRenderers, safeThemeBold, safeThemeInverse, safeThemePaint } from "../lib/tui-render.ts";
 import { registerFormTool } from "../lib/tool-variants.ts";
-import { ASK_PARAMS, askDescription } from "./description.ts";
+import { requireText } from "../lib/profile.ts";
 import { askThroughDialogs } from "./dialogs.ts";
-import { type Answer, answerPairs, formatAnswers, formatDecline, type Question } from "./questions.ts";
+import type { Answer, Question } from "./questions.ts";
+import type { AskUserText } from "./text.ts";
 import { applyWidgetKey, createWidgetState, decodeWidgetKey, renderWidget, type WidgetResult } from "./widget.ts";
 import { panelUi } from "../lib/panel-focus.ts";
 
-const NON_INTERACTIVE =
-	"This session has no interactive UI, so the user cannot be shown a dialog. Ask your question in your reply instead and stop, or proceed under a stated assumption.";
-
-const AskParams = Type.Object({
-	questions: Type.Array(
-		Type.Object({
-			question: Type.String({ description: ASK_PARAMS.question }),
-			header: Type.String({ description: ASK_PARAMS.header }),
-			options: Type.Array(
-				Type.Object({
-					label: Type.String({ description: ASK_PARAMS.label }),
-					description: Type.Optional(Type.String({ description: ASK_PARAMS.optionDescription })),
-					preview: Type.Optional(Type.String({ description: ASK_PARAMS.preview })),
-				}),
-				{ minItems: 2, maxItems: 4, description: ASK_PARAMS.options },
-			),
-			multiSelect: Type.Optional(Type.Boolean({ description: ASK_PARAMS.multiSelect })),
-		}),
-		{ minItems: 1, maxItems: 4, description: ASK_PARAMS.questions },
-	),
-});
+/** The tool's parameters, documented in the profile's words. */
+const askParams = (params: AskUserText["params"]) =>
+	Type.Object({
+		questions: Type.Array(
+			Type.Object({
+				question: Type.String({ description: params.question }),
+				header: Type.String({ description: params.header }),
+				options: Type.Array(
+					Type.Object({
+						label: Type.String({ description: params.label }),
+						description: Type.Optional(Type.String({ description: params.optionDescription })),
+						preview: Type.Optional(Type.String({ description: params.preview })),
+					}),
+					{ minItems: 2, maxItems: 4, description: params.options },
+				),
+				multiSelect: Type.Optional(Type.Boolean({ description: params.multiSelect })),
+			}),
+			{ minItems: 1, maxItems: 4, description: params.questions },
+		),
+	});
 
 function askUserExtension(pi: ExtensionAPI) {
-	// Claude Code's AskUserQuestion text, short or long by the model's tier
-	// (description.ts, lib/tool-variants.ts); registered again when the form changes.
+	const text = requireText("askUser");
+	// The profile's text, short or long by the model's tier (lib/tool-variants.ts);
+	// registered again when the form changes.
 	const tool = defineTool({
 		name: "ask_user_question",
 		label: "Ask User",
 		...ccToolRenderers<{ questions?: Array<{ question?: string }> }>("Ask User", {
 			title: (a) => a?.questions?.[0]?.question,
 		}),
-		description: askDescription("short"),
-		promptSnippet: "Ask the user to decide between options when genuinely blocked",
-		parameters: AskParams,
+		description: text.description("short"),
+		promptSnippet: text.promptSnippet,
+		parameters: askParams(text.params),
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			if (!ctx.hasUI) {
-				return { content: [{ type: "text", text: NON_INTERACTIVE }], details: {}, isError: true };
+				return { content: [{ type: "text", text: text.noInteractiveUi }], details: {}, isError: true };
 			}
 
 			const questions = params.questions as Question[];
@@ -99,30 +100,26 @@ function askUserExtension(pi: ExtensionAPI) {
 
 			if (!outcome || outcome.kind === "cancel") {
 				const partial = outcome?.kind === "cancel" ? outcome.answers : [];
-				const text =
-					partial.length > 0
-						? `The user cancelled without submitting. They had made these selections before cancelling (NOT submitted — do not treat them as final answers): ${answerPairs(partial)}.`
-						: "The user cancelled without answering.";
 				return {
-					content: [{ type: "text", text }],
+					content: [{ type: "text", text: text.cancelled(partial) }],
 					details: { answers: partial, cancelled: true },
 				};
 			}
 
 			if (outcome.kind === "chat") {
 				return {
-					content: [{ type: "text", text: formatDecline(questions) }],
+					content: [{ type: "text", text: text.declined(questions) }],
 					details: { answers: [] as Answer[], declined: true },
 				};
 			}
 
 			return {
-				content: [{ type: "text", text: formatAnswers(outcome.answers) }],
+				content: [{ type: "text", text: text.answered(outcome.answers) }],
 				details: { answers: outcome.answers },
 			};
 		},
 	});
-	registerFormTool(pi, tool, askDescription);
+	registerFormTool(pi, tool, text.description);
 }
 
 export default feature("ask-user", askUserExtension);
