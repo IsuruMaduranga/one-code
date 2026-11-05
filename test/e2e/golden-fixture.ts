@@ -12,8 +12,9 @@
  * GOLDEN_AGENT, notebook edits under GOLDEN_NOTEBOOK and the task tools
  * steps under GOLDEN_TASKS, each in later rounds, then web_fetch under
  * GOLDEN_WEB_FETCH (against canned golden.example pages), web_search under
- * GOLDEN_SEARCH (against canned search backends) and the worktree tools under
- * GOLDEN_WORKTREE after all of them. The auto-mode classifier gets a verdict instead: severity 60
+ * GOLDEN_SEARCH (against canned search backends), the skill tool under
+ * GOLDEN_SKILL, the MCP tools under GOLDEN_MCP (golden-mcp-server.mjs) and
+ * the worktree tools under GOLDEN_WORKTREE after all of them. The auto-mode classifier gets a verdict instead: severity 60
  * at stage 1, so stage 2 runs too, and severity 10 at stage 2, so the call is
  * allowed and the subagent's own requests are recorded. Every other reply is a
  * fixed text shaped like a compaction summary, which serves every turn and
@@ -317,6 +318,41 @@ const SKILL_ROUNDS: ToolCall[][] = [
 ];
 
 /**
+ * The MCP tools under GOLDEN_MCP, against golden-mcp-server.mjs (server
+ * `golden`; golden-requests.mjs also configures a server `broken` that exits
+ * at once): load them; every result of a connected server (tools, the
+ * resource tools, their failures and an unknown server); mutate the tool
+ * list; the removed and the changed tool; quit mid-call; a tool and the
+ * resource tools after the server is gone.
+ */
+const mcp = (id: string, name: string, input: Record<string, unknown> = {}): ToolCall => ({ id: `toolu_golden_mcp_${id}`, name, input });
+const MCP_ROUNDS: ToolCall[][] = [
+	[
+		mcp("load", "tool_search", {
+			query: "select:mcp__golden__echo,mcp__golden__nodesc,mcp__golden__fail,mcp__golden__mutate,mcp__golden__quit,list_mcp_resources,read_mcp_resource,read_mcp_resource_dir",
+		}),
+	],
+	[
+		mcp("echo", "mcp__golden__echo", { text: "golden" }),
+		mcp("nodesc", "mcp__golden__nodesc"),
+		mcp("fail", "mcp__golden__fail"),
+		mcp("list", "list_mcp_resources"),
+		mcp("list_unknown", "list_mcp_resources", { server: "nope" }),
+		mcp("read", "read_mcp_resource", { server: "golden", uri: "golden://notes" }),
+		mcp("read_blob", "read_mcp_resource", { server: "golden", uri: "golden://logo" }),
+		mcp("read_missing", "read_mcp_resource", { server: "golden", uri: "golden://missing" }),
+		mcp("read_unknown", "read_mcp_resource", { server: "nope", uri: "golden://notes" }),
+		mcp("dir", "read_mcp_resource_dir", { server: "golden", uri: "golden://dir" }),
+		mcp("dir_empty", "read_mcp_resource_dir", { server: "golden", uri: "golden://empty" }),
+		mcp("dir_missing", "read_mcp_resource_dir", { server: "golden", uri: "golden://notes" }),
+	],
+	[mcp("mutate", "mcp__golden__mutate")],
+	[mcp("removed", "mcp__golden__echo", { text: "golden" }), mcp("changed", "mcp__golden__nodesc")],
+	[mcp("quit", "mcp__golden__quit")],
+	[mcp("gone", "mcp__golden__fail"), mcp("list_gone", "list_mcp_resources"), mcp("read_gone", "read_mcp_resource", { server: "golden", uri: "golden://notes" })],
+];
+
+/**
  * Plan mode under GOLDEN_PLAN, on its own (the session scenario's last
  * prompt): load the tools, exit before entering, enter, exit with an empty
  * plan, write the plan to the file enter_plan_mode named, and exit for
@@ -398,6 +434,7 @@ function roundsFor(text: string): ToolCall[][] {
 	if (has("GOLDEN_WEB_FETCH")) rounds.push(...WEB_FETCH_ROUNDS);
 	if (has("GOLDEN_SEARCH")) rounds.push(...SEARCH_ROUNDS);
 	if (has("GOLDEN_SKILL")) rounds.push(...SKILL_ROUNDS);
+	if (has("GOLDEN_MCP")) rounds.push(...MCP_ROUNDS);
 	if (has("GOLDEN_WORKTREE")) rounds.push(...WORKTREE_ROUNDS);
 	return rounds;
 }

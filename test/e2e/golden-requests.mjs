@@ -81,7 +81,7 @@ const CONFIGS = [
 	{ name: "session-anthropic-tiny", model: ANTHROPIC, tier: "tiny", mode: "session" },
 	{ name: "session-openrouter-cheap", model: OPENROUTER, tier: "cheap", mode: "session" },
 ];
-const PROMPTS = { print: "Reply with OK.", tools: "GOLDEN_TOOLS GOLDEN_AGENT GOLDEN_NOTEBOOK GOLDEN_TASKS GOLDEN_WEB_FETCH GOLDEN_SEARCH GOLDEN_SKILL GOLDEN_WORKTREE: make the scripted calls." };
+const PROMPTS = { print: "Reply with OK.", tools: "GOLDEN_TOOLS GOLDEN_AGENT GOLDEN_NOTEBOOK GOLDEN_TASKS GOLDEN_WEB_FETCH GOLDEN_SEARCH GOLDEN_SKILL GOLDEN_MCP GOLDEN_WORKTREE: make the scripted calls." };
 
 /** A format 4.4 notebook (no cell ids, so nothing random) with the given code cells. */
 const notebook = (...sources) =>
@@ -138,6 +138,18 @@ function writeProjectSkills(project, agentDir) {
 	writeFileSync(join(agentDir, "plugins", "skill-overrides.json"), `${JSON.stringify({ "project:golden-off": "off", "project:golden-hidden": "user-only" }, null, 2)}\n`);
 }
 
+/**
+ * The tools scenario's user-scope MCP servers (golden-fixture.ts MCP_ROUNDS):
+ * `golden`, the stub server, and `broken`, which exits before it answers.
+ */
+function writeMcpServers(home) {
+	const mcpServers = {
+		golden: { command: process.execPath, args: [join(repo, "test/e2e/golden-mcp-server.mjs")] },
+		broken: { command: process.execPath, args: ["-e", "process.exit(1)"] },
+	};
+	writeFileSync(join(home, ".claude.json"), `${JSON.stringify({ mcpServers }, null, 2)}\n`);
+}
+
 const SESSION_PROMPTS = ["GOLDEN_TOOLS: read README.md and run echo golden.", "Reply with OK."];
 
 /** The parent's environment without anything that steers pi or One Code. */
@@ -164,6 +176,7 @@ async function runConfig(config) {
 		if (config.mode === "tools") {
 			for (const [name, content] of Object.entries(NOTEBOOK_FILES)) writeFileSync(join(project, name), content);
 			writeProjectSkills(project, agentDir);
+			writeMcpServers(home);
 			makeGitProject(project, home);
 		}
 		const settings = withCompactionKeepBackfilled({
