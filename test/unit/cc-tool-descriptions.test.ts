@@ -13,7 +13,7 @@ import askUserExtension from "../../extensions/ask-user/index.ts";
 import { ASK_LONG_DESCRIPTION, ASK_SHORT_DESCRIPTION } from "../../extensions/ask-user/description.ts";
 import { BASH_AVOID_SHELL_READS_LINE, BASH_LONG_DESCRIPTION, BASH_LONG_SEARCH_TOOLS_DESCRIPTION, BASH_SHORT_DESCRIPTION, bashDescription } from "../../extensions/bash/description.ts";
 import bashExtension from "../../extensions/bash/index.ts";
-import { NOTEBOOK_EDIT_DESCRIPTION } from "../../extensions/notebook/description.ts";
+import { NOTEBOOK_EDIT_DESCRIPTION } from "../../profile/notebook/description.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts";
 import { AGENT_HOW_AGENTS_RUN, AGENT_LONG_DESCRIPTION, AGENT_SHORT_DESCRIPTION, agentDescription } from "../../extensions/subagents/agent-description.ts";
 import { TASK_CREATE_DESCRIPTION, TASK_GET_DESCRIPTION, TASK_LIST_DESCRIPTION, TASK_UPDATE_DESCRIPTION } from "../../extensions/tasks/descriptions.ts";

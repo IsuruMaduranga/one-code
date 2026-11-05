@@ -1,5 +1,5 @@
 /**
- * notebook extension — Claude Code's NotebookEdit (its text: description.ts), deferred behind tool_search
+ * notebook extension — Claude Code's NotebookEdit (its words: the profile's `text.notebook`, contract in text.ts), deferred behind tool_search
  * (most sessions never touch a notebook, so its schema stays out of the prompt
  * until needed).
  */
@@ -12,42 +12,34 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
-import { applyEdit, type EditMode, type Notebook, notebookErrorHint, parseNotebook } from "./notebook.ts";
+import { applyEdit, cellRefs, type EditMode, type Notebook, notebookFailure, parseNotebook } from "./notebook.ts";
 import { resolveToolPath } from "../lib/tool-path.ts";
-import { NOTEBOOK_EDIT_DESCRIPTION } from "./description.ts";
+import { requireText } from "../lib/profile.ts";
 
 function notebookExtension(pi: ExtensionAPI) {
+	const text = requireText("notebook");
 	pi.registerTool({
 		name: "notebook_edit",
 		label: "Notebook Edit",
 		...ccToolRenderers("Notebook Edit"),
-		description: NOTEBOOK_EDIT_DESCRIPTION,
+		description: text.description,
 		parameters: Type.Object({
-			path: Type.Optional(Type.String({ description: "Absolute or workspace-relative path to the .ipynb file" })),
+			path: Type.Optional(Type.String({ description: text.params.path })),
 			// Claude Code's NotebookEdit spells the path `notebook_path` and defaults
 			// edit_mode to `replace`; a CC-trained model's `{notebook_path, cell_id,
 			// new_source}` used to fail schema validation twice over
 			// (TOOL-FIDELITY-REVIEW-2026-09-07 M2). Accept both.
-			notebook_path: Type.Optional(Type.String({ description: "Alias of `path` (Claude Code's name for it)." })),
-			edit_mode: Type.Optional(StringEnum(["replace", "insert", "append", "delete"] as const, { description: "The type of edit to make. Defaults to replace." })),
-			cell_id: Type.Optional(
-				Type.String({
-					description:
-						"Target cell id, either the cell's own id or its position as `cell-0`, `cell-1`, … Required for replace and delete; for insert the new cell goes after it (omit to insert at the top); ignored for append.",
-				}),
-			),
-			new_source: Type.Optional(Type.String({ description: "New cell source. Required unless deleting." })),
-			cell_type: Type.Optional(
-				StringEnum(["code", "markdown"] as const, {
-					description: "Cell type. Required when inserting or appending; when replacing, changes the cell's type.",
-				}),
-			),
+			notebook_path: Type.Optional(Type.String({ description: text.params.notebook_path })),
+			edit_mode: Type.Optional(StringEnum(["replace", "insert", "append", "delete"] as const, { description: text.params.edit_mode })),
+			cell_id: Type.Optional(Type.String({ description: text.params.cell_id })),
+			new_source: Type.Optional(Type.String({ description: text.params.new_source })),
+			cell_type: Type.Optional(StringEnum(["code", "markdown"] as const, { description: text.params.cell_type })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const rawPath = params.path ?? params.notebook_path;
 			if (!rawPath) {
 				return {
-					content: [{ type: "text", text: "`path` (or Claude Code's `notebook_path`) is required: the .ipynb file to edit." }],
+					content: [{ type: "text", text: text.failed({ failure: { kind: "missingPath" } }) }],
 					details: {},
 					isError: true,
 				};
@@ -61,7 +53,7 @@ function notebookExtension(pi: ExtensionAPI) {
 			let parsed: Notebook | undefined;
 			try {
 				const notebook = (parsed = parseNotebook(readFileSync(path, "utf-8")));
-				const { notebook: updated, summary } = applyEdit(
+				const { notebook: updated, outcome } = applyEdit(
 					notebook,
 					{
 						cellId: params.cell_id,
@@ -73,19 +65,12 @@ function notebookExtension(pi: ExtensionAPI) {
 				);
 				writeFileSync(path, `${JSON.stringify(updated, null, 1)}\n`);
 				return {
-					content: [{ type: "text", text: `${summary} in ${rawPath} (${updated.cells.length} cells).` }],
+					content: [{ type: "text", text: text.edited({ outcome, path: rawPath, cellCount: updated.cells.length }) }],
 					details: { path, cellCount: updated.cells.length },
 				};
 			} catch (error) {
-				const message = (error as Error).message;
-				const hint = notebookErrorHint({
-					code: (error as NodeJS.ErrnoException).code,
-					syntax: error instanceof SyntaxError,
-					message,
-					parsed,
-				});
 				return {
-					content: [{ type: "text", text: `Notebook edit failed: ${message}${hint}` }],
+					content: [{ type: "text", text: text.failed({ failure: notebookFailure(error), ...(parsed ? { cells: cellRefs(parsed) } : {}) }) }],
 					details: {},
 					isError: true,
 				};
@@ -93,7 +78,7 @@ function notebookExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	pi.events.emit(DEFER_CHANNEL, { name: "notebook_edit", keywords: ["notebook", "jupyter", "ipynb", "cell"] });
+	pi.events.emit(DEFER_CHANNEL, { name: "notebook_edit", keywords: text.searchKeywords });
 }
 
 export default feature("notebook", notebookExtension);

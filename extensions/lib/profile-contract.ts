@@ -9,12 +9,18 @@
  * extensions child sessions load, and the text groups moved so far.
  */
 
+import type { NotebookText } from "../notebook/text.ts";
 import type { SystemPromptText } from "../system-prompt/text.ts";
 import type { FeatureId } from "./features.ts";
 
-/** Every text the base shows the model, one group per feature that owns it. */
+/**
+ * Every text the base shows the model, one group per feature that owns it.
+ * A group of an optional feature may be left out when the profile turns that
+ * feature off (lib/profile.ts requireText).
+ */
 export interface ProfileText {
 	systemPrompt: SystemPromptText;
+	notebook?: NotebookText;
 }
 
 /** A profile's switches for one tool, by its registered name. Omitted fields keep the base's choice. */

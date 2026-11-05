@@ -12,6 +12,8 @@
  * every failure enumerates the notebook's current cells.
  */
 
+import type { CellRef, EditOutcome, NotebookFailure } from "./text.ts";
+
 export interface NotebookCell {
 	cell_type: string;
 	id?: string;
@@ -35,9 +37,25 @@ export interface EditRequest {
 	editMode: EditMode;
 }
 
+/** An edit that cannot be made, as data the profile words (text.ts). */
+export class NotebookError extends Error {
+	constructor(readonly failure: NotebookFailure) {
+		super(failure.kind);
+	}
+}
+
+/** The failure an error stands for: ours as is, the parser's and the system's with their own message. */
+export function notebookFailure(error: unknown): NotebookFailure {
+	if (error instanceof NotebookError) return error.failure;
+	const message = (error as Error).message;
+	if (error instanceof SyntaxError) return { kind: "invalidJson", osMessage: message };
+	if ((error as NodeJS.ErrnoException).code === "ENOENT") return { kind: "fileNotFound", osMessage: message };
+	return { kind: "other", osMessage: message };
+}
+
 export function parseNotebook(content: string): Notebook {
 	const parsed = JSON.parse(content) as Notebook;
-	if (!Array.isArray(parsed.cells)) throw new Error("Not a Jupyter notebook: missing 'cells' array");
+	if (!Array.isArray(parsed.cells)) throw new NotebookError({ kind: "notANotebook" });
 	return parsed;
 }
 
@@ -57,28 +75,9 @@ export function cellLabel(cell: NotebookCell, index: number): string {
 	return cell.id ?? positionalId(index);
 }
 
-/** `aaa (markdown), cell-1 (code)` — every id the notebook currently answers to. */
-export function describeCells(notebook: Notebook): string {
-	if (notebook.cells.length === 0) return "(none — the notebook has no cells)";
-	return notebook.cells.map((cell, index) => `${cellLabel(cell, index)} (${cell.cell_type})`).join(", ");
-}
-
-/**
- * Trailing hint appended to a notebook_edit failure message. A missing file or
- * malformed JSON gets a targeted pointer; a cell-addressing failure (a missing or
- * wrong `cell_id`) gets the list of ids the notebook actually has, so a weak tier
- * picks a real one instead of inventing it by hand (review M4). A missing
- * `new_source`/`cell_type` is not about a cell, so it gets no id listing — that
- * would misdirect (code-review F3). A real "No cell with id" already lists them,
- * so it is left untouched.
- */
-export function notebookErrorHint(opts: { code?: string; syntax: boolean; message: string; parsed: Notebook | undefined }): string {
-	if (opts.code === "ENOENT") return " — no such file; check the path points to an existing .ipynb";
-	if (opts.syntax) return " — the file is not valid notebook JSON";
-	if (opts.parsed && opts.message.includes("cell_id") && !opts.message.includes("cells are:")) {
-		return ` — this notebook's cells are: ${describeCells(opts.parsed)}. Address a cell by its own id or by position (cell-0 is the first); edit_mode "append" adds one at the end.`;
-	}
-	return "";
+/** Every cell as the model can address it, in order. */
+export function cellRefs(notebook: Notebook): CellRef[] {
+	return notebook.cells.map((cell, index) => ({ label: cellLabel(cell, index), type: cell.cell_type }));
 }
 
 /** Index of a cell by its own id, or by its `cell-N` position. -1 when neither matches. */
@@ -91,17 +90,9 @@ export function findCellIndex(notebook: Notebook, cellId: string): number {
 	return index < notebook.cells.length ? index : -1;
 }
 
-/**
- * The "fail loud, name the fix" error for an id that resolves to nothing
- * (working-docs/decisions/tools.md): which ids exist, and the two ways to add a cell
- * without naming one.
- */
-export function noSuchCellError(notebook: Notebook, cellId: string): Error {
-	return new Error(
-		`No cell with id "${cellId}". This notebook's cells are: ${describeCells(notebook)}. ` +
-			"Cells can be addressed by their own id or by position (cell-0 is the first). " +
-			'To add a cell without naming one, use edit_mode "append" (at the end) or omit cell_id with edit_mode "insert" (at the top).',
-	);
+/** The "fail loud, name the fix" failure for an id that resolves to nothing (working-docs/decisions/tools.md). */
+function noSuchCell(cellId: string): NotebookError {
+	return new NotebookError({ kind: "noSuchCell", cellId });
 }
 
 function newCell(cellType: "code" | "markdown", source: string, id: string | undefined): NotebookCell {
@@ -136,7 +127,7 @@ function withRepairedIds(notebook: Notebook, cells: NotebookCell[], makeId: () =
 
 export interface EditResult {
 	notebook: Notebook;
-	summary: string;
+	outcome: EditOutcome;
 }
 
 /**
@@ -145,42 +136,42 @@ export interface EditResult {
  */
 export function applyEdit(notebook: Notebook, request: EditRequest, makeId: () => string): EditResult {
 	const cells = [...notebook.cells];
-	const finish = (updated: NotebookCell[], summary: string): EditResult => ({
+	const finish = (updated: NotebookCell[], outcome: EditOutcome): EditResult => ({
 		notebook: { ...notebook, cells: withRepairedIds(notebook, updated, makeId) },
-		summary,
+		outcome,
 	});
 
 	if (request.editMode === "delete") {
-		if (!request.cellId) throw new Error("cell_id is required for edit_mode 'delete'");
+		if (!request.cellId) throw new NotebookError({ kind: "cellIdRequired", mode: "delete" });
 		const index = findCellIndex(notebook, request.cellId);
-		if (index === -1) throw noSuchCellError(notebook, request.cellId);
+		if (index === -1) throw noSuchCell(request.cellId);
 		const label = cellLabel(cells[index], index);
 		cells.splice(index, 1);
-		return finish(cells, `Deleted cell ${label}`);
+		return finish(cells, { kind: "deleted", cell: label });
 	}
 
-	if (request.newSource === undefined) throw new Error("new_source is required unless edit_mode is 'delete'");
+	if (request.newSource === undefined) throw new NotebookError({ kind: "newSourceRequired" });
 
 	if (request.editMode === "insert" || request.editMode === "append") {
-		if (!request.cellType) throw new Error(`cell_type is required for edit_mode '${request.editMode}'`);
+		if (!request.cellType) throw new NotebookError({ kind: "cellTypeRequired", mode: request.editMode });
 		const cell = newCell(request.cellType, request.newSource, supportsIds(notebook) ? makeId() : undefined);
 		if (request.editMode === "append") {
 			cells.push(cell);
 			// Named the way the model must address it next: its id, or its position
 			// in a notebook that has none.
-			return finish(cells, `Appended ${request.cellType} cell ${cellLabel(cell, cells.length - 1)} at the end`);
+			return finish(cells, { kind: "appended", cellType: request.cellType, cell: cellLabel(cell, cells.length - 1) });
 		}
 		// Claude Code inserts AFTER the given cell; no cell_id means insert first.
 		const index = request.cellId ? findCellIndex(notebook, request.cellId) : -1;
-		if (request.cellId && index === -1) throw noSuchCellError(notebook, request.cellId);
-		const afterLabel = request.cellId ? cellLabel(notebook.cells[index], index) : undefined;
+		if (request.cellId && index === -1) throw noSuchCell(request.cellId);
+		const after = request.cellId ? cellLabel(notebook.cells[index], index) : undefined;
 		cells.splice(index + 1, 0, cell);
-		return finish(cells, `Inserted ${request.cellType} cell ${cellLabel(cell, index + 1)}${afterLabel ? ` after ${afterLabel}` : " at the top"}`);
+		return finish(cells, { kind: "inserted", cellType: request.cellType, cell: cellLabel(cell, index + 1), ...(after ? { after } : {}) });
 	}
 
-	if (!request.cellId) throw new Error("cell_id is required for edit_mode 'replace'");
+	if (!request.cellId) throw new NotebookError({ kind: "cellIdRequired", mode: "replace" });
 	const index = findCellIndex(notebook, request.cellId);
-	if (index === -1) throw noSuchCellError(notebook, request.cellId);
+	if (index === -1) throw noSuchCell(request.cellId);
 	const existing = cells[index];
 	const label = cellLabel(existing, index);
 	const cellType = (request.cellType ?? existing.cell_type) as "code" | "markdown";
@@ -197,5 +188,5 @@ export function applyEdit(notebook: Notebook, request: EditRequest, makeId: () =
 		delete replacement.execution_count;
 	}
 	cells[index] = replacement;
-	return finish(cells, `Replaced cell ${label}`);
+	return finish(cells, { kind: "replaced", cell: label });
 }

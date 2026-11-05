@@ -24,7 +24,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { FeatureId } from "./features.ts";
-import { activeProfile, featureEnabled, isToolDisabled } from "./profile.ts";
+import { activeProfile, failClosed, featureEnabled, isToolDisabled } from "./profile.ts";
 
 /** `pi` as the profile lets an extension register tools: see the header. */
 export function profiledPi(pi: ExtensionAPI): ExtensionAPI {
@@ -43,13 +43,6 @@ export function profiledPi(pi: ExtensionAPI): ExtensionAPI {
 			return typeof value === "function" ? value.bind(target) : value;
 		},
 	});
-}
-
-/** Stop the process: an invalid profile must never run degraded or without its gate. */
-function failClosed(error: unknown): never {
-	const reason = error instanceof Error ? error.message : String(error);
-	process.stderr.write(`\nThe profile in profile/ is invalid, so the harness will not start: ${reason}\n\n`);
-	process.exit(1);
 }
 
 export function feature<R>(id: FeatureId, factory: (pi: ExtensionAPI) => R): (pi: ExtensionAPI) => R | undefined {

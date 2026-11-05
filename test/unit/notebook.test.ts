@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { applyEdit, describeCells, findCellIndex, type Notebook, notebookErrorHint, parseNotebook, toSourceLines } from "../../extensions/notebook/notebook.ts";
+/**
+ * The notebook tool's logic (extensions/notebook/notebook.ts): what an edit
+ * does and why it fails, as data. One Code's wording of it is checked in
+ * profile-notebook-text.test.ts.
+ */
+import { applyEdit, cellRefs, findCellIndex, type Notebook, NotebookError, notebookFailure, parseNotebook, toSourceLines } from "../../extensions/notebook/notebook.ts";
+
+/** The failure an edit throws. */
+const failureOf = (edit: () => unknown) => {
+	try {
+		edit();
+	} catch (error) {
+		return notebookFailure(error);
+	}
+	throw new Error("the edit did not fail");
+};
 
 const nb = (): Notebook => ({
 	nbformat: 4,
@@ -15,7 +30,8 @@ const ids = () => "new1";
 
 describe("parseNotebook", () => {
 	it("rejects non-notebook JSON", () => {
-		expect(() => parseNotebook('{"foo":1}')).toThrow(/missing 'cells'/);
+		expect(failureOf(() => parseNotebook('{"foo":1}'))).toEqual({ kind: "notANotebook" });
+		expect(failureOf(() => parseNotebook("not json")).kind).toBe("invalidJson");
 	});
 });
 
@@ -28,12 +44,12 @@ describe("toSourceLines", () => {
 
 describe("applyEdit", () => {
 	it("replaces a cell's source and clears code outputs", () => {
-		const { notebook, summary } = applyEdit(nb(), { cellId: "bbb", newSource: "print(2)", editMode: "replace" }, ids);
+		const { notebook, outcome } = applyEdit(nb(), { cellId: "bbb", newSource: "print(2)", editMode: "replace" }, ids);
 		const cell = notebook.cells[1];
 		expect(cell.source).toEqual(["print(2)"]);
 		expect(cell.outputs).toEqual([]);
 		expect(cell.execution_count).toBeNull();
-		expect(summary).toContain("Replaced cell bbb");
+		expect(outcome).toEqual({ kind: "replaced", cell: "bbb" });
 	});
 
 	it("drops output fields when replacing a code cell with markdown", () => {
@@ -55,11 +71,13 @@ describe("applyEdit", () => {
 		);
 		expect(notebook.cells.map((c) => c.id)).toEqual(["aaa", "new1", "bbb"]);
 		expect(notebook.cells[1].outputs).toEqual([]);
+		expect(applyEdit(nb(), { cellId: "aaa", newSource: "x", cellType: "code", editMode: "insert" }, ids).outcome).toEqual({ kind: "inserted", cellType: "code", cell: "new1", after: "aaa" });
 	});
 
 	it("inserts at the top when no cell_id is given", () => {
-		const { notebook } = applyEdit(nb(), { newSource: "# intro", cellType: "markdown", editMode: "insert" }, ids);
+		const { notebook, outcome } = applyEdit(nb(), { newSource: "# intro", cellType: "markdown", editMode: "insert" }, ids);
 		expect(notebook.cells.map((c) => c.id)).toEqual(["new1", "aaa", "bbb"]);
+		expect(outcome).toEqual({ kind: "inserted", cellType: "markdown", cell: "new1" });
 	});
 
 	it("deletes a cell", () => {
@@ -74,10 +92,18 @@ describe("applyEdit", () => {
 	});
 
 	it("validates required arguments", () => {
-		expect(() => applyEdit(nb(), { editMode: "delete" }, ids)).toThrow(/cell_id is required/);
-		expect(() => applyEdit(nb(), { cellId: "aaa", editMode: "replace" }, ids)).toThrow(/new_source is required/);
-		expect(() => applyEdit(nb(), { newSource: "x", editMode: "insert" }, ids)).toThrow(/cell_type is required/);
-		expect(() => applyEdit(nb(), { cellId: "zzz", newSource: "x", editMode: "replace" }, ids)).toThrow(/No cell with id/);
+		expect(failureOf(() => applyEdit(nb(), { editMode: "delete" }, ids))).toEqual({ kind: "cellIdRequired", mode: "delete" });
+		expect(failureOf(() => applyEdit(nb(), { newSource: "x", editMode: "replace" }, ids))).toEqual({ kind: "cellIdRequired", mode: "replace" });
+		expect(failureOf(() => applyEdit(nb(), { cellId: "aaa", editMode: "replace" }, ids))).toEqual({ kind: "newSourceRequired" });
+		expect(failureOf(() => applyEdit(nb(), { newSource: "x", editMode: "insert" }, ids))).toEqual({ kind: "cellTypeRequired", mode: "insert" });
+		expect(failureOf(() => applyEdit(nb(), { cellId: "zzz", newSource: "x", editMode: "replace" }, ids))).toEqual({ kind: "noSuchCell", cellId: "zzz" });
+	});
+
+	it("passes the system's own message through for a file error", () => {
+		const missing = Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
+		expect(notebookFailure(missing)).toEqual({ kind: "fileNotFound", osMessage: "ENOENT: no such file" });
+		expect(notebookFailure(new Error("EACCES"))).toEqual({ kind: "other", osMessage: "EACCES" });
+		expect(new NotebookError({ kind: "newSourceRequired" }).failure.kind).toBe("newSourceRequired");
 	});
 });
 
@@ -105,33 +131,29 @@ describe("addressing cells without ids", () => {
 	});
 
 	it("lists every id the notebook answers to", () => {
-		expect(describeCells(idless())).toBe("cell-0 (markdown), cell-1 (code)");
-		expect(describeCells(nb())).toBe("aaa (markdown), bbb (code)");
-		expect(describeCells({ ...nb(), cells: [] })).toContain("no cells");
+		expect(cellRefs(idless())).toEqual([{ label: "cell-0", type: "markdown" }, { label: "cell-1", type: "code" }]);
+		expect(cellRefs(nb())).toEqual([{ label: "aaa", type: "markdown" }, { label: "bbb", type: "code" }]);
+		expect(cellRefs({ ...nb(), cells: [] })).toEqual([]);
 	});
 
 	it("replaces and deletes an id-less cell by position", () => {
 		const replaced = applyEdit(idless(), { cellId: "cell-1", newSource: "print(2)", editMode: "replace" }, ids);
 		expect(replaced.notebook.cells[1].source).toEqual(["print(2)"]);
-		expect(replaced.summary).toContain("Replaced cell cell-1");
+		expect(replaced.outcome).toEqual({ kind: "replaced", cell: "cell-1" });
 		const deleted = applyEdit(idless(), { cellId: "cell-0", editMode: "delete" }, ids);
 		expect(deleted.notebook.cells).toHaveLength(1);
-		expect(deleted.summary).toContain("Deleted cell cell-0");
+		expect(deleted.outcome).toEqual({ kind: "deleted", cell: "cell-0" });
 	});
 
-	it("names the ids that exist when one does not resolve", () => {
-		expect(() => applyEdit(idless(), { cellId: "1", newSource: "x", editMode: "replace" }, ids)).toThrow(
-			/cells are: cell-0 \(markdown\), cell-1 \(code\)/,
-		);
-		expect(() => applyEdit(idless(), { cellId: "last", newSource: "x", cellType: "code", editMode: "insert" }, ids)).toThrow(
-			/edit_mode "append"/,
-		);
+	it("reports an id that does not resolve, whatever the mode", () => {
+		expect(failureOf(() => applyEdit(idless(), { cellId: "1", newSource: "x", editMode: "replace" }, ids))).toEqual({ kind: "noSuchCell", cellId: "1" });
+		expect(failureOf(() => applyEdit(idless(), { cellId: "last", newSource: "x", cellType: "code", editMode: "insert" }, ids))).toEqual({ kind: "noSuchCell", cellId: "last" });
 	});
 });
 
 describe("append", () => {
 	it("adds a cell at the end with no cell_id at all, named by position on a 4.4 notebook", () => {
-		const { notebook, summary } = applyEdit(idless(), { newSource: "print('hello')", cellType: "code", editMode: "append" }, ids);
+		const { notebook, outcome } = applyEdit(idless(), { newSource: "print('hello')", cellType: "code", editMode: "append" }, ids);
 		expect(notebook.cells).toHaveLength(3);
 		expect(notebook.cells[2].source).toEqual(["print('hello')"]);
 		// `id` is not a legal cell field before 4.5, so the new cell must not carry
@@ -139,23 +161,23 @@ describe("append", () => {
 		// withRepairedIds refuses to create.
 		expect(notebook.cells[2].id).toBeUndefined();
 		expect(notebook.cells.every((cell) => cell.id === undefined)).toBe(true);
-		expect(summary).toContain("Appended code cell cell-2 at the end");
+		expect(outcome).toEqual({ kind: "appended", cellType: "code", cell: "cell-2" });
 	});
 
 	it("stamps an id on the appended cell when the notebook is 4.5, where ids are required", () => {
-		const { notebook, summary } = applyEdit(
+		const { notebook, outcome } = applyEdit(
 			{ ...idless(), nbformat_minor: 5 },
 			{ newSource: "print('hello')", cellType: "code", editMode: "append" },
 			ids,
 		);
 		expect(notebook.cells[2].id).toBe("new1");
-		expect(summary).toContain("Appended code cell new1 at the end");
+		expect(outcome).toEqual({ kind: "appended", cellType: "code", cell: "new1" });
 		// And the repair fills the pre-existing cells in, so none is left id-less.
 		expect(notebook.cells.every((cell) => typeof cell.id === "string")).toBe(true);
 	});
 
 	it("still requires a cell type", () => {
-		expect(() => applyEdit(idless(), { newSource: "x", editMode: "append" }, ids)).toThrow(/cell_type is required/);
+		expect(failureOf(() => applyEdit(idless(), { newSource: "x", editMode: "append" }, ids))).toEqual({ kind: "cellTypeRequired", mode: "append" });
 	});
 });
 
@@ -170,27 +192,5 @@ describe("id repair", () => {
 		const { notebook: updated } = applyEdit(idless(), { newSource: "x", cellType: "code", editMode: "append" }, ids);
 		expect(updated.cells[0].id).toBeUndefined();
 		expect(updated.cells[1].id).toBeUndefined();
-	});
-});
-
-describe("notebookErrorHint (code-review F3)", () => {
-	it("lists cell ids for a missing/wrong cell_id, so a weak tier picks a real one (review M4)", () => {
-		const hint = notebookErrorHint({ syntax: false, message: "cell_id is required for edit_mode 'delete'", parsed: nb() });
-		expect(hint).toContain("this notebook's cells are: aaa (markdown), bbb (code)");
-	});
-
-	it("does NOT list cell ids for a missing new_source or cell_type — those are not cell-addressing errors", () => {
-		expect(notebookErrorHint({ syntax: false, message: "new_source is required unless edit_mode is 'delete'", parsed: nb() })).toBe("");
-		expect(notebookErrorHint({ syntax: false, message: "cell_type is required for edit_mode 'insert'", parsed: nb() })).toBe("");
-	});
-
-	it("does not double-list when the message already names the cells", () => {
-		const already = 'No cell with id "zzz". This notebook\'s cells are: aaa (markdown), bbb (code).';
-		expect(notebookErrorHint({ syntax: false, message: already, parsed: nb() })).toBe("");
-	});
-
-	it("gives targeted pointers for a missing file or bad JSON, never a cell listing", () => {
-		expect(notebookErrorHint({ code: "ENOENT", syntax: false, message: "ENOENT", parsed: undefined })).toContain("no such file");
-		expect(notebookErrorHint({ syntax: true, message: "Unexpected token", parsed: undefined })).toContain("not valid notebook JSON");
 	});
 });

@@ -98,6 +98,24 @@ export function profileText(): ProfileText {
 	return activeProfile().text;
 }
 
+/** Stop the process: an invalid profile must never run degraded or without its gate. */
+export function failClosed(error: unknown): never {
+	const reason = error instanceof Error ? error.message : String(error);
+	process.stderr.write(`\nThe profile in profile/ is invalid, so the harness will not start: ${reason}\n\n`);
+	process.exit(1);
+}
+
+/**
+ * A feature's text group, for a feature that is on. A profile may leave out
+ * the group of a feature it turns off; one it leaves on without its text is
+ * invalid and stops the process.
+ */
+export function requireText<K extends keyof ProfileText>(group: K): NonNullable<ProfileText[K]> {
+	const text = profileText()[group];
+	if (text === undefined) failClosed(new Error(`it has no text for "${group}", and that feature is on`));
+	return text as NonNullable<ProfileText[K]>;
+}
+
 export function toolSwitch(name: string): ToolSwitch | undefined {
 	return activeProfile().tools.get(name);
 }

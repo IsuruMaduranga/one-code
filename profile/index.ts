@@ -9,11 +9,12 @@
  */
 
 import type { Profile } from "../extensions/lib/profile-contract.ts";
+import { notebook } from "./notebook/index.ts";
 import { systemPrompt } from "./system-prompt/index.ts";
 
 export const profile: Profile = {
 	features: {},
 	tools: {},
 	childExtensions: [],
-	text: { systemPrompt },
+	text: { systemPrompt, notebook },
 };
