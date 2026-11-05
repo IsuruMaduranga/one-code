@@ -280,8 +280,10 @@ function runPrint(config, { cwd, env }) {
  * Drive one RPC session: each prompt in SESSION_PROMPTS, with a manual
  * compaction between them, then a /btw side question (its answer notice is
  * recorded), /init, plan mode end to end (its approval dialog is approved)
- * with a compaction after it, and ultracode switched on and off with a turn
- * after each. The fixture's ask_user_question dialogs are
+ * with a compaction after it, ultracode switched on and off with a turn
+ * after each, and a prompt refused as too long for the context window (pi
+ * compacts for the overflow and retries, so that step waits for
+ * `agent_settled`: pi sends `agent_end` before it decides to retry). The fixture's ask_user_question dialogs are
  * answered by their header (dialogAnswer); every other dialog is cancelled,
  * so nothing is ever approved by accident. Each dialog is recorded, so a
  * change in what asks the user shows up in the snapshot too. Resolves with
@@ -306,6 +308,8 @@ function runSession(config, { cwd, env }) {
 			{ type: "prompt", message: SESSION_PROMPTS[1] },
 			{ type: "prompt", message: "/effort high", until: "notify" },
 			{ type: "prompt", message: SESSION_PROMPTS[1] },
+			// Refused as too long (golden-fixture.ts overflowReply): pi compacts for the overflow and retries.
+			{ type: "prompt", message: "GOLDEN_OVERFLOW: reply after the overflow.", until: "settled" },
 		];
 		let step = -1;
 		const dialogs = [];
@@ -320,8 +324,12 @@ function runSession(config, { cwd, env }) {
 			resolveRun(problem ? { problem } : { dialogs });
 		};
 		const timer = setTimeout(() => finish(`timed out at step ${step}\n${stderr.slice(-3000)}`), RUN_TIMEOUT_MS);
+		// Whether the current step's run has started: the previous step's
+		// `agent_settled` can arrive after this step's prompt went out.
+		let started = false;
 		const next = () => {
 			step += 1;
+			started = false;
 			if (step >= steps.length) return finish();
 			const { until: _until, ...command } = steps[step];
 			child.stdin.write(`${JSON.stringify({ id: `step-${step}`, ...command })}\n`);
@@ -355,7 +363,11 @@ function runSession(config, { cwd, env }) {
 					finish(`command ${event.command} failed: ${event.error ?? JSON.stringify(event)}`);
 				} else if (event.type === "response" && event.command === "compact") {
 					next();
-				} else if (event.type === "agent_end") {
+				} else if (event.type === "agent_end" && steps[step]?.until !== "settled") {
+					next();
+				} else if (event.type === "agent_start") {
+					started = true;
+				} else if (event.type === "agent_settled" && steps[step]?.until === "settled" && started) {
 					next();
 				}
 			}

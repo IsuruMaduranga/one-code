@@ -572,6 +572,22 @@ const PLAN_ROUNDS: ToolCall[][] = [
 	[pc("exit", "exit_plan_mode")],
 ];
 
+/**
+ * GOLDEN_OVERFLOW (the session scenario's last prompt): the first request
+ * that ends on that prompt is refused as too long for the context window, in
+ * the provider's own words, so pi compacts for the overflow and retries.
+ */
+let overflowSent = false;
+function overflowReply(messages: Messages, anthropic: boolean): Response | undefined {
+	const last = messages.findLast((m) => m.role !== "system");
+	if (overflowSent || last?.role !== "user" || !JSON.stringify(last.content).includes("GOLDEN_OVERFLOW")) return undefined;
+	overflowSent = true;
+	const error = anthropic
+		? { type: "error", error: { type: "invalid_request_error", message: "prompt is too long: 213462 tokens > 200000 maximum" } }
+		: { error: { message: "This endpoint's maximum context length is 200000 tokens. However, you requested about 213462 tokens.", code: 400 } };
+	return new Response(JSON.stringify(error), { status: 400, headers: { "content-type": "application/json", ...(anthropic ? { "request-id": "req_golden" } : {}) } });
+}
+
 /** Added when the user text also says GOLDEN_AGENT: a subagent run (blocking only in one-shot modes). */
 const AGENT_CALL: ToolCall = { id: "toolu_golden_7", name: "Agent", input: { description: "Golden check", task: "Reply with OK.", subagent_type: "general-purpose" } };
 
@@ -697,6 +713,8 @@ export default function goldenFixture(_pi: ExtensionAPI) {
 		if (!Array.isArray(body.messages)) return offline();
 		appendFileSync(out, `${JSON.stringify({ url, body })}\n`);
 		const anthropic = url.includes("anthropic.com");
+		const overflow = overflowReply(body.messages as Messages, anthropic);
+		if (overflow) return overflow;
 		const server = anthropic ? serverToolReply(raw) : undefined;
 		if (server) return new Response(server, { status: 200, headers: { "content-type": "text/event-stream", "request-id": "req_golden" } });
 		const verdict = classifierVerdict(raw);
