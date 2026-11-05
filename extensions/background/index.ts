@@ -36,15 +36,8 @@ import {
 	TASK_REGISTER_CHANNEL,
 } from "./registry.ts";
 import { SWITCH_CANCEL, SWITCH_STOP, switchWarning, workWidgetLine } from "./switch-guard.ts";
-import {
-	AGED_OUT_RESULT,
-	DynamicLoop,
-	formatScheduled,
-	formatStopped,
-	SCHEDULE_WAKEUP_DESCRIPTION,
-	SCHEDULE_WAKEUP_PARAMS,
-	WAKEUP_ERRORS,
-} from "./wakeup.ts";
+import { DynamicLoop, scheduledText } from "./wakeup.ts";
+import type { WakeupMissingField } from "./text.ts";
 import {
 	deliveryFromState,
 	isAutonomousSentinel,
@@ -57,23 +50,15 @@ import {
 } from "./loop-fire.ts";
 import { autonomousPreamble, loopSkillPrompt } from "./loop-skill.ts";
 import {
-	CRON_CREATE_DESCRIPTION,
-	CRON_CREATE_PARAMETERS,
-	CRON_DELETE_DESCRIPTION,
-	CRON_DELETE_PARAMETERS,
-	CRON_LIST_DESCRIPTION,
-	CRON_LIST_PARAMETERS,
 	CronStore,
 	type CronFire,
 	type CronJob,
+	cronToolParameters,
 	describeCadence,
-	formatCannotFire,
-	formatCreateResult,
-	formatDeleteResult,
-	formatJobList,
-	formatUnknownJob,
 	JOB_FIRED_ENTRY,
+	RECURRING_MAX_AGE_DAYS,
 	scheduledJobsOnBranch,
+	shownJob,
 	WAKEUP_ARMED_ENTRY,
 } from "./cron.ts";
 import {
@@ -101,7 +86,8 @@ import {
 import { registerLocalCommand } from "../lib/local-command.ts";
 import { applyNoopFolds, decideFold, type FoldDetails, type FoldEntry, foldSuffix } from "./noop-fold.ts";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, type FireConversation, formatNotOwner } from "../lib/agent-cron.ts";
+import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, type FireConversation } from "../lib/agent-cron.ts";
+import { requireText } from "../lib/profile.ts";
 import { SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../lib/skill-body.ts";
 import { BUNDLED_SKILLS_DIR } from "../lib/skill-scan.ts";
 import { createWriteStream, mkdirSync, type WriteStream } from "node:fs";
@@ -196,6 +182,12 @@ function foldEntry(entry: { type: string; timestamp?: string; customType?: strin
 }
 
 function backgroundExtension(pi: ExtensionAPI) {
+	const text = requireText("background");
+	const cronParameters = cronToolParameters(text.cron);
+	const created = (job: CronJob) => text.cron.created({ job: shownJob(job), maxAgeDays: RECURRING_MAX_AGE_DAYS });
+	const jobList = (jobs: CronJob[]) => text.cron.list({ jobs: jobs.map(shownJob) });
+	/** A scheduling result, with the never-fires note in a one-shot run. */
+	const scheduling = (result: string, ctx: ExtensionContext) => (sessionOutlivesTurn(ctx.mode) ? result : `${result} ${text.cron.neverFires}`);
 	// After session_shutdown the captured ctx throws on every access and the
 	// notifier is inert; a monitor whose command ends later (its shell was
 	// killed, the orphaned command finished) must repaint nothing and say
@@ -231,22 +223,22 @@ function backgroundExtension(pi: ExtensionAPI) {
 	pi.events.on(AGENT_CRON_CHANNEL, (data) => {
 		const request = data as AgentCronRequest;
 		if (request.op === "create") {
-			const created = cron.create({ cron: request.cron, prompt: request.prompt, recurring: request.recurring, agentId: request.agentId, cwd: request.cwd }, Date.now());
-			request.result = created.ok
-				? { text: formatCreateResult(created.job), details: { jobId: created.job.id } }
-				: { text: created.error, isError: true };
-			if (created.ok) runCron();
+			const result = cron.create({ cron: request.cron, prompt: request.prompt, recurring: request.recurring, agentId: request.agentId, cwd: request.cwd }, Date.now());
+			request.result = result.ok
+				? { text: created(result.job), details: { jobId: result.job.id } }
+				: { text: text.cron.createFailed(result.failure), isError: true };
+			if (result.ok) runCron();
 		} else if (request.op === "list") {
 			const jobs = cron.list().filter((job) => job.agentId === request.agentId);
-			request.result = { text: formatJobList(jobs), details: { jobCount: jobs.length } };
+			request.result = { text: jobList(jobs), details: { jobCount: jobs.length } };
 		} else {
 			const job = cron.get(request.id);
-			if (!job) request.result = { text: formatUnknownJob(request.id), isError: true };
-			else if (job.agentId !== request.agentId) request.result = { text: formatNotOwner(request.id), isError: true };
+			if (!job) request.result = { text: text.cron.unknownJob({ id: request.id }), isError: true };
+			else if (job.agentId !== request.agentId) request.result = { text: text.cron.notOwner({ id: request.id }), isError: true };
 			else {
 				cron.delete(request.id);
 				runCron();
-				request.result = { text: formatDeleteResult(request.id) };
+				request.result = { text: text.cron.deleted({ id: request.id }) };
 			}
 		}
 	});
@@ -829,32 +821,31 @@ function backgroundExtension(pi: ExtensionAPI) {
 		...ccToolRenderers<{ delaySeconds?: number; stop?: boolean }>("Schedule Wakeup", {
 			title: (a) => (a?.stop ? "stop" : a?.delaySeconds !== undefined ? `${a.delaySeconds}s` : undefined),
 		}),
-		description: SCHEDULE_WAKEUP_DESCRIPTION,
+		description: text.wakeup.description,
 		parameters: Type.Object({
-			delaySeconds: Type.Optional(Type.Number({ description: SCHEDULE_WAKEUP_PARAMS.delaySeconds })),
-			reason: Type.Optional(Type.String({ description: SCHEDULE_WAKEUP_PARAMS.reason })),
-			prompt: Type.Optional(Type.String({ description: SCHEDULE_WAKEUP_PARAMS.prompt })),
-			stop: Type.Optional(Type.Boolean({ description: SCHEDULE_WAKEUP_PARAMS.stop })),
-			noop: Type.Optional(Type.Boolean({ description: SCHEDULE_WAKEUP_PARAMS.noop })),
+			delaySeconds: Type.Optional(Type.Number({ description: text.wakeup.params.delaySeconds })),
+			reason: Type.Optional(Type.String({ description: text.wakeup.params.reason })),
+			prompt: Type.Optional(Type.String({ description: text.wakeup.params.prompt })),
+			stop: Type.Optional(Type.Boolean({ description: text.wakeup.params.stop })),
+			noop: Type.Optional(Type.Boolean({ description: text.wakeup.params.noop })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			lastCtx = ctx;
-			const fail = (text: string) => ({ content: [{ type: "text" as const, text }], details: {}, isError: true });
+			const fail = (field: WakeupMissingField) => ({ content: [{ type: "text" as const, text: text.wakeup.missing(field) }], details: {}, isError: true });
 			if (params.stop === true) {
 				const cancelled = dynamicLoop.stop();
 				runCron();
-				return { content: [{ type: "text", text: formatStopped(cancelled) }], details: { stopped: true, cancelledWakeups: cancelled } };
+				return { content: [{ type: "text", text: text.wakeup.stopped({ cancelled }) }], details: { stopped: true, cancelledWakeups: cancelled } };
 			}
-			if (params.delaySeconds === undefined || params.reason === undefined) return fail(WAKEUP_ERRORS.delayAndReason);
-			if (params.prompt === undefined) return fail(WAKEUP_ERRORS.prompt);
-			if (params.noop === undefined) return fail(WAKEUP_ERRORS.noop);
+			if (params.delaySeconds === undefined || params.reason === undefined) return fail("delayAndReason");
+			if (params.prompt === undefined) return fail("prompt");
+			if (params.noop === undefined) return fail("noop");
 			const now = Date.now();
 			const scheduled = dynamicLoop.schedule(params.delaySeconds, params.prompt, now);
 			runCron();
-			if (!scheduled) return { content: [{ type: "text", text: AGED_OUT_RESULT }], details: { scheduledFor: 0 } };
-			const text = formatScheduled(scheduled, now);
+			if (!scheduled) return { content: [{ type: "text", text: text.wakeup.agedOut }], details: { scheduledFor: 0 } };
 			return {
-				content: [{ type: "text", text: sessionOutlivesTurn(ctx.mode) ? text : `${text} ${formatCannotFire()}` }],
+				content: [{ type: "text", text: scheduling(text.wakeup.scheduled(scheduledText(scheduled, now)), ctx) }],
 				details: { ...scheduled, reason: params.reason, noop: params.noop },
 			};
 		},
@@ -864,17 +855,16 @@ function backgroundExtension(pi: ExtensionAPI) {
 		name: "cron_create",
 		label: "Cron Create",
 		...ccToolRenderers<{ cron?: string }>("Cron Create", { title: (a) => a?.cron }),
-		description: CRON_CREATE_DESCRIPTION,
-		parameters: CRON_CREATE_PARAMETERS,
+		description: text.cron.createDescription({ maxAgeDays: RECURRING_MAX_AGE_DAYS }),
+		parameters: cronParameters.create,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			lastCtx = ctx;
-			const created = cron.create({ cron: params.cron, prompt: params.prompt, recurring: params.recurring }, Date.now());
-			if (!created.ok) return { content: [{ type: "text", text: created.error }], details: {}, isError: true };
+			const result = cron.create({ cron: params.cron, prompt: params.prompt, recurring: params.recurring }, Date.now());
+			if (!result.ok) return { content: [{ type: "text", text: text.cron.createFailed(result.failure) }], details: {}, isError: true };
 			runCron();
-			const text = formatCreateResult(created.job);
 			return {
-				content: [{ type: "text", text: sessionOutlivesTurn(ctx.mode) ? text : `${text} ${formatCannotFire()}` }],
-				details: { jobId: created.job.id, cron: created.job.cron, recurring: created.job.recurring, nextFireAt: created.job.nextFireAt },
+				content: [{ type: "text", text: scheduling(created(result.job), ctx) }],
+				details: { jobId: result.job.id, cron: result.job.cron, recurring: result.job.recurring, nextFireAt: result.job.nextFireAt },
 			};
 		},
 	});
@@ -883,12 +873,12 @@ function backgroundExtension(pi: ExtensionAPI) {
 		name: "cron_list",
 		label: "Cron List",
 		...ccToolRenderers("Cron List"),
-		description: CRON_LIST_DESCRIPTION,
-		parameters: CRON_LIST_PARAMETERS,
+		description: text.cron.listDescription,
+		parameters: cronParameters.list,
 		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
 			lastCtx = ctx;
 			const jobs = cron.list();
-			return { content: [{ type: "text", text: formatJobList(jobs) }], details: { count: jobs.length } };
+			return { content: [{ type: "text", text: jobList(jobs) }], details: { count: jobs.length } };
 		},
 	});
 
@@ -896,13 +886,13 @@ function backgroundExtension(pi: ExtensionAPI) {
 		name: "cron_delete",
 		label: "Cron Delete",
 		...ccToolRenderers<{ id?: string }>("Cron Delete", { title: (a) => a?.id }),
-		description: CRON_DELETE_DESCRIPTION,
-		parameters: CRON_DELETE_PARAMETERS,
+		description: text.cron.deleteDescription,
+		parameters: cronParameters.delete,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			lastCtx = ctx;
-			if (!cron.delete(params.id)) return { content: [{ type: "text", text: formatUnknownJob(params.id) }], details: {}, isError: true };
+			if (!cron.delete(params.id)) return { content: [{ type: "text", text: text.cron.unknownJob({ id: params.id }) }], details: {}, isError: true };
 			runCron();
-			return { content: [{ type: "text", text: formatDeleteResult(params.id) }], details: { jobId: params.id } };
+			return { content: [{ type: "text", text: text.cron.deleted({ id: params.id }) }], details: { jobId: params.id } };
 		},
 	});
 

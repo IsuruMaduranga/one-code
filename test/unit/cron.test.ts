@@ -6,10 +6,6 @@ import {
 	nextRecurringFire,
 	oneShotFire,
 	describeCadence,
-	formatCreateResult,
-	formatDeleteResult,
-	formatJobList,
-	formatUnknownJob,
 	MAX_JOBS,
 	nextMatch,
 	parseCron,
@@ -184,21 +180,12 @@ describe("CronStore", () => {
 		expect(second.ok && second.job.id).toBe("other000");
 	});
 
-	it("rejects with Claude Code's wording", () => {
+	it("refuses an unparsable or impossible expression and a full store", () => {
 		const store = new CronStore({ jitter: false, maxJobs: 1 });
-		expect(store.create({ cron: "* * *", prompt: "x" }, now)).toEqual({
-			ok: false,
-			error: "Invalid cron expression '* * *'. Expected 5 fields: M H DoM Mon DoW.",
-		});
-		expect(store.create({ cron: "0 0 30 2 *", prompt: "x" }, now)).toEqual({
-			ok: false,
-			error: "Cron expression '0 0 30 2 *' does not match any calendar date in the next year.",
-		});
+		expect(store.create({ cron: "* * *", prompt: "x" }, now)).toEqual({ ok: false, failure: { kind: "invalid", cron: "* * *" } });
+		expect(store.create({ cron: "0 0 30 2 *", prompt: "x" }, now)).toEqual({ ok: false, failure: { kind: "neverMatches", cron: "0 0 30 2 *" } });
 		store.create({ cron: "* * * * *", prompt: "x" }, now);
-		expect(store.create({ cron: "* * * * *", prompt: "y" }, now)).toEqual({
-			ok: false,
-			error: "Too many scheduled jobs (max 1). Cancel one first.",
-		});
+		expect(store.create({ cron: "* * * * *", prompt: "y" }, now)).toEqual({ ok: false, failure: { kind: "tooMany", max: 1 } });
 	});
 
 	it("caps a session at 50 jobs by default", () => {
@@ -264,25 +251,6 @@ describe("CronStore", () => {
 		expect(store.deleteWhere((j) => j.source === "wakeup").map((j) => j.id)).toEqual(["l0000000", "l1111111"]);
 		expect(store.delete("m0000000")).toBe(true);
 		expect(store.size).toBe(0);
-	});
-});
-
-describe("model-facing text", () => {
-	const job = { id: "2427a4e2", cron: "*/7 * * * *", prompt: "Say the word ping.", recurring: true, source: "model" as const, createdAt: 0, nextFireAt: 0 };
-
-	it("matches Claude Code's result strings with our tool names", () => {
-		expect(formatCreateResult(job)).toBe(
-			"Scheduled recurring job 2427a4e2 (Every 7 minutes). Session-only (not written to disk, dies when this session ends). Auto-expires after 7 days. Use cron_delete to cancel sooner.",
-		);
-		expect(formatCreateResult({ ...job, id: "8a527832", cron: "3 9 28 12 *", recurring: false })).toBe(
-			"Scheduled one-shot task 8a527832 (3 9 28 12 *). Session-only (not written to disk, dies when this session ends). It will fire once then auto-delete.",
-		);
-		expect(formatJobList([job, { ...job, id: "8a527832", cron: "3 9 28 12 *", recurring: false, prompt: "One-shot test" }])).toBe(
-			"2427a4e2 — Every 7 minutes (recurring) [session-only]: Say the word ping.\n8a527832 — 3 9 28 12 * (one-shot) [session-only]: One-shot test",
-		);
-		expect(formatJobList([])).toBe("No scheduled jobs.");
-		expect(formatDeleteResult("2427a4e2")).toBe("Cancelled job 2427a4e2.");
-		expect(formatUnknownJob("nope")).toBe("No scheduled job with id 'nope'");
 	});
 });
 

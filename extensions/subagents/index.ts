@@ -21,6 +21,7 @@ import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../lib/child-writes.ts";
 import { canShowCustomUi } from "../lib/headless-output.ts";
 import { existsSync, mkdirSync, readdirSync, renameSync, writeFileSync, readFileSync } from "node:fs";
 import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, agentCronTools, agentOwnsCronJobs } from "../lib/agent-cron.ts";
+import { profileText } from "../lib/profile.ts";
 import os from "node:os";
 import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
@@ -1669,8 +1670,10 @@ function subagentsExtension(pi: ExtensionAPI) {
 	 */
 	const spawnToolsFor = (record: AgentRunRecord, { resident = false } = {}): ToolDefinition[] => {
 		const depth = record.depth ?? 0;
-		// The child's cron tools reach this session's store (lib/agent-cron.ts).
-		const cron = agentCronTools(pi.events, { agentId: record.taskId, cwd: record.cwd, resident }) as unknown as ToolDefinition[];
+		// The child's cron tools reach this session's store (lib/agent-cron.ts);
+		// none when the profile has no background text (the feature is off).
+		const cronText = profileText().background?.cron;
+		const cron = cronText ? (agentCronTools(pi.events, { agentId: record.taskId, cwd: record.cwd, resident }, cronText) as unknown as ToolDefinition[]) : [];
 		return depth < MAX_SPAWN_DEPTH ? [childAgentTool(record, depth), ...cron] : cron;
 	};
 

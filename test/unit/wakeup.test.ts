@@ -1,13 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CronStore } from "../../extensions/background/cron.ts";
-import {
-	AGED_OUT_RESULT,
-	DynamicLoop,
-	formatScheduled,
-	formatStopped,
-	KEEPALIVE_DELAY_SECONDS,
-	keepaliveEnabled,
-} from "../../extensions/background/wakeup.ts";
+import { DynamicLoop, KEEPALIVE_DELAY_SECONDS, keepaliveEnabled, scheduledText } from "../../extensions/background/wakeup.ts";
 
 const at = (h: number, m: number, s = 0) => new Date(2026, 8, 25, h, m, s).getTime();
 const newLoop = () => {
@@ -115,17 +108,10 @@ describe("DynamicLoop (Claude Code's loop core, 2.1.282)", () => {
 	});
 });
 
-describe("schedule_wakeup texts", () => {
-	it("formats the scheduled result in local time", () => {
-		expect(formatScheduled({ scheduledFor: at(14, 5, 9), clampedDelaySeconds: 300, wasClamped: false, startedAt: at(14, 0, 9) }, at(14, 0, 9))).toBe(
-			"Next wakeup scheduled for 14:05:09 (in 300s). Nothing more to do this turn — the harness re-invokes you when the wakeup fires or a task-notification arrives.",
-		);
-	});
-
-	it("names our tools in the stop texts", () => {
-		expect(formatStopped(0)).toContain("cancel it with cron_delete. If you armed a monitor for this loop, task_stop it now;");
-		expect(formatStopped(2)).toContain("cancelled 2 pending wakeup(s)");
-		expect(AGED_OUT_RESULT).toBe("Wakeup not scheduled. The loop reached its maximum duration — the loop has ended; do not re-issue.");
+describe("schedule_wakeup's result as data", () => {
+	it("gives the local clock time, the delay, and the clamp only when it applied", () => {
+		expect(scheduledText({ scheduledFor: at(14, 5, 9), clampedDelaySeconds: 300, wasClamped: false, startedAt: at(14, 0, 9) }, at(14, 0, 9))).toEqual({ clock: "14:05:09", inSeconds: 300 });
+		expect(scheduledText({ scheduledFor: at(14, 1, 9), clampedDelaySeconds: 60, wasClamped: true, startedAt: at(14, 0, 9) }, at(14, 0, 9))).toEqual({ clock: "14:01:09", inSeconds: 60, clampedTo: 60 });
 	});
 
 	it("turns keepalive off only for a false-like CLAUDE_CODE_LOOP_KEEPALIVE", () => {

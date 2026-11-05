@@ -19,6 +19,7 @@
 import { randomUUID } from "node:crypto";
 import { Type } from "typebox";
 import { sliceColumns, visibleWidth } from "../lib/text-width.ts";
+import type { CronCreateFailure, CronText, ShownJob } from "./text.ts";
 
 /** Claude Code's per-session job cap. */
 export const MAX_JOBS = 50;
@@ -257,7 +258,7 @@ export interface CronFire {
 	final: boolean;
 }
 
-export type CreateResult = { ok: true; job: CronJob } | { ok: false; error: string };
+export type CreateResult = { ok: true; job: CronJob } | { ok: false; failure: CronCreateFailure };
 
 export interface CronStoreOptions {
 	maxJobs?: number;
@@ -296,10 +297,10 @@ export class CronStore {
 	 */
 	create(input: { cron: string; prompt: string; recurring?: boolean; source?: CronSource; fireAt?: number; agentId?: string; cwd?: string }, now: number): CreateResult {
 		const fields = parseCron(input.cron);
-		if (!fields) return { ok: false, error: `Invalid cron expression '${input.cron}'. Expected 5 fields: M H DoM Mon DoW.` };
-		if (!nextMatch(fields, new Date(now))) return { ok: false, error: `Cron expression '${input.cron}' does not match any calendar date in the next year.` };
+		if (!fields) return { ok: false, failure: { kind: "invalid", cron: input.cron } };
+		if (!nextMatch(fields, new Date(now))) return { ok: false, failure: { kind: "neverMatches", cron: input.cron } };
 		// The cap is cron_create's check, as in Claude Code; a wakeup is never refused.
-		if (input.source !== "wakeup" && this.jobs.size >= this.maxJobs) return { ok: false, error: `Too many scheduled jobs (max ${this.maxJobs}). Cancel one first.` };
+		if (input.source !== "wakeup" && this.jobs.size >= this.maxJobs) return { ok: false, failure: { kind: "tooMany", max: this.maxJobs } };
 		let id = this.newId();
 		while (this.jobs.has(id)) id = this.newId();
 		const base = { id, cron: input.cron.trim(), recurring: input.recurring ?? true, fields };
@@ -511,16 +512,7 @@ function publicJob(job: CronJob & { fields?: CronFields }): CronJob {
 	return rest;
 }
 
-// ── Model-facing text (Claude Code's wording, our tool names) ───────────────
-
-const SESSION_ONLY = "Session-only (not written to disk, dies when this session ends)";
-
-export function formatCreateResult(job: CronJob): string {
-	const cadence = describeCadence(job.cron);
-	return job.recurring
-		? `Scheduled recurring job ${job.id} (${cadence}). ${SESSION_ONLY}. Auto-expires after ${RECURRING_MAX_AGE_DAYS} days. Use cron_delete to cancel sooner.`
-		: `Scheduled one-shot task ${job.id} (${cadence}). ${SESSION_ONLY}. It will fire once then auto-delete.`;
-}
+// ── What the texts read (the words are the profile's, text.ts CronText) ─────
 
 /**
  * Claude Code's `CronList` clip of a prompt (its `truncate(text, 80, true)`):
@@ -543,100 +535,32 @@ function cutToWidth(text: string, max: number): string {
 	return max <= 1 ? "…" : `${sliceColumns(text, max - 1).text}…`;
 }
 
-export function formatJobLine(job: CronJob): string {
-	return `${job.id} — ${describeCadence(job.cron)} (${job.recurring ? "recurring" : "one-shot"}) [session-only]: ${clipPrompt(job.prompt)}`;
-}
-
-export function formatJobList(jobs: CronJob[]): string {
-	return jobs.length ? jobs.map(formatJobLine).join("\n") : "No scheduled jobs.";
-}
-
-export function formatDeleteResult(id: string): string {
-	return `Cancelled job ${id}.`;
-}
-
-export function formatUnknownJob(id: string): string {
-	return `No scheduled job with id '${id}'`;
-}
-
-export function formatCannotFire(): string {
-	return "This is a one-shot session: it ends when this turn does, so the job will never fire.";
+/** A job as the texts show it, its prompt clipped for a list line. */
+export function shownJob(job: CronJob): ShownJob {
+	return { id: job.id, cadence: describeCadence(job.cron), recurring: job.recurring, prompt: clipPrompt(job.prompt) };
 }
 
 /**
- * Claude Code's descriptions with the durable feature off, the names swapped
- * to ours and "Claude" read as "this session" (the model behind One Code may
- * be any). The jitter sentence is Claude Code's own, understating its code.
+ * The three tools' parameters, worded by the profile, shared by the main
+ * session's tools and a subagent's proxies (lib/agent-cron.ts). `durable` is
+ * accepted and ignored, as in Claude Code with its durable mode off;
+ * cron_list and cron_delete stay open to stray fields like our other tools
+ * (deepseek sends `query` to an empty schema; decisions/tools.md, "Session
+ * cron").
  */
-export const CRON_CREATE_DESCRIPTION = `Schedule a prompt to be enqueued at a future time. Use for both recurring schedules and one-shot reminders.
-
-Uses standard 5-field cron in the user's local timezone: minute hour day-of-month month day-of-week. "0 9 * * *" means 9am local — no timezone conversion needed.
-
-## One-shot tasks (recurring: false)
-
-For "remind me at X" or "at <time>, do Y" requests — fire once then auto-delete.
-Pin minute/hour/day-of-month/month to specific values:
-  "remind me at 2:30pm today to check the deploy" → cron: "30 14 <today_dom> <today_month> *", recurring: false
-  "tomorrow morning, run the smoke test" → cron: "57 8 <tomorrow_dom> <tomorrow_month> *", recurring: false
-
-## Recurring jobs (recurring: true, the default)
-
-For "every N minutes" / "every hour" / "weekdays at 9am" requests:
-  "*/5 * * * *" (every 5 min), "0 * * * *" (hourly), "0 9 * * 1-5" (weekdays at 9am local)
-
-## Avoid the :00 and :30 minute marks when the task allows it
-
-Every user who asks for "9am" gets \`0 9\`, and every user who asks for "hourly" gets \`0 *\` — which means requests from across the planet land on the API at the same instant. When the user's request is approximate, pick a minute that is NOT 0 or 30:
-  "every morning around 9" → "57 8 * * *" or "3 9 * * *" (not "0 9 * * *")
-  "hourly" → "7 * * * *" (not "0 * * * *")
-  "in an hour or so, remind me to..." → pick whatever minute you land on, don't round
-
-Only use minute 0 or 30 when the user names that exact time and clearly means it ("at 9:00 sharp", "at half past", coordinating with a meeting). When in doubt, nudge a few minutes early or late — the user will not notice, and the fleet will.
-
-## Session-only
-
-Jobs live only in this session — nothing is written to disk, and the job is gone when the session ends.
-
-## Not for live watching
-
-cron_create re-runs a prompt at fixed wall-clock intervals. To watch a log file, process, or command output and be notified the moment something changes, use the monitor tool instead — monitor streams events as they happen; cron polls on a schedule.
-
-## Runtime behavior
-
-Jobs only fire while the REPL is idle (not mid-query). The scheduler adds a small deterministic jitter on top of whatever you pick: recurring tasks fire up to 10% of their period late (max 15 min); one-shot tasks landing on :00 or :30 fire up to 90 s early. Picking an off-minute is still the bigger lever.
-
-Recurring tasks auto-expire after ${RECURRING_MAX_AGE_DAYS} days — they fire one final time, then are deleted. This bounds session lifetime. Tell the user about the ${RECURRING_MAX_AGE_DAYS}-day limit when scheduling recurring jobs.
-
-Returns a job ID you can pass to cron_delete.`;
-
-export const CRON_CREATE_PARAMS = {
-	cron: 'Standard 5-field cron expression in local time: "M H DoM Mon DoW" (e.g. "*/5 * * * *" = every 5 minutes, "30 14 28 2 *" = Feb 28 at 2:30pm local once).',
-	prompt: "The prompt to enqueue at each fire time.",
-	/** Claude Code's text with its durable mode off, as on the account One Code matches (decisions/tools.md, "Session cron"). */
-	durable: "Has no effect — durable persistence is not available. All jobs are session-only (in-memory, gone when this session ends).",
-	recurring: `true (default) = fire on every cron match until deleted or auto-expired after ${RECURRING_MAX_AGE_DAYS} days. false = fire once at the next match, then auto-delete. Use false for "remind me at X" one-shot requests with pinned minute/hour/dom/month.`,
-};
-
-export const CRON_LIST_DESCRIPTION = "List all cron jobs scheduled via cron_create in this session.";
-
-/**
- * The three tools' parameters, shared by the main session's tools and a
- * subagent's proxies (lib/agent-cron.ts). `durable` is accepted and ignored,
- * as in Claude Code with its durable mode off; cron_list and cron_delete stay
- * open to stray fields like our other tools (deepseek sends `query` to an
- * empty schema; decisions/tools.md, "Session cron").
- */
-export const CRON_CREATE_PARAMETERS = Type.Object(
-	{
-		cron: Type.String({ description: CRON_CREATE_PARAMS.cron }),
-		prompt: Type.String({ description: CRON_CREATE_PARAMS.prompt }),
-		recurring: Type.Optional(Type.Boolean({ description: CRON_CREATE_PARAMS.recurring })),
-		durable: Type.Optional(Type.Boolean({ description: CRON_CREATE_PARAMS.durable })),
-	},
-	{ additionalProperties: false },
-);
-export const CRON_LIST_PARAMETERS = Type.Object({});
-
-export const CRON_DELETE_DESCRIPTION = "Cancel a cron job previously scheduled with cron_create. Removes it from the in-memory session store.";
-export const CRON_DELETE_ID_DESCRIPTION = "Job ID returned by cron_create.";
-export const CRON_DELETE_PARAMETERS = Type.Object({ id: Type.String({ description: CRON_DELETE_ID_DESCRIPTION }) });
+export function cronToolParameters(text: CronText) {
+	const params = text.createParams({ maxAgeDays: RECURRING_MAX_AGE_DAYS });
+	return {
+		create: Type.Object(
+			{
+				cron: Type.String({ description: params.cron }),
+				prompt: Type.String({ description: params.prompt }),
+				recurring: Type.Optional(Type.Boolean({ description: params.recurring })),
+				durable: Type.Optional(Type.Boolean({ description: params.durable })),
+			},
+			{ additionalProperties: false },
+		),
+		list: Type.Object({}),
+		delete: Type.Object({ id: Type.String({ description: text.deleteIdParam }) }),
+	};
+}

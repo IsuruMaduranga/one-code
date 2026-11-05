@@ -10,6 +10,7 @@
  */
 
 import type { AskUserText } from "../ask-user/text.ts";
+import type { BackgroundText } from "../background/text.ts";
 import type { BtwText } from "../btw/text.ts";
 import type { EffortText } from "../effort/text.ts";
 import type { HooksText } from "../hooks/text.ts";
@@ -56,6 +57,8 @@ export interface ProfileText {
 	lsp?: LspText;
 	hooks?: HooksText;
 	memory?: MemoryText;
+	/** Also read by subagents, for a child's cron tools. */
+	background?: BackgroundText;
 	/** Used by the worktree tools, subagents and workflows (each guards isolated sessions with it). */
 	worktreeGuard?: WorktreeGuardText;
 }
