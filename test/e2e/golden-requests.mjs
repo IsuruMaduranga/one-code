@@ -210,7 +210,9 @@ function runPrint(config, { cwd, env }) {
 /**
  * Drive one RPC session: each prompt in SESSION_PROMPTS, with a manual
  * compaction between them, then a /btw side question (its answer notice is
- * recorded), /init, and ultracode switched on and off with a turn after each. The fixture's ask_user_question dialogs are
+ * recorded), /init, plan mode end to end (its approval dialog is approved)
+ * with a compaction after it, and ultracode switched on and off with a turn
+ * after each. The fixture's ask_user_question dialogs are
  * answered by their header (dialogAnswer); every other dialog is cancelled,
  * so nothing is ever approved by accident. Each dialog is recorded, so a
  * change in what asks the user shows up in the snapshot too. Resolves with
@@ -226,6 +228,10 @@ function runSession(config, { cwd, env }) {
 			{ type: "prompt", message: SESSION_PROMPTS[1] },
 			{ type: "prompt", message: "/btw What is the golden project?", until: "notify" },
 			{ type: "prompt", message: "/init" },
+			// Plan mode end to end, then a compaction, after which the plan file is re-attached.
+			{ type: "prompt", message: "GOLDEN_TOOLS GOLDEN_PLAN: make the scripted calls." },
+			{ type: "compact" },
+			{ type: "prompt", message: SESSION_PROMPTS[1] },
 			// Ultracode on, a turn with its standing reminder, off, a turn with the off notice.
 			{ type: "prompt", message: "/effort ultracode", until: "notify" },
 			{ type: "prompt", message: SESSION_PROMPTS[1] },
@@ -295,6 +301,8 @@ function runSession(config, { cwd, env }) {
  * that is not one of those is cancelled.
  */
 function dialogAnswer(method, title, options = []) {
+	// The plan approval dialog (plan-mode/viewer.ts): approve with the first choice.
+	if (method === "select" && title.startsWith("Plan (")) return options.find((option) => option.startsWith("Approve"));
 	const header = /^Golden (A|B|C|E1)\b/.exec(title)?.[1];
 	if (!header) return undefined;
 	if (method === "input") return header === "B" ? "a typed golden answer" : undefined;
@@ -326,6 +334,8 @@ function makeNormalizer({ home, project, root }) {
 		out = out.replace(/\/[^\s`'"]*\/onecode-\d+\/[^/\s]+\/[^/\s]+\/scratchpad/g, "<SCRATCHPAD>");
 		// Background task ids (background/registry.ts generateTaskId): "b" and 7 hex digits.
 		out = out.replace(/\b(task |subagents\/|tasks\/)b[0-9a-f]{7}\b/g, "$1<TASK_ID>");
+		// Plan files get a random three-word name (plan-mode/slug.ts).
+		out = out.replace(/(\/plans\/)[a-z]+-[a-z]+-[a-z]+\.md/g, "$1<PLAN_SLUG>.md");
 		// pi's session file names carry the start time: <DATE>T05-01-26-326Z.
 		out = out.replace(/<DATE>T\d{2}-\d{2}-\d{2}-\d{3}Z/g, "<DATE>T<TIME>Z");
 		return out.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "<UUID>");

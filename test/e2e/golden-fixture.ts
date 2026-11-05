@@ -28,7 +28,9 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 const WRAPPED = Symbol.for("one-code.golden-fixture");
 
 const REPLY_TEXT = "<analysis>Golden.</analysis>\n<summary>Golden summary.</summary>";
-type ToolCall = { id: string; name: string; input: Record<string, unknown> };
+type Messages = Array<{ role?: string; content?: unknown }>;
+/** A scripted call; an input computed from the conversation so far reads what an earlier result said. */
+type ToolCall = { id: string; name: string; input: Record<string, unknown> | ((messages: Messages) => Record<string, unknown>) };
 
 const TOOL_CALLS: ToolCall[] = [
 	{ id: "toolu_golden_1", name: "read", input: { path: "README.md" } },
@@ -294,6 +296,23 @@ const WORKTREE_ROUNDS: ToolCall[][] = [
 	[wt("remove", "exit_worktree", { action: "remove", discard_changes: true })],
 ];
 
+/**
+ * Plan mode under GOLDEN_PLAN, on its own (the session scenario's last
+ * prompt): load the tools, exit before entering, enter, exit with an empty
+ * plan, write the plan to the file enter_plan_mode named, and exit for
+ * approval (golden-requests.mjs approves the plan dialog).
+ */
+const pc = (id: string, name: string, input: ToolCall["input"] = {}): ToolCall => ({ id: `toolu_golden_plan_${id}`, name, input });
+const planFile = (messages: Messages) => /Your plan file is (\S+), the one file/.exec(JSON.stringify(messages))?.[1] ?? "plan.md";
+const PLAN_ROUNDS: ToolCall[][] = [
+	[pc("load", "tool_search", { query: "select:enter_plan_mode,exit_plan_mode" })],
+	[pc("exit_early", "exit_plan_mode")],
+	[pc("enter", "enter_plan_mode")],
+	[pc("exit_empty", "exit_plan_mode")],
+	[pc("write", "write", (messages) => ({ path: planFile(messages), content: "# Golden plan\n\nRead the README, then reply OK.\n" }))],
+	[pc("exit", "exit_plan_mode")],
+];
+
 /** Added when the user text also says GOLDEN_AGENT: a subagent run (blocking only in one-shot modes). */
 const AGENT_CALL: ToolCall = { id: "toolu_golden_7", name: "Agent", input: { description: "Golden check", task: "Reply with OK.", subagent_type: "general-purpose" } };
 
@@ -346,6 +365,7 @@ function chatReply(calls: ToolCall[] | undefined, text: string): string {
 /** The rounds a GOLDEN_TOOLS message scripts, from its flags; round n answers the n-th reply's results. */
 function roundsFor(text: string): ToolCall[][] {
 	const has = (flag: string) => text.includes(flag);
+	if (has("GOLDEN_PLAN")) return PLAN_ROUNDS;
 	const tasks = has("GOLDEN_TASKS") ? TASK_ROUNDS : [];
 	const rounds: ToolCall[][] = [
 		[...TOOL_CALLS, ...ASK_CALLS, ...(has("GOLDEN_NOTEBOOK") ? NOTEBOOK_READS : []), ...(tasks[0] ?? []), ...(has("GOLDEN_AGENT") ? [AGENT_CALL] : [])],
@@ -368,7 +388,12 @@ function roundsFor(text: string): ToolCall[][] {
  * it, and the newest turn is tool results). Mid-conversation `system`
  * messages may sit anywhere after it, so the search skips them.
  */
-function scriptedCalls(messages: Array<{ role?: string; content?: unknown }>): ToolCall[] | undefined {
+function scriptedCalls(messages: Messages): ToolCall[] | undefined {
+	const round = scriptedRound(messages);
+	return round?.map((call) => (typeof call.input === "function" ? { ...call, input: call.input(messages) } : call));
+}
+
+function scriptedRound(messages: Messages): ToolCall[] | undefined {
 	const isResults = (m: { role?: string; content?: unknown }) => m.role === "tool" || (m.role === "user" && JSON.stringify(m.content).includes("tool_result"));
 	const goldenAt = messages.findLastIndex((m) => m.role === "user" && !isResults(m) && JSON.stringify(m.content).includes("GOLDEN_TOOLS"));
 	if (goldenAt < 0 || messages.slice(goldenAt + 1).some((m) => m.role === "user" && !isResults(m))) return undefined;
