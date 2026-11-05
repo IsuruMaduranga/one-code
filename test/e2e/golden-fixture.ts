@@ -15,7 +15,8 @@
  * GOLDEN_SEARCH (against canned search backends), the skill tool under
  * GOLDEN_SKILL, the MCP tools under GOLDEN_MCP (golden-mcp-server.mjs),
  * lsp_diagnostics under GOLDEN_LSP (golden-lsp-server.mjs), the hooks under
- * GOLDEN_HOOKS (golden-hook.mjs) and the worktree
+ * GOLDEN_HOOKS (golden-hook.mjs), MEMORY.md near and over its limit under
+ * GOLDEN_MEMORY and the worktree
  * tools under GOLDEN_WORKTREE after all of them. The auto-mode classifier gets a verdict instead: severity 60
  * at stage 1, so stage 2 runs too, and severity 10 at stage 2, so the call is
  * allowed and the subagent's own requests are recorded. Every other reply is a
@@ -26,7 +27,9 @@
  * never depends on what it would have returned.
  */
 import { appendFileSync } from "node:fs";
+import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { projectMemoryDir } from "../../extensions/lib/memory.ts";
 
 const WRAPPED = Symbol.for("one-code.golden-fixture");
 
@@ -396,6 +399,20 @@ const HOOK_ROUNDS: ToolCall[][] = [
 ];
 
 /**
+ * The memory index under GOLDEN_MEMORY: MEMORY.md in the project's memory
+ * directory written near its load limit (the near-limit reminder), then over
+ * it (the over-limit error). One write per round.
+ */
+const memoryIndex = (lines: number) => () => ({
+	path: join(projectMemoryDir(process.cwd()), "MEMORY.md"),
+	content: Array.from({ length: lines }, (_, i) => `- [Golden ${i + 1}](golden-${i + 1}.md) — one line`).join("\n"),
+});
+const MEMORY_ROUNDS: ToolCall[][] = [
+	[{ id: "toolu_golden_memory_near", name: "write", input: memoryIndex(185) }],
+	[{ id: "toolu_golden_memory_over", name: "write", input: memoryIndex(205) }],
+];
+
+/**
  * Plan mode under GOLDEN_PLAN, on its own (the session scenario's last
  * prompt): load the tools, exit before entering, enter, exit with an empty
  * plan, write the plan to the file enter_plan_mode named, and exit for
@@ -480,6 +497,7 @@ function roundsFor(text: string): ToolCall[][] {
 	if (has("GOLDEN_MCP")) rounds.push(...MCP_ROUNDS);
 	if (has("GOLDEN_LSP")) rounds.push(...LSP_ROUNDS);
 	if (has("GOLDEN_HOOKS")) rounds.push(...HOOK_ROUNDS);
+	if (has("GOLDEN_MEMORY")) rounds.push(...MEMORY_ROUNDS);
 	if (has("GOLDEN_WORKTREE")) rounds.push(...WORKTREE_ROUNDS);
 	return rounds;
 }
