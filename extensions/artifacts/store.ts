@@ -32,6 +32,7 @@ import { readJsonFile, writeTextAtomic } from "../lib/atomic-write.ts";
 import { comparablePath, isPathAtOrUnder, oneCodeStateDir, tildify } from "../lib/paths.ts";
 import { sanitizeDisplayText } from "../lib/terminal-text.ts";
 import { renderDownloadPayload, renderGallery } from "./gallery.ts";
+import type { PublishProblem, ShownArtifact } from "./text.ts";
 import { renderViewer } from "./viewer.ts";
 
 export interface ArtifactMeta {
@@ -199,21 +200,24 @@ export interface PublishResult {
 }
 
 /**
- * Check a page before it is stored: the reason it cannot be published, or
- * undefined. Every reason names the fix.
+ * Check a page before it is stored: why it cannot be published, or undefined.
+ * The profile words each problem with its fix.
  */
-export function publishProblem(root: string, sourcePath: string, bytes: number): string | undefined {
-	if (!HTML_EXTENSIONS.has(extname(sourcePath).toLowerCase())) {
-		return `${sourcePath} is not an .html file. Write the page as a single self-contained .html file (inline CSS and JS) and publish that.`;
-	}
-	if (isInsideStore(root, sourcePath)) {
-		return `${sourcePath} is inside the artifact store. Edit a copy in your scratchpad or the project and publish that copy, passing the artifact's id to update it in place.`;
-	}
-	if (bytes === 0) return `${sourcePath} is empty. Write the page first, then publish it.`;
-	if (bytes > MAX_ARTIFACT_BYTES) {
-		return `${sourcePath} is ${(bytes / 1024 / 1024).toFixed(1)} MB; an artifact is at most 16 MB. Move large data or media out of the page, or shrink it.`;
-	}
+export function publishProblem(root: string, sourcePath: string, bytes: number): PublishProblem | undefined {
+	if (!HTML_EXTENSIONS.has(extname(sourcePath).toLowerCase())) return { kind: "notHtml", path: sourcePath };
+	if (isInsideStore(root, sourcePath)) return { kind: "insideStore", path: sourcePath };
+	if (bytes === 0) return { kind: "empty", path: sourcePath };
+	if (bytes > MAX_ARTIFACT_BYTES) return { kind: "tooLarge", path: sourcePath, bytes, maxBytes: MAX_ARTIFACT_BYTES };
 	return undefined;
+}
+
+/** publishArtifact's failure when the id to update names no artifact. */
+export class ArtifactNotFoundError extends Error {
+	readonly id: string;
+	constructor(id: string) {
+		super(`no artifact has the id "${id}"`);
+		this.id = id;
+	}
 }
 
 /** Store a page: a new artifact, or a new version of an existing one. */
@@ -223,7 +227,7 @@ export function publishArtifact(root: string, input: PublishInput): PublishResul
 	let found: ArtifactMeta | undefined;
 	if (input.id !== undefined) {
 		found = getArtifact(root, input.id);
-		if (!found) throw new Error(`No artifact has the id "${input.id}". Run the artifact tool with action "list" to see the ids.`);
+		if (!found) throw new ArtifactNotFoundError(input.id);
 	} else {
 		// The lookup and a creation are one step under a store-wide lock, so two
 		// first publishes of one file cannot both miss and make two artifacts.
@@ -542,10 +546,16 @@ export function writeGallery(root: string): void {
 	}
 }
 
-/** One artifact as a line of the tool's `list` output and the non-interactive /artifacts. */
-export function listLine(root: string, meta: ArtifactMeta, home: string): string {
-	const project = meta.project ? ` [${tildify(meta.project, home)}]` : "";
-	return `- ${meta.id}: "${meta.title}" (v${meta.version}, updated ${meta.updatedAt.slice(0, 16).replace("T", " ")} UTC)${project}\n  ${fileUrl(viewerPath(root, meta.id))}`;
+/** One artifact as the tool's `list` output and the non-interactive /artifacts show it (the profile words the line). */
+export function shownArtifact(root: string, meta: ArtifactMeta, home: string): ShownArtifact {
+	return {
+		id: meta.id,
+		title: meta.title,
+		version: meta.version,
+		updated: meta.updatedAt.slice(0, 16).replace("T", " "),
+		...(meta.project ? { project: tildify(meta.project, home) } : {}),
+		url: fileUrl(viewerPath(root, meta.id)),
+	};
 }
 
 /**

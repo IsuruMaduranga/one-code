@@ -26,6 +26,8 @@ import { tildify } from "../lib/paths.ts";
 import { sanitizeDisplayText, terminalLink } from "../lib/terminal-text.ts";
 import { resolveToolPath } from "../lib/tool-path.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
+import { requireText } from "../lib/profile.ts";
+import type { ArtifactsText, NoBrowser, PublishBrowser, PublishProblem } from "./text.ts";
 import {
 	type ArtifactMeta,
 	artifactsRoot,
@@ -35,11 +37,12 @@ import {
 	galleryPath,
 	getArtifact,
 	listArtifacts,
-	listLine,
+	ArtifactNotFoundError,
 	pagePath,
 	publishArtifact,
 	publishProblem,
 	resolveArtifactRef,
+	shownArtifact,
 	viewerPath,
 	writeGallery,
 } from "./store.ts";
@@ -60,20 +63,6 @@ interface PublishDetails {
 	created: boolean;
 }
 
-const DESCRIPTION = `Publish a self-contained HTML page as an artifact: a page saved on this machine under ~/.onecode/artifacts/ and opened in the user's default browser. Use it when a page would be clearer than terminal text (a report, a visual explainer, a comparison, a diagram), or when the user will use the page rather than only read it (a dashboard, a small tool, a game). Advice the user will act on right away in the code they are working on belongs in your reply, not in an artifact.
-
-Before writing the page, load the \`artifact-design\` skill with the skill tool; it holds the page rules (title, both themes, phone-width layout, libraries). Write the page to one .html file (your scratchpad when there is one), then publish it with \`file_path\`. Keep it self-contained: inline the CSS and JS, load a library only as a pinned script from cdnjs.cloudflare.com or cdn.jsdelivr.net, fonts only from Google Fonts, and embed images as data: URIs. Only the one file is stored, so a relative link to another local file breaks.
-
-Actions (\`action\`, publish when omitted):
-- publish: stores \`file_path\` as a new artifact and opens it in the browser. Publishing the same file again updates that artifact in place as a new version; earlier versions are kept. To update an artifact from an earlier session, pass its \`id\` (from list). \`description\` is one sentence for the gallery; \`title\` is the fallback for a page with no <title>.
-- list: the saved artifacts, newest first, with ids and links.
-- open: shows an existing artifact (\`id\`) in the browser again, or the gallery of all artifacts when no id is given.
-- delete: removes an artifact and all its versions, only when the user asks; the user confirms it.
-
-The browser shows the page under a bar with Download, Copy file path, the earlier versions and a link to the gallery, so the page needs no download or navigation controls of its own. An update does not reopen the browser: tell the user to refresh the tab. When no browser can be opened (an SSH session, no display), give the user the link. The page is opened from a file: URL, so browser storage may be shared with other local pages or unavailable: wrap every localStorage read and write in try/catch and make the page work without it. There is no runtime API: the page cannot call Claude or keep shared state.
-
-Never publish a page that impersonates a real person or organization, fabricated records presented as genuine, or a form that collects credentials or payment details.`;
-
 /** `artifacts.autoOpen` in ~/.onecode/settings.json; true unless set to false. */
 function autoOpenEnabled(): boolean {
 	const settings = readJsonFile<{ artifacts?: { autoOpen?: unknown } }>(oneCodeSettingsPath(homedir()));
@@ -81,22 +70,21 @@ function autoOpenEnabled(): boolean {
 }
 
 /** Open a page the store built: why it was not opened, or undefined when it was. */
-async function showInBrowser(path: string): Promise<string | undefined> {
+async function showInBrowser(path: string): Promise<NoBrowser | undefined> {
 	const reason = noDisplayReason();
 	if (reason) return reason;
-	return (await launchOpener(openerPlan(fileUrl(path)))) ? undefined : "the browser could not be started";
+	return (await launchOpener(openerPlan(fileUrl(path)))) ? undefined : "launchFailed";
 }
 
 /** The tool result's line about the browser. */
-async function browserNote(path: string): Promise<string> {
-	const failed = await showInBrowser(path);
-	return failed ? `No browser was opened: ${failed}. Give the user the link.` : "Opened it in the user's default browser.";
+async function browserNote(path: string, text: ArtifactsText): Promise<string> {
+	return text.browserNote({ failed: await showInBrowser(path) });
 }
 
 /** The /artifacts status line after opening `path`. */
-async function notifyOpened(ctx: ExtensionContext, path: string, name: string): Promise<void> {
+async function notifyOpened(ctx: ExtensionContext, path: string, name: string, text: ArtifactsText): Promise<void> {
 	const failed = await showInBrowser(path);
-	if (failed) ctx.ui.notify(`No browser was opened (${failed}): ${path}`, "warning");
+	if (failed) ctx.ui.notify(`No browser was opened (${text.noBrowserReason(failed)}): ${path}`, "warning");
 	else ctx.ui.notify(`Opened ${name}`, "info");
 }
 
@@ -120,6 +108,7 @@ async function confirmDelete(ctx: ExtensionContext, meta: ArtifactMeta, signal?:
 }
 
 function artifactsExtension(pi: ExtensionAPI) {
+	const text = requireText("artifacts");
 	pi.registerTool({
 		name: "artifact",
 		label: "Artifact",
@@ -143,15 +132,15 @@ function artifactsExtension(pi: ExtensionAPI) {
 				return terminalLink(tildify(path, homedir()), fileUrl(path));
 			},
 		}),
-		description: DESCRIPTION,
+		description: text.description,
 		parameters: Type.Object({
-			action: Type.Optional(StringEnum(["publish", "list", "open", "delete"] as const, { description: "What to do. Defaults to publish." })),
-			file_path: Type.Optional(Type.String({ description: "publish: the .html file to store." })),
-			title: Type.Optional(Type.String({ description: "publish: the fallback title for a page with no <title>." })),
-			description: Type.Optional(Type.String({ description: "publish: one sentence shown under the title in the gallery." })),
-			id: Type.Optional(Type.String({ description: "The artifact to update (publish), open or delete: its id, or the file URL publish returned." })),
-			url: Type.Optional(Type.String({ description: "Alias of `id` (Claude Code's name for it)." })),
-			limit: Type.Optional(Type.Number({ description: "list: the maximum number of artifacts to return (default 25)." })),
+			action: Type.Optional(StringEnum(["publish", "list", "open", "delete"] as const, { description: text.params.action })),
+			file_path: Type.Optional(Type.String({ description: text.params.filePath })),
+			title: Type.Optional(Type.String({ description: text.params.title })),
+			description: Type.Optional(Type.String({ description: text.params.description })),
+			id: Type.Optional(Type.String({ description: text.params.id })),
+			url: Type.Optional(Type.String({ description: text.params.url })),
+			limit: Type.Optional(Type.Number({ description: text.params.limit })),
 		}),
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			const root = artifactsRoot();
@@ -159,52 +148,50 @@ function artifactsExtension(pi: ExtensionAPI) {
 			const ref = params.id ?? params.url;
 			const resolved = ref === undefined ? undefined : resolveArtifactRef(root, ref);
 			if (ref !== undefined && !resolved) {
-				return textResult(`No artifact matches "${ref}". Run the artifact tool with action "list" to see the ids.`, {}, true);
+				return textResult(text.noMatch({ ref }), {}, true);
 			}
 
 			if (action === "list") {
 				const all = listArtifacts(root);
-				if (all.length === 0) return textResult("No artifacts yet.");
+				if (all.length === 0) return textResult(text.emptyList);
 				const limit = Math.max(1, Math.floor(params.limit ?? 25));
-				const shown = all.slice(0, limit);
-				const more = all.length > shown.length ? `\n(${all.length - shown.length} more not shown; raise \`limit\` to see them.)` : "";
-				return textResult(`${all.length} artifact${all.length === 1 ? "" : "s"}, newest first:\n${shown.map((meta) => listLine(root, meta, homedir())).join("\n")}${more}\nGallery: ${fileUrl(galleryPath(root))}`);
+				const shown = all.slice(0, limit).map((meta) => shownArtifact(root, meta, homedir()));
+				return textResult(text.list({ total: all.length, shown, galleryUrl: fileUrl(galleryPath(root)) }));
 			}
 
 			if (action === "open") {
 				if (!resolved) {
 					writeGallery(root);
-					return textResult(`Gallery: ${fileUrl(galleryPath(root))}\n${await browserNote(galleryPath(root))}`);
+					return textResult(text.openedGallery({ url: fileUrl(galleryPath(root)), browserNote: await browserNote(galleryPath(root), text) }));
 				}
-				return textResult(`${fileUrl(viewerPath(root, resolved))}\n${await browserNote(viewerPath(root, resolved))}`);
+				return textResult(text.opened({ url: fileUrl(viewerPath(root, resolved)), browserNote: await browserNote(viewerPath(root, resolved), text) }));
 			}
 
 			if (action === "delete") {
-				if (!resolved) return textResult("Pass the `id` of the artifact to delete.", {}, true);
+				if (!resolved) return textResult(text.deleteNeedsId, {}, true);
 				const meta = getArtifact(root, resolved);
-				if (!meta) return textResult(`No artifact has the id "${resolved}".`, {}, true);
-				if (!ctx.hasUI) {
-					return textResult("Deleting an artifact needs the user's confirmation, and this session cannot ask. Tell the user to delete it with /artifacts.", {}, true);
-				}
+				if (!meta) return textResult(text.unknownForDelete({ id: resolved }), {}, true);
+				if (!ctx.hasUI) return textResult(text.deleteNeedsUser, {}, true);
 				const approved = await confirmDelete(ctx, meta, signal);
-				if (signal?.aborted) return textResult("The operation was aborted; the artifact was not deleted.", {}, true);
-				if (!approved) return textResult("The user declined; the artifact was not deleted.", {}, true);
+				if (signal?.aborted) return textResult(text.deleteAborted, {}, true);
+				if (!approved) return textResult(text.deleteDeclined, {}, true);
 				deleteArtifact(root, resolved);
-				return textResult(`Deleted the artifact ${meta.id} ("${meta.title}").`);
+				return textResult(text.deleted({ id: meta.id, title: meta.title }));
 			}
 
-			if (!params.file_path) return textResult("`file_path` is required: the .html file to publish.", {}, true);
+			const refuse = (problem: PublishProblem) => textResult(text.publishProblem(problem), {}, true);
+			if (!params.file_path) return refuse({ kind: "noPath" });
 			const sourcePath = resolveToolPath(params.file_path, ctx.cwd);
 			let bytes: number;
 			try {
 				const stat = statSync(sourcePath);
-				if (!stat.isFile()) return textResult(`${sourcePath} is not a file. Pass the path of the .html page to publish.`, {}, true);
+				if (!stat.isFile()) return refuse({ kind: "notFile", path: sourcePath });
 				bytes = stat.size;
 			} catch {
-				return textResult(`${sourcePath} does not exist. Write the page to that path first, then publish it.`, {}, true);
+				return refuse({ kind: "missing", path: sourcePath });
 			}
 			const problem = publishProblem(root, sourcePath, bytes);
-			if (problem) return textResult(problem, {}, true);
+			if (problem) return refuse(problem);
 
 			let result: ReturnType<typeof publishArtifact>;
 			try {
@@ -219,24 +206,21 @@ function artifactsExtension(pi: ExtensionAPI) {
 					suffix: () => randomBytes(3).toString("hex"),
 				});
 			} catch (error) {
-				return textResult(`Publishing failed: ${(error as Error).message}`, {}, true);
+				return refuse(error instanceof ArtifactNotFoundError ? { kind: "unknownId", id: error.id } : { kind: "failed", osMessage: (error as Error).message });
 			}
 			const { meta, created } = result;
 			const viewer = viewerPath(root, meta.id);
 			const url = fileUrl(viewer);
-			const lines = [
-				created
-					? `Published "${meta.title}" as the artifact ${meta.id}.`
-					: `Updated the artifact ${meta.id} ("${meta.title}") to version ${meta.version}; earlier versions are kept.`,
-				`Link: ${url}`,
-				`File: ${pagePath(root, meta.id)}`,
-			];
-			if (!created) lines.push("The browser was not reopened: tell the user to refresh the tab that shows it.");
-			else if (!autoOpenEnabled()) lines.push(`Opening the browser is off (artifacts.autoOpen is false in ${tildify(oneCodeSettingsPath(homedir()), homedir())}). Give the user the link.`);
-			else lines.push(await browserNote(viewer));
-			lines.push(`Gallery of all artifacts: ${fileUrl(galleryPath(root))}`);
+			const browser: PublishBrowser = !created
+				? { kind: "notReopened" }
+				: !autoOpenEnabled()
+					? { kind: "autoOpenOff", settingsPath: tildify(oneCodeSettingsPath(homedir()), homedir()) }
+					: { kind: "tried", failed: await showInBrowser(viewer) };
 			const details: PublishDetails = { id: meta.id, version: meta.version, path: viewer, created };
-			return textResult(lines.join("\n"), details);
+			return textResult(
+				text.published({ id: meta.id, title: meta.title, version: meta.version, created, url, file: pagePath(root, meta.id), galleryUrl: fileUrl(galleryPath(root)), browser }),
+				details,
+			);
 		},
 	});
 
@@ -248,7 +232,7 @@ function artifactsExtension(pi: ExtensionAPI) {
 			const root = artifactsRoot();
 			const all = listArtifacts(root);
 			if (!ctx.hasUI) {
-				ctx.ui.notify(all.length ? all.map((meta) => listLine(root, meta, homedir())).join("\n") : "No artifacts yet.", "info");
+				ctx.ui.notify(all.length ? all.map((meta) => text.listLine(shownArtifact(root, meta, homedir()))).join("\n") : text.emptyList, "info");
 				return;
 			}
 			const GALLERY = "Open the gallery in the browser";
@@ -258,7 +242,7 @@ function artifactsExtension(pi: ExtensionAPI) {
 			if (!picked) return;
 			if (picked === GALLERY) {
 				writeGallery(root);
-				await notifyOpened(ctx, galleryPath(root), "the artifact gallery");
+				await notifyOpened(ctx, galleryPath(root), "the artifact gallery", text);
 				return;
 			}
 			const meta = labels.get(picked);
@@ -269,7 +253,7 @@ function artifactsExtension(pi: ExtensionAPI) {
 			const DELETE = "Delete";
 			const choice = await ctx.ui.select(uiTitle(meta), [OPEN, EXPORT, PATH, DELETE]);
 			if (choice === OPEN) {
-				await notifyOpened(ctx, viewerPath(root, meta.id), uiTitle(meta));
+				await notifyOpened(ctx, viewerPath(root, meta.id), uiTitle(meta), text);
 			} else if (choice === EXPORT) {
 				try {
 					ctx.ui.notify(`Saved ${tildify(exportArtifact(root, meta, homedir()), homedir())}`, "info");

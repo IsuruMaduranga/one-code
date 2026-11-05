@@ -30,12 +30,13 @@ export function openerPlan(url: string, platform: NodeJS.Platform = process.plat
 
 /**
  * Why a browser opened from here would not reach the user, or undefined when
- * it would. Over SSH the opener runs on the remote machine's desktop, and a
- * Linux or BSD box with neither X nor Wayland has no desktop at all. Pure.
+ * it would: `ssh` (the opener runs on the remote machine's desktop) or
+ * `noDisplay` (a Linux or BSD box with neither X nor Wayland has no desktop
+ * at all). The caller words it. Pure.
  */
-export function noDisplayReason(platform: NodeJS.Platform = process.platform, env: Record<string, string | undefined> = process.env): string | undefined {
-	if (env.SSH_CONNECTION || env.SSH_TTY) return "this session runs over SSH";
-	if (platform !== "darwin" && platform !== "win32" && !env.DISPLAY && !env.WAYLAND_DISPLAY) return "no graphical display is available";
+export function noDisplayReason(platform: NodeJS.Platform = process.platform, env: Record<string, string | undefined> = process.env): "ssh" | "noDisplay" | undefined {
+	if (env.SSH_CONNECTION || env.SSH_TTY) return "ssh";
+	if (platform !== "darwin" && platform !== "win32" && !env.DISPLAY && !env.WAYLAND_DISPLAY) return "noDisplay";
 	return undefined;
 }
 

@@ -9,6 +9,7 @@
  * extensions child sessions load, and the text groups moved so far.
  */
 
+import type { ArtifactsText } from "../artifacts/text.ts";
 import type { AskUserText } from "../ask-user/text.ts";
 import type { BackgroundText } from "../background/text.ts";
 import type { BtwText } from "../btw/text.ts";
@@ -59,6 +60,7 @@ export interface ProfileText {
 	memory?: MemoryText;
 	/** Also read by subagents, for a child's cron tools. */
 	background?: BackgroundText;
+	artifacts?: ArtifactsText;
 	/** Used by the worktree tools, subagents and workflows (each guards isolated sessions with it). */
 	worktreeGuard?: WorktreeGuardText;
 }
