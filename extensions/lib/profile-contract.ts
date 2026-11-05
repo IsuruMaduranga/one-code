@@ -12,6 +12,7 @@
 import type { AskUserText } from "../ask-user/text.ts";
 import type { NotebookText } from "../notebook/text.ts";
 import type { SystemPromptText } from "../system-prompt/text.ts";
+import type { TasksText } from "../tasks/text.ts";
 import type { FeatureId } from "./features.ts";
 
 /**
@@ -23,6 +24,7 @@ export interface ProfileText {
 	systemPrompt: SystemPromptText;
 	notebook?: NotebookText;
 	askUser?: AskUserText;
+	tasks?: TasksText;
 }
 
 /** A profile's switches for one tool, by its registered name. Omitted fields keep the base's choice. */

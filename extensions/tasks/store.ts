@@ -6,6 +6,8 @@
  * reciprocal: adding one side always records the other.
  */
 
+import type { TaskView, UpdateProblem } from "./text.ts";
+
 export type TaskStatus = "pending" | "in_progress" | "completed";
 
 export interface TaskItem {
@@ -82,10 +84,10 @@ export class TaskStore {
 	 * Apply an update. `updatedFields` names what actually changed, in Claude
 	 * Code's order (its TaskUpdate result lists them).
 	 */
-	update(rawId: string, input: TaskUpdateInput): { task?: TaskItem; deleted?: boolean; error?: string; updatedFields?: string[] } {
+	update(rawId: string, input: TaskUpdateInput): { task?: TaskItem; deleted?: boolean; notFound?: boolean; problems?: UpdateProblem[]; updatedFields?: string[] } {
 		const id = normalizeTaskId(rawId);
 		const task = this.tasks.get(id);
-		if (!task) return { error: `No task with id "${rawId}". Use task_list to see ids.` };
+		if (!task) return { notFound: true };
 
 		if (input.status === "deleted") {
 			this.tasks.delete(id);
@@ -142,11 +144,10 @@ export class TaskStore {
 			else if (!this.link(other, id)) unknown.push(other);
 		}
 		if (task.blockedBy.length > blockedByBefore) updatedFields.push("blockedBy");
-		const errors: string[] = [];
-		if (selfRef) errors.push(`Task #${id} cannot block or be blocked by itself`);
-		if (unknown.length > 0) errors.push(`Unknown task id(s) in dependency list: ${unknown.join(", ")}`);
-		if (errors.length > 0) return { task, error: errors.join(". "), updatedFields };
-		return { task, updatedFields };
+		const problems: UpdateProblem[] = [];
+		if (selfRef) problems.push({ kind: "selfReference", id });
+		if (unknown.length > 0) problems.push({ kind: "unknownDependencies", ids: unknown });
+		return problems.length > 0 ? { task, problems, updatedFields } : { task, updatedFields };
 	}
 
 	/** Record "blocker blocks blocked" on both sides. False if either id is unknown. */
@@ -199,20 +200,9 @@ export class TaskStore {
 /** How long a finished list stays on screen before it clears (Claude Code's 5000 ms). */
 export const FINISHED_LIST_CLEAR_MS = 5_000;
 
-const STATUS_MARK: Record<TaskStatus, string> = { pending: " ", in_progress: "▸", completed: "x" };
-
-export function formatTaskLine(store: TaskStore, task: TaskItem): string {
-	const parts = [`#${task.id} [${STATUS_MARK[task.status]}] ${task.subject}`];
-	if (task.owner) parts.push(`owner: ${task.owner}`);
-	const open = store.openBlockers(task);
-	if (open.length > 0) parts.push(`blocked by: ${open.map((b) => `#${b}`).join(", ")}`);
-	return parts.join(" · ");
-}
-
-export function formatTaskList(store: TaskStore): string {
-	const tasks = store.list();
-	if (tasks.length === 0) return "No tasks.";
-	return tasks.map((t) => formatTaskLine(store, t)).join("\n");
+/** A task with the blockers it still waits on (text.ts TaskView). */
+export function taskView(store: TaskStore, task: TaskItem): TaskView {
+	return { task, openBlockers: store.openBlockers(task) };
 }
 
 /**
@@ -275,40 +265,4 @@ export function formatHiddenTaskWidget(store: TaskStore, hint: string, style: Wi
 	const n = store.list().length;
 	if (n === 0) return [];
 	return [`  ${style.paint("dim", `${n} ${n === 1 ? "task" : "tasks"} hidden · ${hint}`)}`];
-}
-
-/**
- * The periodic task-tool reminder (Claude Code's `task_reminder`): a single
- * gentle nudge fired when the task tools have gone unused for a while, with the
- * current list appended so the model can clean up completed or stale tasks — as
- * when the user pivots mid-session and the plan no longer matches the work.
- *
- * Byte-for-byte Claude Code's text (messages.ts) except the tool names, which
- * stay our snake_case (working-docs/decisions/tools.md). We do NOT branch on list state
- * the way CC's earlier prompt did — one reminder, always the same, and the
- * appended list is what the model reasons over.
- */
-export function nudgeMessage(tasks: TaskItem[]): string {
-	let message =
-		"The task tools haven't been used recently. If you're working on tasks that would benefit from tracking progress, consider using task_create to add new tasks and task_update to update task status (set to in_progress when starting, completed when done). Also consider cleaning up the task list if it has become stale. Only use these if relevant to the current work. This is just a gentle reminder - ignore if not applicable. Make sure that you NEVER mention this reminder to the user\n";
-	if (tasks.length > 0) {
-		const items = tasks.map((t) => `#${t.id}. [${t.status}] ${t.subject}`).join("\n");
-		message += `\n\nHere are the existing tasks:\n\n${items}`;
-	}
-	return message;
-}
-
-export function formatTaskDetails(store: TaskStore, task: TaskItem): string {
-	const lines = [
-		`Task #${task.id}: ${task.subject}`,
-		`Status: ${task.status}${task.owner ? ` · owner: ${task.owner}` : ""}`,
-		`Description: ${task.description}`,
-	];
-	if (task.blocks.length > 0) lines.push(`Blocks: ${task.blocks.map((b) => `#${b}`).join(", ")}`);
-	const open = store.openBlockers(task);
-	if (task.blockedBy.length > 0) {
-		lines.push(`Blocked by: ${task.blockedBy.map((b) => `#${b}`).join(", ")}${open.length === 0 ? " (all resolved)" : ""}`);
-	}
-	if (Object.keys(task.metadata).length > 0) lines.push(`Metadata: ${JSON.stringify(task.metadata)}`);
-	return lines.join("\n");
 }

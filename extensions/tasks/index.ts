@@ -25,23 +25,14 @@ import { taskToolsEnabled } from "../lib/model-tier.ts";
 import { sessionModelTier } from "../lib/session-model-tier.ts";
 import { ccToolRenderers, linesComponent, safeThemeBold, safeThemePaint, strike } from "../lib/tui-render.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
-import {
-	TASK_CREATE_DESCRIPTION,
-	TASK_CREATE_PARAMS,
-	TASK_GET_DESCRIPTION,
-	TASK_GET_PARAMS,
-	TASK_LIST_DESCRIPTION,
-	TASK_UPDATE_DESCRIPTION,
-	TASK_UPDATE_PARAMS,
-} from "./descriptions.ts";
+import { requireText } from "../lib/profile.ts";
 import {
 	FINISHED_LIST_CLEAR_MS,
 	formatHiddenTaskWidget,
-	formatTaskDetails,
-	formatTaskList,
+
 	formatTaskWidget,
 	normalizeTaskId,
-	nudgeMessage,
+	taskView,
 	type TaskSnapshot,
 	TaskStore,
 } from "./store.ts";
@@ -54,9 +45,9 @@ interface TaskDetails {
 }
 
 const TASK_TOOLS = new Set(["task_create", "task_get", "task_list", "task_update"]);
-const TASK_KEYWORDS = ["task", "todo", "plan", "progress", "dependencies", "tracking"];
 
 function tasksExtension(pi: ExtensionAPI) {
+	const text = requireText("tasks");
 	const requestTier = sessionModelTier(pi);
 	const store = new TaskStore();
 	const toggleKey = taskToggleKey();
@@ -129,7 +120,7 @@ function tasksExtension(pi: ExtensionAPI) {
 		withheld = !enabled;
 		for (const name of TASK_TOOLS) {
 			if (withheld) pi.events.emit(WITHHOLD_CHANNEL, { name });
-			else pi.events.emit(DEFER_CHANNEL, { name, keywords: TASK_KEYWORDS });
+			else pi.events.emit(DEFER_CHANNEL, { name, keywords: text.searchKeywords });
 		}
 	};
 
@@ -161,7 +152,7 @@ function tasksExtension(pi: ExtensionAPI) {
 		turnsSinceReminder++;
 		if (turnsSinceTaskUse < TURNS_SINCE_WRITE || turnsSinceReminder < TURNS_BETWEEN_REMINDERS) return;
 		turnsSinceReminder = 0;
-		pi.events.emit(REMINDER_CHANNEL, { text: nudgeMessage(store.list()) });
+		pi.events.emit(REMINDER_CHANNEL, { text: text.reminder(store.list()) });
 	});
 
 	// Only the mutating tools count as "using" the tracker — a read must not
@@ -170,11 +161,11 @@ function tasksExtension(pi: ExtensionAPI) {
 		turnsSinceTaskUse = 0;
 	};
 
-	const result = (text: string, ctx: ExtensionContext, isError = false) => {
+	const result = (body: string, ctx: ExtensionContext, isError = false) => {
 		updateWidget(ctx);
 		scheduleClear(ctx);
 		return {
-			content: [{ type: "text" as const, text }],
+			content: [{ type: "text" as const, text: body }],
 			details: { taskSnapshot: store.snapshot() } satisfies TaskDetails,
 			isError,
 		};
@@ -184,17 +175,17 @@ function tasksExtension(pi: ExtensionAPI) {
 		name: "task_create",
 		label: "Create Task",
 		...ccToolRenderers("Create Task"),
-		description: TASK_CREATE_DESCRIPTION,
+		description: text.descriptions.task_create,
 		parameters: Type.Object({
-			subject: Type.String({ description: TASK_CREATE_PARAMS.subject }),
-			description: Type.String({ description: TASK_CREATE_PARAMS.description }),
-			activeForm: Type.Optional(Type.String({ description: TASK_CREATE_PARAMS.activeForm })),
-			metadata: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: TASK_CREATE_PARAMS.metadata })),
+			subject: Type.String({ description: text.params.create.subject }),
+			description: Type.String({ description: text.params.create.description }),
+			activeForm: Type.Optional(Type.String({ description: text.params.create.activeForm })),
+			metadata: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: text.params.create.metadata })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			markUsed();
 			const task = store.create(params);
-			return result(`Task #${task.id} created successfully: ${task.subject}`, ctx);
+			return result(text.created(task), ctx);
 		},
 	});
 
@@ -202,14 +193,14 @@ function tasksExtension(pi: ExtensionAPI) {
 		name: "task_get",
 		label: "Get Task",
 		...ccToolRenderers("Get Task"),
-		description: TASK_GET_DESCRIPTION,
+		description: text.descriptions.task_get,
 		parameters: Type.Object({
-			taskId: Type.String({ description: TASK_GET_PARAMS.taskId }),
+			taskId: Type.String({ description: text.params.get.taskId }),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const task = store.get(params.taskId);
-			if (!task) return result(`No task with id "${params.taskId}". Use task_list to see ids.`, ctx, true);
-			return result(formatTaskDetails(store, task), ctx);
+			if (!task) return result(text.notFound(params.taskId), ctx, true);
+			return result(text.details(taskView(store, task)), ctx);
 		},
 	});
 
@@ -217,10 +208,10 @@ function tasksExtension(pi: ExtensionAPI) {
 		name: "task_list",
 		label: "List Tasks",
 		...ccToolRenderers("List Tasks", { maxCollapsedLines: 12 }),
-		description: TASK_LIST_DESCRIPTION,
+		description: text.descriptions.task_list,
 		parameters: Type.Object({}),
 		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-			return result(formatTaskList(store), ctx);
+			return result(text.list(store.list().map((task) => taskView(store, task))), ctx);
 		},
 	});
 
@@ -228,37 +219,36 @@ function tasksExtension(pi: ExtensionAPI) {
 		name: "task_update",
 		label: "Update Task",
 		...ccToolRenderers("Update Task"),
-		description: TASK_UPDATE_DESCRIPTION,
+		description: text.descriptions.task_update,
 		parameters: Type.Object({
-			taskId: Type.String({ description: TASK_UPDATE_PARAMS.taskId }),
-			subject: Type.Optional(Type.String({ description: TASK_UPDATE_PARAMS.subject })),
-			description: Type.Optional(Type.String({ description: TASK_UPDATE_PARAMS.description })),
-			activeForm: Type.Optional(Type.String({ description: TASK_UPDATE_PARAMS.activeForm })),
-			status: Type.Optional(StringEnum(["pending", "in_progress", "completed", "deleted"] as const, { description: TASK_UPDATE_PARAMS.status })),
-			addBlocks: Type.Optional(Type.Array(Type.String(), { description: TASK_UPDATE_PARAMS.addBlocks })),
-			addBlockedBy: Type.Optional(Type.Array(Type.String(), { description: TASK_UPDATE_PARAMS.addBlockedBy })),
-			owner: Type.Optional(Type.String({ description: TASK_UPDATE_PARAMS.owner })),
-			metadata: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: TASK_UPDATE_PARAMS.metadata })),
+			taskId: Type.String({ description: text.params.update.taskId }),
+			subject: Type.Optional(Type.String({ description: text.params.update.subject })),
+			description: Type.Optional(Type.String({ description: text.params.update.description })),
+			activeForm: Type.Optional(Type.String({ description: text.params.update.activeForm })),
+			status: Type.Optional(StringEnum(["pending", "in_progress", "completed", "deleted"] as const, { description: text.params.update.status })),
+			addBlocks: Type.Optional(Type.Array(Type.String(), { description: text.params.update.addBlocks })),
+			addBlockedBy: Type.Optional(Type.Array(Type.String(), { description: text.params.update.addBlockedBy })),
+			owner: Type.Optional(Type.String({ description: text.params.update.owner })),
+			metadata: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: text.params.update.metadata })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const { taskId, ...input } = params;
 			const outcome = store.update(taskId, input as Parameters<TaskStore["update"]>[1]);
 			if (outcome.deleted) {
 				markUsed();
-				return result(`Updated task #${normalizeTaskId(taskId)} deleted`, ctx);
+				return result(text.deleted(normalizeTaskId(taskId)), ctx);
 			}
 			// A failed update (unknown id) is not "using" the tracker — a model
 			// looping on a hallucinated id must not suppress the nudge.
-			if (outcome.error && !outcome.task) return result(outcome.error, ctx, true);
+			if (outcome.notFound || !outcome.task) return result(text.notFound(taskId), ctx, true);
 			markUsed();
-			// Claude Code's result names the fields that changed.
-			const line = `Updated task #${outcome.task!.id} ${(outcome.updatedFields ?? []).join(", ")}`;
-			return result(outcome.error ? `${line}\n${outcome.error}` : line, ctx, Boolean(outcome.error));
+			const problems = outcome.problems ?? [];
+			return result(text.updated({ id: outcome.task.id, fields: outcome.updatedFields ?? [], problems }), ctx, problems.length > 0);
 		},
 	});
 
 	for (const name of TASK_TOOLS) {
-		pi.events.emit(DEFER_CHANNEL, { name, keywords: TASK_KEYWORDS });
+		pi.events.emit(DEFER_CHANNEL, { name, keywords: text.searchKeywords });
 	}
 
 	// `/tasks` is Claude Code's Background dialog (the subagents extension, findings
