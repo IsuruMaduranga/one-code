@@ -32,7 +32,7 @@
  * Needs a real terminal-less pi run: from a sandboxed assistant shell, run it
  * inside tmux (findings §10).
  */
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -81,7 +81,7 @@ const CONFIGS = [
 	{ name: "session-anthropic-tiny", model: ANTHROPIC, tier: "tiny", mode: "session" },
 	{ name: "session-openrouter-cheap", model: OPENROUTER, tier: "cheap", mode: "session" },
 ];
-const PROMPTS = { print: "Reply with OK.", tools: "GOLDEN_TOOLS GOLDEN_AGENT GOLDEN_NOTEBOOK GOLDEN_TASKS: make the scripted calls." };
+const PROMPTS = { print: "Reply with OK.", tools: "GOLDEN_TOOLS GOLDEN_AGENT GOLDEN_NOTEBOOK GOLDEN_TASKS GOLDEN_WORKTREE: make the scripted calls." };
 
 /** A format 4.4 notebook (no cell ids, so nothing random) with the given code cells. */
 const notebook = (...sources) =>
@@ -95,6 +95,30 @@ const NOTEBOOK_FILES = {
 	"nb5.ipynb": notebook("print(1)", "print(2)"),
 	"notjupyter.ipynb": "{}\n",
 };
+/**
+ * Makes the tools scenario's project a git repository for the worktree rounds
+ * (golden-fixture.ts WORKTREE_ROUNDS): one commit at a fixed date, so every
+ * hash is stable; a worktree `kept`; a listed worktree `gone` whose directory
+ * is deleted; and a branch `dup` that a new worktree's branch collides with.
+ */
+function makeGitProject(project, home) {
+	const date = "2026-01-01T00:00:00Z";
+	const env = { ...cleanEnv(), HOME: home, GIT_CONFIG_NOSYSTEM: "1", GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date, TZ: "UTC" };
+	const git = (...args) => execFileSync("git", args, { cwd: project, env, stdio: "pipe" });
+	git("init", "-q", "-b", "main");
+	git("config", "user.name", "Golden");
+	git("config", "user.email", "golden@example.com");
+	git("config", "commit.gpgsign", "false");
+	mkdirSync(join(project, ".claude", "worktrees"), { recursive: true });
+	writeFileSync(join(project, ".claude", "worktrees", ".gitignore"), "*\n");
+	git("add", "-A");
+	git("commit", "-q", "-m", "Golden project");
+	git("branch", "dup");
+	git("worktree", "add", "-q", "-b", "kept", ".claude/worktrees/kept");
+	git("worktree", "add", "-q", "-b", "gone", ".claude/worktrees/gone");
+	rmSync(join(project, ".claude", "worktrees", "gone"), { recursive: true, force: true });
+}
+
 const SESSION_PROMPTS = ["GOLDEN_TOOLS: read README.md and run echo golden.", "Reply with OK."];
 
 /** The parent's environment without anything that steers pi or One Code. */
@@ -118,7 +142,10 @@ async function runConfig(config) {
 		mkdirSync(join(home, ".onecode"), { recursive: true });
 		mkdirSync(project, { recursive: true });
 		writeFileSync(join(project, "README.md"), "# Golden project\n\nA fixed project for the golden request snapshot.\n");
-		if (config.mode === "tools") for (const [name, content] of Object.entries(NOTEBOOK_FILES)) writeFileSync(join(project, name), content);
+		if (config.mode === "tools") {
+			for (const [name, content] of Object.entries(NOTEBOOK_FILES)) writeFileSync(join(project, name), content);
+			makeGitProject(project, home);
+		}
 		const settings = withCompactionKeepBackfilled({
 			quietStartup: true,
 			packages: [repo],

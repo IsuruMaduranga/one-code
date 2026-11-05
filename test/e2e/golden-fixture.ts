@@ -10,7 +10,8 @@
  * scripted calls in TOOL_CALLS (successes, error paths, a command the auto-mode
  * classifier judges, a deferred-tool load, the user questions), plus a subagent when it also says
  * GOLDEN_AGENT, notebook edits under GOLDEN_NOTEBOOK and the task tools
- * steps under GOLDEN_TASKS, each in later rounds. The auto-mode classifier gets a verdict instead: severity 60
+ * steps under GOLDEN_TASKS, each in later rounds, and the worktree tools under
+ * GOLDEN_WORKTREE after all of them. The auto-mode classifier gets a verdict instead: severity 60
  * at stage 1, so stage 2 runs too, and severity 10 at stage 2, so the call is
  * allowed and the subagent's own requests are recorded. Every other reply is a
  * fixed text shaped like a compaction summary, which serves every turn and
@@ -96,6 +97,42 @@ const TASK_ROUNDS: ToolCall[][] = [
 	[tc("delete", "task_update", { taskId: "1", status: "deleted" })],
 ];
 
+/**
+ * The worktree tools under GOLDEN_WORKTREE, after every other round (inside a
+ * worktree, relative paths and commands move there). golden-requests.mjs makes
+ * the project a git repository with a worktree `kept`, a listed worktree
+ * `gone` whose directory is deleted, and a branch `dup`. Each round is one
+ * dependent step: every early failure; switch into `kept`; the in-session
+ * failures; keep it; create `golden`; the two shell guards, a dirty file and a
+ * commit; the refused removal; the forced one.
+ */
+const wt = (id: string, name: string, input: Record<string, unknown>): ToolCall => ({ id: `toolu_golden_wt_${id}`, name, input });
+const WORKTREE_ROUNDS: ToolCall[][] = [
+	[wt("load", "tool_search", { query: "select:enter_worktree,exit_worktree" })],
+	[
+		wt("exit_none", "exit_worktree", { action: "keep" }),
+		wt("both", "enter_worktree", { name: "a", path: ".claude/worktrees/kept" }),
+		wt("empty_path", "enter_worktree", { path: "" }),
+		wt("unlisted", "enter_worktree", { path: "README.md" }),
+		wt("gone", "enter_worktree", { path: ".claude/worktrees/gone" }),
+		wt("bad_name", "enter_worktree", { name: "bad name" }),
+		wt("exists", "enter_worktree", { name: "kept" }),
+		wt("git_fails", "enter_worktree", { name: "dup" }),
+	],
+	[wt("switch", "enter_worktree", { path: ".claude/worktrees/kept" })],
+	[wt("remove_foreign", "exit_worktree", { action: "remove" }), wt("again", "enter_worktree", { name: "second" })],
+	[wt("keep", "exit_worktree", { action: "keep" })],
+	[wt("create", "enter_worktree", { name: "golden" })],
+	[
+		wt("git_shared", "bash", { command: "git -C ../../.. status" }),
+		wt("stash", "bash", { command: "git stash" }),
+		wt("dirty", "write", { path: "dirty.txt", content: "dirty\n" }),
+		wt("commit", "bash", { command: "git commit --allow-empty -q -m wip" }),
+	],
+	[wt("remove_dirty", "exit_worktree", { action: "remove" })],
+	[wt("remove", "exit_worktree", { action: "remove", discard_changes: true })],
+];
+
 /** Added when the user text also says GOLDEN_AGENT: a subagent run (blocking only in one-shot modes). */
 const AGENT_CALL: ToolCall = { id: "toolu_golden_7", name: "Agent", input: { description: "Golden check", task: "Reply with OK.", subagent_type: "general-purpose" } };
 
@@ -157,6 +194,7 @@ function roundsFor(text: string): ToolCall[][] {
 		later[i] = [...(later[i] ?? []), ...round];
 	});
 	for (const round of later) if (round.length > 0) rounds.push(round);
+	if (has("GOLDEN_WORKTREE")) rounds.push(...WORKTREE_ROUNDS);
 	return rounds;
 }
 
