@@ -43,7 +43,7 @@ describe("protocol: interpretHookResult", () => {
 			stdout: "",
 			stderr: "not on my watch\n",
 		});
-		expect(outcome.block).toEqual({ reason: "not on my watch" });
+		expect(outcome.block).toEqual({ kind: "stated", reason: "not on my watch" });
 	});
 
 	it("other non-zero exits fail open", () => {
@@ -78,18 +78,20 @@ describe("protocol: interpretHookResult", () => {
 
 	it("permissionDecision deny and ask both block; allow does nothing", () => {
 		const deny = ok(JSON.stringify({ hookSpecificOutput: { permissionDecision: "deny", permissionDecisionReason: "no" } }));
-		expect(interpretHookResult("PreToolUse", deny).block).toEqual({ reason: "no" });
+		expect(interpretHookResult("PreToolUse", deny).block).toEqual({ kind: "stated", reason: "no" });
 		const ask = ok(JSON.stringify({ hookSpecificOutput: { permissionDecision: "ask" } }));
-		expect(interpretHookResult("PreToolUse", ask).block?.reason).toContain("confirmation");
+		expect(interpretHookResult("PreToolUse", ask).block).toEqual({ kind: "askRequested" });
 		const allow = ok(JSON.stringify({ hookSpecificOutput: { permissionDecision: "allow" } }));
 		expect(interpretHookResult("PreToolUse", allow)).toEqual({});
 	});
 
 	it("supports the legacy decision field and continue:false", () => {
 		expect(interpretHookResult("Stop", ok(JSON.stringify({ decision: "block", reason: "keep going" }))).block).toEqual({
+			kind: "stated",
 			reason: "keep going",
 		});
 		expect(interpretHookResult("Stop", ok(JSON.stringify({ continue: false, stopReason: "halt" }))).block).toEqual({
+			kind: "stated",
 			reason: "halt",
 		});
 	});
@@ -121,7 +123,7 @@ describe("protocol: interpretHookResult", () => {
 		});
 		expect(interpretHookResult("PreCompact", { ...ok("do not use this failed output"), exitCode: 1 })).toEqual({});
 		expect(interpretHookResult("PreCompact", { ...ok("do not use this blocked output"), exitCode: 2, stderr: "wait for the backup" })).toEqual({
-			block: { reason: "wait for the backup" },
+			block: { kind: "stated", reason: "wait for the backup" },
 		});
 	});
 

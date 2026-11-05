@@ -18,13 +18,17 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import hooksExtension, { hookContextText } from "../../extensions/hooks/index.ts";
+import hooksExtension from "../../extensions/hooks/index.ts";
+import type { CcHookEvent } from "../../extensions/hooks/protocol.ts";
 import { PRECOMPACT_INSTRUCTIONS_CHANNEL, type PreCompactInstructions } from "../../extensions/hooks/compaction.ts";
 import { resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
 import { type HookBridge, SUBAGENT_HOOK_CHANNEL } from "../../extensions/hooks/subagent-bridge.ts";
 import { REMINDER_CHANNEL, wrapReminder } from "../../extensions/lib/reminders.ts";
 import { SKILL_INVOCATION_TYPE } from "../../extensions/skill/invoke.ts";
+import { hooks } from "../../profile/hooks/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+
+const hookContextText = (event: CcHookEvent, text: string) => hooks.additionalContext({ event, text });
 
 const state = vi.hoisted(() => ({
 	fakeHome: `/nonexistent/one-code-test-hooks-wiring-fake-home-${Math.random().toString(36).slice(2)}`,
@@ -318,7 +322,7 @@ describe("hooks wiring", () => {
 			sessionId: "child-1",
 			agentType: "explore",
 		});
-		expect(outcome.block?.reason).toBe("no rm in children");
+		expect(outcome.refusal).toBe("PreToolUse hook: no rm in children");
 		// The hook read a Claude Code payload naming the child (agent_id present,
 		// agent_type = the agent), with the child's cwd and session id.
 		const stdin = JSON.parse(readFileSync(seen, "utf-8"));
@@ -347,7 +351,7 @@ describe("hooks wiring", () => {
 		parentRun.abort();
 		await fake.fireOne("session_start", { reason: "startup" }, createFakeCtx({ cwd: projectDir, signal: parentRun.signal }));
 		const outcome = await bridge!.preToolUse({ toolName: "bash", input: { command: "rm -rf build" }, cwd: projectDir, sessionId: "bg" });
-		expect(outcome.block?.reason).toBe("denied");
+		expect(outcome.refusal).toBe("PreToolUse hook: denied");
 
 		// The parent's own call on its aborted run is cancelled before its hooks run,
 		// and a cancelled PreToolUse blocks rather than letting the call through.
@@ -363,7 +367,7 @@ describe("hooks wiring", () => {
 		const childRun = new AbortController();
 		childRun.abort();
 		const child = await bridge!.preToolUse({ toolName: "bash", input: { command: "rm -rf build" }, cwd: projectDir, sessionId: "bg", signal: childRun.signal });
-		expect(child.block).toBeDefined();
+		expect(child.refusal).toBeDefined();
 	});
 
 	it("the bridge translates a child's updatedInput back to native names and frames its context like the parent's", async () => {
@@ -376,13 +380,13 @@ describe("hooks wiring", () => {
 		});
 		await fake.fireOne("session_start", { reason: "startup" }, ctx());
 		const pre = await bridge!.preToolUse({ toolName: "read", input: { path: "/tmp/a.txt" }, cwd: projectDir, sessionId: "c" });
-		expect(pre.block).toBeUndefined();
+		expect(pre.refusal).toBeUndefined();
 		expect(pre.updatedInput).toEqual({ path: "/tmp/other.txt" });
 		expect(pre.additionalContext).toBe(hookContextText("PreToolUse", "careful"));
 
 		const post = await bridge!.postToolUse({ toolName: "read", input: {}, cwd: projectDir, sessionId: "c", content: [], isError: false });
 		// No PostToolUse hooks configured: nothing to apply.
-		expect(post).toEqual({ block: undefined, updatedToolResult: undefined, additionalContext: undefined });
+		expect(post).toEqual({ objection: undefined, updatedToolResult: undefined, additionalContext: undefined });
 	});
 
 	it("a PreToolUse hook blocks the tool call, quoting the hook's reason", async () => {

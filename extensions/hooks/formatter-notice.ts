@@ -11,7 +11,8 @@
  *
  * Claude Code has a dedicated notice for exactly this, delivered as hook
  * context on the edit's own result. This module is the deterministic detector
- * behind ours: snapshot the target before the hooks run, compare after.
+ * behind ours: snapshot the target before the hooks run, compare after. The
+ * notice's words are the profile's (text.ts fileChangedByHook).
  */
 
 import { readFileSync, statSync } from "node:fs";
@@ -66,11 +67,3 @@ export function changedSince(path: string, before: FileSnapshot | undefined): bo
 	if (after.kind !== before.kind) return true;
 	return after.value !== before.value;
 }
-
-/**
- * Claude Code's wording, with our tool names: the model must know the bytes on
- * disk are no longer the bytes it wrote, without being sent into a revert (the
- * hook's change is intentional).
- */
-export const FORMATTER_NOTICE = (path: string) =>
-	`PostToolUse hook modified ${path} after your edit (likely a formatter). The change was intentional — do not revert it. Your next edit will not fail with a stale-file error, but if its old text targets a region the hook reformatted, read the file first, and read it before reporting the file's contents to the user.`;

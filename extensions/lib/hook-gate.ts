@@ -6,7 +6,7 @@
  * never loads inside it. This inline extension forwards the child's
  * `tool_call` / `tool_result` to the parent's hooks extension over the bridge
  * and applies what comes back exactly as the parent applies it to its own
- * calls: a PreToolUse block denies the call with the hook's reason; an
+ * calls: a PreToolUse block denies the call with the parent's refusal; an
  * updatedInput is applied IN PLACE so the guards after this one (worktree
  * isolation, the permission gate) judge the rewritten input, as Claude Code
  * does; PreToolUse context is queued on the child's reminder channel (the child
@@ -57,7 +57,7 @@ export function hookGateFactory(getBridge: () => HookBridge | undefined, options
 					if (!bridge) return undefined;
 					const call = describe(event.toolName, event.input, ctx as never, process.cwd());
 					const outcome = await bridge.preToolUse(call);
-					if (outcome.block) return { block: true, reason: `PreToolUse hook: ${outcome.block.reason}` };
+					if (outcome.refusal) return { block: true, reason: outcome.refusal };
 					if (outcome.updatedInput) Object.assign(event.input as Record<string, unknown>, outcome.updatedInput);
 					if (outcome.additionalContext) pi.events.emit(REMINDER_CHANNEL, { text: outcome.additionalContext });
 				} catch {
@@ -77,7 +77,7 @@ export function hookGateFactory(getBridge: () => HookBridge | undefined, options
 						isError: event.isError,
 					});
 					// Same assembly as the parent's tool_result handler; the parent already
-					// framed additionalContext as a <system-reminder>.
+					// worded the objection and framed additionalContext as a <system-reminder>.
 					const content = applyPostToolUseOutcome(event.content, outcome, event.toolName);
 					if (!content) return undefined;
 					return { content, isError: event.isError };

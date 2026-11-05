@@ -22,8 +22,8 @@
  * here is wrapped — a throwing hook fails open, never takes the turn down.
  *
  * Hook context reaches the model in Claude Code's `hook_additional_context`
- * shape — a `<system-reminder>` reading "<Event> hook additional context: …" —
- * never as a message of its own: PreToolUse context is queued as a one-shot on
+ * shape — a `<system-reminder>` worded by the profile (text.ts) — never as a
+ * message of its own: PreToolUse context is queued as a one-shot on
  * the reminder channel, so it lands INSIDE the tool result it belongs to,
  * persisted, at no extra turn; PostToolUse context is appended to the result
  * the same way; prompt, session and compaction context is a one-shot too,
@@ -55,7 +55,7 @@ import { defaultDiscoverRoots } from "../lib/plugins.ts";
 import { appendHookLog, formatDebugLine, hooksDebugEnabled, hooksLogPath } from "./debug.ts";
 import { runHookCommand } from "./executor.ts";
 import { PRECOMPACT_INSTRUCTIONS_CHANNEL, type PreCompactInstructions } from "./compaction.ts";
-import { changedSince, FORMATTER_NOTICE, type FileSnapshot, fileToolTarget, snapshotFile } from "./formatter-notice.ts";
+import { changedSince, type FileSnapshot, fileToolTarget, snapshotFile } from "./formatter-notice.ts";
 import { matcherApplies, ccToolName, toolMatchCandidates, ccToolInput, nativeToolInput } from "./matcher.ts";
 import { loadPluginHooks } from "./plugin-hooks.ts";
 import {
@@ -63,6 +63,7 @@ import {
 	type CcHookEvent,
 	type HookOutcome,
 	type HookStdinPayload,
+	type MergedHookOutcome,
 	cancelledOutcome,
 	interpretHookResult,
 } from "./protocol.ts";
@@ -75,11 +76,7 @@ import { PromptContextRouter } from "./prompt-context.ts";
 import { SKILL_INVOCATION_TYPE, type SkillInvocationDetails } from "../skill/invoke.ts";
 import { consentDialog } from "../lib/consent-dialogs.ts";
 import { followWorkCwd } from "../lib/worktree-channel.ts";
-
-/** Claude Code's `hook_additional_context` attachment text (utils/messages.ts). */
-export function hookContextText(event: CcHookEvent, text: string): string {
-	return `${event} hook additional context: ${text}`;
-}
+import { requireText } from "../lib/profile.ts";
 
 /**
  * Every hook text that reaches the model is bounded through this: additional
@@ -132,10 +129,17 @@ function isStopContinuation(event: unknown): boolean {
 }
 
 function hooksExtension(pi: ExtensionAPI) {
+	const text = requireText("hooks");
+	const contextText = (event: CcHookEvent, added: string) => text.additionalContext({ event, text: added });
+	/** A PostToolUse hook's added context and the notice of a file it changed, as one appended block. */
+	const postToolUseContext = (added: string | undefined, changedPath: string | undefined) =>
+		[added && wrapReminder(contextText("PostToolUse", added)), changedPath && wrapReminder(text.fileChangedByHook({ path: changedPath }))]
+			.filter(Boolean)
+			.join("\n") || undefined;
 	const workCwd = followWorkCwd(pi.events);
 	let stopHookBlocks = 0;
 	/** Prompt, session and compaction hook context, as a one-shot the next request carries (lib/reminders.ts). */
-	const deliverContext = (event: CcHookEvent, text: string) => pi.events.emit(REMINDER_CHANNEL, { text: hookContextText(event, text), placement: "last-append" });
+	const deliverContext = (event: CcHookEvent, added: string) => pi.events.emit(REMINDER_CHANNEL, { text: contextText(event, added), placement: "last-append" });
 	/** UserPromptSubmit context, held until pi delivers its prompt (prompt-context.ts). */
 	const promptContext = new PromptContextRouter();
 	/** The last context seen, for bridged child calls (dispatched parent-side). */
@@ -209,6 +213,9 @@ function hooksExtension(pi: ExtensionAPI) {
 		hook_event_name: event,
 	});
 
+	/** A single outcome with its block reason worded (a cancel before or after the hooks ran). */
+	const worded = ({ block, ...rest }: HookOutcome): MergedHookOutcome => (block ? { ...rest, block: { reason: text.blockReason(block) } } : rest);
+
 	/**
 	 * Run every matched hook in parallel (CC runs matching hooks concurrently)
 	 * and merge: first block wins, updatedInput merges in order, contexts and
@@ -221,15 +228,15 @@ function hooksExtension(pi: ExtensionAPI) {
 		payloadOrFactory: HookStdinPayload | (() => Promise<HookStdinPayload | undefined>),
 		/** Runs once, only when hooks will actually run — the point where a caller can snapshot state the hooks may change. */
 		willRun?: () => void,
-	): Promise<HookOutcome> => {
-		const merged: HookOutcome = {};
+	): Promise<MergedHookOutcome> => {
+		const merged: MergedHookOutcome = {};
 		const signal = ctx.sessionEnded ? ctx.signal : ctx.signal ? AbortSignal.any([ctx.signal, sessionAbort.signal]) : sessionAbort.signal;
 		try {
 			const hooks = await collectHooks({ ...ctx, signal }, event, matchValue);
 			const payload = typeof payloadOrFactory === "function" ? await payloadOrFactory() : payloadOrFactory;
 			if (!payload || hooks.length === 0) return merged;
 			// Cancelled before the hooks ran: the gating events block, as a mid-run cancel does.
-			if (signal?.aborted) return cancelledOutcome(event);
+			if (signal?.aborted) return worded(cancelledOutcome(event));
 			willRun?.();
 			const stdin = JSON.stringify(payload);
 			const outcomes = await Promise.allSettled(
@@ -254,7 +261,7 @@ function hooksExtension(pi: ExtensionAPI) {
 						scope: source.pluginName ? `plugin:${source.pluginName}` : source.scope,
 						command: hook.command,
 						decision: decision as "allow" | "block" | "context" | "error",
-						reason: outcome.block?.reason,
+						reason: outcome.block && text.blockReason(outcome.block),
 						exitCode: run.exitCode,
 						durationMs: run.durationMs,
 					};
@@ -265,7 +272,7 @@ function hooksExtension(pi: ExtensionAPI) {
 					return outcome;
 				}),
 			);
-			if (signal?.aborted) return cancelledOutcome(event);
+			if (signal?.aborted) return worded(cancelledOutcome(event));
 			for (const result of outcomes) {
 				// One broken response must not erase another hook's deny or let the
 				// tool run while the other hooks are still deciding.
@@ -279,15 +286,15 @@ function hooksExtension(pi: ExtensionAPI) {
 				// Stop follow-up), so it is bounded like the other hook texts —
 				// stderr on an exit-2 hook is easily a full stack trace (review M2).
 				if (!merged.block && outcome.block) {
-					merged.block = { reason: capHookText(outcome.block.reason, ctx, `${event}-block`) };
+					merged.block = { reason: capHookText(text.blockReason(outcome.block), ctx, `${event}-block`) };
 				}
 				if (outcome.updatedInput) merged.updatedInput = { ...merged.updatedInput, ...outcome.updatedInput };
 				if ("updatedToolResult" in outcome) {
 					// A non-string replacement is JSON-encoded before it reaches the
 					// model, so stringify then cap it too — not just the string case.
-					const text =
+					const replacement =
 						typeof outcome.updatedToolResult === "string" ? outcome.updatedToolResult : JSON.stringify(outcome.updatedToolResult);
-					merged.updatedToolResult = capHookText(text, ctx, `${event}-result`);
+					merged.updatedToolResult = capHookText(replacement, ctx, `${event}-result`);
 				}
 				if (outcome.additionalContext) {
 					merged.additionalContext = capHookText(
@@ -318,7 +325,7 @@ function hooksExtension(pi: ExtensionAPI) {
 			tool_input: ccToolInput(event.toolName, event.input as Record<string, unknown>),
 		};
 		const outcome = await dispatch(ctx, "PreToolUse", { candidates: toolMatchCandidates(event.toolName) }, payload);
-		if (outcome.block) return { block: true, reason: `PreToolUse hook: ${outcome.block.reason}` };
+		if (outcome.block) return { block: true, reason: text.preToolUseBlocked(outcome.block) };
 		if (outcome.updatedInput) {
 			// In-place, so worktree/file-tracker/permissions (later in the
 			// extension order) all see the rewritten input — CC applies hook
@@ -328,7 +335,7 @@ function hooksExtension(pi: ExtensionAPI) {
 		}
 		// A one-shot pending when this call's result is stored is written into
 		// that result by the system-reminder extension — CC's shape, no extra turn.
-		if (outcome.additionalContext) pi.events.emit(REMINDER_CHANNEL, { text: hookContextText("PreToolUse", outcome.additionalContext) });
+		if (outcome.additionalContext) pi.events.emit(REMINDER_CHANNEL, { text: contextText("PreToolUse", outcome.additionalContext) });
 		return undefined;
 	});
 
@@ -349,15 +356,13 @@ function hooksExtension(pi: ExtensionAPI) {
 		const outcome = await dispatch(ctx, "PostToolUse", { candidates: toolMatchCandidates(event.toolName) }, payload, () => {
 			if (target) before = snapshotFile(target);
 		});
-		const formatterNotice = target && before && changedSince(target, before) ? wrapReminder(FORMATTER_NOTICE(target)) : undefined;
+		const changed = target && before && changedSince(target, before) ? target : undefined;
 		// CC feeds PostToolUse block reasons back to the model in the result the
 		// same way; the assembly rules live in applyPostToolUseOutcome.
 		const content = applyPostToolUseOutcome(event.content, {
-			...outcome,
-			additionalContext:
-				[outcome.additionalContext && wrapReminder(hookContextText("PostToolUse", outcome.additionalContext)), formatterNotice]
-					.filter(Boolean)
-					.join("\n") || undefined,
+			objection: outcome.block && text.postToolUseBlocked(outcome.block),
+			updatedToolResult: outcome.updatedToolResult,
+			additionalContext: postToolUseContext(outcome.additionalContext, changed),
 		}, event.toolName);
 		if (!content) return undefined;
 		return { content, isError: event.isError };
@@ -410,9 +415,9 @@ function hooksExtension(pi: ExtensionAPI) {
 		// queued mid-turn or not, so it rides the prompt's own request and never a
 		// run a notification opens first. A queued message is held without
 		// context too, so its delivery never takes an idle prompt's.
-		const text = outcome.additionalContext ? hookContextText("UserPromptSubmit", outcome.additionalContext) : undefined;
-		if (event.streamingBehavior) promptContext.holdQueued(event.text, text);
-		else if (text) promptContext.holdIdle(event.text, text);
+		const held = outcome.additionalContext ? contextText("UserPromptSubmit", outcome.additionalContext) : undefined;
+		if (event.streamingBehavior) promptContext.holdQueued(event.text, held);
+		else if (held) promptContext.holdIdle(event.text, held);
 		return undefined;
 	});
 
@@ -429,8 +434,8 @@ function hooksExtension(pi: ExtensionAPI) {
 			if (promptContext.isEmpty) return;
 			// A queued message delivers as typed, so an exact match is its own; the
 			// idle prompt's message may carry its expansion instead.
-			const text = promptContext.release(contentText(message.content, ""));
-			if (text) emit(text);
+			const released = promptContext.release(contentText(message.content, ""));
+			if (released) emit(released);
 			return;
 		}
 		if (message.role !== "custom") return;
@@ -534,9 +539,9 @@ function hooksExtension(pi: ExtensionAPI) {
 			if (!ctx) return {};
 			const outcome = await dispatch(ctx, "PreToolUse", { candidates: toolMatchCandidates(call.toolName) }, childPayload(call, "PreToolUse"));
 			return {
-				block: outcome.block,
+				refusal: outcome.block && text.preToolUseBlocked(outcome.block),
 				updatedInput: outcome.updatedInput ? nativeToolInput(call.toolName, outcome.updatedInput) : undefined,
-				additionalContext: outcome.additionalContext ? hookContextText("PreToolUse", outcome.additionalContext) : undefined,
+				additionalContext: outcome.additionalContext ? contextText("PreToolUse", outcome.additionalContext) : undefined,
 			};
 		},
 		async postToolUse(result: ChildHookResult) {
@@ -554,14 +559,11 @@ function hooksExtension(pi: ExtensionAPI) {
 			const outcome = await dispatch(ctx, "PostToolUse", { candidates: toolMatchCandidates(result.toolName) }, payload, () => {
 				if (target) before = snapshotFile(target);
 			});
-			const formatterNotice = target && before && changedSince(target, before) ? wrapReminder(FORMATTER_NOTICE(target)) : undefined;
+			const changed = target && before && changedSince(target, before) ? target : undefined;
 			return {
-				block: outcome.block,
+				objection: outcome.block && text.postToolUseBlocked(outcome.block),
 				updatedToolResult: outcome.updatedToolResult,
-				additionalContext:
-					[outcome.additionalContext && wrapReminder(hookContextText("PostToolUse", outcome.additionalContext)), formatterNotice]
-						.filter(Boolean)
-						.join("\n") || undefined,
+				additionalContext: postToolUseContext(outcome.additionalContext, changed),
 			};
 		},
 	};
@@ -647,7 +649,7 @@ function hooksExtension(pi: ExtensionAPI) {
 			pi.sendMessage(
 				{
 					customType: STOP_CONTINUATION_TYPE,
-					content: `Stop hook blocked stopping: ${outcome.block.reason}`,
+					content: text.stopBlocked(outcome.block),
 					display: false,
 				},
 				{ deliverAs: "followUp", triggerTurn: true },

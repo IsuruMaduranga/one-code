@@ -104,7 +104,8 @@ export interface HookRunOptions {
 	shell?: HookShell;
 }
 
-const MAX_OUTPUT_BYTES = 1_000_000;
+/** The most a hook may write to each of stdout and stderr; past it the run stops (protocol.ts reads the cap for its message). */
+export const MAX_HOOK_OUTPUT_BYTES = 1_000_000;
 const DEFAULT_TIMEOUT_S = 60;
 /** Node timers silently fire immediately above 2^31-1 ms. */
 const MAX_TIMEOUT_S = 2_147_483;
@@ -177,7 +178,7 @@ export function runHookCommand(command: string, stdinJson: string, opts: HookRun
 		const capture = (sink: "stdout" | "stderr") => (chunk: string) => {
 			if (outputLimitExceeded) return;
 			outputBytes[sink] += Buffer.byteLength(chunk, "utf8");
-			if (outputBytes[sink] > MAX_OUTPUT_BYTES) {
+			if (outputBytes[sink] > MAX_HOOK_OUTPUT_BYTES) {
 				outputLimitExceeded = true;
 				killProcessTree(child, "SIGKILL");
 				return;

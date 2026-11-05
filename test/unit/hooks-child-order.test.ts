@@ -32,7 +32,7 @@ describe("child hook and permission order", () => {
 
 	it.each(["Agent", "SendMessage"])("runs the parent's hooks for a child's %s call even though permission autoallows it", async (toolName) => {
 		let decision: ToolCallEventResult | undefined;
-		const hooks: HookBridge = { preToolUse: async () => ({ block: { reason: "no nested work" } }), postToolUse: async () => ({}) };
+		const hooks: HookBridge = { preToolUse: async () => ({ refusal: "PreToolUse hook: no nested work" }), postToolUse: async () => ({}) };
 		const permission = vi.fn(async () => undefined);
 		vi.spyOn(AgentSession.prototype, "prompt").mockImplementation(async function (this: AgentSession) {
 			expect(this.getToolDefinition(toolName)).toBeDefined();
@@ -47,7 +47,7 @@ describe("child hook and permission order", () => {
 
 	it("stops at a child's hook denial before asking the permission bridge", async () => {
 		const permission = vi.fn(async () => undefined);
-		const hooks: HookBridge = { preToolUse: async () => ({ block: { reason: "child hook denied" } }), postToolUse: async () => ({}) };
+		const hooks: HookBridge = { preToolUse: async () => ({ refusal: "PreToolUse hook: child hook denied" }), postToolUse: async () => ({}) };
 		const session = await openChildSession({
 			loader: { cwd, agentDir, noContextFiles: true, getHookBridge: () => hooks, getPermissionBridge: () => permission },
 			session: { cwd, agentDir, sessionManager: SessionManager.inMemory(cwd) },

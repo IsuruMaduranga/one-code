@@ -49,17 +49,22 @@ export interface ChildHookResult extends ChildHookCall {
 	isError: boolean;
 }
 
-/** What the parent's PreToolUse hooks decided; fields absent when no hook spoke. */
+/**
+ * What the parent's PreToolUse hooks decided; fields absent when no hook spoke.
+ * The parent words every text (the child loads no profile text for hooks).
+ */
 export interface ChildPreToolUseOutcome {
-	block?: { reason: string };
+	/** A block: the result the call gets instead of running. */
+	refusal?: string;
 	/** Already translated back to the tool's native parameter names. */
 	updatedInput?: Record<string, unknown>;
 	additionalContext?: string;
 }
 
-/** What the parent's PostToolUse hooks decided. */
+/** What the parent's PostToolUse hooks decided, worded like the pre-call outcome. */
 export interface ChildPostToolUseOutcome {
-	block?: { reason: string };
+	/** A block: the line put before the result. */
+	objection?: string;
 	updatedToolResult?: unknown;
 	additionalContext?: string;
 }

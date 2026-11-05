@@ -12,6 +12,7 @@
 import type { AskUserText } from "../ask-user/text.ts";
 import type { BtwText } from "../btw/text.ts";
 import type { EffortText } from "../effort/text.ts";
+import type { HooksText } from "../hooks/text.ts";
 import type { InitText } from "../init/text.ts";
 import type { LspText } from "../lsp/text.ts";
 import type { McpText } from "../mcp/text.ts";
@@ -52,6 +53,7 @@ export interface ProfileText {
 	skill?: SkillText;
 	mcp?: McpText;
 	lsp?: LspText;
+	hooks?: HooksText;
 	/** Used by the worktree tools, subagents and workflows (each guards isolated sessions with it). */
 	worktreeGuard?: WorktreeGuardText;
 }

@@ -7,6 +7,7 @@
 
 import { isAppendedReminderText } from "../lib/reminders.ts";
 import { emptyToolResultText } from "../lib/empty-tool-result.ts";
+import { MAX_HOOK_OUTPUT_BYTES } from "./executor.ts";
 import type { SessionBackgroundTask, SessionCron } from "../lib/session-work.ts";
 
 /** The contiguous run of reminder/countdown blocks at the tail of a tool result (review M3). */
@@ -100,15 +101,40 @@ export function parseEnvelope(stdout: string): HookEnvelope | undefined {
 	}
 }
 
+/**
+ * Why a hook's verdict blocks: the reason the hook stated, or the verdict that
+ * gave none. The extension words it through the profile (text.ts blockReason).
+ */
+export type HookBlock =
+	| { kind: "stated"; reason: string }
+	/** The calling turn or child session was cancelled while the hook ran. */
+	| { kind: "cancelled" }
+	| { kind: "timedOut" }
+	| { kind: "outputLimit"; maxBytes: number }
+	/** Exit code 2 with nothing on stderr. */
+	| { kind: "exitTwo" }
+	/** `continue: false` without a `stopReason`. */
+	| { kind: "stopped" }
+	/** `permissionDecision: "ask"` without a reason (blocks: a hook cannot open a prompt). */
+	| { kind: "askRequested" }
+	| { kind: "denied" }
+	/** `decision: "block"` without a reason. */
+	| { kind: "blocked" };
+
 /** What one finished hook run asks One Code to do. */
 export interface HookOutcome {
-	block?: { reason: string };
+	block?: HookBlock;
 	/** Stop continue:false ends the turn rather than requesting another response. */
 	preventContinuation?: boolean;
 	updatedInput?: Record<string, unknown>;
 	updatedToolResult?: unknown;
 	additionalContext?: string;
 	systemMessage?: string;
+}
+
+/** Every matched hook's outcome merged, a block's reason worded and bounded (hooks/index.ts dispatch). */
+export interface MergedHookOutcome extends Omit<HookOutcome, "block"> {
+	block?: { reason: string };
 }
 
 export interface FinishedRun {
@@ -145,27 +171,35 @@ const STDOUT_IS_CONTEXT: ReadonlySet<CcHookEvent> = new Set(["UserPromptSubmit",
 
 /** A cancelled run: the gating events block, the rest pass. */
 export function cancelledOutcome(event: CcHookEvent): HookOutcome {
-	return TIMEOUT_BLOCKS.has(event) ? { block: { reason: "Hook cancelled" } } : {};
+	return TIMEOUT_BLOCKS.has(event) ? { block: { kind: "cancelled" } } : {};
+}
+
+/** The hook's own reason, when it gave a non-blank one. */
+function stated(reason: string | undefined): HookBlock | undefined {
+	const trimmed = reason?.trim();
+	return trimmed ? { kind: "stated", reason: trimmed } : undefined;
 }
 
 export function interpretHookResult(event: CcHookEvent, run: FinishedRun): HookOutcome {
 	if (run.aborted) return cancelledOutcome(event);
 	if (run.outputLimitExceeded) {
-		const reason = "Hook exceeded its output limit; reduce stdout/stderr to at most 1,000,000 bytes per stream.";
-		return TIMEOUT_BLOCKS.has(event) ? { block: { reason } } : { systemMessage: reason };
+		// Blocks for the gating events; for the rest a notice to the user.
+		return TIMEOUT_BLOCKS.has(event)
+			? { block: { kind: "outputLimit", maxBytes: MAX_HOOK_OUTPUT_BYTES } }
+			: { systemMessage: `Hook exceeded its output limit; reduce stdout/stderr to at most ${MAX_HOOK_OUTPUT_BYTES.toLocaleString("en-US")} bytes per stream.` };
 	}
 	// Killed (timeout or otherwise): a null exit code must never read as a
 	// clean allow. Closed for the two events that gate something; open for the
 	// rest — the side effect already happened, or blocking would wedge exit.
 	if (run.timedOut || (run.exitCode === null && !run.spawnError)) {
-		return TIMEOUT_BLOCKS.has(event) ? { block: { reason: "Hook timed out" } } : {};
+		return TIMEOUT_BLOCKS.has(event) ? { block: { kind: "timedOut" } } : {};
 	}
 	// A hook that couldn't spawn at all is an environment problem, not a
 	// verdict — fail open everywhere (CC treats non-2 errors as non-blocking).
 	if (run.spawnError) return {};
 
 	if (run.exitCode === 2) {
-		return { block: { reason: run.stderr.trim() || "Hook blocked the action (exit 2)" } };
+		return { block: stated(run.stderr) ?? { kind: "exitTwo" } };
 	}
 	if (run.exitCode !== 0) return {};
 
@@ -179,21 +213,17 @@ export function interpretHookResult(event: CcHookEvent, run: FinishedRun): HookO
 	const specific = envelope.hookSpecificOutput;
 
 	if (envelope.continue === false) {
-		outcome.block = { reason: envelope.stopReason?.trim() || "Hook stopped continuation" };
+		outcome.block = stated(envelope.stopReason) ?? { kind: "stopped" };
 		if (event === "Stop") outcome.preventContinuation = true;
 	}
 	const decision = specific?.permissionDecision;
 	if (decision === "deny" || decision === "ask") {
 		// pi's tool_call is allow-or-block; treating "ask" as a silent allow
 		// would be the unsafe reading, so it blocks with the hook's reason.
-		outcome.block ??= {
-			reason:
-				specific?.permissionDecisionReason?.trim() ||
-				(decision === "ask" ? "Hook requested user confirmation" : "Hook denied the action"),
-		};
+		outcome.block ??= stated(specific?.permissionDecisionReason) ?? { kind: decision === "ask" ? "askRequested" : "denied" };
 	}
 	if (envelope.decision === "block") {
-		outcome.block ??= { reason: envelope.reason?.trim() || "Hook blocked the action" };
+		outcome.block ??= stated(envelope.reason) ?? { kind: "blocked" };
 	}
 	// "allow" is deliberately not handled: a hook cannot pre-approve anything —
 	// One Code's permission gate, safety floor, and classifier still run.
@@ -218,17 +248,18 @@ interface TextBlock {
  * hook changed anything. Shared by the parent's `tool_result` handler and the
  * child hook gate so a subagent's results are assembled exactly like the
  * parent's: an `updatedToolResult` replaces the content (a non-string is
- * JSON-encoded), a block's reason is put in front — the tool already ran, so
- * the objection is delivered in the result the model reads, the error flag left
- * as the tool set it (a successful write marked as an error invites a redo) —
- * and `additionalContext` (already framed by the caller) goes behind.
+ * JSON-encoded), a block's `objection` line is put in front — the tool already
+ * ran, so the objection is delivered in the result the model reads, the error
+ * flag left as the tool set it (a successful write marked as an error invites
+ * a redo) — and `additionalContext` goes behind. The caller words and frames
+ * both (text.ts postToolUseBlocked, additionalContext).
  */
 export function applyPostToolUseOutcome<T extends { type: string }>(
 	content: readonly T[],
-	outcome: Pick<HookOutcome, "block" | "updatedToolResult" | "additionalContext">,
+	outcome: { objection?: string; updatedToolResult?: unknown; additionalContext?: string },
 	toolName: string,
 ): Array<T | TextBlock> | undefined {
-	if (!outcome.block && outcome.updatedToolResult === undefined && !outcome.additionalContext) return undefined;
+	if (!outcome.objection && outcome.updatedToolResult === undefined && !outcome.additionalContext) return undefined;
 	let result: Array<T | TextBlock> = [...content];
 	if (outcome.updatedToolResult !== undefined) {
 		const replacement = outcome.updatedToolResult;
@@ -241,7 +272,7 @@ export function applyPostToolUseOutcome<T extends { type: string }>(
 		// The hook's own text: an empty one gets the marker for every tool, read included.
 		result = [{ type: "text", text: text.trim() ? text : emptyToolResultText(toolName) }, ...reminderTail];
 	}
-	if (outcome.block) result = [{ type: "text", text: `PostToolUse hook: ${outcome.block.reason}` }, ...result];
+	if (outcome.objection) result = [{ type: "text", text: outcome.objection }, ...result];
 	if (outcome.additionalContext) result = [...result, { type: "text", text: outcome.additionalContext }];
 	return result;
 }

@@ -46,7 +46,7 @@ describe("hookGateFactory", () => {
 		const bridge: HookBridge = {
 			async preToolUse(call) {
 				calls.push(call);
-				return { block: { reason: "not in children" } };
+				return { refusal: "PreToolUse hook: not in children" };
 			},
 			async postToolUse() {
 				return {};
@@ -85,7 +85,7 @@ describe("hookGateFactory", () => {
 			},
 			async postToolUse(result) {
 				seen.push(result);
-				return { block: { reason: "lint failed" }, updatedToolResult: "replaced", additionalContext: "<system-reminder>\nctx\n</system-reminder>" };
+				return { objection: "PostToolUse hook: lint failed", updatedToolResult: "replaced", additionalContext: "<system-reminder>\nctx\n</system-reminder>" };
 			},
 		};
 		const { fake } = mount(bridge);
@@ -133,7 +133,7 @@ describe("hookGateFactory", () => {
 		const bridge: HookBridge = {
 			preToolUse: async () => {
 				called++;
-				return { block: { reason: "x" } };
+				return { refusal: "x" };
 			},
 			postToolUse: async () => ({}),
 		};

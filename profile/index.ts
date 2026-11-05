@@ -12,6 +12,7 @@ import type { Profile } from "../extensions/lib/profile-contract.ts";
 import { askUser } from "./ask-user/index.ts";
 import { btw } from "./btw/index.ts";
 import { effort } from "./effort/index.ts";
+import { hooks } from "./hooks/index.ts";
 import { init } from "./init/index.ts";
 import { lsp } from "./lsp/index.ts";
 import { mcp } from "./mcp/index.ts";
@@ -32,5 +33,5 @@ export const profile: Profile = {
 	features: {},
 	tools: {},
 	childExtensions: [],
-	text: { systemPrompt, notebook, askUser, tasks, worktree, worktreeGuard, webFetch, webSearch, nativeWeb, sessionTitle, init, btw, recap, effort, planMode, skill, mcp, lsp },
+	text: { systemPrompt, notebook, askUser, tasks, worktree, worktreeGuard, webFetch, webSearch, nativeWeb, sessionTitle, init, btw, recap, effort, planMode, skill, mcp, lsp, hooks },
 };
