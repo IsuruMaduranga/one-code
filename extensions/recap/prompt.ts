@@ -1,7 +1,7 @@
 /**
  * Pure pieces of Claude Code's "while you were away" recap (the ※ line CC shows
- * when you come back after stepping away). Prompt text is verbatim from CC's
- * services/awaySummary.ts; the display format matches CC's away_summary render
+ * when you come back after stepping away). The prompt text is the profile's
+ * (text.ts); the display format matches CC's away_summary render
  * (dim, led by the ※ reference mark). The session-memory block CC optionally
  * prepends is omitted here (kept decoupled from One Code's memory extension).
  */
@@ -17,10 +17,6 @@ export const REFERENCE_MARK = "※";
  * "where we left off").
  */
 export const RECENT_MESSAGE_WINDOW = 30;
-
-/** The away-summary instruction, verbatim from Claude Code 2.1.261's request (no memory block). */
-export const RECAP_PROMPT =
-	"The user stepped away and is coming back. Recap in under 40 words, 1-2 plain sentences, no markdown. Lead with the overall goal and current task, then the one next action. Skip root-cause narrative, fix internals, secondary to-dos, and em-dash tangents.";
 
 /** The transcript text after the ※ mark, matching CC's shipped "recap: …" line. */
 export function recapLine(content: string): string {

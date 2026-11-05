@@ -39,14 +39,13 @@ import { releaseSideCalls, runSideCall } from "../lib/side-call-run.ts";
 import { answerText, branchMessages, stripImageBlocks, toolStubs, withoutSystemMessages } from "../lib/side-call.ts";
 import { unrefTimers } from "../lib/timer-ops.ts";
 import { dimMarkedLine } from "../lib/tui-render.ts";
-import { RECAP_PROMPT, recapLine, recentForRecap, REFERENCE_MARK } from "./prompt.ts";
+import { requireText } from "../lib/profile.ts";
+import { recapLine, recentForRecap, REFERENCE_MARK } from "./prompt.ts";
 import { RecapScheduler } from "./scheduler.ts";
 
 const ENTRY_TYPE = "one-code:recap";
 const DEFAULT_IDLE_MS = 5 * 60_000; // CC's BLUR_DELAY_MS
 const RECAP_MAX_TOKENS = 256; // 1-3 short sentences
-/** Description on the name-only tool stubs sent with the recap. */
-const STUB_REASON = "Unavailable during this summary; answer in text.";
 const RECAP_TIMEOUT_MS = 30_000;
 
 /** The idle delay before a recap, overridable via CC_RECAP_IDLE_MS (floor 1s). */
@@ -60,6 +59,7 @@ interface RecapData {
 }
 
 function recapExtension(pi: ExtensionAPI) {
+	const text = requireText("recap");
 	pi.registerEntryRenderer<RecapData>(ENTRY_TYPE, (entry, _options, theme) => {
 		const content = entry.data?.content;
 		if (!content) return undefined;
@@ -95,13 +95,13 @@ function recapExtension(pi: ExtensionAPI) {
 		// blocks stays valid on strict providers (see the header note) without
 		// shipping every full schema (~6k tokens) to a call that must answer
 		// in text.
-		const tools = toolStubs(pi.getActiveTools(), STUB_REASON);
+		const tools = toolStubs(pi.getActiveTools(), text.stubReason);
 
 		const recent = recentForRecap(withoutSystemMessages(messages));
 		// The cheap reader may be a text-only model, and the recap does not need
 		// images — strip them so a pasted image or one a Read returned cannot break
 		// the call (working-docs/decisions/model-policy.md).
-		const recapMessages = [...stripImageBlocks(convertToLlm(recent)), { role: "user" as const, content: RECAP_PROMPT, timestamp: Date.now() }];
+		const recapMessages = [...stripImageBlocks(convertToLlm(recent)), { role: "user" as const, content: text.prompt, timestamp: Date.now() }];
 		// Thinking off unless the model cannot disable it; withReasoningFallback
 		// sends a level up front for catalog-marked models and retries on the 400
 		// for the rest. Fires on a 5-min idle timer, so no cross-call memo.
@@ -133,7 +133,7 @@ function recapExtension(pi: ExtensionAPI) {
 		try {
 			const model = ctx.model;
 			if (!model) return;
-			const replayed = await replaySideCall(ctx, model as Model<Api>, exchange, RECAP_PROMPT, {
+			const replayed = await replaySideCall(ctx, model as Model<Api>, exchange, text.prompt, {
 				signal: controller.signal,
 				timeoutMs: RECAP_TIMEOUT_MS,
 				onUsage: (usage) => recordUsage(pi, "recap", usage),

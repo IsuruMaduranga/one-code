@@ -5,7 +5,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import initExtension from "../../extensions/init/index.ts";
-import { INIT_PROMPT } from "../../extensions/init/prompt.ts";
+import { INIT_PROMPT } from "../../profile/init/prompt.ts";
 import { commandDisplayLine, promptCommandText } from "../../extensions/skill/invoke.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { captureUserTurns } from "./helpers/user-turn.ts";

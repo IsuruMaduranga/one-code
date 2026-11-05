@@ -1,7 +1,11 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { exchangeMessages, historyMessages, SIDE_QUESTION_REMINDER, sideQuestionMessage } from "../../extensions/btw/prompt.ts";
+import { exchangeMessages, historyMessages } from "../../extensions/btw/prompt.ts";
+import { btw, SIDE_QUESTION_REMINDER } from "../../profile/btw/index.ts";
+
+/** The side question's final user message in One Code's words (the extension trims the question). */
+const sideQuestionMessage = (question: string) => btw.question(question.trim());
 
 const capturePath = fileURLToPath(new URL("../../captures/btw.json", import.meta.url));
 

@@ -53,13 +53,12 @@ import { recordUsage } from "../lib/usage-bus.ts";
 import type { ProseRenderer } from "../subagents/panel-render.ts";
 import { createMarkdownProse } from "../subagents/prose.ts";
 import { applyBtwKey, type BtwBody, BTW_MAX_HEIGHT, copyAnswer, decodeBtwKey, initialBtwState, renderBtwPanel } from "./panel.ts";
-import { type BtwExchange, exchangeMessages, historyMessages, sideQuestionMessage } from "./prompt.ts";
+import { requireText } from "../lib/profile.ts";
+import { type BtwExchange, exchangeMessages, historyMessages } from "./prompt.ts";
 import { panelUi } from "../lib/panel-focus.ts";
 
 const BTW_MAX_TOKENS = 8192;
 const BTW_TIMEOUT_MS = 120_000;
-/** Description on the name-only tool stubs sent with the side question. */
-const STUB_REASON = "Unavailable during this side question; answer in text.";
 /**
  * The transcript record of a started fork, Claude Code's `/btw <question>` row
  * with `⎿  ⑂ forked <name> (<id>)` under it. A display-only session entry: it
@@ -74,6 +73,7 @@ interface BtwForkEntry {
 }
 
 function btwExtension(pi: ExtensionAPI) {
+	const text = requireText("btw");
 	// The fork entry's `/btw` row is drawn as pi draws a user prompt, with the
 	// padding pi read from settings at startup.
 	let outputPad = 1;
@@ -157,7 +157,7 @@ function btwExtension(pi: ExtensionAPI) {
 		const model = ctx.model as Model<Api> | undefined;
 		if (!model) throw new Error("No model is configured for this session.");
 		const before = historyMessages(earlier, model);
-		const replayed = await replaySideCall(ctx, model, exchange, sideQuestionMessage(question), {
+		const replayed = await replaySideCall(ctx, model, exchange, text.question(question.trim()), {
 			signal,
 			timeoutMs: BTW_TIMEOUT_MS,
 			onUsage: (usage) => recordUsage(pi, "btw", usage),
@@ -168,7 +168,7 @@ function btwExtension(pi: ExtensionAPI) {
 		// No replay for this model, or it failed: the standalone call.
 		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
 		if (!auth.ok) throw new Error("No API key is available for the current model.");
-		const tools = toolStubs(pi.getActiveTools(), STUB_REASON);
+		const tools = toolStubs(pi.getActiveTools(), text.stubReason);
 		// The current branch, read now: a /tree or a compaction since the last
 		// request changed it, and pi fires no `context` event for either.
 		const context = trimToTurnBoundary(withoutSystemMessages(branchMessages(ctx)));
@@ -178,7 +178,7 @@ function btwExtension(pi: ExtensionAPI) {
 		const messages = [
 			...stripImageBlocks(convertToLlm(context)),
 			...before,
-			{ role: "user" as const, content: sideQuestionMessage(question), timestamp: Date.now() },
+			{ role: "user" as const, content: text.question(question.trim()), timestamp: Date.now() },
 		];
 		const result = await runSideCall({
 			kind: "btw",

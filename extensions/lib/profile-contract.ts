@@ -10,7 +10,10 @@
  */
 
 import type { AskUserText } from "../ask-user/text.ts";
+import type { BtwText } from "../btw/text.ts";
+import type { InitText } from "../init/text.ts";
 import type { NotebookText } from "../notebook/text.ts";
+import type { RecapText } from "../recap/text.ts";
 import type { SessionTitleText } from "../session-title/text.ts";
 import type { SystemPromptText } from "../system-prompt/text.ts";
 import type { TasksText } from "../tasks/text.ts";
@@ -36,6 +39,9 @@ export interface ProfileText {
 	/** Used by web_search and web_fetch (Anthropic's server-side tools). */
 	nativeWeb?: NativeWebText;
 	sessionTitle?: SessionTitleText;
+	init?: InitText;
+	btw?: BtwText;
+	recap?: RecapText;
 	/** Used by the worktree tools, subagents and workflows (each guards isolated sessions with it). */
 	worktreeGuard?: WorktreeGuardText;
 }
