@@ -16,8 +16,8 @@
  * GOLDEN_SKILL, the MCP tools under GOLDEN_MCP (golden-mcp-server.mjs),
  * lsp_diagnostics under GOLDEN_LSP (golden-lsp-server.mjs), the hooks under
  * GOLDEN_HOOKS (golden-hook.mjs), MEMORY.md near and over its limit under
- * GOLDEN_MEMORY, the cron tools and schedule_wakeup under GOLDEN_CRON and
- * the worktree
+ * GOLDEN_MEMORY, the cron tools and schedule_wakeup under GOLDEN_CRON, the
+ * monitor and task tools under GOLDEN_MONITOR and the worktree
  * tools under GOLDEN_WORKTREE after all of them. The auto-mode classifier gets a verdict instead: severity 60
  * at stage 1, so stage 2 runs too, and severity 10 at stage 2, so the call is
  * allowed and the subagent's own requests are recorded. Every other reply is a
@@ -443,6 +443,29 @@ const CRON_ROUNDS: ToolCall[][] = [
 ];
 
 /**
+ * monitor, task_output and task_stop under GOLDEN_MONITOR. The tools scenario
+ * is a one-shot run, so a monitor runs to its end and returns inline: events
+ * and an exit, nothing seen, a deadline, the persistent flag a one-shot run
+ * cannot honour, a WebSocket URL that cannot open, and neither or both of
+ * command and ws; then task_output and task_stop on an unknown id.
+ */
+const mo = (id: string, name: string, input: Record<string, unknown>): ToolCall => ({ id: `toolu_golden_monitor_${id}`, name, input });
+const MONITOR_ROUNDS: ToolCall[][] = [
+	[mo("load", "tool_search", { query: "select:monitor,task_output,task_stop" })],
+	[
+		mo("events", "monitor", { command: "printf 'one\\ntwo\\n'; exit 3", description: "golden events" }),
+		mo("quiet", "monitor", { command: "true", description: "golden quiet" }),
+		mo("deadline", "monitor", { command: "sleep 30", description: "golden deadline", timeout_ms: 1000 }),
+		mo("persistent", "monitor", { command: "sleep 30", description: "golden persistent", persistent: true, timeout_ms: 1000 }),
+		mo("ws_bad", "monitor", { ws: { url: "not a url" }, description: "golden socket" }),
+		mo("neither", "monitor", { description: "golden neither" }),
+		mo("both", "monitor", { command: "true", ws: { url: "ws://golden.example" }, description: "golden both" }),
+		mo("output_unknown", "task_output", { task_id: "nope" }),
+		mo("stop_unknown", "task_stop", { task_id: "nope" }),
+	],
+];
+
+/**
  * Plan mode under GOLDEN_PLAN, on its own (the session scenario's last
  * prompt): load the tools, exit before entering, enter, exit with an empty
  * plan, write the plan to the file enter_plan_mode named, and exit for
@@ -529,6 +552,7 @@ function roundsFor(text: string): ToolCall[][] {
 	if (has("GOLDEN_HOOKS")) rounds.push(...HOOK_ROUNDS);
 	if (has("GOLDEN_MEMORY")) rounds.push(...MEMORY_ROUNDS);
 	if (has("GOLDEN_CRON")) rounds.push(...CRON_ROUNDS);
+	if (has("GOLDEN_MONITOR")) rounds.push(...MONITOR_ROUNDS);
 	if (has("GOLDEN_WORKTREE")) rounds.push(...WORKTREE_ROUNDS);
 	return rounds;
 }
