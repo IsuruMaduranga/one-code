@@ -633,6 +633,18 @@ const RESULT_ROUNDS: ToolCall[][] = [
 ];
 
 /**
+ * tool_search under GOLDEN_TOOLSEARCH: a deferred tool called before it is
+ * loaded (the miss reminder), and a select of a loaded tool with a name that
+ * is not deferred (already loaded, plus the not-found note).
+ */
+const TOOLSEARCH_ROUNDS: ToolCall[][] = [
+	[
+		{ id: "toolu_golden_ts_miss", name: "enter_plan_mode", input: {} },
+		{ id: "toolu_golden_ts_select", name: "tool_search", input: { query: "select:web_fetch,golden_nope" } },
+	],
+];
+
+/**
  * GOLDEN_DENY (the session scenario, before its first compaction): a read
  * outside the project, whose first-outside-read prompt the runner cancels, so
  * the model hears the user declined it.
@@ -777,6 +789,7 @@ function roundsFor(text: string): ToolCall[][] {
 	if (has("GOLDEN_AUTOMODE")) rounds.push(...AUTOMODE_ROUNDS);
 	if (has("GOLDEN_SHELL")) rounds.push(...SHELL_ROUNDS);
 	if (has("GOLDEN_RESULTS")) rounds.push(...RESULT_ROUNDS);
+	if (has("GOLDEN_TOOLSEARCH")) rounds.push(...TOOLSEARCH_ROUNDS);
 	if (has("GOLDEN_DENY")) rounds.push(...DENY_ROUNDS);
 	if (has("GOLDEN_BIGFILE")) rounds.push(...BIGFILE_ROUNDS);
 	if (has("GOLDEN_WORKTREE")) rounds.push(...WORKTREE_ROUNDS);
