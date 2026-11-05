@@ -20,8 +20,8 @@
  * monitor and task tools under GOLDEN_MONITOR, the /loop skill under
  * GOLDEN_LOOP, the artifact tool under GOLDEN_ARTIFACT, the file tracker's
  * refusals and change notices under GOLDEN_FILES, a file too large to
- * restore after compaction under GOLDEN_BIGFILE (the session scenario) and
- * the worktree tools under GOLDEN_WORKTREE after all of them. The auto-mode classifier gets a verdict instead: severity 60
+ * restore after compaction under GOLDEN_BIGFILE (the session scenario), the
+ * workflow tool under GOLDEN_WORKFLOW and the worktree tools under GOLDEN_WORKTREE after all of them. The auto-mode classifier gets a verdict instead: severity 60
  * at stage 1, so stage 2 runs too, and severity 10 at stage 2, so the call is
  * allowed and the subagent's own requests are recorded. Every other reply is a
  * fixed text shaped like a compaction summary, which serves every turn and
@@ -546,6 +546,39 @@ const FILE_ROUNDS: ToolCall[][] = [
 const CHILD_ROUNDS: ToolCall[][] = [[fl("child_own_read", "read", { path: "ft/child.txt" })], [fl("child_write", "write", { path: "ft/child.txt", content: "changed by the child\n" })]];
 
 /**
+ * The workflow tool under GOLDEN_WORKFLOW, all in one round (a one-shot run
+ * runs each to its end): every refusal before a run starts, a meta that is
+ * not a pure literal, a script that breaks the determinism rules, and a run
+ * whose agents reply as asked, never call structured_output (the nudge,
+ * then the failure), and name an agent type that does not exist.
+ * golden-requests.mjs replaces the run id and the run's seconds.
+ */
+const wkf = (id: string, input: ToolCall["input"]): ToolCall => ({ id: `toolu_golden_workflow_${id}`, name: "workflow", input });
+const WORKFLOW_META = "export const meta = { name: 'golden-run', description: 'A golden workflow', phases: [{ title: 'Ask' }] }";
+const WORKFLOW_SCRIPT = [
+	WORKFLOW_META,
+	"phase('Ask')",
+	"log('asking')",
+	"const plain = await agent('Reply with OK.', { label: 'plain', phase: 'Ask' })",
+	"const errors = []",
+	"try { await agent('Give the data.', { label: 'shaped', schema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] } }) } catch (e) { errors.push(e.message) }",
+	"try { await agent('Reply.', { label: 'typed', agentType: 'golden-nope' }) } catch (e) { errors.push(e.message) }",
+	"return { plain, errors }",
+].join("\n");
+const WORKFLOW_ROUNDS: ToolCall[][] = [
+	[
+		wkf("none", {}),
+		wkf("missing_path", { scriptPath: "missing-workflow.js" }),
+		wkf("unknown_name", { name: "golden-nope" }),
+		wkf("unknown_run", { resumeFromRunId: "wf_0000000000" }),
+		wkf("no_meta", { script: "await agent('Reply with OK.')" }),
+		wkf("impure_meta", { script: "export const meta = { name: `golden-${1}`, description: 'x' }\nreturn 1" }),
+		wkf("random", { script: "export const meta = { name: 'golden-random', description: 'Breaks determinism' }\nreturn Math.random()" }),
+		wkf("run", { script: WORKFLOW_SCRIPT }),
+	],
+];
+
+/**
  * GOLDEN_BIGFILE (the session scenario, before its first compaction): make a
  * file past the restore's per-file cap and read it, so the restore sends the
  * note in place of its contents.
@@ -663,6 +696,7 @@ function roundsFor(text: string): ToolCall[][] {
 	if (has("GOLDEN_LOOP")) rounds.push(...LOOP_ROUNDS);
 	if (has("GOLDEN_ARTIFACT")) rounds.push(...ARTIFACT_ROUNDS);
 	if (has("GOLDEN_FILES")) rounds.push(...FILE_ROUNDS);
+	if (has("GOLDEN_WORKFLOW")) rounds.push(...WORKFLOW_ROUNDS);
 	if (has("GOLDEN_BIGFILE")) rounds.push(...BIGFILE_ROUNDS);
 	if (has("GOLDEN_WORKTREE")) rounds.push(...WORKTREE_ROUNDS);
 	return rounds;
