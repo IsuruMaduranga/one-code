@@ -10,6 +10,7 @@ export async function runNativeSearch<T>(
 	return runWithDeadline(call, {
 		signal,
 		timeoutMs: NATIVE_SEARCH_TIMEOUT_MS,
-		message: "Provider-native search did not answer within 120 seconds.",
+		// Never shown: index.ts reads the DeadlineError as a `timedOut` failure the profile words.
+		message: "web_search: provider-native search did not resolve in time",
 	});
 }

@@ -2,12 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import {
 	BRAVE_KEY_ENV,
 	EXA_MCP_URL,
-	KEYLESS_NOTE,
 	TAVILY_KEY_ENV,
 	braveBackend,
+	type ChainOutcome,
 	exaFreeBackend,
 	filterByDomains,
-	formatSearchResults,
 	parseBrave,
 	parseExaMcpText,
 	parseMcpResponseBody,
@@ -20,6 +19,22 @@ import {
 	type FetchLike,
 	type SearchBackend,
 } from "../../extensions/web/backends.ts";
+import { webSearch } from "../../profile/web-search/index.ts";
+
+/** The failure data a backend or the chain threw. */
+async function failureOf(work: Promise<unknown> | (() => unknown)): Promise<unknown> {
+	try {
+		await (typeof work === "function" ? work() : work);
+	} catch (error) {
+		return (error as { failure?: unknown }).failure;
+	}
+	throw new Error("expected a failure");
+}
+
+/** The chain's result in One Code's words. */
+const formatSearchResults = (query: string, outcome: ChainOutcome) =>
+	webSearch.chainResults({ query, label: outcome.backend.label, attempts: outcome.attempts, keyless: outcome.backend.keyless, results: outcome.results });
+const KEYLESS_NOTE_START = "Note: these results came from Exa's free keyless endpoint";
 
 const jsonResponse = (body: unknown, init: { status?: number; contentType?: string } = {}): Response =>
 	new Response(typeof body === "string" ? body : JSON.stringify(body), {
@@ -131,10 +146,10 @@ describe("parsers", () => {
 		]);
 	});
 
-	it("parseMcpResponseBody handles plain JSON and SSE", () => {
+	it("parseMcpResponseBody handles plain JSON and SSE", async () => {
 		expect(parseMcpResponseBody('{"a":1}', "application/json")).toEqual({ a: 1 });
 		expect(parseMcpResponseBody('event: message\ndata: {"a":2}\n\n', "text/event-stream")).toEqual({ a: 2 });
-		expect(() => parseMcpResponseBody("event: message\n", "text/event-stream")).toThrow(/no data/);
+		expect(await failureOf(() => parseMcpResponseBody("event: message\n", "text/event-stream"))).toEqual({ kind: "noData", api: "Exa MCP" });
 	});
 });
 
@@ -153,7 +168,9 @@ describe("backends over a fake fetch", () => {
 
 	it("brave names the env var on an auth failure", async () => {
 		const fetchImpl: FetchLike = async () => jsonResponse("Unauthorized", { status: 401, contentType: "text/plain" });
-		await expect(braveBackend("bad", fetchImpl).search("q", {}, 5, undefined)).rejects.toThrow(new RegExp(`401.*${BRAVE_KEY_ENV}.*Unauthorized`));
+		const failure = await failureOf(braveBackend("bad", fetchImpl).search("q", {}, 5, undefined));
+		expect(failure).toEqual({ kind: "http", api: "Brave Search API", status: 401, keyEnv: BRAVE_KEY_ENV, body: "Unauthorized" });
+		expect(webSearch.attempt({ label: "Brave Search", failure: failure as never })).toBe(`Brave Search: Brave Search API HTTP 401 (check ${BRAVE_KEY_ENV}): Unauthorized`);
 	});
 
 	it("tavily posts a bearer token with include/exclude domains", async () => {
@@ -181,10 +198,10 @@ describe("backends over a fake fetch", () => {
 	});
 
 	it("exa-free surfaces a rate limit and a JSON-RPC error loudly", async () => {
-		await expect(exaFreeBackend(async () => jsonResponse("", { status: 429 })).search("q", {}, 4, undefined)).rejects.toThrow(/rate-limited/);
-		await expect(
-			exaFreeBackend(async () => jsonResponse({ jsonrpc: "2.0", id: 1, error: { code: -1, message: "boom" } })).search("q", {}, 4, undefined),
-		).rejects.toThrow(/Exa MCP error: boom/);
+		expect(await failureOf(exaFreeBackend(async () => jsonResponse("", { status: 429 })).search("q", {}, 4, undefined))).toEqual({ kind: "rateLimited", api: "Exa free endpoint" });
+		const rpc = await failureOf(exaFreeBackend(async () => jsonResponse({ jsonrpc: "2.0", id: 1, error: { code: -1, message: "boom" } })).search("q", {}, 4, undefined));
+		expect(rpc).toEqual({ kind: "rpcError", api: "Exa MCP", message: "boom" });
+		expect(webSearch.attempt({ label: "Exa", failure: rpc as never })).toBe("Exa: Exa MCP error: boom");
 	});
 });
 
@@ -201,11 +218,11 @@ describe("runChain + formatSearchResults", () => {
 		const chain = [backend("brave", false, async () => { throw new Error("down"); }), backend("exa-free", true, async () => ok)];
 		const outcome = await runChain(chain, "q", {}, 10, undefined);
 		expect(outcome.backend.name).toBe("exa-free");
-		expect(outcome.failures).toEqual(["brave: down"]);
+		expect(outcome.attempts).toEqual([{ label: "brave", failure: { kind: "other", osMessage: "down" } }]);
 		const text = formatSearchResults("q", outcome);
 		expect(text).toContain('Search results for "q" (via exa-free)');
 		expect(text).toContain("Fell back after: brave: down");
-		expect(text).toContain(KEYLESS_NOTE);
+		expect(text).toContain(KEYLESS_NOTE_START);
 		expect(text).toContain("1. T\n   https://a.com/\n   S");
 		expect(text).toContain("Sources:");
 	});
@@ -223,13 +240,14 @@ describe("runChain + formatSearchResults", () => {
 	it("does not add the keyless note for a keyed backend and reports no results", async () => {
 		const outcome = await runChain([backend("tavily", false, async () => [])], "q", {}, 10, undefined);
 		const text = formatSearchResults("q", outcome);
-		expect(text).not.toContain(KEYLESS_NOTE);
+		expect(text).not.toContain(KEYLESS_NOTE_START);
 		expect(text).toContain("No results.");
 	});
 
 	it("names every backend when all fail", async () => {
 		const chain = [backend("brave", false, async () => { throw new Error("a"); }), backend("exa-free", true, async () => { throw new Error("b"); })];
-		await expect(runChain(chain, "q", {}, 10, undefined)).rejects.toThrow(/Every search backend failed:\n- brave: a\n- exa-free: b/);
+		const failure = await failureOf(runChain(chain, "q", {}, 10, undefined));
+		expect(webSearch.failed({ model: "p/m", failure: failure as never })).toBe("web_search failed on p/m.\nEvery search backend failed:\n- brave: a\n- exa-free: b");
 	});
 
 	it("stops on cancellation instead of trying the next backend", async () => {
@@ -239,7 +257,7 @@ describe("runChain + formatSearchResults", () => {
 			backend("brave", false, async () => { controller.abort(); throw new Error("aborted"); }),
 			backend("exa-free", true, second),
 		];
-		await expect(runChain(chain, "q", {}, 10, controller.signal)).rejects.toThrow(/cancelled/);
+		expect(await failureOf(runChain(chain, "q", {}, 10, controller.signal))).toEqual({ kind: "cancelled" });
 		expect(second).not.toHaveBeenCalled();
 	});
 });

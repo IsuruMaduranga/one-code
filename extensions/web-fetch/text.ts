@@ -50,7 +50,8 @@ export interface WebFetchText {
 	/**
 	 * The result's header, above the framed page. `upgraded`: http was
 	 * upgraded to https; `nativeFallback`: why the server-side fetch did not
-	 * answer; `noArticle`: the page had no article structure.
+	 * answer, as the `nativeWeb` group words it; `noArticle`: the page had no
+	 * article structure.
 	 */
 	header(p: { url: string; upgraded: boolean; nativeFallback?: string; noArticle: boolean; answer: FetchAnswer }): string;
 	/** The words around the base's `<page>` frame, and the page title's line. */

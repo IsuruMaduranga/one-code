@@ -19,7 +19,7 @@ import { AGENT_HOW_AGENTS_RUN, AGENT_LONG_DESCRIPTION, AGENT_SHORT_DESCRIPTION, 
 import { TASK_CREATE_DESCRIPTION, TASK_GET_DESCRIPTION, TASK_LIST_DESCRIPTION, TASK_UPDATE_DESCRIPTION } from "../../profile/tasks/descriptions.ts";
 import toolStyleExtension from "../../extensions/tool-style/index.ts";
 import { WRITE_LONG_DESCRIPTION, WRITE_SHORT_DESCRIPTION } from "../../extensions/tool-style/write-description.ts";
-import { WEB_SEARCH_LONG_DESCRIPTION, WEB_SEARCH_SHORT_DESCRIPTION } from "../../extensions/web/description.ts";
+import { WEB_SEARCH_LONG_DESCRIPTION, WEB_SEARCH_SHORT_DESCRIPTION } from "../../profile/web-search/description.ts";
 import webSearchExtension from "../../extensions/web/index.ts";
 import { WEB_FETCH_LONG_DESCRIPTION, WEB_FETCH_SHORT_DESCRIPTION } from "../../profile/web-fetch/description.ts";
 import webFetchExtension from "../../extensions/web-fetch/index.ts";

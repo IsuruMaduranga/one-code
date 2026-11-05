@@ -9,7 +9,7 @@
  * available in the US".
  */
 
-import type { DescriptionForm } from "../lib/tool-variants.ts";
+import type { DescriptionForm } from "../../extensions/lib/tool-variants.ts";
 
 export const WEB_SEARCH_SHORT_DESCRIPTION =
 	"Search the web. Returns result blocks with titles and URLs.\n\n" +

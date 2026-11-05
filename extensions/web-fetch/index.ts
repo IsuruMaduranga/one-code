@@ -21,7 +21,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { recordUsage } from "../lib/usage-bus.ts";
 import { releaseSideCalls, runSideCall } from "../lib/side-call-run.ts";
-import { runWithDeadline } from "../lib/operation-deadline.ts";
+import { DeadlineError, runWithDeadline } from "../lib/operation-deadline.ts";
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { CrossHostRedirect, htmlToMarkdown, isSameHost, normalizeUrl, paginate } from "./extract.ts";
@@ -45,8 +45,6 @@ const MAX_REDIRECTS = 5;
 const MAX_CACHE_ENTRIES = 50;
 /** Longer than the classifier's cap: the reader ingests whole pages. */
 const READER_TIMEOUT_MS = 60_000;
-/** The reader's credentials deadline, told apart from a registry error by this message (never shown). */
-const CREDENTIALS_DEADLINE = "web_fetch: reader credentials deadline";
 const USER_AGENT = "one-code/0.1 (+https://github.com/IsuruMaduranga/one-code)";
 
 /**
@@ -105,7 +103,7 @@ async function answerFromPage(
 		const auth = await runWithDeadline(() => ctx.modelRegistry.getApiKeyAndHeaders(choice.model), {
 			signal,
 			timeoutMs: READER_TIMEOUT_MS,
-			message: CREDENTIALS_DEADLINE,
+			message: "web_fetch: the reader's credentials did not resolve in time",
 		});
 		if (!auth.ok) return { failure: { kind: "error", reader, osMessage: auth.error } };
 		const messages = readerMessages(words, { prompt, markdown: entry.markdown, url, title: entry.title });
@@ -142,14 +140,14 @@ async function answerFromPage(
 		if (!answer) return { failure: { kind: "noText", reader } };
 		return { answer, reader, truncated: messages.truncated, cutOff: result.stopReason === "length" };
 	} catch (error) {
-		const message = (error as Error).message;
-		if (message === CREDENTIALS_DEADLINE) return { failure: { kind: "credentialsTimeout", reader, seconds: READER_TIMEOUT_MS / 1000 } };
-		return { failure: { kind: "error", reader, osMessage: message } };
+		if (error instanceof DeadlineError) return { failure: { kind: "credentialsTimeout", reader, seconds: error.timeoutMs / 1000 } };
+		return { failure: { kind: "error", reader, osMessage: (error as Error).message } };
 	}
 }
 
 function webFetchExtension(pi: ExtensionAPI) {
 	const text = requireText("webFetch");
+	const nativeWords = requireText("nativeWeb");
 	// Same 15-minute window Claude Code documents, so repeated reads of one page
 	// during a task don't re-download it.
 	const cache = new Map<string, CacheEntry>();
@@ -274,7 +272,7 @@ function webFetchExtension(pi: ExtensionAPI) {
 			if (params.prompt && !isPrivateOrLocalUrl(target)) {
 				const prompt = params.prompt;
 				const native = await tryNativeWeb(ctx, {
-					body: (model) => nativeFetchBody({ model, url: target, prompt }),
+					body: (model) => nativeFetchBody(nativeWords.fetch, { model, url: target, prompt }),
 					outcome: fetchOutcome,
 					onUsage: (usage) => recordUsage(pi, "web-fetch", usage),
 					learned: learnedNativeThinking,
@@ -285,7 +283,7 @@ function webFetchExtension(pi: ExtensionAPI) {
 					const answer: FetchAnswer = { kind: "native", reader: native.spec, cutOff: native.cutOff, answer: native.text };
 					return { content: [{ type: "text", text: resultText(answer, { body: native.text }) }], details: { url: target, reader: native.spec, path: "native" } };
 				}
-				if (native.kind === "fell-back") nativeFallback = native.reason;
+				if (native.kind === "fell-back") nativeFallback = nativeWords.fallback(native.fallback);
 			}
 
 			try {

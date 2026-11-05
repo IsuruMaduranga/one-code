@@ -36,7 +36,9 @@ import webSearchPackage from "pi-web-search/src/index.ts";
 import { callApiStream, getConfig, getProviderKind } from "pi-web-search/src/api.ts";
 import { getWebSearchModel } from "pi-web-search/src/utils.ts";
 import { tryNativeWeb } from "../lib/anthropic-server-call.ts";
-import { CUT_OFF_NOTE, nativeSearchBody, searchOutcome, searchSources, sourceLine, type ThinkingFields } from "../lib/anthropic-server-tools.ts";
+import { nativeSearchBody, searchOutcome, searchSources, sourceLine, type ThinkingFields } from "../lib/anthropic-server-tools.ts";
+import { DeadlineError } from "../lib/operation-deadline.ts";
+import { requireText } from "../lib/profile.ts";
 import { readJsonFile } from "../lib/atomic-write.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 import { DEFER_CHANNEL, WITHHOLD_CHANNEL } from "../lib/deferred.ts";
@@ -44,19 +46,19 @@ import { oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 import { registerFormTool } from "../lib/tool-variants.ts";
-import { webSearchDescription } from "./description.ts";
-import { formatNativeSearchResult } from "./native-results.ts";
+import { nativeSearchResult, ProviderSearchError } from "./native-results.ts";
 import { runNativeSearch } from "./native-call.ts";
 import {
 	DEFAULT_MAX_RESULTS,
-	formatSearchResults,
 	KEYLESS_USER_NOTICE,
 	resolveChain,
 	runChain,
+	SearchChainError,
 	webSearchSettingsFrom,
 	withSiteOperators,
 	type WebSearchSettings,
 } from "./backends.ts";
+import type { ChainFailure, ProviderSearchFailure } from "./text.ts";
 
 /** `webSearch` from ~/.onecode/settings.json, read leniently — a bad file skips the setting, never breaks the tool. */
 function readWebSearchSettings(): WebSearchSettings {
@@ -75,6 +77,8 @@ interface SearchDetails {
 }
 
 function webExtension(pi: ExtensionAPI) {
+	const text = requireText("webSearch");
+	const nativeWords = requireText("nativeWeb");
 	// url_context + its active-tools sync, and the vendor web_search we override below.
 	webSearchPackage(pi);
 
@@ -83,31 +87,39 @@ function webExtension(pi: ExtensionAPI) {
 	// Per-session: the thinking-off fields a native-call model turned out to need.
 	const learnedNativeThinking = new Map<string, ThinkingFields>();
 
-	// Short or long text by the model's tier (description.ts, lib/tool-variants.ts).
+	// Short or long text by the model's tier (the profile's description, lib/tool-variants.ts).
 	const tool = defineTool({
 		name: "web_search",
 		label: "Web Search",
 		...ccToolRenderers<{ query?: string }>("Web Search", { title: (args) => args?.query }),
-		description: webSearchDescription("short"),
+		description: text.description("short"),
 		parameters: Type.Object({
-			query: Type.String({ minLength: 2, description: "The search query to use" }),
-			allowed_domains: Type.Optional(Type.Array(Type.String(), { description: "Only include search results from these domains" })),
-			blocked_domains: Type.Optional(Type.Array(Type.String(), { description: "Never include search results from these domains" })),
+			query: Type.String({ minLength: 2, description: text.params.query }),
+			allowed_domains: Type.Optional(Type.Array(Type.String(), { description: text.params.allowed_domains })),
+			blocked_domains: Type.Optional(Type.Array(Type.String(), { description: text.params.blocked_domains })),
 		}),
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			const filters = { allowed: params.allowed_domains, blocked: params.blocked_domains };
+			const filtered = Boolean(params.allowed_domains?.length || params.blocked_domains?.length);
+			const cancelled = () => ({
+				content: [{ type: "text" as const, text: text.cancelled(params.query) }],
+				details: { query: params.query } as SearchDetails,
+				isError: true,
+			});
+			// Notes on the routes that fell back, newest first, after the answer.
+			const notes: string[] = [];
+			const withNotes = (body: string) => [body, ...notes].join("\n\n");
 
 			// 0. Anthropic's server-side search with dynamic filtering, on a
 			// first-party Anthropic API-key session. The domain filters are enforced
 			// by the search itself; it takes one list or the other, so a call with
 			// both goes down the paths below. Anything short of an answer from real
 			// results falls through, with a note saying why.
-			let nativeNote: string | undefined;
 			const bothFilters = Boolean(params.allowed_domains?.length && params.blocked_domains?.length);
 			if (!bothFilters) {
 				const native = await tryNativeWeb(ctx, {
 					body: (model) =>
-						nativeSearchBody({ model, query: params.query, allowedDomains: params.allowed_domains, blockedDomains: params.blocked_domains }),
+						nativeSearchBody(nativeWords.searchSystem, { model, query: params.query, allowedDomains: params.allowed_domains, blockedDomains: params.blocked_domains }),
 					outcome: searchOutcome,
 					onUsage: (usage) => recordUsage(pi, "web-search", usage),
 					learned: learnedNativeThinking,
@@ -118,35 +130,17 @@ function webExtension(pi: ExtensionAPI) {
 						}),
 					signal,
 				});
-				if (native.kind === "cancelled") {
-					return {
-						content: [{ type: "text", text: `Search for "${params.query}" was cancelled.` }],
-						details: { query: params.query } as SearchDetails,
-						isError: true,
-					};
-				}
+				if (native.kind === "cancelled") return cancelled();
 				if (native.kind === "answered") {
 					const sources = searchSources(native.result);
-					const filtered = Boolean(params.allowed_domains?.length || params.blocked_domains?.length);
-					const text = [
-						native.text,
-						...(native.cutOff ? ["", CUT_OFF_NOTE] : []),
-						"",
-						"Sources:",
-						...sources.map(sourceLine),
-						"",
-						`(Searched with Anthropic's server-side web search with dynamic filtering, on ${native.spec}${filtered ? "; the domain filters were enforced by the search" : ""}.)`,
-					].join("\n");
+					const answer = text.nativeAnswer({ answer: native.text, cutOff: native.cutOff, sourceLines: sources.map(sourceLine), spec: native.spec, filtered });
 					return {
-						content: [{ type: "text", text: persistIfLarge(text, { dir: sessionResultsDir(ctx), id: toolCallId }) }],
+						content: [{ type: "text", text: persistIfLarge(answer, { dir: sessionResultsDir(ctx), id: toolCallId }) }],
 						details: { query: params.query, native: true, backend: `anthropic web_search via ${native.spec}`, resultCount: sources.length } as SearchDetails,
 					};
 				}
-				if (native.kind === "fell-back") {
-					nativeNote = `(Anthropic's server-side web search did not answer (${native.reason}); the results below come from the next search route.)`;
-				}
+				if (native.kind === "fell-back") notes.unshift(text.nativeFellBack(nativeWords.fallback(native.fallback)));
 			}
-			const withNativeNote = (text: string) => nativeNote ? `${text}\n\n${nativeNote}` : text;
 
 			// 1. Reuse pi-web-search's transport, not its tool wrapper: that wrapper
 			// truncates before we can persist the full answer and its sources.
@@ -159,27 +153,22 @@ function webExtension(pi: ExtensionAPI) {
 						contents: [{ role: "user", parts: [{ text: withSiteOperators(params.query, filters) }] }],
 						...(config.kind === "google" ? { tools: [{ [config.searchTool!]: {} }] } : {}),
 					}, (update) => { if (!nativeSignal.aborted) onUpdate?.(update); }, nativeSignal), signal);
-					const result = formatNativeSearchResult(response);
-					// This route returns a synthesized answer, not rows we can filter.
-					const hasFilters = Boolean(params.allowed_domains?.length || params.blocked_domains?.length);
-					const text = withNativeNote([
-						result.text,
-						`(Searched with ${backend}.)`,
-						...(hasFilters ? ["(Domain filters were applied as `site:` operators in the query — best-effort with provider-native search; verify the sources' hosts.)"] : []),
-					].join("\n\n"));
+					const result = nativeSearchResult(response);
+					// This route returns a synthesized answer, not rows we can filter (`filtered`: `site:` operators).
+					const answer = withNotes(text.providerAnswer({ answer: result.answer, sources: result.sources, extra: result.extra, backend, filtered }));
 					return {
-						content: [{ type: "text", text: persistIfLarge(text, { dir: sessionResultsDir(ctx), id: toolCallId }) }],
+						content: [{ type: "text", text: persistIfLarge(answer, { dir: sessionResultsDir(ctx), id: toolCallId }) }],
 						details: { ...result.details, query: params.query, native: true, backend } as SearchDetails,
 					};
 				} catch (error) {
-					if (signal?.aborted) {
-						return {
-							content: [{ type: "text", text: `Search for "${params.query}" was cancelled.` }],
-							details: { query: params.query } as SearchDetails,
-							isError: true,
-						};
-					}
-					nativeNote = withNativeNote(`(Provider-native search on ${backend} failed (${error instanceof Error ? error.message : String(error)}); the next search route was tried.)`);
+					if (signal?.aborted) return cancelled();
+					const failure: ProviderSearchFailure =
+						error instanceof ProviderSearchError
+							? error.failure
+							: error instanceof DeadlineError
+								? { kind: "timedOut", seconds: error.timeoutMs / 1000 }
+								: { kind: "other", osMessage: error instanceof Error ? error.message : String(error) };
+					notes.unshift(text.providerFailed({ backend, failure }));
 				}
 			}
 
@@ -197,32 +186,35 @@ function webExtension(pi: ExtensionAPI) {
 				}
 				// Bounded by result count, but a provider's error body (quoted in
 				// "Fell back after") or long snippets can still be large: persist, never slice.
-				const text = persistIfLarge(withNativeNote(formatSearchResults(params.query, outcome)), { dir: sessionResultsDir(ctx), id: toolCallId });
+				const results = text.chainResults({
+					query: params.query,
+					label: outcome.backend.label,
+					attempts: outcome.attempts,
+					keyless: outcome.backend.keyless,
+					results: outcome.results,
+				});
 				return {
-					content: [{ type: "text", text }],
+					content: [{ type: "text", text: persistIfLarge(withNotes(results), { dir: sessionResultsDir(ctx), id: toolCallId }) }],
 					details: {
 						query: params.query,
 						backend: outcome.backend.name,
 						keyless: outcome.backend.keyless,
 						resultCount: outcome.results.length,
-						failures: outcome.failures.length ? outcome.failures : undefined,
+						failures: outcome.attempts.length ? outcome.attempts.map(text.attempt) : undefined,
 					} as SearchDetails,
 				};
 			} catch (error) {
-				const message = (error as Error).message;
-				const text = persistIfLarge(
-					withNativeNote(`web_search failed on ${ctx.model?.provider}/${ctx.model?.id}.\n${message}`),
-					{ dir: sessionResultsDir(ctx), id: toolCallId },
-				);
+				const failure: ChainFailure = error instanceof SearchChainError ? error.failure : { kind: "other", osMessage: (error as Error).message };
+				const message = text.failed({ model: `${ctx.model?.provider}/${ctx.model?.id}`, failure });
 				return {
-					content: [{ type: "text", text }],
+					content: [{ type: "text", text: persistIfLarge(withNotes(message), { dir: sessionResultsDir(ctx), id: toolCallId }) }],
 					details: { query: params.query, error: message } as SearchDetails,
 					isError: true,
 				};
 			}
 		},
 	});
-	registerFormTool(pi, tool, webSearchDescription);
+	registerFormTool(pi, tool, text.description);
 
 	// url_context reports failures ("Failed: …" text, details.error set) without
 	// isError. Stamp it here rather than patching the vendor package.
@@ -232,10 +224,7 @@ function webExtension(pi: ExtensionAPI) {
 		if (details?.error) return { isError: true };
 	});
 
-	pi.events.emit(DEFER_CHANNEL, {
-		name: "web_search",
-		keywords: ["web", "search", "internet", "google", "news", "lookup", "online", "current"],
-	});
+	pi.events.emit(DEFER_CHANNEL, { name: "web_search", keywords: text.searchKeywords });
 
 	// url_context only works on a Gemini-compatible provider — pi-web-search's
 	// own gate (getProviderKind === "google") deactivates the tool on anything

@@ -1,15 +1,26 @@
-/** Provider-native search formatting without pi-web-search's lossy truncateHead wrapper. */
+/**
+ * Provider-native search results without pi-web-search's lossy truncateHead
+ * wrapper: the answer, its sources and the other hits as data (the profile
+ * words them), or a ProviderSearchError saying why there is no answer.
+ */
 import { applyCitations, type StreamResult } from "pi-web-search/src/api.ts";
+import type { ProviderSearchFailure } from "./text.ts";
 
-export function formatNativeSearchResult(result: StreamResult) {
-	if (result.nativeSearchUsed === false) throw new Error("The provider returned a response without performing a web search.");
+export class ProviderSearchError extends Error {
+	constructor(readonly failure: ProviderSearchFailure) {
+		super(`provider-native search failed: ${failure.kind}`);
+	}
+}
+
+export function nativeSearchResult(result: StreamResult) {
+	if (result.nativeSearchUsed === false) throw new ProviderSearchError({ kind: "noSearch" });
 	// The vendor substitutes this placeholder when the stream contains no answer text.
-	if (!result.text.trim() || result.text.trim() === "No answer available.") throw new Error("The provider returned an empty web-search answer.");
+	if (!result.text.trim() || result.text.trim() === "No answer available.") throw new ProviderSearchError({ kind: "emptyAnswer" });
 	const cited = applyCitations(result.text, result.groundingMetadata);
 	const sources = result.sources?.length ? result.sources : cited.sources;
 	const failedSearch = result.searchResults?.find((item) => item.type === "web_search_tool_result_error");
-	if (failedSearch) throw new Error(`The provider's search returned ${failedSearch.status ?? "an unspecified tool error"}.`);
-	if (!sources.length && !result.searchResults?.some((item) => item.url)) throw new Error("The provider returned no search results.");
+	if (failedSearch) throw new ProviderSearchError({ kind: "searchError", status: failedSearch.status == null ? undefined : `${failedSearch.status}` });
+	if (!sources.length && !result.searchResults?.some((item) => item.url)) throw new ProviderSearchError({ kind: "noResults" });
 	const seen = new Set<string>();
 	const extraResults = (result.searchResults ?? []).filter((item) => {
 		if (!item.url || sources.some((source) => source.url === item.url)) return false;
@@ -18,13 +29,10 @@ export function formatNativeSearchResult(result: StreamResult) {
 		seen.add(key);
 		return true;
 	});
-	const parts = [cited.text];
-	if (sources.length) parts.push(`## Sources\n${sources.map((source, i) => `${i + 1}. [${source.title}](${source.url})`).join("\n")}`);
-	if (extraResults.length) {
-		parts.push(`## Additional Search Results\n${extraResults.map((item, i) => `${i + 1}. ${item.title || item.url} - ${item.url}`).join("\n")}`);
-	}
 	return {
-		text: parts.join("\n\n"),
+		answer: cited.text,
+		sources,
+		extra: extraResults.map((item) => ({ title: item.title, url: item.url! })),
 		details: {
 			sources,
 			providerKind: result.providerKind,

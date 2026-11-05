@@ -14,7 +14,9 @@ import type { NotebookText } from "../notebook/text.ts";
 import type { SystemPromptText } from "../system-prompt/text.ts";
 import type { TasksText } from "../tasks/text.ts";
 import type { WebFetchText } from "../web-fetch/text.ts";
+import type { WebSearchText } from "../web/text.ts";
 import type { WorktreeGuardText, WorktreeText } from "../worktree/text.ts";
+import type { NativeWebText } from "./native-web-text.ts";
 import type { FeatureId } from "./features.ts";
 
 /**
@@ -29,6 +31,9 @@ export interface ProfileText {
 	tasks?: TasksText;
 	worktree?: WorktreeText;
 	webFetch?: WebFetchText;
+	webSearch?: WebSearchText;
+	/** Used by web_search and web_fetch (Anthropic's server-side tools). */
+	nativeWeb?: NativeWebText;
 	/** Used by the worktree tools, subagents and workflows (each guards isolated sessions with it). */
 	worktreeGuard?: WorktreeGuardText;
 }

@@ -13,7 +13,24 @@
  * Every backend takes `fetch` as a parameter so the chain is unit-testable
  * without the network; nothing here reads the environment or the file system
  * directly — `resolveChain` is handed `env` and the parsed settings.
+ * Failures are data (text.ts); the profile words them.
  */
+
+import type { BackendAttempt, BackendFailure, ChainFailure } from "./text.ts";
+
+/** A backend failed for a reason the profile words. */
+export class BackendError extends Error {
+	constructor(readonly failure: BackendFailure) {
+		super(`search backend failed: ${failure.kind}`);
+	}
+}
+
+/** No backend answered (or the search was cancelled). */
+export class SearchChainError extends Error {
+	constructor(readonly failure: ChainFailure) {
+		super(`web search failed: ${failure.kind}`);
+	}
+}
 
 export interface SearchResult {
 	title: string;
@@ -63,23 +80,14 @@ const BACKEND_NAMES: readonly BackendName[] = ["brave", "tavily", "exa-free"];
 /** The one-line settings snippet both warnings point at: the fix, spelled out. */
 export const SETTINGS_SNIPPET = '{ "webSearch": { "apiKeys": { "brave": "<key>" } } }';
 export const SETTINGS_FILE = "~/.onecode/settings.json";
-/** The advice both warnings share: where a key goes and that the keyed backends have free tiers. */
-const KEYLESS_ADVICE =
-	`add ${SETTINGS_SNIPPET} (or "tavily") to ${SETTINGS_FILE}, or set ${BRAVE_KEY_ENV} / ${TAVILY_KEY_ENV} in the environment. ` +
-	"Brave and Tavily both have free tiers.";
-
 /**
- * Model-facing warning attached to every keyless result: the model should know
- * these results are best-effort and what the user can configure instead.
+ * User-facing one-time notice (TUI) the first time a session searches keyless.
+ * The model's own note on every keyless result is the profile's (text.ts chainResults).
  */
-export const KEYLESS_NOTE =
-	"Note: these results came from Exa's free keyless endpoint (rate-limited, best-effort). " +
-	`For reliable search the user can ${KEYLESS_ADVICE}`;
-
-/** User-facing one-time notice (TUI) the first time a session searches keyless. */
 export const KEYLESS_USER_NOTICE =
 	"web_search used Exa's free keyless endpoint (rate-limited, best-effort). " +
-	`For reliable results ${KEYLESS_ADVICE}`;
+	`For reliable results add ${SETTINGS_SNIPPET} (or "tavily") to ${SETTINGS_FILE}, or set ${BRAVE_KEY_ENV} / ${TAVILY_KEY_ENV} in the environment. ` +
+	"Brave and Tavily both have free tiers.";
 
 // ---------------------------------------------------------------------------
 // Settings + chain resolution
@@ -200,20 +208,19 @@ function timeoutSignal(signal: AbortSignal | undefined): AbortSignal {
 }
 
 /** The error body, whole: it lands in the tool result, which the caller persists when large (never a bare slice). */
-async function errorBody(response: Response): Promise<string> {
+async function errorBody(response: Response): Promise<string | undefined> {
 	try {
-		const text = (await response.text()).trim();
-		return text ? `: ${text}` : "";
+		return (await response.text()).trim() || undefined;
 	} catch {
-		return "";
+		return undefined;
 	}
 }
 
-/** Throw a labelled error for a failed keyed-API response; 401/403 name the env var to check. */
-async function assertOk(response: Response, apiName: string, keyEnv: string): Promise<void> {
+/** Throw for a failed keyed-API response; 401/403 name the env var to check. */
+async function assertOk(response: Response, api: string, keyEnv: string): Promise<void> {
 	if (response.ok) return;
-	const hint = response.status === 401 || response.status === 403 ? ` (check ${keyEnv})` : "";
-	throw new Error(`${apiName} HTTP ${response.status}${hint}${await errorBody(response)}`);
+	const keyWrong = response.status === 401 || response.status === 403;
+	throw new BackendError({ kind: "http", api, status: response.status, keyEnv: keyWrong ? keyEnv : undefined, body: await errorBody(response) });
 }
 
 /** Map a provider's rows onto SearchResult, reading the snippet from `snippetKey`; rows without a url are dropped. */
@@ -314,7 +321,7 @@ export function parseMcpResponseBody(body: string, contentType: string): unknown
 		.filter((line) => line.startsWith("data:"))
 		.map((line) => line.slice(5).trim())
 		.filter(Boolean);
-	if (!dataLines.length) throw new Error("Exa MCP returned an event stream with no data");
+	if (!dataLines.length) throw new BackendError({ kind: "noData", api: "Exa MCP" });
 	return JSON.parse(dataLines[dataLines.length - 1]);
 }
 
@@ -336,20 +343,18 @@ export function exaFreeBackend(fetchImpl: FetchLike): SearchBackend {
 				}),
 				signal: timeoutSignal(signal),
 			});
-			if (response.status === 429) {
-				throw new Error("Exa free endpoint rate-limited the request (HTTP 429); retry shortly or configure a keyed backend");
-			}
-			if (!response.ok) throw new Error(`Exa MCP HTTP ${response.status}${await errorBody(response)}`);
+			if (response.status === 429) throw new BackendError({ kind: "rateLimited", api: "Exa free endpoint" });
+			if (!response.ok) throw new BackendError({ kind: "http", api: "Exa MCP", status: response.status, body: await errorBody(response) });
 			const message = parseMcpResponseBody(await response.text(), response.headers.get("content-type") ?? "") as {
 				error?: { message?: string };
 				result?: { isError?: boolean; content?: Array<{ type: string; text?: string }> };
 			};
-			if (message.error) throw new Error(`Exa MCP error: ${message.error.message ?? JSON.stringify(message.error)}`);
+			if (message.error) throw new BackendError({ kind: "rpcError", api: "Exa MCP", message: message.error.message ?? JSON.stringify(message.error) });
 			const text = (message.result?.content ?? [])
 				.filter((c) => c.type === "text" && typeof c.text === "string")
 				.map((c) => c.text as string)
 				.join("\n");
-			if (message.result?.isError) throw new Error(`Exa MCP tool error: ${text || "(no detail)"}`);
+			if (message.result?.isError) throw new BackendError({ kind: "toolError", api: "Exa MCP", text });
 			return filterByDomains(parseExaMcpText(text), filters);
 		},
 	};
@@ -362,8 +367,8 @@ export function exaFreeBackend(fetchImpl: FetchLike): SearchBackend {
 export interface ChainOutcome {
 	backend: SearchBackend;
 	results: SearchResult[];
-	/** `label: error` for every backend tried before this one. */
-	failures: string[];
+	/** Every backend tried before this one. */
+	attempts: BackendAttempt[];
 }
 
 /**
@@ -378,41 +383,17 @@ export async function runChain(
 	maxResults: number,
 	signal: AbortSignal | undefined,
 ): Promise<ChainOutcome> {
-	const failures: string[] = [];
+	const attempts: BackendAttempt[] = [];
 	for (const backend of chain) {
-		if (signal?.aborted) throw new Error("Search was cancelled.");
+		if (signal?.aborted) throw new SearchChainError({ kind: "cancelled" });
 		try {
 			const results = await backend.search(query, filters, maxResults, signal);
-			return { backend, results, failures };
+			return { backend, results, attempts };
 		} catch (error) {
-			if (signal?.aborted) throw new Error("Search was cancelled.");
-			failures.push(`${backend.label}: ${(error as Error).message}`);
+			if (signal?.aborted) throw new SearchChainError({ kind: "cancelled" });
+			const failure: BackendFailure = error instanceof BackendError ? error.failure : { kind: "other", osMessage: (error as Error).message };
+			attempts.push({ label: backend.label, failure });
 		}
 	}
-	throw new Error(`Every search backend failed:\n- ${failures.join("\n- ")}`);
-}
-
-/**
- * Claude Code's WebSearch returns "result blocks with titles and URLs"; this is
- * that shape, with the backend named so the model can report its source and,
- * on the keyless route, the configuration note.
- */
-export function formatSearchResults(query: string, outcome: ChainOutcome): string {
-	const lines: string[] = [];
-	lines.push(`Search results for "${query}" (via ${outcome.backend.label}):`);
-	if (outcome.failures.length) lines.push(`Fell back after: ${outcome.failures.join("; ")}`);
-	if (outcome.backend.keyless) lines.push(KEYLESS_NOTE);
-	lines.push("");
-	if (!outcome.results.length) {
-		lines.push("No results.");
-	} else {
-		outcome.results.forEach((result, index) => {
-			lines.push(`${index + 1}. ${result.title || result.url}`);
-			lines.push(`   ${result.url}`);
-			if (result.snippet) lines.push(`   ${result.snippet}`);
-			lines.push("");
-		});
-		lines.push('After answering from these results, end with a "Sources:" list of the URLs you used as markdown links.');
-	}
-	return lines.join("\n").trimEnd();
+	throw new SearchChainError({ kind: "allFailed", attempts });
 }

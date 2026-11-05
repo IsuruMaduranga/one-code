@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { tryNativeWeb } from "../../extensions/lib/anthropic-server-call.ts";
 import { fetchOutcome, nativeFetchBody } from "../../extensions/lib/anthropic-server-tools.ts";
+import { nativeWeb } from "../../profile/native-web/index.ts";
 
 const model = { provider: "anthropic", api: "anthropic-messages", id: "claude-sonnet-4-6", baseUrl: "https://api.anthropic.com", cost: { input: 3, output: 15 } } as any;
 
@@ -22,7 +23,7 @@ describe("native web authentication deadline", () => {
 		};
 		let settled = false;
 		const pending = tryNativeWeb(ctx, {
-			body: (id) => nativeFetchBody({ model: id, url: "https://example.com/", prompt: "Which release?" }),
+			body: (id) => nativeFetchBody(nativeWeb.fetch, { model: id, url: "https://example.com/", prompt: "Which release?" }),
 			outcome: fetchOutcome,
 			onUsage: vi.fn(), onStart, signal: controller.signal,
 		}).then((result) => { settled = true; return result; });
@@ -35,7 +36,10 @@ describe("native web authentication deadline", () => {
 		await vi.advanceTimersByTimeAsync(0);
 		expect(settledBeforeAuth).toBe(true);
 		expect(result.kind).toBe(ending === "cancel" ? "cancelled" : "fell-back");
-		if (result.kind === "fell-back") expect(result.reason).toContain("120 seconds");
+		if (result.kind === "fell-back") {
+			expect(result.fallback).toEqual({ kind: "authTimeout", seconds: 120 });
+			expect(nativeWeb.fallback(result.fallback)).toContain("120 seconds");
+		}
 		expect(fetch).not.toHaveBeenCalled();
 		expect(onStart).not.toHaveBeenCalled();
 	});

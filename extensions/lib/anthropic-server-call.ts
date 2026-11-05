@@ -25,7 +25,8 @@ import {
 } from "./anthropic-server-tools.ts";
 
 import { modelSpec } from "./model-policy.ts";
-import { runWithDeadline } from "./operation-deadline.ts";
+import type { NativeFallback } from "./native-web-text.ts";
+import { DeadlineError, runWithDeadline } from "./operation-deadline.ts";
 
 /** Observed calls take 8 to 16 s; a stuck one gives way to the fallback. */
 const NATIVE_CALL_TIMEOUT_MS = 120_000;
@@ -150,8 +151,8 @@ export type NativeAttempt =
 	/** The session cannot use the native tools; today's path runs with no note. */
 	| { kind: "skipped" }
 	| { kind: "answered"; text: string; cutOff: boolean; spec: string; result: ServerCallResult }
-	/** The call ran and did not answer; `reason` goes into the fallback's note. */
-	| { kind: "fell-back"; reason: string }
+	/** The call ran and did not answer; the fallback's note says why. */
+	| { kind: "fell-back"; fallback: NativeFallback }
 	| { kind: "cancelled" };
 
 /**
@@ -176,7 +177,7 @@ export async function tryNativeWeb(
 		const native = await runWithDeadline((signal) => resolveNativeWeb(ctx, signal), {
 			signal: request.signal,
 			timeoutMs: NATIVE_CALL_TIMEOUT_MS,
-			message: "Native web authentication did not answer within 120 seconds.",
+			message: "native web: authentication did not resolve in time",
 		});
 		if (!native.ok) return { kind: "skipped" };
 		const spec = modelSpec(native.model);
@@ -186,11 +187,12 @@ export async function tryNativeWeb(
 		const outcome = request.outcome(reply.result);
 		return outcome.ok
 			? { kind: "answered", text: outcome.text, cutOff: outcome.cutOff, spec, result: reply.result }
-			: { kind: "fell-back", reason: outcome.reason };
+			: { kind: "fell-back", fallback: outcome.fallback };
 	} catch (error) {
 		if (error instanceof ServerCallError && error.usage.totalTokens > 0) request.onUsage(error.usage);
 		if (request.signal?.aborted) return { kind: "cancelled" };
-		return { kind: "fell-back", reason: `the call failed: ${(error as Error).message}` };
+		if (error instanceof DeadlineError) return { kind: "fell-back", fallback: { kind: "authTimeout", seconds: error.timeoutMs / 1000 } };
+		return { kind: "fell-back", fallback: { kind: "callFailed", osMessage: (error as Error).message } };
 	}
 }
 
