@@ -9,12 +9,12 @@
  * GOLDEN_TOOLS and no tool result has come back yet, the reply makes the
  * scripted calls in TOOL_CALLS (successes, error paths, a command the auto-mode
  * classifier judges, a deferred-tool load), plus a subagent when it also says
- * GOLDEN_AGENT; otherwise it is a
- * The auto-mode classifier gets a verdict instead: severity 60 at stage 1, so
- * stage 2 runs too, and severity 10 at stage 2, so the call is allowed and the
- * subagent's own requests are recorded. Every other reply is a fixed text shaped
- * like a compaction summary, which serves every turn and side call (session
- * title, compaction) alike. Any other fetch goes to the network as usual.
+ * GOLDEN_AGENT. The auto-mode classifier gets a verdict instead: severity 60
+ * at stage 1, so stage 2 runs too, and severity 10 at stage 2, so the call is
+ * allowed and the subagent's own requests are recorded. Every other reply is a
+ * fixed text shaped like a compaction summary, which serves every turn and
+ * side call (session title, compaction) alike. Any other fetch goes to the
+ * network as usual.
  */
 import { appendFileSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -48,7 +48,7 @@ function classifierVerdict(raw: string): string | undefined {
 	return raw.includes("Stage 1 does NOT apply user intent") ? STAGE1_VERDICT : STAGE2_VERDICT;
 }
 
-function anthropicReply(calls: ToolCall[] | undefined, text = REPLY_TEXT): string {
+function anthropicReply(calls: ToolCall[] | undefined, text: string): string {
 	const withTools = calls !== undefined;
 	const usage = { input_tokens: 10, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
 	const blocks = withTools
@@ -70,7 +70,7 @@ function anthropicReply(calls: ToolCall[] | undefined, text = REPLY_TEXT): strin
 	]);
 }
 
-function chatReply(calls: ToolCall[] | undefined, text = REPLY_TEXT): string {
+function chatReply(calls: ToolCall[] | undefined, text: string): string {
 	const withTools = calls !== undefined;
 	const chunk = (delta: object, finish: string | null, extra: object = {}) =>
 		`data: ${JSON.stringify({ id: "golden", object: "chat.completion.chunk", created: 0, model: "golden", choices: [{ index: 0, delta, finish_reason: finish }], ...extra })}\n\n`;

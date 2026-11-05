@@ -12,6 +12,7 @@
  *   node test/e2e/golden-requests.mjs --update  rewrite the snapshot files
  *   node test/e2e/golden-requests.mjs --only anthropic-tiny
  *   node test/e2e/golden-requests.mjs --dir /tmp/golden
+ *   node test/e2e/golden-requests.mjs --jobs 2  runs at once (default: half the CPUs)
  *   node test/e2e/golden-requests.mjs --sweep   one turn per optional feature
  *       turned off (ONECODE_FEATURES_OFF), plus a tool-switch check
  *       (ONECODE_TOOLS_OFF): each run must finish and send a request, and the
@@ -23,24 +24,40 @@
  * app's settings (pi's replaced built-ins off, the compaction keep window),
  * and a fixed project directory. The tier is forced through One Code's
  * `modelTiers` setting, so one model covers every register. Values that differ
- * per machine or per run (paths, dates, the OS release, the login, ids) are replaced with
- * placeholders before comparing.
+ * per machine or per run (paths, dates, the OS release, the login, ids) are
+ * replaced with placeholders before comparing. Runs share nothing, so they go
+ * several at a time; results print in config order.
  *
  * Needs a real terminal-less pi run: from a sandboxed assistant shell, run it
  * inside tmux (findings §10).
  */
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseArgs } from "node:util";
 import { withCompactionKeepBackfilled } from "../../extensions/lib/compaction-keep.mjs";
+import { FEATURE_IDS, FEATURES } from "../../extensions/lib/features.ts";
+import { projectSlug } from "../../extensions/lib/memory.ts";
 import { withReplacedBuiltinsOff } from "../../extensions/lib/replaced-builtins.mjs";
+
+const { values: opts } = parseArgs({
+	options: {
+		update: { type: "boolean", default: false },
+		sweep: { type: "boolean", default: false },
+		only: { type: "string" },
+		dir: { type: "string" },
+		jobs: { type: "string" },
+	},
+});
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const piCli = join(repo, "node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js");
 const fixture = join(repo, "test/e2e/golden-fixture.ts");
-const goldenDir = resolve(process.argv.includes("--dir") ? process.argv[process.argv.indexOf("--dir") + 1] : join(repo, "captures/golden-requests"));
+const goldenDir = resolve(opts.dir ?? join(repo, "captures/golden-requests"));
+const jobs = Math.max(1, Number(opts.jobs) || Math.floor(os.availableParallelism() / 2));
+const RUN_TIMEOUT_MS = 180_000;
 
 const ANTHROPIC = "anthropic/claude-opus-5-5";
 const OPENROUTER = "openrouter/deepseek/deepseek-v4-flash";
@@ -66,10 +83,6 @@ const CONFIGS = [
 const PROMPTS = { print: "Reply with OK.", tools: "GOLDEN_TOOLS GOLDEN_AGENT: make the scripted calls." };
 const SESSION_PROMPTS = ["GOLDEN_TOOLS: read README.md and run echo golden.", "Reply with OK."];
 
-const args = process.argv.slice(2);
-const update = args.includes("--update");
-const only = args.includes("--only") ? args[args.indexOf("--only") + 1] : undefined;
-
 /** The parent's environment without anything that steers pi or One Code. */
 function cleanEnv() {
 	const env = {};
@@ -80,63 +93,72 @@ function cleanEnv() {
 	return env;
 }
 
+/** Run one config in a fresh temp root; resolves with its normalized `{ dialogs, requests }` or throws. */
 async function runConfig(config) {
 	const root = realpathSync(mkdtempSync(join(os.tmpdir(), "golden-")));
-	const home = join(root, "home");
-	const project = join(root, "project");
-	const agentDir = join(home, ".pi", "agent");
-	mkdirSync(agentDir, { recursive: true });
-	mkdirSync(join(home, ".onecode"), { recursive: true });
-	mkdirSync(project, { recursive: true });
-	writeFileSync(join(project, "README.md"), "# Golden project\n\nA fixed project for the golden request snapshot.\n");
+	try {
+		const home = join(root, "home");
+		const project = join(root, "project");
+		const agentDir = join(home, ".pi", "agent");
+		mkdirSync(agentDir, { recursive: true });
+		mkdirSync(join(home, ".onecode"), { recursive: true });
+		mkdirSync(project, { recursive: true });
+		writeFileSync(join(project, "README.md"), "# Golden project\n\nA fixed project for the golden request snapshot.\n");
+		const settings = withCompactionKeepBackfilled({
+			quietStartup: true,
+			packages: [repo],
+			extensions: withReplacedBuiltinsOff(undefined).extensions,
+		}).settings;
+		writeFileSync(join(agentDir, "settings.json"), `${JSON.stringify(settings, null, 2)}\n`);
+		writeFileSync(join(home, ".onecode", "settings.json"), `${JSON.stringify({ modelTiers: { [config.model]: config.tier } }, null, 2)}\n`);
 
-	const settings = withCompactionKeepBackfilled({
-		quietStartup: true,
-		packages: [repo],
-		extensions: withReplacedBuiltinsOff(undefined).extensions,
-	}).settings;
-	writeFileSync(join(agentDir, "settings.json"), `${JSON.stringify(settings, null, 2)}\n`);
-	writeFileSync(join(home, ".onecode", "settings.json"), `${JSON.stringify({ modelTiers: { [config.model]: config.tier } }, null, 2)}\n`);
-
-	const dump = join(root, "requests.jsonl");
-	const env = {
-		...cleanEnv(),
-		HOME: home,
-		GOLDEN_DUMP: dump,
-		ANTHROPIC_API_KEY: "sk-ant-golden",
-		OPENROUTER_API_KEY: "sk-or-golden",
-		ONECODE_NO_UPDATE_CHECK: "1",
-		SHELL: "/bin/zsh",
-		TZ: "UTC",
-		...config.env,
-	};
-	const fail = (message) => {
+		const dump = join(root, "requests.jsonl");
+		const env = {
+			...cleanEnv(),
+			HOME: home,
+			GOLDEN_DUMP: dump,
+			ANTHROPIC_API_KEY: "sk-ant-golden",
+			OPENROUTER_API_KEY: "sk-or-golden",
+			ONECODE_NO_UPDATE_CHECK: "1",
+			SHELL: "/bin/zsh",
+			TZ: "UTC",
+			...config.env,
+		};
+		const outcome = config.mode === "session" ? await runSession(config, { cwd: project, env }) : await runPrint(config, { cwd: project, env });
+		if (outcome.problem) throw new Error(outcome.problem);
+		if (!existsSync(dump)) throw new Error("no request was recorded");
+		const normalize = makeNormalizer({ home, project, root });
+		const requests = readFileSync(dump, "utf8").trim().split("\n").map((line) => normalize(JSON.parse(line)));
+		// Side calls (the session title, the classifier, a subagent) run alongside
+		// the turn, so their place in the dump varies; sorting on the serialized
+		// body makes the order stable.
+		const ordered = config.mode === "print" ? requests : requests.map((r) => [JSON.stringify(r), r]).sort(([a], [b]) => (a < b ? -1 : 1)).map(([, r]) => r);
+		return { dialogs: normalize(outcome.dialogs), requests: ordered };
+	} catch (error) {
+		throw new Error(`${config.name}: ${error.message ?? error}`);
+	} finally {
 		rmSync(root, { recursive: true, force: true });
-		throw new Error(`${config.name}: ${message}`);
-	};
-	let dialogs = [];
-	if (config.mode !== "session") {
-		const result = spawnSync(process.execPath, [piCli, "--mode", "json", "--model", config.model, "-e", fixture, "-p", PROMPTS[config.mode]], {
-			cwd: project,
-			env,
-			encoding: "utf8",
-			timeout: 120_000,
-		});
-		if (result.status !== 0) fail(`pi exited ${result.status}\n${result.stderr?.slice(-4000)}\n${result.stdout?.slice(-2000)}`);
-	} else {
-		const outcome = await runSession(config, { cwd: project, env });
-		if (outcome.problem) fail(outcome.problem);
-		dialogs = outcome.dialogs;
 	}
-	if (!existsSync(dump)) fail("no request was recorded");
-	const requests = readFileSync(dump, "utf8").trim().split("\n").map((line) => JSON.parse(line));
-	// Side calls (the session title, the classifier, a subagent) run alongside
-	// the turn, so their place in the dump varies; sorting on the serialized
-	// body makes the order stable.
-	const normalized = requests.map((request) => normalize(request, { home, project, root }));
-	if (config.mode !== "print") normalized.sort((a, b) => (JSON.stringify(a) < JSON.stringify(b) ? -1 : 1));
-	rmSync(root, { recursive: true, force: true });
-	return { dialogs: normalize(dialogs, { home, project, root }), requests: normalized };
+}
+
+/** One `-p` turn in JSON mode. Resolves with `{ problem }` or `{ dialogs: [] }`. */
+function runPrint(config, { cwd, env }) {
+	return new Promise((resolveRun) => {
+		const child = spawn(process.execPath, [piCli, "--mode", "json", "--model", config.model, "-e", fixture, "-p", PROMPTS[config.mode]], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+		let stdout = "";
+		let stderr = "";
+		child.stdout.on("data", (chunk) => {
+			stdout += chunk;
+		});
+		child.stderr.on("data", (chunk) => {
+			stderr += chunk;
+		});
+		const timer = setTimeout(() => child.kill(), RUN_TIMEOUT_MS);
+		child.on("close", (code) => {
+			clearTimeout(timer);
+			resolveRun(code === 0 ? { dialogs: [] } : { problem: `pi exited ${code}\n${stderr.slice(-4000)}\n${stdout.slice(-2000)}` });
+		});
+	});
 }
 
 /**
@@ -165,7 +187,7 @@ function runSession(config, { cwd, env }) {
 			child.kill();
 			resolveRun(problem ? { problem } : { dialogs });
 		};
-		const timer = setTimeout(() => finish(`timed out at step ${step}\n${stderr.slice(-3000)}`), 120_000);
+		const timer = setTimeout(() => finish(`timed out at step ${step}\n${stderr.slice(-3000)}`), RUN_TIMEOUT_MS);
 		const next = () => {
 			step += 1;
 			if (step >= steps.length) return finish();
@@ -203,20 +225,20 @@ function runSession(config, { cwd, env }) {
 	});
 }
 
-/** Replace every per-machine and per-run value with a placeholder. */
-function normalize(value, { home, project, root }) {
-	const today = new Date().toISOString().slice(0, 10);
+/** A function that replaces every per-machine and per-run value of one run with a placeholder. */
+function makeNormalizer({ home, project, root }) {
+	const user = os.userInfo().username;
 	const replacements = [
-		// The project as a folder name (memory and scratchpad dirs): every non-alphanumeric becomes "-".
-		[project.replace(/[^a-zA-Z0-9]/g, "-"), "<PROJECT_SLUG>"],
+		// The project as a folder name (memory and scratchpad dirs).
+		[projectSlug(project), "<PROJECT_SLUG>"],
 		[project, "<PROJECT>"],
 		[home, "<HOME>"],
 		[root, "<ROOT>"],
 		[os.release(), "<OS_RELEASE>"],
 		// The auto-mode classifier names the login (its "User identity" line).
-		[`\`${os.userInfo().username}\``, "`<USER>`"],
-		[`${os.userInfo().username}/`, "<USER>/"],
-		[today, "<DATE>"],
+		[`\`${user}\``, "`<USER>`"],
+		[`${user}/`, "<USER>/"],
+		[new Date().toISOString().slice(0, 10), "<DATE>"],
 	];
 	const text = (s) => {
 		let out = s;
@@ -235,7 +257,7 @@ function normalize(value, { home, project, root }) {
 		if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)]));
 		return v;
 	};
-	return walk(value);
+	return walk;
 }
 
 /** The first path where two JSON values differ, with both sides. */
@@ -263,65 +285,101 @@ function showSides(expected, actual) {
 	return { e: cut(e), a: cut(a) };
 }
 
+/** Run `task(item)` over `items`, `jobs` at a time; resolves with the outcomes in input order. */
+async function pool(items, task) {
+	const results = new Array(items.length);
+	let next = 0;
+	const worker = async () => {
+		while (next < items.length) {
+			const index = next++;
+			try {
+				results[index] = { ok: true, value: await task(items[index]) };
+			} catch (error) {
+				results[index] = { ok: false, error };
+			}
+		}
+	};
+	await Promise.all(Array.from({ length: Math.min(jobs, items.length) }, worker));
+	return results;
+}
+
+const toolNames = (body) => (body?.tools ?? []).map((t) => t.name ?? t.function?.name);
+const mainBody = (requests) => (requests.find((r) => Array.isArray(r.body.tools) && r.body.tools.length > 0) ?? requests[0])?.body;
+
 /** --sweep: see the header. Exits the process with the outcome. */
 async function sweep() {
-	const { FEATURE_IDS, FEATURES } = await import("../../extensions/lib/features.ts");
 	const optional = FEATURE_IDS.filter((id) => !FEATURES[id].required);
 	const runs = optional.map((id) => ({ label: `${id} off`, config: { name: `sweep-${id}`, model: ANTHROPIC, tier: "frontier", mode: "print", env: { ONECODE_FEATURES_OFF: id } } }));
 	const toolsOff = ["notebook_edit", "edit", "web_fetch"];
 	runs.push({ label: `tools ${toolsOff.join(", ")} off`, toolsOff, config: { name: "sweep-tools", model: ANTHROPIC, tier: "frontier", mode: "print", env: { ONECODE_TOOLS_OFF: toolsOff.join(",") } } });
-	let bad = 0;
-	const toolNames = (body) => (body?.tools ?? []).map((t) => t.name ?? t.function?.name);
-	const mainBody = (requests) => (requests.find((r) => Array.isArray(r.body.tools) && r.body.tools.length > 0) ?? requests[0])?.body;
-	// The tools a run loses against an all-on baseline, and which of them the
-	// request's text still names (a whole-word match, so a plain English word
-	// like "edit" can be a false hit): text that should follow the switches.
-	const baseline = new Set(toolNames(mainBody((await runConfig({ name: "sweep-baseline", model: ANTHROPIC, tier: "frontier", mode: "print" })).requests)));
-	const stillNamed = [];
-	for (const run of runs) {
-		try {
-			const { requests } = await runConfig(run.config);
-			if (args.includes("--dir")) {
-				mkdirSync(goldenDir, { recursive: true });
-				writeFileSync(join(goldenDir, `${run.config.name}.json`), `${JSON.stringify(requests, null, 1)}\n`);
-			}
-			const main = requests.find((r) => Array.isArray(r.body.tools) && r.body.tools.length > 0) ?? requests[0];
-			const names = (main?.body.tools ?? []).map((t) => t.name ?? t.function?.name);
-			const leaked = (run.toolsOff ?? []).filter((name) => names.includes(name));
-			if (leaked.length > 0) throw new Error(`turned-off tools still sent: ${leaked.join(", ")}`);
-			const body = mainBody(requests);
-			const text = JSON.stringify({ system: body?.system, messages: body?.messages, tools: body?.tools });
-			const named = [...baseline].filter((name) => !names.includes(name) && new RegExp(`(^|[^A-Za-z_])${name}([^A-Za-z_]|$)`).test(text));
-			if (named.length > 0) stillNamed.push(`${run.label}: ${named.join(", ")}`);
-			console.log(`ok    ${run.label} (${requests.length} request(s), ${names.length} tools)`);
-		} catch (error) {
-			bad += 1;
-			console.log(`FAIL  ${run.label}: ${String(error.message ?? error).slice(0, 1500)}`);
-		}
+	// The all-on baseline runs in the same pool; the tools a run loses against
+	// it, and which of them the request's text still names (a whole-word match,
+	// so a plain English word like "edit" can be a false hit), are text that
+	// should follow the switches.
+	const baselineRun = { label: "baseline", config: { name: "sweep-baseline", model: ANTHROPIC, tier: "frontier", mode: "print" } };
+	const [baselineOutcome, ...outcomes] = await pool([baselineRun, ...runs], (run) => runConfig(run.config));
+	if (!baselineOutcome.ok) {
+		console.log(`FAIL  baseline: ${baselineOutcome.error.message}`);
+		process.exit(1);
 	}
+	const baseline = toolNames(mainBody(baselineOutcome.value.requests));
+	let bad = 0;
+	const stillNamed = [];
+	outcomes.forEach((outcome, index) => {
+		const run = runs[index];
+		if (!outcome.ok) {
+			bad += 1;
+			console.log(`FAIL  ${run.label}: ${String(outcome.error.message ?? outcome.error).slice(0, 1500)}`);
+			return;
+		}
+		const { requests } = outcome.value;
+		if (opts.dir) {
+			mkdirSync(goldenDir, { recursive: true });
+			writeFileSync(join(goldenDir, `${run.config.name}.json`), `${JSON.stringify(requests, null, 1)}\n`);
+		}
+		const body = mainBody(requests);
+		const names = toolNames(body);
+		const leaked = (run.toolsOff ?? []).filter((name) => names.includes(name));
+		if (leaked.length > 0) {
+			bad += 1;
+			console.log(`FAIL  ${run.label}: turned-off tools still sent: ${leaked.join(", ")}`);
+			return;
+		}
+		const text = JSON.stringify({ system: body?.system, messages: body?.messages, tools: body?.tools });
+		const named = baseline.filter((name) => !names.includes(name) && new RegExp(`(^|[^A-Za-z_])${name}([^A-Za-z_]|$)`).test(text));
+		if (named.length > 0) stillNamed.push(`${run.label}: ${named.join(", ")}`);
+		console.log(`ok    ${run.label} (${requests.length} request(s), ${names.length} tools)`);
+	});
 	console.log(`${runs.length - bad}/${runs.length} sweep runs ok`);
 	if (stillNamed.length > 0) console.log(`\nText still naming a removed tool (report only until the text follows the switches):\n  ${stillNamed.join("\n  ")}`);
 	process.exit(bad > 0 ? 1 : 0);
 }
-if (args.includes("--sweep")) await sweep();
+if (opts.sweep) await sweep();
 
 mkdirSync(goldenDir, { recursive: true });
+const selected = CONFIGS.filter((c) => !opts.only || c.name === opts.only);
+const outcomes = await pool(selected, runConfig);
 let failed = false;
-for (const config of CONFIGS.filter((c) => !only || c.name === only)) {
-	const actual = await runConfig(config);
+outcomes.forEach((outcome, index) => {
+	const config = selected[index];
+	if (!outcome.ok) {
+		failed = true;
+		console.log(`FAIL  ${outcome.error.message}`);
+		return;
+	}
+	const actual = outcome.value;
 	const file = join(goldenDir, `${config.name}.json`);
-	if (update) {
+	if (opts.update) {
 		writeFileSync(file, `${JSON.stringify(actual, null, 1)}\n`);
 		console.log(`${config.name}: wrote ${actual.requests.length} request(s), ${actual.dialogs.length} dialog(s)`);
-		continue;
+		return;
 	}
 	if (!existsSync(file)) {
 		console.log(`${config.name}: no snapshot (run with --update)`);
 		failed = true;
-		continue;
+		return;
 	}
-	const expected = JSON.parse(readFileSync(file, "utf8"));
-	const diff = firstDifference(actual, expected);
+	const diff = firstDifference(actual, JSON.parse(readFileSync(file, "utf8")));
 	if (diff) {
 		failed = true;
 		const { e, a } = showSides(diff.expected, diff.actual);
@@ -329,5 +387,5 @@ for (const config of CONFIGS.filter((c) => !only || c.name === only)) {
 	} else {
 		console.log(`${config.name}: identical (${actual.requests.length} request(s), ${actual.dialogs.length} dialog(s))`);
 	}
-}
+});
 process.exit(failed ? 1 : 0);
