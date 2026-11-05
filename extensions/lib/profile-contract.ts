@@ -5,11 +5,17 @@
  * (working-docs/decisions/bi-fork.md, working-docs/features/profiles/).
  *
  * The contract grows phase by phase as text, brand and catalogs move out of
- * the base. Today it carries the feature and tool switches and the extra
- * extensions child sessions load.
+ * the base. Today it carries the feature and tool switches, the extra
+ * extensions child sessions load, and the text groups moved so far.
  */
 
+import type { SystemPromptText } from "../system-prompt/text.ts";
 import type { FeatureId } from "./features.ts";
+
+/** Every text the base shows the model, one group per feature that owns it. */
+export interface ProfileText {
+	systemPrompt: SystemPromptText;
+}
 
 /** A profile's switches for one tool, by its registered name. Omitted fields keep the base's choice. */
 export interface ToolSwitch {
@@ -43,4 +49,6 @@ export interface Profile {
 	 * tools, commands, reminders and prompt sections.
 	 */
 	childExtensions: readonly string[];
+	/** The model-facing text, by owning feature. */
+	text: ProfileText;
 }

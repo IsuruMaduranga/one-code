@@ -7,6 +7,7 @@ import { childExtensionPaths } from "../../extensions/lib/child-extensions.ts";
 import { feature, profiledPi } from "../../extensions/lib/feature.ts";
 import { activeProfile, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile.ts";
 import type { Profile } from "../../extensions/lib/profile-contract.ts";
+import { profile as shippedProfile } from "../../profile/index.ts";
 import { discoverPlugins, invalidatePluginsCache } from "../../extensions/lib/plugins.ts";
 import { autoMemoryEnabled, resetAutoMemoryForTest } from "../../extensions/lib/auto-memory.ts";
 import { DEFER_CHANNEL } from "../../extensions/lib/deferred.ts";
@@ -20,7 +21,7 @@ import toolSearchExtension from "../../extensions/tool-search/index.ts";
 import { createFakePi } from "./helpers/fake-pi.ts";
 import { makeToolSearchFakePi } from "./helpers/tool-search-fake-pi.ts";
 
-const empty: Profile = { features: {}, tools: {}, childExtensions: [] };
+const empty: Profile = { features: {}, tools: {}, childExtensions: [], text: shippedProfile.text };
 const use = (profile: Partial<Profile>, env: NodeJS.ProcessEnv = {}) =>
 	setActiveProfileForTest(resolveProfile({ ...empty, ...profile }, env, "/profile"));
 

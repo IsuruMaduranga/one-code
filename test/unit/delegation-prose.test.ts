@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DELEGATION_STEER } from "../../extensions/subagents/delegation-steer.ts";
-import { DELEGATE_STRICT } from "../../extensions/system-prompt/tiers/low.ts";
-import { DELEGATING_WORK } from "../../extensions/system-prompt/tiers/mid.ts";
+import { DELEGATE_STRICT } from "../../profile/system-prompt/low.ts";
+import { DELEGATING_WORK } from "../../profile/system-prompt/mid.ts";
 
 /**
  * The delegation policy ships as three separately tuned prose registers — one

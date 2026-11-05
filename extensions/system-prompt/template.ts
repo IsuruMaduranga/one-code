@@ -1,44 +1,26 @@
 /**
- * Claude Code system prompt, adapted for One Code, selected by model tier.
- *
- * The tier-specific section text lives in `tiers/` (one bundle per tier);
- * this module is the tier-agnostic composer — it places the dynamic blocks
- * (tools, memory, the cwd trailer, the budget line) around the bundle's
- * `lead`/`tail` sections. Sections tied to Anthropic-hosted features are
- * dropped. The environment block, the model line and the git snapshot are not
- * here: they ride the first-message context (lib/environment-block.ts,
- * lib/claude-context.ts), or the mid-conversation system message on a model
- * that takes one, as in Claude Code.
+ * The system prompt composer: the profile's sections (`text.systemPrompt`,
+ * working-docs/features/profiles/) with the computed blocks placed between
+ * them: the tool list, the memory section, sections other extensions add
+ * (SYSTEM_PROMPT_SECTION_CHANNEL, text.ts), appended text, the working
+ * directory and the budget line. The environment block, the model line and
+ * the git snapshot are not here: they ride the first-message context
+ * (lib/environment-block.ts, lib/claude-context.ts), or the mid-conversation
+ * system message on a model that takes one, as in Claude Code.
  *
  * For a fixed tier this function must be pure and deterministic: same inputs,
  * byte-identical output (prompt-cache stability).
  */
 
 import type { BuildSystemPromptOptions } from "@earendil-works/pi-coding-agent";
-import { memoryPromptSection } from "../lib/memory.ts";
 import type { PromptTier } from "../lib/model-tier.ts";
+import { profileText } from "../lib/profile.ts";
 import type { EnvironmentInfo } from "./environment.ts";
-import type { PromptBundle } from "./tiers/common.ts";
-import { frontierBundle } from "./tiers/frontier.ts";
-import { lowBundle } from "./tiers/low.ts";
-import { midBundle } from "./tiers/mid.ts";
+import type { SystemPromptSection, SystemPromptSession } from "./text.ts";
 
-/**
- * Four tiers, three register texts. `workhorse` and `cheap` share Claude Code's
- * long register (`midBundle`), as Claude Code sends one text to Haiku 4.5,
- * Sonnet 4.x and Opus 4.5 to 4.7; the two tiers differ in their tool
- * descriptions. `tiny` = the long register plus the weak-model scaffolding
- * (`lowBundle`). See `working-docs/decisions/model-tiers.md`.
- */
-const BUNDLES: Record<PromptTier, PromptBundle> = {
-	frontier: frontierBundle,
-	workhorse: midBundle,
-	cheap: midBundle,
-	tiny: lowBundle,
-};
-
-function buildToolsSection(options: BuildSystemPromptOptions): string {
-	const tools = options.selectedTools ?? ["read", "bash", "edit", "write"];
+/** The active tools with a snippet, in registration order, and the tools' guidelines, deduplicated. */
+function toolListInputs(options: BuildSystemPromptOptions): { tools: { name: string; snippet: string }[]; guidelines: string[] } {
+	const selected = options.selectedTools ?? ["read", "bash", "edit", "write"];
 	// In registration order (the snippets' own), never activation order: a tool
 	// withdrawn and brought back (a model hop through another tier) is appended
 	// to pi's active list, and a prompt built from that order would depend on
@@ -48,10 +30,10 @@ function buildToolsSection(options: BuildSystemPromptOptions): string {
 		const at = order.indexOf(name);
 		return at === -1 ? order.length : at;
 	};
-	const visible = tools.filter((name) => !!options.toolSnippets?.[name]).sort((a, b) => rank(a) - rank(b));
-	const toolsList =
-		visible.length > 0 ? visible.map((name) => `- ${name}: ${options.toolSnippets![name]}`).join("\n") : "(none)";
-
+	const tools = selected
+		.filter((name) => !!options.toolSnippets?.[name])
+		.sort((a, b) => rank(a) - rank(b))
+		.map((name) => ({ name, snippet: options.toolSnippets![name] }));
 	const guidelines: string[] = [];
 	const seen = new Set<string>();
 	for (const g of options.promptGuidelines ?? []) {
@@ -61,9 +43,7 @@ function buildToolsSection(options: BuildSystemPromptOptions): string {
 			guidelines.push(trimmed);
 		}
 	}
-	const guidelinesBlock = guidelines.length > 0 ? `\n\nGuidelines:\n${guidelines.map((g) => `- ${g}`).join("\n")}` : "";
-
-	return `# Available tools\n${toolsList}${guidelinesBlock}`;
+	return { tools, guidelines };
 }
 
 export function buildClaudeCodeSystemPrompt(
@@ -78,16 +58,22 @@ export function buildClaudeCodeSystemPrompt(
 	totalTokensLine?: string | null,
 	/** False when the session model runs without the task tools (`lib/model-tier.ts taskToolsEnabled`). */
 	taskTools = true,
+	/** Sections other extensions announced, in announcement order. */
+	extraSections: readonly SystemPromptSection[] = [],
 ): string {
-	const bundle = BUNDLES[tier];
-	const lead = bundle.leadFor?.({ taskTools, tools: options.selectedTools }) ?? (taskTools ? bundle.lead : (bundle.leadWithoutTaskTools ?? bundle.lead));
+	const text = profileText().systemPrompt;
+	const session: SystemPromptSession = { tier, taskTools, tools: options.selectedTools };
+	const extra = (place: SystemPromptSection["place"]) =>
+		extraSections.filter((section) => section.place === place).flatMap((section) => section.render(session) ?? []);
+	const { tools, guidelines } = toolListInputs(options);
 	const sections = [
-		...lead,
-		buildToolsSection(options),
-		// Workhorse, cheap and tiny use the long memory spec. No section while
-		// auto-memory is off, as in Claude Code.
-		...(env.memoryDir ? [memoryPromptSection(env.memoryDir, bundle.verboseMemory)] : []),
-		...bundle.tail,
+		...text.lead(session),
+		...extra("lead"),
+		text.toolList(tools, guidelines),
+		// No section while auto-memory is off, as in Claude Code.
+		...(env.memoryDir ? [text.memory(env.memoryDir, session)] : []),
+		...text.tail(session),
+		...extra("tail"),
 	];
 
 	let prompt = sections.join("\n\n");
@@ -105,7 +91,7 @@ export function buildClaudeCodeSystemPrompt(
 	// message (Claude Code's block 3), framed for the `skill` tool rather than pi's
 	// read-the-file convention.
 
-	prompt += `\nCurrent working directory: ${env.cwd.replace(/\\/g, "/")}`;
+	prompt += `\n${text.cwdLine(env.cwd.replace(/\\/g, "/"))}`;
 
 	// Claude Code ends its prompt with the budget line, after a blank line.
 	if (totalTokensLine) {

@@ -4,13 +4,16 @@
  * this folder with its own implementation of `Profile`
  * (extensions/lib/profile-contract.ts).
  *
- * One Code runs every feature and keeps each tool's base switches.
+ * One Code runs every feature and keeps each tool's base switches. Its text
+ * lives beside this file, one folder per group (system-prompt/ so far).
  */
 
 import type { Profile } from "../extensions/lib/profile-contract.ts";
+import { systemPrompt } from "./system-prompt/index.ts";
 
 export const profile: Profile = {
 	features: {},
 	tools: {},
 	childExtensions: [],
+	text: { systemPrompt },
 };

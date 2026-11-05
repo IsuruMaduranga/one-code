@@ -18,7 +18,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { profile as shippedProfile } from "../../profile/index.ts";
 import { enabledFeatures, type FeatureId, featureProblems, isGuardFeature } from "./features.ts";
-import type { Profile, ToolSwitch } from "./profile-contract.ts";
+import type { Profile, ProfileText, ToolSwitch } from "./profile-contract.ts";
 
 export const PROFILE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../profile");
 
@@ -37,6 +37,8 @@ export interface ResolvedProfile {
 	disabledTools: ReadonlySet<string>;
 	/** Absolute entry files child sessions load after the base's own. */
 	childExtensionPaths: readonly string[];
+	/** The profile's model-facing text, as the profile wrote it. */
+	text: ProfileText;
 }
 
 function envList(env: NodeJS.ProcessEnv, name: string): string[] {
@@ -70,6 +72,7 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		tools,
 		disabledTools: new Set([...tools].filter(([, sw]) => sw.enabled === false).map(([name]) => name)),
 		childExtensionPaths: profile.childExtensions.map((entry) => resolve(profileDir, entry)),
+		text: profile.text,
 	};
 }
 
@@ -88,6 +91,11 @@ export function setActiveProfileForTest(resolved: ResolvedProfile | undefined): 
 
 export function featureEnabled(id: FeatureId): boolean {
 	return activeProfile().features.has(id);
+}
+
+/** The profile's model-facing text. */
+export function profileText(): ProfileText {
+	return activeProfile().text;
 }
 
 export function toolSwitch(name: string): ToolSwitch | undefined {

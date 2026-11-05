@@ -33,6 +33,7 @@ import { collectEnvironment, type EnvironmentInfo } from "./environment.ts";
 import { totalTokensBlock, turnTokenBudget } from "../context-budget/budget.ts";
 import { optionsForIdleTurn, withSystemHead } from "./idle-turn.ts";
 import { buildClaudeCodeSystemPrompt } from "./template.ts";
+import { SYSTEM_PROMPT_SECTION_CHANNEL, type SystemPromptSection } from "./text.ts";
 import { WORKSPACE_CHANNEL, type WorkspaceAnnouncement } from "../lib/workspace-channel.ts";
 import { PROMPT_OPTIONS_CHANNEL, type PromptOptionsAnnouncement, SYSTEM_PROMPT_REQUEST_CHANNEL, type SystemPromptRequest } from "../lib/prompt-options.ts";
 
@@ -59,6 +60,15 @@ function systemPromptExtension(pi: ExtensionAPI) {
 	let lastOptions: BuildSystemPromptOptions | undefined;
 	/** Whether this run is one-shot (`-p`, json): the turn_start that queued the blocks saw it. */
 	let oneShotRun = false;
+	// Sections other extensions add (a product's domain section), announced
+	// while extensions load; a later announcement with the same id replaces
+	// the earlier one in its place.
+	const extraSections = new Map<string, SystemPromptSection>();
+	pi.events.on(SYSTEM_PROMPT_SECTION_CHANNEL, (data) => {
+		const section = data as SystemPromptSection | undefined;
+		if (!section?.id || typeof section.render !== "function" || (section.place !== "lead" && section.place !== "tail")) return;
+		extraSections.set(section.id, section);
+	});
 	pi.events.on(WORKSPACE_CHANNEL, (data) => {
 		const dirs = (data as WorkspaceAnnouncement | undefined)?.dirs;
 		workspaceDirs = Array.isArray(dirs) ? dirs.filter((dir): dir is string => typeof dir === "string") : [];
@@ -92,7 +102,7 @@ function systemPromptExtension(pi: ExtensionAPI) {
 		const tier = requestTier();
 		// The same constant the context-budget extension puts on every user message.
 		const totalTokensLine = process.env.CC_TOTAL_TOKENS === "0" ? null : totalTokensBlock(turnTokenBudget());
-		return buildClaudeCodeSystemPrompt(options, environment(ctx.cwd), tier, totalTokensLine, taskToolsEnabled(model, process.env, tier));
+		return buildClaudeCodeSystemPrompt(options, environment(ctx.cwd), tier, totalTokensLine, taskToolsEnabled(model, process.env, tier), [...extraSections.values()]);
 	};
 
 	// Claude Code's environment block and model line, the first two blocks of the
