@@ -13,8 +13,9 @@
  * steps under GOLDEN_TASKS, each in later rounds, then web_fetch under
  * GOLDEN_WEB_FETCH (against canned golden.example pages), web_search under
  * GOLDEN_SEARCH (against canned search backends), the skill tool under
- * GOLDEN_SKILL, the MCP tools under GOLDEN_MCP (golden-mcp-server.mjs) and
- * the worktree tools under GOLDEN_WORKTREE after all of them. The auto-mode classifier gets a verdict instead: severity 60
+ * GOLDEN_SKILL, the MCP tools under GOLDEN_MCP (golden-mcp-server.mjs),
+ * lsp_diagnostics under GOLDEN_LSP (golden-lsp-server.mjs) and the worktree
+ * tools under GOLDEN_WORKTREE after all of them. The auto-mode classifier gets a verdict instead: severity 60
  * at stage 1, so stage 2 runs too, and severity 10 at stage 2, so the call is
  * allowed and the subagent's own requests are recorded. Every other reply is a
  * fixed text shaped like a compaction summary, which serves every turn and
@@ -353,6 +354,32 @@ const MCP_ROUNDS: ToolCall[][] = [
 ];
 
 /**
+ * The language-server tool under GOLDEN_LSP, against golden-lsp-server.mjs
+ * (on PATH as `gopls`): a write that brings new diagnostics, a clean file,
+ * then lsp_diagnostics on the file (all and errors only), on the clean file,
+ * on a file no server handles, on a Rust file (rust-analyzer runs project
+ * code, so it waits for a trust this run never gives) and on a TypeScript
+ * file with no TypeScript in the project. One write per round: two writes
+ * in one round could split the new-diagnostics block either way.
+ */
+const ls = (id: string, name: string, input: Record<string, unknown>): ToolCall => ({ id: `toolu_golden_lsp_${id}`, name, input });
+const LSP_ROUNDS: ToolCall[][] = [
+	[ls("write", "write", { path: "main.go", content: "package main\n\nfunc main() {\n\tgolden\n}\n" })],
+	[ls("write_clean", "write", { path: "clean.go", content: "package clean\n" })],
+	[
+		ls("load", "tool_search", { query: "select:lsp_diagnostics" }),
+	],
+	[
+		ls("all", "lsp_diagnostics", { path: "main.go" }),
+		ls("errors", "lsp_diagnostics", { path: "main.go", severity: "error" }),
+		ls("clean", "lsp_diagnostics", { path: "clean.go" }),
+		ls("none", "lsp_diagnostics", { path: "README.md" }),
+		ls("untrusted", "lsp_diagnostics", { path: "src/lib.rs" }),
+		ls("typescript", "lsp_diagnostics", { path: "app.ts" }),
+	],
+];
+
+/**
  * Plan mode under GOLDEN_PLAN, on its own (the session scenario's last
  * prompt): load the tools, exit before entering, enter, exit with an empty
  * plan, write the plan to the file enter_plan_mode named, and exit for
@@ -435,6 +462,7 @@ function roundsFor(text: string): ToolCall[][] {
 	if (has("GOLDEN_SEARCH")) rounds.push(...SEARCH_ROUNDS);
 	if (has("GOLDEN_SKILL")) rounds.push(...SKILL_ROUNDS);
 	if (has("GOLDEN_MCP")) rounds.push(...MCP_ROUNDS);
+	if (has("GOLDEN_LSP")) rounds.push(...LSP_ROUNDS);
 	if (has("GOLDEN_WORKTREE")) rounds.push(...WORKTREE_ROUNDS);
 	return rounds;
 }

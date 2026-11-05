@@ -81,7 +81,7 @@ const CONFIGS = [
 	{ name: "session-anthropic-tiny", model: ANTHROPIC, tier: "tiny", mode: "session" },
 	{ name: "session-openrouter-cheap", model: OPENROUTER, tier: "cheap", mode: "session" },
 ];
-const PROMPTS = { print: "Reply with OK.", tools: "GOLDEN_TOOLS GOLDEN_AGENT GOLDEN_NOTEBOOK GOLDEN_TASKS GOLDEN_WEB_FETCH GOLDEN_SEARCH GOLDEN_SKILL GOLDEN_MCP GOLDEN_WORKTREE: make the scripted calls." };
+const PROMPTS = { print: "Reply with OK.", tools: "GOLDEN_TOOLS GOLDEN_AGENT GOLDEN_NOTEBOOK GOLDEN_TASKS GOLDEN_WEB_FETCH GOLDEN_SEARCH GOLDEN_SKILL GOLDEN_MCP GOLDEN_LSP GOLDEN_WORKTREE: make the scripted calls." };
 
 /** A format 4.4 notebook (no cell ids, so nothing random) with the given code cells. */
 const notebook = (...sources) =>
@@ -150,6 +150,13 @@ function writeMcpServers(home) {
 	writeFileSync(join(home, ".claude.json"), `${JSON.stringify({ mcpServers }, null, 2)}\n`);
 }
 
+/** The tools scenario's `gopls`: a wrapper that runs the stub language server (golden-fixture.ts LSP_ROUNDS). */
+function writeLanguageServer(bin) {
+	mkdirSync(bin, { recursive: true });
+	const script = join(repo, "test/e2e/golden-lsp-server.mjs");
+	writeFileSync(join(bin, "gopls"), `#!/bin/sh\nexec "${process.execPath}" "${script}" "$@"\n`, { mode: 0o755 });
+}
+
 const SESSION_PROMPTS = ["GOLDEN_TOOLS: read README.md and run echo golden.", "Reply with OK."];
 
 /** The parent's environment without anything that steers pi or One Code. */
@@ -167,6 +174,7 @@ async function runConfig(config) {
 	const root = realpathSync(mkdtempSync(join(os.tmpdir(), "golden-")));
 	try {
 		const home = join(root, "home");
+		const bin = join(root, "bin");
 		const project = join(root, "project");
 		const agentDir = join(home, ".pi", "agent");
 		mkdirSync(agentDir, { recursive: true });
@@ -177,6 +185,7 @@ async function runConfig(config) {
 			for (const [name, content] of Object.entries(NOTEBOOK_FILES)) writeFileSync(join(project, name), content);
 			writeProjectSkills(project, agentDir);
 			writeMcpServers(home);
+			writeLanguageServer(bin);
 			makeGitProject(project, home);
 		}
 		const settings = withCompactionKeepBackfilled({
@@ -197,8 +206,9 @@ async function runConfig(config) {
 			ONECODE_NO_UPDATE_CHECK: "1",
 			SHELL: "/bin/zsh",
 			TZ: "UTC",
-			// Keys for the canned Brave and Tavily replies (golden-fixture.ts SEARCH_ROUNDS).
-			...(config.mode === "tools" ? { BRAVE_SEARCH_API_KEY: "golden-brave", TAVILY_API_KEY: "golden-tavily" } : {}),
+			// Keys for the canned Brave and Tavily replies (golden-fixture.ts SEARCH_ROUNDS),
+			// and the stub language server first on PATH (LSP_ROUNDS).
+			...(config.mode === "tools" ? { BRAVE_SEARCH_API_KEY: "golden-brave", TAVILY_API_KEY: "golden-tavily", PATH: `${bin}:${process.env.PATH}` } : {}),
 			...config.env,
 		};
 		const outcome = config.mode === "session" ? await runSession(config, { cwd: project, env }) : await runPrint(config, { cwd: project, env });
