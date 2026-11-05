@@ -24,17 +24,17 @@ import { releaseSideCalls, runSideCall } from "../lib/side-call-run.ts";
 import { runWithDeadline } from "../lib/operation-deadline.ts";
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
-import { CrossHostRedirect, htmlToMarkdown, isSameHost, normalizeUrl, paginate, redirectMessage } from "./extract.ts";
+import { CrossHostRedirect, htmlToMarkdown, isSameHost, normalizeUrl, paginate } from "./extract.ts";
 import { pickReaderModel, READER_MAX_CHARS, READER_MAX_TOKENS, readerMessages } from "./summarize.ts";
 import { tryNativeWeb } from "../lib/anthropic-server-call.ts";
-import { CUT_OFF_NOTE, fetchOutcome, isPrivateOrLocalUrl, nativeFetchBody, type ThinkingFields } from "../lib/anthropic-server-tools.ts";
+import { fetchOutcome, isPrivateOrLocalUrl, nativeFetchBody, type ThinkingFields } from "../lib/anthropic-server-tools.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
+import { requireText } from "../lib/profile.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 import { registerFormTool } from "../lib/tool-variants.ts";
-import { webFetchDescription } from "./description.ts";
-import { readResponseText } from "./response.ts";
+import { readResponseText, WebFetchFailure } from "./response.ts";
 import { pageContent } from "./page-content.ts";
-
+import type { FetchAnswer, ReaderFailure, WebFetchText } from "./text.ts";
 
 const DEFAULT_MAX_CHARS = 30_000;
 const CACHE_TTL_MS = 15 * 60 * 1000;
@@ -45,6 +45,8 @@ const MAX_REDIRECTS = 5;
 const MAX_CACHE_ENTRIES = 50;
 /** Longer than the classifier's cap: the reader ingests whole pages. */
 const READER_TIMEOUT_MS = 60_000;
+/** The reader's credentials deadline, told apart from a registry error by this message (never shown). */
+const CREDENTIALS_DEADLINE = "web_fetch: reader credentials deadline";
 const USER_AGENT = "one-code/0.1 (+https://github.com/IsuruMaduranga/one-code)";
 
 /**
@@ -66,7 +68,8 @@ interface CacheEntry {
 	markdown: string;
 	title?: string;
 	fetchedAt: number;
-	note?: string;
+	/** The page had no article structure, so the whole page was converted. */
+	noArticle?: boolean;
 }
 
 /**
@@ -80,6 +83,7 @@ interface CacheEntry {
  * errors turns into the raw-content fallback, wasting the fetch.
  */
 async function answerFromPage(
+	words: WebFetchText,
 	ctx: ExtensionContext,
 	prompt: string,
 	entry: { markdown: string; title?: string },
@@ -90,9 +94,9 @@ async function answerFromPage(
 	learnedReasoning: Map<string, ThinkingLevel>,
 	/** Report the reader call's usage for the all-in footer cost. */
 	recordCall: (usage: unknown) => void,
-): Promise<{ answer?: string; reader?: string; truncated?: boolean; cutOff?: boolean; error?: string }> {
+): Promise<{ answer: string; reader: string; truncated: boolean; cutOff: boolean } | { failure: ReaderFailure }> {
 	const choice = pickReaderModel(ctx.modelRegistry.getAvailable(), ctx.model);
-	if (!choice) return { error: "no model available to read the page" };
+	if (!choice) return { failure: { kind: "noModel" } };
 	const reader = `${choice.model.provider}/${choice.model.id}`;
 
 	try {
@@ -101,10 +105,10 @@ async function answerFromPage(
 		const auth = await runWithDeadline(() => ctx.modelRegistry.getApiKeyAndHeaders(choice.model), {
 			signal,
 			timeoutMs: READER_TIMEOUT_MS,
-			message: "The reader's credentials did not resolve within 60 seconds.",
+			message: CREDENTIALS_DEADLINE,
 		});
-		if (!auth.ok) return { error: `${reader}: ${auth.error}` };
-		const messages = readerMessages({ prompt, markdown: entry.markdown, url, title: entry.title });
+		if (!auth.ok) return { failure: { kind: "error", reader, osMessage: auth.error } };
+		const messages = readerMessages(words, { prompt, markdown: entry.markdown, url, title: entry.title });
 		// Thinking off unless the model cannot disable it; withReasoningFallback sends
 		// a level up front for catalog-marked models and retries on the 400 for the
 		// rest, memoizing the result so repeated fetches don't re-pay the failure.
@@ -124,21 +128,28 @@ async function answerFromPage(
 			onUsage: recordCall,
 		});
 		if (result.stopReason !== "stop" && result.stopReason !== "length") {
-			return { error: `${reader}: ${result.errorMessage || `the call stopped early (${result.stopReason})`}` };
+			return {
+				failure: result.errorMessage
+					? { kind: "error", reader, osMessage: result.errorMessage }
+					: { kind: "stoppedEarly", reader, stopReason: String(result.stopReason) },
+			};
 		}
 		const answer = result.content
 			.filter((block): block is { type: "text"; text: string } => block.type === "text")
 			.map((block) => block.text)
 			.join("\n")
 			.trim();
-		if (!answer) return { error: `${reader} returned no text` };
+		if (!answer) return { failure: { kind: "noText", reader } };
 		return { answer, reader, truncated: messages.truncated, cutOff: result.stopReason === "length" };
 	} catch (error) {
-		return { error: `${reader}: ${(error as Error).message}` };
+		const message = (error as Error).message;
+		if (message === CREDENTIALS_DEADLINE) return { failure: { kind: "credentialsTimeout", reader, seconds: READER_TIMEOUT_MS / 1000 } };
+		return { failure: { kind: "error", reader, osMessage: message } };
 	}
 }
 
 function webFetchExtension(pi: ExtensionAPI) {
+	const text = requireText("webFetch");
 	// Same 15-minute window Claude Code documents, so repeated reads of one page
 	// during a task don't re-download it.
 	const cache = new Map<string, CacheEntry>();
@@ -174,7 +185,7 @@ function webFetchExtension(pi: ExtensionAPI) {
 				if (location) {
 					const target = new URL(location, url).toString();
 					if (isSameHost(target, url)) {
-						if (redirects >= MAX_REDIRECTS) throw new Error(`Too many redirects (${MAX_REDIRECTS}); last target ${target}`);
+						if (redirects >= MAX_REDIRECTS) throw new WebFetchFailure({ kind: "tooManyRedirects", max: MAX_REDIRECTS, lastTarget: target });
 						void response.body?.cancel().catch(() => {});
 						// Each hop inherits the first request's deadline as well as caller cancellation.
 						return await load(target, controller.signal, redirects + 1);
@@ -184,7 +195,7 @@ function webFetchExtension(pi: ExtensionAPI) {
 			}
 
 			if (!response.ok) {
-				throw new Error(`HTTP ${response.status} ${response.statusText}`);
+				throw new WebFetchFailure({ kind: "httpStatus", status: response.status, statusText: response.statusText });
 			}
 
 			const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
@@ -197,7 +208,7 @@ function webFetchExtension(pi: ExtensionAPI) {
 					markdown: extracted.markdown,
 					title: extracted.title,
 					fetchedAt: Date.now(),
-					note: extracted.fallback ? "No article structure found; converted the whole page." : undefined,
+					noArticle: extracted.fallback,
 				};
 			} else if (contentType.includes("json")) {
 				entry = { markdown: `\`\`\`json\n${body.trim()}\n\`\`\``, fetchedAt: Date.now() };
@@ -219,45 +230,40 @@ function webFetchExtension(pi: ExtensionAPI) {
 		}
 	};
 
-	// Short or long text by the model's tier (description.ts, lib/tool-variants.ts).
+	// Short or long text by the model's tier (the profile's description, lib/tool-variants.ts).
 	const tool = defineTool({
 		name: "web_fetch",
 		label: "Web Fetch",
 		...ccToolRenderers("Web Fetch"),
-		description: webFetchDescription("short"),
+		description: text.description("short"),
 		parameters: Type.Object({
-			url: Type.String({ description: "URL to fetch (http is upgraded to https)" }),
-			prompt: Type.Optional(
-				Type.String({
-					description:
-						"Question to answer from the page. A small same-provider model reads the whole page and returns just the answer, keeping long pages out of context. Omit to get the raw page markdown",
-				}),
-			),
-			offset: Type.Optional(
-				Type.Integer({ minimum: 0, description: "Character offset to resume from for a long page" }),
-			),
-			max_chars: Type.Optional(
-				Type.Integer({ minimum: 1000, maximum: 100_000, description: `Characters to return (default ${DEFAULT_MAX_CHARS})` }),
-			),
+			url: Type.String({ description: text.params.url }),
+			prompt: Type.Optional(Type.String({ description: text.params.prompt })),
+			offset: Type.Optional(Type.Integer({ minimum: 0, description: text.params.offset })),
+			max_chars: Type.Optional(Type.Integer({ minimum: 1000, maximum: 100_000, description: text.params.max_chars(DEFAULT_MAX_CHARS) })),
 		}),
 		async execute(toolCallId, params, signal, _onUpdate, ctx) {
-			let target: string;
-			let normalizeNote: string | undefined;
-			try {
-				const normalized = normalizeUrl(params.url);
-				target = normalized.url;
-				normalizeNote = normalized.note;
-			} catch (error) {
+			const normalized = normalizeUrl(params.url);
+			if ("problem" in normalized) {
 				return {
-					content: [{ type: "text", text: (error as Error).message }],
+					content: [{ type: "text", text: text.urlRejected(normalized.problem) }],
 					details: {} as FetchDetails,
 					isError: true,
 				};
 			}
+			const target = normalized.url;
+			const upgraded = normalized.upgraded === true;
+			/** Why Anthropic's server-side fetch did not answer `prompt`, when it was asked and fell back. */
+			let nativeFallback: string | undefined;
+			const cancelled = () => ({ content: [{ type: "text" as const, text: text.cancelled(target) }], details: { url: target }, isError: true });
+			/** The header and the framed page, bounded for the model. */
+			const resultText = (answer: FetchAnswer, page: { body: string; title?: string }, noArticle = false) =>
+				persistIfLarge(`${text.header({ url: target, upgraded, nativeFallback, noArticle, answer })}\n\n${pageContent(text.page, page.body, page.title)}`, {
+					dir: sessionResultsDir(ctx),
+					id: toolCallId,
+				});
 
-			if (signal?.aborted) {
-				return { content: [{ type: "text", text: `Fetch of ${target} was cancelled.` }], details: { url: target }, isError: true };
-			}
+			if (signal?.aborted) return cancelled();
 
 			// With `prompt` on a first-party Anthropic API-key session, Anthropic's
 			// server-side fetch answers it with dynamic filtering. Anything short of
@@ -265,7 +271,6 @@ function webFetchExtension(pi: ExtensionAPI) {
 			// with a note saying why (lib/anthropic-server-tools.ts fetchOutcome).
 			// Without `prompt` the local path always answers: it pages with
 			// `offset`, which the server tool cannot.
-			let nativeNote: string | undefined;
 			if (params.prompt && !isPrivateOrLocalUrl(target)) {
 				const prompt = params.prompt;
 				const native = await tryNativeWeb(ctx, {
@@ -275,75 +280,49 @@ function webFetchExtension(pi: ExtensionAPI) {
 					learned: learnedNativeThinking,
 					signal,
 				});
-				if (native.kind === "cancelled") {
-					return { content: [{ type: "text", text: `Fetch of ${target} was cancelled.` }], details: { url: target }, isError: true };
-				}
+				if (native.kind === "cancelled") return cancelled();
 				if (native.kind === "answered") {
-					const header = [
-						`Source: ${target}`,
-						normalizeNote,
-						`Answered by ${native.spec} with Anthropic's server-side web fetch (dynamic filtering). Refetch without \`prompt\` for the raw content.`,
-						native.cutOff ? CUT_OFF_NOTE : undefined,
-					]
-						.filter(Boolean)
-						.join("\n");
-					const text = persistIfLarge(`${header}\n\n${pageContent(native.text)}`, { dir: sessionResultsDir(ctx), id: toolCallId });
-					return { content: [{ type: "text", text }], details: { url: target, reader: native.spec, path: "native" } };
+					const answer: FetchAnswer = { kind: "native", reader: native.spec, cutOff: native.cutOff, answer: native.text };
+					return { content: [{ type: "text", text: resultText(answer, { body: native.text }) }], details: { url: target, reader: native.spec, path: "native" } };
 				}
-				if (native.kind === "fell-back") {
-					nativeNote = `Anthropic's server-side fetch did not answer (${native.reason}); fetched the page locally instead.`;
-				}
+				if (native.kind === "fell-back") nativeFallback = native.reason;
 			}
 
 			try {
 				const entry = await load(target, signal);
 
 				// Reader failures degrade to the raw page below — loudly, via
-				// readerNote, never silently.
-				let readerNote: string | undefined;
+				// readerFailure, never silently.
+				let readerFailure: ReaderFailure | undefined;
 				if (params.prompt) {
-					const answered = await answerFromPage(ctx, params.prompt, entry, target, signal, learnedReasoning, (usage) =>
+					const answered = await answerFromPage(text, ctx, params.prompt, entry, target, signal, learnedReasoning, (usage) =>
 						recordUsage(pi, "reader", usage),
 					);
 					signal?.throwIfAborted();
-					if (answered.answer !== undefined) {
-						const header = [
-							`Source: ${target}`,
-							normalizeNote,
-							nativeNote,
-							entry.note,
-							answered.truncated
-								? `Answered by ${answered.reader} from the first ${READER_MAX_CHARS} characters of the page and title; the rest was not read. Refetch without \`prompt\` (with \`offset\`) for the raw content.`
-								: `Answered by ${answered.reader} from the full page (${entry.markdown.length} chars). Refetch without \`prompt\` for the raw content.`,
-							answered.cutOff ? "(The answer was cut off at the reader's output limit and may be incomplete.)" : undefined,
-						]
-							.filter(Boolean)
-							.join("\n");
+					if ("answer" in answered) {
+						const answer: FetchAnswer = {
+							kind: "reader",
+							reader: answered.reader,
+							pageChars: entry.markdown.length,
+							readChars: answered.truncated ? READER_MAX_CHARS : undefined,
+							cutOff: answered.cutOff,
+							answer: answered.answer,
+						};
 						return {
-							content: [{ type: "text", text: persistIfLarge(`${header}\n\n${pageContent(answered.answer, entry.title)}`, { dir: sessionResultsDir(ctx), id: toolCallId }) }],
+							content: [{ type: "text", text: resultText(answer, { body: answered.answer, title: entry.title }, entry.noArticle) }],
 							details: { url: target, totalChars: entry.markdown.length, reader: answered.reader, path: "local" },
 						};
 					}
-					readerNote = `Could not answer \`prompt\` (${answered.error}); returning the raw page content instead.`;
+					readerFailure = answered.failure;
 				}
 
-				const page = paginate(entry.markdown, params.offset ?? 0, params.max_chars ?? DEFAULT_MAX_CHARS);
-
-				const header = [
-					`Source: ${target}`,
-					normalizeNote,
-					nativeNote,
-					entry.note,
-					readerNote,
-					page.truncated
-						? `Showing characters ${params.offset ?? 0}–${(params.offset ?? 0) + page.text.length} of ${page.totalChars}. Continue with offset ${page.nextOffset}.`
-						: undefined,
-				]
-					.filter(Boolean)
-					.join("\n");
+				const offset = params.offset ?? 0;
+				const page = paginate(entry.markdown, offset, params.max_chars ?? DEFAULT_MAX_CHARS);
+				const window = page.truncated ? { from: offset, to: offset + page.text.length, total: page.totalChars, next: page.nextOffset! } : undefined;
+				const answer: FetchAnswer = { kind: "raw", text: page.text, title: entry.title, window, readerFailure };
 
 				return {
-					content: [{ type: "text", text: persistIfLarge(`${header}\n\n${pageContent(page.text, entry.title)}`, { dir: sessionResultsDir(ctx), id: toolCallId }) }],
+					content: [{ type: "text", text: resultText(answer, { body: page.text, title: entry.title }, entry.noArticle) }],
 					details: {
 						url: target,
 						totalChars: page.totalChars,
@@ -359,41 +338,25 @@ function webFetchExtension(pi: ExtensionAPI) {
 				// name alone. Unpack all three so the model sees what actually failed
 				// and what to try next.
 				if (error instanceof CrossHostRedirect) {
-					return { content: [{ type: "text", text: redirectMessage(target, error, params.prompt) }], details: { url: target } };
+					const redirect = text.redirect({ originalUrl: target, redirectUrl: error.redirectUrl, status: error.status, prompt: params.prompt });
+					return { content: [{ type: "text", text: redirect }], details: { url: target } };
 				}
 				const err = error as Error & { cause?: unknown };
 				const aborted = err.name === "AbortError" || err.name === "TimeoutError";
-				if (signal?.aborted) {
-					return {
-						content: [{ type: "text", text: `Fetch of ${target} was cancelled.` }],
-						details: { url: target },
-						isError: true,
-					};
-				}
-				const reason = aborted
-					? `timed out after ${FETCH_TIMEOUT_MS / 1000}s — the site may be slow, unreachable, or blocking automated requests`
-					: err.cause instanceof Error
-						? `${err.message}: ${err.cause.message}`
-						: err.message;
-				return {
-					content: [
-						{
-							type: "text",
-							text: `Could not fetch ${target}: ${reason}. Verify the URL and host, retry, or use web_search instead.`,
-						},
-					],
-					details: { url: target },
-					isError: true,
-				};
+				if (signal?.aborted) return cancelled();
+				const failure =
+					error instanceof WebFetchFailure
+						? error.failure
+						: aborted
+							? ({ kind: "timedOut", seconds: FETCH_TIMEOUT_MS / 1000 } as const)
+							: ({ kind: "network", osMessage: err.cause instanceof Error ? `${err.message}: ${err.cause.message}` : err.message } as const);
+				return { content: [{ type: "text", text: text.failed({ url: target, failure }) }], details: { url: target }, isError: true };
 			}
 		},
 	});
-	registerFormTool(pi, tool, webFetchDescription);
+	registerFormTool(pi, tool, text.description);
 
-	pi.events.emit(DEFER_CHANNEL, {
-		name: "web_fetch",
-		keywords: ["fetch", "url", "webpage", "web page", "read page", "http", "download", "docs", "article"],
-	});
+	pi.events.emit(DEFER_CHANNEL, { name: "web_fetch", keywords: text.searchKeywords });
 }
 
 export default feature("web-fetch", webFetchExtension);

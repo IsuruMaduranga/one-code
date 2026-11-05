@@ -10,7 +10,7 @@
  * "Results may be summarized".
  */
 
-import type { DescriptionForm } from "../lib/tool-variants.ts";
+import type { DescriptionForm } from "../../extensions/lib/tool-variants.ts";
 
 export const WEB_FETCH_SHORT_DESCRIPTION =
 	"Fetch a URL and return its readable content as markdown. Navigation and boilerplate are stripped. Pass `prompt` to have a small fast model answer it from the full page instead of returning the page itself — prefer that for long pages (on an Anthropic API-key session, Anthropic's server-side fetch answers it). Without `prompt`, long pages are windowed; pass `offset` to continue reading. Responses are cached for 15 minutes. Cross-host redirects are reported instead of followed; call again with the new URL to follow one.";

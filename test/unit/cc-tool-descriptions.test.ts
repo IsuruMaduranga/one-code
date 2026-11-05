@@ -21,7 +21,7 @@ import toolStyleExtension from "../../extensions/tool-style/index.ts";
 import { WRITE_LONG_DESCRIPTION, WRITE_SHORT_DESCRIPTION } from "../../extensions/tool-style/write-description.ts";
 import { WEB_SEARCH_LONG_DESCRIPTION, WEB_SEARCH_SHORT_DESCRIPTION } from "../../extensions/web/description.ts";
 import webSearchExtension from "../../extensions/web/index.ts";
-import { WEB_FETCH_LONG_DESCRIPTION, WEB_FETCH_SHORT_DESCRIPTION } from "../../extensions/web-fetch/description.ts";
+import { WEB_FETCH_LONG_DESCRIPTION, WEB_FETCH_SHORT_DESCRIPTION } from "../../profile/web-fetch/description.ts";
 import webFetchExtension from "../../extensions/web-fetch/index.ts";
 import { ENTER_WORKTREE_DESCRIPTION, EXIT_WORKTREE_DESCRIPTION } from "../../profile/worktree/descriptions.ts";
 import { descriptionForm, registerVariantTool } from "../../extensions/lib/tool-variants.ts";

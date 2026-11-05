@@ -3,6 +3,7 @@
  */
 
 import type TurndownService from "turndown";
+import type { UrlProblem } from "./text.ts";
 
 /**
  * linkedom + turndown + readability cost ~90ms to load (findings §15), so they
@@ -33,30 +34,26 @@ function loadLibs() {
 
 export interface NormalizedUrl {
 	url: string;
-	/** Set when the input was rewritten, so the tool can say so. */
-	note?: string;
+	/** The input was http and is now https, so the tool can say so. */
+	upgraded?: true;
 }
 
 /** Upgrades http to https and rejects non-web schemes, as Claude Code's WebFetch does. */
-export function normalizeUrl(input: string): NormalizedUrl {
+export function normalizeUrl(input: string): NormalizedUrl | { problem: UrlProblem } {
 	const trimmed = input.trim();
 	let parsed: URL;
 	try {
 		parsed = new URL(trimmed);
 	} catch {
-		throw new Error(`Not a valid URL: ${input}`);
+		return { problem: { kind: "invalid", input } };
 	}
 
-	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-		throw new Error(`Unsupported URL scheme "${parsed.protocol}" — only http and https are fetched.`);
-	}
-	if (parsed.username || parsed.password) throw new Error("URLs with embedded credentials are not supported.");
-	if (!parsed.hostname.replace(/\.+$/, "").includes(".")) {
-		throw new Error("web_fetch cannot fetch localhost or other hostnames without a dot. To reach a local server, use bash with curl instead.");
-	}
+	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return { problem: { kind: "scheme", protocol: parsed.protocol } };
+	if (parsed.username || parsed.password) return { problem: { kind: "credentials" } };
+	if (!parsed.hostname.replace(/\.+$/, "").includes(".")) return { problem: { kind: "noDot" } };
 	if (parsed.protocol === "http:") {
 		parsed.protocol = "https:";
-		return { url: parsed.toString(), note: "Upgraded http to https." };
+		return { url: parsed.toString(), upgraded: true };
 	}
 	return { url: parsed.toString() };
 }
@@ -162,25 +159,4 @@ export class CrossHostRedirect extends Error {
 	) {
 		super(`Redirects to a different host: ${redirectUrl}`);
 	}
-}
-
-/**
- * Claude Code's WebFetch redirect result, with our tool name, and the prompt
- * line only when the call had a prompt (ours is optional). Before it, the
- * redirect read as a fetch failure ("Verify the URL and host, retry, or use
- * web_search instead"), advice that does not apply.
- */
-export function redirectMessage(originalUrl: string, redirect: CrossHostRedirect, prompt: string | undefined): string {
-	const statusText = redirect.status === 301 ? "Moved Permanently" : redirect.status === 308 ? "Permanent Redirect" : redirect.status === 307 ? "Temporary Redirect" : "Found";
-	return [
-		"REDIRECT DETECTED: The URL redirects to a different host.",
-		"",
-		`Original URL: ${originalUrl}`,
-		`Redirect URL: ${redirect.redirectUrl}`,
-		`Status: ${redirect.status} ${statusText}`,
-		"",
-		"To complete your request, I need to fetch content from the redirected URL. Please use web_fetch again with these parameters:",
-		`- url: "${redirect.redirectUrl}"`,
-		...(prompt ? [`- prompt: "${prompt}"`] : []),
-	].join("\n");
 }

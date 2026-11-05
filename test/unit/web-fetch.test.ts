@@ -1,34 +1,32 @@
 import { describe, expect, it } from "vitest";
-import { CrossHostRedirect, htmlToMarkdown, isSameHost, normalizeUrl, paginate, redirectMessage } from "../../extensions/web-fetch/extract.ts";
+import { htmlToMarkdown, isSameHost, normalizeUrl, paginate } from "../../extensions/web-fetch/extract.ts";
 
 describe("normalizeUrl", () => {
 	it("upgrades http to https and says so", () => {
-		const result = normalizeUrl("http://example.com/a");
-		expect(result.url).toBe("https://example.com/a");
-		expect(result.note).toMatch(/Upgraded/);
+		expect(normalizeUrl("http://example.com/a")).toEqual({ url: "https://example.com/a", upgraded: true });
 	});
 
-	it("leaves https alone without a note", () => {
+	it("leaves https alone", () => {
 		expect(normalizeUrl("https://example.com/")).toEqual({ url: "https://example.com/" });
 	});
 
 	it("trims surrounding whitespace", () => {
-		expect(normalizeUrl("  https://example.com/  ").url).toBe("https://example.com/");
+		expect(normalizeUrl("  https://example.com/  ")).toEqual({ url: "https://example.com/" });
 	});
 
 	it("rejects non-web schemes and malformed input", () => {
-		expect(() => normalizeUrl("file:///etc/passwd")).toThrow(/Unsupported URL scheme/);
-		expect(() => normalizeUrl("ftp://example.com")).toThrow(/Unsupported URL scheme/);
-		expect(() => normalizeUrl("not a url")).toThrow(/Not a valid URL/);
-		expect(() => normalizeUrl("data:text/plain,hello")).toThrow(/Unsupported URL scheme/);
+		expect(normalizeUrl("file:///etc/passwd")).toEqual({ problem: { kind: "scheme", protocol: "file:" } });
+		expect(normalizeUrl("ftp://example.com")).toEqual({ problem: { kind: "scheme", protocol: "ftp:" } });
+		expect(normalizeUrl("not a url")).toEqual({ problem: { kind: "invalid", input: "not a url" } });
+		expect(normalizeUrl("data:text/plain,hello")).toEqual({ problem: { kind: "scheme", protocol: "data:" } });
 	});
 
 	it.each(["https://localhost/", "https://intranet/", "http://localhost:8080/"])("rejects dotless local hosts: %s", (url) => {
-		expect(() => normalizeUrl(url)).toThrow(/local|hostname|curl/i);
+		expect(normalizeUrl(url)).toEqual({ problem: { kind: "noDot" } });
 	});
 
 	it.each(["https://user:password@example.com/", "https://user@example.com/"])("rejects embedded credentials: %s", (url) => {
-		expect(() => normalizeUrl(url)).toThrow(/credentials|username|password/i);
+		expect(normalizeUrl(url)).toEqual({ problem: { kind: "credentials" } });
 	});
 });
 
@@ -131,26 +129,5 @@ describe("paginate", () => {
 	it("clamps an out-of-range offset instead of throwing", () => {
 		expect(paginate(text, 999, 10).text).toBe("");
 		expect(paginate(text, -5, 3).text).toBe("abc");
-	});
-});
-
-describe("redirectMessage", () => {
-	it("reports a cross-host redirect in Claude Code's shape, with the prompt line only when there was a prompt", () => {
-		const redirect = new CrossHostRedirect("https://example.com/", 302);
-		expect(redirectMessage("https://httpbin.org/redirect-to", redirect, "What is it?")).toBe(
-			[
-				"REDIRECT DETECTED: The URL redirects to a different host.",
-				"",
-				"Original URL: https://httpbin.org/redirect-to",
-				"Redirect URL: https://example.com/",
-				"Status: 302 Found",
-				"",
-				"To complete your request, I need to fetch content from the redirected URL. Please use web_fetch again with these parameters:",
-				'- url: "https://example.com/"',
-				'- prompt: "What is it?"',
-			].join("\n"),
-		);
-		expect(redirectMessage("https://a.com", new CrossHostRedirect("https://b.com/", 301), undefined)).not.toContain("prompt:");
-		expect(redirectMessage("https://a.com", new CrossHostRedirect("https://b.com/", 301), undefined)).toContain("Status: 301 Moved Permanently");
 	});
 });

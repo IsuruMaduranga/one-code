@@ -1,5 +1,14 @@
 /** Bounded response decoding. Oversized or binary bodies are errors, never partial page content. */
 
+import type { FetchFailure } from "./text.ts";
+
+/** A fetch that failed for a reason the profile words (text.ts FetchFailure). */
+export class WebFetchFailure extends Error {
+	constructor(readonly failure: FetchFailure) {
+		super(`web_fetch failed: ${failure.kind}`);
+	}
+}
+
 /** Match Claude Code's 10 MiB response limit; pagination happens only after a complete download. */
 export const MAX_BODY_BYTES = 10 * 1024 * 1024;
 
@@ -14,7 +23,7 @@ export async function readResponseText(response: Response, signal?: AbortSignal)
 	// Application types also include text (YAML, GraphQL, vendor JSON, ...).
 	// Reject known binary formats rather than treating every unfamiliar type as binary.
 	if (BINARY_TYPES.has(mime) || (/^(?:image|audio|video|font)\//.test(mime) && !mime.endsWith("+xml"))) {
-		throw new Error(`Unsupported binary content type ${mime}; use bash to download the file, then read it with a tool that supports that format`);
+		throw new WebFetchFailure({ kind: "binary", mime });
 	}
 	const charset = /\bcharset\s*=\s*["']?([^\s;"']+)/i.exec(contentType)?.[1] ?? "utf-8";
 	let decoder: TextDecoder;
@@ -37,7 +46,7 @@ export async function readResponseText(response: Response, signal?: AbortSignal)
 			signal?.throwIfAborted();
 			if (done) break;
 			bytes += value.byteLength;
-			if (bytes > MAX_BODY_BYTES) throw new Error(`Response exceeds the ${MAX_BODY_BYTES / (1024 * 1024)} MiB download limit; use bash to download the file instead`);
+			if (bytes > MAX_BODY_BYTES) throw new WebFetchFailure({ kind: "tooLarge", limitMiB: MAX_BODY_BYTES / (1024 * 1024) });
 			text += decoder.decode(value, { stream: true });
 		}
 		return text + decoder.decode();

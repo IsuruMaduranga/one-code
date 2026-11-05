@@ -3,6 +3,7 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import webFetchExtension from "../../extensions/web-fetch/index.ts";
 import { readerMessages } from "../../extensions/web-fetch/summarize.ts";
+import { webFetch } from "../../profile/web-fetch/index.ts";
 import { logSideCallUsage } from "../../extensions/lib/side-call-usage.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
@@ -54,7 +55,7 @@ describe("web-fetch reader cache affinity", () => {
 		// A cached download still invokes the reader, with exactly the old prompt bytes.
 		expect(fetch).toHaveBeenCalledTimes(1);
 		for (const [index, prompt] of ["What does the page say?", "Another question?"].entries()) {
-			const expected = readerMessages({ prompt, markdown: page, url });
+			const expected = readerMessages(webFetch, { prompt, markdown: page, url });
 			expect(complete.mock.calls[index][1]).toEqual({
 				systemPrompt: expected.system,
 				messages: [{ role: "user", content: expected.user, timestamp: expect.any(Number) }],

@@ -13,6 +13,7 @@ import type { AskUserText } from "../ask-user/text.ts";
 import type { NotebookText } from "../notebook/text.ts";
 import type { SystemPromptText } from "../system-prompt/text.ts";
 import type { TasksText } from "../tasks/text.ts";
+import type { WebFetchText } from "../web-fetch/text.ts";
 import type { WorktreeGuardText, WorktreeText } from "../worktree/text.ts";
 import type { FeatureId } from "./features.ts";
 
@@ -27,6 +28,7 @@ export interface ProfileText {
 	askUser?: AskUserText;
 	tasks?: TasksText;
 	worktree?: WorktreeText;
+	webFetch?: WebFetchText;
 	/** Used by the worktree tools, subagents and workflows (each guards isolated sessions with it). */
 	worktreeGuard?: WorktreeGuardText;
 }
