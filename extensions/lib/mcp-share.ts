@@ -8,6 +8,7 @@
  * connection map, so they must only ever be used in the same process.
  */
 
+import { featureEnabled } from "./profile.ts";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 export const MCP_TOOLS_CHANNEL = "one-code:mcp-tools";
@@ -42,6 +43,9 @@ export interface McpToolsEvents {
  * servers are configured.
  */
 export function watchMcpTools(events: McpToolsEvents, settleCapMs = MCP_SETTLE_CAP_MS): () => Promise<ToolDefinition[]> {
+	// With the profile's mcp feature off nothing ever publishes, so waiting for
+	// a settle would stall every child spawn for the whole cap (lib/profile.ts).
+	if (!featureEnabled("mcp")) return async () => [];
 	let tools: ToolDefinition[] = [];
 	let settled = false;
 	let resolveSettled: (() => void) | undefined;

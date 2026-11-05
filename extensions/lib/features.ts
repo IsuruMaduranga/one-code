@@ -10,8 +10,7 @@
  * the registry, the manifest, the child list and the wrappers agree.
  *
  * `required` marks the safety core and the request pipeline: a profile that
- * turns one off fails at load. `dependsOn` names features that must stay on
- * while this one is on.
+ * turns one off fails at load.
  */
 
 export interface FeatureSpec {
@@ -19,8 +18,6 @@ export interface FeatureSpec {
 	entries: readonly string[];
 	/** Part of the safety core or the request pipeline; never off. */
 	required?: true;
-	/** Features this one needs on. */
-	dependsOn?: readonly FeatureId[];
 }
 
 export const FEATURES = {
@@ -91,30 +88,22 @@ export function featureOfEntry(entry: string): FeatureId | undefined {
 	return FEATURE_IDS.find((id) => (FEATURES[id].entries as readonly string[]).includes(entry));
 }
 
+/** The features on under a `features` map: every feature unless the map says false. */
+export function enabledFeatures(features: Partial<Record<string, boolean>>): ReadonlySet<FeatureId> {
+	return new Set(FEATURE_IDS.filter((id) => features[id] !== false));
+}
+
 /**
- * Which features are on, given a profile's `features` map and the ids the
- * environment turns off: every feature is on unless one of the two says off.
- * Throws when a required feature would be off or an enabled feature's
- * dependency would be off, naming each: a profile that breaks the core must
- * fail at load, never run degraded.
+ * What is wrong with a `features` map, one sentence each: an unknown name, or
+ * a required feature turned off. A profile that breaks the core must fail at
+ * load, never run degraded.
  */
-export function resolveFeatures(profileFeatures: Partial<Record<string, boolean>>, envOff: readonly string[] = []): ReadonlySet<FeatureId> {
-	const problems: string[] = [];
-	for (const id of Object.keys(profileFeatures)) {
-		if (!isFeatureId(id)) problems.push(`the profile names an unknown feature "${id}"`);
-	}
-	for (const id of envOff) {
-		if (!isFeatureId(id)) problems.push(`ONECODE_FEATURES_OFF names an unknown feature "${id}"`);
-	}
-	const on = new Set<FeatureId>(FEATURE_IDS.filter((id) => profileFeatures[id] !== false && !envOff.includes(id)));
+export function featureProblems(features: Partial<Record<string, boolean>>): string[] {
+	const problems = Object.keys(features)
+		.filter((id) => !isFeatureId(id))
+		.map((id) => `unknown feature "${id}"`);
 	for (const id of FEATURE_IDS) {
-		const spec: FeatureSpec = FEATURES[id];
-		if (spec.required && !on.has(id)) problems.push(`"${id}" is part of the safety core or the request pipeline and cannot be turned off`);
-		if (!on.has(id)) continue;
-		for (const dep of spec.dependsOn ?? []) {
-			if (!on.has(dep)) problems.push(`"${id}" needs "${dep}", which is off`);
-		}
+		if ("required" in FEATURES[id] && features[id] === false) problems.push(`"${id}" is part of the safety core or the request pipeline and cannot be turned off`);
 	}
-	if (problems.length > 0) throw new Error(`Invalid profile features: ${problems.join("; ")}.`);
-	return on;
+	return problems;
 }

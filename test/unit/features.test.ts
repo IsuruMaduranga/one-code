@@ -7,13 +7,13 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { CHILD_EXTENSIONS } from "../../extensions/lib/child-extensions.ts";
-import { FEATURE_IDS, FEATURES, featureOfEntry, resolveFeatures } from "../../extensions/lib/features.ts";
+import { CHILD_EXTENSIONS, childEntry } from "../../extensions/lib/child-extensions.ts";
+import { enabledFeatures, FEATURE_IDS, FEATURES, featureOfEntry, featureProblems } from "../../extensions/lib/features.ts";
 
 const repo = join(import.meta.dirname, "../..");
 const manifest = JSON.parse(readFileSync(join(repo, "package.json"), "utf8")) as { pi: { extensions: string[] } };
 const manifestEntries = manifest.pi.extensions.map((path) => path.replace(/^extensions\//, ""));
-const childEntries = CHILD_EXTENSIONS.map((name) => (name.includes("/") ? `${name}.ts` : `${name}/index.ts`));
+const childEntries = CHILD_EXTENSIONS.map(childEntry);
 const registered = FEATURE_IDS.flatMap((id) => FEATURES[id].entries.map((entry) => ({ id, entry })));
 
 describe("feature registry", () => {
@@ -39,26 +39,20 @@ describe("feature registry", () => {
 	});
 });
 
-describe("resolveFeatures", () => {
-	it("turns everything on by default", () => {
-		expect(resolveFeatures({}).size).toBe(FEATURE_IDS.length);
-	});
-
-	it("turns off what the profile or the environment names", () => {
-		const on = resolveFeatures({ plugins: false, notebook: true }, ["mcp"]);
+describe("feature maps", () => {
+	it("turns everything on by default and off what the map says", () => {
+		expect(enabledFeatures({}).size).toBe(FEATURE_IDS.length);
+		const on = enabledFeatures({ plugins: false, notebook: true });
 		expect(on.has("plugins")).toBe(false);
-		expect(on.has("mcp")).toBe(false);
 		expect(on.has("notebook")).toBe(true);
 	});
 
-	it("refuses a required feature turned off, by either route", () => {
-		expect(() => resolveFeatures({ permissions: false })).toThrow(/"permissions" is part of the safety core/);
-		expect(() => resolveFeatures({}, ["ledger"])).toThrow(/"ledger" is part of the safety core/);
-	});
-
-	it("refuses unknown feature names", () => {
-		expect(() => resolveFeatures({ plugin: false } as never)).toThrow(/unknown feature "plugin"/);
-		expect(() => resolveFeatures({}, ["nope"])).toThrow(/ONECODE_FEATURES_OFF names an unknown feature "nope"/);
+	it("reports a required feature turned off and an unknown name", () => {
+		expect(featureProblems({ permissions: false, plugin: false })).toEqual([
+			'unknown feature "plugin"',
+			'"permissions" is part of the safety core or the request pipeline and cannot be turned off',
+		]);
+		expect(featureProblems({ plugins: false })).toEqual([]);
 	});
 
 	it("keeps the agreed core required", () => {

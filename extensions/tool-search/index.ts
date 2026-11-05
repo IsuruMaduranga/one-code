@@ -26,6 +26,7 @@
  * and pi's event bus only delivers to listeners already registered.
  */
 
+import { activeProfile, toolSwitch } from "../lib/profile.ts";
 import { feature } from "../lib/feature.ts";
 import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -238,6 +239,10 @@ function toolSearchExtension(pi: ExtensionAPI) {
 	 * withheld tool is never active. Run before pi fixes a turn's tools
 	 * (turn_start) and whenever the inputs change.
 	 */
+	// Withheld tools plus the tools the profile turns off: never active, pi's
+	// built-ins included (lib/profile.ts).
+	const profileDisabled = activeProfile().disabledTools;
+	const neverActive = () => (profileDisabled.size === 0 ? withheldNames : new Set([...withheldNames, ...profileDisabled]));
 	const reconcile = (owner: SessionLike | undefined, model: typeof currentModel) => {
 		if (!alive()) return;
 		const all = pi.getAllTools();
@@ -246,7 +251,7 @@ function toolSearchExtension(pi: ExtensionAPI) {
 			// Nothing is deferred without the loader, but a withheld tool is still
 			// never active: a /tree switch restores a loadout from before it left.
 			const active = pi.getActiveTools();
-			const next = reconcileActive(active, new Set(), new Set(), withheldNames, registered);
+			const next = reconcileActive(active, new Set(), new Set(), neverActive(), registered);
 			if (next !== active) pi.setActiveTools([...next]);
 			return;
 		}
@@ -272,7 +277,7 @@ function toolSearchExtension(pi: ExtensionAPI) {
 			});
 		}
 		const active = pi.getActiveTools();
-		const next = reconcileActive(active, deferred, callable, withheldNames, registered);
+		const next = reconcileActive(active, deferred, callable, neverActive(), registered);
 		if (next !== active) pi.setActiveTools([...next]);
 	};
 	const reconcileNow = () => reconcile(session, currentModel);
@@ -324,6 +329,9 @@ function toolSearchExtension(pi: ExtensionAPI) {
 
 	pi.events.on(DEFER_CHANNEL, (data) => {
 		const request = data as DeferRequest;
+		// The profile's choice wins: a tool it turns off or keeps up front is never deferred.
+		const sw = request?.name ? toolSwitch(request.name) : undefined;
+		if (sw?.enabled === false || sw?.deferred === false) return;
 		deferredRegistry.add(request);
 		// A withheld tool brought back is deferred again.
 		if (request?.name) withheldNames.delete(request.name);

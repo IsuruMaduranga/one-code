@@ -16,7 +16,7 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { profile as shippedProfile } from "../../profile/index.ts";
-import { type FeatureId, resolveFeatures } from "./features.ts";
+import { enabledFeatures, type FeatureId, featureProblems } from "./features.ts";
 import type { Profile, ToolSwitch } from "./profile-contract.ts";
 
 export const PROFILE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../profile");
@@ -27,6 +27,8 @@ const PINNED_TOOLS = new Set(["tool_search"]);
 export interface ResolvedProfile {
 	features: ReadonlySet<FeatureId>;
 	tools: ReadonlyMap<string, ToolSwitch>;
+	/** The tools the profile turns off (`enabled: false`). */
+	disabledTools: ReadonlySet<string>;
 	/** Absolute entry files child sessions load after the base's own. */
 	childExtensionPaths: readonly string[];
 }
@@ -39,24 +41,26 @@ function envList(env: NodeJS.ProcessEnv, name: string): string[] {
 }
 
 /**
- * Resolve and check a profile. Throws, naming every problem, when it turns off
- * a required feature or a dependency, names an unknown feature, or turns off
- * or defers a pinned tool.
+ * Resolve and check a profile, with the environment's off-switches merged in.
+ * Throws, naming every problem at once, when it turns off a required feature,
+ * names an unknown feature, or turns off or defers a pinned tool.
  */
 export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profileDir: string): ResolvedProfile {
-	const features = resolveFeatures(profile.features, envList(env, "ONECODE_FEATURES_OFF"));
+	const featureMap: Partial<Record<string, boolean>> = { ...profile.features };
+	for (const id of envList(env, "ONECODE_FEATURES_OFF")) featureMap[id] = false;
 	const tools = new Map<string, ToolSwitch>(Object.entries(profile.tools));
 	for (const name of envList(env, "ONECODE_TOOLS_OFF")) tools.set(name, { ...tools.get(name), enabled: false });
-	const problems: string[] = [];
+	const problems = featureProblems(featureMap);
 	for (const name of PINNED_TOOLS) {
 		const sw = tools.get(name);
 		if (sw?.enabled === false) problems.push(`"${name}" cannot be turned off`);
 		if (sw?.deferred === true) problems.push(`"${name}" cannot be deferred`);
 	}
-	if (problems.length > 0) throw new Error(`Invalid profile tools: ${problems.join("; ")}.`);
+	if (problems.length > 0) throw new Error(`Invalid profile: ${problems.join("; ")}.`);
 	return {
-		features,
+		features: enabledFeatures(featureMap),
 		tools,
+		disabledTools: new Set([...tools].filter(([, sw]) => sw.enabled === false).map(([name]) => name)),
 		childExtensionPaths: profile.childExtensions.map((entry) => resolve(profileDir, entry)),
 	};
 }
@@ -84,10 +88,5 @@ export function toolSwitch(name: string): ToolSwitch | undefined {
 
 /** The profile turned this tool off: never registered, never active, denied if called. */
 export function isToolDisabled(name: string): boolean {
-	return toolSwitch(name)?.enabled === false;
-}
-
-/** The profile marks this tool as needing no permission prompt. */
-export function isProfileAutoAllowed(name: string): boolean {
-	return toolSwitch(name)?.autoAllow === true;
+	return activeProfile().disabledTools.has(name);
 }

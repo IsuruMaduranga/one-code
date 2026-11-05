@@ -14,6 +14,7 @@
  * Subdirectories are searched recursively.
  */
 
+import { activeProfile } from "../lib/profile.ts";
 import { readdirSync, readFileSync, type Stats, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -267,7 +268,12 @@ export function usableAllowlistedTools(registered: string[], allowlist: string[]
  * (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 H2, H3).
  */
 export function agentToolOptions(agent: AgentDefinition | undefined): { tools?: string[]; excludeTools?: string[] } {
-	return { tools: childToolAllowlist(agent?.tools), excludeTools: agent?.excludeTools };
+	// The profile's disabled tools join pi's own excludeTools, which filters
+	// built-ins, extension tools and injected custom tools (shared MCP tools)
+	// alike (lib/profile.ts).
+	const disabled = [...activeProfile().disabledTools];
+	const exclude = disabled.length > 0 ? [...new Set([...(agent?.excludeTools ?? []), ...disabled])] : agent?.excludeTools;
+	return { tools: childToolAllowlist(agent?.tools), excludeTools: exclude };
 }
 
 /**

@@ -19,7 +19,9 @@ import { RESPONSES_APIS } from "./system-role.ts";
 import { ADDENDUM_HEAD } from "./tool-additions.ts";
 import { normalizeToolName } from "../permissions/matcher.ts";
 
-export const DEFER_CHANNEL = "one-code:defer-tool";
+import { DEFER_CHANNEL, type DeferRequest } from "./deferred-channel.ts";
+
+export { DEFER_CHANNEL, type DeferRequest } from "./deferred-channel.ts";
 
 /**
  * Take a deferred tool out of this session's surface (`{ name }`): it leaves the
@@ -32,11 +34,6 @@ export const DEFER_CHANNEL = "one-code:defer-tool";
  */
 export const WITHHOLD_CHANNEL = "one-code:withhold-tool";
 
-export interface DeferRequest {
-	name: string;
-	/** Extra search terms beyond the tool's name and description. */
-	keywords?: string[];
-}
 
 /**
  * Ask the session's tool-search which tools it defers: emit a `DeferredQuery`

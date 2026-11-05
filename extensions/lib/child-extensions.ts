@@ -50,8 +50,12 @@ export const CHILD_EXTENSIONS = [
 	"file-tracker", "search-tools", "skill", "bash/child", "powershell/child", "web", "web-fetch", "notebook",
 ];
 
-export const CHILD_EXTENSION_PATHS = CHILD_EXTENSIONS.map((name) =>
-	name.includes("/") ? join(EXTENSIONS_DIR, `${name}.ts`) : join(EXTENSIONS_DIR, name, "index.ts"));
+/** A child extension's entry file under `extensions/`: `bash/child` → `bash/child.ts`, `skill` → `skill/index.ts`. */
+export function childEntry(name: string): string {
+	return name.includes("/") ? `${name}.ts` : `${name}/index.ts`;
+}
+
+export const CHILD_EXTENSION_PATHS = CHILD_EXTENSIONS.map((name) => join(EXTENSIONS_DIR, childEntry(name)));
 
 /**
  * What a child session loads under the profile in force: the base entries
@@ -62,8 +66,8 @@ export const CHILD_EXTENSION_PATHS = CHILD_EXTENSIONS.map((name) =>
 export function childExtensionPaths(): string[] {
 	const profile = activeProfile();
 	const base = CHILD_EXTENSIONS.filter((name) => {
-		const id = featureOfEntry(name.includes("/") ? `${name}.ts` : `${name}/index.ts`);
+		const id = featureOfEntry(childEntry(name));
 		return id === undefined || profile.features.has(id);
-	}).map((name) => (name.includes("/") ? join(EXTENSIONS_DIR, `${name}.ts`) : join(EXTENSIONS_DIR, name, "index.ts")));
+	}).map((name) => join(EXTENSIONS_DIR, childEntry(name)));
 	return [...base, ...profile.childExtensionPaths];
 }

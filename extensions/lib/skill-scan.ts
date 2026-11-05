@@ -15,6 +15,7 @@
  * turn), so a root missing here is a skill with no `/name` command at startup.
  */
 
+import { featureEnabled } from "./profile.ts";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -99,6 +100,8 @@ export function scanSkills(
 	pluginSkills: PluginSkill[],
 	bundledSkillsDir?: string,
 ): ScannedSkill[] {
+	// No skill tool, no skills: the banner and the subagent guide read this too (lib/profile.ts).
+	if (!featureEnabled("skill")) return [];
 	const skills = new Map<string, ScannedSkill>();
 	const seenFiles = new Set<string>();
 	scanDir(join(agentDir, "skills"), "user", skills, seenFiles);

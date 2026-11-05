@@ -10,6 +10,7 @@
  * a change applies from the next start.
  */
 
+import { featureEnabled } from "./profile.ts";
 import os from "node:os";
 import { readSettingsFile, settingsSources } from "./claude-settings.ts";
 
@@ -64,6 +65,9 @@ const AUTO_MEMORY_SLOT = Symbol.for("one-code:auto-memory");
  * value call `resetAutoMemoryForTest` first.
  */
 export function autoMemoryEnabled(cwd: string = process.cwd()): boolean {
+	// The profile's memory feature off means no auto-memory anywhere: no prompt
+	// section, no MEMORY.md in message 1, no writable memory dir (lib/profile.ts).
+	if (!featureEnabled("memory")) return false;
 	const slot = globalThis as { [AUTO_MEMORY_SLOT]?: boolean };
 	return (slot[AUTO_MEMORY_SLOT] ??= readAutoMemory(cwd));
 }

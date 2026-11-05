@@ -8,16 +8,23 @@ import { feature, profiledPi } from "../../extensions/lib/feature.ts";
 import { activeProfile, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile.ts";
 import type { Profile } from "../../extensions/lib/profile-contract.ts";
 import { discoverPlugins, invalidatePluginsCache } from "../../extensions/lib/plugins.ts";
+import { autoMemoryEnabled, resetAutoMemoryForTest } from "../../extensions/lib/auto-memory.ts";
+import { DEFER_CHANNEL } from "../../extensions/lib/deferred.ts";
+import { watchMcpTools } from "../../extensions/lib/mcp-share.ts";
+import { scanSkills } from "../../extensions/lib/skill-scan.ts";
 import { decide } from "../../extensions/permissions/matcher.ts";
+import { agentToolOptions } from "../../extensions/subagents/agents.ts";
+import toolSearchExtension from "../../extensions/tool-search/index.ts";
 import { createFakePi } from "./helpers/fake-pi.ts";
+import { makeToolSearchFakePi } from "./helpers/tool-search-fake-pi.ts";
 
-const DEFER = "one-code:defer-tool";
 const empty: Profile = { features: {}, tools: {}, childExtensions: [] };
 const use = (profile: Partial<Profile>, env: NodeJS.ProcessEnv = {}) =>
 	setActiveProfileForTest(resolveProfile({ ...empty, ...profile }, env, "/profile"));
 
 afterEach(() => setActiveProfileForTest(undefined));
 
+const endsWith = (paths: string[], entry: string) => paths.some((p) => p.replaceAll("\\", "/").endsWith(entry));
 const tool = (name: string) => ({ name, label: name, description: name, parameters: {}, execute: async () => ({ content: [], details: {} }) });
 
 describe("resolveProfile", () => {
@@ -39,16 +46,23 @@ describe("resolveProfile", () => {
 		expect(() => resolveProfile(empty, { ONECODE_TOOLS_OFF: "tool_search" }, "/p")).toThrow(/cannot be turned off/);
 	});
 
+	it("merges ONECODE_FEATURES_OFF and reports every problem at once", () => {
+		expect(resolveProfile(empty, { ONECODE_FEATURES_OFF: "mcp" }, "/p").features.has("mcp")).toBe(false);
+		expect(() => resolveProfile({ ...empty, tools: { tool_search: { enabled: false } } }, { ONECODE_FEATURES_OFF: "ledger,nope" }, "/p")).toThrow(
+			/unknown feature "nope".*"ledger" is part of the safety core.*"tool_search" cannot be turned off/,
+		);
+	});
+
 	it("resolves child extensions against the profile folder, after the base's", () => {
 		use({ childExtensions: ["ballerina/index.ts"] });
 		const paths = childExtensionPaths();
 		expect(paths.at(-1)).toBe("/profile/ballerina/index.ts");
-		expect(paths.some((p) => p.replaceAll("\\", "/").endsWith("notebook/index.ts"))).toBe(true);
+		expect(endsWith(paths, "notebook/index.ts")).toBe(true);
 	});
 
 	it("leaves a turned-off feature's entries out of the child list", () => {
 		use({ features: { notebook: false } });
-		expect(childExtensionPaths().some((p) => p.replaceAll("\\", "/").endsWith("notebook/index.ts"))).toBe(false);
+		expect(endsWith(childExtensionPaths(), "notebook/index.ts")).toBe(false);
 	});
 });
 
@@ -79,26 +93,40 @@ describe("feature()", () => {
 		expect(fake.getActiveTools()).toEqual(["read", "web_fetch"]);
 	});
 
-	it("applies the profile's deferral choice", () => {
-		use({ tools: { notebook_edit: { deferred: false }, web_fetch: { deferred: true } } });
+	it("defers a tool the profile defers as it registers", () => {
+		use({ tools: { web_fetch: { deferred: true } } });
 		const fake = createFakePi();
 		const deferred: string[] = [];
-		fake.events.on(DEFER, (data) => deferred.push((data as { name: string }).name));
+		fake.events.on(DEFER_CHANNEL, (data) => deferred.push((data as { name: string }).name));
 		const pi = profiledPi(fake.pi as never);
-		pi.registerTool(tool("notebook_edit") as never);
-		pi.events.emit(DEFER, { name: "notebook_edit", keywords: ["notebook"] });
 		pi.registerTool(tool("web_fetch") as never);
-		pi.events.emit("other-channel", { name: "notebook_edit" });
+		pi.registerTool(tool("notebook_edit") as never);
 		expect(deferred).toEqual(["web_fetch"]);
 	});
+});
 
-	it("removes a disabled built-in from the active set when a session starts", async () => {
-		use({ tools: { edit: { enabled: false } } });
-		const fake = createFakePi();
-		fake.setActiveTools(["read", "edit", "bash"]);
-		feature("tool-search", () => {})(fake.pi as never);
-		await fake.fire("session_start", {});
-		expect(fake.getActiveTools()).toEqual(["read", "bash"]);
+describe("tool-search and the tool switches", () => {
+	it("keeps a disabled built-in out of the active set and ignores overridden deferral requests", () => {
+		use({ tools: { edit: { enabled: false }, notebook_edit: { deferred: false } } });
+		const fake = makeToolSearchFakePi(["read", "edit"]);
+		toolSearchExtension(fake.pi as never);
+		fake.addDeferred("notebook_edit");
+		fake.addDeferred("web_fetch");
+		fake.pi.fire("session_start", {});
+		expect(fake.activeTools()).not.toContain("edit");
+		expect(fake.activeTools()).toContain("notebook_edit");
+		const listing = fake.reminders.filter((r) => r.key === "deferred-tools").at(-1)?.text ?? "";
+		expect(listing).toContain("web_fetch");
+		expect(listing).not.toContain("notebook_edit");
+	});
+});
+
+describe("child sessions and the tool switches", () => {
+	it("adds the disabled tools to pi's excludeTools", () => {
+		use({ tools: { web_fetch: { enabled: false } } });
+		expect(agentToolOptions({ excludeTools: ["edit"] } as never).excludeTools).toEqual(["edit", "web_fetch"]);
+		setActiveProfileForTest(undefined);
+		expect(agentToolOptions({ excludeTools: ["edit"] } as never).excludeTools).toEqual(["edit"]);
 	});
 });
 
@@ -129,5 +157,18 @@ describe("the plugins feature switch", () => {
 		expect(found.agentDirs).toEqual([]);
 		expect(found.skills).toEqual([]);
 		expect(found.mcpConfigs).toEqual([]);
+	});
+});
+
+describe("resources a feature owns, read by other features", () => {
+	it("reports no auto-memory, no shared MCP tools and no skills when those features are off", async () => {
+		use({ features: { memory: false, mcp: false, skill: false } });
+		resetAutoMemoryForTest();
+		expect(autoMemoryEnabled("/")).toBe(false);
+		const started = Date.now();
+		expect(await watchMcpTools(createFakePi().events, 10_000)()).toEqual([]);
+		expect(Date.now() - started).toBeLessThan(1000);
+		expect(scanSkills("/", "/nonexistent", "/nonexistent", [])).toEqual([]);
+		resetAutoMemoryForTest();
 	});
 });

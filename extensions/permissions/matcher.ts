@@ -7,7 +7,7 @@
  * existing ~/.claude/settings.json files work unchanged.
  */
 
-import { isProfileAutoAllowed, isToolDisabled } from "../lib/profile.ts";
+import { isToolDisabled, toolSwitch } from "../lib/profile.ts";
 import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
@@ -791,7 +791,7 @@ export const AUTO_ALLOWED_TOOLS = new Set<string>([
 
 /** A tool that runs without approval: the base's set, plus any the profile marks `autoAllow` (lib/profile.ts). */
 export function isAutoAllowedTool(tool: string): boolean {
-	return AUTO_ALLOWED_TOOLS.has(tool) || isProfileAutoAllowed(tool);
+	return AUTO_ALLOWED_TOOLS.has(tool) || toolSwitch(tool)?.autoAllow === true;
 }
 
 export interface DecideInput {
@@ -1050,9 +1050,10 @@ export function decide(params: DecideInput): Decision {
 		return { decision: "ask", rule, cause: rule ? "rule" : "tier" };
 	};
 
+	const tool = normalizeToolName(toolName);
 	// A tool the profile turned off is refused in every mode, bypass included:
 	// it should never have been callable, whatever path it arrived by.
-	if (isToolDisabled(normalizeToolName(toolName))) return { decision: "deny", cause: "profile-disabled" };
+	if (isToolDisabled(tool)) return { decision: "deny", cause: "profile-disabled" };
 
 	const denyRule = deny.find((r) => ruleMatches(r, toolName, subject, cwd));
 	if (denyRule) return { decision: "deny", rule: denyRule, cause: "rule" };
@@ -1060,8 +1061,7 @@ export function decide(params: DecideInput): Decision {
 	if (mode === "bypassPermissions") return { decision: "allow", cause: "mode" };
 
 	const tier = toolTier(toolName);
-	const tool = normalizeToolName(toolName);
-	if (mode === "plan" && tier !== "safe" && !isAutoAllowedTool(normalizeToolName(toolName))) {
+	if (mode === "plan" && tier !== "safe" && !isAutoAllowedTool(tool)) {
 		// Plan mode's one writable file (~/.onecode/plans/<slug>.md, which
 		// protected-paths already excepts as working space).
 		const planFile = params.planFilePath;
