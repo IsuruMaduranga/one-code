@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { applyNoopFolds, decideFold, type FoldEntry, foldCompanion, foldSuffix } from "../../extensions/background/noop-fold.ts";
+import { applyNoopFolds, decideFold, type FoldEntry, foldSuffix } from "../../extensions/background/noop-fold.ts";
+import { loop } from "../../profile/background/loop.ts";
+
+const foldCompanion = (streak: number) => loop.foldNote({ streak });
 
 const wakeup = (timestamp = 1000, details?: { noOpStreak?: number; streakStartedAt?: number }): FoldEntry => ({ kind: "wakeup", timestamp, details });
 const noopCall = (id = "c1", noop: unknown = true): FoldEntry => ({ kind: "assistant", toolCalls: [{ id, name: "schedule_wakeup", noop }], aborted: false });
@@ -45,12 +48,12 @@ describe("applyNoopFolds (the model's context)", () => {
 	const m = (id: string, role = "assistant"): M => ({ role, id });
 
 	it("leaves a context with no fold alone", () => {
-		expect(applyNoopFolds([m("u", "user"), w("w1"), m("a1")], note)).toBeUndefined();
+		expect(applyNoopFolds([m("u", "user"), w("w1"), m("a1")], note, loop.foldNote)).toBeUndefined();
 	});
 
 	it("drops each folded tick and keeps only the latest note", () => {
 		const context = [m("u", "user"), w("w1"), m("a1"), m("t1", "toolResult"), w("w2", 1), m("a2"), m("t2", "toolResult"), w("w3", 2), m("a3")];
-		const ids = applyNoopFolds(context, note)!.map((x) => x.id);
+		const ids = applyNoopFolds(context, note, loop.foldNote)!.map((x) => x.id);
 		expect(ids).toEqual(["u", `note:${foldCompanion(2)}`, "w3", "a3"]);
 	});
 });

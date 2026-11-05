@@ -48,7 +48,7 @@ import {
 	readLoopFile,
 	resolveLoopFire,
 } from "./loop-fire.ts";
-import { autonomousPreamble, loopSkillPrompt } from "./loop-skill.ts";
+import { loopPersistent, loopSkillForm } from "./loop-skill.ts";
 import {
 	CronStore,
 	type CronFire,
@@ -319,9 +319,9 @@ function backgroundExtension(pi: ExtensionAPI) {
 		}
 		const before = deliveryFromState(stateSinceCompaction(branch, LOOP_DELIVERY_STATE));
 		const state = { ...before };
-		const text = resolveLoopFire(state, prompt, cwd, autonomousPreamble());
+		const fired = resolveLoopFire(state, prompt, cwd, text.loop, loopPersistent());
 		const changed = state.autonomousPreambleDelivered !== before.autonomousPreambleDelivered || state.lastLoopFileDelivered !== before.lastLoopFileDelivered;
-		return changed ? { text, delivery: state } : { text };
+		return changed ? { text: fired, delivery: state } : { text: fired };
 	};
 	/** Record what a delivered fire told its conversation; a torn-down one has nothing to record into. */
 	const recordDelivery = (conversation: Pick<FireConversation, "appendEntry">, delivery: LoopDeliveryState) => {
@@ -886,7 +886,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 	pi.events.on(SKILL_BODY_CHANNEL, (data) => {
 		const query = data as SkillBodyQuery;
 		if (query.skill !== "loop" || resolve(query.path) !== loopSkillPath) return;
-		query.body = loopSkillPrompt(query.args, readLoopFile(query.cwd));
+		query.body = text.loop.skillBody({ form: loopSkillForm(query.args), loopFile: readLoopFile(query.cwd), persistent: loopPersistent(), maxAgeDays: RECURRING_MAX_AGE_DAYS });
 	});
 
 	/** Arm the branch's scheduled jobs, with each wakeup's loop age and keepalive spend. */
@@ -935,7 +935,11 @@ function backgroundExtension(pi: ExtensionAPI) {
 	});
 	// Folded no-op ticks leave the model's context (noop-fold.ts); the note stands in for them.
 	pi.on("context", (event) => {
-		const messages = applyNoopFolds(event.messages as Array<AgentMessage & { role: string }>, (text, timestamp) => ({ role: "user", content: [{ type: "text", text }], timestamp }) as AgentMessage & { role: string });
+		const messages = applyNoopFolds(
+			event.messages as Array<AgentMessage & { role: string }>,
+			(note, timestamp) => ({ role: "user", content: [{ type: "text", text: note }], timestamp }) as AgentMessage & { role: string },
+			text.loop.foldNote,
+		);
 		return messages ? { messages } : undefined;
 	});
 	// A switch stops everything below, so ask first. pi can cancel a switch but

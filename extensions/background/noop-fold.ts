@@ -75,11 +75,6 @@ export function decideFold(entries: readonly FoldEntry[]): FoldDecision {
 	return { kind: "fold", priorStreak: anchor.details?.noOpStreak ?? 0, since: anchor.details?.streakStartedAt ?? anchor.timestamp };
 }
 
-/** Claude Code's note to the model in place of the folded ticks. */
-export function foldCompanion(streak: number): string {
-	return `[${streak} prior /loop ${streak === 1 ? "wakeup" : "wakeups"} found nothing actionable; loop is healthy.]`;
-}
-
 /** The streak part of the wakeup line, after `Resuming /loop wakeup (<time>)`. */
 export function foldSuffix(streak: number, since: string): string {
 	return ` · ${streak} no-op ${streak === 1 ? "tick" : "ticks"} since ${since}`;
@@ -104,9 +99,14 @@ function streakOf(message: ContextMessage): number {
  * The model's context with every folded tick removed: before a wakeup that
  * carries a streak, drop everything back to (and including) the previous
  * wakeup and the note in front of it, and put the note for this streak in
- * front of it. Unchanged when nothing folded.
+ * front of it, worded by the profile's `foldNote`. Unchanged when nothing
+ * folded.
  */
-export function applyNoopFolds<M extends ContextMessage>(messages: readonly M[], companion: (text: string, timestamp: number) => M): M[] | undefined {
+export function applyNoopFolds<M extends ContextMessage>(
+	messages: readonly M[],
+	companion: (text: string, timestamp: number) => M,
+	foldNote: (p: { streak: number }) => string,
+): M[] | undefined {
 	if (!messages.some((m) => streakOf(m) > 0)) return undefined;
 	const out: M[] = [];
 	const companions = new Set<M>();
@@ -117,7 +117,7 @@ export function applyNoopFolds<M extends ContextMessage>(messages: readonly M[],
 			let cut = lastWakeup;
 			if (cut > 0 && companions.has(out[cut - 1])) cut--;
 			out.length = cut;
-			const note = companion(foldCompanion(streak), message.timestamp ?? Date.now());
+			const note = companion(foldNote({ streak }), message.timestamp ?? Date.now());
 			companions.add(note);
 			out.push(note);
 		}

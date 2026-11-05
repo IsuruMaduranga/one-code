@@ -13,8 +13,17 @@ import {
 	readLoopFile,
 	resolveLoopFire,
 } from "../../extensions/background/loop-fire.ts";
-import { AUTONOMOUS_PREAMBLE, AUTONOMOUS_PREAMBLE_PERSISTENT } from "../../extensions/background/loop-preamble.ts";
-import { autonomousPreamble, loopSkillPrompt } from "../../extensions/background/loop-skill.ts";
+import { loopPersistent, loopSkillForm } from "../../extensions/background/loop-skill.ts";
+import { RECURRING_MAX_AGE_DAYS } from "../../extensions/background/cron.ts";
+import type { LoopFile } from "../../extensions/background/text.ts";
+import { loop } from "../../profile/background/loop.ts";
+import { AUTONOMOUS_PREAMBLE, AUTONOMOUS_PREAMBLE_PERSISTENT } from "../../profile/background/loop-preamble.ts";
+
+/** The skill body One Code's profile words for `/loop <args>`. */
+const loopSkillPrompt = (args: string, loopFile: LoopFile | null) =>
+	loop.skillBody({ form: loopSkillForm(args), loopFile, persistent: false, maxAgeDays: RECURRING_MAX_AGE_DAYS });
+/** One Code's loop text with a stand-in preamble, so the expansion tests read short. */
+const PRE = { ...loop, preamble: () => "PRE" };
 
 const dirs: string[] = [];
 afterEach(() => vi.unstubAllEnvs());
@@ -89,9 +98,11 @@ describe("loopSkillPrompt (Claude Code's /loop skill, 2.1.288)", () => {
 	});
 
 	it("picks the persistent instructions with CLAUDE_CODE_LOOP_PERSISTENT", () => {
-		expect(autonomousPreamble({})).toBe(AUTONOMOUS_PREAMBLE);
-		expect(autonomousPreamble({ CLAUDE_CODE_LOOP_PERSISTENT: "1" })).toBe(AUTONOMOUS_PREAMBLE_PERSISTENT);
-		for (const off of ["0", "false", "No", " off ", ""]) expect(autonomousPreamble({ CLAUDE_CODE_LOOP_PERSISTENT: off })).toBe(AUTONOMOUS_PREAMBLE);
+		expect(loopPersistent({})).toBe(false);
+		expect(loopPersistent({ CLAUDE_CODE_LOOP_PERSISTENT: "1" })).toBe(true);
+		for (const off of ["0", "false", "No", " off ", ""]) expect(loopPersistent({ CLAUDE_CODE_LOOP_PERSISTENT: off })).toBe(false);
+		expect(loop.preamble({ persistent: false })).toBe(AUTONOMOUS_PREAMBLE);
+		expect(loop.preamble({ persistent: true })).toBe(AUTONOMOUS_PREAMBLE_PERSISTENT);
 		expect(AUTONOMOUS_PREAMBLE.startsWith("# Autonomous loop check\n")).toBe(true);
 	});
 });
@@ -101,17 +112,17 @@ describe("resolveLoopFire (Claude Code's sentinel expansion)", () => {
 	const home = tempDir();
 
 	it("passes an ordinary prompt through", () => {
-		expect(resolveLoopFire(freshDeliveryState(), "check CI", noFile, "PRE", home)).toBe("check CI");
+		expect(resolveLoopFire(freshDeliveryState(), "check CI", noFile, PRE, false, home)).toBe("check CI");
 	});
 
 	it("sends the full instructions once, then the short tick", () => {
 		const state = freshDeliveryState();
-		const first = resolveLoopFire(state, AUTONOMOUS_LOOP_DYNAMIC, noFile, "PRE", home);
+		const first = resolveLoopFire(state, AUTONOMOUS_LOOP_DYNAMIC, noFile, PRE, false, home);
 		expect(first.startsWith("PRE\n\n---\n\n# Autonomous loop tick (dynamic pacing)")).toBe(true);
-		const later = resolveLoopFire(state, AUTONOMOUS_LOOP_DYNAMIC, noFile, "PRE", home);
+		const later = resolveLoopFire(state, AUTONOMOUS_LOOP_DYNAMIC, noFile, PRE, false, home);
 		expect(later.startsWith("# Autonomous loop tick (dynamic pacing)")).toBe(true);
 		expect(later).toContain("call schedule_wakeup again at the end of this turn with `prompt` set to the literal sentinel `<<autonomous-loop-dynamic>>`");
-		expect(resolveLoopFire(state, AUTONOMOUS_LOOP, noFile, "PRE", home)).toContain("The recurring cron will fire the next tick automatically — do not call schedule_wakeup from this tick.");
+		expect(resolveLoopFire(state, AUTONOMOUS_LOOP, noFile, PRE, false, home)).toContain("The recurring cron will fire the next tick automatically — do not call schedule_wakeup from this tick.");
 	});
 
 	it("resends loop.md whenever it changed, and falls back to the instructions when it is gone", () => {
@@ -120,12 +131,12 @@ describe("resolveLoopFire (Claude Code's sentinel expansion)", () => {
 		const file = join(cwd, ".claude", "loop.md");
 		writeFileSync(file, "- task one\n");
 		const state = freshDeliveryState();
-		expect(resolveLoopFire(state, LOOP_FILE_SENTINEL, cwd, "PRE", home)).toContain(`# /loop tick — tasks from ${file}\n\nThe user configured a loop-tasks file.`);
-		expect(resolveLoopFire(state, LOOP_FILE_SENTINEL, cwd, "PRE", home).startsWith("# /loop tick — loop.md tasks\n")).toBe(true);
+		expect(resolveLoopFire(state, LOOP_FILE_SENTINEL, cwd, PRE, false, home)).toContain(`# /loop tick — tasks from ${file}\n\nThe user configured a loop-tasks file.`);
+		expect(resolveLoopFire(state, LOOP_FILE_SENTINEL, cwd, PRE, false, home).startsWith("# /loop tick — loop.md tasks\n")).toBe(true);
 		writeFileSync(file, "- task two\n");
-		expect(resolveLoopFire(state, LOOP_FILE_SENTINEL, cwd, "PRE", home)).toContain("- task two");
+		expect(resolveLoopFire(state, LOOP_FILE_SENTINEL, cwd, PRE, false, home)).toContain("- task two");
 		rmSync(file);
-		const absent = resolveLoopFire(freshDeliveryState(), LOOP_FILE_DYNAMIC_SENTINEL, cwd, "PRE", home);
+		const absent = resolveLoopFire(freshDeliveryState(), LOOP_FILE_DYNAMIC_SENTINEL, cwd, PRE, false, home);
 		expect(absent.startsWith("PRE\n\n---\n\n# /loop tick — loop.md absent (dynamic pacing)")).toBe(true);
 	});
 
@@ -149,8 +160,8 @@ describe("resolveLoopFire (Claude Code's sentinel expansion)", () => {
 		const file = join(home, ".claude", "loop.md");
 		writeFileSync(file, `${"a".repeat(LOOP_FILE_CAP - 5)}\n${"b".repeat(100)}`);
 		const found = readLoopFile(cwd, home)!;
-		expect(found.path).toBe(file);
-		expect(found.content).toBe(`${"a".repeat(LOOP_FILE_CAP - 5)}\n\n> WARNING: loop.md was truncated to ${LOOP_FILE_CAP} bytes. Keep the task list concise.`);
+		expect(found).toEqual({ path: file, content: "a".repeat(LOOP_FILE_CAP - 5), truncatedAt: LOOP_FILE_CAP });
+		expect(loopSkillPrompt("", found)).toContain(`${"a".repeat(LOOP_FILE_CAP - 5)}\n\n> WARNING: loop.md was truncated to ${LOOP_FILE_CAP} bytes. Keep the task list concise.`);
 	});
 
 	it("honors CLAUDE_CONFIG_DIR, preferring the project's file and falling back when it is empty", () => {

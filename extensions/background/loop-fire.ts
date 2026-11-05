@@ -4,8 +4,8 @@
  * sentinel expands to the full instructions on first delivery (and, for a
  * loop.md tasks file, whenever the file changed) and to a short tick
  * reminder after that, so the long text stays in the cached prefix
- * (findings §21). The texts are Claude Code's, verbatim with our tool names;
- * the "tell the user" addenda are dropped (no counterpart tool here).
+ * (findings §21). This module decides what goes out and records it; the
+ * profile words it (text.ts LoopText).
  *
  * Pure apart from reading loop.md (`<cwd>/.claude/loop.md`, then `~/.claude/loop.md`;
  * the corresponding `.onecode` directories in independent mode).
@@ -16,11 +16,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-
-const yl = "schedule_wakeup";
-const il = "monitor";
-const Um = "task_stop";
-const jb = "task_output";
+import type { LoopFile, LoopText } from "./text.ts";
 
 export const AUTONOMOUS_LOOP = "<<autonomous-loop>>";
 export const AUTONOMOUS_LOOP_DYNAMIC = "<<autonomous-loop-dynamic>>";
@@ -31,10 +27,7 @@ export const LOOP_FILE_CAP = 25000;
 /** Marks "the autonomous preamble went out because loop.md was absent". */
 const PREAMBLE_MARK = "__autonomous_preamble__";
 
-export interface LoopFile {
-	path: string;
-	content: string;
-}
+export type { LoopFile };
 
 /**
  * What one conversation was already sent; compaction resets it (the first
@@ -90,39 +83,6 @@ export function isLoopFileSentinel(prompt: string): boolean {
 	return prompt === LOOP_FILE_SENTINEL || prompt === LOOP_FILE_DYNAMIC_SENTINEL;
 }
 
-function cronTick(): string {return`# Autonomous loop tick
-
-Run the autonomous check using the loop instructions established earlier in this conversation. If you cannot find them, treat this as a no-op tick. The recurring cron will fire the next tick automatically \u2014 do not call ${yl} from this tick.`}
-const DYNAMIC_MONITOR_NOTE=`
-
-If a ${il} is armed (check ${jb}), keep \`delaySeconds\` at 1200\u20131800s \u2014 the ${il} is the wake signal and this is only the fallback heartbeat. If you were woken by a \`<task-notification>\`, handle the event before deciding whether to re-arm. To stop the loop, call ${yl} with \`stop: true\` and ${Um} the monitor (use ${jb} to find its task ID if no longer in context).`;
-function dynamicTick(): string {return`# Autonomous loop tick (dynamic pacing)
-
-Run the autonomous check using the loop instructions established earlier in this conversation. If you cannot find them, treat this as a no-op tick.
-
-You scheduled this tick via the ${yl} tool (not a recurring cron). To keep the loop alive, call ${yl} again at the end of this turn with \`prompt\` set to the literal sentinel \`${AUTONOMOUS_LOOP_DYNAMIC}\` and \`noop\` set to \`true\` if this tick changed nothing (or \`false\` if it did) \u2014 otherwise the loop ends after this tick.${DYNAMIC_MONITOR_NOTE}`}
-function resolveAutonomous(e: LoopDeliveryState, t: string, preamble: string): string | null {if(!isAutonomousSentinel(t))return null;let o=t===AUTONOMOUS_LOOP_DYNAMIC?dynamicTick():cronTick();if(e.autonomousPreambleDelivered||e.lastLoopFileDelivered!==null)return o;return e.autonomousPreambleDelivered=!0,`${preamble}
-
----
-
-${o}`}
-function loopFileCronTick(): string {return`# /loop tick \u2014 loop.md tasks
-
-Work the tasks from the loop.md contents established earlier in this conversation. If you cannot find them, treat this as a no-op tick. The recurring cron will fire the next tick automatically \u2014 do not call ${yl} from this tick.`}
-function loopFileDynamicTick(): string {return`# /loop tick \u2014 loop.md tasks (dynamic pacing)
-
-Work the tasks from the loop.md contents established earlier in this conversation. If you cannot find them, treat this as a no-op tick.
-
-You scheduled this tick via the ${yl} tool (not a recurring cron). To keep the loop alive, call ${yl} again at the end of this turn with \`prompt\` set to the literal sentinel \`${LOOP_FILE_DYNAMIC_SENTINEL}\` and \`noop\` set to \`true\` if this tick changed nothing (or \`false\` if it did) \u2014 otherwise the loop ends after this tick.${DYNAMIC_MONITOR_NOTE}`}
-function loopFileAbsentDynamicTick(): string {return`# /loop tick \u2014 loop.md absent (dynamic pacing)
-
-loop.md is not currently present. Run the autonomous check using the loop instructions established earlier in this conversation.
-
-You scheduled this tick via the ${yl} tool (not a recurring cron). To keep the loop alive \u2014 and to pick up loop.md if it is recreated \u2014 call ${yl} again at the end of this turn with \`prompt\` set to the literal sentinel \`${LOOP_FILE_DYNAMIC_SENTINEL}\` and \`noop\` set to \`true\` if this tick changed nothing (or \`false\` if it did) \u2014 otherwise the loop ends after this tick.${DYNAMIC_MONITOR_NOTE}`}
-function capLoopFile(e: string): string {if(e.length<=LOOP_FILE_CAP)return e;let t=e.lastIndexOf(`
-`,LOOP_FILE_CAP);return`${e.slice(0,t>0?t:LOOP_FILE_CAP)}
-
-> WARNING: loop.md was truncated to ${LOOP_FILE_CAP} bytes. Keep the task list concise.`}
 /**
  * One loop.md candidate, or null. Every read error counts as absent (Claude
  * Code rethrows all but a missing file or a directory): this runs from the
@@ -137,7 +97,9 @@ function readLoopFileAt(path: string): LoopFile | null {
 	}
 	const trimmed = text.trim();
 	if (trimmed.length === 0) return null;
-	return { path, content: capLoopFile(trimmed) };
+	if (trimmed.length <= LOOP_FILE_CAP) return { path, content: trimmed };
+	const lastBreak = trimmed.lastIndexOf("\n", LOOP_FILE_CAP);
+	return { path, content: trimmed.slice(0, lastBreak > 0 ? lastBreak : LOOP_FILE_CAP), truncatedAt: LOOP_FILE_CAP };
 }
 
 /**
@@ -149,25 +111,35 @@ export function readLoopFile(cwd: string, home = homedir()): LoopFile | null {
 	return readLoopFileAt(join(projectConfigDir(cwd), "loop.md")) ?? readLoopFileAt(join(userConfigDir(home), "loop.md"));
 }
 
-function resolveLoopFile(e: LoopDeliveryState, t: string, o: LoopFile | null, preamble: string): string {let n=t===LOOP_FILE_DYNAMIC_SENTINEL;if(o){let s=n?loopFileDynamicTick():loopFileCronTick(),m=loopFileMark(o.content);if(e.lastLoopFileDelivered===m)return s;return e.lastLoopFileDelivered=m,`# /loop tick \u2014 tasks from ${o.path}
-
-The user configured a loop-tasks file. Work through the tasks defined below; these are the instructions for this tick and every subsequent tick (the reminder on later fires refers back to this message).
-
----
-
-${o.content}
-
----
-
-${s}`}let r=n?loopFileAbsentDynamicTick():cronTick();if(e.lastLoopFileDelivered===PREAMBLE_MARK||e.autonomousPreambleDelivered)return r;return e.lastLoopFileDelivered=PREAMBLE_MARK,e.autonomousPreambleDelivered=!0,`${preamble}
-
----
-
-${r}`}
 /**
- * The text a fired prompt delivers, as in Claude Code:
- * a sentinel expands, updating `state`; any other prompt passes through.
+ * The text a fired prompt delivers, as in Claude Code: a sentinel expands,
+ * updating `state`; any other prompt passes through. An autonomous sentinel
+ * sends the instructions with its first fire (none yet, and no loop.md
+ * delivered), then the tick alone. A loop.md sentinel sends the file's tasks
+ * whenever the file is new or changed; with the file gone, the autonomous
+ * instructions once, then the tick.
  */
-export function resolveLoopFire(state: LoopDeliveryState, prompt: string, cwd: string, preamble: string, home?: string): string {
-	return resolveAutonomous(state, prompt, preamble) ?? (isLoopFileSentinel(prompt) ? resolveLoopFile(state, prompt, readLoopFile(cwd, home), preamble) : prompt);
+export function resolveLoopFire(state: LoopDeliveryState, prompt: string, cwd: string, text: LoopText, persistent: boolean, home?: string): string {
+	const withPreamble = (tick: string) => text.withPreamble({ preamble: text.preamble({ persistent }), tick });
+	if (isAutonomousSentinel(prompt)) {
+		const tick = text.tick(prompt === AUTONOMOUS_LOOP_DYNAMIC ? "autonomousDynamic" : "autonomous");
+		if (state.autonomousPreambleDelivered || state.lastLoopFileDelivered !== null) return tick;
+		state.autonomousPreambleDelivered = true;
+		return withPreamble(tick);
+	}
+	if (!isLoopFileSentinel(prompt)) return prompt;
+	const dynamic = prompt === LOOP_FILE_DYNAMIC_SENTINEL;
+	const loopFile = readLoopFile(cwd, home);
+	if (loopFile) {
+		const tick = text.tick(dynamic ? "loopFileDynamic" : "loopFile");
+		const mark = loopFileMark(loopFile.content);
+		if (state.lastLoopFileDelivered === mark) return tick;
+		state.lastLoopFileDelivered = mark;
+		return text.loopFileTick({ loopFile, tick });
+	}
+	const tick = text.tick(dynamic ? "loopFileAbsentDynamic" : "autonomous");
+	if (state.lastLoopFileDelivered === PREAMBLE_MARK || state.autonomousPreambleDelivered) return tick;
+	state.lastLoopFileDelivered = PREAMBLE_MARK;
+	state.autonomousPreambleDelivered = true;
+	return withPreamble(tick);
 }

@@ -124,9 +124,45 @@ export interface TaskToolsText {
 	stopRequested(p: { id: string; description: string }): string;
 }
 
+/** What `/loop <args>` asks for, as the base sorts its arguments (loop-skill.ts loopSkillForm). */
+export type LoopSkillForm =
+	/** A prompt, with or without an interval: the model parses it. */
+	| { kind: "prompt"; input: string }
+	/** No prompt: `selfPaced` when no interval was given either; `interval` is the one given, or the default. */
+	| { kind: "noPrompt"; selfPaced: boolean; interval: string };
+
+/** A loop-tasks file as read; `truncatedAt` is the cap it was cut to, when it was longer. */
+export interface LoopFile {
+	path: string;
+	content: string;
+	truncatedAt?: number;
+}
+
+/**
+ * The short reminder a fired loop sentinel sends once its full instructions
+ * went out: the autonomous loop's (cron or self-paced), or loop.md's (cron,
+ * self-paced, or self-paced with the file gone).
+ */
+export type LoopTick = "autonomous" | "autonomousDynamic" | "loopFile" | "loopFileDynamic" | "loopFileAbsentDynamic";
+
+export interface LoopText {
+	/** The /loop skill's body; `persistent` picks the autonomous instructions' persistent variant. */
+	skillBody(p: { form: LoopSkillForm; loopFile: LoopFile | null; persistent: boolean; maxAgeDays: number }): string;
+	/** The autonomous-loop instructions, sent with the first fire of an autonomous loop. */
+	preamble(p: { persistent: boolean }): string;
+	tick(tick: LoopTick): string;
+	/** The first fire after loop.md appeared or changed: its tasks, then the tick. */
+	loopFileTick(p: { loopFile: LoopFile; tick: string }): string;
+	/** The first fire of an autonomous loop: the instructions, then the tick. */
+	withPreamble(p: { preamble: string; tick: string }): string;
+	/** Stands in for folded no-op wakeups in the model's context. */
+	foldNote(p: { streak: number }): string;
+}
+
 export interface BackgroundText {
 	cron: CronText;
 	wakeup: WakeupText;
 	monitor: MonitorText;
 	tasks: TaskToolsText;
+	loop: LoopText;
 }
