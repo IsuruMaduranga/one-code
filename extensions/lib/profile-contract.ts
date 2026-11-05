@@ -17,6 +17,7 @@ import type { NotebookText } from "../notebook/text.ts";
 import type { PlanModeText } from "../plan-mode/text.ts";
 import type { RecapText } from "../recap/text.ts";
 import type { SessionTitleText } from "../session-title/text.ts";
+import type { SkillText } from "../skill/text.ts";
 import type { SystemPromptText } from "../system-prompt/text.ts";
 import type { TasksText } from "../tasks/text.ts";
 import type { WebFetchText } from "../web-fetch/text.ts";
@@ -46,6 +47,7 @@ export interface ProfileText {
 	recap?: RecapText;
 	effort?: EffortText;
 	planMode?: PlanModeText;
+	skill?: SkillText;
 	/** Used by the worktree tools, subagents and workflows (each guards isolated sessions with it). */
 	worktreeGuard?: WorktreeGuardText;
 }

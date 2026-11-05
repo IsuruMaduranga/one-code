@@ -123,26 +123,6 @@ export function promptCommandText(name: string, args: string, prompt: string): s
 	return typedSkillContent(name, args, prompt).join("\n");
 }
 
-/** Claude Code's result for a model's skill call; the skill's text follows it as a second block. */
-export const launchingSkill = (name: string): string => `Launching skill: ${name}`;
-
-/**
- * The lines that open and close a skill tool result when the model called a
- * skill that takes arguments without passing any. A skill's text is its
- * instructions, not a manual: a weak model "checking the interface" of
- * `/loop` got the no-argument body, which starts an autonomous loop. A mild
- * opening line lost to that body's "The user invoked /loop with no prompt"
- * on DeepSeek V4.1 Flash; telling it to stop and check, plus a closing
- * reminder, turned it around. Only the model's tool calls get this; a user's
- * bare `/<name>` is deliberate.
- */
-export function missingArgumentsNote(argumentHint: string): { before: string; after: string } {
-	return {
-		before: `Stop and check before following this. This skill takes arguments (${argumentHint}) and this call passed none, so what follows is its no-argument mode, written as if the user asked for the skill with nothing after it. If the user's request names any of those arguments, do not follow the instructions below: call the skill again with them in \`args\`.`,
-		after: "Reminder: those were the no-argument instructions. If the user's request included arguments, call the skill again with them in `args` instead of following them.",
-	};
-}
-
 /**
  * The hidden message a `/skill:` command is delivered as. `details.input` is
  * the text the user typed, so an extension that saw that text at `input` (the

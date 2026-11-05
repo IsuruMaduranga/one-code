@@ -7,6 +7,7 @@ import {
 	skillListingText,
 	usageScore,
 } from "../../extensions/skill/listing.ts";
+import { skill } from "../../profile/skill/index.ts";
 
 describe("skillListingText (C4)", () => {
 	it("carries a multi-line description whole, so the 'Use when' trigger survives", () => {
@@ -26,9 +27,10 @@ describe("skillListingText (C4)", () => {
 		expect(text).toBe("- a: A does things\n- b");
 	});
 
-	it("says so when nothing is available", () => {
-		expect(skillListingText([])).toBe("(no skills available)");
-		expect(skillListingText([{ name: "x", state: "off" }])).toBe("(no skills available)");
+	it("lists nothing when nothing is available, which the profile words", () => {
+		expect(skillListingText([])).toBeUndefined();
+		expect(skillListingText([{ name: "x", state: "off" }])).toBeUndefined();
+		expect(skill.available(undefined)).toBe("Available skills:\n(no skills available)");
 	});
 });
 
@@ -64,7 +66,7 @@ describe("skillListingText: Claude Code's line, clip and budget", () => {
 			{ name: "plain", description: "p".repeat(40), state: "name-only" },
 			{ name: "review", description: "b".repeat(40), state: "on", bundled: true },
 		];
-		const whole = skillListingText(skills);
+		const whole = skillListingText(skills) ?? "";
 		expect(skillListingText(skills, whole.length)).toBe(whole);
 		// Room for one more description beyond the kept lines: the most used gets it.
 		const kept = ["- rare", `- often: ${"o".repeat(40)}`, "- plain", `- review: ${"b".repeat(40)}`].join("\n");

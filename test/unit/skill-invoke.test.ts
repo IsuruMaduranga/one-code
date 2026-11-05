@@ -4,7 +4,6 @@ import {
 	commandBreadcrumb,
 	commandDisplayLine,
 	isBareCommandName,
-	launchingSkill,
 	parseSkillCommand,
 	resolveSkill,
 	skillCommandCandidates,
@@ -13,6 +12,7 @@ import {
 	typedSkillContent,
 	withoutDuplicateSkillCommands,
 } from "../../extensions/skill/invoke.ts";
+import { skill } from "../../profile/skill/index.ts";
 
 describe("parseSkillCommand", () => {
 	it("returns undefined for non-skill input", () => {
@@ -95,7 +95,7 @@ describe("Claude Code's skill message", () => {
 	});
 
 	it("answers a model's call with Claude Code's launch line", () => {
-		expect(launchingSkill("workflow-authoring")).toBe("Launching skill: workflow-authoring");
+		expect(skill.launching("workflow-authoring")).toBe("Launching skill: workflow-authoring");
 	});
 });
 

@@ -13,7 +13,10 @@ import type { ToldFact } from "../../extensions/lib/ledger/records.ts";
 import { pluginRoot } from "../../extensions/lib/plugin-root.ts";
 import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/reminders.ts";
 import { setSkillState } from "../../extensions/lib/skill-overrides.ts";
-import { listableSkillNames, SKILL_LISTING_HEADER } from "../../extensions/skill/announce.ts";
+import { listableSkillNames } from "../../extensions/skill/announce.ts";
+import { skill } from "../../profile/skill/index.ts";
+
+const SKILL_LISTING_HEADER = skill.listingHeader;
 import skillExtension from "../../extensions/skill/index.ts";
 import subagentsExtension from "../../extensions/subagents/index.ts";
 import { createFakeCtx, createFakePi, type FakePi, renderRequest } from "./helpers/fake-pi.ts";

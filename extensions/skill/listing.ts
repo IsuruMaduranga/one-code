@@ -66,7 +66,8 @@ export function usageScore(entry: UsageEntry | undefined, now: Date = new Date()
 	return entry.count * Math.max(0.5 ** (days / 7), 0.1);
 }
 
-export function skillListingText(skills: ReadonlyArray<ListedSkill>, budget = Number.POSITIVE_INFINITY): string {
+/** The listing's lines, or undefined when no skill is listable (the profile words that). */
+export function skillListingText(skills: ReadonlyArray<ListedSkill>, budget = Number.POSITIVE_INFINITY): string | undefined {
 	const listed = skills.flatMap((skill) => {
 		if (skill.disableModelInvocation) return [];
 		const visibility = skillListingVisibility(skill.state);
@@ -76,7 +77,7 @@ export function skillListingText(skills: ReadonlyArray<ListedSkill>, budget = Nu
 		const text = listingDescription(skill);
 		return [{ skill, short, full: text ? `${short}: ${text}` : short }];
 	});
-	if (listed.length === 0) return "(no skills available)";
+	if (listed.length === 0) return undefined;
 	const separators = listed.length - 1;
 	const whole = listed.reduce((sum, line) => sum + line.full.length, 0) + separators;
 	if (whole <= budget) return listed.map((line) => line.full).join("\n");
@@ -96,23 +97,19 @@ export function skillListingText(skills: ReadonlyArray<ListedSkill>, budget = Nu
 }
 
 /**
- * The skills listing for a session without the skill tool: each skill's file,
- * to read with `reader`. The same states as the tool's listing: user-only and
- * off skills stay hidden, a name-only skill shows no description. Undefined
- * when nothing is listable.
+ * The skills listing's lines for a session without the skill tool: each
+ * skill's file (the profile frames them). The same states as the tool's
+ * listing: user-only and off skills stay hidden, a name-only skill shows no
+ * description. Undefined when nothing is listable.
  */
-export function readableSkillListing(
-	skills: ReadonlyArray<ListedSkill & { path?: string; kind?: string }>,
-	reader: string,
-): string | undefined {
+export function readableSkillLines(skills: ReadonlyArray<ListedSkill & { path?: string; kind?: string }>): string[] | undefined {
 	const lines = skills
 		.filter((skill) => !skill.kind && !skill.disableModelInvocation && skill.path && skillListingVisibility(skill.state) !== "hidden")
 		.map((skill) => {
 			const text = skillListingVisibility(skill.state) === "full" ? listingDescription(skill) : "";
 			return `- ${skill.name}${text ? `: ${text}` : ""} (${skill.path})`;
 		});
-	if (lines.length === 0) return undefined;
-	return `The following skills provide specialized instructions for specific tasks. Read a skill's file with ${reader} when the task matches its description:\n\n${lines.join("\n")}`;
+	return lines.length === 0 ? undefined : lines;
 }
 
 /**

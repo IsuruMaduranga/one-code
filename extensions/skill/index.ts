@@ -43,8 +43,6 @@ import { boundedDockHeight, ccToolRenderers, safeThemeBold, safeThemePaint, trun
 import {
 	bareSkillMatches,
 	commandDisplayLine,
-	launchingSkill,
-	missingArgumentsNote,
 	parseSkillCommand,
 	resolveSkill,
 	SKILL_INVOCATION_TYPE,
@@ -56,9 +54,10 @@ import {
 } from "./invoke.ts";
 import { codeReviewBody } from "./code-review.ts";
 import { decodeSkillsKey } from "./panel/keys.ts";
-import { frontmatterFlag, readableSkillListing, skillListingBudget, skillListingText, usageScore, withoutPiSkillsBlock } from "./listing.ts";
+import { frontmatterFlag, readableSkillLines, skillListingBudget, skillListingText, usageScore, withoutPiSkillsBlock } from "./listing.ts";
+import { requireText } from "../lib/profile.ts";
 import { renderSkillsPanel, type SkillsPaint } from "./panel/render.ts";
-import { listableSkillNames, SKILL_LISTING_HEADER } from "./announce.ts";
+import { listableSkillNames } from "./announce.ts";
 import { applySkillsKey, followRow, initialSkillsState, type SkillsRow, visibleRows } from "./panel/state.ts";
 import { announceArgumentHint, type CommandHint, frontmatterCommandHint } from "../lib/argument-hints.ts";
 import { parseSlashCommand, SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../lib/skill-body.ts";
@@ -101,6 +100,7 @@ const CODE_REVIEW_PATH = join(BUNDLED_ROOT, "code-review", "SKILL.md");
 const CODE_REVIEW_CELLS = join(BUNDLED_ROOT, "code-review", "cells");
 
 function skillExtension(pi: ExtensionAPI) {
+	const text = requireText("skill");
 	const requestTier = sessionModelTier(pi);
 	// pi draws a user message as markdown, so a typed skill, `/init` and
 	// `/doctor` showed their whole expanded prompt; show the command line.
@@ -194,9 +194,12 @@ function skillExtension(pi: ExtensionAPI) {
 	 */
 	const listingText = (skills: IndexedSkill[]): string | undefined => {
 		const tools = pi.getActiveTools();
-		if (!tools.includes("skill")) return readableSkillListing(skills, tools.includes("read") ? "the read tool" : "the shell");
+		if (!tools.includes("skill")) {
+			const lines = readableSkillLines(skills);
+			return lines && text.readableListing({ lines, reader: tools.includes("read") ? "read" : "shell" });
+		}
 		const listing = describe(skills);
-		return listing === "(no skills available)" ? undefined : `${SKILL_LISTING_HEADER}\n\n${listing}`;
+		return listing === undefined ? undefined : `${text.listingHeader}\n\n${listing}`;
 	};
 	const listableNow = (skills: IndexedSkill[]) => listableSkillNames(skills, !pi.getActiveTools().includes("skill"));
 	/** The listing as live state: what an epoch's message 1 says (the render step above announces later skills). */
@@ -400,13 +403,12 @@ function skillExtension(pi: ExtensionAPI) {
 			// The skill's text goes to the model; the transcript needs one line.
 			result: (_r, a, isError) => (isError ? undefined : a?.skill ? `Loaded ${a.skill}` : undefined),
 		}),
-		description:
-			"Invoke a skill.\n\nA skill is a packaged set of instructions the user or project has set up for a particular kind of task (deploy steps, a review checklist, a repo-specific workflow). Available skills appear in a system-reminder listing with one-line descriptions. When the task at hand is one a listed skill covers, call this tool first — the skill's instructions load into the turn for you to follow in place of your default approach. Users may also ask for one by name (`/<name>`, or \"slash command\"); that's a request to invoke it.\n\n- `skill`: exact name from the listing, no leading slash. Plugin skills are named `<plugin>:<skill>`.\n- `args`: optional arguments to pass through.\n\nOnly names from the listing (or that the user typed explicitly) are valid. Built-in CLI commands (`/help`, `/clear`, …) aren't skills. Use `list` to see what is available.",
-		promptSnippet: "Load packaged instructions for a task (see the skills listing)",
+		description: text.description,
+		promptSnippet: text.promptSnippet,
 		parameters: Type.Object({
-			skill: Type.Optional(Type.String({ description: "Exact skill name, no leading slash" })),
-			args: Type.Optional(Type.String({ description: "Arguments to pass through to the skill" })),
-			list: Type.Optional(Type.Boolean({ description: "List available skills instead of invoking one" })),
+			skill: Type.Optional(Type.String({ description: text.params.skill })),
+			args: Type.Optional(Type.String({ description: text.params.args })),
+			list: Type.Optional(Type.Boolean({ description: text.params.list })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			// `list`, or a bare call with no invoke signal, browses the catalog. A
@@ -417,7 +419,7 @@ function skillExtension(pi: ExtensionAPI) {
 			const all = index();
 			if (params.list || (!params.skill && params.args == null)) {
 				return {
-					content: [{ type: "text", text: `Available skills:\n${skillListingText(all)}` }],
+					content: [{ type: "text", text: text.available(skillListingText(all)) }],
 					details: { skills: all.map((s) => s.name) } as Record<string, unknown>,
 				};
 			}
@@ -426,7 +428,7 @@ function skillExtension(pi: ExtensionAPI) {
 					content: [
 						{
 							type: "text",
-							text: `No \`skill\` given, but you passed \`args\` — this looks like an invocation that forgot to name the skill. Set \`skill\` to one of the names below, or call with \`list: true\` to just browse.\n\nAvailable skills:\n${skillListingText(all)}`,
+							text: text.noName(skillListingText(all)),
 						},
 					],
 					details: {} as Record<string, unknown>,
@@ -443,11 +445,11 @@ function skillExtension(pi: ExtensionAPI) {
 
 			if (!found) {
 				const ambiguous = bareMatches.length > 1;
-				const text = ambiguous
-					? `"${params.skill}" is ambiguous — it matches ${bareMatches.map((s) => s.name).join(", ")}. Use the full \`<plugin>:${wanted}\` name.`
-					: `No skill named "${params.skill}".\n\nAvailable skills:\n${skillListingText(all)}`;
+				const refusal = ambiguous
+					? text.ambiguous({ query: params.skill, wanted, matches: bareMatches.map((s) => s.name) })
+					: text.notFound({ query: params.skill, listing: skillListingText(all) });
 				return {
-					content: [{ type: "text", text }],
+					content: [{ type: "text", text: refusal }],
 					details: {} as Record<string, unknown>,
 					isError: true,
 				};
@@ -459,16 +461,16 @@ function skillExtension(pi: ExtensionAPI) {
 			// not come through this tool; a listing frozen before the user hid it can
 			// still name it, so the tool refuses it too (./announce.ts).
 			if (found.state === "off") {
-				const where = found.source === "plugin" ? "/plugins" : "/skills";
+				const manager = found.source === "plugin" ? "/plugins" : "/skills";
 				return {
-					content: [{ type: "text", text: `Skill "${found.name}" is turned off — the user can re-enable it from ${where}.` }],
+					content: [{ type: "text", text: text.off({ name: found.name, manager }) }],
 					details: { skill: found.name, state: found.state } as Record<string, unknown>,
 					isError: true,
 				};
 			}
 			if (found.state === "user-only") {
 				return {
-					content: [{ type: "text", text: `Skill "${found.name}" is set to user-only — only the user can run it, by typing /${found.name}.` }],
+					content: [{ type: "text", text: text.userOnly(found.name) }],
 					details: { skill: found.name, state: found.state } as Record<string, unknown>,
 					isError: true,
 				};
@@ -478,7 +480,7 @@ function skillExtension(pi: ExtensionAPI) {
 			// (a typed `/<name>` runs through deliverSkill, not this tool).
 			if (found.disableModelInvocation || readModelInvocationDisabled(found.path)) {
 				return {
-					content: [{ type: "text", text: `Skill ${wanted} cannot be used with Skill tool due to disable-model-invocation` }],
+					content: [{ type: "text", text: text.manualOnly(wanted) }],
 					details: { skill: found.name } as Record<string, unknown>,
 					isError: true,
 				};
@@ -491,7 +493,7 @@ function skillExtension(pi: ExtensionAPI) {
 				promptText = skillPromptText(body, args, baseDirFor(found));
 			} catch (error) {
 				return {
-					content: [{ type: "text", text: `Could not read skill "${found.name}": ${(error as Error).message}` }],
+					content: [{ type: "text", text: text.readFailed({ name: found.name, osMessage: (error as Error).message }) }],
 					details: {} as Record<string, unknown>,
 					isError: true,
 				};
@@ -501,16 +503,16 @@ function skillExtension(pi: ExtensionAPI) {
 
 			// A skill that takes arguments, called without any, returns its
 			// no-argument body; say so, since a model previewing the skill would
-			// otherwise follow it (invoke.ts missingArgumentsNote).
+			// otherwise follow it (the profile's missingArguments).
 			const hint = params.args?.trim() ? undefined : readArgumentHint(found.path);
 			const hintText = hint?.hint ?? hint?.argNames?.map((name) => `<${name}>`).join(" ");
-			const note = hintText ? missingArgumentsNote(hintText) : undefined;
+			const note = hintText ? text.missingArguments(hintText) : undefined;
 
 			// Claude Code's shape: the result says the skill is launching, and its
 			// text follows as a block of its own.
 			return {
 				content: [
-					{ type: "text", text: launchingSkill(found.name) },
+					{ type: "text", text: text.launching(found.name) },
 					{ type: "text", text: note ? `${note.before}\n\n${promptText}\n\n${note.after}` : promptText },
 				],
 				details: { skill: found.name, path: found.path } as Record<string, unknown>,
