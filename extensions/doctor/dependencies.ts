@@ -19,6 +19,7 @@ import { getProviderKind } from "pi-web-search/src/api.ts";
 import { installHint, serverInstallHint } from "../lsp/install-hints.ts";
 import { languageIdForPath, SERVERS } from "../lsp/servers.ts";
 import { typescriptPreflight } from "../lsp/servers.ts";
+import { profileText } from "../lib/profile.ts";
 import type { McpServer } from "../mcp/config.ts";
 import { BRAVE_KEY_ENV, resolveChain, TAVILY_KEY_ENV, type WebSearchSettings } from "../web/backends.ts";
 import type { Finding, ReportLine, ReportSection } from "./report.ts";
@@ -197,8 +198,10 @@ export function checkDependencies(input: DependencyInput): DependencyReport {
 			});
 		}
 		if (needed && found && config.command === "typescript-language-server") {
+			// Worded by the language-server text, which is there whenever that feature is on.
 			const preflight = typescriptPreflight(cwd);
-			if (preflight) findings.push({ level: "warn", text: preflight });
+			const words = profileText().lsp;
+			if (preflight && words) findings.push({ level: "warn", text: words.failure(preflight) });
 		}
 	}
 

@@ -5,10 +5,10 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	filterDiagnostics,
-	formatDiagnostic,
-	formatDiagnostics,
+	formatDiagnostics as formatWith,
 	type LspDiagnostic,
 	severityName,
+	shownDiagnostic,
 } from "../../extensions/lsp/format.ts";
 import { describeStartFailure, INSTALL_HINTS } from "../../extensions/lsp/install-hints.ts";
 import { withKeepAlive } from "../../extensions/lsp/keep-alive.ts";
@@ -21,6 +21,10 @@ import {
 	typescriptPreflight,
 	findTypescript,
 } from "../../extensions/lsp/servers.ts";
+import { lsp as lspText } from "../../profile/lsp/index.ts";
+
+/** The tool's result with One Code's words, as the extension passes them. */
+const formatDiagnostics = (path: string, list: LspDiagnostic[], limit?: number) => formatWith(path, list, lspText.diagnostics, limit);
 
 const diag = (message: string, severity = 1, line = 0, character = 0): LspDiagnostic => ({
 	range: { start: { line, character } },
@@ -111,7 +115,7 @@ describe("project root and preflight", () => {
 
 	it("flags a local TypeScript without tsserver.js", () => {
 		mkdirSync(join(dir, "node_modules", "typescript", "lib"), { recursive: true });
-		expect(typescriptPreflight(dir)).toMatch(/tsserver\.js/);
+		expect(typescriptPreflight(dir)).toEqual({ kind: "noTsserver", install: "npm install -D typescript@5" });
 	});
 
 	it("passes when tsserver.js is present", () => {
@@ -121,9 +125,7 @@ describe("project root and preflight", () => {
 	});
 
 	it("flags a project with no TypeScript reachable at all (a global install does not count)", () => {
-		const problem = typescriptPreflight(dir);
-		expect(problem).toMatch(/No TypeScript installation is reachable/);
-		expect(problem).toMatch(/npm install -D typescript@5/);
+		expect(typescriptPreflight(dir)).toEqual({ kind: "noTypescript", install: "npm install -D typescript@5" });
 		expect(findTypescript(dir)).toBeUndefined();
 	});
 
@@ -137,30 +139,35 @@ describe("project root and preflight", () => {
 });
 
 describe("start-failure install hints", () => {
-	const enoent = (command: string) => `Could not start ${command}: spawn ${command} ENOENT`;
+	const enoent = (command: string) => ({ kind: "spawnFailed" as const, command, osMessage: `spawn ${command} ENOENT` });
+	const worded = (...args: Parameters<typeof describeStartFailure>) => lspText.failure(describeStartFailure(...args));
 
 	it("rewrites a missing built-in server into its install command", () => {
-		expect(describeStartFailure(enoent("pyright-langserver"), "pyright-langserver")).toBe(
-			"pyright-langserver is not installed. Install it with: npm install -g pyright",
-		);
+		expect(describeStartFailure(enoent("pyright-langserver"), "pyright-langserver")).toEqual({
+			kind: "notInstalled",
+			command: "pyright-langserver",
+			installHint: "npm install -g pyright",
+		});
+		expect(worded(enoent("pyright-langserver"), "pyright-langserver")).toBe("pyright-langserver is not installed. Install it with: npm install -g pyright");
 	});
 
 	it("names the plugin when a plugin configured a known command", () => {
-		expect(describeStartFailure(enoent("pyright-langserver"), "pyright-langserver", "pyright")).toBe(
+		expect(worded(enoent("pyright-langserver"), "pyright-langserver", "pyright")).toBe(
 			"pyright-langserver is not installed (configured by the pyright plugin). Install it with: npm install -g pyright",
 		);
 	});
 
 	it("gives PATH guidance for a plugin command it has no hint for", () => {
-		const message = describeStartFailure(enoent("mi-lemminx"), "mi-lemminx", "mi-ls");
-		expect(message).toContain("configured by the mi-ls plugin");
-		expect(message).toContain("on your PATH");
-		expect(message).toContain("plugin's documentation");
+		expect(describeStartFailure(enoent("mi-lemminx"), "mi-lemminx", "mi-ls")).toEqual({ kind: "notInstalled", command: "mi-lemminx", plugin: "mi-ls" });
+		expect(worded(enoent("mi-lemminx"), "mi-lemminx", "mi-ls")).toBe(
+			"mi-lemminx is not installed (configured by the mi-ls plugin). Install it and make sure it is on your PATH (the plugin's documentation should say how).",
+		);
 	});
 
 	it("reports a vendored absolute path as missing, not uninstalled", () => {
 		const command = "/plugins/mi-ls/bin/server";
-		expect(describeStartFailure(enoent(command), command, "mi-ls")).toBe(
+		expect(describeStartFailure(enoent(command), command, "mi-ls")).toEqual({ kind: "missingPath", command, plugin: "mi-ls" });
+		expect(worded(enoent(command), command, "mi-ls")).toBe(
 			"/plugins/mi-ls/bin/server does not exist (configured by the mi-ls plugin). Check the plugin's installation.",
 		);
 	});
@@ -171,15 +178,15 @@ describe("start-failure install hints", () => {
 		expect(commands.size).toBeGreaterThan(0);
 		for (const command of commands) {
 			expect(INSTALL_HINTS[command], command).toBeTruthy();
-			expect(describeStartFailure(enoent(command), command)).toContain(INSTALL_HINTS[command]);
+			expect(describeStartFailure(enoent(command), command)).toMatchObject({ kind: "notInstalled", installHint: INSTALL_HINTS[command] });
 		}
 	});
 
 	it("passes non-ENOENT failures through unchanged", () => {
-		const crash = "language server stopped unexpectedly";
+		const crash = { kind: "exitedQuietly" as const };
 		expect(describeStartFailure(crash, "pyright-langserver")).toBe(crash);
-		const protocolError = "Could not start jdtls: initialize timed out after 10000ms";
-		expect(describeStartFailure(protocolError, "jdtls", "java-tools")).toBe(protocolError);
+		const timeout = { kind: "timedOut" as const, method: "initialize", ms: 10000 };
+		expect(describeStartFailure(timeout, "jdtls", "java-tools")).toBe(timeout);
 	});
 });
 
@@ -205,7 +212,7 @@ describe("diagnostic formatting", () => {
 			source: "typescript",
 			message: "Argument of type 'number' is not assignable to parameter of type 'string'.",
 		};
-		expect(formatDiagnostic("src/index.ts", d)).toBe(
+		expect(lspText.diagnostics.line({ path: "src/index.ts", diagnostic: shownDiagnostic(d) })).toBe(
 			"src/index.ts:5:30 error: Argument of type 'number' is not assignable to parameter of type 'string'. (2345) [typescript]",
 		);
 	});

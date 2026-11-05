@@ -18,7 +18,9 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+import { LspFailureError } from "./failure.ts";
 import type { LspDiagnostic } from "./format.ts";
+import type { LspFailure } from "./text.ts";
 import { childProcessEnv } from "../lib/app-launch.mjs";
 import { commandLaunch } from "../lib/command-launch.ts";
 import { killProcessTree, unrefHandle } from "../lib/process-tree.ts";
@@ -72,7 +74,7 @@ export class LspClient {
 	private waiters = new Map<string, Array<() => void>>();
 	private open = new Map<string, OpenDocument>();
 	private ready = false;
-	private failure?: string;
+	private failure?: LspFailure;
 	private publishes = 0;
 
 	constructor(
@@ -85,7 +87,7 @@ export class LspClient {
 		return this.ready && !!this.child && this.child.exitCode === null;
 	}
 
-	get error(): string | undefined {
+	get error(): LspFailure | undefined {
 		return this.failure;
 	}
 
@@ -129,22 +131,22 @@ export class LspClient {
 			for (const message of readMessages(this.reader, chunk)) this.handle(message);
 		});
 		child.on("error", (error) => {
-			this.failure = `Could not start ${this.config.command}: ${error.message}`;
-			this.rejectAll(new Error(this.failure));
+			this.failure = { kind: "spawnFailed", command: this.config.command, osMessage: error.message };
+			this.rejectAll(new LspFailureError(this.failure));
 		});
 		// A write to a dead server's stdin is an EPIPE on the stream; without a
 		// listener that is an unhandled 'error' event, i.e. a crash (review T10).
 		child.stdin?.on("error", (error) => {
-			this.failure ??= `${this.config.command} stopped accepting input: ${error.message}`;
+			this.failure ??= { kind: "stoppedInput", command: this.config.command, osMessage: error.message };
 			this.ready = false;
 		});
 		child.on("exit", (code, signal) => {
 			this.ready = false;
 			if (!this.failure && code !== 0) {
 				const detail = stderr.trim().split("\n").slice(-3).join(" ");
-				this.failure = `${this.config.command} exited (${signal ?? `code ${code}`})${detail ? `: ${detail}` : ""}`;
+				this.failure = { kind: "exited", command: this.config.command, ...(signal ? { signal } : { code }), ...(detail ? { detail } : {}) };
 			}
-			this.rejectAll(new Error(this.failure ?? "language server exited"));
+			this.rejectAll(new LspFailureError(this.failure ?? { kind: "exitedQuietly" }));
 		});
 
 		await this.request(
@@ -214,7 +216,7 @@ export class LspClient {
 		return new Promise((resolve, reject) => {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
-				reject(new Error(`${method} timed out after ${timeoutMs}ms`));
+				reject(new LspFailureError({ kind: "timedOut", method, ms: timeoutMs }));
 			}, timeoutMs);
 			timer.unref?.();
 			this.pending.set(id, {

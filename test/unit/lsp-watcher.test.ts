@@ -6,10 +6,11 @@ import {
 	computeDelta,
 	DeliveredTracker,
 	fingerprintDiagnostic,
-	formatNewDiagnostics,
+	formatNewDiagnostics as formatWith,
 	markDelivered,
 	MAX_CHARS,
 } from "../../extensions/lsp/watcher.ts";
+import { lsp as lspText } from "../../profile/lsp/index.ts";
 
 const diag = (message: string, severity?: number, line = 0, character = 0, extra?: Partial<LspDiagnostic>): LspDiagnostic => ({
 	message,
@@ -21,6 +22,10 @@ const diag = (message: string, severity?: number, line = 0, character = 0, extra
 // A file URI for `/project/<name>` as this platform spells it (`D:\project\…` on Windows).
 const PROJECT = resolve("/project");
 const uri = (name: string) => pathToFileURL(join(PROJECT, name)).href;
+
+
+/** The block with One Code's words, as the extension passes them. */
+const formatNewDiagnostics = (delta: Map<string, LspDiagnostic[]>, cwd: string) => formatWith(delta, cwd, lspText.newDiagnostics);
 
 describe("fingerprintDiagnostic", () => {
 	it("is stable for identical content and differs when any field changes", () => {

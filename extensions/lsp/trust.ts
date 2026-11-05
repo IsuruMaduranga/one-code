@@ -23,11 +23,7 @@ import { singleFlight } from "../lib/single-flight.ts";
 /** Built-in server commands that execute project code. */
 export const PROJECT_CODE_SERVERS: ReadonlySet<string> = new Set(["rust-analyzer", "jdtls"]);
 
-/** What each of those runs, for the consent dialog and the not-started notice. */
-export const PROJECT_CODE_REASON: Record<string, string> = {
-	"rust-analyzer": "runs this project's build scripts and proc macros",
-	jdtls: "runs this project's Gradle or Maven build to import it",
-};
+/* What each of those runs is worded by the profile (text.ts `projectCodeReason`). */
 
 interface TrustStore {
 	version: 1;

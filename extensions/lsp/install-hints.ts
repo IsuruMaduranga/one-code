@@ -1,18 +1,20 @@
 /**
- * Turn a language-server spawn failure into an actionable message.
+ * Turn a language-server spawn failure into an actionable failure.
  *
  * A missing binary (spawn ENOENT) is the common, fixable case: the built-in
  * table assumes its servers are on PATH, and Claude Code LSP plugins ship
  * config only — never the binary (findings §18.3). The raw
  * "spawn pyright-langserver ENOENT" tells the user nothing about what to do,
- * so it is rewritten here with the install command when we know it, and with
- * PATH/plugin guidance when we don't. Every other failure passes through
- * unchanged. Enrichment happens once, where the failure is recorded, so the
- * one-time warning, /lsp, and the lsp_diagnostics tool all show the same text.
+ * so it becomes a not-installed failure carrying the install command when we
+ * know it (the profile words PATH/plugin guidance when we don't). Every other
+ * failure passes through unchanged. It happens once, where the failure is
+ * recorded, so the one-time warning, /lsp, and the lsp_diagnostics tool all
+ * show the same text.
  */
 
 import { isAbsolute } from "node:path";
 import { TYPESCRIPT_PROJECT_INSTALL } from "./servers.ts";
+import type { LspFailure } from "./text.ts";
 
 /**
  * Tools that come from the OS package manager, by platform. Homebrew is a
@@ -51,8 +53,8 @@ export const INSTALL_HINTS: Record<string, string> = {
 };
 
 /** True when the failure is a spawn ENOENT — the binary itself is absent. */
-export function isMissingBinary(failure: string): boolean {
-	return /\bENOENT\b/.test(failure);
+export function isMissingBinary(failure: LspFailure): boolean {
+	return (failure.kind === "spawnFailed" || failure.kind === "error") && /\bENOENT\b/.test(failure.osMessage);
 }
 
 /**
@@ -60,14 +62,11 @@ export function isMissingBinary(failure: string): boolean {
  * else verbatim. `pluginName` is set when a plugin's config (not the built-in
  * table) named the command.
  */
-export function describeStartFailure(rawFailure: string, command: string, pluginName?: string): string {
+export function describeStartFailure(rawFailure: LspFailure, command: string, pluginName?: string): LspFailure {
 	if (!isMissingBinary(rawFailure)) return rawFailure;
-	const from = pluginName ? ` (configured by the ${pluginName} plugin)` : "";
-	const hint = INSTALL_HINTS[command];
-	if (hint) return `${command} is not installed${from}. Install it with: ${hint}`;
-	if (isAbsolute(command)) {
-		return `${command} does not exist${from}. ${pluginName ? "Check the plugin's installation." : "Check the configured path."}`;
-	}
-	const docs = pluginName ? " (the plugin's documentation should say how)" : "";
-	return `${command} is not installed${from}. Install it and make sure it is on your PATH${docs}.`;
+	const plugin = pluginName ? { plugin: pluginName } : {};
+	const installHint = INSTALL_HINTS[command];
+	if (installHint) return { kind: "notInstalled", command, ...plugin, installHint };
+	if (isAbsolute(command)) return { kind: "missingPath", command, ...plugin };
+	return { kind: "notInstalled", command, ...plugin };
 }

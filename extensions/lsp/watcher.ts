@@ -19,7 +19,8 @@
 
 import { relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type LspDiagnostic, severitySymbol } from "./format.ts";
+import { type LspDiagnostic, shownDiagnostic } from "./format.ts";
+import type { LspText } from "./text.ts";
 
 export const MAX_PER_FILE = 10;
 export const MAX_TOTAL = 30;
@@ -92,14 +93,6 @@ export function markDelivered(delta: Map<string, LspDiagnostic[]>, tracker: Deli
 	}
 }
 
-function entryLine(d: LspDiagnostic): string {
-	const line = d.range.start.line + 1;
-	const column = d.range.start.character + 1;
-	const code = d.code !== undefined ? ` [${d.code}]` : "";
-	const source = d.source ? ` (${d.source})` : "";
-	return `  ${severitySymbol(d.severity)} [Line ${line}:${column}] ${d.message}${code}${source}`;
-}
-
 function displayPath(uri: string, cwd: string): string {
 	let path = uri;
 	try {
@@ -115,7 +108,7 @@ function displayPath(uri: string, cwd: string): string {
  * opening tag runs straight into the preamble, one blank line before the
  * first file section and between sections, entries two-space indented.
  */
-export function formatNewDiagnostics(delta: Map<string, LspDiagnostic[]>, cwd: string): string | undefined {
+export function formatNewDiagnostics(delta: Map<string, LspDiagnostic[]>, cwd: string, text: LspText["newDiagnostics"]): string | undefined {
 	if (delta.size === 0) return undefined;
 
 	interface FileSection {
@@ -145,13 +138,13 @@ export function formatNewDiagnostics(delta: Map<string, LspDiagnostic[]>, cwd: s
 		const room = MAX_TOTAL - included;
 		const kept = section.diagnostics.slice(0, room);
 		included += kept.length;
-		parts.push(`${section.path}:\n${kept.map(entryLine).join("\n")}`);
+		parts.push(text.section({ path: section.path, entries: kept.map((d) => text.entry(shownDiagnostic(d))) }));
 	}
 	const omitted = total - included;
-	if (omitted > 0) parts.push(`… ${omitted} more`);
+	if (omitted > 0) parts.push(text.more(omitted));
 
 	let body = parts.join("\n\n");
-	if (body.length > MAX_CHARS) body = `${body.slice(0, MAX_CHARS)}…[truncated]`;
+	if (body.length > MAX_CHARS) body = text.cut(body.slice(0, MAX_CHARS));
 
-	return `<new-diagnostics>The following new diagnostic issues were detected:\n\n${body}\n</new-diagnostics>`;
+	return text.block(body);
 }

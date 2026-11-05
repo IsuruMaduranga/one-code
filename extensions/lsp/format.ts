@@ -1,6 +1,9 @@
 /**
- * Diagnostic shaping for the model (pure).
+ * Diagnostic shaping for the model (pure); the profile's `lsp` group words
+ * the lines (text.ts).
  */
+
+import type { LspText, ShownDiagnostic } from "./text.ts";
 
 export interface LspDiagnostic {
 	range: { start: { line: number; character: number }; end?: { line: number; character: number } };
@@ -12,20 +15,23 @@ export interface LspDiagnostic {
 
 export type SeverityFilter = "error" | "warning" | "all";
 
-/** LSP severity metadata (1..4; missing severity is treated as error). */
-export const SEVERITY: Record<number, { name: string; symbol: string }> = {
-	1: { name: "error", symbol: "✘" },
-	2: { name: "warning", symbol: "⚠" },
-	3: { name: "info", symbol: "ℹ" },
-	4: { name: "hint", symbol: "★" },
-};
+/** LSP's severity names (1..4; a missing or unknown severity is treated as error). */
+const SEVERITY: Record<number, ShownDiagnostic["severity"]> = { 1: "error", 2: "warning", 3: "info", 4: "hint" };
 
-export function severityName(severity: number | undefined): string {
-	return SEVERITY[severity ?? 1]?.name ?? "error";
+export function severityName(severity: number | undefined): ShownDiagnostic["severity"] {
+	return SEVERITY[severity ?? 1] ?? "error";
 }
 
-export function severitySymbol(severity: number | undefined): string {
-	return SEVERITY[severity ?? 1]?.symbol ?? "✘";
+/** A diagnostic as the texts show it: 1-based position, severity by name. */
+export function shownDiagnostic(diagnostic: LspDiagnostic): ShownDiagnostic {
+	return {
+		line: diagnostic.range.start.line + 1,
+		column: diagnostic.range.start.character + 1,
+		severity: severityName(diagnostic.severity),
+		message: diagnostic.message,
+		...(diagnostic.code !== undefined ? { code: diagnostic.code } : {}),
+		...(diagnostic.source ? { source: diagnostic.source } : {}),
+	};
 }
 
 export function filterDiagnostics(diagnostics: LspDiagnostic[], filter: SeverityFilter): LspDiagnostic[] {
@@ -34,23 +40,15 @@ export function filterDiagnostics(diagnostics: LspDiagnostic[], filter: Severity
 	return diagnostics.filter((d) => (d.severity ?? 1) <= max);
 }
 
-/** One diagnostic as `path:line:col severity: message (code) [source]`, 1-indexed. */
-export function formatDiagnostic(relPath: string, diagnostic: LspDiagnostic): string {
-	const line = diagnostic.range.start.line + 1;
-	const column = diagnostic.range.start.character + 1;
-	const code = diagnostic.code !== undefined ? ` (${diagnostic.code})` : "";
-	const source = diagnostic.source ? ` [${diagnostic.source}]` : "";
-	return `${relPath}:${line}:${column} ${severityName(diagnostic.severity)}: ${diagnostic.message}${code}${source}`;
-}
-
-export function formatDiagnostics(relPath: string, diagnostics: LspDiagnostic[], limit = 20): string {
-	if (diagnostics.length === 0) return "No diagnostics.";
-	const shown = diagnostics.slice(0, limit).map((d) => formatDiagnostic(relPath, d));
-	const errors = diagnostics.filter((d) => (d.severity ?? 1) === 1).length;
-	const warnings = diagnostics.filter((d) => d.severity === 2).length;
-	const counts = [errors ? `${errors} error${errors === 1 ? "" : "s"}` : "", warnings ? `${warnings} warning${warnings === 1 ? "" : "s"}` : ""]
-		.filter(Boolean)
-		.join(", ");
-	const omitted = diagnostics.length > limit ? `\n… ${diagnostics.length - limit} more` : "";
-	return `${counts || `${diagnostics.length} diagnostics`}\n\n${shown.join("\n")}${omitted}`;
+/** The tool's result: a summary line, then up to `limit` diagnostics. */
+export function formatDiagnostics(relPath: string, diagnostics: LspDiagnostic[], text: LspText["diagnostics"], limit = 20): string {
+	if (diagnostics.length === 0) return text.none;
+	const shown = diagnostics.slice(0, limit).map((d) => text.line({ path: relPath, diagnostic: shownDiagnostic(d) }));
+	if (diagnostics.length > limit) shown.push(text.more(diagnostics.length - limit));
+	const summary = text.summary({
+		errors: diagnostics.filter((d) => (d.severity ?? 1) === 1).length,
+		warnings: diagnostics.filter((d) => d.severity === 2).length,
+		total: diagnostics.length,
+	});
+	return `${summary}\n\n${shown.join("\n")}`;
 }

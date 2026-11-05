@@ -7,6 +7,7 @@
 
 import { existsSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
+import type { LspFailure } from "./text.ts";
 import { ancestorDirs } from "../lib/claude-context.ts";
 
 export interface ServerConfig {
@@ -91,11 +92,9 @@ export const TYPESCRIPT_PROJECT_INSTALL = "npm install -D typescript@5";
  * from the project (the server does not use a global one), or a TypeScript 7
  * whose native compiler dropped the `lib/tsserver.js` the server requires.
  */
-export function typescriptPreflight(root: string): string | undefined {
+export function typescriptPreflight(root: string): LspFailure | undefined {
 	const typescript = findTypescript(root);
-	if (!typescript) {
-		return `No TypeScript installation is reachable from this project (typescript-language-server resolves \`typescript\` from the project's node_modules upward and never uses a global install). Run \`${TYPESCRIPT_PROJECT_INSTALL}\` in the project for LSP diagnostics.`;
-	}
+	if (!typescript) return { kind: "noTypescript", install: TYPESCRIPT_PROJECT_INSTALL };
 	if (existsSync(join(typescript, "lib", "tsserver.js"))) return undefined;
-	return `The project's TypeScript has no lib/tsserver.js (TypeScript 7's native compiler removed it), so typescript-language-server cannot analyse this project. Run \`${TYPESCRIPT_PROJECT_INSTALL}\` for LSP diagnostics.`;
+	return { kind: "noTsserver", install: TYPESCRIPT_PROJECT_INSTALL };
 }
