@@ -29,12 +29,14 @@
 import { feature } from "../lib/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
+import { requireText } from "../lib/profile.ts";
 import { totalTokensBlock, TurnBudget, turnTokenBudget } from "./budget.ts";
 
 const USER_MESSAGE_KEY = "total-tokens";
 const FIRST_PROMPT_KEY = "total-tokens-first";
 
 function contextBudgetExtension(pi: ExtensionAPI) {
+	const text = requireText("contextBudget");
 	const enabled = () => process.env.CC_TOTAL_TOKENS !== "0";
 	const budget = new TurnBudget(turnTokenBudget());
 	/** True between the first agent_start of a turn and agent_settled. */
@@ -44,13 +46,13 @@ function contextBudgetExtension(pi: ExtensionAPI) {
 		busy = false;
 		if (!enabled()) return;
 		pi.events.emit(REMINDER_CHANNEL, {
-			text: totalTokensBlock(budget.budget),
+			text: totalTokensBlock(text.tokensLeft({ left: budget.budget })),
 			key: FIRST_PROMPT_KEY,
 			placement: "first-prepend",
 			order: CONTEXT_ORDER.totalTokens,
 		} satisfies ReminderPayload);
 		pi.events.emit(REMINDER_CHANNEL, {
-			text: totalTokensBlock(budget.budget),
+			text: totalTokensBlock(text.tokensLeft({ left: budget.budget })),
 			key: USER_MESSAGE_KEY,
 			placement: "sticky-append",
 			raw: true,
@@ -78,7 +80,7 @@ function contextBudgetExtension(pi: ExtensionAPI) {
 	pi.on("tool_result", (event, ctx) => {
 		if (!enabled()) return;
 		pi.events.emit(REMINDER_CHANNEL, {
-			text: totalTokensBlock(budget.left(ctx.getContextUsage()?.tokens)),
+			text: totalTokensBlock(text.tokensLeft({ left: budget.left(ctx.getContextUsage()?.tokens) })),
 			placement: "last-append",
 			raw: true,
 			toolCallId: event.toolCallId,

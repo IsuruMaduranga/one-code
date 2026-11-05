@@ -9,6 +9,7 @@ import contextBudgetExtension from "../../extensions/context-budget/index.ts";
 import systemReminderExtension from "../../extensions/system-reminder/index.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { contextBudget } from "../../profile/context-budget/index.ts";
 
 describe("turnTokenBudget", () => {
 	it("is Claude Code's 15,000,000 unless CC_TOTAL_TOKENS_BUDGET names a positive number", () => {
@@ -71,8 +72,8 @@ describe("TurnBudget", () => {
 });
 
 describe("totalTokensBlock", () => {
-	it("is Claude Code's bare block, byte for byte", () => {
-		expect(totalTokensBlock(14_832_967)).toBe("<total_tokens>14832967 tokens left</total_tokens>");
+	it("frames the profile's words as Claude Code's bare block, byte for byte", () => {
+		expect(totalTokensBlock(contextBudget.tokensLeft({ left: 14_832_967 }))).toBe("<total_tokens>14832967 tokens left</total_tokens>");
 	});
 });
 

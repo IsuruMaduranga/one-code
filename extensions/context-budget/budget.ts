@@ -1,5 +1,7 @@
 /**
  * Claude Code's `<total_tokens>N tokens left</total_tokens>` signal, pure half.
+ * The base frames it (the tag is how lib/reminders.ts recognizes the block on a
+ * tool result); the profile words what is inside (text.ts).
  *
  * What the number is (read off a live Claude Code session and the 2.1.261
  * capture, findings §14): a PER-TURN token budget, not the context window. It
@@ -69,7 +71,7 @@ export class TurnBudget {
 	}
 }
 
-/** The bare block Claude Code appends, byte-for-byte. */
-export function totalTokensBlock(left: number): string {
-	return `<total_tokens>${left} tokens left</total_tokens>`;
+/** The budget block as it rides a message: the profile's words in Claude Code's `<total_tokens>` frame. */
+export function totalTokensBlock(words: string): string {
+	return `<total_tokens>${words}</total_tokens>`;
 }
