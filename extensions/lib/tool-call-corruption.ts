@@ -5,6 +5,12 @@
  * command (an option followed by one trailing blank): the call goes back to the
  * model once, and a repeat in the same run counts as corrupt.
  */
+
+import type { ArgumentDamage } from "../tool-call-corruption/text.ts";
+import { requireText } from "./profile.ts";
+/** A damage worded by the profile (`text.toolCallCorruption`). */
+const damageWords = (damage: ArgumentDamage): string => requireText("toolCallCorruption").damage(damage);
+
 export interface ToolCallDamage {
 	kind: "corrupt" | "suspect";
 	reason: string;
@@ -26,7 +32,7 @@ export function toolCallCorruptionReason(toolName: string, rawArguments: string)
 	try {
 		args = JSON.parse(rawArguments);
 	} catch {
-		return { kind: "corrupt", reason: "The raw tool-call arguments are not exactly one JSON value." };
+		return { kind: "corrupt", reason: damageWords({ kind: "notOneJson" }) };
 	}
 	if (toolName !== "bash" && toolName !== "powershell" && toolName !== "monitor") return;
 	if (!args || typeof args !== "object" || !("command" in args) || typeof args.command !== "string") return;
@@ -34,7 +40,7 @@ export function toolCallCorruptionReason(toolName: string, rawArguments: string)
 	if (cut) {
 		return {
 			kind: "suspect",
-			reason: `The shell command ends with "${cut[1] ?? cut[2]}" and nothing after it, the shape of arguments cut off before a quoted string.`,
+			reason: damageWords({ kind: "cutAfterOption", option: cut[1] ?? cut[2] }),
 		};
 	}
 	const command = args.command.trimEnd();
@@ -60,7 +66,7 @@ export function toolCallCorruptionReason(toolName: string, rawArguments: string)
 			i = newline;
 		}
 	}
-	if (doubleQuoted) return { kind: "corrupt", reason: "The shell command ends with an unbalanced double quote, indicating truncated tool-call arguments." };
+	if (doubleQuoted) return { kind: "corrupt", reason: damageWords({ kind: "unbalancedQuote" }) };
 }
 
 // GLM's native tool-call tags, which a broken upstream parser leaks into the JSON arguments.

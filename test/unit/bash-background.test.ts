@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	type BashFinishSummary,
-	EMPTY_OUTPUT_MARKER,
 	runBackgroundBashBlocking,
 	startBackgroundBash,
 	tailCap,
@@ -68,8 +67,8 @@ describe("startBackgroundBash", () => {
 		const { task, summary } = start("true");
 		await task.finished;
 		expect(task.status).toBe("completed");
-		expect(task.output()).toBe(EMPTY_OUTPUT_MARKER);
-		expect(summary()?.output).toBe(EMPTY_OUTPUT_MARKER);
+		expect(task.output()).toBe(text.emptyOutput);
+		expect(summary()?.output).toBe(text.emptyOutput);
 	});
 
 	it("stop() ends the run with status stopped", async () => {

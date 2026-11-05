@@ -72,6 +72,8 @@ export interface ShellText {
 		logPath?: string;
 		output: string;
 	}): string;
+	/** A finished background command that printed nothing (never a blank, which reads as still running). */
+	emptyOutput: string;
 	/** Heads output cut to its last characters. */
 	earlierTruncated: string;
 	/** Heads a background command's output when its spool file could not be written. */

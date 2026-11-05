@@ -38,6 +38,8 @@ import type { WebSearchText } from "../web/text.ts";
 import type { WorktreeGuardText, WorktreeText } from "../worktree/text.ts";
 import type { NativeWebText } from "./native-web-text.ts";
 import type { NotificationsText } from "./notifications-text.ts";
+import type { ToolResultsText } from "./tool-results-text.ts";
+import type { ToolCallCorruptionText } from "../tool-call-corruption/text.ts";
 import type { ShellText } from "./shell-text.ts";
 import type { FeatureId } from "./features.ts";
 
@@ -83,6 +85,9 @@ export interface ProfileText {
 	doctor?: DoctorText;
 	/** The shared notification frames (lib/notifications.ts): every session uses them, so a profile must supply them. */
 	notifications?: NotificationsText;
+	/** The base's shared result rewrites (empty results, persisted output, a user's denial): a profile must supply them. */
+	toolResults?: ToolResultsText;
+	toolCallCorruption?: ToolCallCorruptionText;
 	/** Used by the worktree tools, subagents and workflows (each guards isolated sessions with it). */
 	worktreeGuard?: WorktreeGuardText;
 }

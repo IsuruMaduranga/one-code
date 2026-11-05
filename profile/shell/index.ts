@@ -96,6 +96,7 @@ export const shell: ShellText = {
 			: "";
 		return `${label} task ${id} (${description}) ${finish(end)}. ${note}${stopped}${logPath ? ` Log: ${logPath}.` : ""}\n\n${output}`;
 	},
+	emptyOutput: "(no output — the command wrote nothing to stdout or stderr)",
 	earlierTruncated: "… (earlier output truncated)\n",
 	spoolLost: ({ keptChars }) => `[The command's spool file could not be written, so only the last ${keptChars.toLocaleString("en-US")} characters of its output were kept.]\n`,
 };

@@ -1,5 +1,6 @@
 /** Reject damaged OpenRouter streams before tool execution, without changing the request prefix. */
 import { feature } from "../lib/feature.ts";
+import { requireText } from "../lib/profile.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { notifyOrPrint } from "../lib/headless-output.ts";
 import { TURN_FAILED_CHANNEL, type TurnFailedEvent } from "../lib/interrupt.ts";
@@ -213,13 +214,13 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 		if (damage.kind === "suspect" && !suspectReturned) {
 			suspectReturned = true;
 			flagged.delete(event.toolCallId);
-			return { block: true, reason: `${damage.reason} It was not run. Send the complete command again; if it really ends there, drop the trailing blank or the empty option.` };
+			return { block: true, reason: requireText("toolCallCorruption").suspectBlock({ reason: damage.reason }) };
 		}
-		const repeat = damage.kind === "suspect" ? " An earlier command in this run came through cut the same way." : "";
+		const repeat = damage.kind === "suspect";
 		flagged.set(event.toolCallId, { kind: "corrupt", reason: damage.reason });
 		return {
 			block: true,
-			reason: `OpenRouter tool-call corruption: ${damage.reason}${repeat} Do not retry this call; switch models or exclude the upstream provider.`,
+			reason: requireText("toolCallCorruption").corruptBlock({ reason: damage.reason, repeat }),
 			terminate: true,
 		};
 	});

@@ -17,6 +17,7 @@ import { StringDecoder } from "node:string_decoder";
 import { join } from "node:path";
 import { oneCodeStateDir } from "./paths.ts";
 import { privateSessionTempDir } from "./scratchpad.ts";
+import { toolResultWords } from "./tool-results-words.ts";
 
 /**
  * Where a session's oversized outputs are persisted — the session dir,
@@ -94,9 +95,9 @@ export function persistIfLarge(text: string, options: PersistOptions): string {
 	try {
 		mkdirSync(join(options.dir, "tool-results"), { recursive: true });
 		writeFileSync(file, text);
-		saved = `Output too large (${formatSize(size)}). Full output saved to: ${file}`;
+		saved = toolResultWords().persisted({ size: formatSize(size), file });
 	} catch (error) {
-		saved = `Output too large (${formatSize(size)}) and could not be saved to ${file}: ${(error as Error).message}. Only this preview survives — re-run with a narrower query if more is needed.`;
+		saved = toolResultWords().persisted({ size: formatSize(size), file, saveError: (error as Error).message });
 	}
 
 	return persistedBlock(saved, preview, previewBytes);
@@ -108,7 +109,7 @@ export function persistIfLarge(text: string, options: PersistOptions): string {
  * reading or copying the file.
  */
 export function persistedFileBlock(file: string, size: number, preview: string, previewBytes: number = PREVIEW_BYTES): string {
-	return persistedBlock(`Output too large (${formatSize(size)}). Full output saved to: ${file}`, preview, previewBytes);
+	return persistedBlock(toolResultWords().persisted({ size: formatSize(size), file }), preview, previewBytes);
 }
 
 /** Preview an existing spool without reading or copying the whole output. */
@@ -132,7 +133,7 @@ function persistedBlock(saved: string, preview: string, previewBytes: number): s
 		"<persisted-output>",
 		saved,
 		"",
-		`Preview (first ${Math.round(previewBytes / 1024)}KB):`,
+		toolResultWords().previewHeading({ kb: Math.round(previewBytes / 1024) }),
 		preview,
 		"...",
 		"</persisted-output>",

@@ -22,8 +22,6 @@ import type { ShellText } from "../lib/shell-text.ts";
 
 export const STORED_OUTPUT_CAP = 200_000;
 
-export const EMPTY_OUTPUT_MARKER = "(no output — the command wrote nothing to stdout or stderr)";
-
 export function tailCap(text: string, cap: number, marker: string): string {
 	return text.length <= cap ? text : `${marker}${text.slice(-cap)}`;
 }
@@ -60,7 +58,7 @@ export interface StartBackgroundBashOptions {
 	 * profile, so this module loads in a plain Node process (the process-group
 	 * test runs it there).
 	 */
-	text: Pick<ShellText, "earlierTruncated" | "spoolLost">;
+	text: Pick<ShellText, "earlierTruncated" | "spoolLost" | "emptyOutput">;
 	onFinished(task: BackgroundTask, summary: BashFinishSummary): void;
 }
 
@@ -116,7 +114,7 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 		ownUI: true, // rendered live by the subagents panel's shell manager
 		output: () => overflowed && !task.logPath
 			? `${options.text.spoolLost({ keptChars: STORED_OUTPUT_CAP })}${stored}`
-			: stored || (task.status === "running" ? "" : EMPTY_OUTPUT_MARKER),
+			: stored || (task.status === "running" ? "" : options.text.emptyOutput),
 		stop: () => {
 			stopRequested = true;
 			// SIGTERM the tree, SIGKILL after the grace: a command that traps TERM

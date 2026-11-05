@@ -1,8 +1,9 @@
 /** Claude Code's empty tool_result guard and marker (toolResultStorage). */
 import { ccToolName } from "../hooks/matcher.ts";
+import { toolResultWords } from "./tool-results-words.ts";
 
 export function emptyToolResultText(toolName: string): string {
-	return `(${ccToolName(toolName)} completed with no output)`;
+	return toolResultWords().empty({ tool: ccToolName(toolName) });
 }
 
 /** Images and other non-text blocks are results, even without accompanying text. */
@@ -22,6 +23,6 @@ export function emptyToolResultContent(content: unknown, toolName: string): Arra
 	if (toolName === "read" && only) return undefined;
 	if (isEmptyToolResultContent(content)) return [{ type: "text", text: emptyToolResultText(toolName) }];
 	// pi's find is Claude Code's Glob; Grep already uses Claude Code's no-match text.
-	if (toolName === "find" && only?.text === "No files found matching pattern") return [{ ...only, text: "No files found" }];
+	if (toolName === "find" && only?.text === "No files found matching pattern") return [{ ...only, text: toolResultWords().noFilesFound }];
 	return undefined;
 }
