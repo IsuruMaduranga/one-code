@@ -5,6 +5,8 @@
  * system prompt, which keeps only what never varies per session.
  */
 
+import { contextWords } from "./context-words.ts";
+
 import { parseClaudeId } from "./model-tier.ts";
 
 export interface EnvironmentFacts {
@@ -21,20 +23,7 @@ export interface EnvironmentFacts {
 
 /** Claude Code's `# Environment` block, byte for byte; the trailing space after "environment:" is Claude Code's. */
 export function environmentBlock(env: EnvironmentFacts): string {
-	const lines = [
-		"# Environment",
-		"You have been invoked in the following environment: ",
-		` - Primary working directory: ${env.cwd}`,
-		` - Is a git repository: ${env.isGitRepo}`,
-	];
-	if (env.workspaceDirs?.length) lines.push(" - Additional working directories:", ...env.workspaceDirs.map((dir) => `  - ${dir}`));
-	lines.push(` - Platform: ${env.platform}`, ` - Shell: ${env.shell}`, ` - OS Version: ${env.osVersion}`);
-	if (env.scratchpadDir) {
-		lines.push(
-			` - Scratchpad directory: ${env.scratchpadDir} — always use it for temporary files (intermediate results, scripts, outputs that don't belong in the project) instead of \`/tmp\` or other system temp directories; it is session-specific, isolated from the project, and can generally be used without permission prompts. Only use \`/tmp\` if the user explicitly asks.`,
-		);
-	}
-	return lines.join("\n");
+	return contextWords().environment(env);
 }
 
 /** Knowledge cutoffs Claude Code states, keyed by family and version. */
@@ -71,6 +60,5 @@ export function modelLine(model: { id: string; name?: string }): string {
 	const claude = claudeDisplayName(model.id);
 	const name = claude ?? (model.name || model.id);
 	const cutoff = claude ? CLAUDE_CUTOFFS[claude.toLowerCase()] : undefined;
-	const base = `You are powered by the model named ${name}. The exact model ID is ${model.id}.`;
-	return cutoff ? `${base} Assistant knowledge cutoff is ${cutoff}.` : base;
+	return contextWords().modelLine({ name, id: model.id, ...(cutoff ? { cutoff } : {}) });
 }

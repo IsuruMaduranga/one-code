@@ -320,7 +320,7 @@ describe("rules in Claude context discovery", () => {
 		const cwd = join(fixture, "project");
 		const path = write(cwd, "CLAUDE.md", "  legacy whitespace\n\n");
 		const files = discoverContextFiles({ cwd, home: fixture, homeClaudeDir: join(fixture, "user"), managedDir: join(fixture, "managed") });
-		expect(files).toEqual([{ path, content: "  legacy whitespace\n\n", descriptor: "project instructions, checked into the codebase" }]);
+		expect(files).toEqual([{ path, content: "  legacy whitespace\n\n", descriptor: "project" }]);
 		expect(buildClaudeMdBlock({ contextFiles: files })).toBe(
 			"Codebase and user instructions are shown below. Be sure to adhere to these instructions. IMPORTANT: These instructions OVERRIDE any default behavior and you MUST follow them exactly as written.\n\n" +
 			`Contents of ${path} (project instructions, checked into the codebase):\n\n  legacy whitespace\n`,
@@ -332,7 +332,7 @@ describe("rules in Claude context discovery", () => {
 		mkdirSync(cwd);
 		const path = write(fixture, "home/.claude/CLAUDE.md", "---\nname: legacy\n---\n  global whitespace\n\n");
 		const files = discoverContextFiles({ cwd, home: join(fixture, "home"), homeClaudeDir: join(fixture, "home", ".claude") });
-		expect(files).toEqual([{ path, content: "---\nname: legacy\n---\n  global whitespace\n\n", descriptor: "user's private global instructions for all projects" }]);
+		expect(files).toEqual([{ path, content: "---\nname: legacy\n---\n  global whitespace\n\n", descriptor: "global" }]);
 	});
 
 	it("deduplicates AGENTS.md that .claude/CLAUDE.md imports in both-files mode", () => {
@@ -341,7 +341,7 @@ describe("rules in Claude context discovery", () => {
 		const agents = write(cwd, "AGENTS.md", "shared instruction");
 		const files = discoverContextFiles({ cwd, home: fixture, homeClaudeDir: join(fixture, "user"), rule: "claude-md-and-agents-md" });
 		expect(files.map((file) => file.path)).toEqual([hidden, agents]);
-		expect(files.map((file) => file.descriptor)).toEqual(["project instructions, checked into the codebase", "project instructions, checked into the codebase"]);
+		expect(files.map((file) => file.descriptor)).toEqual(["project", "project"]);
 	});
 
 	it("allows an ancestor's conditional rule to match a read in a sibling of cwd without walking that sibling's instructions", () => {

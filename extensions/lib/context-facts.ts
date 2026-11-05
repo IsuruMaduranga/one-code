@@ -9,6 +9,8 @@ import { buildClaudeMdBlock, type ContextFile } from "./claude-context.ts";
 import type { ToldFact } from "./ledger/records.ts";
 import { contentHash } from "./ledger/wire.ts";
 import { toldBlockFact } from "./reminders.ts";
+import type { ContextChange } from "./context-text.ts";
+import { contextWords } from "./context-words.ts";
 
 /** The told keys of the fingerprints (whole-text block facts) and of the compaction flag (a mode). */
 export const FACT_KEYS = {
@@ -62,9 +64,22 @@ export function contextBlockFacts(gitStatus: string | null, atCompaction: boolea
 	];
 }
 
-/** A refreshed git snapshot must not describe itself as the conversation's initial status. */
+/**
+ * A refreshed git snapshot must not describe itself as the conversation's
+ * initial status: the part of the profile's heading that differs between its
+ * start and compaction renderings is swapped.
+ */
 export function compactionGitStatus(text: string | null): string | null {
-	return text?.replace("This is the git status at the start of the conversation.", "This is the git status at the latest compaction.") ?? null;
+	if (text === null) return null;
+	const probe = { branch: "", mainBranch: "", user: "", status: "", commits: "" };
+	const words = contextWords();
+	const start = words.gitStatus({ snapshot: probe, at: "start" });
+	const compaction = words.gitStatus({ snapshot: probe, at: "compaction" });
+	let head = 0;
+	while (head < start.length && start[head] === compaction[head]) head++;
+	let tail = 0;
+	while (tail < start.length - head && tail < compaction.length - head && start[start.length - 1 - tail] === compaction[compaction.length - 1 - tail]) tail++;
+	return text.replace(start.slice(head, start.length - tail), compaction.slice(head, compaction.length - tail));
 }
 
 /**
@@ -78,20 +93,20 @@ export function resumeFactsNotice(
 	atCompaction: boolean,
 	live: ContextFingerprints & { git?: string },
 ): { text: string; facts: ToldFact[] } | undefined {
-	const changed: string[] = [];
+	const changed: ContextChange[] = [];
 	const facts: ToldFact[] = [];
-	const compare = (key: string, hash: string | undefined, what: string) => {
+	const compare = (key: string, hash: string | undefined, what: ContextChange) => {
 		const before = told.get(key);
 		if (hash === undefined || before === undefined || before === hash) return;
 		changed.push(what);
 		facts.push({ kind: "block", key, hash });
 	};
-	compare(FACT_KEYS.git, live.git, "git status changed");
-	compare(FACT_KEYS.memory, live.memory, "the memory index changed");
-	compare(FACT_KEYS.instructions, live.instructions, "CLAUDE.md-family instructions changed");
+	compare(FACT_KEYS.git, live.git, "git");
+	compare(FACT_KEYS.memory, live.memory, "memory");
+	compare(FACT_KEYS.instructions, live.instructions, "instructions");
 	if (changed.length === 0) return undefined;
 	return {
-		text: `Since the saved context snapshot, ${changed.join("; ")}. The earlier context block reflects ${atCompaction ? "the latest compaction" : "the session's start"}, not the current workspace. Read the current files or run git status if needed.`,
+		text: contextWords().changedSinceSnapshot({ changes: changed, atCompaction }),
 		facts,
 	};
 }

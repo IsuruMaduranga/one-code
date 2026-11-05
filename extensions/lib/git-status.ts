@@ -24,6 +24,7 @@
 
 import { execFileSync } from "node:child_process";
 import { HARNESS_GIT_CONFIG } from "./git.ts";
+import { contextWords } from "./context-words.ts";
 
 export interface GitSnapshot {
 	branch: string;
@@ -35,9 +36,6 @@ export interface GitSnapshot {
 	commits: string;
 }
 
-const HEADER =
-	"# gitStatus\nThis is the git status at the start of the conversation. " +
-	"Note that this status is a snapshot in time, and will not update during the conversation.";
 
 /** The main session's system-prompt extension claims the snapshot on this channel; a child session never does. */
 export const GIT_SNAPSHOT_OWNER_CHANNEL = "one-code:git-snapshot-owner";
@@ -54,25 +52,12 @@ export const GIT_TIMEOUT_MS = 10_000;
  */
 export function clipGitStatus(status: string, shellTool = "bash"): string {
 	if (status.length <= GIT_STATUS_MAX_CHARS) return status;
-	return `${status.substring(0, GIT_STATUS_MAX_CHARS)}\n... (truncated because it exceeds 2k characters. If you need more information, run "git status" using ${shellTool})`;
+	return `${status.substring(0, GIT_STATUS_MAX_CHARS)}${contextWords().gitStatusClipped({ maxChars: GIT_STATUS_MAX_CHARS, shellTool })}`;
 }
 
 /** Assemble CC's block from a snapshot. Pure; byte-exact against the captures. */
 export function formatGitStatus(s: GitSnapshot): string {
-	return [
-		HEADER,
-		"",
-		`Current branch: ${s.branch}`,
-		"",
-		`Main branch (you will usually use this for PRs): ${s.mainBranch}`,
-		"",
-		...(s.user ? [`Git user: ${s.user}`, ""] : []),
-		"Status:",
-		s.status || "(clean)",
-		"",
-		"Recent commits:",
-		s.commits,
-	].join("\n");
+	return contextWords().gitStatus({ snapshot: s, at: "start" });
 }
 
 /** Runs one git command in `cwd`, returning trimmed stdout or null on any failure. */

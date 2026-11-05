@@ -42,6 +42,8 @@ import { absoluteFrom, claudeManagedDir, claudeUserDir, expandTilde, isPathAtOrU
 import { discoverRules, MAX_INSTRUCTION_BYTES, readRuleInstructions, type RuleFile, type RuleOptions } from "./claude-rules.ts";
 import { readExternalIncludesApproval } from "./claude-external-includes.ts";
 import { fitToWindow, type SkippedInstruction } from "./instruction-budget.ts";
+import type { InstructionSource } from "./context-text.ts";
+import { contextWords } from "./context-words.ts";
 
 /** One instruction section. Legacy content stays raw; new parsed files carry CC's trimmed startup body. */
 export interface ContextFile {
@@ -52,14 +54,15 @@ export interface ContextFile {
 	imported?: string[];
 }
 
-export const GLOBAL_DESCRIPTOR = "user's private global instructions for all projects";
-export const MANAGED_DESCRIPTOR = "organization-managed policy instructions";
-export const PROJECT_DESCRIPTOR = "project instructions, checked into the codebase";
-export const LOCAL_DESCRIPTOR = "user's private project instructions, not checked in";
-export const MEMORY_DESCRIPTOR = "user's auto-memory, persists across conversations";
-export const ONECODE_DESCRIPTOR = "One Code-specific instructions, not read by Claude Code";
-export const ONECODE_GLOBAL_DESCRIPTOR =
-	"One Code-specific global instructions for all projects, not read by Claude Code";
+// Where each instruction file comes from, as the key its descriptor is worded
+// by (the profile's `text.context.descriptor`, rendered in `section`).
+export const GLOBAL_DESCRIPTOR: InstructionSource = "global";
+export const MANAGED_DESCRIPTOR: InstructionSource = "managed";
+export const PROJECT_DESCRIPTOR: InstructionSource = "project";
+export const LOCAL_DESCRIPTOR: InstructionSource = "local";
+export const MEMORY_DESCRIPTOR: InstructionSource = "memory";
+export const ONECODE_DESCRIPTOR: InstructionSource = "oneCode";
+export const ONECODE_GLOBAL_DESCRIPTOR: InstructionSource = "oneCodeGlobal";
 
 /** One Code instruction filenames, in preference order (first present per dir wins). */
 const ONECODE_NAMES = ["ONECODE.md", "onecode.md", "One Code.md"] as const;
@@ -67,20 +70,6 @@ const ONECODE_NAMES = ["ONECODE.md", "onecode.md", "One Code.md"] as const;
 /** Max `@import` hops, matching Claude Code. Depth 0 is the importing file itself. */
 const MAX_IMPORT_DEPTH = 5;
 
-const PREAMBLE =
-	"Codebase and user instructions are shown below. Be sure to adhere to these instructions. " +
-	"IMPORTANT: These instructions OVERRIDE any default behavior and you MUST follow them exactly as written.";
-
-const CONTEXT_PREAMBLE = "As you answer the user's questions, you can use the following context:";
-
-/** Claude Code's sentence after the email, with One Code named as the harness that attached it. */
-const EMAIL_USE =
-	"Use it only to identify the user, such as for authorship, attribution, or filtering their own work. " +
-	"Never send it to an unrelated service, such as in a request header, URL, or payload, unless the user explicitly asks.";
-
-const CONTEXT_FOOTER =
-	"One Code attached this context automatically; it isn't part of the user's message. " +
-	"It describes the user's own account and workspace, so they don't need it reported back.";
 
 /** Independent mode excludes Claude locations even when reached through aliases or imports. */
 export function isClaudeLocation(path: string, userDir: string): boolean {
@@ -558,7 +547,7 @@ export function nestedInstructionFiles(opts: {
 
 /** Claude Code's `nested_memory` rendering (the reminder queue adds the `<system-reminder>` frame). */
 export function nestedInstructionText(file: { path: string; content: string }): string {
-	return `Contents of ${file.path}:\n\n${file.content}`;
+	return contextWords().nestedFile({ path: file.path, content: file.content });
 }
 
 export function discoverContextFiles(opts: DiscoveryOptions & {
@@ -749,13 +738,7 @@ export function discoverOneCodeFiles(opts: { cwd: string; homeOneCodeDir: string
 
 /** The block's preamble, naming the files above it: AGENTS.md in independent mode (lib/config-mode.ts). */
 function oneCodePreamble(): string {
-	const above = claudeSourcesOn() ? "CLAUDE.md" : "AGENTS.md";
-	return (
-		"# oneCodeMd\n" +
-		"The following are One Code-specific instructions, read only by One Code and not by other tools. " +
-		`IMPORTANT: they take precedence over the ${above} instructions above and over any default behavior — ` +
-		`where they conflict with ${above}, follow these. Follow them exactly as written.`
-	);
+	return contextWords().oneCodePreamble({ above: claudeSourcesOn() ? "CLAUDE.md" : "AGENTS.md" });
 }
 
 /**
@@ -769,7 +752,7 @@ export function buildOneCodeBlock(files: ContextFile[]): string | null {
 	return withoutFinalNewline(`${oneCodePreamble()}\n\n${files.map(section).join("\n")}`);
 }
 
-export const AGENTS_DESCRIPTOR = "cross-tool agent instructions, AGENTS.md standard";
+export const AGENTS_DESCRIPTOR: InstructionSource = "agents";
 
 /**
  * One file's section. Its content is raw, but always ends in a newline: the
@@ -778,7 +761,8 @@ export const AGENTS_DESCRIPTOR = "cross-tool agent instructions, AGENTS.md stand
  */
 function section(file: ContextFile): string {
 	const content = file.content.endsWith("\n") ? file.content : `${file.content}\n`;
-	return `Contents of ${file.path} (${file.descriptor}):\n\n${content}`;
+	const words = contextWords();
+	return words.section({ path: file.path, descriptor: words.descriptor(file.descriptor as InstructionSource), content });
 }
 
 /**
@@ -797,7 +781,7 @@ export function localDate(now: Date = new Date()): string {
  * rides a one-shot where the model reads next, the way Claude Code does.
  */
 export function dateChangeReminder(date: string): string {
-	return `The date has changed. Today's date is now ${date}. No need to announce the new date \u2014 the user's own clock shows it.`;
+	return contextWords().dateChanged({ date });
 }
 
 /** The text without one trailing newline: the reminder frame supplies the newline before its closing tag. */
@@ -832,7 +816,7 @@ export function buildClaudeMdBlock(opts: {
 		});
 	}
 	if (sections.length === 0) return null;
-	return withoutFinalNewline(`${PREAMBLE}\n\n${sections.map(section).join("\n")}`);
+	return withoutFinalNewline(`${contextWords().instructionsPreamble}\n\n${sections.map(section).join("\n")}`);
 }
 
 /**
@@ -842,16 +826,17 @@ export function buildClaudeMdBlock(opts: {
  * email nor a snapshot.
  */
 export function buildContextBlock(opts: { email?: string | null; gitStatus?: string | null }): string | null {
+	const words = contextWords();
 	const parts: string[] = [];
-	if (opts.email) parts.push(`# userEmail\nThe user's email address is ${opts.email}. ${EMAIL_USE}`);
+	if (opts.email) parts.push(words.email({ email: opts.email }));
 	if (opts.gitStatus) parts.push(opts.gitStatus);
 	if (parts.length === 0) return null;
-	return `${CONTEXT_PREAMBLE}\n${parts.join("\n")}\n\n${CONTEXT_FOOTER}`;
+	return `${words.contextPreamble}\n${parts.join("\n")}\n\n${words.contextFooter}`;
 }
 
 /** The date reminder's inner text, sent whether or not any CLAUDE.md exists. */
 export function dateBlock(date: string): string {
-	return `Today's date is ${date}.`;
+	return contextWords().date({ date });
 }
 
 /**

@@ -38,6 +38,7 @@ import type { WebSearchText } from "../web/text.ts";
 import type { WorktreeGuardText, WorktreeText } from "../worktree/text.ts";
 import type { NativeWebText } from "./native-web-text.ts";
 import type { NotificationsText } from "./notifications-text.ts";
+import type { ContextText } from "./context-text.ts";
 import type { ToolResultsText } from "./tool-results-text.ts";
 import type { ToolCallCorruptionText } from "../tool-call-corruption/text.ts";
 import type { ShellText } from "./shell-text.ts";
@@ -88,6 +89,8 @@ export interface ProfileText {
 	/** The base's shared result rewrites (empty results, persisted output, a user's denial): a profile must supply them. */
 	toolResults?: ToolResultsText;
 	toolCallCorruption?: ToolCallCorruptionText;
+	/** The first-message context (instructions, context block, date, environment, git status): every session sends it, so a profile must supply it. */
+	context?: ContextText;
 	/** Used by the worktree tools, subagents and workflows (each guards isolated sessions with it). */
 	worktreeGuard?: WorktreeGuardText;
 }

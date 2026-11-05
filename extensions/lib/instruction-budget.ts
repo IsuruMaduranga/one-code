@@ -15,6 +15,7 @@
 
 import { formatTokens } from "../footer/footer-line.ts";
 import { estimateTextTokens } from "./pi-ai-estimate.ts";
+import { contextWords } from "./context-words.ts";
 
 /** The share of the context window instruction files may take together. */
 const INSTRUCTION_WINDOW_SHARE = 0.5;
@@ -28,11 +29,7 @@ export interface SkippedInstruction {
 
 /** The model's note in a skipped file's slot; `imported` names the files inlined into it. */
 export function skippedInstructionNote(tokens: number, contextWindow: number, imported: readonly string[] = []): string {
-	const what = imported.length > 0 ? `This file and the files it imports (${imported.join(", ")}) are not loaded: together they are` : "This file is not loaded: it is";
-	return (
-		`${what} about ${tokens.toLocaleString("en-US")} tokens, and instruction files may take at most half of this model's ` +
-		`${contextWindow.toLocaleString("en-US")}-token context window. Read the parts of it that bear on your task when you need them.\n`
-	);
+	return contextWords().skippedInstruction({ tokens, contextWindow, imported });
 }
 
 /**
@@ -41,10 +38,7 @@ export function skippedInstructionNote(tokens: number, contextWindow: number, im
  * nothing (an instruction file may only tighten what is allowed).
  */
 export function classifierInstructionNote(tokens: number, contextWindow: number): string {
-	return (
-		`(Not shown: this instruction file is about ${tokens.toLocaleString("en-US")} tokens, and instruction files may take at most half of the session model's ` +
-		`${contextWindow.toLocaleString("en-US")}-token context window, so it is left out here as it is for the agent. Leaving it out grants no permission.)`
-	);
+	return contextWords().classifierSkippedInstruction({ tokens, contextWindow });
 }
 
 /**

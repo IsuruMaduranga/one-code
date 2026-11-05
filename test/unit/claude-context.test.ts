@@ -19,6 +19,7 @@ import {
 } from "../../extensions/lib/claude-context.ts";
 import { wrapReminder } from "../../extensions/lib/reminders.ts";
 import { truncateIndex } from "../../extensions/lib/memory-content.ts";
+import { context } from "../../profile/context/index.ts";
 
 // Ancestor instruction files on the host must not affect temporary fixtures,
 // including when TMPDIR is inside a checkout that carries its own CLAUDE.md.
@@ -41,12 +42,12 @@ describe("buildClaudeMdBlock", () => {
 				{
 					path: "/g/CLAUDE.md",
 					content: "Global rules.\n",
-					descriptor: "user's private global instructions for all projects",
+					descriptor: "global",
 				},
 				{
 					path: "/p/CLAUDE.md",
 					content: "Project rules.\n",
-					descriptor: "project instructions, checked into the codebase",
+					descriptor: "project",
 				},
 			],
 			memoryIndex: { path: "/m/MEMORY.md", content: "# Memory index\n\n- entry\n" },
@@ -80,7 +81,7 @@ describe("buildClaudeMdBlock", () => {
 	it("omits the memory section when the index is empty", () => {
 		const inner = buildClaudeMdBlock({
 			contextFiles: [
-				{ path: "/p/CLAUDE.md", content: "Rules.\n", descriptor: "project instructions, checked into the codebase" },
+				{ path: "/p/CLAUDE.md", content: "Rules.\n", descriptor: "project" },
 			],
 			memoryIndex: { path: "/m/MEMORY.md", content: "   \n" },
 		});
@@ -377,8 +378,8 @@ describe("the # oneCodeMd block", () => {
 		expect(text.indexOf(globalOne)).toBeLessThan(text.indexOf(projOne));
 		expect(text).toContain("global one-code");
 		expect(text).toContain("project one-code");
-		expect(text).toContain(ONECODE_GLOBAL_DESCRIPTOR);
-		expect(text).toContain(ONECODE_DESCRIPTOR);
+		expect(text).toContain(context.descriptor(ONECODE_GLOBAL_DESCRIPTOR));
+		expect(text).toContain(context.descriptor(ONECODE_DESCRIPTOR));
 	});
 
 	it("expands @imports inside an ONECODE.md file", () => {
