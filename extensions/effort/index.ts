@@ -28,6 +28,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
 import { getAgentDir, SettingsManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { effortSetMessage, isPersistedEffort, type PersistedEffort } from "./settings.ts";
+import { requireText } from "../lib/profile.ts";
 import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, stickyFact, toldBlockFact } from "../lib/reminders.ts";
 import { readState, recordState } from "../lib/ledger/state.ts";
 import { dimRightAlignedWidget, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
@@ -71,40 +72,24 @@ const NOTE_KEY = "effort-note";
 const NOTE_MS = 5000;
 
 /**
- * The standing instruction for ultracode mode. Deliberately stronger than the
- * single-turn keyword reminder: it makes orchestration the default for
- * substantive work rather than something to consider, and still carves out the
- * trivial cases so the mode does not spawn a fleet to rename a variable.
- */
-const ULTRACODE_STANDING_REMINDER =
-	"Ultracode mode is on, so the user's opt-in to multi-agent orchestration is standing: author and run a workflow for every substantive task by default, and lean toward adversarially verifying your findings. " +
-	"For multi-phase work (understand → design → implement → review) that often means several workflows in sequence — one per phase — so you stay in the loop between them. " +
-	"Token cost is not the constraint here; the most exhaustive correct answer is. " +
-	"Work solo only on conversational turns and trivial mechanical edits.";
-
-/**
- * Said once when ultracode is off while the model has read its standing block:
- * the earlier messages keep the block in the record, so without this the model
- * reads the opt-in as standing (lifecycle-grid-hunt round 3, R3-M21).
- */
-const ULTRACODE_OFF_REMINDER =
-	"Ultracode mode is off now: the user's standing opt-in to multi-agent orchestration has ended. Run a workflow only when the task calls for one or the user asks.";
-/**
- * The told key of the standing block: a request that carries its first
- * delivery records the block's hash under it (system-reminder).
+ * The told key of the standing ultracode reminder (the profile's text, like
+ * the off notice): a request that carries its first delivery records the
+ * block's hash under it (system-reminder). The off notice is said once, when
+ * ultracode is off while the model has read the standing block.
  */
 const STANDING_TOLD_KEY = stickyFact({ key: REMINDER_KEY, text: "", since: 0 }).key;
-/**
- * What the off notice tells, under the same key: the model last read "off".
- * The standing block switched on again is then a first delivery once more,
- * and a later off is told again only after that delivery.
- */
-const OFF_TOLD = toldBlockFact(STANDING_TOLD_KEY, ULTRACODE_OFF_REMINDER);
 
 /** The `one-code:state` key ultracode is recorded under on the branch. */
 const ULTRACODE_STATE = "ultracode";
 
 function effortExtension(pi: ExtensionAPI) {
+	const text = requireText("effort");
+	/**
+	 * What the off notice tells, under the same key: the model last read "off".
+	 * The standing block switched on again is then a first delivery once more,
+	 * and a later off is told again only after that delivery.
+	 */
+	const offTold = toldBlockFact(STANDING_TOLD_KEY, text.ultracodeOff);
 	let ultracodeActive = false;
 	/**
 	 * The level ultracode actually settled on. Not always xhigh: pi clamps to
@@ -158,7 +143,7 @@ function effortExtension(pi: ExtensionAPI) {
 		// not offer, so ultracode is only its reasoning level there (R3-M21).
 		if (on && workflowsOn) {
 			pi.events.emit(REMINDER_CHANNEL, {
-				text: ULTRACODE_STANDING_REMINDER,
+				text: text.ultracodeOn,
 				key: REMINDER_KEY,
 				placement: "sticky-append",
 			});
@@ -175,8 +160,8 @@ function effortExtension(pi: ExtensionAPI) {
 		const request = data as RenderRequest;
 		if (request.epoch || ultracodeActive) return;
 		const told = request.toldBlocks.get(STANDING_TOLD_KEY);
-		if (told === undefined || told === OFF_TOLD.hash) return;
-		request.blocks.push({ text: ULTRACODE_OFF_REMINDER, facts: [OFF_TOLD] });
+		if (told === undefined || told === offTold.hash) return;
+		request.blocks.push({ text: text.ultracodeOff, facts: [offTold] });
 	});
 
 	const canPersist = (ctx: ExtensionContext) => ctx.hasUI && (ctx.mode === "tui" || ctx.mode === "rpc") && !!ctx.model;

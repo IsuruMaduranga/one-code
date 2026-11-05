@@ -11,6 +11,7 @@
 
 import type { AskUserText } from "../ask-user/text.ts";
 import type { BtwText } from "../btw/text.ts";
+import type { EffortText } from "../effort/text.ts";
 import type { InitText } from "../init/text.ts";
 import type { NotebookText } from "../notebook/text.ts";
 import type { RecapText } from "../recap/text.ts";
@@ -42,6 +43,7 @@ export interface ProfileText {
 	init?: InitText;
 	btw?: BtwText;
 	recap?: RecapText;
+	effort?: EffortText;
 	/** Used by the worktree tools, subagents and workflows (each guards isolated sessions with it). */
 	worktreeGuard?: WorktreeGuardText;
 }
