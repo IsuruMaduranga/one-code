@@ -1,14 +1,16 @@
 /**
  * One Code's background wording (profile/background/) for what the golden
  * snapshot cannot reach: a full job store, a subagent's refusals, a wakeup
- * whose loop aged out or that had nothing to cancel. The golden snapshot
- * pins the bytes of every other cron and wakeup text.
+ * whose loop aged out or that had nothing to cancel, and what a background
+ * monitor and task_stop say outside a one-shot run. The golden snapshot pins
+ * the bytes of every other text; background-wiring.test.ts covers the
+ * monitor's empty output, its batches and task_output's clip.
  */
 import { describe, expect, it } from "vitest";
 import { shownJob } from "../../extensions/background/cron.ts";
 import { background } from "../../profile/background/index.ts";
 
-const { cron, wakeup } = background;
+const { cron, wakeup, monitor, tasks } = background;
 
 describe("One Code's cron text", () => {
 	it("words a full store and a subagent's refusals", () => {
@@ -34,5 +36,29 @@ describe("One Code's schedule_wakeup text", () => {
 		expect(wakeup.scheduled({ clock: "14:05:09", inSeconds: 300 })).toBe(
 			"Next wakeup scheduled for 14:05:09 (in 300s). Nothing more to do this turn — the harness re-invokes you when the wakeup fires or a task-notification arrives.",
 		);
+	});
+});
+
+describe("One Code's monitor and task tool text", () => {
+	it("words a background monitor and an aborted one-shot monitor", () => {
+		expect(monitor.started({ id: "b1234567", description: "logs" })).toBe(
+			"Monitor b1234567 started (logs). Events arrive as task notifications; stop with task_stop, inspect with task_output.",
+		);
+		expect(monitor.ranToEnd({ id: "b1234567", description: "logs", end: { kind: "aborted" }, events: 1, note: "N.", output: "x" })).toBe(
+			"Monitor b1234567 (logs) stopped (tool call aborted) after 1 event(s). N.\n\nx",
+		);
+		expect(monitor.spoolLost({ keptChars: 200_000 })).toBe(
+			"[The monitor's spool file could not be written, so only the last 200,000 characters of its output were kept.]\n",
+		);
+		expect(monitor.startFailed({ kind: "noShell" })).toBe("Cannot start the monitor: no bash shell was found");
+	});
+
+	it("words task_stop's outcomes and the task line", () => {
+		expect(tasks.alreadyEnded({ id: "b1", status: "completed" })).toBe("Task b1 is already completed.");
+		expect(tasks.stopRequested({ id: "b1", description: "logs" })).toBe("Stop requested for b1 (logs).");
+		expect(tasks.residentEnded({ id: "b1", description: "review" })).toMatch(/^Terminated the resident agent behind b1 \(review\)/);
+		const line = { id: "b1", kind: "monitor", status: "running", description: "logs", seconds: 5, finished: false };
+		expect(tasks.taskLine(line)).toBe("b1 [monitor] running · logs · started 5s ago");
+		expect(tasks.taskLine({ ...line, status: "completed", finished: true })).toBe("b1 [monitor] completed · logs · started 5s");
 	});
 });

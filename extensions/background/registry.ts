@@ -7,6 +7,7 @@
  */
 
 import { randomBytes } from "node:crypto";
+import type { ShownTask } from "./text.ts";
 
 /** Runtime event-bus channel other extensions use to register their tasks. */
 export const TASK_REGISTER_CHANNEL = "one-code:background-task";
@@ -83,8 +84,9 @@ export class BackgroundRegistry {
 	}
 }
 
-export function formatTaskLine(task: BackgroundTask): string {
-	const age = Math.round((Date.now() - task.startedAt) / 1000);
-	const duration = task.finishedAt ? `${Math.round((task.finishedAt - task.startedAt) / 1000)}s` : `${age}s ago`;
-	return `${task.id} [${task.kind}] ${task.status} · ${task.description} · started ${duration}`;
+/** A task as its one-line summary shows it (the profile's `taskLine` words it). */
+export function shownTask(task: BackgroundTask, now = Date.now()): ShownTask {
+	const finished = Boolean(task.finishedAt);
+	const seconds = Math.round(((finished ? task.finishedAt! : now) - task.startedAt) / 1000);
+	return { id: task.id, kind: task.kind, status: task.status, description: task.description, seconds, finished };
 }

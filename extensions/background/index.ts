@@ -31,13 +31,13 @@ import { ccToolRenderers, customMessageText, expandHintFor, formatFireTime, live
 import {
 	type BackgroundTask,
 	BackgroundRegistry,
-	formatTaskLine,
 	generateTaskId,
+	shownTask,
 	TASK_REGISTER_CHANNEL,
 } from "./registry.ts";
 import { SWITCH_CANCEL, SWITCH_STOP, switchWarning, workWidgetLine } from "./switch-guard.ts";
 import { DynamicLoop, scheduledText } from "./wakeup.ts";
-import type { WakeupMissingField } from "./text.ts";
+import type { MonitorEnd, MonitorStartFailure, TaskToolsText, WakeupMissingField } from "./text.ts";
 import {
 	deliveryFromState,
 	isAutonomousSentinel,
@@ -107,14 +107,11 @@ const STORED_OUTPUT_CAP = 200_000;
 const DEFAULT_MONITOR_TIMEOUT_MS = 300_000;
 const MAX_MONITOR_TIMEOUT_MS = 3_600_000;
 const MAX_BLOCK_TIMEOUT_MS = 600_000;
-/** A finished monitor that saw nothing says so, never a blank a model reads as "still running" (bash's EMPTY_OUTPUT_MARKER). */
-const MONITOR_EMPTY_OUTPUT = "(no output — the monitor received no events and nothing on stderr)";
-/** Heads a monitor's output when the start is gone: past the in-memory cap with no spool file to hold it. */
-const SPOOL_LOST_NOTE = `[The monitor's spool file could not be written, so only the last ${STORED_OUTPUT_CAP.toLocaleString("en-US")} characters of its output were kept.]\n`;
 /** setTimeout's longest delay; a later fire re-arms when this one wakes. */
 const MAX_TIMER_MS = 2 ** 31 - 1;
-function tail(text: string, cap: number): string {
-	return text.length <= cap ? text : `… (earlier output truncated)\n${text.slice(-cap)}`;
+/** The last `cap` characters, headed by `marker` when anything was cut. */
+function tail(text: string, cap: number, marker: string): string {
+	return text.length <= cap ? text : `${marker}${text.slice(-cap)}`;
 }
 
 /**
@@ -152,11 +149,11 @@ function monitorLogPath(ctx: ExtensionContext, taskId: string): string | undefin
  * subagent's report) is persisted whole to the session's tool-results
  * folder, never cut (decisions/tools.md).
  */
-function taskOutputBody(task: BackgroundTask, ctx: ExtensionContext): string {
+function taskOutputBody(task: BackgroundTask, ctx: ExtensionContext, text: TaskToolsText): string {
 	const output = task.output();
 	if (output.length <= TASK_OUTPUT_MAX_CHARS) return output;
 	if (task.logPath) {
-		const header = `[Truncated. Full output: ${task.logPath}]\n\n`;
+		const header = text.clippedHeader({ path: task.logPath });
 		return `${header}${output.slice(-(TASK_OUTPUT_MAX_CHARS - header.length))}`;
 	}
 	return persistIfLarge(output, { dir: sessionResultsDir(ctx), id: `task-output-${task.id}`, maxBytes: TASK_OUTPUT_MAX_CHARS });
@@ -188,6 +185,13 @@ function backgroundExtension(pi: ExtensionAPI) {
 	const jobList = (jobs: CronJob[]) => text.cron.list({ jobs: jobs.map(shownJob) });
 	/** A scheduling result, with the never-fires note in a one-shot run. */
 	const scheduling = (result: string, ctx: ExtensionContext) => (sessionOutlivesTurn(ctx.mode) ? result : `${result} ${text.cron.neverFires}`);
+	const monitorParams = text.monitor.params({ defaultTimeoutMs: DEFAULT_MONITOR_TIMEOUT_MS, maxTimeoutMs: MAX_MONITOR_TIMEOUT_MS });
+	const spoolLost = text.monitor.spoolLost({ keptChars: STORED_OUTPUT_CAP });
+	const unknownTask = (id: string) => ({
+		content: [{ type: "text" as const, text: text.tasks.unknownTask({ id, known: registry.list().map((t) => t.id) }) }],
+		details: {},
+		isError: true,
+	});
 	// After session_shutdown the captured ctx throws on every access and the
 	// notifier is inert; a monitor whose command ends later (its shell was
 	// killed, the orphaned command finished) must repaint nothing and say
@@ -412,34 +416,26 @@ function backgroundExtension(pi: ExtensionAPI) {
 		name: "monitor",
 		label: "Monitor",
 		...ccToolRenderers("Monitor"),
-		description:
-			"Start a background monitor that streams events from a long-running command. Each stdout line becomes a notification delivered to the conversation while you keep working; the command exiting ends the watch. Use for 'tell me every time X happens' (tail -f, an until-loop that polls a condition); for a single command's completion prefer bash with run_in_background: true — its completion notification arrives on its own. Returns a task id — stop with task_stop, inspect with task_output (both deferred — load them with tool_search). Alternatively pass `ws` to watch a WebSocket (each text frame is an event).",
+		description: text.monitor.description,
 		parameters: Type.Object({
-			command: Type.Optional(Type.String({ description: "Shell command; each stdout line is an event, exit ends the watch" })),
-			description: Type.String({ description: "Short description of what is being monitored (shown in notifications)" }),
-			persistent: Type.Optional(Type.Boolean({ description: "Run for the session lifetime (no timeout); stop with task_stop" })),
-			timeout_ms: Type.Optional(
-				Type.Number({ minimum: 1000, description: `Kill the monitor after this deadline (default ${DEFAULT_MONITOR_TIMEOUT_MS}, max ${MAX_MONITOR_TIMEOUT_MS}); ignored when persistent` }),
-			),
+			command: Type.Optional(Type.String({ description: monitorParams.command })),
+			description: Type.String({ description: monitorParams.description }),
+			persistent: Type.Optional(Type.Boolean({ description: monitorParams.persistent })),
+			timeout_ms: Type.Optional(Type.Number({ minimum: 1000, description: monitorParams.timeoutMs })),
 			ws: Type.Optional(
 				Type.Object(
 					{
 						url: Type.String(),
 						protocols: Type.Optional(Type.Array(Type.String())),
 					},
-					{ description: "WebSocket to watch instead of a command; each text frame is an event, close ends the watch" },
+					{ description: monitorParams.ws },
 				),
 			),
 		}),
 		async execute(toolCallId, params, signal, _onUpdate, ctx) {
 			lastCtx = ctx;
-			if (Boolean(params.command) === Boolean(params.ws)) {
-				return {
-					content: [{ type: "text", text: "Pass exactly one of `command` or `ws`." }],
-					details: {},
-					isError: true,
-				};
-			}
+			const startFailed = (failure: MonitorStartFailure) => ({ content: [{ type: "text" as const, text: text.monitor.startFailed(failure) }], details: {}, isError: true });
+			if (Boolean(params.command) === Boolean(params.ws)) return startFailed({ kind: "commandOrSocket" });
 
 			// One-shot modes (`-p` / `--mode json`) exit when the turn settles: the
 			// notifier goes inert, shutdown kills the monitor, and nothing it saw
@@ -458,10 +454,10 @@ function backgroundExtension(pi: ExtensionAPI) {
 			let log: WriteStream | undefined;
 			let spoolFailed = false;
 			let overflowed = false;
-			const record = (text: string) => {
-				if (stored.length + text.length > STORED_OUTPUT_CAP) overflowed = true;
-				stored = tail(`${stored}${text}`, STORED_OUTPUT_CAP);
-				if (!text || spoolFailed) return;
+			const record = (chunk: string) => {
+				if (stored.length + chunk.length > STORED_OUTPUT_CAP) overflowed = true;
+				stored = tail(`${stored}${chunk}`, STORED_OUTPUT_CAP, text.monitor.earlierTruncated);
+				if (!chunk || spoolFailed) return;
 				if (!log) {
 					const path = monitorLogPath(ctx, id);
 					if (!path) return;
@@ -475,7 +471,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 					});
 					task.logPath = path;
 				}
-				log.write(text);
+				log.write(chunk);
 			};
 			let eventCount = 0;
 			let pending: MonitorBatch = emptyBatch();
@@ -500,7 +496,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 				// CC's mid-run monitor batch: no status, the lines in `<event>`.
 				notify(
 					"task-notification",
-					taskNotification({ kind: "monitor", taskId: id, summary: monitorEventSummary(params.description), result: formatMonitorEvents(id, batch) }),
+					taskNotification({ kind: "monitor", taskId: id, summary: monitorEventSummary(params.description), result: formatMonitorEvents(id, batch, text.monitor.moreLines) }),
 					{ taskId: id, events: batchSize(batch) },
 				);
 			};
@@ -537,7 +533,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 					updateWidget();
 					// CC's monitor end: the recent tail rides <event> under the ended summary.
 					const ccStatus = taskStatusOf(finalStatus);
-					const recent = tail(stored, MONITOR_BATCH_MAX_CHARS).trim();
+					const recent = tail(stored, MONITOR_BATCH_MAX_CHARS, text.monitor.earlierTruncated).trim();
 					notify(
 						"task-notification",
 						taskNotification({
@@ -578,13 +574,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 				// one-shot run, the process cannot exit (LIFECYCLE-REVIEW M2, measured).
 				// The session's bash (Git Bash on Windows) — lib/shell-spawn.ts.
 				const bash = bashSpawn();
-				if (!bash.spawn) {
-					return {
-						content: [{ type: "text", text: `Cannot start the monitor: ${bash.error ?? "no bash shell was found"}` }],
-						details: {},
-						isError: true,
-					};
-				}
+				if (!bash.spawn) return startFailed({ kind: "noShell", osMessage: bash.error });
 				const child = spawnShellCommand(bash.spawn, params.command, {
 					cwd: ctx.cwd,
 					...detachedSpawnOptions(),
@@ -626,16 +616,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 				try {
 					ws = new WebSocket(params.ws!.url, params.ws!.protocols);
 				} catch (error) {
-					return {
-						content: [
-							{
-								type: "text",
-								text: `Could not open the WebSocket — check \`ws.url\` ("${params.ws!.url}"): ${(error as Error).message}`,
-							},
-						],
-						details: {},
-						isError: true,
-					};
+					return startFailed({ kind: "socketFailed", url: params.ws!.url, osMessage: (error as Error).message });
 				}
 				ws.addEventListener("message", (event) => {
 					onEvent(typeof event.data === "string" ? event.data : "[binary frame]");
@@ -654,7 +635,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 				description: params.description,
 				status,
 				startedAt: Date.now(),
-				output: () => (overflowed && !task.logPath ? `${SPOOL_LOST_NOTE}${stored}` : stored || (task.status === "running" ? "" : MONITOR_EMPTY_OUTPUT)),
+				output: () => (overflowed && !task.logPath ? `${spoolLost}${stored}` : stored || (task.status === "running" ? "" : text.monitor.noOutput)),
 				stop,
 				finished,
 			};
@@ -684,20 +665,20 @@ function backgroundExtension(pi: ExtensionAPI) {
 				// Past the in-memory cap the spool holds every line: point at it rather
 				// than persist the tail. Without one, say what was lost.
 				const spooled = overflowed && task.logPath ? persistedFilePreview(task.logPath) : undefined;
-				const kept = overflowed && !spooled ? `${SPOOL_LOST_NOTE}${stored.trim()}` : stored.trim() || "(no events)";
+				const kept = overflowed && !spooled ? `${spoolLost}${stored.trim()}` : stored.trim() || text.monitor.noEvents;
 				const output = spooled ?? persistIfLarge(kept, { dir: sessionResultsDir(ctx), id: `monitor-${id}` });
 				const finalStatus = task.status;
-				let how: string = finalStatus;
-				if (finalStatus === "stopped") {
-					if (signal?.aborted) how = "stopped (tool call aborted)";
-					else if (params.persistent) how = `stopped at its default deadline of ${timeoutMs} ms (persistent is not available in a one-shot session)`;
-					else how = `stopped at its ${timeoutMs} ms deadline`;
-				}
+				const end: MonitorEnd =
+					finalStatus !== "stopped"
+						? { kind: finalStatus === "failed" ? "failed" : "completed" }
+						: signal?.aborted
+							? { kind: "aborted" }
+							: { kind: "deadline", ms: timeoutMs, persistentAsked: params.persistent === true };
 				return {
 					content: [
 						{
 							type: "text",
-							text: `Monitor ${id} (${params.description}) ${how} after ${eventCount} event(s). ${oneShotNote("monitor")}\n\n${output}`,
+							text: text.monitor.ranToEnd({ id, description: params.description, end, events: eventCount, note: oneShotNote("monitor"), output }),
 						},
 					],
 					// No taskId: nothing is registered behind task_output/task_stop.
@@ -710,7 +691,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 				content: [
 					{
 						type: "text",
-						text: `Monitor ${id} started (${params.description}). Events arrive as task notifications; stop with task_stop, inspect with task_output.`,
+						text: text.monitor.started({ id, description: params.description }),
 					},
 				],
 				details: { taskId: id },
@@ -722,24 +703,16 @@ function backgroundExtension(pi: ExtensionAPI) {
 		name: "task_output",
 		label: "Task Output",
 		...ccToolRenderers("Task Output"),
-		description:
-			"Retrieve output from a running or finished background task (monitor, background subagent, or background bash) by task id. block=true (default) waits up to `timeout` ms for completion; block=false returns the current status immediately. You never need this just to learn that a task finished — completion arrives as a task notification naming the output file; call this for the output itself, when your next step needs the result now, or for a mid-run peek.",
+		description: text.tasks.outputDescription,
 		parameters: Type.Object({
-			task_id: Type.String({ description: "The task id to get output from" }),
-			block: Type.Optional(Type.Boolean({ description: "Wait for completion (default true)" })),
-			timeout: Type.Optional(Type.Number({ minimum: 0, maximum: MAX_BLOCK_TIMEOUT_MS, description: "Max wait in ms (default 30000)" })),
+			task_id: Type.String({ description: text.tasks.outputParams.taskId }),
+			block: Type.Optional(Type.Boolean({ description: text.tasks.outputParams.block })),
+			timeout: Type.Optional(Type.Number({ minimum: 0, maximum: MAX_BLOCK_TIMEOUT_MS, description: text.tasks.outputParams.timeout })),
 		}),
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			lastCtx = ctx;
 			const task = registry.get(params.task_id);
-			if (!task) {
-				const known = registry.list().map((t) => t.id).join(", ") || "(none)";
-				return {
-					content: [{ type: "text", text: `No background task "${params.task_id}". Known tasks: ${known}` }],
-					details: {},
-					isError: true,
-				};
-			}
+			if (!task) return unknownTask(params.task_id);
 
 			if (params.block !== false && task.status === "running") {
 				const timeoutMs = Math.min(params.timeout ?? 30_000, MAX_BLOCK_TIMEOUT_MS);
@@ -761,8 +734,8 @@ function backgroundExtension(pi: ExtensionAPI) {
 			}
 
 			updateWidget();
-			const header = formatTaskLine(task);
-			const body = taskOutputBody(task, ctx) || "(no output yet)";
+			const header = text.tasks.taskLine(shownTask(task));
+			const body = taskOutputBody(task, ctx, text.tasks) || text.tasks.noOutputYet;
 			// The model now holds a finished task's output: a completion notification
 			// still waiting to go out for it is redundant (lib/notifications.ts).
 			if (task.status !== "running") pi.events.emit(TASK_OUTPUT_DELIVERED_CHANNEL, { taskId: task.id } satisfies TaskOutputDelivered);
@@ -777,26 +750,16 @@ function backgroundExtension(pi: ExtensionAPI) {
 		name: "task_stop",
 		label: "Stop Task",
 		...ccToolRenderers("Stop Task"),
-		// Claude Code's TaskStop text without its agent-team and agent-name clauses:
-		// a task is stopped by its id here.
-		description:
-			"\n- Stops a running background task by its ID\n- Takes a task_id parameter identifying the task to stop\n- Returns a success or failure status\n- Use this tool when you need to terminate a long-running task\n",
+		description: text.tasks.stopDescription,
 		parameters: Type.Object({
-			task_id: Type.String({ description: "The ID of the background task to stop." }),
+			task_id: Type.String({ description: text.tasks.stopParams.taskId }),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			lastCtx = ctx;
 			const task = registry.get(params.task_id);
-			if (!task) {
-				const known = registry.list().map((t) => t.id).join(", ") || "(none)";
-				return {
-					content: [{ type: "text", text: `No background task "${params.task_id}". Known tasks: ${known}` }],
-					details: {},
-					isError: true,
-				};
-			}
+			if (!task) return unknownTask(params.task_id);
 			if (task.status !== "running" && !task.resident?.()) {
-				return { content: [{ type: "text", text: `Task ${task.id} is already ${task.status}.` }], details: { taskId: task.id } };
+				return { content: [{ type: "text", text: text.tasks.alreadyEnded({ id: task.id, status: task.status }) }], details: { taskId: task.id } };
 			}
 			const wasResident = task.status !== "running";
 			task.stop();
@@ -806,8 +769,8 @@ function backgroundExtension(pi: ExtensionAPI) {
 					{
 						type: "text",
 						text: wasResident
-							? `Terminated the resident agent behind ${task.id} (${task.description}); it can no longer be messaged live (SendMessage will resume it from its session file).`
-							: `Stop requested for ${task.id} (${task.description}).`,
+							? text.tasks.residentEnded({ id: task.id, description: task.description })
+							: text.tasks.stopRequested({ id: task.id, description: task.description }),
 					},
 				],
 				details: { taskId: task.id },
@@ -912,7 +875,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 		description: "List background tasks (monitors, background subagents)",
 		handler: async (args, ctx) => {
 			const tasks = registry.list();
-			ctx.ui.notify(tasks.length ? tasks.map(formatTaskLine).join("\n") : "No background tasks.", "info");
+			ctx.ui.notify(tasks.length ? tasks.map((task) => text.tasks.taskLine(shownTask(task))).join("\n") : "No background tasks.", "info");
 		},
 	});
 

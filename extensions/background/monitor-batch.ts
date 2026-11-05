@@ -39,10 +39,11 @@ export function batchSize(batch: MonitorBatch): number {
 
 /**
  * The `<event>` body for one flushed batch: the lines, then how many more
- * arrived (the full stream stays behind `task_output`). The monitor's
+ * arrived (the full stream stays behind `task_output`), worded by the
+ * profile's `moreLines`. The monitor's
  * description rides the notification's `<summary>`, not this text.
  */
-export function formatMonitorEvents(id: string, batch: MonitorBatch): string {
+export function formatMonitorEvents(id: string, batch: MonitorBatch, moreLines: (p: { hidden: number; taskId: string }) => string): string {
 	const lines: string[] = [];
 	let chars = 0;
 	let hidden = batch.overflow;
@@ -55,7 +56,7 @@ export function formatMonitorEvents(id: string, batch: MonitorBatch): string {
 		lines.push(shown);
 		chars += shown.length + 1;
 	}
-	const more = hidden > 0 ? `\n… +${hidden} more line(s) not shown — task_output ${id} has the full stream` : "";
+	const more = hidden > 0 ? moreLines({ hidden, taskId: id }) : "";
 	return `${lines.join("\n")}${more}`;
 }
 

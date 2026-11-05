@@ -9,6 +9,7 @@ import {
 	MonitorLineSplitter,
 	pushEvent,
 } from "../../extensions/background/monitor-batch.ts";
+import { monitor } from "../../profile/background/monitor.ts";
 
 describe("monitor batching", () => {
 	it("keeps at most MAX_LINES lines and counts the rest", () => {
@@ -17,7 +18,7 @@ describe("monitor batching", () => {
 		expect(batch.shown).toHaveLength(MONITOR_BATCH_MAX_LINES);
 		expect(batch.overflow).toBe(25);
 		expect(batchSize(batch)).toBe(MONITOR_BATCH_MAX_LINES + 25);
-		const text = formatMonitorEvents("m1", batch);
+		const text = formatMonitorEvents("m1", batch, monitor.moreLines);
 		expect(text).toContain("+25 more line(s) not shown — task_output m1 has the full stream");
 		expect(text.split("\n")).toHaveLength(MONITOR_BATCH_MAX_LINES + 1);
 	});
@@ -25,7 +26,7 @@ describe("monitor batching", () => {
 	it("caps the characters shown and reports the lines it dropped", () => {
 		const batch = emptyBatch();
 		for (let i = 0; i < 10; i++) pushEvent(batch, "x".repeat(1_000));
-		const text = formatMonitorEvents("m2", batch);
+		const text = formatMonitorEvents("m2", batch, monitor.moreLines);
 		expect(text.length).toBeLessThan(MONITOR_BATCH_MAX_CHARS + 300);
 		expect(text).toMatch(/\+\d+ more line\(s\) not shown/);
 	});
@@ -34,7 +35,7 @@ describe("monitor batching", () => {
 		const batch = emptyBatch();
 		pushEvent(batch, "a");
 		pushEvent(batch, "b");
-		expect(formatMonitorEvents("m3", batch)).toBe("a\nb");
+		expect(formatMonitorEvents("m3", batch, monitor.moreLines)).toBe("a\nb");
 	});
 });
 
