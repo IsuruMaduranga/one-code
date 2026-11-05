@@ -9,7 +9,8 @@
  * GOLDEN_TOOLS and no tool result has come back yet, the reply makes the
  * scripted calls in TOOL_CALLS (successes, error paths, a command the auto-mode
  * classifier judges, a deferred-tool load, the user questions), plus a subagent when it also says
- * GOLDEN_AGENT, and a second round of notebook edits under GOLDEN_NOTEBOOK. The auto-mode classifier gets a verdict instead: severity 60
+ * GOLDEN_AGENT, notebook edits under GOLDEN_NOTEBOOK and the task tools
+ * steps under GOLDEN_TASKS, each in later rounds. The auto-mode classifier gets a verdict instead: severity 60
  * at stage 1, so stage 2 runs too, and severity 10 at stage 2, so the call is
  * allowed and the subagent's own requests are recorded. Every other reply is a
  * fixed text shaped like a compaction summary, which serves every turn and
@@ -73,6 +74,28 @@ const NOTEBOOK_CALLS: ToolCall[] = [
 	{ path: "notjupyter.ipynb", cell_id: "cell-0", new_source: "x" },
 ].map((input, i) => ({ id: `toolu_golden_nb_${i}`, name: "notebook_edit", input }));
 
+/**
+ * The task tools under GOLDEN_TASKS, one dependent step per round (calls in a
+ * round run in parallel): load them, create, update, read back with every
+ * failure (none changes state), delete. Frontier withholds them (the model
+ * gate), so there the calls record pi's unknown-tool result instead.
+ */
+const tc = (id: string, name: string, input: Record<string, unknown>): ToolCall => ({ id: `toolu_golden_task_${id}`, name, input });
+const TASK_ROUNDS: ToolCall[][] = [
+	[tc("load", "tool_search", { query: "select:task_create,task_get,task_list,task_update" })],
+	[tc("create", "task_create", { subject: "Golden task", description: "A task for the golden run.", activeForm: "Running the golden task" })],
+	[tc("start", "task_update", { taskId: "1", status: "in_progress", owner: "golden" })],
+	[
+		tc("get", "task_get", { taskId: "1" }),
+		tc("get_missing", "task_get", { taskId: "42" }),
+		tc("list", "task_list", {}),
+		tc("self", "task_update", { taskId: "1", addBlocks: ["1"] }),
+		tc("unknown_dep", "task_update", { taskId: "1", addBlockedBy: ["9"] }),
+		tc("update_missing", "task_update", { taskId: "42", status: "completed" }),
+	],
+	[tc("delete", "task_update", { taskId: "1", status: "deleted" })],
+];
+
 /** Added when the user text also says GOLDEN_AGENT: a subagent run (blocking only in one-shot modes). */
 const AGENT_CALL: ToolCall = { id: "toolu_golden_7", name: "Agent", input: { description: "Golden check", task: "Reply with OK.", subagent_type: "general-purpose" } };
 
@@ -122,26 +145,38 @@ function chatReply(calls: ToolCall[] | undefined, text: string): string {
 	return `${body}${chunk({}, withTools ? "tool_calls" : "stop", usage)}data: [DONE]\n\n`;
 }
 
+/** The rounds a GOLDEN_TOOLS message scripts, from its flags; round n answers the n-th reply's results. */
+function roundsFor(text: string): ToolCall[][] {
+	const has = (flag: string) => text.includes(flag);
+	const tasks = has("GOLDEN_TASKS") ? TASK_ROUNDS : [];
+	const rounds: ToolCall[][] = [
+		[...TOOL_CALLS, ...ASK_CALLS, ...(has("GOLDEN_NOTEBOOK") ? NOTEBOOK_READS : []), ...(tasks[0] ?? []), ...(has("GOLDEN_AGENT") ? [AGENT_CALL] : [])],
+	];
+	const later = [has("GOLDEN_NOTEBOOK") ? NOTEBOOK_CALLS : [], ...tasks.slice(1).map(() => [] as ToolCall[])];
+	tasks.slice(1).forEach((round, i) => {
+		later[i] = [...(later[i] ?? []), ...round];
+	});
+	for (const round of later) if (round.length > 0) rounds.push(round);
+	return rounds;
+}
+
 /**
  * The scripted calls for this request, else undefined. Round 1 answers the
- * GOLDEN_TOOLS user message itself (no assistant reply after it yet); round 2,
- * under GOLDEN_NOTEBOOK, answers round 1's results (exactly one assistant
- * reply after it, and the newest turn is tool results). Mid-conversation
- * `system` messages may sit anywhere after it, so the search skips them.
+ * GOLDEN_TOOLS user message itself (no assistant reply after it yet); each
+ * later round answers the previous round's results (n assistant replies after
+ * it, and the newest turn is tool results). Mid-conversation `system`
+ * messages may sit anywhere after it, so the search skips them.
  */
 function scriptedCalls(messages: Array<{ role?: string; content?: unknown }>): ToolCall[] | undefined {
 	const isResults = (m: { role?: string; content?: unknown }) => m.role === "tool" || (m.role === "user" && JSON.stringify(m.content).includes("tool_result"));
 	const goldenAt = messages.findLastIndex((m) => m.role === "user" && !isResults(m) && JSON.stringify(m.content).includes("GOLDEN_TOOLS"));
 	if (goldenAt < 0 || messages.slice(goldenAt + 1).some((m) => m.role === "user" && !isResults(m))) return undefined;
-	const text = JSON.stringify(messages[goldenAt].content);
+	const rounds = roundsFor(JSON.stringify(messages[goldenAt].content));
 	const after = messages.slice(goldenAt + 1).filter((m) => m.role !== "system");
 	const replies = after.filter((m) => m.role === "assistant").length;
-	if (replies === 0) {
-		return [...TOOL_CALLS, ...ASK_CALLS, ...(text.includes("GOLDEN_NOTEBOOK") ? NOTEBOOK_READS : []), ...(text.includes("GOLDEN_AGENT") ? [AGENT_CALL] : [])];
-	}
+	if (replies === 0) return rounds[0];
 	const last = after.at(-1);
-	if (replies === 1 && last && isResults(last) && text.includes("GOLDEN_NOTEBOOK")) return NOTEBOOK_CALLS;
-	return undefined;
+	return last && isResults(last) ? rounds[replies] : undefined;
 }
 
 export default function goldenFixture(_pi: ExtensionAPI) {
