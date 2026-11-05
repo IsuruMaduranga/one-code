@@ -81,7 +81,7 @@ const CONFIGS = [
 	{ name: "session-anthropic-tiny", model: ANTHROPIC, tier: "tiny", mode: "session" },
 	{ name: "session-openrouter-cheap", model: OPENROUTER, tier: "cheap", mode: "session" },
 ];
-const PROMPTS = { print: "Reply with OK.", tools: "GOLDEN_TOOLS GOLDEN_AGENT GOLDEN_NOTEBOOK GOLDEN_TASKS GOLDEN_WEB_FETCH GOLDEN_SEARCH GOLDEN_SKILL GOLDEN_MCP GOLDEN_LSP GOLDEN_HOOKS GOLDEN_MEMORY GOLDEN_WORKTREE: make the scripted calls." };
+const PROMPTS = { print: "Reply with OK.", tools: "GOLDEN_TOOLS GOLDEN_AGENT GOLDEN_NOTEBOOK GOLDEN_TASKS GOLDEN_WEB_FETCH GOLDEN_SEARCH GOLDEN_SKILL GOLDEN_MCP GOLDEN_LSP GOLDEN_HOOKS GOLDEN_MEMORY GOLDEN_CRON GOLDEN_WORKTREE: make the scripted calls." };
 
 /** A format 4.4 notebook (no cell ids, so nothing random) with the given code cells. */
 const notebook = (...sources) =>
@@ -398,6 +398,13 @@ function makeNormalizer({ home, project, root }) {
 		for (const [from, to] of replacements) out = out.split(from).join(to);
 		// The scratchpad (lib/scratchpad.ts): <tmp>/onecode-<uid>/<project slug>/<session>/scratchpad.
 		out = out.replace(/\/[^\s`'"]*\/onecode-\d+\/[^/\s]+\/[^/\s]+\/scratchpad/g, "<SCRATCHPAD>");
+		// Cron job ids (background/cron.ts, 8 hex digits) where results name them,
+		// and as cron_delete's input (Anthropic's object, OpenAI's JSON string).
+		out = out.replace(/\b(recurring job |one-shot task |Cancelled job |with id ')[0-9a-f]{8}\b/g, "$1<JOB_ID>");
+		out = out.replace(/^[0-9a-f]{8}( — )/gm, "<JOB_ID>$1");
+		out = out.replace(/^[0-9a-f]{8}$/, "<JOB_ID>").replace(/("id":")[0-9a-f]{8}"/g, '$1<JOB_ID>"');
+		// The wakeup's clock time (background/wakeup.ts formatScheduled).
+		out = out.replace(/(Next wakeup scheduled for )\d{2}:\d{2}:\d{2}/g, "$1<CLOCK>");
 		// Background task ids (background/registry.ts generateTaskId): "b" and 7 hex digits.
 		out = out.replace(/\b(task |subagents\/|tasks\/)b[0-9a-f]{7}\b/g, "$1<TASK_ID>");
 		// Plan files get a random three-word name (plan-mode/slug.ts).

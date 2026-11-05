@@ -16,7 +16,8 @@
  * GOLDEN_SKILL, the MCP tools under GOLDEN_MCP (golden-mcp-server.mjs),
  * lsp_diagnostics under GOLDEN_LSP (golden-lsp-server.mjs), the hooks under
  * GOLDEN_HOOKS (golden-hook.mjs), MEMORY.md near and over its limit under
- * GOLDEN_MEMORY and the worktree
+ * GOLDEN_MEMORY, the cron tools and schedule_wakeup under GOLDEN_CRON and
+ * the worktree
  * tools under GOLDEN_WORKTREE after all of them. The auto-mode classifier gets a verdict instead: severity 60
  * at stage 1, so stage 2 runs too, and severity 10 at stage 2, so the call is
  * allowed and the subagent's own requests are recorded. Every other reply is a
@@ -413,6 +414,35 @@ const MEMORY_ROUNDS: ToolCall[][] = [
 ];
 
 /**
+ * The cron tools and schedule_wakeup under GOLDEN_CRON: load the cron tools;
+ * an unparsable and an impossible expression, a recurring job and a one-shot
+ * one; the list and an unknown id; delete both jobs (their ids read from the
+ * results); then schedule_wakeup missing each required field, a wakeup (it
+ * never fires in a one-shot run), and stop. golden-requests.mjs replaces the
+ * random job ids and the wakeup's clock time.
+ */
+const cr = (id: string, name: string, input: ToolCall["input"]): ToolCall => ({ id: `toolu_golden_cron_${id}`, name, input });
+const jobId = (kind: string) => (messages: Messages) => ({ id: new RegExp(`Scheduled ${kind} ([0-9a-f]{8})`).exec(JSON.stringify(messages))?.[1] ?? "missing" });
+const CRON_ROUNDS: ToolCall[][] = [
+	[cr("load", "tool_search", { query: "select:cron_create,cron_list,cron_delete" })],
+	[
+		cr("bad", "cron_create", { cron: "bogus", prompt: "golden" }),
+		cr("never", "cron_create", { cron: "0 0 31 2 *", prompt: "golden" }),
+		cr("hourly", "cron_create", { cron: "7 * * * *", prompt: "Check the golden build." }),
+		cr("once", "cron_create", { cron: "3 9 28 12 *", prompt: "Golden reminder\nsecond line", recurring: false }),
+	],
+	[cr("list", "cron_list", {}), cr("unknown", "cron_delete", { id: "nope" })],
+	[cr("delete_hourly", "cron_delete", jobId("recurring job")), cr("delete_once", "cron_delete", jobId("one-shot task"))],
+	[
+		cr("wake_none", "schedule_wakeup", {}),
+		cr("wake_prompt", "schedule_wakeup", { delaySeconds: 600, reason: "golden" }),
+		cr("wake_noop", "schedule_wakeup", { delaySeconds: 600, reason: "golden", prompt: "/loop check" }),
+	],
+	[cr("wake", "schedule_wakeup", { delaySeconds: 30, reason: "golden", prompt: "/loop check", noop: false })],
+	[cr("stop", "schedule_wakeup", { stop: true })],
+];
+
+/**
  * Plan mode under GOLDEN_PLAN, on its own (the session scenario's last
  * prompt): load the tools, exit before entering, enter, exit with an empty
  * plan, write the plan to the file enter_plan_mode named, and exit for
@@ -498,6 +528,7 @@ function roundsFor(text: string): ToolCall[][] {
 	if (has("GOLDEN_LSP")) rounds.push(...LSP_ROUNDS);
 	if (has("GOLDEN_HOOKS")) rounds.push(...HOOK_ROUNDS);
 	if (has("GOLDEN_MEMORY")) rounds.push(...MEMORY_ROUNDS);
+	if (has("GOLDEN_CRON")) rounds.push(...CRON_ROUNDS);
 	if (has("GOLDEN_WORKTREE")) rounds.push(...WORKTREE_ROUNDS);
 	return rounds;
 }
