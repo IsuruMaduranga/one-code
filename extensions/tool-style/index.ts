@@ -8,7 +8,9 @@
  * from pi's own definition byte-identical, so the system prompt and tool
  * schemas are unchanged, with one exception: write carries Claude Code's
  * description, short or long by the model's tier (write-description.ts,
- * lib/tool-variants.ts), and is registered again when the form changes.
+ * lib/tool-variants.ts), and is registered again when the form changes;
+ * edit carries pi's plus the read rule. Both texts come from the profile
+ * (text.ts).
  * Execution delegates to a per-cwd instance of pi's
  * real definition (they close over cwd, and enter_worktree moves the session
  * mid-run). Only the TUI renderers differ: a `●` call line, and the base
@@ -27,6 +29,7 @@
  */
 
 import { feature } from "../lib/feature.ts";
+import { requireText } from "../lib/profile.ts";
 import { readFile, stat } from "node:fs/promises";
 import type { ExtensionAPI, ExtensionToolContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
@@ -42,7 +45,7 @@ import { perCwd } from "../lib/per-cwd.ts";
 import { type DescriptionForm, registerFormTool } from "../lib/tool-variants.ts";
 import { resolveToolPath } from "../lib/tool-path.ts";
 import { ccWrapBuiltinRenderers, type RejectedFileOp } from "../lib/tui-render.ts";
-import { editDescription, writeDescription } from "./write-description.ts";
+import type { ToolStyleText } from "./text.ts";
 import { createWriteRenderers, WRITE_DIFF_MAX_BYTES, type WriteRenderDeps, writeDetails } from "./write-render.ts";
 
 // The concrete definitions are each strongly typed to their own schema; this
@@ -66,28 +69,30 @@ interface BuiltinSpec {
 const asSpecCreate = (create: (cwd: string) => unknown): BuiltinSpec["create"] =>
 	create as BuiltinSpec["create"];
 
-const BUILTINS: BuiltinSpec[] = [
-	{ label: "Read", create: asSpecCreate(createReadToolDefinition), title: (a) => a?.path as string | undefined },
-	{
-		label: "Write",
-		create: asSpecCreate(createWriteToolDefinition),
-		title: (a) => a?.path as string | undefined,
-		rejectedAs: "write",
-		write: true,
-		description: writeDescription,
-	},
-	{
-		label: "Update",
-		create: asSpecCreate(createEditToolDefinition),
-		title: (a) => a?.path as string | undefined,
-		keepBaseCall: true,
-		rejectedAs: "update",
-		description: (_form, base) => editDescription(base),
-	},
-	{ label: "Grep", create: asSpecCreate(createGrepToolDefinition), title: (a) => a?.pattern as string | undefined },
-	{ label: "Find", create: asSpecCreate(createFindToolDefinition), title: (a) => a?.pattern as string | undefined },
-	{ label: "LS", create: asSpecCreate(createLsToolDefinition), title: (a) => (a?.path as string | undefined) ?? "." },
-];
+function builtins(text: ToolStyleText): BuiltinSpec[] {
+	return [
+		{ label: "Read", create: asSpecCreate(createReadToolDefinition), title: (a) => a?.path as string | undefined },
+		{
+			label: "Write",
+			create: asSpecCreate(createWriteToolDefinition),
+			title: (a) => a?.path as string | undefined,
+			rejectedAs: "write",
+			write: true,
+			description: (form) => text.writeDescription(form),
+		},
+		{
+			label: "Update",
+			create: asSpecCreate(createEditToolDefinition),
+			title: (a) => a?.path as string | undefined,
+			keepBaseCall: true,
+			rejectedAs: "update",
+			description: (_form, base) => text.editDescription({ base }),
+		},
+		{ label: "Grep", create: asSpecCreate(createGrepToolDefinition), title: (a) => a?.pattern as string | undefined },
+		{ label: "Find", create: asSpecCreate(createFindToolDefinition), title: (a) => a?.pattern as string | undefined },
+		{ label: "LS", create: asSpecCreate(createLsToolDefinition), title: (a) => (a?.path as string | undefined) ?? "." },
+	];
+}
 
 /**
  * The file a write is about to replace, for its diff: undefined when there is
@@ -107,7 +112,7 @@ const readBefore: WriteRenderDeps["readBefore"] = async (raw, cwd) => {
 const writeDeps: WriteRenderDeps = { readBefore, diff: (before, after) => generateDiffString(before, after).diff };
 
 function toolStyleExtension(pi: ExtensionAPI) {
-	for (const spec of BUILTINS) {
+	for (const spec of builtins(requireText("toolStyle"))) {
 		const base = spec.create(process.cwd());
 		const forCwd = perCwd(spec.create);
 		const renderers = ccWrapBuiltinRenderers(spec.label, base, { title: spec.title, keepBaseCall: spec.keepBaseCall, rejectedAs: spec.rejectedAs });

@@ -26,6 +26,7 @@ import type { SessionTitleText } from "../session-title/text.ts";
 import type { SkillText } from "../skill/text.ts";
 import type { SystemPromptText } from "../system-prompt/text.ts";
 import type { TasksText } from "../tasks/text.ts";
+import type { ToolStyleText } from "../tool-style/text.ts";
 import type { WebFetchText } from "../web-fetch/text.ts";
 import type { WebSearchText } from "../web/text.ts";
 import type { WorktreeGuardText, WorktreeText } from "../worktree/text.ts";
@@ -61,6 +62,7 @@ export interface ProfileText {
 	/** Also read by subagents, for a child's cron tools. */
 	background?: BackgroundText;
 	artifacts?: ArtifactsText;
+	toolStyle?: ToolStyleText;
 	/** Used by the worktree tools, subagents and workflows (each guards isolated sessions with it). */
 	worktreeGuard?: WorktreeGuardText;
 }
