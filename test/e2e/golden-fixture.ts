@@ -18,8 +18,10 @@
  * GOLDEN_HOOKS (golden-hook.mjs), MEMORY.md near and over its limit under
  * GOLDEN_MEMORY, the cron tools and schedule_wakeup under GOLDEN_CRON, the
  * monitor and task tools under GOLDEN_MONITOR, the /loop skill under
- * GOLDEN_LOOP, the artifact tool under GOLDEN_ARTIFACT and the worktree
- * tools under GOLDEN_WORKTREE after all of them. The auto-mode classifier gets a verdict instead: severity 60
+ * GOLDEN_LOOP, the artifact tool under GOLDEN_ARTIFACT, the file tracker's
+ * refusals and change notices under GOLDEN_FILES, a file too large to
+ * restore after compaction under GOLDEN_BIGFILE (the session scenario) and
+ * the worktree tools under GOLDEN_WORKTREE after all of them. The auto-mode classifier gets a verdict instead: severity 60
  * at stage 1, so stage 2 runs too, and severity 10 at stage 2, so the call is
  * allowed and the subagent's own requests are recorded. Every other reply is a
  * fixed text shaped like a compaction summary, which serves every turn and
@@ -515,6 +517,45 @@ const ARTIFACT_ROUNDS: ToolCall[][] = [
 ];
 
 /**
+ * The file tracker under GOLDEN_FILES: make files with a shell command (so
+ * none counts as read); write one unread (refused), read an empty one and a
+ * directory; read six more one per round (the order the change notices name
+ * them in); change all six with a shell command, which sends five detailed
+ * notices (the first with more changed lines than an excerpt shows) and one
+ * that lists the rest; edit a changed file without reading it again
+ * (refused as stale); and a subagent (GOLDEN_CHILD) that reads and rewrites
+ * a file the session read, which the session then hears was changed by it.
+ */
+const fl = (id: string, name: string, input: ToolCall["input"]): ToolCall => ({ id: `toolu_golden_file_${id}`, name, input });
+const MANY = ["m1", "m2", "m3", "m4", "m5"];
+const FILE_ROUNDS: ToolCall[][] = [
+	[fl("setup", "bash", { command: `mkdir -p ft/dir && printf 'unread\n' > ft/unread.txt && : > ft/empty.txt && seq 1 60 > ft/long.txt && printf 'child\n' > ft/child.txt && for f in ${MANY.join(" ")}; do echo one > ft/$f.txt; done` })],
+	[
+		fl("unread", "write", { path: "ft/unread.txt", content: "overwritten\n" }),
+		fl("empty", "read", { path: "ft/empty.txt" }),
+		fl("dir", "read", { path: "ft/dir" }),
+		fl("long", "read", { path: "ft/long.txt" }),
+		fl("child_read", "read", { path: "ft/child.txt" }),
+	],
+	...MANY.map((f) => [fl(f, "read", { path: `ft/${f}.txt` })]),
+	[fl("change", "bash", { command: `seq 101 160 > ft/long.txt && for f in ${MANY.join(" ")}; do echo two > ft/$f.txt; done` })],
+	[fl("stale", "edit", { path: "ft/long.txt", edits: [{ oldText: "101", newText: "one hundred and one" }] })],
+	[fl("agent", "Agent", { description: "Golden child write", task: "GOLDEN_TOOLS GOLDEN_CHILD: make the scripted calls.", subagent_type: "general-purpose" })],
+];
+/** The subagent GOLDEN_FILES starts: read the file, then rewrite it. */
+const CHILD_ROUNDS: ToolCall[][] = [[fl("child_own_read", "read", { path: "ft/child.txt" })], [fl("child_write", "write", { path: "ft/child.txt", content: "changed by the child\n" })]];
+
+/**
+ * GOLDEN_BIGFILE (the session scenario, before its first compaction): make a
+ * file past the restore's per-file cap and read it, so the restore sends the
+ * note in place of its contents.
+ */
+const BIGFILE_ROUNDS: ToolCall[][] = [
+	[fl("big_make", "bash", { command: "yes 'golden padding line for the restore cap' | head -600 > big.txt" })],
+	[fl("big_read", "read", { path: "big.txt" })],
+];
+
+/**
  * Plan mode under GOLDEN_PLAN, on its own (the session scenario's last
  * prompt): load the tools, exit before entering, enter, exit with an empty
  * plan, write the plan to the file enter_plan_mode named, and exit for
@@ -584,6 +625,7 @@ function chatReply(calls: ToolCall[] | undefined, text: string): string {
 function roundsFor(text: string): ToolCall[][] {
 	const has = (flag: string) => text.includes(flag);
 	if (has("GOLDEN_PLAN")) return PLAN_ROUNDS;
+	if (has("GOLDEN_CHILD")) return CHILD_ROUNDS;
 	const tasks = has("GOLDEN_TASKS") ? TASK_ROUNDS : [];
 	const rounds: ToolCall[][] = [
 		[...TOOL_CALLS, ...ASK_CALLS, ...(has("GOLDEN_NOTEBOOK") ? NOTEBOOK_READS : []), ...(tasks[0] ?? []), ...(has("GOLDEN_AGENT") ? [AGENT_CALL] : [])],
@@ -604,6 +646,8 @@ function roundsFor(text: string): ToolCall[][] {
 	if (has("GOLDEN_MONITOR")) rounds.push(...MONITOR_ROUNDS);
 	if (has("GOLDEN_LOOP")) rounds.push(...LOOP_ROUNDS);
 	if (has("GOLDEN_ARTIFACT")) rounds.push(...ARTIFACT_ROUNDS);
+	if (has("GOLDEN_FILES")) rounds.push(...FILE_ROUNDS);
+	if (has("GOLDEN_BIGFILE")) rounds.push(...BIGFILE_ROUNDS);
 	if (has("GOLDEN_WORKTREE")) rounds.push(...WORKTREE_ROUNDS);
 	return rounds;
 }
