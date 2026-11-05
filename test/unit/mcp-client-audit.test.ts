@@ -8,6 +8,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { beginInteractiveAuth, callTool, connect, finishInteractiveAuth, isUnauthorized, readResource, readResourceDir, type Connection } from "../../extensions/mcp/client.ts";
+import { failureOf } from "../../extensions/mcp/failure.ts";
 import { silentProvider } from "../../extensions/mcp/oauth/flow.ts";
 import { McpOAuthProvider } from "../../extensions/mcp/oauth/provider.ts";
 
@@ -84,8 +85,7 @@ describe("MCP request lifecycle regressions", () => {
 		const result = await connect({ kind: "stdio", name: "early-exit", command: process.execPath, args: ["-e", script], source: "test" }).catch((error: unknown) => error);
 		if (!(result instanceof Error)) await (result as Connection).client.close();
 		expect(result).toBeInstanceOf(Error);
-		expect((result as Error).message).toContain("closed");
-		expect((result as Error).message).toContain("exited during discovery");
+		expect(failureOf(result)).toEqual({ kind: "closedDuringDiscovery", server: "early-exit", stderr: { text: "exited during discovery", cut: false } });
 	});
 
 	it.each(operations)("cancels a hanging %s request when the caller aborts", async (method, invoke) => {
@@ -187,7 +187,7 @@ describe("MCP OAuth runtime regressions", () => {
 			const pending = connect(localServer, provider).catch((error: unknown) => error);
 			await tokenStarted;
 			await vi.advanceTimersByTimeAsync(20_001);
-			expect((await pending as Error).message).toContain("timed out");
+			expect(failureOf(await pending)).toMatchObject({ kind: "timedOut", step: "connect", ms: 20_000 });
 			vi.useRealTimers();
 			await vi.waitFor(() => expect(tokenRequestClosed).toBe(true), { timeout: 500 });
 		} finally {

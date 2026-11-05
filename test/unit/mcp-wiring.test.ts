@@ -23,10 +23,12 @@ import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/mcp-share.ts";
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../../extensions/lib/mcp-status.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/reminders.ts";
 import { mcpFacts, type McpSnapshot } from "../../extensions/mcp/announce.ts";
+import type { McpFailure } from "../../extensions/mcp/text.ts";
+import { mcp as mcpText } from "../../profile/mcp/index.ts";
 
 /** Render one request inside an epoch whose message 1 described `told`; the blocks MCP adds to its tail. */
 function renderInEpoch(events: { emit(channel: string, data: unknown): void }, told: McpSnapshot): string[] {
-	return renderRequest(events, { facts: mcpFacts(told) }).map((block) => block.text);
+	return renderRequest(events, { facts: mcpFacts(told, mcpText) }).map((block) => block.text);
 }
 import { createFakeCtx, createFakePi, type FakePi, renderRequest } from "./helpers/fake-pi.ts";
 import { localCommandBlocks } from "../../extensions/lib/local-command.ts";
@@ -36,7 +38,7 @@ interface Fixture {
 	tools?: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }>;
 	resources?: Array<{ uri: string; name?: string; description?: string }>;
 	instructions?: string;
-	warnings?: string[];
+	warnings?: McpFailure[];
 	connectError?: Error;
 	/** Delays this server's mocked connect so startup-settle behavior is observable. */
 	connectGate?: Promise<void>;

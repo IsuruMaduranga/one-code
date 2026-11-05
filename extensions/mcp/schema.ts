@@ -9,6 +9,10 @@
 
 import { crc32 } from "node:zlib";
 import { type TSchema, Type } from "typebox";
+import type { ImageProblem, McpText } from "./text.ts";
+
+/** The profile's label for a description past the cap (text.ts `tool.descriptionCut`). */
+export type DescriptionCut = McpText["tool"]["descriptionCut"];
 
 /**
  * Claude Code's namespacing: `mcp__<server>__<tool>`. Hyphens are KEPT (CC's
@@ -52,22 +56,23 @@ interface JsonSchema {
  * A server's tool and parameter descriptions ride every request as
  * deferred-definition bytes with no bound; a malicious or careless server can
  * make each one arbitrarily large. Cap them at registration with a labelled
- * marker (review L2). 4 KB is far more than any real description needs.
+ * marker (review L2), worded by the profile. 4 KB is far more than any real
+ * description needs.
  */
 export const DESCRIPTION_CAP = 4096;
-export function capDescription(text: string | undefined): string | undefined {
+export function capDescription(text: string | undefined, cut: DescriptionCut): string | undefined {
 	if (typeof text !== "string") return undefined;
-	return text.length > DESCRIPTION_CAP ? `${text.slice(0, DESCRIPTION_CAP)}… [truncated, ${text.length} chars]` : text;
+	return text.length > DESCRIPTION_CAP ? cut({ head: text.slice(0, DESCRIPTION_CAP), chars: text.length }) : text;
 }
 
 /** TypeBox options carrying a (capped) description, or none. */
-function descriptionOptions(schema: JsonSchema): Record<string, unknown> {
-	const capped = capDescription(schema.description);
+function descriptionOptions(schema: JsonSchema, cut: DescriptionCut): Record<string, unknown> {
+	const capped = capDescription(schema.description, cut);
 	return capped ? { description: capped } : {};
 }
 
-function convertLeaf(schema: JsonSchema): TSchema | undefined {
-	const options = descriptionOptions(schema);
+function convertLeaf(schema: JsonSchema, cut: DescriptionCut): TSchema | undefined {
+	const options = descriptionOptions(schema, cut);
 
 	switch (schema.type) {
 		case "string":
@@ -81,7 +86,7 @@ function convertLeaf(schema: JsonSchema): TSchema | undefined {
 		case "null":
 			return Type.Null(options);
 		case "array":
-			return Type.Array(schema.items ? jsonSchemaToTypeBox(schema.items) : Type.Unknown(), options);
+			return Type.Array(schema.items ? jsonSchemaToTypeBox(schema.items, cut) : Type.Unknown(), options);
 		default:
 			return undefined;
 	}
@@ -91,12 +96,12 @@ function convertLeaf(schema: JsonSchema): TSchema | undefined {
  * Converts a JSON Schema to a TypeBox schema. Enums become literal unions;
  * unrecognised constructs become `Unknown`, which validates anything, so an
  * unusual server schema degrades to passing arguments through rather than
- * rejecting every call.
+ * rejecting every call. Descriptions past the cap are cut with `cut`'s label.
  */
-export function jsonSchemaToTypeBox(schema: JsonSchema | undefined): TSchema {
+export function jsonSchemaToTypeBox(schema: JsonSchema | undefined, cut: DescriptionCut): TSchema {
 	if (!schema || typeof schema !== "object") return Type.Unknown();
 
-	const options = descriptionOptions(schema);
+	const options = descriptionOptions(schema, cut);
 
 	if (Array.isArray(schema.enum) && schema.enum.length > 0) {
 		const literals = schema.enum
@@ -109,11 +114,11 @@ export function jsonSchemaToTypeBox(schema: JsonSchema | undefined): TSchema {
 	}
 
 	if (Array.isArray(schema.type) && schema.type.length > 0) {
-		if (schema.type.length === 1) return jsonSchemaToTypeBox({ ...schema, type: schema.type[0] });
+		if (schema.type.length === 1) return jsonSchemaToTypeBox({ ...schema, type: schema.type[0] }, cut);
 		// TypeBox emits anyOf, which pi's provider converters understand. Keep
 		// the description on the union, not on each of its generated branches.
 		return Type.Union(
-			schema.type.map((type) => jsonSchemaToTypeBox({ ...schema, type, description: undefined })),
+			schema.type.map((type) => jsonSchemaToTypeBox({ ...schema, type, description: undefined }, cut)),
 			options,
 		);
 	}
@@ -122,19 +127,19 @@ export function jsonSchemaToTypeBox(schema: JsonSchema | undefined): TSchema {
 		const required = new Set(Array.isArray(schema.required) ? schema.required : []);
 		const properties: Record<string, TSchema> = {};
 		for (const [key, value] of Object.entries(schema.properties ?? {})) {
-			const converted = jsonSchemaToTypeBox(value);
+			const converted = jsonSchemaToTypeBox(value, cut);
 			properties[key] = required.has(key) ? converted : Type.Optional(converted);
 		}
 		// additionalProperties stays open: servers commonly accept more than they declare.
 		return Type.Object(properties, { ...options, additionalProperties: true });
 	}
 
-	const leaf = convertLeaf(schema);
+	const leaf = convertLeaf(schema, cut);
 	if (leaf) return leaf;
 
 	const variants = schema.anyOf ?? schema.oneOf;
 	if (Array.isArray(variants) && variants.length > 0) {
-		const converted = variants.map((variant) => jsonSchemaToTypeBox(variant));
+		const converted = variants.map((variant) => jsonSchemaToTypeBox(variant, cut));
 		return converted.length === 1 ? converted[0] : Type.Union(converted, options);
 	}
 
@@ -163,14 +168,14 @@ export interface McpResourceContents {
 	blob?: string;
 }
 
-export function describeResourceContents(contents: McpResourceContents[] | undefined): string {
+export function describeResourceContents(contents: McpResourceContents[] | undefined, text: McpText["content"]): string {
 	const parts: string[] = [];
 	for (const entry of contents ?? []) {
 		if (typeof entry.text === "string") {
 			parts.push(entry.text);
 		} else if (typeof entry.blob === "string") {
 			const size = Math.round((entry.blob.length * 3) / 4 / 1024);
-			parts.push(`[binary resource ${entry.uri ?? ""} ${entry.mimeType ?? "unknown type"}, ~${size} KB]`);
+			parts.push(text.binaryResource({ uri: entry.uri, mimeType: entry.mimeType, kb: size }));
 		}
 	}
 	return parts.join("\n").trim();
@@ -199,23 +204,23 @@ const MAX_IMAGE_BASE64_LENGTH = Math.ceil((MAX_IMAGE_BYTES * 4) / 3);
 export function validateImageData(
 	data: string,
 	claimedMime: string | undefined,
-): { ok: true; mimeType: string } | { ok: false; reason: string; bytes: number } {
+): { ok: true; mimeType: string } | { ok: false; problem: ImageProblem; bytes: number } {
 	// Bound and sniff from the base64 string itself: decoding the whole payload
 	// (up to ~6.7 MB) just to read a 12-byte magic number and a length is pure
 	// waste — the block ships as the original base64 string regardless. Cap on
 	// the string length, then decode only a 24-char (4-aligned) prefix to sniff.
-	if (data.length === 0) return { ok: false, reason: "empty image data", bytes: 0 };
+	if (data.length === 0) return { ok: false, problem: { kind: "empty" }, bytes: 0 };
 	const approxBytes = Math.floor((data.length * 3) / 4);
 	if (data.length > MAX_IMAGE_BASE64_LENGTH) {
-		return { ok: false, reason: `image is ~${approxBytes} bytes, over the ${MAX_IMAGE_BYTES}-byte ceiling`, bytes: approxBytes };
+		return { ok: false, problem: { kind: "tooLarge", bytes: approxBytes, limit: MAX_IMAGE_BYTES }, bytes: approxBytes };
 	}
 	const head = Buffer.from(data.slice(0, 24), "base64");
-	if (head.length === 0) return { ok: false, reason: "empty after base64 decode", bytes: 0 };
+	if (head.length === 0) return { ok: false, problem: { kind: "emptyAfterDecode" }, bytes: 0 };
 	const mime = sniffImageMime(head);
-	if (!mime) return { ok: false, reason: `unrecognised image format (claimed ${claimedMime ?? "none"})`, bytes: approxBytes };
+	if (!mime) return { ok: false, problem: { kind: "unrecognised", claimed: claimedMime }, bytes: approxBytes };
 	const bytes = Buffer.from(data, "base64");
 	const problem = wholeImageProblem(bytes, mime);
-	if (problem) return { ok: false, reason: problem, bytes: bytes.length };
+	if (problem) return { ok: false, problem, bytes: bytes.length };
 	return { ok: true, mimeType: mime };
 }
 
@@ -232,71 +237,75 @@ function paddedEnd(buf: Buffer): number {
 }
 
 /** Why the image's container is not whole, or undefined when it is. Pure. */
-export function wholeImageProblem(buf: Buffer, mime: string): string | undefined {
+export function wholeImageProblem(buf: Buffer, mime: string): ImageProblem | undefined {
+	const png = (defect: Extract<ImageProblem, { kind: "png" }>["defect"], chunk?: string): ImageProblem => ({ kind: "png", defect, ...(chunk === undefined ? {} : { chunk }) });
+	const jpeg = (defect: Extract<ImageProblem, { kind: "jpeg" }>["defect"]): ImageProblem => ({ kind: "jpeg", defect });
+	const gif = (defect: Extract<ImageProblem, { kind: "gif" }>["defect"]): ImageProblem => ({ kind: "gif", defect });
+	const webp = (defect: Extract<ImageProblem, { kind: "webp" }>["defect"]): ImageProblem => ({ kind: "webp", defect });
 	if (mime === "image/png") {
-		if (buf.length < 8 || !buf.subarray(0, 8).equals(PNG_SIGNATURE)) return "corrupt PNG signature";
+		if (buf.length < 8 || !buf.subarray(0, 8).equals(PNG_SIGNATURE)) return png("signature");
 		let offset = 8;
 		let first = true;
 		let sawData = false;
 		for (;;) {
-			if (offset + 12 > buf.length) return "truncated PNG (no IEND chunk)";
+			if (offset + 12 > buf.length) return png("noEnd");
 			const length = buf.readUInt32BE(offset);
 			const type = buf.toString("latin1", offset + 4, offset + 8);
-			if (offset + 12 + length > buf.length) return `truncated PNG (the ${type} chunk runs past the data)`;
-			if (crc32(buf.subarray(offset + 4, offset + 8 + length)) !== buf.readUInt32BE(offset + 8 + length)) return `corrupt PNG (bad ${type} chunk checksum)`;
+			if (offset + 12 + length > buf.length) return png("chunkPastData", type);
+			if (crc32(buf.subarray(offset + 4, offset + 8 + length)) !== buf.readUInt32BE(offset + 8 + length)) return png("checksum", type);
 			if (first) {
-				if (type !== "IHDR" || length !== 13) return "corrupt PNG (IHDR is not the first chunk)";
-				if (buf.readUInt32BE(offset + 8) === 0 || buf.readUInt32BE(offset + 12) === 0) return "corrupt PNG (zero width or height)";
+				if (type !== "IHDR" || length !== 13) return png("headerNotFirst");
+				if (buf.readUInt32BE(offset + 8) === 0 || buf.readUInt32BE(offset + 12) === 0) return png("zeroSize");
 				first = false;
 			}
 			if (type === "IDAT") sawData = true;
 			offset += 12 + length;
-			if (type === "IEND") return sawData ? undefined : "corrupt PNG (no image data)";
+			if (type === "IEND") return sawData ? undefined : png("noData");
 		}
 	}
 	if (mime === "image/jpeg") {
 		let offset = 2;
 		for (;;) {
-			if (offset + 2 > buf.length) return "truncated JPEG (no image scan)";
-			if (buf[offset] !== 0xff) return "corrupt JPEG (bad segment marker)";
+			if (offset + 2 > buf.length) return jpeg("noScan");
+			if (buf[offset] !== 0xff) return jpeg("badMarker");
 			const marker = buf[offset + 1];
 			if (marker === 0xff) {
 				offset++; // fill byte
 				continue;
 			}
 			if (marker === 0xda) break; // start of scan: entropy-coded data follows
-			if (marker === 0xd9) return "corrupt JPEG (ends before its image scan)";
+			if (marker === 0xd9) return jpeg("endsBeforeScan");
 			if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
 				offset += 2;
 				continue;
 			}
-			if (offset + 4 > buf.length) return "truncated JPEG";
+			if (offset + 4 > buf.length) return jpeg("truncated");
 			const length = buf.readUInt16BE(offset + 2);
-			if (length < 2 || offset + 2 + length > buf.length) return "truncated JPEG (a segment runs past the data)";
+			if (length < 2 || offset + 2 + length > buf.length) return jpeg("segmentPastData");
 			offset += 2 + length;
 		}
 		// The EOI marker anywhere after the scan: scan data escapes every 0xFF, and
 		// bytes after EOI (a vendor trailer, a Motion Photo payload) are allowed.
-		return buf.indexOf(JPEG_EOI, offset + 2) !== -1 ? undefined : "truncated JPEG (no end-of-image marker)";
+		return buf.indexOf(JPEG_EOI, offset + 2) !== -1 ? undefined : jpeg("noEnd");
 	}
 	if (mime === "image/gif") {
 		const header = buf.toString("latin1", 0, 6);
-		if (header !== "GIF87a" && header !== "GIF89a") return "corrupt GIF header";
-		if (buf.length < 14) return "truncated GIF";
-		if (buf.readUInt16LE(6) === 0 || buf.readUInt16LE(8) === 0) return "corrupt GIF (zero width or height)";
+		if (header !== "GIF87a" && header !== "GIF89a") return gif("header");
+		if (buf.length < 14) return gif("truncated");
+		if (buf.readUInt16LE(6) === 0 || buf.readUInt16LE(8) === 0) return gif("zeroSize");
 		const end = paddedEnd(buf);
-		return buf[end - 1] === 0x3b ? undefined : "truncated GIF (no trailer)";
+		return buf[end - 1] === 0x3b ? undefined : gif("noTrailer");
 	}
 	if (mime === "image/webp") {
-		if (buf.length < 20) return "truncated WebP";
+		if (buf.length < 20) return webp("truncated");
 		const riffEnd = buf.readUInt32LE(4) + 8;
-		if (riffEnd > buf.length) return "truncated WebP (shorter than its RIFF length)";
+		if (riffEnd > buf.length) return webp("shorterThanRiff");
 		const chunk = buf.toString("latin1", 12, 16);
-		if (chunk !== "VP8 " && chunk !== "VP8L" && chunk !== "VP8X") return "corrupt WebP (no image chunk)";
-		if (20 + buf.readUInt32LE(16) > riffEnd) return "truncated WebP (its image chunk runs past the data)";
+		if (chunk !== "VP8 " && chunk !== "VP8L" && chunk !== "VP8X") return webp("noImage");
+		if (20 + buf.readUInt32LE(16) > riffEnd) return webp("chunkPastData");
 		return undefined;
 	}
-	return `unsupported image type ${mime}`;
+	return { kind: "unsupported", mime };
 }
 
 /** Magic-number sniff for the formats Anthropic accepts. Returns undefined for anything else. */
@@ -310,6 +319,7 @@ function sniffImageMime(buf: Buffer): string | undefined {
 
 export function describeContent(
 	blocks: McpContentBlock[] | undefined,
+	text: McpText["content"],
 	serverName?: string,
 ): {
 	text: string;
@@ -324,12 +334,11 @@ export function describeContent(
 		} else if (block.type === "image" && block.data) {
 			const checked = validateImageData(block.data, block.mimeType);
 			if (checked.ok) images.push({ data: block.data, mimeType: checked.mimeType });
-			else texts.push(`[image content${serverName ? ` from ${serverName}` : ""} could not be decoded: ${checked.reason}, ${checked.bytes} bytes]`);
+			else texts.push(text.imageUndecodable({ server: serverName, problem: checked.problem, bytes: checked.bytes }));
 		} else if (block.type === "resource" && block.resource) {
-			const { text, uri } = block.resource;
-			texts.push(text ?? `[resource ${uri ?? "(no uri)"}]`);
+			texts.push(block.resource.text ?? text.resource(block.resource.uri));
 		} else {
-			texts.push(`[${block.type} content]`);
+			texts.push(text.other(block.type));
 		}
 	}
 

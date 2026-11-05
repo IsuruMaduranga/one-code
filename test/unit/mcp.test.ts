@@ -4,18 +4,26 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { expandEnv, loadServers, missingEnvVars, parseServer, referencedEnvVars } from "../../extensions/mcp/config.ts";
 import {
-	capDescription,
+	capDescription as capWith,
 	DESCRIPTION_CAP,
-	describeContent,
-	describeResourceContents,
-	jsonSchemaToTypeBox,
+	describeContent as describeWith,
+	describeResourceContents as describeResourceWith,
+	jsonSchemaToTypeBox as convertSchema,
 	namespacedToolName,
 	parseNamespacedToolName,
 	pluginServerName,
 	validateImageData,
 } from "../../extensions/mcp/schema.ts";
-import { createTailBuffer } from "../../extensions/mcp/client.ts";
+import { createTailBuffer, mcpInstructionsReminder as instructionsWith } from "../../extensions/mcp/client.ts";
+import { mcp as mcpText } from "../../profile/mcp/index.ts";
 import { TINY_GIF, TINY_JPEG, TINY_PNG, TINY_WEBP } from "./helpers/tiny-images.ts";
+
+/** The pure functions with One Code's text, as the extension passes it. */
+const capDescription = (text: string | undefined) => capWith(text, mcpText.tool.descriptionCut);
+const jsonSchemaToTypeBox = (schema: Parameters<typeof convertSchema>[0]) => convertSchema(schema, mcpText.tool.descriptionCut);
+const describeContent = (blocks: Parameters<typeof describeWith>[0], server?: string) => describeWith(blocks, mcpText.content, server);
+const describeResourceContents = (contents: Parameters<typeof describeResourceWith>[0]) => describeResourceWith(contents, mcpText.content);
+const mcpInstructionsReminder = (connections: Parameters<typeof instructionsWith>[0]) => instructionsWith(connections, mcpText);
 
 describe("expandEnv", () => {
 	it("expands both $VAR and ${VAR}", () => {
@@ -295,7 +303,7 @@ describe("validateImageData", () => {
 		// A flipped byte inside a PNG chunk fails its checksum.
 		const flipped = Buffer.from(bytes(TINY_PNG));
 		flipped[45] ^= 0xff;
-		expect(validateImageData(flipped.toString("base64"), "x")).toMatchObject({ ok: false, reason: expect.stringContaining("checksum") });
+		expect(validateImageData(flipped.toString("base64"), "x")).toMatchObject({ ok: false, problem: { kind: "png", defect: "checksum" } });
 		// The signature-only fixtures the sniff alone used to accept.
 		expect(validateImageData(b64([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), "x").ok).toBe(false);
 		expect(validateImageData(b64([0xff, 0xd8, 0xff, 0x00]), "x").ok).toBe(false);
@@ -393,7 +401,6 @@ describe("missing environment variables", () => {
 
 describe("mcpInstructionsReminder", () => {
 	it("formats per-server sections and skips servers without instructions", async () => {
-		const { mcpInstructionsReminder } = await import("../../extensions/mcp/client.ts");
 		const text = mcpInstructionsReminder([
 			{ server: { name: "deepwiki" }, instructions: "Ask questions about repos." },
 			{ server: { name: "silent" } },
@@ -404,7 +411,6 @@ describe("mcpInstructionsReminder", () => {
 	});
 
 	it("returns undefined when no server has instructions, truncates long ones", async () => {
-		const { mcpInstructionsReminder } = await import("../../extensions/mcp/client.ts");
 		expect(mcpInstructionsReminder([{ server: { name: "s" } }])).toBeUndefined();
 		const long = mcpInstructionsReminder([{ server: { name: "s" }, instructions: "x".repeat(5000) }]);
 		expect(long).toContain("… [truncated]");

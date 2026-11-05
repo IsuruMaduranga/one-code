@@ -73,14 +73,17 @@ import { claudeSourcesOn } from "../lib/config-mode.ts";
 import { claudeJsonPath } from "../lib/paths.ts";
 import { consentDialog, startupConsentReady } from "../lib/consent-dialogs.ts";
 import { panelUi } from "../lib/panel-focus.ts";
+import { requireText } from "../lib/profile.ts";
+import { failureOf } from "./failure.ts";
+import type { McpText } from "./text.ts";
 
 /** Anthropic's hard limit on a tool name; a longer one fails the whole request. */
 const MAX_TOOL_NAME_LENGTH = 128;
 
 /** Shared "server name not found" tool result for the resource read/list-dir tools. */
-function unknownServerError(name: string) {
+function unknownServerError(name: string, text: McpText) {
 	return {
-		content: [{ type: "text" as const, text: `No connected MCP server named "${name}".` }],
+		content: [{ type: "text" as const, text: text.resources.unknownServer({ name }) }],
 		details: {} as { server?: string; uri?: string },
 		isError: true,
 	};
@@ -90,6 +93,7 @@ function unknownServerError(name: string) {
 const piMcpConfigs = (cwd: string) => piMcpConfigPaths(getAgentDir(), cwd, CONFIG_DIR_NAME);
 
 function mcpExtension(pi: ExtensionAPI) {
+	const text = requireText("mcp");
 	const connections = new Map<string, Connection>();
 	let failures: FailedConnection[] = [];
 	const registered = new Map<string, { server: string; tool: string }>();
@@ -136,7 +140,7 @@ function mcpExtension(pi: ExtensionAPI) {
 			if (name.length > MAX_TOOL_NAME_LENGTH) {
 				failures.push({
 					server: connection.server,
-					error: `tool "${tool.name}" skipped: its namespaced name is ${name.length} characters, over the ${MAX_TOOL_NAME_LENGTH}-character limit the provider enforces`,
+					error: text.failure({ kind: "nameTooLong", tool: tool.name, length: name.length, max: MAX_TOOL_NAME_LENGTH }),
 				});
 				continue;
 			}
@@ -151,7 +155,7 @@ function mcpExtension(pi: ExtensionAPI) {
 				// the connection summary reports it.
 				failures.push({
 					server: connection.server,
-					error: `tool "${tool.name}" skipped: its registered name "${name}" is already taken by another tool`,
+					error: text.failure({ kind: "nameTaken", tool: tool.name, name }),
 				});
 				continue;
 			}
@@ -161,13 +165,13 @@ function mcpExtension(pi: ExtensionAPI) {
 				name,
 				label: `${connection.server.name}: ${tool.name}`,
 				...ccToolRenderers(`${connection.server.name}: ${tool.name}`),
-				description: capDescription(tool.description) ?? `MCP tool "${tool.name}" from server "${connection.server.name}".`,
-				parameters: jsonSchemaToTypeBox(tool.inputSchema),
+				description: capDescription(tool.description, text.tool.descriptionCut) ?? text.tool.description({ server: connection.server.name, tool: tool.name }),
+				parameters: jsonSchemaToTypeBox(tool.inputSchema, text.tool.descriptionCut),
 				async execute(toolCallId, params, signal, _onUpdate, ctx) {
 					const live = connections.get(connection.server.name);
 					if (!live) {
 						return {
-							content: [{ type: "text", text: `MCP server "${connection.server.name}" is not connected.` }],
+							content: [{ type: "text", text: text.tool.notConnected(connection.server.name) }],
 							details: {} as Record<string, unknown>,
 							isError: true,
 						};
@@ -175,20 +179,18 @@ function mcpExtension(pi: ExtensionAPI) {
 					const current = live.tools.find((candidate) => candidate.name === tool.name);
 					if (!current || !isDeepStrictEqual(current.inputSchema, tool.inputSchema)) {
 						return {
-							content: [{ type: "text", text: !current
-								? `MCP server "${connection.server.name}" no longer exposes tool "${tool.name}".`
-								: `MCP tool "${name}" changed its input schema. Run /reload to load the new definition; this call was not sent.` }],
+							content: [{ type: "text", text: !current ? text.tool.gone({ server: connection.server.name, tool: tool.name }) : text.tool.schemaChanged(name) }],
 							details: {} as Record<string, unknown>,
 							isError: true,
 						};
 					}
 					try {
 						const result = await callTool(live, tool.name, (params ?? {}) as Record<string, unknown>, signal);
-						const { text: contentText, images } = describeContent(result.content as McpContentBlock[] | undefined, connection.server.name);
+						const { text: contentText, images } = describeContent(result.content as McpContentBlock[] | undefined, text.content, connection.server.name);
 						const structuredText = result.structuredContent !== undefined ? JSON.stringify(result.structuredContent, null, 2) : "";
-						const text = [contentText, structuredText].filter(Boolean).join("\n");
+						const body = [contentText, structuredText].filter(Boolean).join("\n");
 						const content = [
-							...(text ? [{ type: "text" as const, text: persistIfLarge(text, { dir: resultsDir(ctx), id: toolCallId }) }] : []),
+							...(body ? [{ type: "text" as const, text: persistIfLarge(body, { dir: resultsDir(ctx), id: toolCallId }) }] : []),
 							...images.map((image) => ({ type: "image" as const, data: image.data, mimeType: image.mimeType })),
 						];
 						return {
@@ -198,7 +200,7 @@ function mcpExtension(pi: ExtensionAPI) {
 						};
 					} catch (error) {
 						return {
-							content: [{ type: "text", text: `MCP call failed: ${(error as Error).message}` }],
+							content: [{ type: "text", text: text.tool.callFailed((error as Error).message) }],
 							details: { server: connection.server.name, tool: tool.name } as Record<string, unknown>,
 							isError: true,
 						};
@@ -252,18 +254,16 @@ function mcpExtension(pi: ExtensionAPI) {
 			if (connections.get(server.name) !== connection) return;
 			connections.delete(server.name);
 			const tail = connection.stderrTail();
-			failures.push({
-				server,
-				error: `connection closed by the server${tail ? `\nserver stderr: ${tail.slice(-1_000)}` : ""}`,
-			});
+			failures.push({ server, error: text.failure({ kind: "closedByServer", ...(tail ? { stderr: tail.slice(-1_000) } : {}) }) });
 			emitInstructions();
 		};
 		let previousTools = connection.tools;
-		connection.onToolsChanged = (error) => {
+		connection.onToolsChanged = (failure) => {
 			if (!alive() || connection.closing || connections.get(server.name) !== connection) return;
-			if (error) {
-				failures.push({ server, error: error.message });
-				pi.events.emit(REMINDER_CHANNEL, { text: `MCP server "${server.name}" could not refresh its tool list: ${error.message}` });
+			if (failure) {
+				const error = text.failure(failure);
+				failures.push({ server, error });
+				pi.events.emit(REMINDER_CHANNEL, { text: text.notices.refreshFailed({ server: server.name, failure: error }) });
 				return;
 			}
 			const unavailable = previousTools.filter((old) => {
@@ -274,12 +274,12 @@ function mcpExtension(pi: ExtensionAPI) {
 			registerToolsFor(connection);
 			if (unavailable.length > 0) {
 				pi.events.emit(REMINDER_CHANNEL, {
-					text: `MCP server "${server.name}" removed or changed these tools: ${unavailable.map((tool) => namespacedToolName(server.name, tool.name)).join(", ")}. Their old definitions cannot be used. Run /reload to refresh changed schemas.`,
+					text: text.notices.toolsChanged({ server: server.name, tools: unavailable.map((tool) => namespacedToolName(server.name, tool.name)) }),
 				});
 			}
 		};
 		registerToolsFor(connection);
-		for (const warning of connection.warnings) failures.push({ server, error: warning });
+		for (const warning of connection.warnings) failures.push({ server, error: text.failure(warning) });
 		if (connection.resources.length > 0 || connection.resourceTemplates?.length) registerResourceTools();
 	};
 
@@ -300,7 +300,7 @@ function mcpExtension(pi: ExtensionAPI) {
 		} catch (error) {
 			if (!alive()) return;
 			if (server.kind === "http" && isUnauthorized(error)) oauthNeeded.add(server.name);
-			else failures.push({ server, error: (error as Error).message });
+			else failures.push({ server, error: text.failure(failureOf(error)) });
 		} finally {
 			connectingNames.delete(server.name);
 		}
@@ -328,20 +328,20 @@ function mcpExtension(pi: ExtensionAPI) {
 		} else {
 			pi.events.emit(REMINDER_CHANNEL, {
 				key: "mcp-failures",
-				text: mcpFailuresReminder(snapshot.failed),
+				text: mcpFailuresReminder(snapshot.failed, text),
 				placement: "first-prepend",
 				order: CONTEXT_ORDER.mcp + 1,
-				facts: mcpFacts({ connected: [], failed: snapshot.failed }),
+				facts: mcpFacts({ connected: [], failed: snapshot.failed }, text),
 			});
 		}
-		const instructions = mcpInstructionsReminder(live);
+		const instructions = mcpInstructionsReminder(live, text);
 		if (instructions) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				key: "mcp-instructions",
 				text: instructions,
 				placement: "first-prepend",
 				order: CONTEXT_ORDER.mcp,
-				facts: mcpFacts({ connected: snapshot.connected, failed: [] }),
+				facts: mcpFacts({ connected: snapshot.connected, failed: [] }, text),
 			});
 		} else {
 			// No server has instructions anymore (e.g. the last one was disabled or
@@ -355,8 +355,8 @@ function mcpExtension(pi: ExtensionAPI) {
 	pi.events.on(RENDER_CHANNEL, (data) => {
 		const request = data as RenderRequest;
 		if (request.epoch) return;
-		const delta = mcpDelta(request.toldBlocks, liveSnapshot(), !connectSettled, connectingNames);
-		const notices = mcpChangeNotices(delta);
+		const delta = mcpDelta(request.toldBlocks, liveSnapshot(), text, !connectSettled, connectingNames);
+		const notices = mcpChangeNotices(delta, text);
 		notices.forEach((text, i) => request.blocks.push({ text, ...(i === 0 ? { facts: delta.facts } : {}) }));
 	});
 
@@ -458,10 +458,9 @@ function mcpExtension(pi: ExtensionAPI) {
 			name: "list_mcp_resources",
 			label: "MCP Resources",
 			...ccToolRenderers("MCP Resources"),
-			description:
-				"List resources and URI templates exposed by connected MCP servers. Resources are readable documents or data the server offers, addressed by uri. Substitute template variables to construct a resource uri.",
+			description: text.resources.descriptions.list_mcp_resources,
 			parameters: Type.Object({
-				server: Type.Optional(Type.String({ description: "Limit to one server by name" })),
+				server: Type.Optional(Type.String({ description: text.resources.params.list.server })),
 			}),
 			async execute(toolCallId, params, _signal, _onUpdate, ctx) {
 				// A bad `server` name must not read back as "this server has zero
@@ -469,12 +468,7 @@ function mcpExtension(pi: ExtensionAPI) {
 				// looks like an empty (but real) server.
 				if (params.server && !connections.has(params.server)) {
 					return {
-						content: [
-							{
-								type: "text",
-								text: `No connected MCP server named "${params.server}". Connected servers: ${[...connections.keys()].join(", ") || "none"}.`,
-							},
-						],
+						content: [{ type: "text", text: text.resources.unknownServer({ name: params.server, connected: [...connections.keys()] }) }],
 						details: { count: 0 },
 						isError: true,
 					};
@@ -482,20 +476,19 @@ function mcpExtension(pi: ExtensionAPI) {
 				const lines: string[] = [];
 				for (const connection of connections.values()) {
 					if (params.server && connection.server.name !== params.server) continue;
+					const server = connection.server.name;
 					for (const resource of connection.resources) {
-						lines.push(
-							`${connection.server.name} ${resource.uri}${resource.name ? ` — ${resource.name}` : ""}${resource.description ? `: ${resource.description}` : ""}`,
-						);
+						lines.push(text.resources.line({ server, uri: resource.uri, name: resource.name, description: resource.description, template: false }));
 					}
 					for (const template of connection.resourceTemplates ?? []) {
-						lines.push(`${connection.server.name} ${template.uriTemplate} (URI template)${template.name ? ` — ${template.name}` : ""}${template.description ? `: ${template.description}` : ""}`);
+						lines.push(text.resources.line({ server, uri: template.uriTemplate, name: template.name, description: template.description, template: true }));
 					}
 				}
 				return {
 					content: [
 						{
 							type: "text",
-							text: lines.length ? persistIfLarge(lines.join("\n"), { dir: resultsDir(ctx), id: toolCallId }) : "No resources found. MCP servers may still provide tools even if they have no resources.",
+							text: lines.length ? persistIfLarge(lines.join("\n"), { dir: resultsDir(ctx), id: toolCallId }) : text.resources.none,
 						},
 					],
 					details: { count: lines.length },
@@ -507,29 +500,29 @@ function mcpExtension(pi: ExtensionAPI) {
 			name: "read_mcp_resource",
 			label: "Read MCP Resource",
 			...ccToolRenderers("Read MCP Resource"),
-			description: "Read one resource from an MCP server by uri. Use list_mcp_resources to find uris.",
+			description: text.resources.descriptions.read_mcp_resource,
 			parameters: Type.Object({
-				server: Type.String({ description: "Server name that owns the resource" }),
-				uri: Type.String({ description: "Resource uri" }),
+				server: Type.String({ description: text.resources.params.read.server }),
+				uri: Type.String({ description: text.resources.params.read.uri }),
 			}),
 			async execute(toolCallId, params, signal, _onUpdate, ctx) {
 				const connection = connections.get(params.server);
-				if (!connection) return unknownServerError(params.server);
+				if (!connection) return unknownServerError(params.server, text);
 				try {
 					const result = await readResource(connection, params.uri, signal);
-					const text = describeResourceContents(result.contents as McpResourceContents[] | undefined) || JSON.stringify({ contents: result.contents ?? [] });
+					const body = describeResourceContents(result.contents as McpResourceContents[] | undefined, text.content) || JSON.stringify({ contents: result.contents ?? [] });
 					return {
 						content: [
 							{
 								type: "text",
-								text: persistIfLarge(text, { dir: resultsDir(ctx), id: toolCallId }),
+								text: persistIfLarge(body, { dir: resultsDir(ctx), id: toolCallId }),
 							},
 						],
 						details: { server: params.server, uri: params.uri },
 					};
 				} catch (error) {
 					return {
-						content: [{ type: "text", text: `Could not read ${params.uri}: ${(error as Error).message}` }],
+						content: [{ type: "text", text: text.resources.readFailed({ uri: params.uri, osMessage: (error as Error).message }) }],
 						details: { server: params.server, uri: params.uri },
 						isError: true,
 					};
@@ -541,31 +534,30 @@ function mcpExtension(pi: ExtensionAPI) {
 			name: "read_mcp_resource_dir",
 			label: "List MCP Resource Directory",
 			...ccToolRenderers("List MCP Resource Directory"),
-			description:
-				'List the direct children of a directory resource on an MCP server (resources/directory/read). Not recursive: each entry carries its own uri, and subdirectories appear with mimeType "inode/directory" — call again on a subdirectory uri to descend. Only servers that support directory listing accept this; others return an error.',
+			description: text.resources.descriptions.read_mcp_resource_dir,
 			parameters: Type.Object({
-				server: Type.String({ description: "Server name that owns the directory" }),
-				uri: Type.String({ description: "The directory resource uri to list" }),
+				server: Type.String({ description: text.resources.params.dir.server }),
+				uri: Type.String({ description: text.resources.params.dir.uri }),
 			}),
 			async execute(toolCallId, params, signal, _onUpdate, ctx) {
 				const connection = connections.get(params.server);
-				if (!connection) return unknownServerError(params.server);
+				if (!connection) return unknownServerError(params.server, text);
 				try {
 					const result = await readResourceDir(connection, params.uri, signal);
 					const entries = (result.resources ?? result.entries ?? []) as Array<{ uri?: string; name?: string; mimeType?: string }>;
-					const lines = entries.map((e) => `${e.uri ?? "(no uri)"}${e.name ? ` — ${e.name}` : ""}${e.mimeType ? ` (${e.mimeType})` : ""}`);
+					const lines = entries.map((e) => text.resources.directoryEntry({ uri: e.uri, name: e.name, mimeType: e.mimeType }));
 					return {
 						content: [
 							{
 								type: "text",
-								text: lines.length ? persistIfLarge(lines.join("\n"), { dir: resultsDir(ctx), id: toolCallId }) : 'Directory is empty.\n{"resources":[]}',
+								text: lines.length ? persistIfLarge(lines.join("\n"), { dir: resultsDir(ctx), id: toolCallId }) : text.resources.directoryEmpty,
 							},
 						],
 						details: { server: params.server, uri: params.uri },
 					};
 				} catch (error) {
 					return {
-						content: [{ type: "text", text: `Could not list ${params.uri}: ${(error as Error).message}` }],
+						content: [{ type: "text", text: text.resources.directoryFailed({ uri: params.uri, osMessage: (error as Error).message }) }],
 						details: { server: params.server, uri: params.uri },
 						isError: true,
 					};
@@ -574,7 +566,7 @@ function mcpExtension(pi: ExtensionAPI) {
 		});
 
 		for (const name of ["list_mcp_resources", "read_mcp_resource", "read_mcp_resource_dir"]) {
-			pi.events.emit(DEFER_CHANNEL, { name, keywords: ["mcp", "resource", "document", "uri", "directory"] });
+			pi.events.emit(DEFER_CHANNEL, { name, keywords: text.resources.searchKeywords });
 		}
 		pi.events.emit(MCP_TOOLS_CHANNEL, { tools: [...sharedTools] });
 	};
@@ -870,7 +862,7 @@ function mcpExtension(pi: ExtensionAPI) {
 					emitInstructions();
 					notices = [`Authenticated "${entry.name}".`];
 				} catch (error) {
-					notices = [`Authentication failed: ${(error as Error).message}`];
+					notices = [`Authentication failed: ${text.failure(failureOf(error))}`];
 				} finally {
 					busy.delete(entry.name);
 					syncRepaint();

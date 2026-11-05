@@ -14,6 +14,7 @@ vi.mock("../../extensions/mcp/oauth/callback.ts", () => ({
 	startCallbackServer: vi.fn(async () => ({ redirectUrl: "http://127.0.0.1:5000/callback", waitForCode: async () => ({ code: "authorization-code" }), close: mocks.closeCallback })),
 }));
 
+import { failureOf } from "../../extensions/mcp/failure.ts";
 import { authenticate } from "../../extensions/mcp/oauth/flow.ts";
 
 afterEach(() => {
@@ -29,7 +30,7 @@ describe("interactive MCP OAuth lifecycle", () => {
 		void authenticate({ server: { kind: "http", name: "audit", url: "https://mcp.example.test", source: "test" } }).catch((caught: unknown) => { error = caught; });
 		await vi.advanceTimersByTimeAsync(20_001);
 		expect(error).toBeInstanceOf(Error);
-		expect((error as Error).message).toContain("timed out");
+		expect(failureOf(error)).toEqual({ kind: "timedOut", step: "exchangeCode", ms: 20_000 });
 		expect(mocks.closeTransport).toHaveBeenCalled();
 		expect(mocks.closeCallback).toHaveBeenCalledOnce();
 	});

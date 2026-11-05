@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { ToldFact } from "../../extensions/lib/ledger/records.ts";
-import { mcpChangeNotices, mcpDelta, mcpFacts, type McpSnapshot, mcpStartupNotices } from "../../extensions/mcp/announce.ts";
+import { mcpChangeNotices as changeNotices, mcpDelta as delta, mcpFacts as facts, type McpDelta, type McpSnapshot, mcpStartupNotices } from "../../extensions/mcp/announce.ts";
+import { mcp as mcpText } from "../../profile/mcp/index.ts";
+
+/** The pure functions with One Code's text, as the extension passes it. */
+const mcpFacts = (snapshot: McpSnapshot) => facts(snapshot, mcpText);
+const mcpDelta = (told: ReadonlyMap<string, string>, snapshot: McpSnapshot, settling?: boolean, connecting?: ReadonlySet<string>) =>
+	delta(told, snapshot, mcpText, settling, connecting);
+const mcpChangeNotices = (d: McpDelta) => changeNotices(d, mcpText);
 
 /** What an epoch has told, as the ledger folds it: the latest hash per whole-text block key. */
 type Told = Map<string, string>;

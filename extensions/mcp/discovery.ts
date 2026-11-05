@@ -1,3 +1,5 @@
+import { McpFailureError } from "./failure.ts";
+
 /** Collect an MCP list response's cursor pages without silently dropping later entries. */
 export async function collectPages<T>(
 	fetchPage: (cursor?: string) => Promise<{ items: T[]; nextCursor?: string }>,
@@ -12,7 +14,7 @@ export async function collectPages<T>(
 		signal?.throwIfAborted();
 		for (const item of page.items) items.push(item);
 		if (page.nextCursor === undefined) return items;
-		if (seen.has(page.nextCursor)) throw new Error("MCP server repeated a pagination cursor; check the server's list implementation.");
+		if (seen.has(page.nextCursor)) throw new McpFailureError({ kind: "repeatedCursor" });
 		seen.add(page.nextCursor);
 		cursor = page.nextCursor;
 	}

@@ -11,7 +11,8 @@
  * the empty text once a drop or a recovery was announced.
  */
 
-import { mcpFailuresReminder, mcpInstructionsReminder } from "./client.ts";
+import { mcpFailuresReminder, shownFailure, shownInstructions } from "./client.ts";
+import type { McpText } from "./text.ts";
 import type { BlockFact, ToldFact } from "../lib/ledger/records.ts";
 import { toldBlockFact } from "../lib/reminders.ts";
 import { countNoun } from "../lib/tui-render.ts";
@@ -40,26 +41,17 @@ const FAILED = "mcp-failed:";
 const NONE = toldBlockFact("", "").hash;
 
 /**
- * Store and compare the exact bounded values the reminder puts on the wire.
- * A changing tail beyond either cap is not a model-visible capability change
- * and must not become a false notice.
+ * Facts store and compare the exact bounded values the reminder puts on the
+ * wire. A changing tail beyond either cap is not a model-visible capability
+ * change and must not become a false notice.
  */
-function displayedInstructions(name: string, instructions: string): string {
-	const rendered = mcpInstructionsReminder([{ server: { name }, instructions }]);
-	const prefix = "# MCP Server Instructions\n\nThe following MCP servers have provided instructions for how to use their tools and resources:\n\n" + `## ${name}\n`;
-	return rendered?.startsWith(prefix) ? rendered.slice(prefix.length) : instructions;
-}
-function displayedFailure(error: string): string {
-	return error.split("\n")[0].slice(0, 300);
-}
-
-const instructedFact = (name: string, instructions: string): BlockFact => toldBlockFact(INSTRUCTED + name, displayedInstructions(name, instructions));
-const failedFact = (name: string, error: string): BlockFact => toldBlockFact(FAILED + name, displayedFailure(error));
+const instructedFact = (name: string, instructions: string, text: McpText): BlockFact => toldBlockFact(INSTRUCTED + name, shownInstructions(instructions, text));
+const failedFact = (name: string, error: string): BlockFact => toldBlockFact(FAILED + name, shownFailure(error));
 
 /** What message 1's two MCP blocks rendered from `snapshot` tell. */
-export function mcpFacts(snapshot: McpSnapshot): ToldFact[] {
+export function mcpFacts(snapshot: McpSnapshot, text: McpText): ToldFact[] {
 	return [
-		...snapshot.connected.flatMap((c) => (c.instructions ? [instructedFact(c.name, c.instructions)] : [])),
+		...snapshot.connected.flatMap((c) => (c.instructions ? [instructedFact(c.name, c.instructions, text)] : [])),
 		...snapshot.failed.map((f) => failedFact(f.name, f.error)),
 	];
 }
@@ -70,18 +62,24 @@ export function mcpFacts(snapshot: McpSnapshot): ToldFact[] {
  * `settling`, a server not connected yet is not a drop, and neither is one in
  * `connecting` (a reconnect in flight).
  */
-export function mcpDelta(told: ReadonlyMap<string, string>, snapshot: McpSnapshot, settling = false, connecting: ReadonlySet<string> = new Set()): McpDelta {
+export function mcpDelta(
+	told: ReadonlyMap<string, string>,
+	snapshot: McpSnapshot,
+	text: McpText,
+	settling = false,
+	connecting: ReadonlySet<string> = new Set(),
+): McpDelta {
 	const connectedNames = new Set(snapshot.connected.map((c) => c.name));
 	// One failure per server (the latest): two kept errors would alternate as the told fact.
 	const failed = [...new Map(snapshot.failed.map((f) => [f.name, f])).values()];
 	const failedNames = new Set(failed.map((f) => f.name));
 	const toldNames = (prefix: string) => [...told].filter(([key, hash]) => key.startsWith(prefix) && hash !== NONE).map(([key]) => key.slice(prefix.length));
 	const newInstructions = snapshot.connected
-		.filter((c) => c.instructions && told.get(INSTRUCTED + c.name) !== instructedFact(c.name, c.instructions).hash)
-		.map((c) => ({ name: c.name, instructions: displayedInstructions(c.name, c.instructions as string) }));
+		.filter((c) => c.instructions && told.get(INSTRUCTED + c.name) !== instructedFact(c.name, c.instructions, text).hash)
+		.map((c) => ({ name: c.name, instructions: shownInstructions(c.instructions as string, text) }));
 	const newFailures = failed
 		.filter((f) => told.get(FAILED + f.name) !== failedFact(f.name, f.error).hash)
-		.map((f) => ({ name: f.name, error: displayedFailure(f.error) }));
+		.map((f) => ({ name: f.name, error: shownFailure(f.error) }));
 	const recovered = toldNames(FAILED).filter((name) => connectedNames.has(name));
 	const dropped = settling ? [] : toldNames(INSTRUCTED).filter((name) => !connectedNames.has(name) && !failedNames.has(name) && !connecting.has(name));
 	return {
@@ -102,33 +100,12 @@ export function mcpDelta(told: ReadonlyMap<string, string>, snapshot: McpSnapsho
  * The notices for a delta, in the order they go on the tail. Empty when
  * nothing changed.
  */
-export function mcpChangeNotices(delta: McpDelta): string[] {
+export function mcpChangeNotices(delta: McpDelta, text: McpText): string[] {
 	const notices: string[] = [];
-	const add = (text: string) => notices.push(text);
-	if (delta.recovered.length > 0) {
-		add(
-			`MCP server${delta.recovered.length === 1 ? "" : "s"} ${delta.recovered.join(", ")} ` +
-				"connected after this conversation started (an earlier notice reported a connection failure). " +
-				"The server's tools are available as deferred tools — load them with tool_search.",
-		);
-	}
-	if (delta.newInstructions.length > 0) {
-		const names = delta.newInstructions.map((s) => s.name);
-		add(
-			`MCP server${names.length === 1 ? "" : "s"} ${names.join(", ")} connected after this conversation started; ` +
-				"the tools are available as deferred tools (load with tool_search). Server instructions:\n\n" +
-				mcpInstructionsReminder(delta.newInstructions.map((s) => ({ server: { name: s.name }, instructions: s.instructions }))),
-		);
-	}
-	if (delta.newFailures.length > 0) {
-		add(mcpFailuresReminder(delta.newFailures));
-	}
-	if (delta.dropped.length > 0) {
-		add(
-			`MCP server${delta.dropped.length === 1 ? "" : "s"} ${delta.dropped.join(", ")} disconnected; ` +
-				'their tools answer "not connected" until the server is reconnected (the user can do that in /mcp).',
-		);
-	}
+	if (delta.recovered.length > 0) notices.push(text.notices.recovered(delta.recovered));
+	if (delta.newInstructions.length > 0) notices.push(text.notices.connected(delta.newInstructions.map((s) => ({ name: s.name, text: s.instructions }))));
+	if (delta.newFailures.length > 0) notices.push(mcpFailuresReminder(delta.newFailures, text));
+	if (delta.dropped.length > 0) notices.push(text.notices.dropped(delta.dropped));
 	return notices;
 }
 

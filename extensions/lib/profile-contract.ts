@@ -13,6 +13,7 @@ import type { AskUserText } from "../ask-user/text.ts";
 import type { BtwText } from "../btw/text.ts";
 import type { EffortText } from "../effort/text.ts";
 import type { InitText } from "../init/text.ts";
+import type { McpText } from "../mcp/text.ts";
 import type { NotebookText } from "../notebook/text.ts";
 import type { PlanModeText } from "../plan-mode/text.ts";
 import type { RecapText } from "../recap/text.ts";
@@ -48,6 +49,7 @@ export interface ProfileText {
 	effort?: EffortText;
 	planMode?: PlanModeText;
 	skill?: SkillText;
+	mcp?: McpText;
 	/** Used by the worktree tools, subagents and workflows (each guards isolated sessions with it). */
 	worktreeGuard?: WorktreeGuardText;
 }

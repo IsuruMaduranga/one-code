@@ -147,9 +147,9 @@ describe("MCP discovery with real HTTP transport", () => {
 		connection.onToolsChanged = changed;
 		await vi.waitFor(() => expect(notifications).toBeDefined());
 		notifications!.write(`data: ${JSON.stringify({ jsonrpc: "2.0", method: "notifications/tools/list_changed" })}\n\n`);
-		await vi.waitFor(() => expect(changed).toHaveBeenCalledWith(expect.any(Error)));
+		await vi.waitFor(() => expect(changed).toHaveBeenCalledWith(expect.objectContaining({ kind: "error" })));
 		expect(connection.tools.map((tool) => tool.name)).toEqual(["first_tool"]);
-		expect(connection.warnings).toContainEqual(expect.stringContaining("refreshing tools failed"));
+		expect(connection.warnings).toContainEqual(expect.objectContaining({ kind: "listFailed", list: "tools", refresh: true }));
 	});
 
 	it("does not publish an in-flight refresh after the connection closes", async () => {
@@ -214,7 +214,7 @@ describe("MCP discovery with real HTTP transport", () => {
 		});
 		connection = await connect(server);
 		expect(connection.tools).toEqual([]);
-		expect(connection.warnings).toContainEqual(expect.stringContaining("repeated a pagination cursor"));
+		expect(connection.warnings).toContainEqual({ kind: "listFailed", list: "tools", reason: { kind: "repeatedCursor" } });
 		expect(requests.filter((request) => request.method === "tools/list")).toHaveLength(2);
 	});
 
