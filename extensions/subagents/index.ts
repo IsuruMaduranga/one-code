@@ -80,7 +80,7 @@ import { findProjectRoot } from "../lib/git.ts";
 import { followEnteredWorktree, registerWorktreeIsolation } from "../lib/worktree-isolation.ts";
 import { sessionWorkCwd } from "../lib/worktree-channel.ts";
 import {
-	AGENT_NOTE,
+	agentNote,
 	agentMessage,
 	agentSummary,
 	createTaskNotifier,
@@ -1369,7 +1369,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				outputFile: opts.outputFile,
 				status,
 				summary: agentSummary(record?.description ?? opts.name, status),
-				note: AGENT_NOTE,
+				note: agentNote(),
 				result,
 				usage: { subagentTokens: opts.outcome.usage.total, toolUses: opts.outcome.toolCalls, durationMs: Date.now() - opts.startedAt },
 			});
@@ -2714,7 +2714,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 					{
 						type: "text",
 						text:
-							`${record.name}: ${oneShotNote("agent's turn")} Its reply follows here; there is no background task to poll.\n\n` +
+							`${record.name}: ${oneShotNote("agentTurn")} Its reply follows here; there is no background task to poll.\n\n` +
 							`${relocationNote}${bounded(outcome.output, `${taskId}-reply`, OUTPUT_CAP)}\n\n(${formatStats(outcome.toolCalls, outcome.usage)})`,
 					},
 				],

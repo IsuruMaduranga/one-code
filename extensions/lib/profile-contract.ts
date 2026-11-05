@@ -37,6 +37,7 @@ import type { WorkflowText } from "../workflow/text.ts";
 import type { WebSearchText } from "../web/text.ts";
 import type { WorktreeGuardText, WorktreeText } from "../worktree/text.ts";
 import type { NativeWebText } from "./native-web-text.ts";
+import type { NotificationsText } from "./notifications-text.ts";
 import type { ShellText } from "./shell-text.ts";
 import type { FeatureId } from "./features.ts";
 
@@ -80,6 +81,8 @@ export interface ProfileText {
 	/** Used by bash and powershell (lib/shell-tool.ts). */
 	shell?: ShellText;
 	doctor?: DoctorText;
+	/** The shared notification frames (lib/notifications.ts): every session uses them, so a profile must supply them. */
+	notifications?: NotificationsText;
 	/** Used by the worktree tools, subagents and workflows (each guards isolated sessions with it). */
 	worktreeGuard?: WorktreeGuardText;
 }

@@ -11,27 +11,29 @@
  */
 import { describe, expect, it } from "vitest";
 import {
-	AGENT_MESSAGE_GUARD,
-	AGENT_MESSAGE_OPENER,
-	AGENT_MESSAGE_OPENER_MID_TURN,
-	AGENT_MESSAGE_REPLY_HINT,
-	AGENT_NOTE,
 	agentMessage,
 	agentSummary,
 	frameForDelivery,
-	HAND_BACK_PREAMBLE,
 	handBackPointer,
 	handBackWarning,
 	indentReport,
 	monitorEndedSummary,
 	monitorEventSummary,
 	shellSummary,
-	TASK_NOTIFICATION_PREAMBLE,
-	TASK_NOTIFICATION_PREAMBLE_WITH_USER_TURN,
 	taskNotification,
 	taskStatusOf,
 	workflowSummary,
 } from "../../extensions/lib/notifications.ts";
+import {
+	AGENT_MESSAGE_GUARD,
+	AGENT_MESSAGE_OPENER,
+	AGENT_MESSAGE_OPENER_MID_TURN,
+	AGENT_MESSAGE_REPLY_HINT,
+	AGENT_NOTE,
+	HAND_BACK_PREAMBLE,
+	TASK_NOTIFICATION_PREAMBLE,
+	TASK_NOTIFICATION_PREAMBLE_WITH_USER_TURN,
+} from "../../profile/notifications/index.ts";
 
 describe("Claude Code 2.1.278 notification literals", () => {
 	it("agent-message envelope: opener, guard, reply hint, hand-back preamble", () => {
