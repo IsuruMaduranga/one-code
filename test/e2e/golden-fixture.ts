@@ -21,7 +21,8 @@
  * GOLDEN_LOOP, the artifact tool under GOLDEN_ARTIFACT, the file tracker's
  * refusals and change notices under GOLDEN_FILES, a file too large to
  * restore after compaction under GOLDEN_BIGFILE (the session scenario), the
- * workflow tool under GOLDEN_WORKFLOW and the worktree tools under GOLDEN_WORKTREE after all of them. The auto-mode classifier gets a verdict instead: severity 60
+ * workflow tool under GOLDEN_WORKFLOW, auto mode's blocks under
+ * GOLDEN_AUTOMODE and the worktree tools under GOLDEN_WORKTREE after all of them. The auto-mode classifier gets a verdict instead: severity 60
  * at stage 1, so stage 2 runs too, and severity 10 at stage 2, so the call is
  * allowed and the subagent's own requests are recorded. Every other reply is a
  * fixed text shaped like a compaction summary, which serves every turn and
@@ -579,6 +580,24 @@ const WORKFLOW_ROUNDS: ToolCall[][] = [
 ];
 
 /**
+ * Auto mode under GOLDEN_AUTOMODE, all in one round: shell writes outside
+ * the project (so the classifier is asked) that it blocks without a rule, answers without a severity, and blocks
+ * under a rule that does not exist (MARKED_VERDICTS), then a write of the
+ * project's settings file and a removal whose wildcard can select it, which
+ * the safety floor blocks without asking the classifier.
+ */
+const am = (id: string, name: string, input: ToolCall["input"]): ToolCall => ({ id: `toolu_golden_automode_${id}`, name, input });
+const AUTOMODE_ROUNDS: ToolCall[][] = [
+	[
+		am("block", "bash", { command: "echo golden-classifier-block > ../golden-block.txt" }),
+		am("silent", "bash", { command: "echo golden-classifier-silent > ../golden-silent.txt" }),
+		am("unknown", "bash", { command: "echo golden-classifier-unknown > ../golden-unknown.txt" }),
+		am("floor_write", "write", { path: ".claude/settings.json", content: "{}\n" }),
+		am("floor_glob", "bash", { command: "rm -f .claude/settings*.bak" }),
+	],
+];
+
+/**
  * GOLDEN_BIGFILE (the session scenario, before its first compaction): make a
  * file past the restore's per-file cap and read it, so the restore sends the
  * note in place of its contents.
@@ -629,10 +648,26 @@ const sse = (events: object[]) => events.map((e) => `event: ${(e as { type: stri
 const STAGE1_VERDICT = "<severity>60</severity>";
 const STAGE2_VERDICT = "<thinking>Golden.</thinking>\n<severity>10</severity>";
 
-/** The classifier's verdict for a classifier request, or undefined for any other request. */
+/** Stage 2's verdict for an action that carries a GOLDEN_AUTOMODE marker (AUTOMODE_ROUNDS). */
+const MARKED_VERDICTS: Record<string, string> = {
+	"golden-classifier-block": "<thinking>Golden.</thinking>\n<severity>90</severity>",
+	"golden-classifier-silent": "Golden.",
+	"golden-classifier-unknown": "<thinking>Golden.</thinking>\n<severity>90</severity>\n<category>Golden Nope</category>",
+};
+
+/**
+ * The classifier's verdict for a classifier request, or undefined for any
+ * other request. Only the action under review (the transcript's last entry,
+ * just before `</transcript>`) is checked for a marker, since every later
+ * classifier request carries earlier calls in its transcript.
+ */
 function classifierVerdict(raw: string): string | undefined {
 	if (!raw.includes("You are a security monitor")) return undefined;
-	return raw.includes("Stage 1 does NOT apply user intent") ? STAGE1_VERDICT : STAGE2_VERDICT;
+	if (raw.includes("Stage 1 does NOT apply user intent")) return STAGE1_VERDICT;
+	const end = raw.lastIndexOf("</transcript>");
+	const action = end < 0 ? "" : raw.slice(raw.lastIndexOf("\\n{", end), end);
+	const marker = Object.keys(MARKED_VERDICTS).find((key) => action.includes(key));
+	return marker ? MARKED_VERDICTS[marker] : STAGE2_VERDICT;
 }
 
 function anthropicReply(calls: ToolCall[] | undefined, text: string): string {
@@ -697,6 +732,7 @@ function roundsFor(text: string): ToolCall[][] {
 	if (has("GOLDEN_ARTIFACT")) rounds.push(...ARTIFACT_ROUNDS);
 	if (has("GOLDEN_FILES")) rounds.push(...FILE_ROUNDS);
 	if (has("GOLDEN_WORKFLOW")) rounds.push(...WORKFLOW_ROUNDS);
+	if (has("GOLDEN_AUTOMODE")) rounds.push(...AUTOMODE_ROUNDS);
 	if (has("GOLDEN_BIGFILE")) rounds.push(...BIGFILE_ROUNDS);
 	if (has("GOLDEN_WORKTREE")) rounds.push(...WORKTREE_ROUNDS);
 	return rounds;
