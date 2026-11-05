@@ -11,13 +11,14 @@
  * classifier judges, a deferred-tool load, the user questions), plus a subagent when it also says
  * GOLDEN_AGENT, notebook edits under GOLDEN_NOTEBOOK and the task tools
  * steps under GOLDEN_TASKS, each in later rounds, then web_fetch under
- * GOLDEN_WEB_FETCH (against canned golden.example pages) and the worktree
- * tools under GOLDEN_WORKTREE after all of them. The auto-mode classifier gets a verdict instead: severity 60
+ * GOLDEN_WEB_FETCH (against canned golden.example pages), web_search under
+ * GOLDEN_SEARCH (against canned search backends) and the worktree tools under
+ * GOLDEN_WORKTREE after all of them. The auto-mode classifier gets a verdict instead: severity 60
  * at stage 1, so stage 2 runs too, and severity 10 at stage 2, so the call is
  * allowed and the subagent's own requests are recorded. Every other reply is a
  * fixed text shaped like a compaction summary, which serves every turn and
  * side call (session title, compaction) alike. A fetch of a golden.example
- * page gets the canned page (PAGES); any other fetch (a catalog refresh, an
+ * page or a search backend gets its canned reply (PAGES, searchReply); any other fetch (a catalog refresh, an
  * update check) is refused with a 503, so a run never reaches the network and
  * never depends on what it would have returned.
  */
@@ -128,6 +129,8 @@ const WEB_FETCH_ROUNDS: ToolCall[][] = [
 		wf("localhost", { url: "http://localhost:3000/" }),
 		wf("upgrade", { url: "http://golden.example/article" }),
 		wf("prompt", { url: "https://golden.example/article", prompt: "What does the article say?" }),
+		wf("native", { url: "https://golden.example/article", prompt: "native: what does it say?" }),
+		wf("native_error", { url: "https://golden.example/article", prompt: "native-error: what does it say?" }),
 	],
 ];
 
@@ -152,6 +155,107 @@ function page(url: string): Response {
 	if (!found) return new Response("Not here", { status: 404, statusText: "Not Found", headers: { "content-type": "text/plain" } });
 	if (found.location) return new Response(null, { status: found.status, headers: { location: found.location } });
 	return new Response(found.body, { status: 200, headers: { "content-type": found.type ?? "text/plain" } });
+}
+
+/**
+ * web_search under GOLDEN_SEARCH, against canned Brave, Tavily and Exa replies
+ * (searchReply): the query's last word picks what each backend does. On an
+ * Anthropic session each search first tries the server-side search and then
+ * the provider's own search, and both fall back here; the call with both
+ * domain lists skips the server-side one.
+ */
+const ws = (id: string, input: Record<string, unknown>): ToolCall => ({ id: `toolu_golden_ws_${id}`, name: "web_search", input });
+const SEARCH_ROUNDS: ToolCall[][] = [
+	[{ id: "toolu_golden_ws_load", name: "tool_search", input: { query: "select:web_search" } }],
+	[
+		ws("results", { query: "golden results" }),
+		ws("empty", { query: "golden empty" }),
+		ws("brave_down", { query: "golden brave-down" }),
+		ws("keyless", { query: "golden keyless" }),
+		ws("all_down", { query: "golden all-down" }),
+		ws("allowed", { query: "golden allowed", allowed_domains: ["golden.example"] }),
+		ws("both_filters", { query: "golden filters", allowed_domains: ["golden.example"], blocked_domains: ["elsewhere.example"] }),
+		ws("native", { query: "golden native", allowed_domains: ["golden.example"] }),
+		ws("native_error", { query: "golden native-error" }),
+	],
+];
+
+const SEARCH_HITS = [
+	{ title: "Golden article", url: "https://golden.example/article", snippet: "The golden article." },
+	{ title: "Elsewhere", url: "https://elsewhere.example/page", snippet: "A page on another host." },
+];
+
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+
+/**
+ * A canned search backend reply, by the query's last word: `empty` (Brave has
+ * no results), `brave-down` (Brave 401, Tavily answers), `keyless` (both keyed
+ * backends 500, Exa answers over SSE), `all-down` (Brave 500, Tavily 401, Exa
+ * 429); anything else, Brave answers.
+ */
+function searchReply(url: string, raw: string | undefined): Response | undefined {
+	const host = new URL(url).hostname;
+	if (host === "api.search.brave.com") {
+		const query = new URL(url).searchParams.get("q") ?? "";
+		if (query.includes("brave-down")) return json({ error: "golden: bad key" }, 401);
+		if (query.includes("keyless") || query.includes("all-down")) return new Response("golden: brave unavailable", { status: 500 });
+		return json({ web: { results: query.includes("empty") ? [] : SEARCH_HITS.map(({ snippet, ...hit }) => ({ ...hit, description: snippet })) } });
+	}
+	if (host === "api.tavily.com") {
+		const query = String((JSON.parse(raw ?? "{}") as { query?: string }).query);
+		if (query.includes("all-down")) return json({ detail: "golden: unauthorized" }, 401);
+		if (query.includes("keyless")) return new Response("golden: tavily unavailable", { status: 500 });
+		return json({ results: SEARCH_HITS.map(({ snippet, ...hit }) => ({ ...hit, content: snippet })) });
+	}
+	if (host === "mcp.exa.ai") {
+		const request = JSON.parse(raw ?? "{}") as { id?: number; params?: { arguments?: { query?: string } } };
+		if (String(request.params?.arguments?.query).includes("all-down")) return new Response("golden: slow down", { status: 429 });
+		const text = SEARCH_HITS.map((hit) => `Title: ${hit.title}\nURL: ${hit.url}\nHighlights:\n${hit.snippet}`).join("\n---\n");
+		const message = { jsonrpc: "2.0", id: request.id, result: { content: [{ type: "text", text }] } };
+		return new Response(`event: message\ndata: ${JSON.stringify(message)}\n\n`, { status: 200, headers: { "content-type": "text/event-stream" } });
+	}
+	return undefined;
+}
+
+/**
+ * Anthropic's server-side web search or fetch, for a nested call whose
+ * question says `native`: a successful search (two hits) or fetch, then a
+ * short answer; `native-error` gets the tool's error instead, so the caller
+ * falls back. Undefined for any other request.
+ */
+function serverToolReply(raw: string): string | undefined {
+	const body = JSON.parse(raw) as { tools?: Array<{ type?: string }>; messages?: unknown };
+	const tool = body.tools?.find((t) => t.type === "web_search_20260209" || t.type === "web_fetch_20260209")?.type;
+	const asked = JSON.stringify(body.messages ?? []);
+	if (!tool || !asked.includes("native")) return undefined;
+	const search = tool.startsWith("web_search");
+	const failed = asked.includes("native-error");
+	const result = search
+		? {
+				type: "web_search_tool_result",
+				tool_use_id: "srvtoolu_golden",
+				content: failed
+					? { type: "web_search_tool_result_error", error_code: "too_many_requests" }
+					: SEARCH_HITS.map((hit) => ({ type: "web_search_result", title: hit.title, url: hit.url, page_age: "1 day ago" })),
+			}
+		: {
+				type: "web_fetch_tool_result",
+				tool_use_id: "srvtoolu_golden",
+				content: failed ? { type: "web_fetch_tool_result_error", error_code: "url_not_allowed" } : { type: "web_fetch_result", url: "https://golden.example/article" },
+			};
+	const usage = { input_tokens: 10, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+	return sse([
+		{ type: "message_start", message: { id: "msg_golden", type: "message", role: "assistant", model: "golden", content: [], stop_reason: null, stop_sequence: null, usage } },
+		{ type: "content_block_start", index: 0, content_block: { type: "server_tool_use", id: "srvtoolu_golden", name: search ? "web_search" : "web_fetch", input: {} } },
+		{ type: "content_block_stop", index: 0 },
+		{ type: "content_block_start", index: 1, content_block: result },
+		{ type: "content_block_stop", index: 1 },
+		{ type: "content_block_start", index: 2, content_block: { type: "text", text: "" } },
+		{ type: "content_block_delta", index: 2, delta: { type: "text_delta", text: "Golden native answer." } },
+		{ type: "content_block_stop", index: 2 },
+		{ type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: 1 } },
+		{ type: "message_stop" },
+	]);
 }
 
 /**
@@ -252,6 +356,7 @@ function roundsFor(text: string): ToolCall[][] {
 	});
 	for (const round of later) if (round.length > 0) rounds.push(round);
 	if (has("GOLDEN_WEB_FETCH")) rounds.push(...WEB_FETCH_ROUNDS);
+	if (has("GOLDEN_SEARCH")) rounds.push(...SEARCH_ROUNDS);
 	if (has("GOLDEN_WORKTREE")) rounds.push(...WORKTREE_ROUNDS);
 	return rounds;
 }
@@ -284,6 +389,8 @@ export default function goldenFixture(_pi: ExtensionAPI) {
 		const offline = () => new Response("golden fixture: offline", { status: 503 });
 		if (new URL(url).hostname === "golden.example") return page(url);
 		const raw = init?.body;
+		const search = searchReply(url, typeof raw === "string" ? raw : undefined);
+		if (search) return search;
 		if (typeof raw !== "string") return offline();
 		let body: { messages?: unknown };
 		try {
@@ -294,6 +401,8 @@ export default function goldenFixture(_pi: ExtensionAPI) {
 		if (!Array.isArray(body.messages)) return offline();
 		appendFileSync(out, `${JSON.stringify({ url, body })}\n`);
 		const anthropic = url.includes("anthropic.com");
+		const server = anthropic ? serverToolReply(raw) : undefined;
+		if (server) return new Response(server, { status: 200, headers: { "content-type": "text/event-stream", "request-id": "req_golden" } });
 		const verdict = classifierVerdict(raw);
 		const calls = verdict === undefined ? scriptedCalls(body.messages as Array<{ role?: string; content?: unknown }>) : undefined;
 		const text = verdict ?? REPLY_TEXT;

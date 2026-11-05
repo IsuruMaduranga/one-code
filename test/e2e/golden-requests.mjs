@@ -81,7 +81,7 @@ const CONFIGS = [
 	{ name: "session-anthropic-tiny", model: ANTHROPIC, tier: "tiny", mode: "session" },
 	{ name: "session-openrouter-cheap", model: OPENROUTER, tier: "cheap", mode: "session" },
 ];
-const PROMPTS = { print: "Reply with OK.", tools: "GOLDEN_TOOLS GOLDEN_AGENT GOLDEN_NOTEBOOK GOLDEN_TASKS GOLDEN_WEB_FETCH GOLDEN_WORKTREE: make the scripted calls." };
+const PROMPTS = { print: "Reply with OK.", tools: "GOLDEN_TOOLS GOLDEN_AGENT GOLDEN_NOTEBOOK GOLDEN_TASKS GOLDEN_WEB_FETCH GOLDEN_SEARCH GOLDEN_WORKTREE: make the scripted calls." };
 
 /** A format 4.4 notebook (no cell ids, so nothing random) with the given code cells. */
 const notebook = (...sources) =>
@@ -125,7 +125,7 @@ const SESSION_PROMPTS = ["GOLDEN_TOOLS: read README.md and run echo golden.", "R
 function cleanEnv() {
 	const env = {};
 	for (const [key, value] of Object.entries(process.env)) {
-		if (/^(PI_|CC_|ONECODE_|ONE_CODE_|CLAUDE_|ANTHROPIC_|OPENAI_|OPENROUTER_|OPEN_ROUTER_)/.test(key)) continue;
+		if (/^(PI_|CC_|ONECODE_|ONE_CODE_|CLAUDE_|ANTHROPIC_|OPENAI_|OPENROUTER_|OPEN_ROUTER_|BRAVE_|TAVILY_|EXA_)/.test(key)) continue;
 		env[key] = value;
 	}
 	return env;
@@ -164,6 +164,8 @@ async function runConfig(config) {
 			ONECODE_NO_UPDATE_CHECK: "1",
 			SHELL: "/bin/zsh",
 			TZ: "UTC",
+			// Keys for the canned Brave and Tavily replies (golden-fixture.ts SEARCH_ROUNDS).
+			...(config.mode === "tools" ? { BRAVE_SEARCH_API_KEY: "golden-brave", TAVILY_API_KEY: "golden-tavily" } : {}),
 			...config.env,
 		};
 		const outcome = config.mode === "session" ? await runSession(config, { cwd: project, env }) : await runPrint(config, { cwd: project, env });
