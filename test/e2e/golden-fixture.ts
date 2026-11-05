@@ -622,6 +622,24 @@ const SHELL_ROUNDS: ToolCall[][] = [
 ];
 
 /**
+ * Tool results under GOLDEN_RESULTS: a shell output past the inline cap (the
+ * persisted-output block) and a find that matches nothing.
+ */
+const RESULT_ROUNDS: ToolCall[][] = [
+	[
+		{ id: "toolu_golden_result_large", name: "bash", input: { command: "seq 1 20000" } },
+		{ id: "toolu_golden_result_find", name: "find", input: { pattern: "*.golden-none" } },
+	],
+];
+
+/**
+ * GOLDEN_DENY (the session scenario, before its first compaction): a read
+ * outside the project, whose first-outside-read prompt the runner cancels, so
+ * the model hears the user declined it.
+ */
+const DENY_ROUNDS: ToolCall[][] = [[{ id: "toolu_golden_deny", name: "read", input: { path: "../golden-outside-read.md" } }]];
+
+/**
  * GOLDEN_BIGFILE (the session scenario, before its first compaction): make a
  * file past the restore's per-file cap and read it, so the restore sends the
  * note in place of its contents.
@@ -758,6 +776,8 @@ function roundsFor(text: string): ToolCall[][] {
 	if (has("GOLDEN_WORKFLOW")) rounds.push(...WORKFLOW_ROUNDS);
 	if (has("GOLDEN_AUTOMODE")) rounds.push(...AUTOMODE_ROUNDS);
 	if (has("GOLDEN_SHELL")) rounds.push(...SHELL_ROUNDS);
+	if (has("GOLDEN_RESULTS")) rounds.push(...RESULT_ROUNDS);
+	if (has("GOLDEN_DENY")) rounds.push(...DENY_ROUNDS);
 	if (has("GOLDEN_BIGFILE")) rounds.push(...BIGFILE_ROUNDS);
 	if (has("GOLDEN_WORKTREE")) rounds.push(...WORKTREE_ROUNDS);
 	return rounds;
