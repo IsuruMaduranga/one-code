@@ -20,7 +20,7 @@ describe.skipIf(process.platform === "win32")("remembered process groups", () =>
 		const script = [
 			`import { runBackgroundBashBlocking } from ${JSON.stringify(moduleUrl)};`,
 			`const keepAlive = setInterval(() => {}, 1000);`,
-			`const result = await runBackgroundBashBlocking({ id: 'owner-test', command: 'sleep 60 & printf "%s %s\\n" "$$" "$!"', description: 'daemon', cwd: process.cwd() });`,
+			`const result = await runBackgroundBashBlocking({ text: { earlierTruncated: '', spoolLost: () => '' }, id: 'owner-test', command: 'sleep 60 & printf "%s %s\\n" "$$" "$!"', description: 'daemon', cwd: process.cwd() });`,
 			`process.stdout.write(result.output);`,
 			`process.stdin.once('data', () => { ${how === "natural" ? "clearInterval(keepAlive); process.stdin.destroy();" : "process.exit(0);"} });`,
 		].join("\n");

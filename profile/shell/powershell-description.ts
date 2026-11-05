@@ -17,7 +17,7 @@
  * guard, after the captured text, the way the bash tool does.
  */
 
-export type PowerShellEditionName = "core" | "desktop" | "unknown";
+import type { PowerShellEditionName } from "../../extensions/lib/shell-text.ts";
 
 /** Claude Code's edition sections (binary JS, 2.1.276). */
 export const EDITION_SECTIONS: Record<PowerShellEditionName, string> = {

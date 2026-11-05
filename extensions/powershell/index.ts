@@ -28,17 +28,21 @@ import { Type } from "typebox";
 import { perCwd } from "../lib/per-cwd.ts";
 import { bashSpawn, createPowerShellOperations, POWERSHELL_TOOL_PREFIX, powerShellEdition, powerShellSpawn } from "../lib/shell-spawn.ts";
 import { registerShellTool } from "../lib/shell-tool.ts";
-import { powerShellToolDescription } from "./description.ts";
+import { requireText } from "../lib/profile.ts";
 import { powershellGuardReason } from "./guards.ts";
 import { shellToolPolicy, withShellTools } from "./policy.ts";
 
 /** Claude Code's PowerShell schema (captured), minus `dangerouslyDisableSandbox` — One Code has no sandbox to disable. */
-const PowerShellParams = Type.Object({
-	command: Type.String({ description: "The PowerShell command to execute" }),
-	timeout: Type.Optional(Type.Number({ description: "Optional timeout in milliseconds (max 600000)" })),
-	description: Type.Optional(Type.String({ description: "Clear, concise description of what this command does in active voice." })),
-	run_in_background: Type.Optional(Type.Boolean({ description: "Set to true to run this command in the background." })),
-});
+/** The tool's parameters, described in the profile's words. */
+const powerShellParams = () => {
+	const d = requireText("shell").powershellParams;
+	return Type.Object({
+		command: Type.String({ description: d.command }),
+		timeout: Type.Optional(Type.Number({ description: d.timeout })),
+		description: Type.Optional(Type.String({ description: d.description })),
+		run_in_background: Type.Optional(Type.Boolean({ description: d.run_in_background })),
+	});
+};
 
 function powershellExtension(pi: ExtensionAPI) {
 	powershellTool(pi, { announce: true });
@@ -56,8 +60,8 @@ export function powershellTool(pi: ExtensionAPI, { announce }: { announce: boole
 	registerShellTool(pi, {
 		name: "powershell",
 		ccLabel: "PowerShell",
-		description: powerShellToolDescription(powerShellEdition(spec)),
-		parameters: PowerShellParams,
+		description: requireText("shell").powershellDescription({ edition: powerShellEdition(spec) }),
+		parameters: powerShellParams(),
 		base,
 		// The guideline joins the system prompt's tool guidelines at registration
 		// (before the first request), so it is part of the cached prefix, never a

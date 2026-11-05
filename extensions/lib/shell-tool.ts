@@ -21,6 +21,8 @@ import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, shellSummary, typ
 import { commandToEvaluate, trackOriginalCommands } from "./original-command.ts";
 import { persistedFilePreview, persistIfLarge, sessionResultsDir } from "./persisted-output.ts";
 import { withClaudeCodeShellText } from "./shell-result.ts";
+import type { ShellEnd } from "./shell-text.ts";
+import { shellWords } from "./shell-words.ts";
 import { bashParserReady } from "./bash-parser.ts";
 import type { ShellSpawn } from "./shell-spawn.ts";
 import { keepSpillReadable } from "./spill-file.ts";
@@ -91,31 +93,21 @@ export interface ShellToolSpec<P extends TObject> {
  * How a shell task ended, read once from the finish summary: CC's `<status>`
  * (a stop is `killed`, a timeout or non-zero exit `failed`) and, for a failure
  * that an exit code does not explain, the detail (the timeout, the signal).
- * `finishLine` (foreground text) and the background notification both build
- * on this, so the two can never disagree.
+ * The one-shot result and the background notification both build
+ * on this, so the two can never disagree; the profile words it.
  */
+export function shellEnd(summary: BashFinishSummary, timeoutSeconds?: number): ShellEnd {
+	if (summary.stopped) return { kind: "stopped" };
+	if (summary.timedOut) return { kind: "timedOut", seconds: timeoutSeconds };
+	if (summary.exitCode === 0) return { kind: "completed" };
+	return summary.exitCode === null ? { kind: "signal", ...(summary.signal ? { signal: summary.signal } : {}) } : { kind: "exitCode", code: summary.exitCode };
+}
+
 export function shellFinish(summary: BashFinishSummary, timeoutSeconds?: number): { status: TaskStatus; detail?: string } {
-	if (summary.stopped) return { status: "killed" };
-	if (summary.timedOut) return { status: "failed", detail: `timed out after ${timeoutSeconds}s` };
-	if (summary.exitCode === 0) return { status: "completed" };
-	return { status: "failed", detail: summary.exitCode === null ? `terminated by ${summary.signal ?? "unknown signal"}` : undefined };
-}
-
-export function finishLine(summary: BashFinishSummary, timeoutSeconds?: number): string {
-	const { status, detail } = shellFinish(summary, timeoutSeconds);
-	if (status === "killed") return "stopped";
-	if (status === "completed") return "completed";
-	return `failed (${detail ?? `exit code ${summary.exitCode}`})`;
-}
-
-/**
- * Why a one-shot `run_in_background` call was stopped: a one-shot session
- * cannot keep a command running past the run, so the call is held to the
- * foreground deadline.
- */
-export function oneShotDeadlineNote(timeoutMs: number, explicit: boolean): string {
-	const which = explicit ? `its ${timeoutMs} ms timeout` : `the default ${timeoutMs} ms timeout (no \`timeout\` was given)`;
-	return `It was stopped at ${which}: a one-shot session cannot keep a background command running after the run ends, so a server or watcher started this way stops at the deadline. Pass a longer \`timeout\` (max ${MAX_TIMEOUT_MS}) for a long build.`;
+	const end = shellEnd(summary, timeoutSeconds);
+	if (end.kind === "stopped") return { status: "killed" };
+	if (end.kind === "completed") return { status: "completed" };
+	return { status: "failed", detail: shellWords().failureDetail(end) };
 }
 
 /** `<sessionDir>/bash/<taskId>/output.log` — one spool location for every shell tool (the shell panel reads it). */
@@ -211,7 +203,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 			const shell = spec.backgroundShell();
 			if (!shell) {
 				return {
-					content: [{ type: "text" as const, text: `No ${spec.ccLabel} executable is available for a background run.` }],
+					content: [{ type: "text" as const, text: shellWords().noBackgroundShell({ label: spec.ccLabel }) }],
 					isError: true,
 					details: {},
 				};
@@ -231,17 +223,25 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 			// server started this way hung the run forever. A detached shell below
 			// keeps having no deadline (findings §31).
 			if (!sessionOutlivesTurn(ctx.mode)) {
-				const summary = await runBackgroundBashBlocking({ id, command, description, cwd: ctx.cwd, timeoutSeconds, logPath, shell }, signal);
+				const summary = await runBackgroundBashBlocking({ id, command, description, cwd: ctx.cwd, timeoutSeconds, logPath, shell, text: shellWords() }, signal);
 				const spool = summary.logPath && Buffer.byteLength(summary.output, "utf8") > INLINE_OUTPUT_CAP
 					? persistedFilePreview(summary.logPath)
 					: undefined;
 				const output = spool ?? persistIfLarge(summary.output, { dir: sessionResultsDir(ctx), id: `${spec.name}-${id}`, maxBytes: INLINE_OUTPUT_CAP });
-				const deadline = summary.timedOut ? ` ${oneShotDeadlineNote(timeoutSeconds * 1000, explicitTimeout)}` : "";
 				return {
 					content: [
 						{
 							type: "text" as const,
-							text: `${spec.ccLabel} task ${id} (${description}) ${finishLine(summary, timeoutSeconds)}. ${oneShotNote("command")}${deadline}${summary.logPath ? ` Log: ${summary.logPath}.` : ""}\n\n${output}`,
+							text: shellWords().ranToEnd({
+								label: spec.ccLabel,
+								id,
+								description,
+								end: shellEnd(summary, timeoutSeconds),
+								note: oneShotNote("command"),
+								...(summary.timedOut ? { deadline: { timeoutMs: timeoutSeconds * 1000, explicit: explicitTimeout, maxTimeoutMs: MAX_TIMEOUT_MS } } : {}),
+								...(summary.logPath ? { logPath: summary.logPath } : {}),
+								output,
+							}),
 						},
 					],
 					// No taskId: nothing was registered behind task_output/task_stop, and
@@ -258,6 +258,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 			// exactly 10 minutes. The one-shot path above keeps the timeout
 			// because there the command holds the turn.
 			const task = startBackgroundBash({
+				text: shellWords(),
 				id,
 				command,
 				description,
@@ -277,7 +278,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 							outputFile: finishedTask.logPath,
 							status,
 							summary: shellSummary(description, status, summary.exitCode, detail),
-							result: finishedTask.logPath ? undefined : tailCap(summary.output, NOTIFY_OUTPUT_CAP).trim() || undefined,
+							result: finishedTask.logPath ? undefined : tailCap(summary.output, NOTIFY_OUTPUT_CAP, shellWords().earlierTruncated).trim() || undefined,
 						}),
 						{ taskId: id, status: finishedTask.status, exitCode: summary.exitCode, logPath: finishedTask.logPath },
 					);
@@ -291,7 +292,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 				content: [
 					{
 						type: "text" as const,
-						text: `⏳ ${spec.ccLabel} task ${id} running in background (${description}).\n\nCompletion will arrive as a task notification on its own naming the output file — you do not need to wait for it or poll; keep working.${logPath ? ` To check interim output, read ${logPath}.` : ""} If your next step cannot proceed without the result, task_output with block=true waits for it. Stop with task_stop.`,
+						text: shellWords().backgroundStarted({ label: spec.ccLabel, id, description, ...(logPath ? { logPath } : {}) }),
 					},
 				],
 				details: { taskId: id, logPath },

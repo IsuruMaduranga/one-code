@@ -18,13 +18,14 @@ import type { BackgroundTask } from "../background/registry.ts";
 import { whenAborted } from "../lib/abort.ts";
 import { detachedSpawnOptions, KILL_GRACE_MS, rememberProcessGroup, stopProcessTree, waitForChildExit } from "../lib/process-tree.ts";
 import { bashSpawnOrThrow, type ShellSpawn, spawnShellCommand } from "../lib/shell-spawn.ts";
+import type { ShellText } from "../lib/shell-text.ts";
 
 export const STORED_OUTPUT_CAP = 200_000;
 
 export const EMPTY_OUTPUT_MARKER = "(no output — the command wrote nothing to stdout or stderr)";
 
-export function tailCap(text: string, cap: number): string {
-	return text.length <= cap ? text : `… (earlier output truncated)\n${text.slice(-cap)}`;
+export function tailCap(text: string, cap: number, marker: string): string {
+	return text.length <= cap ? text : `${marker}${text.slice(-cap)}`;
 }
 
 export interface BashFinishSummary {
@@ -54,6 +55,12 @@ export interface StartBackgroundBashOptions {
 	 * honoured); the powershell extension passes its own spec.
 	 */
 	shell?: ShellSpawn;
+	/**
+	 * The profile's words for cut output. Passed in, not read from the
+	 * profile, so this module loads in a plain Node process (the process-group
+	 * test runs it there).
+	 */
+	text: Pick<ShellText, "earlierTruncated" | "spoolLost">;
 	onFinished(task: BackgroundTask, summary: BashFinishSummary): void;
 }
 
@@ -86,7 +93,7 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 	const appender = (decoder: StringDecoder) => (chunk: Buffer) => {
 		const text = stored + decoder.write(chunk);
 		overflowed ||= text.length > STORED_OUTPUT_CAP;
-		stored = tailCap(text, STORED_OUTPUT_CAP);
+		stored = tailCap(text, STORED_OUTPUT_CAP, options.text.earlierTruncated);
 		if (!spoolFailed) log?.write(chunk);
 	};
 	child.stdout?.on("data", appender(stdoutText));
@@ -108,7 +115,7 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 		logPath: options.logPath,
 		ownUI: true, // rendered live by the subagents panel's shell manager
 		output: () => overflowed && !task.logPath
-			? `[The command's spool file could not be written, so only the last ${STORED_OUTPUT_CAP.toLocaleString("en-US")} characters of its output were kept.]\n${stored}`
+			? `${options.text.spoolLost({ keptChars: STORED_OUTPUT_CAP })}${stored}`
 			: stored || (task.status === "running" ? "" : EMPTY_OUTPUT_MARKER),
 		stop: () => {
 			stopRequested = true;
@@ -134,7 +141,7 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 		if (timer) clearTimeout(timer);
 		// An incomplete sequence at the very end decodes as U+FFFD, as it would have.
 		const rest = stdoutText.end() + stderrText.end();
-		if (rest) stored = tailCap(stored + rest, STORED_OUTPUT_CAP);
+		if (rest) stored = tailCap(stored + rest, STORED_OUTPUT_CAP, options.text.earlierTruncated);
 		let completed = false;
 		const complete = () => {
 			if (completed) return;

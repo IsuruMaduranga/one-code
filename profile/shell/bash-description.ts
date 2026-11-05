@@ -16,7 +16,7 @@
  * tiny's system prompt says (system-prompt/tiers/low.ts).
  */
 
-import type { DescriptionForm } from "../lib/tool-variants.ts";
+import type { DescriptionForm } from "../../extensions/lib/tool-variants.ts";
 
 /** The bullet Claude Code adds to the short form when auto mode is off. */
 export const BASH_AVOID_SHELL_READS_LINE = "- IMPORTANT: Avoid using this tool to run `cat`, `head`, `tail`, `sed`, `awk`, or `echo` commands, unless explicitly instructed or after you have verified that a dedicated tool cannot accomplish your task. Instead, use the appropriate dedicated tool as this will provide a much better experience for the user.\n";

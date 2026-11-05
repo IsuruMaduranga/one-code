@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import bashExtension from "../../extensions/bash/index.ts";
 import { startBackgroundBash } from "../../extensions/bash/background.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { shell as text } from "../../profile/shell/index.ts";
 
 describe("background shell output survives the memory cap and spool failure", () => {
 	const dirs: string[] = [];
@@ -43,7 +44,7 @@ describe("background shell output survives the memory cap and spool failure", ()
 
 	it("does not advertise a failed spool as the full output", async () => {
 		const dir = directory();
-		const task = startBackgroundBash({ id: "spool-fail", command: "printf 'kept output'", description: "failed spool", cwd: dir, logPath: join(dir, "missing", "output.log"), onFinished() {} });
+		const task = startBackgroundBash({ text, id: "spool-fail", command: "printf 'kept output'", description: "failed spool", cwd: dir, logPath: join(dir, "missing", "output.log"), onFinished() {} });
 		await task.finished;
 		expect(task.output()).toBe("kept output");
 		expect(task.logPath).toBeUndefined();

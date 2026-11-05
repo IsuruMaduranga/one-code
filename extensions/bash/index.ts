@@ -29,15 +29,18 @@ import { bashSpawn, piShellEnv, withChildProcessEnv } from "../lib/shell-spawn.t
 import { registerShellTool } from "../lib/shell-tool.ts";
 import { type DescriptionForm, followDescriptionForm } from "../lib/tool-variants.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../permissions/modes.ts";
-import { BASH_PARAMS, bashDescription } from "./description.ts";
+import type { ShellParams } from "../lib/shell-text.ts";
+import { requireText } from "../lib/profile.ts";
 import { bashGuardReason } from "./guards.ts";
 
-const BashParams = Type.Object({
-	command: Type.String({ description: BASH_PARAMS.command }),
-	timeout: Type.Optional(Type.Number({ description: BASH_PARAMS.timeout })),
-	description: Type.Optional(Type.String({ description: BASH_PARAMS.description })),
-	run_in_background: Type.Optional(Type.Boolean({ description: BASH_PARAMS.run_in_background })),
-});
+/** The tool's parameters, described in the profile's words. */
+const bashParams = (d: ShellParams) =>
+	Type.Object({
+		command: Type.String({ description: d.command }),
+		timeout: Type.Optional(Type.Number({ description: d.timeout })),
+		description: Type.Optional(Type.String({ description: d.description })),
+		run_in_background: Type.Optional(Type.Boolean({ description: d.run_in_background })),
+	});
 
 function bashExtension(pi: ExtensionAPI) {
 	bashTool(pi, { announce: true });
@@ -79,12 +82,13 @@ export function bashTool(pi: ExtensionAPI, { announce }: { announce: boolean }) 
 	// Tiny's dedicated search tools replace the long form's shell-find advice.
 	let searchTools = false;
 	let autoMode = false;
-	const describe = () => bashDescription(form, autoMode, searchTools);
+	const text = requireText("shell");
+	const describe = () => text.bashDescription({ form, autoMode, searchTools });
 	const setDescription = registerShellTool(pi, {
 		name: "bash",
 		ccLabel: "Bash",
 		description: describe(),
-		parameters: BashParams,
+		parameters: bashParams(text.bashParams),
 		base,
 		foreground: perCwd((cwd: string) => createBashToolDefinition(cwd, { shellPath, spawnHook })),
 		guard: bashGuardReason,

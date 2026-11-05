@@ -34,6 +34,7 @@ import {
 	type Segment,
 	type Token,
 } from "../auto-mode/shell-analysis.ts";
+import { shellWords } from "../lib/shell-words.ts";
 
 export const clip = (text: string, max = 200): string => (text.length > max ? `${text.slice(0, max)}…` : text);
 
@@ -95,14 +96,7 @@ export function leadingSleepReason<T>(
 	if (leadSleeps === 1 && total !== undefined && total < 2) return undefined;
 	const rest = statements.slice(leadSleeps).map(raw).filter(Boolean).join("; ");
 	const shown = statements.slice(0, leadSleeps).map(raw).join(opts.joiner);
-	const echo = rest ? `\`${shown}\` followed by: ${clip(rest)}` : `standalone \`${shown}\``;
-	return (
-		`Blocked: ${echo}. A foreground ${opts.sleepName} stalls the whole session while it runs. ` +
-		"To wait for a command you started, run it with run_in_background: true — its completion arrives as a task notification on its own, so you never need to poll. " +
-		`To wait for a condition, use the monitor tool with an until-loop (e.g. \`${opts.untilExample}\`) — monitor is deferred, load it with tool_search select:monitor. ` +
-		"If you genuinely need a delay (rate limiting, deliberate pacing), keep it under 2 seconds. " +
-		"Do not chain shorter sleeps to work around this block."
-	);
+	return shellWords().blocked({ kind: "sleep", shown, ...(rest ? { rest: clip(rest) } : {}), sleepName: opts.sleepName, untilExample: opts.untilExample });
 }
 
 function waitReason(segments: Segment[]): string | undefined {
@@ -128,21 +122,14 @@ function pollLoopReason(command: string, segments: Segment[]): string | undefine
 	// as a command inside the loop: `echo sleep` is data.
 	const sleeps = segments.some((seg) => inLoop(seg) && resolvePayload(leadTokens(seg)).command === "sleep");
 	if (!sleeps) return undefined;
-	return (
-		`Blocked: a foreground polling loop (\`${clip(command, 160)}\`). It occupies the whole session while it spins. ` +
-		"Use the monitor tool to run the until-loop for you (deferred — load it with tool_search select:monitor) — it returns when the condition holds — or start the underlying work with run_in_background: true and let its completion notification arrive on its own. " +
-		"Do not shorten the sleep or unroll the loop to work around this block."
-	);
+	return shellWords().blocked({ kind: "pollingLoop", command: clip(command, 160) });
 }
 
 // ---------------------------------------------------------------------------
 // Orphan guard
 
 function orphanReason(background: boolean, segments: Segment[]): string | undefined {
-	const message = (via: string) =>
-		`Blocked: this command detaches a process with ${via}, leaving an orphan this session cannot manage — its output and exit status would be lost. ` +
-		"Run it with run_in_background: true instead: it returns a task id immediately, completion arrives as a task notification, output stays readable with task_output, and it can be stopped with task_stop. " +
-		"If you need shell-level parallelism inside one command, end it with `wait` so the children are reaped.";
+	const message = (via: string) => shellWords().blocked({ kind: "detach", via });
 
 	for (const seg of segments) {
 		const { peeled } = resolvePayload(leadTokens(seg));
@@ -166,31 +153,19 @@ function interactiveReason(segments: Segment[]): string | undefined {
 		const { command: cmd, args } = resolvePayload(leadTokens(seg));
 		if (EDITORS.has(cmd)) {
 			if (cmd === "emacs" && args.some((a) => ["--batch", "-batch", "--script"].includes(a.value))) continue;
-			return (
-				`Blocked: \`${cmd}\` is an interactive editor and this shell has no TTY — it would hang until the timeout. ` +
-				"Read files with the read tool and change them with edit/write."
-			);
+			return shellWords().blocked({ kind: "editor", command: cmd });
 		}
 		if (cmd === "watch") {
-			return (
-				"Blocked: `watch` needs an interactive terminal, which this shell does not have. " +
-				"Use the monitor tool (deferred — load it with tool_search select:monitor) to wait for a condition, or run_in_background: true with task_output to check on long-running output."
-			);
+			return shellWords().blocked({ kind: "watch" });
 		}
 		if (cmd !== "git") continue;
 		const { sub, rest } = gitSubcommand(args);
 		const flags = new Set(rest.map((t) => t.value));
 		if (sub === "rebase" && (flags.has("-i") || flags.has("--interactive"))) {
-			return (
-				"Blocked: `git rebase -i` opens an interactive editor, which this shell cannot provide — it would hang until the timeout. " +
-				"Drive it non-interactively instead: `GIT_SEQUENCE_EDITOR=: git rebase …` accepts the todo list as-is, or restructure history with `git rebase --onto`, `git commit --amend`, or `git cherry-pick`."
-			);
+			return shellWords().blocked({ kind: "rebaseInteractive", shell: "bash" });
 		}
 		if (sub === "add" && ["-i", "--interactive", "-p", "--patch"].some((f) => flags.has(f))) {
-			return (
-				"Blocked: interactive `git add` prompts on a TTY this shell does not have — it would read EOF and stage nothing while appearing to succeed. " +
-				"Stage whole files with `git add <paths>`, or stage a partial change non-interactively with `git apply --cached` and a crafted diff."
-			);
+			return shellWords().blocked({ kind: "addInteractive" });
 		}
 	}
 	return undefined;

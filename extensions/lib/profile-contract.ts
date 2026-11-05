@@ -36,6 +36,7 @@ import type { WorkflowText } from "../workflow/text.ts";
 import type { WebSearchText } from "../web/text.ts";
 import type { WorktreeGuardText, WorktreeText } from "../worktree/text.ts";
 import type { NativeWebText } from "./native-web-text.ts";
+import type { ShellText } from "./shell-text.ts";
 import type { FeatureId } from "./features.ts";
 
 /**
@@ -75,6 +76,8 @@ export interface ProfileText {
 	workflow?: WorkflowText;
 	/** Read by the permission gate, which always runs: a profile must supply it. */
 	autoMode?: AutoModeText;
+	/** Used by bash and powershell (lib/shell-tool.ts). */
+	shell?: ShellText;
 	/** Used by the worktree tools, subagents and workflows (each guards isolated sessions with it). */
 	worktreeGuard?: WorktreeGuardText;
 }

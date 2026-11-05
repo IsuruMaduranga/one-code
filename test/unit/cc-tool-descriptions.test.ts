@@ -11,7 +11,7 @@ import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import askUserExtension from "../../extensions/ask-user/index.ts";
 import { ASK_LONG_DESCRIPTION, ASK_SHORT_DESCRIPTION } from "../../profile/ask-user/description.ts";
-import { BASH_AVOID_SHELL_READS_LINE, BASH_LONG_DESCRIPTION, BASH_LONG_SEARCH_TOOLS_DESCRIPTION, BASH_SHORT_DESCRIPTION, bashDescription } from "../../extensions/bash/description.ts";
+import { BASH_AVOID_SHELL_READS_LINE, BASH_LONG_DESCRIPTION, BASH_LONG_SEARCH_TOOLS_DESCRIPTION, BASH_SHORT_DESCRIPTION, bashDescription } from "../../profile/shell/bash-description.ts";
 import bashExtension from "../../extensions/bash/index.ts";
 import { NOTEBOOK_EDIT_DESCRIPTION } from "../../profile/notebook/description.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts";

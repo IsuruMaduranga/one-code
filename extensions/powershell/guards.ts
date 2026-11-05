@@ -16,6 +16,7 @@
  */
 
 import { leadingSleepReason } from "../bash/guards.ts";
+import { shellWords } from "../lib/shell-words.ts";
 import { gitSubcommand } from "../auto-mode/shell-analysis.ts";
 import { powershellStatements, statementCommand } from "../permissions/powershell-rules.ts";
 
@@ -53,10 +54,7 @@ export function powershellGuardReason(command: string, opts: { background: boole
 	for (const statement of statements) {
 		const cmd = statementCommand(statement);
 		if (INTERACTIVE.has(cmd)) {
-			return (
-				`Blocked: \`${cmd}\` waits on a console or GUI prompt, and this shell runs -NonInteractive with stdin on the null device — it would error or hang until the timeout. ` +
-				"Ask the user with ask_user_question instead, or pass the value on the command line."
-			);
+			return shellWords().blocked({ kind: "consolePrompt", command: cmd });
 		}
 		if (cmd === "git") {
 			// `gitSubcommand` skips git's value-taking global flags (`-C <dir>`,
@@ -67,16 +65,10 @@ export function powershellGuardReason(command: string, opts: { background: boole
 			const { sub, rest } = gitSubcommand(words.map((value) => ({ value })));
 			const flags = new Set(rest.map((t) => t.value));
 			if (sub === "rebase" && (flags.has("-i") || flags.has("--interactive"))) {
-				return (
-					"Blocked: `git rebase -i` opens an interactive editor, which this shell cannot provide — it would hang until the timeout. " +
-					"Drive it non-interactively instead: `$env:GIT_SEQUENCE_EDITOR = ':'; git rebase …` accepts the todo list as-is, or restructure history with `git rebase --onto`, `git commit --amend`, or `git cherry-pick`."
-				);
+				return shellWords().blocked({ kind: "rebaseInteractive", shell: "powershell" });
 			}
 			if (sub === "add" && ["-i", "--interactive", "-p", "--patch"].some((f) => flags.has(f))) {
-				return (
-					"Blocked: interactive `git add` prompts on a TTY this shell does not have — it would read EOF and stage nothing while appearing to succeed. " +
-					"Stage whole files with `git add <paths>`, or stage a partial change non-interactively with `git apply --cached` and a crafted diff."
-				);
+				return shellWords().blocked({ kind: "addInteractive" });
 			}
 		}
 	}

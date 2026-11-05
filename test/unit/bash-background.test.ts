@@ -12,10 +12,12 @@ import {
 } from "../../extensions/bash/background.ts";
 import type { BackgroundTask } from "../../extensions/background/registry.ts";
 import { localPwsh } from "./helpers/local-pwsh.ts";
+import { shell as text } from "../../profile/shell/index.ts";
 
 function start(command: string, extra?: { timeoutSeconds?: number; logPath?: string }) {
 	let summary: BashFinishSummary | undefined;
 	const task = startBackgroundBash({
+		text,
 		id: "btest001",
 		command,
 		description: "test",
@@ -115,15 +117,15 @@ describe("startBackgroundBash", () => {
 
 describe("tailCap", () => {
 	it("keeps short text and truncates long text with a marker", () => {
-		expect(tailCap("short", 100)).toBe("short");
-		const capped = tailCap("x".repeat(500), 100);
+		expect(tailCap("short", 100, text.earlierTruncated)).toBe("short");
+		const capped = tailCap("x".repeat(500), 100, text.earlierTruncated);
 		expect(capped).toContain("earlier output truncated");
 		expect(capped.endsWith("x".repeat(100))).toBe(true);
 	});
 });
 
 describe("runBackgroundBashBlocking (one-shot modes, STEERING-REVIEW-2026-09-05 H3)", () => {
-	const options = (command: string) => ({ id: "bblock01", command, description: "test", cwd: process.cwd() });
+	const options = (command: string) => ({ text, id: "bblock01", command, description: "test", cwd: process.cwd() });
 
 	it("resolves with the finished command's summary and output", async () => {
 		const summary = await runBackgroundBashBlocking(options("echo blocking-ok"));
@@ -174,6 +176,7 @@ describe.skipIf(!pwsh)("startBackgroundBash with a PowerShell spec (real pwsh)",
 	const startPwsh = (command: string, extra?: { timeoutSeconds?: number }) => {
 		let summary: BashFinishSummary | undefined;
 		const task = startBackgroundBash({
+			text,
 			id: "bpwsh001",
 			command,
 			description: "test",
