@@ -1,3 +1,5 @@
+import { resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile.ts";
+import { profile } from "../../profile/index.ts";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,6 +33,18 @@ afterEach(() => {
 describe("loadProjectInstructions", () => {
 	it("returns undefined when there are no instruction files", () => {
 		expect(loadProjectInstructions(repo, home)).toBeUndefined();
+	});
+
+	it("returns undefined while the agent's instruction files are off, as the agent then reads none", () => {
+		writeFileSync(join(repo, "CLAUDE.md"), "claude rule");
+		writeFileSync(join(repo, "AGENTS.md"), "never push to main");
+		setActiveProfileForTest(resolveProfile(profile, { ONECODE_FEATURES_OFF: "claude-context" }, "/profile"));
+		try {
+			expect(loadProjectInstructions(repo, home)).toBeUndefined();
+		} finally {
+			setActiveProfileForTest(undefined);
+		}
+		expect(loadProjectInstructions(repo, home)).toContain("claude rule");
 	});
 
 	it("reads AGENTS.md beside CLAUDE.md in compatible mode, whatever instructionFiles picks for the agent", () => {

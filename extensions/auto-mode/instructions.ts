@@ -24,6 +24,7 @@ import { agentInstructionSections, type ClassifierFile, openInstructions } from 
 import { classifierInstructionNote, fitToWindow } from "../lib/instruction-budget.ts";
 import { estimateTextTokens } from "../lib/pi-ai-estimate.ts";
 import { tryRealpath } from "../lib/paths.ts";
+import { featureEnabled } from "../lib/profile.ts";
 
 /**
  * Concatenated instruction files in the agent's order (managed and global,
@@ -38,10 +39,15 @@ import { tryRealpath } from "../lib/paths.ts";
  * agent's files are skipped exactly as the agent skips them; the files only
  * the classifier reads (path-conditional rules, AGENTS.md beside CLAUDE.md)
  * share what the agent's loaded files leave of the half. A transcript too
- * large for that window is not judged (`decisions/auto-mode.md`). `agentDir`
+ * large for that window is not judged (`decisions/auto-mode.md`). With the
+ * claude-context feature off the agent reads no instruction file, and
+ * neither does the classifier. `agentDir`
  * is pi's (`getAgentDir()`), for its global AGENTS.md.
  */
 export function loadProjectInstructions(cwd: string, home: string, contextWindow?: number, agentDir?: string): string | undefined {
+	// The classifier sees what the agent sees: nothing while the agent's own
+	// instruction files are off (decisions/bi-fork.md).
+	if (!featureEnabled("claude-context")) return undefined;
 	const files: (ClassifierFile & { key: string })[] = [];
 	const seen = new Set<string>();
 	const add = (file: ClassifierFile) => {
