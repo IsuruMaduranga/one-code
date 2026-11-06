@@ -185,8 +185,8 @@ export function worktreeGuardFactory(cwd: string): InlineExtension {
 		name: "agent-worktree-guard",
 		hidden: true,
 		factory: (pi) => {
-			const words = requireText("worktreeGuard");
-			const block = (refusal: WorktreeGuardRefusal | undefined) => (refusal ? { block: true, reason: words.refusal(refusal) } : undefined);
+			// Read when a refusal is worded: every child loads this guard, and only an isolated one refuses.
+			const block = (refusal: WorktreeGuardRefusal | undefined) => (refusal ? { block: true, reason: requireText("worktreeGuard").refusal(refusal) } : undefined);
 			pi.on("tool_call", async (event, ctx) => {
 				const runCwd = ctx?.cwd ?? cwd;
 				const isolation = worktreeIsolationFor(runCwd);

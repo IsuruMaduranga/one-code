@@ -285,10 +285,7 @@ export function frameForDelivery(text: string, delivery: Delivery): string {
  * that build them, so a wording change cannot leave the parsers behind:
  * `delivery` matches everything `frameForDelivery` adds, `frame` both frames.
  */
-let framing: { words: NotificationsText; delivery: RegExp; frame: RegExp } | undefined;
-function framingPatterns(): { delivery: RegExp; frame: RegExp } {
-	const words = notificationWords();
-	if (framing?.words === words) return framing;
+const framing = memoOn((words: NotificationsText): { delivery: RegExp; frame: RegExp } => {
 	const { preamble, agentMessage: message } = words;
 	const delivery = new RegExp(
 		[
@@ -306,9 +303,9 @@ function framingPatterns(): { delivery: RegExp; frame: RegExp } {
 		].join("|"),
 		"g",
 	);
-	framing = { words, delivery, frame };
-	return framing;
-}
+	return { delivery, frame };
+});
+const framingPatterns = () => framing(notificationWords());
 
 /** The inverse for display: drop the wrapper and either preamble, leaving the frames. */
 export function unframeDelivery(text: string): string {

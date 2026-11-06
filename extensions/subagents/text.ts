@@ -17,6 +17,7 @@ import type { LiveTools } from "../lib/live-tools.ts";
 
 /** What an agent may use, as its catalog row says. */
 export type AgentTools =
+	/** Empty when every tool the agent lists is off. */
 	| { kind: "listed"; tools: string[] }
 	| { kind: "allExcept"; tools: string[] }
 	/** `builtIn`: a built-in or bundled agent (Claude Code writes `*` for those). */

@@ -11,7 +11,8 @@
 import { fitPainted, visibleWidth } from "./text-width.ts";
 import { cutPlainText } from "./tui-render.ts";
 import { notificationWords } from "./notification-words.ts";
-import { around, fillOf } from "./template-probe.ts";
+import { around, fillOf, memoOn } from "./template-probe.ts";
+import type { NotificationsText } from "./notifications-text.ts";
 
 /** `{ target }` while an agent is viewed, `{}` when the view returns to main. */
 export const AGENT_VIEW_CHANNEL = "one-code:agent-view";
@@ -49,10 +50,12 @@ export function userMessageForAgent(text: string): string {
 	return notificationWords().userMessageMidTurn({ text });
 }
 
+/** The wrapper around the user's text, from the profile's own words. */
+const userMessageFrame = memoOn((words: NotificationsText) => around((text) => words.userMessageMidTurn({ text })));
+
 /** The user's own text inside `userMessageForAgent`'s wrapper, or undefined for any other prompt. */
 export function unwrapUserMessage(prompt: string): string | undefined {
-	// The wrapper around the text, from the profile's own words.
-	const frame = around(userMessageForAgent);
+	const frame = userMessageFrame(notificationWords());
 	return frame?.before ? fillOf(prompt, frame) : undefined;
 }
 

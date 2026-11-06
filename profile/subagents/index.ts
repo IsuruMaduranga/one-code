@@ -33,7 +33,7 @@ const TASK_REQUIRED = "`task` is required: a complete, self-contained instructio
 // tells the model an agent cannot edit: "*" for its built-in agents, "All
 // tools" for an agent file that lists none.
 function toolsClause(tools: AgentTools): string {
-	if (tools.kind === "listed") return ` (Tools: ${tools.tools.join(", ")})`;
+	if (tools.kind === "listed") return ` (Tools: ${tools.tools.join(", ") || "none"})`;
 	if (tools.kind === "allExcept") return ` (Tools: All tools except ${tools.tools.join(", ")})`;
 	return tools.builtIn ? " (Tools: *)" : " (Tools: All tools)";
 }

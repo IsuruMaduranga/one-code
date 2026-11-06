@@ -1547,7 +1547,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		// paused — this is the resume prompt, not a per-action approval.
 		const pausedResume = mode === "auto" && result.decision === "classify";
 		const title = floorReason
-			? `Auto mode never auto-approves this — ${event.toolName} ${floorReason}.\n\n  ${preview}\n\n  Allow it this once?`
+			? `Auto mode never auto-approves this — ${event.toolName} ${safetyFloorReason(floorReason)}.\n\n  ${preview}\n\n  Allow it this once?`
 			: askTitle(event.toolName, preview, result.cause, pausedResume);
 		const grant = sessionGrant({
 			toolName: normalizedTool,

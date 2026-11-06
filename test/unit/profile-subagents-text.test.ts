@@ -15,6 +15,7 @@ describe("One Code's subagent text", () => {
 		expect(subagents.catalogRow({ name: "a", description: "d", tools: { kind: "all", builtIn: true } })).toBe("- a: d (Tools: *)");
 		expect(subagents.catalogRow({ name: "a", description: "", tools: { kind: "all", builtIn: false } })).toBe("- a: (no description) (Tools: All tools)");
 		expect(subagents.catalogRow({ name: "a", description: "d", tools: { kind: "allExcept", tools: ["Edit", "Write"] } })).toBe("- a: d (Tools: All tools except Edit, Write)");
+		expect(subagents.catalogRow({ name: "a", description: "d", tools: { kind: "listed", tools: [] } })).toBe("- a: d (Tools: none)");
 	});
 
 	it("words the nested Agent tool's refusals", () => {

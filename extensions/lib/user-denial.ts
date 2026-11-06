@@ -7,12 +7,16 @@
  * wait for the user.
  */
 
-import { around } from "./template-probe.ts";
+import { around, memoOn } from "./template-probe.ts";
+import type { ToolResultsText } from "./tool-results-text.ts";
 import { toolResultWords } from "./tool-results-words.ts";
 
 export function userDenialText(feedback?: string): string {
 	return toolResultWords().userDenial(feedback === undefined ? {} : { feedback });
 }
+
+/** The text up to where the user's words go, from the profile's own wording. */
+const reasonPrefixOf = memoOn((words: ToolResultsText) => around((feedback) => words.userDenial({ feedback }))?.before);
 
 /**
  * Whether a tool result is the user's rejection, for the transcript: `stop`
@@ -23,7 +27,6 @@ export function userDenialText(feedback?: string): string {
 export function userDenialKind(text: string): "stop" | "reason" | undefined {
 	const words = toolResultWords();
 	if (text.startsWith(words.userDenial({}))) return "stop";
-	// The text up to where the user's words go, from the profile's own wording.
-	const reasonPrefix = around((feedback) => words.userDenial({ feedback }))?.before;
+	const reasonPrefix = reasonPrefixOf(words);
 	return reasonPrefix && text.startsWith(reasonPrefix) ? "reason" : undefined;
 }

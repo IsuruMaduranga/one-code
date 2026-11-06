@@ -261,6 +261,10 @@ const BLOCK_ORDER: Record<SubagentBlockKey, number> = {
 const REFUSED_MODELS_STATE = "subagents:refused-models";
 
 function subagentsExtension(pi: ExtensionAPI) {
+	/** The profile's subagent words (fails closed: every Agent call reads them). */
+	const words = subagentWords();
+	/** A refused Agent call (the nested Agent tool's too). */
+	const refuseCall = (r: SubagentRefusal) => ({ content: [{ type: "text" as const, text: words.refused(r) }], details: {}, isError: true });
 	const requestTier = sessionModelTier(pi);
 	const registry = new RunRegistry();
 	/**
@@ -454,8 +458,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 	/** The runtime, or the startup error as a message a failed run can report. */
 	const runtimeOrError = (ctx: ExtensionContext): Promise<SubagentRuntime | string> =>
 		getRuntime(ctx)
-			.then((runtime) => (shuttingDown ? subagentWords().runtimeProblem({ kind: "sessionEnded" }) : runtime))
-			.catch((error: unknown) => subagentWords().runtimeProblem({ kind: "failed", osMessage: error instanceof Error ? error.message : String(error) }));
+			.then((runtime) => (shuttingDown ? words.runtimeProblem({ kind: "sessionEnded" }) : runtime))
+			.catch((error: unknown) => words.runtimeProblem({ kind: "failed", osMessage: error instanceof Error ? error.message : String(error) }));
 
 	// The mcp extension answers a status request synchronously on the bus.
 	let mcpStatus: McpServerStatus[] | undefined;
@@ -547,13 +551,13 @@ function subagentsExtension(pi: ExtensionAPI) {
 
 	/** One catalog row per agent, the shape every catalog the model reads uses. */
 	const catalogLines = (agents: AgentDefinition[]): string[] =>
-		agents.map((a) => subagentWords().catalogRow({ name: a.name, description: a.description, tools: agentTools(a) }));
+		agents.map((a) => words.catalogRow({ name: a.name, description: a.description, tools: agentTools(a) }));
 
 	/** The catalog rows with the fork's. */
-	const describeAgents = (cwd: string, sources?: AgentSources): string[] => [...catalogLines(loadAgents(cwd, sources)), subagentWords().forkRow];
+	const describeAgents = (cwd: string, sources?: AgentSources): string[] => [...catalogLines(loadAgents(cwd, sources)), words.forkRow];
 
 	/** A background launch's line, in the profile's words. */
-	const launchLine = (line: LaunchLine): string => subagentWords().launchLine(line);
+	const launchLine = (line: LaunchLine): string => words.launchLine(line);
 
 	const reconstructRuns = (ctx: ExtensionContext) => {
 		/** Loop-invariant; computed lazily so worktree-free histories pay nothing. */
@@ -650,7 +654,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			const fact = toldBlockFact(key, text ?? "");
 			if (told === fact.hash || (text === null && told === undefined)) continue;
 			const facts = [fact];
-			if (text === null) request.blocks.push({ text: subagentWords().delegationWithdrawn, facts });
+			if (text === null) request.blocks.push({ text: words.delegationWithdrawn, facts });
 			else if (key === "subagent-models" && refusal) request.blocks.push({ text: refusal.refused.map((model) => refusedModelNote(model, refusal?.replacement)).join("\n"), facts });
 			else request.blocks.push({ text, facts });
 		}
@@ -706,14 +710,14 @@ function subagentsExtension(pi: ExtensionAPI) {
 		if (catalogMemo?.stamp !== stamp) {
 			catalogMemo = {
 				stamp,
-				text: subagentWords().catalogBlock({ rows: describeAgents(ctx.cwd, sources) }),
+				text: words.catalogBlock({ rows: describeAgents(ctx.cwd, sources) }),
 			};
 		}
 		return catalogMemo.text;
 	};
 	const emitAgentCatalog = (ctx: ExtensionContext) => publishBlock("subagent-agents", agentCatalog(ctx));
 
-	const emitDelegationSteer = () => publishBlock("subagent-delegation", requestTier() === "tiny" ? subagentWords().delegationSteer : null);
+	const emitDelegationSteer = () => publishBlock("subagent-delegation", requestTier() === "tiny" ? words.delegationSteer : null);
 
 	let shuttingDown = false;
 
@@ -1273,7 +1277,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			toMain();
 			return;
 		}
-		void parent.handle.send(subagentWords().fromSubagent({ name, summary, body })).catch(toMain);
+		void parent.handle.send(words.fromSubagent({ name, summary, body })).catch(toMain);
 	};
 
 	const boundedMessage = (name: string, message: string) => bounded(message, `message-${name}-${Date.now()}`, MESSAGE_TO_MAIN_CAP);
@@ -1500,7 +1504,6 @@ function subagentsExtension(pi: ExtensionAPI) {
 	 * from inside a child.
 	 */
 	const childAgentTool = (parentRecord: AgentRunRecord, parentDepth: number): ToolDefinition => {
-		const words = subagentWords();
 		return {
 			name: "Agent",
 			label: "Agent",
@@ -1699,7 +1702,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		// the task id in runningIds, where SendMessage would call it "still running".
 		const runtime = await runtimeOrError(ctx);
 		if (typeof runtime === "string") {
-			return { agent: request.agent, name: request.name, taskId: record.taskId, task: request.task, output: subagentWords().failure({ kind: "failed", osMessage: runtime }), toolCalls: 0, usage: emptyUsage(), failed: true };
+			return { agent: request.agent, name: request.name, taskId: record.taskId, task: request.task, output: words.failure({ kind: "failed", osMessage: runtime }), toolCalls: 0, usage: emptyUsage(), failed: true };
 		}
 
 		let worktree: Worktree | undefined;
@@ -1712,7 +1715,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 					name: request.name,
 					taskId: record.taskId,
 					task: request.task,
-					output: subagentWords().failure({ kind: "worktree", osMessage: (error as Error).message }),
+					output: words.failure({ kind: "worktree", osMessage: (error as Error).message }),
 					toolCalls: 0,
 					usage: emptyUsage(),
 					failed: true,
@@ -1776,7 +1779,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				name: request.name,
 				taskId: record.taskId,
 				task: request.task,
-				output: subagentWords().failure({ kind: "failed", osMessage: (error as Error).message }),
+				output: words.failure({ kind: "failed", osMessage: (error as Error).message }),
 				toolCalls: 0,
 				usage: emptyUsage(),
 				failed: true,
@@ -1848,7 +1851,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		const live = trackLiveRun(p.record, p.request);
 		const resident: Resident = { handle: undefined as never, startedAt: Date.now(), turnHandlers: [], reviewing: 0 };
 		const worktreeNote = worktree
-			? `\n\n${subagentWords().worktreeRunning({ path: worktree.path, branch: worktree.branch })}`
+			? `\n\n${words.worktreeRunning({ path: worktree.path, branch: worktree.branch })}`
 			: "";
 		resident.turnHandlers.push((outcome, review, stopped) => {
 			task.status = stopped ? "stopped" : outcome.failed ? "failed" : "completed";
@@ -2085,9 +2088,6 @@ function subagentsExtension(pi: ExtensionAPI) {
 	// Claude Code's Agent text, short or long by the model's tier
 	// (agent-description.ts, lib/tool-variants.ts); registered again when the
 	// form changes.
-	const words = subagentWords();
-	/** A refused Agent call (the nested Agent tool's too). */
-	const refuseCall = (r: SubagentRefusal) => ({ content: [{ type: "text" as const, text: words.refused(r) }], details: {}, isError: true });
 	const agentParams = subagentParams(words);
 	const agentTool = defineTool({
 		name: "Agent",
