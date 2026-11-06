@@ -33,10 +33,10 @@ describe("One Code's web_fetch text", () => {
 	});
 
 	it("says which model answered and whether its answer is whole", () => {
-		expect(webFetch.header({ ...base, answer: { kind: "native", reader: "anthropic/m", cutOff: true, answer: "x" } })).toBe(
+		expect(webFetch.header({ ...base, answer: { kind: "native", reader: "anthropic/m", cutOff: true } })).toBe(
 			`Source: ${url}\nAnswered by anthropic/m with Anthropic's server-side web fetch (dynamic filtering). Refetch without \`prompt\` for the raw content.\n(The answer was cut off at the output limit and may be incomplete.)`,
 		);
-		expect(webFetch.header({ ...base, noArticle: true, answer: { kind: "reader", reader: "p/r", pageChars: 200_000, readChars: 100_000, cutOff: true, answer: "x" } })).toBe(
+		expect(webFetch.header({ ...base, noArticle: true, answer: { kind: "reader", reader: "p/r", pageChars: 200_000, readChars: 100_000, cutOff: true } })).toBe(
 			[
 				`Source: ${url}`,
 				"No article structure found; converted the whole page.",
@@ -47,7 +47,7 @@ describe("One Code's web_fetch text", () => {
 	});
 
 	it("falls back to the raw page loudly when the reader fails", () => {
-		expect(webFetch.header({ ...base, upgraded: true, nativeFallback: "the call failed: 500", answer: { kind: "raw", text: "x", readerFailure: { kind: "noText", reader: "p/r" } } })).toBe(
+		expect(webFetch.header({ ...base, upgraded: true, nativeFallback: "the call failed: 500", answer: { kind: "raw", readerFailure: { kind: "noText", reader: "p/r" } } })).toBe(
 			[
 				`Source: ${url}`,
 				"Upgraded http to https.",
@@ -59,7 +59,7 @@ describe("One Code's web_fetch text", () => {
 
 	it("words each reader failure", () => {
 		const line = (failure: ReaderFailure) =>
-			webFetch.header({ ...base, answer: { kind: "raw", text: "x", readerFailure: failure } }).split("\n")[1];
+			webFetch.header({ ...base, answer: { kind: "raw", readerFailure: failure } }).split("\n")[1];
 		expect(line({ kind: "noModel" })).toBe("Could not answer `prompt` (no model available to read the page); returning the raw page content instead.");
 		expect(line({ kind: "credentialsTimeout", reader: "p/r", seconds: 60 })).toContain("(p/r: The reader's credentials did not resolve within 60 seconds.)");
 		expect(line({ kind: "stoppedEarly", reader: "p/r", stopReason: "error" })).toContain("(p/r: the call stopped early (error))");

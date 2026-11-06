@@ -158,7 +158,6 @@ export interface SubagentsText {
 	noAgents: string;
 	agentList(p: { rows: string[] }): string;
 	agentRow(p: { name: string; agent: string; status: RunStatus; taskId: string }): string;
-	runStatus(status: RunStatus): string;
 	/** A subagent's own SendMessage tool, to the main conversation. */
 	toMain: { description: string; params: { to: string; message: string; summary: string }; delivered: string };
 	/** A nested agent's message relayed to its resident parent. */

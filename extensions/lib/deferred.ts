@@ -17,6 +17,8 @@ import { parseClaudeId } from "./claude-id.ts";
 import { leadingToolsItem, toolsItemFor } from "./ledger/wire.ts";
 import { RESPONSES_APIS } from "./system-role.ts";
 import { toolSearchWords } from "../tool-search/words.ts";
+import type { ToolSearchText } from "../tool-search/text.ts";
+import { around, escapeRegExp, memoOn } from "./template-probe.ts";
 import { normalizeToolName } from "../permissions/matcher.ts";
 
 import { DEFER_CHANNEL, type DeferRequest } from "./deferred-channel.ts";
@@ -441,15 +443,11 @@ function withToolReferences(message: WireMessage, referencesAt: ReadonlyMap<stri
 	return { ...message, content: withBreakpointOnLast([...blocks, ...siblings], movedBreakpoint) };
 }
 
-const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-/** `tool_search`'s plain success sentence, which the references stand in for: the profile's, around the names. */
-function loadedSentence(): RegExp {
-	const words = toolSearchWords();
-	const probe = words.result({ added: ["\u0000"], already: [], refused: [], missing: [], withdrawn: [] });
-	const at = probe.indexOf("\u0000");
-	return new RegExp(`^${escapeRegExp(probe.slice(0, at))}[^\\n]*${escapeRegExp(probe.slice(at + 1))}(?=\\n|$)`);
-}
+/** `tool_search`'s plain success sentence, which the references stand in for: the profile's, around the names (never matches when the profile's sentence has no place for them). */
+const loadedSentence = memoOn((words: ToolSearchText): RegExp => {
+	const frame = around((name) => words.result({ added: [name], already: [], refused: [], missing: [], withdrawn: [] }));
+	return frame ? new RegExp(`^${escapeRegExp(frame.before)}[^\\n]*${escapeRegExp(frame.after)}(?=\\n|$)`) : /(?!)/;
+});
 
 /**
  * The text beside the references: Claude Code's "Tool loaded." in place of the
@@ -457,7 +455,8 @@ function loadedSentence(): RegExp {
  * sentence with a not-found note, and anything after it, stays as it was.
  */
 function withClaudeCodeLoadText(text: string): string {
-	return text.replace(loadedSentence(), toolSearchWords().toolLoaded);
+	const words = toolSearchWords();
+	return text.replace(loadedSentence(words), words.toolLoaded);
 }
 
 /**

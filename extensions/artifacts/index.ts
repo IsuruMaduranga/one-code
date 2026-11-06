@@ -76,11 +76,6 @@ async function showInBrowser(path: string): Promise<NoBrowser | undefined> {
 	return (await launchOpener(openerPlan(fileUrl(path)))) ? undefined : "launchFailed";
 }
 
-/** The tool result's line about the browser. */
-async function browserNote(path: string, text: ArtifactsText): Promise<string> {
-	return text.browserNote({ failed: await showInBrowser(path) });
-}
-
 /** The /artifacts status line after opening `path`. */
 async function notifyOpened(ctx: ExtensionContext, path: string, name: string, text: ArtifactsText): Promise<void> {
 	const failed = await showInBrowser(path);
@@ -162,9 +157,9 @@ function artifactsExtension(pi: ExtensionAPI) {
 			if (action === "open") {
 				if (!resolved) {
 					writeGallery(root);
-					return textResult(text.openedGallery({ url: fileUrl(galleryPath(root)), browserNote: await browserNote(galleryPath(root), text) }));
+					return textResult(text.openedGallery({ url: fileUrl(galleryPath(root)), failed: await showInBrowser(galleryPath(root)) }));
 				}
-				return textResult(text.opened({ url: fileUrl(viewerPath(root, resolved)), browserNote: await browserNote(viewerPath(root, resolved), text) }));
+				return textResult(text.opened({ url: fileUrl(viewerPath(root, resolved)), failed: await showInBrowser(viewerPath(root, resolved)) }));
 			}
 
 			if (action === "delete") {

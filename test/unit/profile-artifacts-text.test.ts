@@ -17,7 +17,7 @@ describe("One Code's artifact text", () => {
 		expect(artifacts.published({ ...page, browser: { kind: "autoOpenOff", settingsPath: "~/.onecode/settings.json" } })).toContain(
 			"Opening the browser is off (artifacts.autoOpen is false in ~/.onecode/settings.json). Give the user the link.",
 		);
-		expect(artifacts.browserNote({ failed: "noDisplay" })).toBe("No browser was opened: no graphical display is available. Give the user the link.");
+		expect(artifacts.opened({ url: "file:///v.html", failed: "noDisplay" })).toBe("file:///v.html\nNo browser was opened: no graphical display is available. Give the user the link.");
 		expect(artifacts.noBrowserReason("launchFailed")).toBe("the browser could not be started");
 	});
 

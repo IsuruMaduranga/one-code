@@ -139,9 +139,12 @@ const STATUS: Record<RunStatus, string> = {
 /** The runs by name and task id, comma-separated. */
 const namedRuns = (runs: readonly PendingRun[]): string => runs.map((run) => `${run.name} (task ${run.taskId})`).join(", ");
 
+/** Names both task tools: cut when either is off. */
+const TASK_TOOLS_PASSAGE = ["- Call task_output only if your next step cannot proceed without the result (block=true waits); stop a run with task_stop. Both are deferred — load them with tool_search first.\n"] as const;
+
 const AGENT_PASSAGES: ToolPassages = {
-	task_output: ["- Call task_output only if your next step cannot proceed without the result (block=true waits); stop a run with task_stop. Both are deferred — load them with tool_search first.\n"],
-	task_stop: ["- Call task_output only if your next step cannot proceed without the result (block=true waits); stop a run with task_stop. Both are deferred — load them with tool_search first.\n"],
+	task_output: TASK_TOOLS_PASSAGE,
+	task_stop: TASK_TOOLS_PASSAGE,
 };
 
 export const subagents: SubagentsText = {
@@ -224,7 +227,6 @@ export const subagents: SubagentsText = {
 	noAgents: "No agents have been spawned in this session yet. Start one with the Agent tool.",
 	agentList: ({ rows }) => `Agents spawned this session:\n${rows.join("\n")}`,
 	agentRow: ({ name, agent, status, taskId }) => `- ${name} [${agent}] — ${STATUS[status]} (task ${taskId})`,
-	runStatus: (status) => STATUS[status],
 	toMain: {
 		description:
 			'Report progress, findings, or a question to the main conversation mid-run (to: "main"). Your plain text output is NOT visible to the main conversation until you finish, so use this to surface something before then.',

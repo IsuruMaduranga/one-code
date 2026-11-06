@@ -102,9 +102,8 @@ export const artifacts: ArtifactsText = {
 		return `${total} artifact${total === 1 ? "" : "s"}, newest first:\n${shown.map(listLine).join("\n")}${more}\nGallery: ${galleryUrl}`;
 	},
 	noBrowserReason: (reason) => NO_BROWSER[reason],
-	browserNote,
-	openedGallery: ({ url, browserNote }) => `Gallery: ${url}\n${browserNote}`,
-	opened: ({ url, browserNote }) => `${url}\n${browserNote}`,
+	openedGallery: ({ url, failed }) => `Gallery: ${url}\n${browserNote({ failed })}`,
+	opened: ({ url, failed }) => `${url}\n${browserNote({ failed })}`,
 	deleteNeedsId: "Pass the `id` of the artifact to delete.",
 	unknownForDelete: ({ id }) => `No artifact has the id "${id}".`,
 	deleteNeedsUser: "Deleting an artifact needs the user's confirmation, and this session cannot ask. Tell the user to delete it with /artifacts.",

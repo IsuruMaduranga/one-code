@@ -26,21 +26,23 @@ import { wrapReminder } from "./reminders.ts";
 import { messagesKey, type SystemRoleLayout, systemMessage, type WireMessage, type WirePart, byWireCallId, withoutParts } from "./system-role.ts";
 import { totalTokensBlock } from "../context-budget/budget.ts";
 import { profileText } from "./profile.ts";
+import type { ContextBudgetText } from "../context-budget/text.ts";
+import { around, fillOf, memoOn } from "./template-probe.ts";
 
 /** The budget line for `left` tokens, in the profile's words; undefined without context-budget's words (no lines then). */
 function budgetLine(left: number): string | undefined {
 	const words = profileText().contextBudget;
-	return words && totalTokensBlock(words.tokensLeft({ left }));
+	return words && totalTokensBlock(words, left);
 }
+
+/** The text around the count in a budget line, per context-budget words object. */
+const budgetFrame = memoOn((words: ContextBudgetText) => around((left) => totalTokensBlock(words, Number(left)), "987654321"));
 
 /** The tokens left in a stored budget line, exactly as `budgetLine` writes it, else undefined. */
 function tokensLeftIn(text: string): number | undefined {
-	const probe = budgetLine(987654321);
-	if (!probe) return undefined;
-	const [before, after] = probe.split("987654321");
-	if (!text.startsWith(before) || !text.endsWith(after)) return undefined;
-	const digits = text.slice(before.length, text.length - after.length);
-	return /^\d+$/.test(digits) ? Number(digits) : undefined;
+	const words = profileText().contextBudget;
+	const digits = words && fillOf(text, budgetFrame(words));
+	return digits !== undefined && /^\d+$/.test(digits) ? Number(digits) : undefined;
 }
 
 /** Claude Code's Fable nudge after a tool result's budget message, in the profile's words. */

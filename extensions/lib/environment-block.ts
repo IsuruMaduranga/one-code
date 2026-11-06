@@ -21,7 +21,7 @@ export interface EnvironmentFacts {
 	workspaceDirs?: string[];
 }
 
-/** Claude Code's `# Environment` block, byte for byte; the trailing space after "environment:" is Claude Code's. */
+/** The `# Environment` block, in the profile's words. */
 export function environmentBlock(env: EnvironmentFacts): string {
 	return contextWords().environment(env);
 }

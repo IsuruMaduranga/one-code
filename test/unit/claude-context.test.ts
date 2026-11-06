@@ -19,7 +19,6 @@ import {
 } from "../../extensions/lib/claude-context.ts";
 import { wrapReminder } from "../../extensions/lib/reminders.ts";
 import { truncateIndex } from "../../extensions/lib/memory-content.ts";
-import { context } from "../../profile/context/index.ts";
 
 // Ancestor instruction files on the host must not affect temporary fixtures,
 // including when TMPDIR is inside a checkout that carries its own CLAUDE.md.
@@ -378,8 +377,8 @@ describe("the # oneCodeMd block", () => {
 		expect(text.indexOf(globalOne)).toBeLessThan(text.indexOf(projOne));
 		expect(text).toContain("global one-code");
 		expect(text).toContain("project one-code");
-		expect(text).toContain(context.descriptor(ONECODE_GLOBAL_DESCRIPTOR));
-		expect(text).toContain(context.descriptor(ONECODE_DESCRIPTOR));
+		expect(text).toContain("(One Code-specific global instructions for all projects, not read by Claude Code)");
+		expect(text).toContain("(One Code-specific instructions, not read by Claude Code)");
 	});
 
 	it("expands @imports inside an ONECODE.md file", () => {

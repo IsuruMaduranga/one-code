@@ -27,14 +27,14 @@ export type ReaderFailure =
 	| { kind: "noText"; reader: string }
 	| { kind: "error"; reader: string; osMessage: string };
 
-/** What the result carries below its header. */
+/** What the result carries below its header (the header describes it; the base frames the body). */
 export type FetchAnswer =
 	/** Anthropic's server-side fetch answered `prompt`. */
-	| { kind: "native"; reader: string; cutOff: boolean; answer: string }
+	| { kind: "native"; reader: string; cutOff: boolean }
 	/** The reader model answered `prompt`; `readChars` is set when the page was cut to fit it. */
-	| { kind: "reader"; reader: string; pageChars: number; readChars?: number; cutOff: boolean; answer: string; title?: string }
+	| { kind: "reader"; reader: string; pageChars: number; readChars?: number; cutOff: boolean }
 	/** The page itself; `window` when it was cut, `readerFailure` when a `prompt` went unanswered. */
-	| { kind: "raw"; text: string; title?: string; window?: { from: number; to: number; total: number; next: number }; readerFailure?: ReaderFailure };
+	| { kind: "raw"; window?: { from: number; to: number; total: number; next: number }; readerFailure?: ReaderFailure };
 
 export interface WebFetchText {
 	/** Short on frontier and workhorse, long on cheap and tiny (lib/tool-variants.ts). */

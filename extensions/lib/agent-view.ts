@@ -11,6 +11,7 @@
 import { fitPainted, visibleWidth } from "./text-width.ts";
 import { cutPlainText } from "./tui-render.ts";
 import { notificationWords } from "./notification-words.ts";
+import { around, fillOf } from "./template-probe.ts";
 
 /** `{ target }` while an agent is viewed, `{}` when the view returns to main. */
 export const AGENT_VIEW_CHANNEL = "one-code:agent-view";
@@ -51,13 +52,8 @@ export function userMessageForAgent(text: string): string {
 /** The user's own text inside `userMessageForAgent`'s wrapper, or undefined for any other prompt. */
 export function unwrapUserMessage(prompt: string): string | undefined {
 	// The wrapper around the text, from the profile's own words.
-	const probe = userMessageForAgent("\u0000");
-	const at = probe.indexOf("\u0000");
-	const opener = probe.slice(0, at);
-	const closer = probe.slice(at + 1);
-	if (!opener || !prompt.startsWith(opener) || !prompt.endsWith(closer)) return undefined;
-	const end = prompt.length - closer.length;
-	return end < opener.length ? undefined : prompt.slice(opener.length, end);
+	const frame = around(userMessageForAgent);
+	return frame?.before ? fillOf(prompt, frame) : undefined;
 }
 
 /**

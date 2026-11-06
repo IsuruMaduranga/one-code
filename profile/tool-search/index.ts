@@ -19,9 +19,12 @@ function notFoundNote({ missing, withdrawn }: Pick<SearchOutcome, "missing" | "w
 const DESCRIPTION =
 	"Fetches full schema definitions for deferred tools so they can be called.\n\nDeferred tools appear by name in <system-reminder> messages. Until fetched, only the name is known — there is no parameter schema, so the tool cannot be invoked. This tool takes a query, matches it against the deferred tool list, and loads the matched tools' full schemas so they become callable exactly like any tool defined at the top of the prompt.\n\nQuery forms:\n- `select:web_fetch,notebook_edit` — fetch these exact tools by name\n- `notebook jupyter` — keyword search, up to max_results best matches\n- `+slack send` — require \"slack\" in the name, rank by remaining terms";
 
+/** The example names both tools: a placeholder when either is off. */
+const EXAMPLE_SELECT = [["`select:web_fetch,notebook_edit`", "`select:<name>,<name>`"]] as const;
+
 const DESCRIPTION_PASSAGES: ToolPassages = {
-	web_fetch: [["`select:web_fetch,notebook_edit`", "`select:<name>,<name>`"]],
-	notebook_edit: [["`select:web_fetch,notebook_edit`", "`select:<name>,<name>`"]],
+	web_fetch: EXAMPLE_SELECT,
+	notebook_edit: EXAMPLE_SELECT,
 };
 
 export const toolSearch: ToolSearchText = {

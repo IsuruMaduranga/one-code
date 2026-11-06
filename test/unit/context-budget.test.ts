@@ -73,7 +73,7 @@ describe("TurnBudget", () => {
 
 describe("totalTokensBlock", () => {
 	it("frames the profile's words as Claude Code's bare block, byte for byte", () => {
-		expect(totalTokensBlock(contextBudget.tokensLeft({ left: 14_832_967 }))).toBe("<total_tokens>14832967 tokens left</total_tokens>");
+		expect(totalTokensBlock(contextBudget, 14_832_967)).toBe("<total_tokens>14832967 tokens left</total_tokens>");
 	});
 });
 

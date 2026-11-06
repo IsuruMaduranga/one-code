@@ -169,7 +169,6 @@ const preamble = ({ persistent }: { persistent: boolean }) => (persistent ? AUTO
 export const loop: LoopText = {
 	skillBody: ({ form, loopFile, persistent, maxAgeDays }) =>
 		form.kind === "prompt" ? explicitPrompt(form.input, maxAgeDays) : noPromptBody(loopFile, form.selfPaced, form.interval, preamble({ persistent }), maxAgeDays),
-	preamble,
 	tick: (tick) => TICKS[tick](),
 	loopFileTick: ({ loopFile: o, tick }) => `# /loop tick \u2014 tasks from ${o.path}
 
@@ -182,6 +181,6 @@ ${fileText(o)}
 ---
 
 ${tick}`,
-	withPreamble: ({ preamble, tick }) => `${preamble}\n\n---\n\n${tick}`,
+	withPreamble: ({ persistent, tick }) => `${preamble({ persistent })}\n\n---\n\n${tick}`,
 	foldNote: ({ streak }) => `[${streak} prior /loop ${streak === 1 ? "wakeup" : "wakeups"} found nothing actionable; loop is healthy.]`,
 };

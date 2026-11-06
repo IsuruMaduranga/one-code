@@ -1501,7 +1501,6 @@ function subagentsExtension(pi: ExtensionAPI) {
 	 */
 	const childAgentTool = (parentRecord: AgentRunRecord, parentDepth: number): ToolDefinition => {
 		const words = subagentWords();
-		const refuse = (refusal: SubagentRefusal) => ({ content: [{ type: "text" as const, text: words.refused(refusal) }], details: {}, isError: true });
 		return {
 			name: "Agent",
 			label: "Agent",
@@ -1525,18 +1524,18 @@ function subagentsExtension(pi: ExtensionAPI) {
 				const agentName = typeof p.subagent_type === "string" ? p.subagent_type : "";
 				const taskInput = typeof p.task === "string" ? p.task : typeof p.prompt === "string" ? p.prompt : "";
 				const task = taskInput.trim();
-				if (!ctx) return refuse({ kind: "hostNotReady" });
-				if (agentName.toLowerCase() === FORK_AGENT) return refuse({ kind: "nestedFork" });
+				if (!ctx) return refuseCall({ kind: "hostNotReady" });
+				if (agentName.toLowerCase() === FORK_AGENT) return refuseCall({ kind: "nestedFork" });
 				const agents = loadAgents(parentRecord.cwd);
 				// Only a fork's schema (the parent's) offers these; a nested run has none of them.
 				if (p.action === "list") return { content: [{ type: "text" as const, text: words.catalogList({ rows: catalogLines(agents) }) }], details: {} };
 				const unsupported = (["model", "thinking", "isolation"] as const).filter((key) => p[key] != null);
-				if (unsupported.length > 0) return refuse({ kind: "nestedOptions", options: unsupported });
+				if (unsupported.length > 0) return refuseCall({ kind: "nestedOptions", options: unsupported });
 				const agentDef = agents.find((a) => a.name.toLowerCase() === agentName.toLowerCase());
 				if (!agentDef) {
-					return refuse({ kind: "nestedUnknownAgent", ...(agentName ? { name: agentName } : {}), catalog: catalogLines(agents) });
+					return refuseCall({ kind: "nestedUnknownAgent", ...(agentName ? { name: agentName } : {}), catalog: catalogLines(agents) });
 				}
-				if (!task) return refuse({ kind: "taskRequired" });
+				if (!task) return refuseCall({ kind: "taskRequired" });
 
 				const { name, note: renamedNote } = resolveRunName(registry, agentDef.name, typeof p.name === "string" ? p.name : undefined);
 				// Same parent-side model resolution as the main Agent tool, minus
@@ -1640,8 +1639,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 	const spawnToolsFor = (record: AgentRunRecord, { resident = false } = {}): ToolDefinition[] => {
 		const depth = record.depth ?? 0;
 		// The child's cron tools reach this session's store (lib/agent-cron.ts);
-		// none when the profile has no background text (the feature is off).
-		const cronText = profileText().background?.cron;
+		// none when the background feature is off (no store answers them).
+		const cronText = toolLive("cron_create") ? profileText().background?.cron : undefined;
 		const cron = cronText ? (agentCronTools(pi.events, { agentId: record.taskId, cwd: record.cwd, resident }, cronText) as unknown as ToolDefinition[]) : [];
 		return depth < MAX_SPAWN_DEPTH ? [childAgentTool(record, depth), ...cron] : cron;
 	};
@@ -1700,7 +1699,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		// the task id in runningIds, where SendMessage would call it "still running".
 		const runtime = await runtimeOrError(ctx);
 		if (typeof runtime === "string") {
-			return { agent: request.agent, name: request.name, taskId: record.taskId, task: request.task, output: `Subagent failed: ${runtime}`, toolCalls: 0, usage: emptyUsage(), failed: true };
+			return { agent: request.agent, name: request.name, taskId: record.taskId, task: request.task, output: subagentWords().failure({ kind: "failed", osMessage: runtime }), toolCalls: 0, usage: emptyUsage(), failed: true };
 		}
 
 		let worktree: Worktree | undefined;
@@ -2087,6 +2086,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 	// (agent-description.ts, lib/tool-variants.ts); registered again when the
 	// form changes.
 	const words = subagentWords();
+	/** A refused Agent call (the nested Agent tool's too). */
 	const refuseCall = (r: SubagentRefusal) => ({ content: [{ type: "text" as const, text: words.refused(r) }], details: {}, isError: true });
 	const agentParams = subagentParams(words);
 	const agentTool = defineTool({
@@ -2932,7 +2932,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			if (ctx.mode === "rpc" && registry.list().length) {
 				ctx.ui.notify([
 					"The live subagent panel requires TUI mode; showing spawned agents instead.",
-					...registry.list().map((run) => `- ${run.name} [${run.agent}] — ${words.runStatus(agentStatus(run))} (task ${run.taskId})`),
+					...registry.list().map((run) => words.agentRow({ name: run.name, agent: run.agent, taskId: run.taskId, status: agentStatus(run) })),
 					"Use /tasks for task status; task_output and task_stop inspect or stop a task.",
 				].join("\n"), "info");
 				return;

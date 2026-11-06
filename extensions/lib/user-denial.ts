@@ -7,6 +7,7 @@
  * wait for the user.
  */
 
+import { around } from "./template-probe.ts";
 import { toolResultWords } from "./tool-results-words.ts";
 
 export function userDenialText(feedback?: string): string {
@@ -23,7 +24,6 @@ export function userDenialKind(text: string): "stop" | "reason" | undefined {
 	const words = toolResultWords();
 	if (text.startsWith(words.userDenial({}))) return "stop";
 	// The text up to where the user's words go, from the profile's own wording.
-	const probe = words.userDenial({ feedback: "\u0000" });
-	const reasonPrefix = probe.slice(0, probe.indexOf("\u0000"));
+	const reasonPrefix = around((feedback) => words.userDenial({ feedback }))?.before;
 	return reasonPrefix && text.startsWith(reasonPrefix) ? "reason" : undefined;
 }

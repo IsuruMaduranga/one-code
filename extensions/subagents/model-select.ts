@@ -163,10 +163,13 @@ export interface SubagentModelResolution {
 	notices: string[];
 }
 
+/** The profile's words (model-text.ts); fails closed, as every Agent and workflow call reads them. */
+const words = (): SubagentModelsText => requireText("subagentModels");
+
 /**
  * The model-facing form of a resolution's notices, for the spawn tool's result.
  *
- * Every notice above says what was NOT honored ("falling back to the agent's
+ * Every notice says what was NOT honored ("falling back to the agent's
  * configured model or the session default"); none of them names where the walk
  * actually landed, because it is written before the chain finishes. The user
  * can see the answer in the banner, but the model that asked for `sonnet` could
@@ -185,9 +188,6 @@ export interface SubagentModelResolution {
  * notices used to end by listing which knob might serve next; naming the one
  * that actually did is the same information after the fact, and true.
  */
-/** The profile's words (model-text.ts); fails closed, as every Agent and workflow call reads them. */
-const words = (): SubagentModelsText => requireText("subagentModels");
-
 export function subagentModelNotes(resolution: Pick<SubagentModelResolution, "model" | "notices" | "source">): string[] {
 	if (resolution.notices.length === 0) return [];
 	if (!resolution.model) return [...resolution.notices];

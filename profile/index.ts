@@ -5,7 +5,7 @@
  * (extensions/lib/profile-contract.ts).
  *
  * One Code runs every feature and keeps each tool's base switches. Its text
- * lives beside this file, one folder per group (system-prompt/ so far).
+ * lives beside this file, one folder per text group.
  */
 
 import type { Profile } from "../extensions/lib/profile-contract.ts";

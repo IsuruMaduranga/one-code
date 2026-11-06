@@ -120,7 +120,7 @@ export function readLoopFile(cwd: string, home = homedir()): LoopFile | null {
  * instructions once, then the tick.
  */
 export function resolveLoopFire(state: LoopDeliveryState, prompt: string, cwd: string, text: LoopText, persistent: boolean, home?: string): string {
-	const withPreamble = (tick: string) => text.withPreamble({ preamble: text.preamble({ persistent }), tick });
+	const withPreamble = (tick: string) => text.withPreamble({ persistent, tick });
 	if (isAutonomousSentinel(prompt)) {
 		const tick = text.tick(prompt === AUTONOMOUS_LOOP_DYNAMIC ? "autonomousDynamic" : "autonomous");
 		if (state.autonomousPreambleDelivered || state.lastLoopFileDelivered !== null) return tick;

@@ -31,9 +31,8 @@ export interface ContextText {
 	memoryIndexCut(p: { size: MemoryIndexSize; cut: MemoryIndexCut }): string;
 	/** Opens the instructions block. */
 	instructionsPreamble: string;
-	descriptor(source: InstructionSource): string;
-	/** One file's section; `content` ends in a newline. */
-	section(p: { path: string; descriptor: string; content: string }): string;
+	/** One file's section, naming where it comes from; `content` ends in a newline. */
+	section(p: { path: string; source: InstructionSource; content: string }): string;
 	/** Opens the ONECODE.md block; `above` names the instruction files above it (CLAUDE.md, or AGENTS.md in independent mode). */
 	oneCodePreamble(p: { above: string }): string;
 	/** An instruction file attached when the model reads a file below the working directory. */

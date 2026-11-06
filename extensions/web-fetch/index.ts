@@ -280,7 +280,7 @@ function webFetchExtension(pi: ExtensionAPI) {
 				});
 				if (native.kind === "cancelled") return cancelled();
 				if (native.kind === "answered") {
-					const answer: FetchAnswer = { kind: "native", reader: native.spec, cutOff: native.cutOff, answer: native.text };
+					const answer: FetchAnswer = { kind: "native", reader: native.spec, cutOff: native.cutOff };
 					return { content: [{ type: "text", text: resultText(answer, { body: native.text }) }], details: { url: target, reader: native.spec, path: "native" } };
 				}
 				if (native.kind === "fell-back") nativeFallback = nativeWords.fallback(native.fallback);
@@ -304,7 +304,6 @@ function webFetchExtension(pi: ExtensionAPI) {
 							pageChars: entry.markdown.length,
 							readChars: answered.truncated ? READER_MAX_CHARS : undefined,
 							cutOff: answered.cutOff,
-							answer: answered.answer,
 						};
 						return {
 							content: [{ type: "text", text: resultText(answer, { body: answered.answer, title: entry.title }, entry.noArticle) }],
@@ -317,7 +316,7 @@ function webFetchExtension(pi: ExtensionAPI) {
 				const offset = params.offset ?? 0;
 				const page = paginate(entry.markdown, offset, params.max_chars ?? DEFAULT_MAX_CHARS);
 				const window = page.truncated ? { from: offset, to: offset + page.text.length, total: page.totalChars, next: page.nextOffset! } : undefined;
-				const answer: FetchAnswer = { kind: "raw", text: page.text, title: entry.title, window, readerFailure };
+				const answer: FetchAnswer = { kind: "raw", window, readerFailure };
 
 				return {
 					content: [{ type: "text", text: resultText(answer, { body: page.text, title: entry.title }, entry.noArticle) }],

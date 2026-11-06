@@ -66,11 +66,10 @@ export interface ArtifactsText {
 	list(p: { total: number; shown: ShownArtifact[]; galleryUrl: string }): string;
 	/** Why no browser opened, as a clause; also in the /artifacts notice. */
 	noBrowserReason(reason: NoBrowser): string;
-	/** The line about the browser after opening something; `failed` when none opened. */
-	browserNote(p: { failed?: NoBrowser }): string;
-	/** `open` without an id: the gallery. */
-	openedGallery(p: { url: string; browserNote: string }): string;
-	opened(p: { url: string; browserNote: string }): string;
+	/** `open` without an id: the gallery; `failed` when no browser opened. */
+	openedGallery(p: { url: string; failed?: NoBrowser }): string;
+	/** `open` with an id; `failed` when no browser opened. */
+	opened(p: { url: string; failed?: NoBrowser }): string;
 	deleteNeedsId: string;
 	unknownForDelete(p: { id: string }): string;
 	/** A one-shot run cannot ask the user to confirm a delete. */

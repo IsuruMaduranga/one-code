@@ -137,8 +137,8 @@ function tasksExtension(pi: ExtensionAPI) {
 	// fired no more than once per TURNS_BETWEEN_REMINDERS turns. The two counters
 	// are independent — task use resets the first, a fired reminder resets the
 	// second — so a run of task activity silences the nudge without the cooldown
-	// also suppressing the next legitimate one. The reminder text (nudgeMessage)
-	// carries the current list so the model can clean up completed/stale tasks.
+	// also suppressing the next legitimate one. The reminder text (the profile's
+	// `tasks.reminder`) carries the current list so the model can clean up completed/stale tasks.
 	const TURNS_SINCE_WRITE = 10;
 	const TURNS_BETWEEN_REMINDERS = 10;
 	let turnsSinceTaskUse = 0;

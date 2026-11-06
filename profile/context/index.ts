@@ -43,8 +43,7 @@ export const context: ContextText = {
 	instructionsPreamble:
 		"Codebase and user instructions are shown below. Be sure to adhere to these instructions. " +
 		"IMPORTANT: These instructions OVERRIDE any default behavior and you MUST follow them exactly as written.",
-	descriptor: (source) => DESCRIPTORS[source],
-	section: ({ path, descriptor, content }) => `Contents of ${path} (${descriptor}):\n\n${content}`,
+	section: ({ path, source, content }) => `Contents of ${path} (${DESCRIPTORS[source]}):\n\n${content}`,
 	oneCodePreamble: ({ above }) =>
 		"# oneCodeMd\n" +
 		"The following are One Code-specific instructions, read only by One Code and not by other tools. " +

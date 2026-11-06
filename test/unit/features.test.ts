@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CHILD_EXTENSIONS, childEntry } from "../../extensions/lib/child-extensions.ts";
-import { enabledFeatures, FEATURE_IDS, FEATURES, featureOfEntry, featureProblems } from "../../extensions/lib/features.ts";
+import { enabledFeatures, FEATURE_IDS, FEATURES, featureOfEntry, featureProblems, TOOL_FEATURES } from "../../extensions/lib/features.ts";
 
 const repo = join(import.meta.dirname, "../..");
 const manifest = JSON.parse(readFileSync(join(repo, "package.json"), "utf8")) as { pi: { extensions: string[] } };
@@ -35,6 +35,14 @@ describe("feature registry", () => {
 			const source = readFileSync(file, "utf8");
 			expect(source, entry).toMatch(new RegExp(`^export default feature\\("${id}", \\w+\\);$`, "m"));
 			expect(source, entry).not.toMatch(/^export default function/m);
+		}
+	});
+
+	it("maps every tool an optional feature's entry registers by name to that feature", () => {
+		for (const { id, entry } of registered) {
+			if ("required" in FEATURES[id]) continue;
+			const source = readFileSync(join(repo, "extensions", entry), "utf8");
+			for (const [, tool] of source.matchAll(/registerTool\(\{\s*name: "(\w+)"/g)) expect(TOOL_FEATURES[tool], `${entry}: ${tool}`).toBe(id);
 		}
 	});
 });

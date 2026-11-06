@@ -31,7 +31,7 @@ import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, to
 import { privateSessionScratchpadDir } from "../lib/scratchpad.ts";
 import { collectEnvironment, type EnvironmentInfo } from "./environment.ts";
 import { totalTokensBlock, turnTokenBudget } from "../context-budget/budget.ts";
-import { featureEnabled, profileText } from "../lib/profile.ts";
+import { featureEnabled, profileText, toolLive } from "../lib/profile.ts";
 import { optionsForIdleTurn, withSystemHead } from "./idle-turn.ts";
 import { buildClaudeCodeSystemPrompt } from "./template.ts";
 import { SYSTEM_PROMPT_SECTION_CHANNEL, type SystemPromptSection } from "./text.ts";
@@ -104,8 +104,8 @@ function systemPromptExtension(pi: ExtensionAPI) {
 		// The same constant the context-budget extension puts on every user
 		// message, and only while that extension runs.
 		const budgetText = featureEnabled("context-budget") ? profileText().contextBudget : undefined;
-		const totalTokensLine = !budgetText || process.env.CC_TOTAL_TOKENS === "0" ? null : totalTokensBlock(budgetText.tokensLeft({ left: turnTokenBudget() }));
-		return buildClaudeCodeSystemPrompt(options, environment(ctx.cwd), tier, totalTokensLine, taskToolsEnabled(model, process.env, tier), [...extraSections.values()]);
+		const totalTokensLine = !budgetText || process.env.CC_TOTAL_TOKENS === "0" ? null : totalTokensBlock(budgetText, turnTokenBudget());
+		return buildClaudeCodeSystemPrompt(options, environment(ctx.cwd), tier, totalTokensLine, taskToolsEnabled(model, process.env, tier) && toolLive("task_create"), [...extraSections.values()]);
 	};
 
 	// Claude Code's environment block and model line, the first two blocks of the

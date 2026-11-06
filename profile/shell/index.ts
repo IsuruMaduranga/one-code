@@ -75,7 +75,9 @@ function finish(end: ShellEnd): string {
 
 const BASH_PASSAGES: ToolPassages = {
 	monitor: [" Foreground `sleep` is blocked; use monitor with an until-loop to wait on a condition.", "  - Long leading `sleep` commands are blocked. To poll until a condition is met, use monitor with an until-loop (e.g. `until <check>; do sleep 2; done`) — you get a notification when the loop exits. Do not chain shorter sleeps to work around the block.\n", "  - Use the monitor tool to stream events from a background process (each stdout line is a notification). For one-shot \"wait until done,\" use bash with run_in_background instead.\n"],
+	// After Agent's: with both off, its replacement leaves "task_create tool".
 	Agent: [["task_create or Agent tools", "task_create tool"]],
+	task_create: [["task_create or Agent tools", "Agent tool"], "- NEVER use the task_create tool\n", "- DO NOT use the task_create tool\n"],
 	edit: [" - Edit files: Use edit (NOT sed/awk)\n"],
 };
 

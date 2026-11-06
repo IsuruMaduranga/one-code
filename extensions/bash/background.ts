@@ -22,6 +22,7 @@ import type { ShellText } from "../lib/shell-text.ts";
 
 export const STORED_OUTPUT_CAP = 200_000;
 
+/** The last `cap` characters, headed by `marker` when anything was cut. */
 export function tailCap(text: string, cap: number, marker: string): string {
 	return text.length <= cap ? text : `${marker}${text.slice(-cap)}`;
 }

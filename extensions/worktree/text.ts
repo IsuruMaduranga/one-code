@@ -121,6 +121,4 @@ export type WorktreeGuardRefusal =
  */
 export interface WorktreeGuardText {
 	refusal(refusal: WorktreeGuardRefusal): string;
-	/** What in a checkout could make git run a program, for a refused worktree. */
-	checkoutProgram(program: CheckoutProgram): string;
 }

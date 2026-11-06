@@ -100,19 +100,15 @@ import { makeRecord, RECORD } from "../lib/ledger/records.ts";
 import { recordState, stateSinceCompaction } from "../lib/ledger/state.ts";
 import { processState } from "../lib/process-state.ts";
 import { extensionVersion } from "../lib/package-version.ts";
+import { STORED_OUTPUT_CAP, tailCap } from "../bash/background.ts";
 
 /** Claude Code's `task_output` limit (`TASK_MAX_OUTPUT_DEFAULT`). */
 const TASK_OUTPUT_MAX_CHARS = 32_000;
-const STORED_OUTPUT_CAP = 200_000;
 const DEFAULT_MONITOR_TIMEOUT_MS = 300_000;
 const MAX_MONITOR_TIMEOUT_MS = 3_600_000;
 const MAX_BLOCK_TIMEOUT_MS = 600_000;
 /** setTimeout's longest delay; a later fire re-arms when this one wakes. */
 const MAX_TIMER_MS = 2 ** 31 - 1;
-/** The last `cap` characters, headed by `marker` when anything was cut. */
-function tail(text: string, cap: number, marker: string): string {
-	return text.length <= cap ? text : `${marker}${text.slice(-cap)}`;
-}
 
 /**
  * `/clear`, `/new`, `/resume` and `/reload` stop every background task with
@@ -456,7 +452,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 			let overflowed = false;
 			const record = (chunk: string) => {
 				if (stored.length + chunk.length > STORED_OUTPUT_CAP) overflowed = true;
-				stored = tail(`${stored}${chunk}`, STORED_OUTPUT_CAP, text.monitor.earlierTruncated);
+				stored = tailCap(`${stored}${chunk}`, STORED_OUTPUT_CAP, text.monitor.earlierTruncated);
 				if (!chunk || spoolFailed) return;
 				if (!log) {
 					const path = monitorLogPath(ctx, id);
@@ -533,7 +529,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 					updateWidget();
 					// CC's monitor end: the recent tail rides <event> under the ended summary.
 					const ccStatus = taskStatusOf(finalStatus);
-					const recent = tail(stored, MONITOR_BATCH_MAX_CHARS, text.monitor.earlierTruncated).trim();
+					const recent = tailCap(stored, MONITOR_BATCH_MAX_CHARS, text.monitor.earlierTruncated).trim();
 					notify(
 						"task-notification",
 						taskNotification({

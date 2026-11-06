@@ -148,13 +148,11 @@ export type LoopTick = "autonomous" | "autonomousDynamic" | "loopFile" | "loopFi
 export interface LoopText {
 	/** The /loop skill's body; `persistent` picks the autonomous instructions' persistent variant. */
 	skillBody(p: { form: LoopSkillForm; loopFile: LoopFile | null; persistent: boolean; maxAgeDays: number }): string;
-	/** The autonomous-loop instructions, sent with the first fire of an autonomous loop. */
-	preamble(p: { persistent: boolean }): string;
 	tick(tick: LoopTick): string;
 	/** The first fire after loop.md appeared or changed: its tasks, then the tick. */
 	loopFileTick(p: { loopFile: LoopFile; tick: string }): string;
-	/** The first fire of an autonomous loop: the instructions, then the tick. */
-	withPreamble(p: { preamble: string; tick: string }): string;
+	/** The first fire of an autonomous loop: the autonomous-loop instructions (`persistent` picks the variant), then the tick. */
+	withPreamble(p: { persistent: boolean; tick: string }): string;
 	/** Stands in for folded no-op wakeups in the model's context. */
 	foldNote(p: { streak: number }): string;
 }

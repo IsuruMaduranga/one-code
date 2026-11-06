@@ -49,13 +49,13 @@ import { contextWords } from "./context-words.ts";
 export interface ContextFile {
 	path: string;
 	content: string;
-	descriptor: string;
+	descriptor: InstructionSource;
 	/** Actual inline imports; parsed imports are separate sections and use [] to prevent raw @token inference. */
 	imported?: string[];
 }
 
 // Where each instruction file comes from, as the key its descriptor is worded
-// by (the profile's `text.context.descriptor`, rendered in `section`).
+// by (the profile's `text.context.section`).
 export const GLOBAL_DESCRIPTOR: InstructionSource = "global";
 export const MANAGED_DESCRIPTOR: InstructionSource = "managed";
 export const PROJECT_DESCRIPTOR: InstructionSource = "project";
@@ -266,7 +266,7 @@ function expandImportLine(
 /** A discovered CLAUDE.md-family path and its descriptor, without file content. */
 export interface ContextFilePath {
 	path: string;
-	descriptor: string;
+	descriptor: InstructionSource;
 }
 
 /** The cwd and each ancestor up to the filesystem root, ordered farthest-first. */
@@ -349,7 +349,7 @@ interface InstructionEntry extends ContextFilePath {
 
 function discoverInstructionEntries(
 	opts: DiscoveryOptions,
-	rules: (dir: string, scope: RuleOptions["scope"], descriptor: string) => InstructionEntry[] = () => [],
+	rules: (dir: string, scope: RuleOptions["scope"], descriptor: InstructionSource) => InstructionEntry[] = () => [],
 ): InstructionEntry[] {
 	const paths: InstructionEntry[] = [];
 	const seen = new Set<string>();
@@ -369,7 +369,7 @@ function discoverInstructionEntries(
 		rule === "agents-md" || rule === "claude-md-and-agents-md" || (rule === "claude-md-or-agents-md" && !projectHasClaude());
 
 	/** Adds the path if present. */
-	const push = (path: string, descriptor: string): void => {
+	const push = (path: string, descriptor: InstructionSource): void => {
 		if (!present(path) || (rule === "agents-md" && isClaudeLocation(path, opts.homeClaudeDir))) return;
 		const key = tryRealpath(path) ?? path;
 		if (seen.has(key)) return;
@@ -568,7 +568,7 @@ export function discoverContextFiles(opts: DiscoveryOptions & {
 		const key = tryRealpath(path);
 		return key && isPathAtOrUnder(key, realCwd) ? readAllowedImport(path) : null;
 	};
-	const appendParsed = (file: RuleFile, descriptor: string) => {
+	const appendParsed = (file: RuleFile, descriptor: InstructionSource) => {
 		if (emitted.has(file.key)) return;
 		emitted.add(file.key);
 		parsedShown.add(file.key);
@@ -685,7 +685,7 @@ export function externalInstructionIncludes(opts: DiscoveryOptions & { home: str
 function discoverOneCodeFilePaths(opts: { cwd: string; homeOneCodeDir: string }): ContextFilePath[] {
 	const paths: ContextFilePath[] = [];
 	const seen = new Set<string>();
-	const push = (path: string | null, descriptor: string) => {
+	const push = (path: string | null, descriptor: InstructionSource) => {
 		if (!path) return;
 		const key = tryRealpath(path) ?? path;
 		if (seen.has(key)) return;
@@ -705,7 +705,7 @@ function discoverOneCodeFilePaths(opts: { cwd: string; homeOneCodeDir: string })
  */
 function oneCodeSources(opts: { cwd: string; homeOneCodeDir: string; home: string }): {
 	path: string;
-	descriptor: string;
+	descriptor: InstructionSource;
 	content: string;
 	confined: (path: string) => string | null;
 	unconfined: (path: string) => string | null;
@@ -762,7 +762,7 @@ export const AGENTS_DESCRIPTOR: InstructionSource = "agents";
 function section(file: ContextFile): string {
 	const content = file.content.endsWith("\n") ? file.content : `${file.content}\n`;
 	const words = contextWords();
-	return words.section({ path: file.path, descriptor: words.descriptor(file.descriptor as InstructionSource), content });
+	return words.section({ path: file.path, source: file.descriptor, content });
 }
 
 /**

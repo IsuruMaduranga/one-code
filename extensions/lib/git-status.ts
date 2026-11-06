@@ -55,7 +55,7 @@ export function clipGitStatus(status: string, shellTool = "bash"): string {
 	return `${status.substring(0, GIT_STATUS_MAX_CHARS)}${contextWords().gitStatusClipped({ maxChars: GIT_STATUS_MAX_CHARS, shellTool })}`;
 }
 
-/** Assemble CC's block from a snapshot. Pure; byte-exact against the captures. */
+/** The git status block for a snapshot, in the profile's words. */
 export function formatGitStatus(s: GitSnapshot): string {
 	return contextWords().gitStatus({ snapshot: s, at: "start" });
 }

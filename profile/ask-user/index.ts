@@ -50,9 +50,12 @@ export function formatDecline(questions: readonly Question[]): string {
 	return `The user declined to answer and wants to chat about these questions instead:\n\n${list}\n\nAsk them in your reply what they'd like to clarify; don't call ask_user_question again until the discussion resolves it.`;
 }
 
+/** Names both plan-mode tools: cut when either is off. */
+const PLAN_MODE_PASSAGE = ["\n\nPlan mode note: To switch into plan mode, use enter_plan_mode (not this tool). Once in plan mode, use this tool to clarify requirements or choose between approaches BEFORE finalizing your plan. Do NOT use this tool to ask \"Is my plan ready?\", \"Should I proceed?\", or otherwise reference \"the plan\" in questions — plan approval goes through exit_plan_mode."] as const;
+
 const ASK_PASSAGES: ToolPassages = {
-	enter_plan_mode: ["\n\nPlan mode note: To switch into plan mode, use enter_plan_mode (not this tool). Once in plan mode, use this tool to clarify requirements or choose between approaches BEFORE finalizing your plan. Do NOT use this tool to ask \"Is my plan ready?\", \"Should I proceed?\", or otherwise reference \"the plan\" in questions — plan approval goes through exit_plan_mode."],
-	exit_plan_mode: ["\n\nPlan mode note: To switch into plan mode, use enter_plan_mode (not this tool). Once in plan mode, use this tool to clarify requirements or choose between approaches BEFORE finalizing your plan. Do NOT use this tool to ask \"Is my plan ready?\", \"Should I proceed?\", or otherwise reference \"the plan\" in questions — plan approval goes through exit_plan_mode."],
+	enter_plan_mode: PLAN_MODE_PASSAGE,
+	exit_plan_mode: PLAN_MODE_PASSAGE,
 };
 
 export const askUser: AskUserText = {

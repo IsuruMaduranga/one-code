@@ -38,9 +38,9 @@ function texts(live: LiveTools): [string, string | undefined, string][] {
 	const push = (label: string, owner: string | undefined, text: string) => out.push([label, owner, text]);
 	for (const tier of ["frontier", "workhorse", "cheap", "tiny"] as const) {
 		for (const taskTools of [true, false]) {
-			push(`systemPrompt ${tier}${taskTools ? "" : " no task tools"}`, undefined, systemPrompt.lead({ tier, taskTools, tools: undefined, live }).join("\n\n"));
+			push(`systemPrompt ${tier}${taskTools ? "" : " no task tools"}`, undefined, systemPrompt.lead({ tier, taskTools: taskTools && live.has("task_create"), tools: undefined, live }).join("\n\n"));
 		}
-		push(`systemPrompt tail ${tier}`, undefined, systemPrompt.tail({ tier, taskTools: true, tools: undefined, live }).join("\n\n"));
+		push(`systemPrompt tail ${tier}`, undefined, systemPrompt.tail({ tier, taskTools: live.has("task_create"), tools: undefined, live }).join("\n\n"));
 	}
 	for (const form of FORMS) {
 		push(`enter_plan_mode ${form}`, "plan-mode", planMode.descriptions.enter_plan_mode(form, live));

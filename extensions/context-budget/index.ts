@@ -46,13 +46,13 @@ function contextBudgetExtension(pi: ExtensionAPI) {
 		busy = false;
 		if (!enabled()) return;
 		pi.events.emit(REMINDER_CHANNEL, {
-			text: totalTokensBlock(text.tokensLeft({ left: budget.budget })),
+			text: totalTokensBlock(text, budget.budget),
 			key: FIRST_PROMPT_KEY,
 			placement: "first-prepend",
 			order: CONTEXT_ORDER.totalTokens,
 		} satisfies ReminderPayload);
 		pi.events.emit(REMINDER_CHANNEL, {
-			text: totalTokensBlock(text.tokensLeft({ left: budget.budget })),
+			text: totalTokensBlock(text, budget.budget),
 			key: USER_MESSAGE_KEY,
 			placement: "sticky-append",
 			raw: true,
@@ -80,7 +80,7 @@ function contextBudgetExtension(pi: ExtensionAPI) {
 	pi.on("tool_result", (event, ctx) => {
 		if (!enabled()) return;
 		pi.events.emit(REMINDER_CHANNEL, {
-			text: totalTokensBlock(text.tokensLeft({ left: budget.left(ctx.getContextUsage()?.tokens) })),
+			text: totalTokensBlock(text, budget.left(ctx.getContextUsage()?.tokens)),
 			placement: "last-append",
 			raw: true,
 			toolCallId: event.toolCallId,

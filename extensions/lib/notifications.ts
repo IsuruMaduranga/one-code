@@ -41,6 +41,7 @@ import { wrapReminder } from "./reminders.ts";
 import type { NotificationsText, OneShotWork } from "./notifications-text.ts";
 import { notificationWords } from "./notification-words.ts";
 import { liveTools } from "./profile.ts";
+import { around, commonPrefix, escapeRegExp, memoOn } from "./template-probe.ts";
 
 /** pi's session-mode union, derived from the context (the package root does not export ExtensionMode itself). */
 type ExtensionMode = ExtensionContext["mode"];
@@ -49,7 +50,7 @@ type ExtensionMode = ExtensionContext["mode"];
 // The inter-agent message channel (CC's `agent-message` type)
 // ---------------------------------------------------------------------------
 
-/** Indent every line of a report two spaces/** Indent every line of a report two spaces — blanks included; that is the anti-forgery invariant the preamble promises. */
+/** Indent every line of a report two spaces, blanks included; that is the anti-forgery invariant the preamble promises. */
 export function indentReport(text: string): string {
 	return text
 		.split("\n")
@@ -131,20 +132,15 @@ export function handBackPointer(from: string, flagged: boolean): string {
 }
 
 /** How every pointer opens (what the display parser recognises one by): the profile's text before the sender. */
-function handBackPointerPrefix(): string {
-	const probe = notificationWords().handBackPointer({ from: "\u0000", flagged: false });
-	return probe.slice(0, probe.indexOf("\u0000"));
-}
+const handBackPointerPrefix = memoOn((words: NotificationsText) => around((from) => words.handBackPointer({ from, flagged: false }))?.before);
 
 /** Auto mode's verdict on a resident's finished turn, as the hand-back review answers it. */
 export type HandBackVerdict = { kind: "blocked"; reason: string } | { kind: "unavailable"; reason: string };
 
 /**
- * The warning above a flagged hand-back. `blocked` is CC's literal (the reason
- * clipped to 500 characters, its trailing period dropped). `unavailable` — the
- * review timed out or threw — is One Code's own sentence in the shape of CC's
- * UNREVIEWED text (findings §24 has CC's; its "unavailable" wording names a
- * model and HTTP status and was not captured). Both reasons are clipped to 500
+ * The warning above a flagged hand-back, in the profile's words: `blocked`
+ * (the reason's trailing period dropped) or `unavailable` (the review timed
+ * out or threw; findings §24). Both reasons are clipped to 500
  * characters: the `unavailable` reason can carry a thrown error's `.message` (a
  * provider body, a stack), and this is the choke point where it enters the
  * model-facing warning, so it must not go in unbounded. The clip is a bound on
@@ -284,15 +280,6 @@ export function frameForDelivery(text: string, delivery: Delivery): string {
 	});
 }
 
-const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-/** The longest start two texts share. */
-function commonPrefix(a: string, b: string): string {
-	let i = 0;
-	while (i < a.length && a[i] === b[i]) i++;
-	return a.slice(0, i);
-}
-
 /**
  * The patterns that read the frames back, built from the same profile words
  * that build them, so a wording change cannot leave the parsers behind:
@@ -372,7 +359,7 @@ export function parseNotificationFrames(wire: string): NotificationFrame[] {
 	const frames: NotificationFrame[] = [];
 	let last = 0;
 	const preamble = notificationWords().agentMessage.handBackPreamble;
-	const pointerPrefix = handBackPointerPrefix();
+	const pointerPrefix = handBackPointerPrefix(notificationWords());
 	for (const match of text.matchAll(framingPatterns().frame)) {
 		const gap = text.slice(last, match.index).trim();
 		if (gap) frames.push({ kind: "text", text: gap });
@@ -385,7 +372,7 @@ export function parseNotificationFrames(wire: string): NotificationFrame[] {
 				kind: "task",
 				summary: unescapeTaskText(tagBody(block, "summary") ?? ""),
 				body: result,
-				pointer: result.startsWith(pointerPrefix),
+				pointer: !!pointerPrefix && result.startsWith(pointerPrefix),
 				status: tagBody(block, "status"),
 				durationMs: durationMs === undefined ? undefined : Number(durationMs),
 			});

@@ -11,6 +11,7 @@ import { contentHash } from "./ledger/wire.ts";
 import { toldBlockFact } from "./reminders.ts";
 import type { ContextChange } from "./context-text.ts";
 import { contextWords } from "./context-words.ts";
+import { differingSpans } from "./template-probe.ts";
 
 /** The told keys of the fingerprints (whole-text block facts) and of the compaction flag (a mode). */
 export const FACT_KEYS = {
@@ -73,13 +74,8 @@ export function compactionGitStatus(text: string | null): string | null {
 	if (text === null) return null;
 	const probe = { branch: "", mainBranch: "", user: "", status: "", commits: "" };
 	const words = contextWords();
-	const start = words.gitStatus({ snapshot: probe, at: "start" });
-	const compaction = words.gitStatus({ snapshot: probe, at: "compaction" });
-	let head = 0;
-	while (head < start.length && start[head] === compaction[head]) head++;
-	let tail = 0;
-	while (tail < start.length - head && tail < compaction.length - head && start[start.length - 1 - tail] === compaction[compaction.length - 1 - tail]) tail++;
-	return text.replace(start.slice(head, start.length - tail), compaction.slice(head, compaction.length - tail));
+	const [start, compaction] = differingSpans(words.gitStatus({ snapshot: probe, at: "start" }), words.gitStatus({ snapshot: probe, at: "compaction" }));
+	return text.replace(start, compaction);
 }
 
 /**

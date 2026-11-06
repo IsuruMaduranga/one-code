@@ -111,4 +111,4 @@ export function checkoutProgram(program: CheckoutProgram): string {
 	}
 }
 
-export const worktreeGuard: WorktreeGuardText = { refusal, checkoutProgram };
+export const worktreeGuard: WorktreeGuardText = { refusal };

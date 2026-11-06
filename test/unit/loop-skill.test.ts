@@ -23,7 +23,7 @@ import { AUTONOMOUS_PREAMBLE, AUTONOMOUS_PREAMBLE_PERSISTENT } from "../../profi
 const loopSkillPrompt = (args: string, loopFile: LoopFile | null) =>
 	loop.skillBody({ form: loopSkillForm(args), loopFile, persistent: false, maxAgeDays: RECURRING_MAX_AGE_DAYS });
 /** One Code's loop text with a stand-in preamble, so the expansion tests read short. */
-const PRE = { ...loop, preamble: () => "PRE" };
+const PRE = { ...loop, withPreamble: ({ tick }: { tick: string }) => `PRE\n\n---\n\n${tick}` };
 
 const dirs: string[] = [];
 afterEach(() => vi.unstubAllEnvs());
@@ -101,8 +101,8 @@ describe("loopSkillPrompt (Claude Code's /loop skill, 2.1.288)", () => {
 		expect(loopPersistent({})).toBe(false);
 		expect(loopPersistent({ CLAUDE_CODE_LOOP_PERSISTENT: "1" })).toBe(true);
 		for (const off of ["0", "false", "No", " off ", ""]) expect(loopPersistent({ CLAUDE_CODE_LOOP_PERSISTENT: off })).toBe(false);
-		expect(loop.preamble({ persistent: false })).toBe(AUTONOMOUS_PREAMBLE);
-		expect(loop.preamble({ persistent: true })).toBe(AUTONOMOUS_PREAMBLE_PERSISTENT);
+		expect(loop.withPreamble({ persistent: false, tick: "t" })).toBe(`${AUTONOMOUS_PREAMBLE}\n\n---\n\nt`);
+		expect(loop.withPreamble({ persistent: true, tick: "t" })).toBe(`${AUTONOMOUS_PREAMBLE_PERSISTENT}\n\n---\n\nt`);
 		expect(AUTONOMOUS_PREAMBLE.startsWith("# Autonomous loop check\n")).toBe(true);
 	});
 });
