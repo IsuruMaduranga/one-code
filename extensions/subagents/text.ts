@@ -11,6 +11,7 @@
  */
 
 import type { DescriptionForm } from "../lib/tool-variants.ts";
+import type { CheckoutProgram } from "../auto-mode/git-checkout-programs.ts";
 import type { GuideInput } from "./guide-agent.ts";
 import type { LiveTools } from "../lib/live-tools.ts";
 
@@ -128,7 +129,7 @@ export interface SubagentsText {
 	/** An agent file whose `tools` list matches no tool. */
 	unusableTools(p: { name: string; tools: string[] }): string;
 	/** Creating an isolation worktree was refused; `program` names what git would run. */
-	worktreeRefused(p: { program: string }): string;
+	worktreeRefused(p: { program: CheckoutProgram }): string;
 	/** A worktree kept because it holds the agent's work. */
 	worktreeKept(p: { path: string; branch?: string }): string;
 	/** A resident running in a worktree, on its report. */

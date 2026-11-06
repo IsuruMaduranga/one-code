@@ -145,36 +145,48 @@ function submoduleGitDirs(root: string, commonDir: string): string[] | undefined
 /** The hooks a git read can run: `status` rewrites the index. */
 export const READ_HOOKS = ["post-index-change"] as const;
 
+/** What in a checkout could make git run a program it names (worded by the profile's worktree guard). */
+export type CheckoutProgram =
+	/** A submodule's git directory cannot be read. */
+	| { kind: "submodulesUnreadable" }
+	| { kind: "configUnreadable" }
+	/** The checkout's config sets `key` (a program git runs). */
+	| { kind: "configSetsProgram"; key: string }
+	/** A submodule's config sets `key`, or cannot be read (`key` absent). */
+	| { kind: "submoduleConfig"; key?: string }
+	/** The checkout has this hook, which git runs. */
+	| { kind: "hook"; hook: string };
+
 /**
  * Why a git command in `dir` could run a program the checkout names, or
  * undefined when its repository-scoped configuration names none (or `dir` is
  * in no checkout). `hooks` are the hook names the command can run; `home`
  * expands a `~` hooks path.
  */
-export function checkoutGitRunsProgram(dir: string, home: string, hooks: readonly string[] = READ_HOOKS): string | undefined {
+export function checkoutGitRunsProgram(dir: string, home: string, hooks: readonly string[] = READ_HOOKS): CheckoutProgram | undefined {
 	const checkout = checkoutOf(dir);
 	if (!checkout) return undefined;
 	const { root, gitDir, commonDir } = checkout;
 	const modules = submoduleGitDirs(root, commonDir);
-	if (!modules) return "the checkout's submodules cannot all be read";
+	if (!modules) return { kind: "submodulesUnreadable" };
 	// `status` rewrites the index, which runs `post-index-change`; it recurses
 	// into submodules, each with its own hooks directory.
 	const hooksDirs = [join(commonDir, "hooks"), ...modules.map((module) => join(module, "hooks"))];
 	for (const file of new Set([join(commonDir, "config"), join(commonDir, "config.worktree"), join(gitDir, "config.worktree")])) {
 		const found = readConfig(file);
-		if (!found) return "the checkout's git config cannot be read";
-		if (found.program) return `the checkout's git config sets ${found.program}, which names a program git runs`;
+		if (!found) return { kind: "configUnreadable" };
+		if (found.program) return { kind: "configSetsProgram", key: found.program };
 		for (const path of found.hooksPaths) hooksDirs.push(resolve(root, expandTilde(path, home)));
 	}
 	for (const module of modules) {
 		const found = readConfig(join(module, "config"));
 		// A submodule's relative hooks path is resolved against a worktree this check does not map.
 		if (!found || found.program || found.hooksPaths.length > 0) {
-			return `a submodule's git config ${found ? `sets ${found.program ?? "core.hookspath"}, which names a program git runs` : "cannot be read"}`;
+			return found ? { kind: "submoduleConfig", key: found.program ?? "core.hookspath" } : { kind: "submoduleConfig" };
 		}
 	}
 	const hook = hooks.find((name) => hooksDirs.some((dir) => existsSync(join(dir, name))));
-	return hook && `the checkout has a ${hook} hook, which git runs`;
+	return hook ? { kind: "hook", hook } : undefined;
 }
 
 /** What a config file names; empty when it does not exist, undefined when it cannot be read. */

@@ -4,6 +4,7 @@
  * The shell guards' refusals are a separate group: subagent worktree isolation
  * uses them too.
  */
+import type { CheckoutProgram } from "../auto-mode/git-checkout-programs.ts";
 
 /** The worktree session as the result and reminder texts name it. */
 export interface WorktreeSessionView {
@@ -25,7 +26,7 @@ export type EnterWorktreeFailure =
 	| { kind: "alreadyActive"; path: string }
 	| { kind: "invalidName"; name: string; problem: WorktreeNameProblem }
 	/** `program`: what a checkout would run (auto-mode/git-checkout-programs.ts). */
-	| { kind: "checkoutRunsProgram"; program: string }
+	| { kind: "checkoutRunsProgram"; program: CheckoutProgram }
 	| { kind: "exists"; path: string }
 	| { kind: "createFailed"; osMessage: string };
 
@@ -120,4 +121,6 @@ export type WorktreeGuardRefusal =
  */
 export interface WorktreeGuardText {
 	refusal(refusal: WorktreeGuardRefusal): string;
+	/** What in a checkout could make git run a program, for a refused worktree. */
+	checkoutProgram(program: CheckoutProgram): string;
 }

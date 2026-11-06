@@ -17,9 +17,10 @@ describe("One Code's worktree text", () => {
 
 	it("words the enter failures the offline run cannot reach", () => {
 		expect(worktree.enter.failed({ kind: "notARepository" })).toBe("enter_worktree needs a git repository; this directory is not one.");
-		expect(worktree.enter.failed({ kind: "checkoutRunsProgram", program: "a filter runs `x`" })).toBe(
-			"Could not create worktree safely: a filter runs `x`. Create it with a permission-reviewed `git worktree add` command, then enter it with `path`.",
+		expect(worktree.enter.failed({ kind: "checkoutRunsProgram", program: { kind: "configSetsProgram", key: "core.fsmonitor" } })).toBe(
+			"Could not create worktree safely: the checkout's git config sets core.fsmonitor, which names a program git runs. Create it with a permission-reviewed `git worktree add` command, then enter it with `path`.",
 		);
+		expect(worktree.enter.failed({ kind: "checkoutRunsProgram", program: { kind: "submoduleConfig" } })).toContain("a submodule's git config cannot be read.");
 		expect(worktree.enter.failed({ kind: "invalidName", name: "a/../b", problem: "dotSegment" })).toBe('Invalid worktree name "a/../b": segments may not be . or ..');
 		expect(worktree.enter.failed({ kind: "invalidName", name: "", problem: "length" })).toBe('Invalid worktree name "": name must be 1-64 characters');
 	});

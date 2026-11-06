@@ -33,7 +33,7 @@
 import { isProtectedPath } from "../permissions/protected-paths.ts";
 import { isExecutionPrimitivePath, isSensitivePath } from "./sensitive.ts";
 import { isWithin, resolveForContainment, toAbsoluteBash, touchesGuardedPath } from "./paths.ts";
-import { checkoutGitRunsProgram, READ_HOOKS } from "./git-checkout-programs.ts";
+import { type CheckoutProgram, checkoutGitRunsProgram, READ_HOOKS } from "./git-checkout-programs.ts";
 import { lstatSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -767,7 +767,7 @@ const GIT_FILE_OPERANDS = new Set(["diff"]);
  * runs in (after every `-C`, each relative to the last) could still make it
  * run a program (git-checkout-programs.ts), or undefined.
  */
-function gitCheckoutReason(args: Token[], cwd: string, home: string, seen: Map<string, string | undefined>, hooks: readonly string[] = READ_HOOKS): string | undefined {
+function gitCheckoutReason(args: Token[], cwd: string, home: string, seen: Map<string, CheckoutProgram | undefined>, hooks: readonly string[] = READ_HOOKS): string | undefined {
 	let dir = cwd;
 	for (let index = 0; index < args.length && args[index].value.startsWith("-"); index++) {
 		if (args[index].value === "-C" && args[index + 1]) dir = toAbsoluteBash(dir, args[++index].value, home);
@@ -777,7 +777,7 @@ function gitCheckoutReason(args: Token[], cwd: string, home: string, seen: Map<s
 	const key = `${hooks.join(",")}\0${dir}`;
 	if (!seen.has(key)) seen.set(key, checkoutGitRunsProgram(dir, home, hooks));
 	const why = seen.get(key);
-	return why && `runs git where ${why}`;
+	return why && `runs git in a checkout that can run a program (${why.kind}${"key" in why && why.key ? `: ${why.key}` : "hook" in why ? `: ${why.hook}` : ""})`;
 }
 
 export interface AnalyzeInput {
@@ -828,7 +828,7 @@ export function hasReadOnlyShellWords(segment: Segment, cwd: string, home: strin
  * Classify a shell command. Never denies — see the module contract above.
  */
 export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], readableRoots = [], writableRoots = [] }: AnalyzeInput): ShellEvidence {
-	const checkoutReasons = new Map<string, string | undefined>();
+	const checkoutReasons = new Map<string, CheckoutProgram | undefined>();
 	const evidence: ShellEvidence = {
 		verdict: "safe",
 		notes: [],

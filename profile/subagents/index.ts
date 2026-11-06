@@ -9,6 +9,7 @@
  */
 
 import type { AgentTools, LaunchLine, PendingRun, RunFailure, RunStatus, SubagentRefusal, SubagentsText } from "../../extensions/subagents/text.ts";
+import { checkoutProgram } from "../worktree/guard.ts";
 import { agentDescription } from "./agent-description.ts";
 import { guideAgent } from "./guide-agent.ts";
 import { type ToolPassages, withoutOff } from "../live-tools.ts";
@@ -186,7 +187,7 @@ export const subagents: SubagentsText = {
 		`Agent "${name}" lists tools (${tools.join(", ")}) that match no available tool. ` +
 		"Use Claude Code names (Read, Edit, Write, Bash, Grep, Glob, WebFetch, WebSearch, NotebookEdit, Skill, Agent, SendMessage) or pi names (read, edit, write, bash, grep, find, ls, …) in the agent file's `tools` list.",
 	worktreeRefused: ({ program }) =>
-		`Cannot create an isolation worktree: ${program}. Create the worktree with an explicitly approved git worktree add command, then start a session there without automatic isolation.`,
+		`Cannot create an isolation worktree: ${checkoutProgram(program)}. Create the worktree with an explicitly approved git worktree add command, then start a session there without automatic isolation.`,
 	worktreeKept: ({ path, branch }) => `(Changes or commits left in worktree ${path}${branch ? ` on branch ${branch}` : ""} — review or merge them.)`,
 	worktreeRunning: ({ path, branch }) =>
 		`(Running in worktree ${path} on branch ${branch} — kept while the agent stays resident, and after it exits if it holds uncommitted changes or commits.)`,

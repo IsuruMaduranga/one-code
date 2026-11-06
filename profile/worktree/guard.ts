@@ -6,6 +6,7 @@
  */
 
 import type { GitTargetProblem, StashRisk, WorktreeGuardRefusal, WorktreeGuardText } from "../../extensions/worktree/text.ts";
+import type { CheckoutProgram } from "../../extensions/auto-mode/git-checkout-programs.ts";
 
 /** Why the target cannot be verified, and the fix, for a worktree at `wt`. */
 function gitTarget(problem: GitTargetProblem, wt: string): [string, string] {
@@ -94,4 +95,20 @@ function refusal(r: WorktreeGuardRefusal): string {
 	}
 }
 
-export const worktreeGuard: WorktreeGuardText = { refusal };
+/** What in a checkout could make git run a program, for a refused worktree (the worktree tools and subagents word it the same). */
+export function checkoutProgram(program: CheckoutProgram): string {
+	switch (program.kind) {
+		case "submodulesUnreadable":
+			return "the checkout's submodules cannot all be read";
+		case "configUnreadable":
+			return "the checkout's git config cannot be read";
+		case "configSetsProgram":
+			return `the checkout's git config sets ${program.key}, which names a program git runs`;
+		case "submoduleConfig":
+			return `a submodule's git config ${program.key ? `sets ${program.key}, which names a program git runs` : "cannot be read"}`;
+		case "hook":
+			return `the checkout has a ${program.hook} hook, which git runs`;
+	}
+}
+
+export const worktreeGuard: WorktreeGuardText = { refusal, checkoutProgram };

@@ -6,6 +6,7 @@
 
 import type { EnterWorktreeFailure, RemoveBlocker, WorktreeNameProblem, WorktreeSessionView, WorktreeText } from "../../extensions/worktree/text.ts";
 import { enterWorktreeDescription, ENTER_WORKTREE_PARAMS, EXIT_WORKTREE_DESCRIPTION, EXIT_WORKTREE_PARAMS } from "./descriptions.ts";
+import { checkoutProgram } from "./guard.ts";
 
 /**
  * The worktree git-isolation guard, said when the session enters: before it,
@@ -39,7 +40,7 @@ function enterFailed(failure: EnterWorktreeFailure): string {
 		case "invalidName":
 			return `Invalid worktree name "${failure.name}": ${NAME_PROBLEM[failure.problem]}`;
 		case "checkoutRunsProgram":
-			return `Could not create worktree safely: ${failure.program}. Create it with a permission-reviewed \`git worktree add\` command, then enter it with \`path\`.`;
+			return `Could not create worktree safely: ${checkoutProgram(failure.program)}. Create it with a permission-reviewed \`git worktree add\` command, then enter it with \`path\`.`;
 		case "exists":
 			return `Worktree ${failure.path} already exists — pass it as \`path\` to switch into it.`;
 		case "createFailed":
