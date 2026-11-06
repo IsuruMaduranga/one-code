@@ -6,7 +6,7 @@
  *
  * One Code runs every feature and keeps each tool's base switches. Its text
  * lives beside this file, one folder per text group; claude-code/ holds the
- * code that reads Claude Code's own files (the instruction provider).
+ * code that reads Claude Code's own files (the source provider).
  */
 
 import type { Profile } from "../extensions/lib/profile-contract.ts";
@@ -15,7 +15,6 @@ import { askUserText } from "./ask-user/index.ts";
 import { autoModeText } from "./auto-mode/index.ts";
 import { background } from "./background/index.ts";
 import { btw } from "./btw/index.ts";
-import { claudeCodeInstructions } from "./claude-code/index.ts";
 import { compaction } from "./compaction/index.ts";
 import { context } from "./context/index.ts";
 import { contextBudget } from "./context-budget/index.ts";
@@ -98,6 +97,6 @@ export const profile: Profile = {
 		subagents: subagentsText(live),
 		plugins,
 	}),
-	instructions: claudeCodeInstructions,
+	sources: "claude-code/sources.ts",
 	globalAgentsFiles: ["~/.agents/AGENTS.md"],
 };

@@ -10,6 +10,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import claudeContextExtension from "../../extensions/claude-context/index.ts";
 import { nestedInstructionText } from "../../extensions/lib/claude-context.ts";
 import { nestedInstructionFiles } from "../../profile/claude-code/instructions.ts";
+import { openInstructions } from "../../extensions/lib/instructions.ts";
+import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
@@ -27,8 +29,7 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-const files = (filePath: string, rule: "claude-md" | "agents-md" = "claude-md") =>
-	nestedInstructionFiles({ filePath, cwd: root, rule, home: root }).map((f) => f.path);
+const files = (filePath: string) => nestedInstructionFiles({ filePath, cwd: root, rule: "claude-md", home: root }).map((f) => f.path);
 
 describe("nestedInstructionFiles", () => {
 	it("returns the directories between cwd and the file, never cwd's own files", () => {
@@ -43,9 +44,11 @@ describe("nestedInstructionFiles", () => {
 		expect(files(join(root, "src", "reports", "CLAUDE.md"))).toEqual([join(root, "src", "reports", "CLAUDE.local.md")]);
 	});
 
-	it("follows the instruction rule: independent mode reads AGENTS.md only", () => {
+	it("independent mode reads AGENTS.md only", () => {
 		writeFileSync(join(root, "src", "reports", "AGENTS.md"), "agents rules\n");
-		expect(files(join(root, "src", "reports", "summary.py"), "agents-md")).toEqual([join(root, "src", "reports", "AGENTS.md")]);
+		resetConfigModeForTest("independent");
+		const nested = openInstructions(root, undefined).nested({ filePath: join(root, "src", "reports", "summary.py"), cwd: root, includeExternal: false });
+		expect(nested.map((f) => f.path)).toEqual([join(root, "src", "reports", "AGENTS.md")]);
 	});
 
 	it("never reads a file that resolves outside the project, nor an import outside it", () => {

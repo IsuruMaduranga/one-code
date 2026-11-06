@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { instructionRule } from "../../profile/claude-code/instructions.ts";
+import { sources } from "../../profile/claude-code/sources.ts";
 import { readInstructionFiles } from "../../extensions/lib/claude-settings.ts";
 import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
 
@@ -40,11 +40,14 @@ describe("readInstructionFiles (findings §57)", () => {
 	});
 });
 
-describe("instructionRule", () => {
-	it("is agents-md in independent mode, whatever Claude Code's settings say", () => {
+describe("One Code's source provider", () => {
+	it("opens no instruction view in independent mode, whatever Claude Code's settings say", () => {
 		const home = homeWith({ projectInstructions: "claude" });
-		expect(instructionRule(home)).toBe("claude-md");
+		expect(sources.open({ home }).instructions).toBeDefined();
 		resetConfigModeForTest("independent");
-		expect(instructionRule(home)).toBe("agents-md");
+		const off = sources.open({ home });
+		expect(off.instructions).toBeUndefined();
+		expect(off.allowPath?.(join(home, ".claude", "CLAUDE.md"))).toBe(false);
+		expect(off.allowPath?.(join(home, "AGENTS.md"))).toBe(true);
 	});
 });

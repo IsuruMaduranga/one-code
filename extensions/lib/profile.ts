@@ -21,9 +21,9 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { shareModuleForTest, sharedModule } from "./shared-module.ts";
 import { enabledFeatures, type FeatureId, featureProblems, isGuardFeature, TOOL_FEATURES } from "./features.ts";
-import type { InstructionProvider } from "./instructions.ts";
 import type { LiveTools } from "./live-tools.ts";
 import type { Profile, ProfileText, ToolSwitch } from "./profile-contract.ts";
+import type { SourceProvider } from "./sources.ts";
 
 export const PROFILE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../profile");
 
@@ -46,8 +46,8 @@ export interface ResolvedProfile {
 	childExtensionPaths: readonly string[];
 	/** The profile's model-facing text, built for `live`. */
 	text: ProfileText;
-	/** The profile's instruction provider (lib/instructions.ts), if it has one. */
-	instructions?: InstructionProvider;
+	/** The absolute path of the module exporting the profile's source provider (lib/sources.ts), if it has one. */
+	sourcesModule?: string;
 	/** The user's global AGENTS.md files besides pi's own, `~/` unexpanded. */
 	globalAgentsFiles: readonly string[];
 }
@@ -93,7 +93,7 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		live,
 		childExtensionPaths: profile.childExtensions.map((entry) => resolve(profileDir, entry)),
 		text: profile.text({ live }),
-		instructions: profile.instructions,
+		...(profile.sources ? { sourcesModule: resolve(profileDir, profile.sources) } : {}),
 		globalAgentsFiles: profile.globalAgentsFiles ?? [],
 	};
 }
@@ -107,7 +107,7 @@ const PROFILE_MODULE = resolve(PROFILE_DIR, "index.ts");
  * this module that needs it and shared with the rest (see the header). It is
  * loaded on demand rather than imported, so a copy that finds it in the slot
  * never evaluates it. Sharing is safe because the module holds no state: its
- * text is constant, and its code (the instruction provider) loads on first use.
+ * text is constant, and its code (the source provider) loads on first use.
  */
 function shippedProfile(): Profile {
 	return sharedModule<typeof import("../../profile/index.ts")>(SHIPPED_PROFILE, PROFILE_MODULE).profile;
@@ -124,6 +124,23 @@ let active: ResolvedProfile | undefined;
 export function activeProfile(): ResolvedProfile {
 	active ??= resolveProfile(shippedProfile(), process.env, PROFILE_DIR);
 	return active;
+}
+
+/** The slot key a profile module is shared under (lib/shared-module.ts), by its absolute path. */
+export function profileModuleKey(absolutePath: string): string {
+	return `one-code:profile-module:${absolutePath}`;
+}
+
+/**
+ * The profile's source provider, loaded the first time a session asks for it
+ * and shared once per process (lib/shared-module.ts): it reads files through
+ * lib/ modules a profile import must not pull in early (under test,
+ * test/setup.ts loads the profile before a test file's own mocks exist), and
+ * it holds no state. Undefined when the profile names none.
+ */
+export function sourceProvider(): SourceProvider | undefined {
+	const path = activeProfile().sourcesModule;
+	return path ? sharedModule<{ sources: SourceProvider }>(profileModuleKey(path), path).sources : undefined;
 }
 
 /** Test seam: use `resolved` as the active profile (`undefined` resolves the shipped one again). */

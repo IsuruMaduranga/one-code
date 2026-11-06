@@ -433,9 +433,11 @@ describe("startup probe and approved readers", () => {
 		resetConfigModeForTest("independent");
 		const outside = write(join(root, ".claude", "hidden.md"), `CLAUDE SECRET\n${ref(write(join(root, "transitive.md"), "HIDDEN TRANSITIVE RULE"))}`);
 		write(join(cwd, "AGENTS.md"), ref(outside));
-		expect(externalInstructionIncludes({ ...opts(), rule: "agents-md" })).toEqual([]);
-		expect(JSON.stringify(discoverContextFiles({ ...opts(), rule: "agents-md", includeExternal: true }))).not.toContain("CLAUDE SECRET");
-		expect(JSON.stringify(discoverContextFiles({ ...opts(), rule: "agents-md", includeExternal: true }))).not.toContain("HIDDEN TRANSITIVE RULE");
+		const instructions = openInstructions(home, undefined);
+		expect(instructions.externalIncludes({ cwd })).toEqual([]);
+		const files = JSON.stringify(instructions.sections({ cwd, includeExternal: true }).contextFiles);
+		expect(files).not.toContain("CLAUDE SECRET");
+		expect(files).not.toContain("HIDDEN TRANSITIVE RULE");
 	});
 });
 

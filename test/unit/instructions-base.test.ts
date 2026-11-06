@@ -30,7 +30,7 @@ beforeEach(() => {
 	cwd = join(root, "repo", "app");
 	state = join(home, ".product");
 	mkdirSync(cwd, { recursive: true });
-	setActiveProfileForTest(resolveProfile({ ...profile, instructions: undefined }, {}, "/profile"));
+	setActiveProfileForTest(resolveProfile({ ...profile, sources: undefined }, {}, "/profile"));
 });
 afterEach(() => {
 	setActiveProfileForTest(undefined);

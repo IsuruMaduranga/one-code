@@ -9,7 +9,6 @@
  * extensions child sessions load, and the text groups moved so far.
  */
 
-import type { InstructionProvider } from "./instructions.ts";
 import type { ArtifactsText } from "../artifacts/text.ts";
 import type { AskUserText } from "../ask-user/text.ts";
 import type { AutoModeText } from "../auto-mode/text.ts";
@@ -154,11 +153,12 @@ export interface Profile {
 	 */
 	text(env: TextEnv): ProfileText;
 	/**
-	 * The product's instruction files beyond the base's AGENTS.md and product
-	 * file (lib/instructions.ts): the provider gets the base's finished lists
-	 * and returns the final ones. Absent: the base's lists as they are.
+	 * The module, relative to the profile folder, whose `sources` export is the
+	 * product's source provider (lib/sources.ts): where it reads beyond the
+	 * base's own locations, such as another tool's instruction files. Loaded
+	 * on first use, once per process. Absent: the base's locations only.
 	 */
-	instructions?: InstructionProvider;
+	sources?: string;
 	/**
 	 * The user's global AGENTS.md files the base reads besides pi's own
 	 * `<agent dir>/AGENTS.md`, in order; `~/` is the home directory.

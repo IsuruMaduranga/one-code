@@ -414,9 +414,6 @@ describe("rules in Claude context discovery", () => {
 		const managedOnly = discoverContextFiles({ cwd, homeClaudeDir: user, managedDir: managed, home: fixture, rule: "managed-only" })
 			.filter((file) => [managedFile, managedRule].includes(file.path));
 		expect(managedOnly.map((file) => file.path)).toEqual([managedFile, managedRule]);
-		expect(discoverContextFiles({ cwd, homeClaudeDir: user, managedDir: managed, home: fixture, rule: "agents-md" }).filter((file) => file.path === agent).map((file) => file.path)).toEqual([agent]);
-		// Rules are never an independent AGENTS.md-mode attachment.
-		expect(discoverContextFiles({ cwd, homeClaudeDir: user, managedDir: managed, home: fixture, rule: "agents-md" }).some((file) => file.path.endsWith(join("rules", "m.md")))).toBe(false);
 	});
 
 	it("uses trimmed parsed rule bodies and descriptors at startup, but nested attachments keep raw parsed bodies without descriptors", () => {

@@ -5,8 +5,7 @@ import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import claudeContextExtension from "../../extensions/claude-context/index.ts";
 import systemReminderExtension from "../../extensions/system-reminder/index.ts";
-import { discoverOneCodeFiles } from "../../extensions/lib/instructions.ts";
-import { discoverContextFiles, nestedInstructionFiles } from "../../profile/claude-code/instructions.ts";
+import { discoverOneCodeFiles, openInstructions } from "../../extensions/lib/instructions.ts";
 import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
@@ -189,7 +188,8 @@ describe("claude-context audit", () => {
 		mkdirSync(join(hidden, "child"), { recursive: true });
 		writeFileSync(join(hidden, "AGENTS.md"), "HIDDEN STARTUP RULE\n");
 		symlinkSync(hidden, join(root, "alias"));
-		const files = discoverContextFiles({ cwd: join(root, "alias", "child"), home: root, homeClaudeDir: join(root, "home"), rule: "agents-md" });
+		// Independent mode: the base's lists behind the provider's allowPath (profile/claude-code/sources.ts).
+		const files = openInstructions(root, undefined).sections({ cwd: join(root, "alias", "child"), includeExternal: false }).contextFiles;
 		expect(files.some((file) => file.content.includes("HIDDEN STARTUP RULE"))).toBe(false);
 	});
 
@@ -198,7 +198,7 @@ describe("claude-context audit", () => {
 		writeFileSync(join(root, ".claude", "private.md"), "HIDDEN IMPORT RULE\n");
 		writeFileSync(join(root, "AGENTS.md"), "@.claude/private.md\n");
 		writeFileSync(join(root, "ONECODE.md"), "@.claude/private.md\n");
-		const files = discoverContextFiles({ cwd: root, home: root, homeClaudeDir: join(root, "home"), rule: "agents-md" });
+		const files = openInstructions(root, undefined).sections({ cwd: root, includeExternal: false }).contextFiles;
 		const oneCode = discoverOneCodeFiles({ cwd: root, home: root, homeOneCodeDir: join(root, "home-onecode") });
 		expect([...files, ...oneCode].some((file) => file.content.includes("HIDDEN IMPORT RULE"))).toBe(false);
 	});
@@ -209,13 +209,6 @@ describe("claude-context audit", () => {
 		writeFileSync(join(root, ".claude", "nested", "source.ts"), "export {};\n");
 		symlinkSync(join(root, ".claude"), join(root, "alias"));
 
-		expect(
-			nestedInstructionFiles({
-				cwd: root,
-				filePath: join(root, "alias", "nested", "source.ts"),
-				rule: "agents-md",
-				home: root,
-			}),
-		).toEqual([]);
+		expect(openInstructions(root, undefined).nested({ cwd: root, filePath: join(root, "alias", "nested", "source.ts"), includeExternal: false })).toEqual([]);
 	});
 });

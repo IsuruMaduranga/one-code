@@ -6,7 +6,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadProjectInstructions } from "../../extensions/auto-mode/instructions.ts";
 import { buildClaudeMdBlock } from "../../extensions/lib/claude-context.ts";
-import { discoverContextFiles, instructionRule } from "../../profile/claude-code/instructions.ts";
+import { discoverContextFiles } from "../../profile/claude-code/instructions.ts";
+import { readInstructionFiles } from "../../extensions/lib/claude-settings.ts";
 import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
 import { classifierInstructionNote, skippedInstructionNote } from "../../extensions/lib/instruction-budget.ts";
 import { estimateTextTokens } from "../../extensions/lib/pi-ai-estimate.ts";
@@ -136,7 +137,7 @@ describe("loadProjectInstructions", () => {
 	])("carries a restriction in %s to both the agent and the classifier", (_label, relative) => {
 		mkdirSync(join(repo, relative, ".."), { recursive: true });
 		writeFileSync(join(repo, relative), "Never delete the fixtures directory.");
-		const agent = buildClaudeMdBlock({ contextFiles: discoverContextFiles({ cwd: repo, homeClaudeDir: join(home, ".claude"), rule: instructionRule(home), home }) }) ?? "";
+		const agent = buildClaudeMdBlock({ contextFiles: discoverContextFiles({ cwd: repo, homeClaudeDir: join(home, ".claude"), rule: readInstructionFiles(home), home }) }) ?? "";
 		expect(agent).toContain("Never delete the fixtures directory.");
 		expect(loadProjectInstructions(repo, home, undefined, undefined)).toContain("Never delete the fixtures directory.");
 	});
@@ -186,7 +187,7 @@ describe("loadProjectInstructions", () => {
 			const text = loadProjectInstructions(repo, home, window, undefined) ?? "";
 			expect(text).toContain(`claude ${BIG}`);
 			expect(text).toContain(`# ${join(repo, "CLAUDE.local.md")}\n${classifierInstructionNote(estimateTextTokens(`local ${BIG} and more`), window)}`);
-			const agent = discoverContextFiles({ cwd: repo, homeClaudeDir: join(home, ".claude"), rule: instructionRule(home), home });
+			const agent = discoverContextFiles({ cwd: repo, homeClaudeDir: join(home, ".claude"), rule: readInstructionFiles(home), home });
 			expect(agent.map((file) => file.path)).toEqual([join(repo, "CLAUDE.md"), join(repo, "CLAUDE.local.md")]);
 		});
 

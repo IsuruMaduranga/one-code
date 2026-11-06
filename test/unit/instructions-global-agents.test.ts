@@ -105,7 +105,7 @@ describe("the global AGENTS.md files under One Code's provider", () => {
 
 describe("the global AGENTS.md files without a provider", () => {
 	it("load first, with their imports read anywhere (the user wrote them)", () => {
-		setActiveProfileForTest(resolveProfile({ ...profile, instructions: undefined }, {}, "/profile"));
+		setActiveProfileForTest(resolveProfile({ ...profile, sources: undefined }, {}, "/profile"));
 		write(join(root, "elsewhere.md"), "ELSEWHERE\n");
 		write(userGlobal, "user global\n@../../elsewhere.md\n");
 		const files = openInstructions(home, agentDir).sections({ cwd, includeExternal: false }).contextFiles;

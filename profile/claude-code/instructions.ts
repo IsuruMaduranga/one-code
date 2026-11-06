@@ -8,8 +8,9 @@
  * from the farthest ancestor down to the cwd `CLAUDE.md`, `.claude/CLAUDE.md`,
  * the base's AGENTS.md where Claude Code's `instructionFiles` rule takes it,
  * `.claude/AGENTS.md`, `.claude/rules` and `CLAUDE.local.md`. The block stays
- * byte-exact with Claude Code. In independent mode (lib/config-mode.ts) it
- * reads no Claude Code location and passes the base's files through.
+ * byte-exact with Claude Code. In independent mode (lib/config-mode.ts) the
+ * provider opens no instruction view (sources.ts), so the base's files go
+ * through as they are.
  *
  * Nested subtree instruction files come later, when a file under them is read
  * (`nestedInstructionFiles`). Rules parsing, recursive discovery and path
@@ -18,8 +19,7 @@
 
 import { basename, dirname, join } from "node:path";
 import { type InstructionFiles, readInstructionFiles } from "../../extensions/lib/claude-settings.ts";
-import { claudeSourcesOn } from "../../extensions/lib/config-mode.ts";
-import { claudeManagedDir, claudeUserDir, isClaudeLocation, isPathAtOrUnder, tryRealpath, absoluteFrom } from "../../extensions/lib/paths.ts";
+import { claudeManagedDir, claudeUserDir, isPathAtOrUnder, tryRealpath, absoluteFrom } from "../../extensions/lib/paths.ts";
 import { discoverRules, readRuleInstructions, type RuleFile, type RuleOptions } from "../../extensions/lib/claude-rules.ts";
 import { readExternalIncludesApproval } from "../../extensions/lib/claude-external-includes.ts";
 import type { InstructionSource } from "../../extensions/lib/context-text.ts";
@@ -37,7 +37,6 @@ import {
 	importReaders,
 	GLOBAL_DESCRIPTOR,
 	GLOBAL_SOURCES,
-	type InstructionProvider,
 	type InstructionView,
 	isPresentFile,
 	LOCAL_DESCRIPTOR,
@@ -50,18 +49,8 @@ import {
 	readFileIfPresent,
 } from "../../extensions/lib/instructions.ts";
 
-/**
- * Which instruction files load: Claude Code's `instructionFiles` values
- * (findings §57) in Claude-compatible mode, or `agents-md` in independent mode
- * (lib/config-mode.ts), where no CLAUDE.md-family file is read and every
- * directory's `AGENTS.md` loads.
- */
-type InstructionRule = InstructionFiles | "agents-md";
-
-/** The rule One Code runs under: independent mode's own, else Claude Code's `instructionFiles`. */
-export function instructionRule(home: string): InstructionRule {
-	return claudeSourcesOn() ? readInstructionFiles(home) : "agents-md";
-}
+/** Which instruction files load: Claude Code's `instructionFiles` values (findings §57). */
+type InstructionRule = InstructionFiles;
 
 /**
  * Whether `dir` holds a CLAUDE.md that puts Claude's instructions in play for
@@ -87,8 +76,7 @@ function dirHasClaudeMd(dir: string, present: (path: string) => boolean = isPres
  * decision, so `# claudeMd` stays byte-exact with CC whenever CLAUDE.md is
  * present); `claude-md-and-agents-md` loads them beside CLAUDE.md;
  * `managed-only` drops the user's and the project's files, retaining managed
- * instructions; `agents-md` reads only `AGENTS.md`, with no Claude Code
- * file at all.
+ * instructions.
  *
  * When `homeOneCodeDir` is given, One Code's own `ONECODE.md` files join the
  * list: the global one from `~/.onecode` right after the global CLAUDE.md, and
@@ -124,7 +112,7 @@ function discoverInstructionEntries(
 	const paths: InstructionEntry[] = [];
 	const seen = new Set<string>();
 	const rule = opts.rule ?? "claude-md";
-	const claudeFiles = rule !== "agents-md" && rule !== "managed-only";
+	const claudeFiles = rule !== "managed-only";
 	const dirs = ancestorDirs(opts.cwd);
 	const base = opts.base ?? basePaths(opts.cwd, { homeOneCodeDir: opts.homeOneCodeDir });
 	// Keyed by the directory as join() spells it, so a cwd given with a trailing separator still matches.
@@ -141,23 +129,20 @@ function discoverInstructionEntries(
 		return found;
 	};
 	const projectHasClaude = () => dirs.some((d) => dirHasClaudeMd(d, present));
-	const agentsFiles =
-		rule === "agents-md" || rule === "claude-md-and-agents-md" || (rule === "claude-md-or-agents-md" && !projectHasClaude());
+	const agentsFiles = rule === "claude-md-and-agents-md" || (rule === "claude-md-or-agents-md" && !projectHasClaude());
 
 	/** Adds the path if present. */
 	const push = (path: string, descriptor: InstructionSource): void => {
-		if (!present(path) || (rule === "agents-md" && isClaudeLocation(path, opts.homeClaudeDir))) return;
+		if (!present(path)) return;
 		const key = tryRealpath(path) ?? path;
 		if (seen.has(key)) return;
 		paths.push({ path, descriptor });
 		seen.add(key);
 	};
 
-	if (rule !== "agents-md") {
-		const managed = opts.managedDir ?? claudeManagedDir();
-		push(join(managed, "CLAUDE.md"), MANAGED_DESCRIPTOR);
-		paths.push(...rules(join(managed, ".claude", "rules"), "Managed", MANAGED_DESCRIPTOR));
-	}
+	const managed = opts.managedDir ?? claudeManagedDir();
+	push(join(managed, "CLAUDE.md"), MANAGED_DESCRIPTOR);
+	paths.push(...rules(join(managed, ".claude", "rules"), "Managed", MANAGED_DESCRIPTOR));
 	if (claudeFiles) {
 		push(join(opts.homeClaudeDir, "CLAUDE.md"), GLOBAL_DESCRIPTOR);
 		paths.push(...rules(join(opts.homeClaudeDir, "rules"), "User", GLOBAL_DESCRIPTOR));
@@ -165,7 +150,7 @@ function discoverInstructionEntries(
 	// The user's global AGENTS.md files follow the rule as a project's do, with
 	// ~/.claude/CLAUDE.md in the role of the project's CLAUDE.md: beside it,
 	// only without it, or not at all (decisions/bi-fork.md).
-	const globalAgents = rule === "agents-md" || rule === "claude-md-and-agents-md" || (rule === "claude-md-or-agents-md" && !present(join(opts.homeClaudeDir, "CLAUDE.md")));
+	const globalAgents = rule === "claude-md-and-agents-md" || (rule === "claude-md-or-agents-md" && !present(join(opts.homeClaudeDir, "CLAUDE.md")));
 	if (globalAgents) for (const entry of base) if (entry.descriptor === AGENTS_GLOBAL_DESCRIPTOR) push(entry.path, entry.descriptor);
 	for (const entry of base) if (entry.descriptor === ONECODE_GLOBAL_DESCRIPTOR) push(entry.path, entry.descriptor);
 
@@ -177,7 +162,6 @@ function discoverInstructionEntries(
 		if (agentsFiles) {
 			const agentsFile = baseAgents.get(at(d));
 			if (agentsFile) push(agentsFile.path, agentsFile.descriptor);
-			// `.claude/AGENTS.md` is a Claude Code location; independent mode reads none.
 			if (claudeFiles) push(join(d, ".claude", "AGENTS.md"), AGENTS_DESCRIPTOR);
 		}
 		if (claudeFiles) {
@@ -195,9 +179,8 @@ function discoverInstructionEntries(
  * the working directory (its `nested_memory` attachment): for each directory
  * from just below cwd down to the file's own, `CLAUDE.md`, `.claude/CLAUDE.md`
  * and `CLAUDE.local.md`, under the same rule as the startup block (AGENTS.md
- * per `rule`, decided for the whole project as at startup; none of the
- * CLAUDE.md family and no `.claude` directory in independent mode), plus One
- * Code's ONECODE.md. Directories at or above cwd are left out: the startup
+ * per `rule`, decided for the whole project as at startup), plus One Code's
+ * ONECODE.md. Directories at or above cwd are left out: the startup
  * block already carries them. Rules attach in Claude Code's order: managed/user
  * conditional, nested files/rules, then ancestor conditional rules.
  *
@@ -225,17 +208,13 @@ export function nestedInstructionFiles(opts: {
 	// sibling can still match an ancestor's rule, whose base is that ancestor.
 	const dirs = nestedDirs(target, opts.cwd);
 	const realTarget = tryRealpath(target);
-	const claudeFiles = opts.rule !== "agents-md" && opts.rule !== "managed-only";
-	// Independent mode reads no Claude Code location, so it never walks into a `.claude` directory.
-	const userDir = opts.homeClaudeDir ?? claudeUserDir(opts.home);
-	const allowedLocation = (path: string) => opts.rule !== "agents-md" || !isClaudeLocation(path, userDir);
-	const walked = dirs.filter(allowedLocation);
+	const claudeFiles = opts.rule !== "managed-only";
 	// claude-md-or-agents-md is decided per project, as at startup: AGENTS.md only where no CLAUDE.md is in play.
 	const projectHasClaude = () =>
-		[...ancestorDirs(opts.cwd), ...walked].some((dir) => dirHasClaudeMd(dir));
-	const agents = opts.rule === "agents-md" || opts.rule === "claude-md-and-agents-md" || (opts.rule === "claude-md-or-agents-md" && !projectHasClaude());
+		[...ancestorDirs(opts.cwd), ...dirs].some((dir) => dirHasClaudeMd(dir));
+	const agents = opts.rule === "claude-md-and-agents-md" || (opts.rule === "claude-md-or-agents-md" && !projectHasClaude());
 	// Approved external chains use the reference parser below; the legacy fallback stays confined.
-	const { anywhere: readAllowed, inProject: readInProject } = importReaders(opts.cwd, allowedLocation);
+	const { anywhere: readAllowed, inProject: readInProject } = importReaders(opts.cwd);
 	const seen = new Set<string>(realTarget ? [realTarget] : []);
 	const files: NestedFile[] = [];
 	const addRules = (rulesDir: string, scope: RuleOptions["scope"], conditional: boolean) => {
@@ -245,9 +224,9 @@ export function nestedInstructionFiles(opts: {
 			files.push({ ...file, imported: [] });
 		}
 	};
-	if (opts.rule !== "agents-md") addRules(join(opts.managedDir ?? claudeManagedDir(), ".claude", "rules"), "Managed", true);
+	addRules(join(opts.managedDir ?? claudeManagedDir(), ".claude", "rules"), "Managed", true);
 	if (claudeFiles) addRules(join(opts.homeClaudeDir ?? claudeUserDir(opts.home), "rules"), "User", true);
-	for (const dir of walked) {
+	for (const dir of dirs) {
 		const candidates: string[] = [];
 		if (claudeFiles) candidates.push(join(dir, "CLAUDE.md"), join(dir, ".claude", "CLAUDE.md"));
 		if (agents) {
@@ -259,7 +238,7 @@ export function nestedInstructionFiles(opts: {
 		if (oneCode) candidates.push(oneCode);
 		for (const path of candidates) {
 			const key = tryRealpath(path);
-			if (!inProject(key) || seen.has(key) || !allowedLocation(path)) continue;
+			if (!inProject(key) || seen.has(key)) continue;
 			if (basename(dirname(path)) === ".claude" && basename(path) === "CLAUDE.md") {
 				for (const file of readRuleInstructions(path, { cwd: opts.cwd, home: opts.home, scope: "Project", includeExternal: opts.includeExternal })) {
 					if (seen.has(file.key)) continue;
@@ -308,7 +287,7 @@ export function discoverContextFiles(opts: DiscoveryOptions & {
 	const contents = new Set<string>();
 	const emitted = new Set<string>();
 	const parsedShown = new Set<string>();
-	const { anywhere: readAllowedImport, inProject: readProjectImport } = importReaders(opts.cwd, (path) => opts.rule !== "agents-md" || !isClaudeLocation(path, opts.homeClaudeDir));
+	const { anywhere: readAllowedImport, inProject: readProjectImport } = importReaders(opts.cwd);
 	const appendParsed = (file: RuleFile, descriptor: InstructionSource) => {
 		if (emitted.has(file.key)) return;
 		emitted.add(file.key);
@@ -367,11 +346,9 @@ export function discoverContextFiles(opts: DiscoveryOptions & {
 }
 
 /** Use CC's parsed records for an approved external chain, without changing legacy no-import bytes. */
-function approvedExternalInstructions(path: string, opts: { cwd: string; home: string; homeClaudeDir?: string; rule?: InstructionRule; includeExternal?: boolean }): RuleFile[] | undefined {
+function approvedExternalInstructions(path: string, opts: { cwd: string; home: string; includeExternal?: boolean }): RuleFile[] | undefined {
 	if (!opts.includeExternal) return;
-	const files = readRuleInstructions(path, { cwd: opts.cwd, home: opts.home, scope: "Project", includeExternal: true,
-		allowPath: (path) => opts.rule !== "agents-md" || !isClaudeLocation(path, opts.homeClaudeDir ?? claudeUserDir(opts.home)),
-	});
+	const files = readRuleInstructions(path, { cwd: opts.cwd, home: opts.home, scope: "Project", includeExternal: true });
 	const cwd = tryRealpath(opts.cwd) ?? opts.cwd;
 	return files.some((file) => file.parent && !isPathAtOrUnder(file.key, cwd)) ? files : undefined;
 }
@@ -401,7 +378,6 @@ export function externalInstructionIncludes(opts: DiscoveryOptions & { home: str
 		if (ruleFile) { add(ruleFile); continue; }
 		const dotClaude = descriptor === PROJECT_DESCRIPTOR && basename(dirname(path)) === ".claude" && basename(path) === "CLAUDE.md";
 		for (const file of readRuleInstructions(path, { cwd: opts.cwd, home: opts.home, scope: descriptor === MANAGED_DESCRIPTOR ? "Managed" : "Project", includeExternal: true,
-			allowPath: (path) => opts.rule !== "agents-md" || !isClaudeLocation(path, opts.homeClaudeDir),
 			...(dotClaude ? { ownerDir: dirname(dirname(path)) } : {}),
 		})) add(file);
 	}
@@ -433,31 +409,26 @@ function conditionalRules(cwd: string, home: string, homeClaudeDir: string, incl
  */
 function classifierInstructionFiles(opts: { cwd: string; home: string; homeClaudeDir?: string; base?: readonly ContextFilePath[] }): ClassifierFile[] {
 	const homeClaudeDir = opts.homeClaudeDir ?? claudeUserDir(opts.home);
-	const claude = claudeSourcesOn();
-	const includeExternal = claude && readExternalIncludesApproval(opts.cwd, opts.home).approved;
-	const rules = claude ? conditionalRules(opts.cwd, opts.home, homeClaudeDir, includeExternal) : [];
-	const rule = claude ? "claude-md-and-agents-md" : "agents-md";
-	return [...rules, ...discoverContextFiles({ cwd: opts.cwd, homeClaudeDir, rule, home: opts.home, includeExternal, base: opts.base })];
+	const includeExternal = readExternalIncludesApproval(opts.cwd, opts.home).approved;
+	const rules = conditionalRules(opts.cwd, opts.home, homeClaudeDir, includeExternal);
+	return [...rules, ...discoverContextFiles({ cwd: opts.cwd, homeClaudeDir, rule: "claude-md-and-agents-md", home: opts.home, includeExternal, base: opts.base })];
 }
 
-/** One Code's provider: the rule is read when a view opens, and holds until the next one. */
-export const claudeCodeInstructions: InstructionProvider = {
-	open({ home }): InstructionView {
-		const homeClaudeDir = claudeUserDir(home);
-		let rule: InstructionRule | undefined;
-		const currentRule = () => (rule ??= instructionRule(home));
-		return {
-			allowPath: (path) => claudeSourcesOn() || !isClaudeLocation(path, homeClaudeDir),
-			paths: (base, { cwd, homeOneCodeDir }) => discoverContextFilePaths({ cwd, homeClaudeDir, homeOneCodeDir, rule: currentRule(), base }),
-			// Its own reading replaces the base's (rule files, external chains, deduplication), so the base's contents are never read.
-			files: (base, { cwd, includeExternal }) => discoverContextFiles({ cwd, homeClaudeDir, rule: currentRule(), home, includeExternal, base: base.paths }),
-			nested: (_base, { filePath, cwd, includeExternal }) => nestedInstructionFiles({ filePath, cwd, rule: currentRule(), home, homeClaudeDir, includeExternal }),
-			externalIncludes: (base, { cwd }) => {
-				const outside = externalInstructionIncludes({ cwd, homeClaudeDir, rule: currentRule(), home });
-				const seen = new Set(outside);
-				return [...outside, ...base.filter((path) => !seen.has(path))];
-			},
-			classifier: (base, { cwd }) => classifierInstructionFiles({ cwd, home, homeClaudeDir, base: base.paths }),
-		};
-	},
-};
+/** Claude Code's instruction files for one view (sources.ts): the rule is read on first use, and holds until the next view. */
+export function claudeCodeInstructionView(home: string): InstructionView {
+	const homeClaudeDir = claudeUserDir(home);
+	let rule: InstructionRule | undefined;
+	const currentRule = () => (rule ??= readInstructionFiles(home));
+	return {
+		paths: (base, { cwd, homeOneCodeDir }) => discoverContextFilePaths({ cwd, homeClaudeDir, homeOneCodeDir, rule: currentRule(), base }),
+		// Its own reading replaces the base's (rule files, external chains, deduplication), so the base's contents are never read.
+		files: (base, { cwd, includeExternal }) => discoverContextFiles({ cwd, homeClaudeDir, rule: currentRule(), home, includeExternal, base: base.paths }),
+		nested: (_base, { filePath, cwd, includeExternal }) => nestedInstructionFiles({ filePath, cwd, rule: currentRule(), home, homeClaudeDir, includeExternal }),
+		externalIncludes: (base, { cwd }) => {
+			const outside = externalInstructionIncludes({ cwd, homeClaudeDir, rule: currentRule(), home });
+			const seen = new Set(outside);
+			return [...outside, ...base.filter((path) => !seen.has(path))];
+		},
+		classifier: (base, { cwd }) => classifierInstructionFiles({ cwd, home, homeClaudeDir, base: base.paths }),
+	};
+}

@@ -9,11 +9,12 @@
  * directory, and the product's own file (`ONECODE.md`, global and per
  * directory), with `@path` imports expanded in place
  * (recursive, depth-capped, cycle-safe, code-span aware) and confined to the
- * project unless the user approved external imports. A profile's provider
- * (`Profile.instructions`) reshapes the base's lists: it gets them finished
- * and returns the final ones. One Code's adds Claude Code's CLAUDE.md family
- * (profile/claude-code/instructions.ts); a product without one sends the
- * base's lists as they are.
+ * project unless the user approved external imports. A profile's source
+ * provider (lib/sources.ts) may reshape the base's lists: its view's
+ * `instructions` gets them finished and returns the final ones, and its
+ * `allowPath` keeps paths out of every read. One Code's adds Claude Code's
+ * CLAUDE.md family (profile/claude-code/instructions.ts); a product without
+ * one, or One Code in independent mode, sends the base's lists as they are.
  *
  * Every reader goes through `openInstructions`, so the agent's first message,
  * a read's nested files, the classifier, /memory, /doctor and the startup
@@ -32,6 +33,7 @@ import { readExternalIncludesApproval } from "./claude-external-includes.ts";
 import { fitToWindow, type SkippedInstruction } from "./instruction-budget.ts";
 import type { InstructionSource } from "./context-text.ts";
 import { activeProfile, featureEnabled } from "./profile.ts";
+import { allowPathOf, openSources } from "./sources.ts";
 
 /** One instruction section. Legacy content stays raw; new parsed files carry CC's trimmed startup body. */
 export interface ContextFile {
@@ -328,12 +330,11 @@ export interface BaseList<T> {
 }
 
 /**
- * A provider's view for one session's settings (`InstructionProvider.open`):
- * each method gets the base's finished list and returns the final one.
+ * A provider's instruction files for one session's settings
+ * (`SourceView.instructions`, lib/sources.ts): each method gets the base's
+ * finished list and returns the final one.
  */
 export interface InstructionView {
-	/** Whether the base may read `path` at all: an AGENTS.md, a product file or an import. */
-	allowPath(path: string): boolean;
 	/** Every instruction file that exists, product files included, in the block's order (/memory, /doctor, the banner). */
 	paths(base: ContextFilePath[], opts: { cwd: string; homeOneCodeDir: string }): ContextFilePath[];
 	/** The instructions block's files, imports expanded (the product files ride their own block). */
@@ -346,14 +347,7 @@ export interface InstructionView {
 	classifier(base: BaseList<ContextFile>, opts: { cwd: string }): ClassifierFile[];
 }
 
-/** A profile's instruction source (`Profile.instructions`). */
-export interface InstructionProvider {
-	/** A view for the settings in force now; a session keeps one from its startup block to its next refresh. */
-	open(opts: { home: string }): InstructionView;
-}
-
 const BASE_VIEW: InstructionView = {
-	allowPath: () => true,
 	paths: (base) => base,
 	files: (base) => base.read(),
 	nested: (base) => base(),
@@ -361,9 +355,10 @@ const BASE_VIEW: InstructionView = {
 	classifier: (base) => base.read(),
 };
 
-/** The active profile's view, or the base's own lists unchanged. */
-function openView(home: string): InstructionView {
-	return activeProfile().instructions?.open({ home }) ?? BASE_VIEW;
+/** The provider's instruction view and read filter for `home`, or the base's own lists unchanged. */
+function openView(home: string): { view: InstructionView; allowPath: (path: string) => boolean } {
+	const sources = openSources(home);
+	return { view: sources.instructions ?? BASE_VIEW, allowPath: allowPathOf(sources) };
 }
 
 /**
@@ -428,7 +423,7 @@ function readSources(paths: readonly ContextFilePath[], home: string, readers: R
  * (the user's consent, as for CLAUDE.md), which `externalIncludes` asks for.
  */
 export function discoverOneCodeFiles(opts: { cwd: string; homeOneCodeDir: string; home: string; includeExternal?: boolean; allowPath?: (path: string) => boolean }): ContextFile[] {
-	const allowPath = opts.allowPath ?? openView(opts.home).allowPath;
+	const allowPath = opts.allowPath ?? allowPathOf(openSources(opts.home));
 	return readProductFiles(basePaths(opts.cwd, { allowPath, homeOneCodeDir: opts.homeOneCodeDir, agents: false }), opts.cwd, opts.home, allowPath, opts.includeExternal ?? false);
 }
 
@@ -513,8 +508,7 @@ const NO_INSTRUCTIONS: Instructions = {
  */
 export function openInstructions(home: string, agentDir: string | undefined): Instructions {
 	if (!featureEnabled("claude-context")) return NO_INSTRUCTIONS;
-	const view = openView(home);
-	const { allowPath } = view;
+	const { view, allowPath } = openView(home);
 	const globals = globalAgentsFiles(home, agentDir);
 	const productDir = (dir: string | undefined) => dir ?? oneCodeStateDir(process.env, home);
 	/** One walk for both blocks: the AGENTS.md list a provider reshapes (contents on demand) and the product files, read with the user's approval. */
