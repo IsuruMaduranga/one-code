@@ -11,8 +11,10 @@
  * own lists go through as they are.
  */
 
-import { CONFIG_MODE_KEY, claudeSourcesOn, configModeFromEnv, MODE_LABELS, savedConfigMode } from "./mode.ts";
+import { CONFIG_MODE_ENV, CONFIG_MODE_KEY, claudeSourcesOn, configModeFromEnv, savedConfigMode } from "./mode.ts";
 import { existsSync } from "node:fs";
+import os from "node:os";
+import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../../extensions/lib/one-code-settings.ts";
 import { join } from "node:path";
 import { findProjectConfigs } from "../../extensions/mcp/config.ts";
 import { claudeJsonPath, claudeUserDir, isClaudeLocation, tildify } from "../../extensions/lib/paths.ts";
@@ -29,15 +31,19 @@ import { claudeCodeInstructionView } from "./instructions.ts";
 const configSources: SourceSwitch = {
 	title: "Config sources",
 	key: CONFIG_MODE_KEY,
-	envVar: "ONECODE_CONFIG_MODE",
-	on: { value: "claude-compatible", label: MODE_LABELS["claude-compatible"], reads: "~/.claude, CLAUDE.md, .agents and pi's dirs" },
-	off: { value: "independent", label: MODE_LABELS.independent, reads: "~/.onecode, ONECODE.md, .agents and pi's dirs" },
+	envVar: CONFIG_MODE_ENV,
+	on: { label: "Claude-compatible", reads: "~/.claude, CLAUDE.md, .agents and pi's dirs" },
+	off: { label: "Independent", reads: "~/.onecode, ONECODE.md, .agents and pi's dirs" },
 	running: claudeSourcesOn,
 	saved: () => savedConfigMode() === "claude-compatible",
 	fromEnv: () => configModeFromEnv() !== undefined,
+	save(on) {
+		const path = oneCodeSettingsPath(os.homedir());
+		writeSettings(path, { ...readSettingsForWrite(path), [CONFIG_MODE_KEY]: on ? "claude-compatible" : "independent" });
+	},
 	describe({ home, env }) {
 		if (!claudeSourcesOn()) return "Claude Code config: not read (~/.claude, .claude/, CLAUDE.md, ~/.claude.json, managed settings)";
-		const claudeDir = env.CLAUDE_CONFIG_DIR ? `${env.CLAUDE_CONFIG_DIR} (CLAUDE_CONFIG_DIR)` : tildify(join(home, ".claude"), home);
+		const claudeDir = env.CLAUDE_CONFIG_DIR ? `${env.CLAUDE_CONFIG_DIR} (CLAUDE_CONFIG_DIR)` : tildify(claudeUserDir(home, env), home);
 		return `Claude Code config read from: ${claudeDir} (never written)`;
 	},
 	// Independent mode leaves an organisation's policy file unapplied: say so.
@@ -52,6 +58,9 @@ const configSources: SourceSwitch = {
 					})),
 };
 
+/** Claude Code's project folder. */
+const PROJECT_DIR = ".claude";
+
 export const sources: SourceProvider = {
 	switch: configSources,
 	open({ home }) {
@@ -60,20 +69,20 @@ export const sources: SourceProvider = {
 		return {
 			instructions: claudeCodeInstructionView(home),
 			instructionTargets: { project: "CLAUDE.md", user: join(homeClaudeDir, "CLAUDE.md") },
-			configDirs: { user: homeClaudeDir, project: ".claude" },
+			configDirs: { user: homeClaudeDir, project: PROJECT_DIR },
 			settings: (base, { cwd }) => claudeCodeSettings(base, cwd, home),
 			// Each of Claude Code's two skill folders loads before its `.agents` twin.
 			skillDirs: (base, { cwd }) => [
 				{ dir: join(homeClaudeDir, "skills"), scope: "user" },
 				...base.filter((dir) => dir.scope === "user"),
-				{ dir: join(cwd, ".claude", "skills"), scope: "project" },
+				{ dir: join(cwd, PROJECT_DIR, "skills"), scope: "project" },
 				...base.filter((dir) => dir.scope === "project"),
 			],
 			pluginsDir: join(homeClaudeDir, "plugins"),
 			mcpFiles: ({ cwd }) => [
 				{ path: claudeJsonPath(home), scope: "user" },
 				...findProjectConfigs(cwd).map((path): McpFile => ({ path, scope: "project" })),
-				{ path: join(cwd, ".claude", "settings.local.json"), scope: "local" },
+				{ path: settingsPaths(cwd, home).local, scope: "local" },
 			],
 			mcpWhere: ".mcp.json in the project, ~/.claude.json",
 			protectedFiles: [{ path: claudeJsonPath(home), label: "Claude Code's .claude.json" }],
@@ -92,8 +101,8 @@ function claudeCodeSettings(base: SettingsFile[], cwd: string, home: string): Se
 	return [
 		{ path: paths.user, scope: "user", owner: "borrowed", primary: true, label: "Claude Code user settings" },
 		...own("user"),
-		{ path: paths.project, scope: "project", owner: "borrowed", label: "project settings (checked in)" },
-		{ path: paths.local, scope: "local", owner: "borrowed", label: "project settings (local)" },
+		{ path: paths.project, scope: "project", owner: "borrowed", repo: true, label: "project settings (checked in)" },
+		{ path: paths.local, scope: "local", owner: "borrowed", repo: true, label: "project settings (local)" },
 		...own("local"),
 		...managedSettingsPaths().map((path): SettingsFile => ({ path, scope: "managed", owner: "borrowed", label: "managed settings (organisation policy)" })),
 	];

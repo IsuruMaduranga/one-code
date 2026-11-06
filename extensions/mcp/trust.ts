@@ -28,7 +28,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { primarySettingsFile, readSettingsFile, settingsSources } from "../lib/claude-settings.ts";
+import { primaryFamily, primarySettingsFile, readSettingsFile, settingsSources } from "../lib/claude-settings.ts";
 import { boundConsentItems } from "../lib/consent-preview.ts";
 import { consentStorePath } from "../lib/consent-stores.ts";
 import { processState } from "../lib/process-state.ts";
@@ -145,12 +145,13 @@ export async function readClaudeMcpjsonPolicy(cwd: string, home: string): Promis
 	// the local file of the same family.
 	const files = settingsSources(cwd, home);
 	const primary = primarySettingsFile(files);
+	const family = primaryFamily(files);
 	const policy: ClaudeMcpjsonPolicy = { enableAll: false, enabled: new Set(), disabled: new Set() };
 	// Deliberately not the project file: a checked-in settings.json granting
 	// enableAllProjectMcpServers would be the repo approving its own servers.
 	// The local file is in the checkout too, whatever git says about it.
 	for (const entry of files) {
-		const local = entry.scope === "local" && entry.owner === primary?.owner;
+		const local = entry.scope === "local" && family.includes(entry);
 		if (entry !== primary && !local) continue;
 		const file = readSettingsFile(entry.path);
 		if (!file) continue;

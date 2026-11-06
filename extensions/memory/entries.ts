@@ -123,6 +123,7 @@ export function buildMemoryEntries(opts: {
 		if (descriptor === AGENTS_GLOBAL_DESCRIPTOR) add({ title: "Global AGENTS.md", description: `${disp(path)} (cross-tool)`, path, kind: "file", exists: true });
 	}
 
+	const configDir = projectConfigDirName();
 	for (const d of ancestorDirs(cwd)) {
 		const isCwd = d === cwd;
 		if (isCwd) {
@@ -157,7 +158,7 @@ export function buildMemoryEntries(opts: {
 			});
 		}
 		// An AGENTS.md in the project's config folder (`.claude/AGENTS.md`), which a provider may load too.
-		const configAgents = found.get(`${AGENTS_DESCRIPTOR}\0${join(d, projectConfigDirName())}`);
+		const configAgents = found.get(`${AGENTS_DESCRIPTOR}\0${join(d, configDir)}`);
 		if (configAgents) add({ title: disp(configAgents), path: configAgents, kind: "file", exists: true });
 
 		const oneCode = found.get(`${ONECODE_DESCRIPTOR}\0${d}`);

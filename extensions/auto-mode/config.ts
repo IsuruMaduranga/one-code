@@ -46,7 +46,7 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { settingsSources } from "../lib/claude-settings.ts";
+import { isBorrowedUserFile, settingsSources } from "../lib/claude-settings.ts";
 import type { SettingsFile } from "../lib/sources.ts";
 import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
 import { DEFAULT_ENVIRONMENT, slotName } from "./defaults.ts";
@@ -110,12 +110,7 @@ export function autoModeSettingsPaths(home: string): string[] {
  * read: a repository could otherwise grant itself classifier exceptions.
  */
 export function autoModeSettingsFiles(home: string): SettingsFile[] {
-	return settingsSources(process.cwd(), home).filter((file) => file.scope === "user" || file.scope === "managed");
-}
-
-/** Another tool's user file: never the home of One Code's own keys (`classifierModel`, `subagentModel`). */
-export function isBorrowedUserFile(file: SettingsFile): boolean {
-	return file.owner === "borrowed" && file.scope === "user";
+	return settingsSources(process.cwd(), home, { productLocal: false }).filter((file) => file.scope === "user" || file.scope === "managed");
 }
 
 function readFile(path: string, diagnostics: string[]): AutoModeSettingsFile | undefined {

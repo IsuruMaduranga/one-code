@@ -19,7 +19,7 @@
 
 import { feature } from "../lib/feature.ts";
 import os from "node:os";
-import { join, relative } from "node:path";
+import { join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { type ChildAction, SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-mode/actions.ts";
@@ -112,13 +112,13 @@ import {
 	persistPermissionRule,
 	removePermissionRule,
 	resolveStartupMode,
-	type RuleSource,
 	persistWorkspaceDirectory,
 	removeWorkspaceDirectory,
 	type SourcedDirectory,
 	type SourcedRule,
 } from "./settings.ts";
 import { isRepoFile, sourceId } from "../lib/claude-settings.ts";
+import type { SettingsFile } from "../lib/sources.ts";
 import { MODE_ENV, parsePowerShell, resolvedOrSelf, runtimeProtectedDirs, runtimeSecretPaths } from "../lib/permission-gate.ts";
 import { describeProjectAllow, persistProjectAllowApproval, projectAllowApproved, projectDirectoryConsentEntry, type TrustFiring } from "./project-trust.ts";
 import { parseAddDirFlag, tooBroadForWorkspace, validateWorkspaceDirectory } from "./workspace.ts";
@@ -127,8 +127,8 @@ import { findProjectRoot } from "../lib/git.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 import { announceLocalCommand, registerLocalCommand } from "../lib/local-command.ts";
-import { openSources } from "../lib/sources.ts";
-import { forwardSlashes, tildify, tryRealpath } from "../lib/paths.ts";
+import { protectedFiles } from "../lib/sources.ts";
+import { relativeDisplayPath, tildify, tryRealpath } from "../lib/paths.ts";
 import { openPermissionsPanel, type PermissionsPanelHost } from "./panel/host.ts";
 import { PANEL_FOCUS_CHANNEL, PanelFocus, panelUi } from "../lib/panel-focus.ts";
 import {
@@ -258,9 +258,41 @@ const approved = (choice: string | undefined, grant: SessionGrant | undefined) =
 const PRODUCT_USER = sourceId({ owner: "product", scope: "user" });
 const PRODUCT_LOCAL = sourceId({ owner: "product", scope: "local" });
 
-/** A repository file as the user names it: `.claude/settings.json`, relative to the working directory. */
-function repoRelative(cwd: string, path: string): string {
-	return forwardSlashes(relative(cwd, path));
+/** Where a panel row came from, and why the panel cannot edit it when it cannot. */
+interface Origin {
+	label: string;
+	editable: boolean;
+	note?: string;
+}
+
+/** What each panel calls its rows, for the read-only notes. */
+type RowKind = "rule" | "entry" | "directory";
+const MANAGED_NOTE: Record<RowKind, string> = {
+	rule: "This rule is configured by managed settings and cannot be modified. Contact your system administrator for more information.",
+	entry: "This entry is configured by managed settings and cannot be modified. Contact your system administrator for more information.",
+	directory: "This directory is configured by managed settings and cannot be modified here.",
+};
+const BORROWED_CHANGE: Record<RowKind, (where: string) => string> = {
+	rule: (where) => `Change this rule in ${where}.`,
+	entry: (where) => `Change this entry in ${where}; it stays in effect here.`,
+	directory: (where) => `Change it in ${where}.`,
+};
+
+/**
+ * One rule for every panel's rows (permission rules, auto-mode entries,
+ * workspace directories): the product's own files are editable; the
+ * repository's, managed policy and another tool's are read only, each with
+ * its note. `repo` adds the repository-trust state the caller words.
+ */
+function originOf(source: SettingsFile, path: string, cwd: string, home: string, kind: RowKind, repo: { label?: string; note?: string } = {}): Origin {
+	const where = tildify(path, home);
+	if (source.owner === "product") return { label: `From ${source.label} (${where})`, editable: true };
+	if (isRepoFile(source)) {
+		const file = relativeDisplayPath(cwd, path);
+		return { label: `From the repository's ${file}${repo.label ?? ""}`, editable: false, note: `This ${kind} ships with the repository. Change it in ${file}.${repo.note ?? ""}` };
+	}
+	if (source.scope === "managed") return { label: "From managed settings", editable: false, note: MANAGED_NOTE[kind] };
+	return { label: `From ${source.label} (${where})`, editable: false, note: `One Code does not edit ${source.label}. ${BORROWED_CHANGE[kind](where)}` };
 }
 
 function permissionsExtension(pi: ExtensionAPI) {
@@ -391,12 +423,11 @@ function permissionsExtension(pi: ExtensionAPI) {
 	let workspacePaths: string[] = [];
 	/** The same directories in containment's comparison form: what decide() and both shell pre-gates see. */
 	let workspaceDirs: string[] = [];
-	const isRepoSource = (source: RuleSource) => isRepoFile(source);
-	const repoWorkspaceDirs = () => settingsWorkspaceDirs.filter((dir) => isRepoSource(dir.source));
+	const repoWorkspaceDirs = () => settingsWorkspaceDirs.filter((dir) => isRepoFile(dir.source));
 	/** What the repository-trust consent covers: its allow rules and its workspace directories. */
 	const projectTrustList = () => [...projectAllowRaw, ...repoWorkspaceDirs().map((dir) => projectDirectoryConsentEntry(dir.raw))];
 	const refreshWorkspace = () => {
-		const trusted = settingsWorkspaceDirs.filter((dir) => projectAllowTrusted || !isRepoSource(dir.source)).map((dir) => dir.path);
+		const trusted = settingsWorkspaceDirs.filter((dir) => projectAllowTrusted || !isRepoFile(dir.source)).map((dir) => dir.path);
 		workspacePaths = [...new Set([...trusted, ...flagWorkspaceDirs, ...sessionWorkspaceDirs].map((dir) => tryRealpath(dir) ?? dir))];
 		workspaceDirs = [...new Set(workspacePaths.map(resolvedOrSelf))];
 		readableRoots = [...harnessReadableRoots, ...docsDirPaths, ...workspaceDirs];
@@ -1274,7 +1305,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 	 */
 	const firstOutsideRead = (ctx: ExtensionContext, toolName: string, path: string, signal = ctx.signal): Promise<"allow" | "block" | "ask_again"> => {
 		const home = os.homedir();
-		const settled = () => (outsideReadSeen ??= outsideReadPromptSeen(oneCodeSettingsPath(home), (openSources(home).protectedFiles ?? []).map((file) => file.path)));
+		const settled = () => (outsideReadSeen ??= outsideReadPromptSeen(oneCodeSettingsPath(home), protectedFiles(home).map((file) => file.path)));
 		if (!ctx.hasUI) return Promise.resolve("allow");
 		// Settled while this call waited (a parallel read's Block included).
 		if (settled()) return Promise.resolve(blockOutsideReads ? "block" : "allow");
@@ -1805,19 +1836,10 @@ function permissionsExtension(pi: ExtensionAPI) {
 	};
 
 	/** Where a rule came from, and why the panel cannot edit it when it cannot. */
-	const describeSource = (rule: SourcedRule, cwd: string, home: string): { label: string; editable: boolean; note?: string } => {
-		const { source } = rule;
-		const where = tildify(rule.path, home);
-		const readOnly = (label: string, note: string) => ({ label: `From ${label}`, editable: false, note });
-		if (source.owner === "product") return { label: `From ${source.label} (${where})`, editable: true };
-		if (isRepoFile(source)) {
-			const file = repoRelative(cwd, rule.path);
-			const consent =
-				rule.behavior !== "allow" ? "" : projectAllowTrusted ? " You trusted this repository's allow rules." : projectAllowDeclined ? " Its allow rules are off this session." : " Its allow rules apply only after you trust them.";
-			return readOnly(`the repository's ${file}`, `This rule ships with the repository. Change it in ${file}.${consent}`);
-		}
-		if (source.scope === "managed") return readOnly("managed settings", "This rule is configured by managed settings and cannot be modified. Contact your system administrator for more information.");
-		return readOnly(`${source.label} (${where})`, `One Code does not edit ${source.label}. Change this rule in ${where}.`);
+	const describeSource = (rule: SourcedRule, cwd: string, home: string): Origin => {
+		const consent =
+			rule.behavior !== "allow" ? "" : projectAllowTrusted ? " You trusted this repository's allow rules." : projectAllowDeclined ? " Its allow rules are off this session." : " Its allow rules apply only after you trust them.";
+		return originOf(rule.source, rule.path, cwd, home, "rule", { note: consent });
 	};
 
 	const ruleRows = (cwd: string, home: string): Record<RuleTab, RuleRow[]> => {
@@ -1877,15 +1899,8 @@ function permissionsExtension(pi: ExtensionAPI) {
 	/** Built-in rules per auto-mode section, counted once from the embedded ruleset. */
 	let builtinCounts: ReturnType<typeof builtinRuleCounts> | undefined;
 
-	const autoSource = (entry: SourcedAutoModeEntry, home: string): { label: string; editable: boolean; note?: string } => {
-		const where = tildify(entry.path, home);
-		const { source } = entry;
-		if (source.owner === "product") return { label: `From ${source.label} (${where})`, editable: true };
-		if (source.scope === "managed") {
-			return { label: "From managed settings", editable: false, note: "This entry is configured by managed settings and cannot be modified. Contact your system administrator for more information." };
-		}
-		return { label: `From ${source.label} (${where})`, editable: false, note: `One Code does not edit ${source.label}. Change this entry in ${where}; it stays in effect here.` };
-	};
+	// Auto mode is never read from a repository's files, so no repository row reaches this.
+	const autoSource = (entry: SourcedAutoModeEntry, home: string): Origin => originOf(entry.source, entry.path, "", home, "entry");
 
 	const autoModeView = (home: string): AutoModeView => {
 		const listed = listAutoModeEntries(home);
@@ -1935,7 +1950,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 	 */
 	const editEnvironment = async (ctx: ExtensionContext, home: string): Promise<string | undefined> => {
 		const listed = listAutoModeEntries(home).filter((e) => e.key === "environment");
-		const own = listed.filter((e) => sourceId(e.source) === PRODUCT_USER).map((e) => e.text);
+		const own = listed.filter((e) => e.source.owner === "product").map((e) => e.text);
 		const others = listed.length - own.length;
 		// `"$defaults"` in the list: the user's lines extend the built-in default,
 		// which stays out of the editor and is kept on save.
@@ -1944,7 +1959,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		const title =
 			"Auto mode environment: one entry per line, `### ` lines are section headers. Save it empty to restore the built-in default." +
 			(extendsDefault ? " These lines are added to the built-in default." : "") +
-			(others > 0 ? ` These lines are added to the ${others} entries from ${[...new Set(listed.filter((e) => sourceId(e.source) !== PRODUCT_USER).map((e) => e.source.label))].join(" and ")}.` : "");
+			(others > 0 ? ` These lines are added to the ${others} entries from ${[...new Set(listed.filter((e) => e.source.owner !== "product").map((e) => e.source.label))].join(" and ")}.` : "");
 		const edited = await ctx.ui.editor(title, start.join("\n"));
 		if (edited === undefined) return undefined;
 		const lines = edited.split("\n").map((line) => line.trimEnd()).filter((line) => line.trim().length > 0);
@@ -1966,25 +1981,12 @@ function permissionsExtension(pi: ExtensionAPI) {
 	const workspaceRows = (cwd: string, home: string): WorkspaceDirRow[] => {
 		const rows: WorkspaceDirRow[] = [];
 		for (const dir of settingsWorkspaceDirs) {
-			const where = tildify(dir.settingsPath, home);
 			const key = `${sourceId(dir.source)}\0${dir.settingsPath}\0${dir.raw}`;
-			if (dir.source.owner === "product") {
-				rows.push({ key, path: dir.path, sourceLabel: `From ${dir.source.label} (${where})`, editable: true });
-			} else if (isRepoSource(dir.source)) {
-				const file = repoRelative(cwd, dir.settingsPath);
-				const state = projectAllowTrusted ? "" : projectAllowDeclined ? ", off this session" : ", awaiting your trust";
-				rows.push({
-					key,
-					path: dir.path,
-					sourceLabel: `From the repository's ${file}${state}`,
-					editable: false,
-					readOnlyNote: `This directory ships with the repository. Change it in ${file}.${projectAllowTrusted ? "" : " It applies only after you trust the repository's settings, which you are asked the first time a call needs it."}`,
-				});
-			} else {
-				const managed = dir.source.scope === "managed";
-				const label = managed ? "managed settings" : `${dir.source.label} (${where})`;
-				rows.push({ key, path: dir.path, sourceLabel: `From ${label}`, editable: false, readOnlyNote: managed ? "This directory is configured by managed settings and cannot be modified here." : `One Code does not edit ${dir.source.label}. Change it in ${where}.` });
-			}
+			const origin = originOf(dir.source, dir.settingsPath, cwd, home, "directory", {
+				label: projectAllowTrusted ? "" : projectAllowDeclined ? ", off this session" : ", awaiting your trust",
+				note: projectAllowTrusted ? "" : " It applies only after you trust the repository's settings, which you are asked the first time a call needs it.",
+			});
+			rows.push({ key, path: dir.path, sourceLabel: origin.label, editable: origin.editable, ...(origin.note ? { readOnlyNote: origin.note } : {}) });
 		}
 		for (const path of flagWorkspaceDirs) rows.push({ key: `flag\0\0${path}`, path, sourceLabel: "From --add-dir", editable: false, readOnlyNote: "Added with --add-dir for this run. Start One Code without it to leave it out." });
 		for (const path of sessionWorkspaceDirs) rows.push({ key: `session\0\0${path}`, path, sourceLabel: "Added for this session", editable: true });
@@ -2427,7 +2429,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		// must appear in both lists (removing the One Code copy alone would leave the
 		// exposure and a false "fixed" impression).
 		const oneCodeAllow = new Set(oneCodePermissionAllow(os.homedir()));
-		// Independent mode reads no ~/.claude rule, so none of them is in force.
+		// Without a borrowed user file (independent mode) the list is empty.
 		const claudeAllow = new Set(borrowedUserPermissionAllow(os.homedir()));
 		const removable = flagged.filter((entry) => oneCodeAllow.has(entry.rule));
 		const claudeSide = flagged.filter((entry) => claudeAllow.has(entry.rule));

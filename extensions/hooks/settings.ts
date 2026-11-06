@@ -1,10 +1,10 @@
 /**
  * Hook config discovery and merge (pure fs reads, no pi imports).
  *
- * Sources, in collection order: user ~/.claude/settings.json, managed
- * settings (Claude Code's platform paths), project .claude/settings.json,
- * project .claude/settings.local.json (independent mode: One Code's user and
- * per-repo settings, `hookSettingsPaths`). Project and local sources are
+ * Sources, in collection order: the primary settings file's family of the
+ * ladder, user files first, then managed, then the repository's
+ * (`hookSettingsPaths`; with One Code's provider on, Claude Code's four
+ * files). Project and local sources are
  * *returned flagged, not filtered* — whether they run is a trust decision
  * (hooks are arbitrary code execution) that index.ts applies via trust.ts;
  * this module stays pure.
@@ -16,7 +16,7 @@
 
 import { readFileSync, statSync } from "node:fs";
 import os from "node:os";
-import { isRepoFile, primarySettingsFile, settingsSources } from "../lib/claude-settings.ts";
+import { isRepoFile, primaryFamily, primarySettingsFile, settingsSources } from "../lib/claude-settings.ts";
 import type { SettingsFile } from "../lib/sources.ts";
 import { CC_HOOK_EVENTS, type CcHookEvent } from "./protocol.ts";
 
@@ -69,11 +69,13 @@ export interface LoadedHooks {
  * project-trust prompt.
  */
 export function hookSettingsPaths(cwd: string, home: string = os.homedir()): Array<{ scope: HookScope; path: string }> {
-	const files = settingsSources(cwd, home);
-	const owner = primarySettingsFile(files)?.owner;
-	const scopeOf = (file: SettingsFile): HookScope => (isRepoFile(file) ? (file.scope as "project" | "local") : file.scope === "managed" ? "managed" : "user");
-	return files
-		.filter((file) => file.owner === owner)
+	// A file no repository ships is user scope, so it needs no project-trust prompt.
+	const scopeOf = (file: SettingsFile): HookScope => (isRepoFile(file) || file.scope === "managed" ? file.scope : "user");
+	// Runs on every hook dispatch: the product's per-project file (a walk up for
+	// the project root) is looked up only when the product's files are the family.
+	const borrowedFirst = settingsSources(cwd, home, { productLocal: false });
+	const files = primarySettingsFile(borrowedFirst)?.owner === "borrowed" ? borrowedFirst : settingsSources(cwd, home);
+	return primaryFamily(files)
 		.map((file) => ({ scope: scopeOf(file), path: file.path }))
 		.sort((a, b) => HOOK_SCOPE_ORDER.indexOf(a.scope) - HOOK_SCOPE_ORDER.indexOf(b.scope));
 }

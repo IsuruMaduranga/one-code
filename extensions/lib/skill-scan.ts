@@ -41,9 +41,18 @@ export interface ScannedSkill {
  * skill never shows different scopes in /plugins vs the skill tool.
  */
 export function scopeForPath(path: string, home: string, agentDir: string): SkillScope {
+	return scopeIn(path, userSkillRoots(home, agentDir));
+}
+
+/** The user-scope skill folders: compute them once for a pass over many skills (`scopeIn`). */
+export function userSkillRoots(home: string, agentDir: string): string[] {
 	// The user-scope folders do not depend on the working directory, so `home` stands in for it.
-	const roots = [...skillSourceDirs(home, home).filter((d) => d.scope === "user").map((d) => d.dir), join(agentDir, "skills")];
-	return roots.some((root) => isPathAtOrUnder(path, root)) ? "user" : "project";
+	return [...skillSourceDirs(home, home).filter((d) => d.scope === "user").map((d) => d.dir), join(agentDir, "skills")];
+}
+
+/** `scopeForPath` against roots from `userSkillRoots`. */
+export function scopeIn(path: string, userRoots: readonly string[]): SkillScope {
+	return userRoots.some((root) => isPathAtOrUnder(path, root)) ? "user" : "project";
 }
 
 /**

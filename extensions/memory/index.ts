@@ -28,7 +28,7 @@ import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil
 import { claudeMdLimitWarning, combinedLimitWarning, projectMemoryDir } from "../lib/memory.ts";
 import { INDEX_MAX_CHARS, INDEX_MAX_LINES, indexLimitStatus, stampFrontmatter } from "../lib/memory-content.ts";
 import { requireText } from "../lib/profile.ts";
-import { allowPathOf, openSources, sourceSwitch } from "../lib/sources.ts";
+import { allowedPath, sourceSwitch } from "../lib/sources.ts";
 import { agentSkippedInstructions } from "../lib/instructions.ts";
 import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
 import { comparablePath, isPathAtOrUnder, oneCodeStateDir, tildify, tryRealpath } from "../lib/paths.ts";
@@ -79,7 +79,7 @@ function memoryExtension(pi: ExtensionAPI) {
 		// A state directory can contain links into a location the source view
 		// keeps out (Claude Code's tree, in independent mode). Resolve missing
 		// leaves through their parents before creating anything.
-		if (!allowPathOf(openSources(os.homedir()))(resolveThroughLinks(candidate) ?? candidate)) return;
+		if (!allowedPath(os.homedir())(resolveThroughLinks(candidate) ?? candidate)) return;
 
 		// Claude Code's startup warning: an instruction file over the char limit
 		// bloats every turn's context. Warn once, pointing at /memory to trim it.
@@ -286,7 +286,7 @@ function openMemoryPanel(
 				if (effect?.kind === "toggle-mode" && mode) {
 					const next = !mode.saved;
 					try {
-						saveUserSetting(mode.switch.key, (next ? mode.switch.on : mode.switch.off).value);
+						mode.switch.save(next);
 						mode.saved = next;
 					} catch (error) {
 						ctx.ui.notify(`Couldn't save the ${mode.switch.title.toLowerCase()} setting: ${error instanceof Error ? error.message : error}`, "error");

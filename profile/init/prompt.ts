@@ -10,6 +10,7 @@
  * directory has no CLAUDE.md, so once /init writes one, anything left in
  * AGENTS.md alone would stop reaching the model.
  */
+
 /**
  * The prompt for a target file: `CLAUDE.md` with One Code's source provider on
  * (the text it has always sent), `AGENTS.md` without it, where the clause that

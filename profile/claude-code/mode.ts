@@ -33,15 +33,9 @@ export type ConfigMode = "claude-compatible" | "independent";
 
 const DEFAULT_CONFIG_MODE: ConfigMode = "claude-compatible";
 
-/** How each mode is named to the user (`/memory`, `/doctor`). */
-export const MODE_LABELS: Record<ConfigMode, string> = {
-	"claude-compatible": "Claude-compatible",
-	independent: "Independent",
-};
-
 /** The key in `~/.onecode/settings.json`. */
 export const CONFIG_MODE_KEY = "configMode";
-const CONFIG_MODE_ENV = "ONECODE_CONFIG_MODE";
+export const CONFIG_MODE_ENV = "ONECODE_CONFIG_MODE";
 
 function isConfigMode(value: unknown): value is ConfigMode {
 	return value === "claude-compatible" || value === "independent";

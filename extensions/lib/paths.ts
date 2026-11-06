@@ -202,6 +202,11 @@ export function tildify(path: string, home: string): string {
 	return isRelativeInside(rest) ? `~/${forwardSlashes(rest)}` : path;
 }
 
+/** A path as the user names it from `cwd`, forward-slashed: `.claude/settings.json` for a file in the working directory's tree. */
+export function relativeDisplayPath(cwd: string, path: string): string {
+	return forwardSlashes(relative(cwd, path));
+}
+
 /** Independent mode excludes Claude locations even when reached through aliases or imports. */
 export function isClaudeLocation(path: string, userDir: string): boolean {
 	return [path, tryRealpath(path)].some((candidate) => candidate !== undefined && (

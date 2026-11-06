@@ -36,7 +36,7 @@ import {
 	skillOverrideKey,
 	skillStateFor,
 } from "../lib/skill-overrides.ts";
-import { BUNDLED_SKILLS_DIR, estimateSkillTokens, promptTemplateNames, scanSkills, scopeForPath } from "../lib/skill-scan.ts";
+import { BUNDLED_SKILLS_DIR, estimateSkillTokens, promptTemplateNames, scanSkills, scopeIn, userSkillRoots } from "../lib/skill-scan.ts";
 import { sessionModelTier } from "../lib/session-model-tier.ts";
 import { readUsage, recordUsage, usageKey } from "../lib/usage-tracker.ts";
 import { boundedDockHeight, ccToolRenderers, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
@@ -175,6 +175,7 @@ function skillExtension(pi: ExtensionAPI) {
 	/** Index the skills pi resolved for this turn and list them for the model. */
 	const adoptPiSkills = (skills: unknown[], cwd: string) => {
 		sessionCwd = cwd;
+		const userRoots = userSkillRoots(os.homedir(), getAgentDir());
 		piSkills = skills.map((skill) => {
 			const record = skill as unknown as { name: string; description?: string; path?: string; filePath?: string; disableModelInvocation?: boolean };
 			const path = record.path ?? record.filePath ?? "";
@@ -183,7 +184,7 @@ function skillExtension(pi: ExtensionAPI) {
 				description: record.description,
 				path,
 				source: "project" as const,
-				scope: scopeForPath(path, os.homedir(), getAgentDir()),
+				scope: scopeIn(path, userRoots),
 				state: "on" as const, // resolved per index() call below
 				// pi reads only a YAML `true`; Claude Code also takes the string "true".
 				disableModelInvocation: record.disableModelInvocation === true || (path ? readModelInvocationDisabled(path) : false),

@@ -29,10 +29,10 @@
  * pass through to resolveSubagentModel, which owns the semantics.
  */
 
-import { readSettingsFile } from "../lib/claude-settings.ts";
+import { isBorrowedUserFile, readSettingsFile } from "../lib/claude-settings.ts";
 import { isClaudeFamilyModel } from "../lib/model-policy.ts";
 import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
-import { autoModeSettingsFiles, isBorrowedUserFile } from "../auto-mode/config.ts";
+import { autoModeSettingsFiles } from "../auto-mode/config.ts";
 
 export interface SubagentDefault {
 	spec: string;

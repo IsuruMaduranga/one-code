@@ -49,8 +49,6 @@ import {
 	readFileIfPresent,
 } from "../../extensions/lib/instructions.ts";
 
-/** Which instruction files load: Claude Code's `instructionFiles` values (findings §57). */
-type InstructionRule = InstructionFiles;
 
 /**
  * Whether `dir` holds a CLAUDE.md that puts Claude's instructions in play for
@@ -90,7 +88,7 @@ interface DiscoveryOptions {
 	homeClaudeDir: string;
 	homeOneCodeDir?: string;
 	managedDir?: string;
-	rule?: InstructionRule;
+	rule?: InstructionFiles;
 	/** User consent for this project's external instruction imports. Never sourced from project files. */
 	includeExternal?: boolean;
 	/** The base's files: the global and per-directory AGENTS.md files, and the product files with `homeOneCodeDir` (lib/instructions.ts basePaths); found here when absent. */
@@ -194,7 +192,7 @@ function discoverInstructionEntries(
 export function nestedInstructionFiles(opts: {
 	filePath: string;
 	cwd: string;
-	rule: InstructionRule;
+	rule: InstructionFiles;
 	home: string;
 	homeClaudeDir?: string;
 	managedDir?: string;
@@ -417,7 +415,7 @@ function classifierInstructionFiles(opts: { cwd: string; home: string; homeClaud
 /** Claude Code's instruction files for one view (sources.ts): the rule is read on first use, and holds until the next view. */
 export function claudeCodeInstructionView(home: string): InstructionView {
 	const homeClaudeDir = claudeUserDir(home);
-	let rule: InstructionRule | undefined;
+	let rule: InstructionFiles | undefined;
 	const currentRule = () => (rule ??= readInstructionFiles(home));
 	return {
 		paths: (base, { cwd, homeOneCodeDir }) => discoverContextFilePaths({ cwd, homeClaudeDir, homeOneCodeDir, rule: currentRule(), base }),

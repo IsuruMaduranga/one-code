@@ -13,6 +13,8 @@ import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
 import { safetyControlWrite } from "../../extensions/auto-mode/safety-floor.ts";
+import { loadPermissionSettings } from "../../extensions/permissions/settings.ts";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { settingsSources } from "../../extensions/lib/claude-settings.ts";
 import { instructionFileNames, instructionTargets } from "../../extensions/lib/instructions.ts";
 import { INIT_PROMPT, initPrompt } from "../../profile/init/prompt.ts";
@@ -95,6 +97,17 @@ describe("the settings ladder", () => {
 		useProvider({ open: () => ({ settings: (base) => [{ path: extra, scope: "user", owner: "borrowed", primary: true, label: "Other tool settings" }, ...base] }) });
 		expect(settingsSources(cwd, home)[0].path).toBe(extra);
 		expect(writes(extra)).toBeDefined();
+	});
+
+	it("treats a file the provider marks as the repository's as the repository's, whoever owns it", () => {
+		const checkedIn = join(home, "repo", ".product", "settings.json");
+		mkdirSync(join(home, "repo", ".product"), { recursive: true });
+		writeFileSync(checkedIn, JSON.stringify({ permissions: { allow: ["Bash(make:*)"], defaultMode: "bypassPermissions" } }));
+		useProvider({ open: () => ({ settings: (base) => [...base, { path: checkedIn, scope: "project", owner: "product", repo: true, label: "product project settings" }] }) });
+		const merged = loadPermissionSettings(join(home, "repo"), home);
+		expect(merged.projectAllow).toEqual(["Bash(make:*)"]);
+		expect(merged.allow).toEqual([]);
+		expect(merged.defaultMode).toBeUndefined();
 	});
 
 	it("puts another provider's state files under the safety floor", () => {

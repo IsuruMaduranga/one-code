@@ -32,7 +32,7 @@ import { FIND_PATTERN_TESTS, findNegatedPatterns } from "./read-only-options.ts"
 import { analyzeShellCommand, globComponentRegex, hasReadOnlyShellWords, isUnknownTilde, LOOPS, movesDirectory, parseCommand, resolvePayload, scopedTracker } from "./shell-analysis.ts";
 import type { Token } from "./shell-parse.ts";
 import { claudeUserSettingsPath, managedSettingsPaths, settingsSources } from "../lib/claude-settings.ts";
-import { openSources } from "../lib/sources.ts";
+import { protectedFiles } from "../lib/sources.ts";
 import { CONSENT_STORE_TAIL, consentStorePaths } from "../lib/consent-stores.ts";
 import { oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { CATALOG_CACHE_TAIL, catalogCacheFiles } from "../lib/model-catalog-data.ts";
@@ -211,7 +211,7 @@ const CATALOG_FILE_NAME = /(^|[/\\])(models-dev|openrouter|huggingface|refresh-f
 
 /** The session's settings ladder and state files for the floor: every file a source provider adds is a gate control. */
 export function sessionSettingsFiles(cwd: string, home: string): string[] {
-	return [...settingsSources(cwd, home).map((file) => file.path), ...(openSources(home).protectedFiles ?? []).map((file) => file.path)];
+	return [...settingsSources(cwd, home).map((file) => file.path), ...protectedFiles(home).map((file) => file.path)];
 }
 
 /**

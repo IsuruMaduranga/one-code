@@ -29,8 +29,8 @@ import { type HooksSource, loadHookSettings } from "../hooks/settings.ts";
 // Claude Code's auto-memory switch, read through the whole settings ladder.
 import { AUTO_MEMORY_KEY as AUTO_MEMORY } from "../lib/auto-memory.ts";
 import { oneCodeStateDir } from "../lib/paths.ts";
-import { isRepoFile, primarySettingsFile, settingsSources, sourceId } from "../lib/claude-settings.ts";
-import { openSources, type SettingsFile, sourceSwitch } from "../lib/sources.ts";
+import { isBorrowedUserFile, isRepoFile, primaryFamily, primarySettingsFile, settingsSources, type SourceId, sourceId } from "../lib/claude-settings.ts";
+import { protectedFiles, type SettingsFile, sourceSwitch } from "../lib/sources.ts";
 import { agentSkippedInstructions, openInstructions } from "../lib/instructions.ts";
 import { CLAUDE_MD_CHAR_LIMIT, claudeMdLimitWarning, projectMemoryDir } from "../lib/memory.ts";
 import { skippedInstructionWarning } from "../lib/instruction-budget.ts";
@@ -47,7 +47,7 @@ import type { Finding, ReportLine, ReportSection, SessionView } from "./report.t
 import { countNoun, shortenHome } from "./report.ts";
 
 /** A file's role (lib/claude-settings.ts sourceId), or another tool's state file. */
-export type SettingsScope = "borrowed-user" | "borrowed-project" | "borrowed-local" | "borrowed-managed" | "product-user" | "product-local" | "borrowed-state";
+export type SettingsScope = SourceId | "borrowed-state";
 
 export interface SettingsFileReport {
 	scope: SettingsScope;
@@ -96,7 +96,7 @@ const MCP_POLICY_KEYS = ["enableAllProjectMcpServers", "enabledMcpjsonServers", 
 /** One Code's workflow keys, read from its user and project files (lib/one-code-settings.ts). */
 const WORKFLOW_KEYS = ["enableWorkflows", "disableWorkflows", "workflowSizeGuideline"];
 const CLAUDE_PROJECT_KEYS = new Set(["permissions", "hooks", "enabledPlugins", AUTO_MEMORY, ...MCP_POLICY_KEYS]);
-const SCOPE_KEYS: Record<SettingsScope, ReadonlySet<string>> = {
+const SCOPE_KEYS: Partial<Record<SettingsScope, ReadonlySet<string>>> = {
 	"borrowed-user": new Set(["permissions", "hooks", "env", "enabledPlugins", "autoMode", AUTO_MEMORY, ...MCP_POLICY_KEYS]),
 	"borrowed-project": CLAUDE_PROJECT_KEYS,
 	"borrowed-local": CLAUDE_PROJECT_KEYS,
@@ -134,21 +134,22 @@ const SCOPE_KEYS: Record<SettingsScope, ReadonlySet<string>> = {
 
 /**
  * The keys One Code reads from a file: its role's (with the source switch's
- * key in the product's user file), plus, for the product's
- * own user file when it is the primary one (no provider), the keys the
- * loaders take from the primary file and its family (hooks, `env`, MCP
- * approvals), and hooks and the MCP tightening list from the product's
- * per-project file in that family.
+ * key in the product's user file), plus what the loaders take by family
+ * (lib/claude-settings.ts primaryFamily): hooks from every file of the
+ * primary's family (hooks/settings.ts), `env` and MCP approvals from the
+ * primary file (claude-settings.ts readSettingsEnv, mcp/trust.ts), and the
+ * MCP tightening list from the family's local file. With the provider on
+ * this adds nothing to Claude Code's rows; without it, One Code's two files
+ * are the family.
  */
-function knownKeys(file: SettingsFile, primary: SettingsFile | undefined): ReadonlySet<string> {
-	const keys = new Set(SCOPE_KEYS[sourceId(file) as SettingsScope]);
+function knownKeys(file: SettingsFile, family: readonly SettingsFile[]): ReadonlySet<string> {
+	const keys = new Set(SCOPE_KEYS[sourceId(file)]);
 	// The /memory panel's switch row, saved in the product's user file.
 	const sw = sourceSwitch();
 	if (sw && file.owner === "product" && file.scope === "user") keys.add(sw.key);
-	if (file.owner === "product" && primary?.owner === "product") {
-		if (file === primary) for (const key of ["hooks", "env", ...MCP_POLICY_KEYS]) keys.add(key);
-		if (file.scope === "local") for (const key of ["hooks", "disabledMcpjsonServers"]) keys.add(key);
-	}
+	if (family.includes(file)) keys.add("hooks");
+	if (file.primary) for (const key of ["env", ...MCP_POLICY_KEYS]) keys.add(key);
+	if (family.includes(file) && file.scope === "local") keys.add("disabledMcpjsonServers");
 	return keys;
 }
 /** Never worth reporting as "ignored". */
@@ -248,19 +249,19 @@ function readReport(scope: SettingsScope, label: string, path: string, home: str
 }
 
 /** One ladder file's row: the keys One Code reads from it by its role, the ones it refuses there, and the ones it ignores. */
-function summarizeFile(source: SettingsFile, primary: SettingsFile | undefined, home: string, findings: Finding[]): SettingsFileReport {
+function summarizeFile(source: SettingsFile, ladder: { primary?: SettingsFile; family: readonly SettingsFile[] }, home: string, findings: Finding[]): SettingsFileReport {
 	const { path } = source;
-	const scope = sourceId(source) as SettingsScope;
+	const scope = sourceId(source);
 	const read = readReport(scope, source.label, path, home, findings);
 	const report = read.row;
 	if (!read.file) return report;
 	const file = read.file;
-	const known = knownKeys(source, primary);
+	const known = knownKeys(source, ladder.family);
 	/** Keys a branch below has already classified (used, refused or ignored), so the final sweep skips them. */
 	const handled = new Set<string>();
-	const borrowedUser = source.owner === "borrowed" && source.scope === "user";
+	const borrowedUser = isBorrowedUserFile(source);
 
-	const perms = permissionsSummary(file.permissions, source, primary?.path ?? path, findings, home);
+	const perms = permissionsSummary(file.permissions, source, ladder.primary?.path ?? path, findings, home);
 	if (perms.used) report.used.push(perms.used);
 	if (perms.refused) report.refused.push(perms.refused);
 	const hooks = hooksSummary(file.hooks);
@@ -376,11 +377,11 @@ export function collectCompat(input: CompatInput): CompatReport {
 	// then the product's own. With the provider switched off only the product's
 	// two are opened, and the switch names what that leaves unapplied.
 	const ladder = settingsSources(cwd, home);
-	const primary = primarySettingsFile(ladder);
-	const summarize = (file: SettingsFile) => summarizeFile(file, primary, home, findings);
+	const roles = { primary: primarySettingsFile(ladder), family: primaryFamily(ladder) };
+	const summarize = (file: SettingsFile) => summarizeFile(file, roles, home, findings);
 	const files: SettingsFileReport[] = [
 		...ladder.filter((file) => file.owner === "borrowed").map(summarize),
-		...(openSources(home).protectedFiles ?? []).map((file) => summarizeStateFile(file.path, file.label, home, findings)),
+		...protectedFiles(home).map((file) => summarizeStateFile(file.path, file.label, home, findings)),
 		...ladder.filter((file) => file.owner === "product").map(summarize),
 	];
 	for (const warning of sourceSwitch()?.offWarnings?.({ home }) ?? []) findings.push({ level: "warn", ...warning });

@@ -34,7 +34,7 @@ import { readExternalIncludesApproval } from "./claude-external-includes.ts";
 import { fitToWindow, type SkippedInstruction } from "./instruction-budget.ts";
 import type { InstructionSource } from "./context-text.ts";
 import { activeProfile, featureEnabled } from "./profile.ts";
-import { allowPathOf, type InstructionTargets, openSources, projectConfigDirName } from "./sources.ts";
+import { allowedPath, allowPathOf, type InstructionTargets, openSources, projectConfigDirName } from "./sources.ts";
 
 /** One instruction section. Legacy content stays raw; new parsed files carry CC's trimmed startup body. */
 export interface ContextFile {
@@ -424,7 +424,7 @@ function readSources(paths: readonly ContextFilePath[], home: string, readers: R
  * (the user's consent, as for CLAUDE.md), which `externalIncludes` asks for.
  */
 export function discoverOneCodeFiles(opts: { cwd: string; homeOneCodeDir: string; home: string; includeExternal?: boolean; allowPath?: (path: string) => boolean }): ContextFile[] {
-	const allowPath = opts.allowPath ?? allowPathOf(openSources(opts.home));
+	const allowPath = opts.allowPath ?? allowedPath(opts.home);
 	return readProductFiles(basePaths(opts.cwd, { allowPath, homeOneCodeDir: opts.homeOneCodeDir, agents: false }), opts.cwd, opts.home, allowPath, opts.includeExternal ?? false);
 }
 

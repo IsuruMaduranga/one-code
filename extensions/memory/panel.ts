@@ -22,7 +22,7 @@ import { wrapHints, wrapProse } from "../lib/tui-render.ts";
 export const MEMORY_DOCS_URL = "https://github.com/IsuruMaduranga/one-code";
 
 /** Cursor rows above the list: the switch's row just above it, when there is one, and auto-memory above that. */
-export const CONFIG_SOURCES_ROW = -1;
+const SWITCH_ROW = -1;
 const autoMemoryRow = (hasMode: boolean): number => (hasMode ? -2 : -1);
 
 export interface MemoryPanelState {
@@ -48,7 +48,7 @@ export type AutoMemoryView = SettingView<boolean>;
 
 /** The source provider's switch, true while the provider is on; its environment variable can set it. */
 export interface ModeView extends SettingView<boolean> {
-	switch: Pick<SourceSwitch, "title" | "key" | "envVar" | "on" | "off">;
+	switch: Pick<SourceSwitch, "title" | "envVar" | "on" | "off" | "save">;
 }
 
 /** The label and what is read for the switch in `on`. */
@@ -101,7 +101,7 @@ export function applyMemoryKey(state: MemoryPanelState, key: MemoryKey, entries:
 			return undefined;
 		case "enter": {
 			if (state.cursor === autoMemoryRow(hasMode)) return { kind: "toggle-auto-memory" };
-			if (hasMode && state.cursor === CONFIG_SOURCES_ROW) {
+			if (hasMode && state.cursor === SWITCH_ROW) {
 				if (confirming) return { kind: "toggle-mode" };
 				state.confirmingMode = true;
 				return { kind: "confirm-mode" };
@@ -147,7 +147,7 @@ export function renderMemoryPanel(
 		paint.bold("Memory"),
 		"",
 		renderAutoMemoryRow(autoMemory, state.cursor === autoMemoryRow(mode !== undefined), paint),
-		...(mode ? [renderModeRow(mode, state.cursor === CONFIG_SOURCES_ROW, paint)] : []),
+		...(mode ? [renderModeRow(mode, state.cursor === SWITCH_ROW, paint)] : []),
 		"",
 	];
 	const hints =

@@ -86,6 +86,12 @@ export interface SettingsFile {
 	/** `product`: the harness's own file, which it may write. `borrowed`: another tool's, never written. */
 	owner: "product" | "borrowed";
 	/**
+	 * The file sits in the repository's checkout, so the repository controls
+	 * it: its allow rules wait for the repository-trust consent, and it may
+	 * not select the modes a repository may not grant itself.
+	 */
+	repo?: boolean;
+	/**
 	 * The user file holding the keys a user edits by hand (`defaultMode`, MCP
 	 * approvals, hooks, `env`). The base marks the product's user file when
 	 * the list has none.
@@ -135,11 +141,11 @@ export interface SourceProvider {
 export interface SourceSwitch {
 	/** The setting's name in /memory and /doctor: "Config sources". */
 	title: string;
-	/** Its key in the product's user settings file. */
+	/** Its key in the settings file it is saved in, for /doctor's report on that file. */
 	key: string;
 	/** The environment variable that sets it for one run. */
 	envVar: string;
-	/** The two states: the value saved under `key`, the label, and what the product reads in it. */
+	/** The two states: the label, and what the product reads in it. */
 	on: SwitchState;
 	off: SwitchState;
 	/** Whether the provider is on in this process. */
@@ -148,6 +154,8 @@ export interface SourceSwitch {
 	saved(): boolean;
 	/** Whether `envVar` sets it in this process. */
 	fromEnv(): boolean;
+	/** Save the state for the next start (the running process keeps its own). Throws when the setting cannot be written. */
+	save(on: boolean): void;
 	/** /doctor's line on what the provider reads in this process, for `home` and the process environment. */
 	describe(opts: { home: string; env: Record<string, string | undefined> }): string;
 	/** /doctor's warnings about what the provider would apply that the off state leaves out (an organisation policy file); none while on. */
@@ -155,7 +163,6 @@ export interface SourceSwitch {
 }
 
 export interface SwitchState {
-	value: string;
 	label: string;
 	reads: string;
 }
@@ -206,6 +213,16 @@ export function projectConfigDirName(): string {
 /** The project-level counterpart of `userConfigDir`: `<cwd>/<project config folder>`. */
 export function projectConfigDir(cwd: string): string {
 	return join(cwd, projectConfigDirName());
+}
+
+/** The active view's read filter for `home`. */
+export function allowedPath(home: string): (path: string) => boolean {
+	return allowPathOf(openSources(home));
+}
+
+/** Another tool's state files the active view names (`SourceView.protectedFiles`); none without a provider. */
+export function protectedFiles(home: string): StateFile[] {
+	return openSources(home).protectedFiles ?? [];
 }
 
 /** `view.allowPath`, or every path when the view sets none. */
