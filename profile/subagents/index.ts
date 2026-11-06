@@ -10,6 +10,7 @@
 
 import type { AgentTools, LaunchLine, PendingRun, RunFailure, RunStatus, SubagentRefusal, SubagentsText } from "../../extensions/subagents/text.ts";
 import { agentDescription } from "./agent-description.ts";
+import { guideAgent } from "./guide-agent.ts";
 
 /**
  * The anti-fabrication sentence, carried by the RESULT of a background spawn
@@ -272,4 +273,5 @@ export const subagents: SubagentsText = {
 	].join("\n"),
 	delegationWithdrawn: "The subagent delegation guidance previously shown for this conversation is no longer active.",
 	reviewTimedOut: "auto mode's review of this agent's actions did not finish before the report was delivered",
+	guideAgent,
 };

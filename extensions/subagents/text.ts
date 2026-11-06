@@ -11,6 +11,7 @@
  */
 
 import type { DescriptionForm } from "../lib/tool-variants.ts";
+import type { GuideInput } from "./guide-agent.ts";
 
 /** What an agent may use, as its catalog row says. */
 export type AgentTools =
@@ -172,4 +173,10 @@ export interface SubagentsText {
 	delegationWithdrawn: string;
 	/** Auto mode's review of a resident's actions did not finish in time. */
 	reviewTimedOut: string;
+	/**
+	 * A built-in agent that answers questions about the product, listed below
+	 * every agent file; absent, there is none. Its prompt gets the docs, the
+	 * install and the user's setup (repository-supplied names filtered).
+	 */
+	guideAgent?: { name: string; description: string; tools: readonly string[]; systemPrompt(input: GuideInput): string };
 }

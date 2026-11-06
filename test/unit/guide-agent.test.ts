@@ -10,13 +10,19 @@ import { guideDocsDirs, ONE_CODE_GUIDE_DIR } from "../../extensions/lib/guide-do
 import { forwardSlashes } from "../../extensions/lib/paths.ts";
 import { decide } from "../../extensions/permissions/matcher.ts";
 import { discoverAgents } from "../../extensions/subagents/agents.ts";
-import { GUIDE_AGENT, guideAgentDefinition, guideSystemPrompt, type GuideInput, listableName, settingsSetup } from "../../extensions/subagents/guide-agent.ts";
+import { guideAgentDefinition as definition, guideSystemPrompt as systemPrompt, type GuideInput, listableName, settingsSetup } from "../../extensions/subagents/guide-agent.ts";
+import { GUIDE_AGENT } from "../../profile/subagents/guide-agent.ts";
+
+/** One Code's profile always has a guide. */
+const guideAgentDefinition = (input: () => GuideInput) => definition(input)!;
+const guideSystemPrompt = (input: GuideInput) => systemPrompt(input) ?? "";
 
 const emptySetup = { skills: [], agents: [], plugins: [], mcpServers: [], packages: [], extensions: [], settingsKeys: [] };
 const input = (over: Partial<GuideInput> = {}): GuideInput => ({
 	docs: { guide: "/pkg/docs/guide", piDocs: "/pi/docs", piExamples: "/pi/examples" },
 	install: { shape: "app", method: "npm", agentDir: "/home/u/.onecode/agent", version: "0.4.1" },
 	setup: emptySetup,
+	config: { claudeSources: true, configDir: ".claude" },
 	...over,
 });
 

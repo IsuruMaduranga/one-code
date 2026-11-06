@@ -63,7 +63,7 @@ import { watchMcpTools } from "../lib/mcp-share.ts";
 import { sessionModelTier } from "../lib/session-model-tier.ts";
 import { type DescriptionForm, followDescriptionForm, registerVariantTool } from "../lib/tool-variants.ts";
 import { prepareAgentArguments } from "./agent-args.ts";
-import { projectConfigDirName } from "../lib/config-mode.ts";
+import { claudeSourcesOn, projectConfigDirName } from "../lib/config-mode.ts";
 import { pendingClaimReminder, runningAfterCompactionReminder } from "./pending-claim.ts";
 import { watchPermissionBridge } from "../permissions/subagent-gate.ts";
 import { watchHookBridge } from "../hooks/subagent-bridge.ts";
@@ -508,6 +508,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				extensions,
 				...settingsSetup(settingsText, PACKAGE_ROOT),
 			},
+			config: { claudeSources: claudeSourcesOn(), configDir: projectConfigDirName() },
 		};
 	};
 
@@ -527,7 +528,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		// The prompt is built from the catalog it sits in, when a spawn reads it.
 		let catalog: AgentDefinition[] = [];
 		const guide = guideAgentDefinition(() => guideInput(cwd, catalog, plugins));
-		catalog = discoverAgents([{ agents: [guide] }, ...fileSources]);
+		catalog = discoverAgents([...(guide ? [{ agents: [guide] }] : []), ...fileSources]);
 		return catalog;
 	};
 

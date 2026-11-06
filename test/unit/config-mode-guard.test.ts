@@ -44,7 +44,6 @@ const CHECKED: Record<string, string> = {
 	"subagents/default-model.ts": "reads through autoModeSettingsPaths",
 	"auto-mode/classifier-prompt.ts": "Claude Code's ruleset verbatim, regenerated, never hand-edited",
 	"doctor/build.ts": "the mode line names what is read",
-	"subagents/guide-agent.ts": "names the mode's own files",
 };
 
 /** Source without block and line comments, so a path named in prose is not a reader (`//` after `:` is a URL). */
