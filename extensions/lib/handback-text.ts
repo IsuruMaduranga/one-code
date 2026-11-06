@@ -14,8 +14,8 @@ export interface HandbackText {
 	/** The line before the reminder in a fork, where the tool is deferred and must be loaded first. */
 	loadFirst: string;
 	delivered: string;
-	/** A second hand-back in the same turn. */
-	alreadyDelivered: string;
+	/** A second hand-back in the same turn; `sendMessage` when the run can still message its caller (a subagent, not a workflow agent). */
+	alreadyDelivered(p: { sendMessage: boolean }): string;
 	/** A hand-back with an empty message. */
 	empty: string;
 }

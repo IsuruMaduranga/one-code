@@ -15,6 +15,7 @@ export const handback: HandbackText = {
 		"Your final report is delivered through SubagentHandback: when your work is complete, call SubagentHandback({message: <your full report>}). The call ends your run, so make it your last step. Only a SubagentHandback call reaches your caller as your result; plain text you write at the end is not delivered.",
 	loadFirst: 'SubagentHandback is deferred here: load it first with tool_search (query "select:SubagentHandback").',
 	delivered: "Report delivered to your caller.",
-	alreadyDelivered: "Nothing was sent: your report was already delivered (SubagentHandback delivers one report). Use SendMessage for anything further, then stop.",
+	alreadyDelivered: ({ sendMessage }) =>
+		`Nothing was sent: your report was already delivered (SubagentHandback delivers one report). ${sendMessage ? "Use SendMessage for anything further, then stop." : "Stop now."}`,
 	empty: "message must not be empty: pass your full report as `message`.",
 };

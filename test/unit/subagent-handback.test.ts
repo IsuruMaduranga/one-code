@@ -41,6 +41,16 @@ describe("the SubagentHandback tool", () => {
 		expect(schema.additionalProperties).toBe(false);
 	});
 
+	it("points a subagent, which can still message its caller, at SendMessage after a second report", async () => {
+		const slot = oneTurnHandbackSlot();
+		const tool = subagentHandbackTool(slot, true);
+		await tool.execute("c1", { message: "Report." }, undefined, undefined, undefined as never);
+		const again = (await tool.execute("c2", { message: "More." }, undefined, undefined, undefined as never)) as { content: { text: string }[] };
+		expect(again.content[0].text).toBe(
+			"Nothing was sent: your report was already delivered (SubagentHandback delivers one report). Use SendMessage for anything further, then stop.",
+		);
+	});
+
 	it("records the report once and ends the run", async () => {
 		const slot = oneTurnHandbackSlot();
 		const tool = subagentHandbackTool(slot);
@@ -55,7 +65,8 @@ describe("the SubagentHandback tool", () => {
 
 		const again = await run("a second report");
 		expect(again).toMatchObject({ isError: true });
-		expect(again.content[0].text).toBe(handback.alreadyDelivered);
+		expect(again.content[0].text).toBe(handback.alreadyDelivered({ sendMessage: false }));
+		expect(again.content[0].text).not.toContain("SendMessage");
 		expect(slot.report).toBe("The file is app.py.");
 	});
 

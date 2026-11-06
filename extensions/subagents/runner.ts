@@ -291,7 +291,8 @@ export class SubagentRuntime {
 				// The tools injected below (the spawn and cron tools, the shared MCP
 				// tools) are deferred as the parent defers them: their owners run there.
 				deferLikeParentExtension(this.getParentDeferred(), injectedByParent(spec.extraTools ?? [])),
-				subagentHandbackExtension(handback, { deferred: fork }),
+				// Every subagent also gets SendMessage to its caller (sendToMainTool below).
+				subagentHandbackExtension(handback, { deferred: fork, sendMessage: true }),
 				...(fork && this.getParentMode ? [parentModeExtension(this.getParentMode)] : []),
 				...(fork && spec.parentRequest ? [forkCacheExtension(spec.parentRequest)] : []),
 			],

@@ -54,7 +54,8 @@ export function oneTurnHandbackSlot(): HandbackSlot & { report?: string } {
 	return slot;
 }
 
-export function subagentHandbackTool(slot: HandbackSlot): ToolDefinition {
+/** `sendMessage`: the run also has a SendMessage tool to its caller (a subagent; a workflow agent has none). */
+export function subagentHandbackTool(slot: HandbackSlot, sendMessage = false): ToolDefinition {
 	const text = words();
 	return {
 		name: SUBAGENT_HANDBACK,
@@ -68,7 +69,7 @@ export function subagentHandbackTool(slot: HandbackSlot): ToolDefinition {
 				return { content: [{ type: "text" as const, text: text.empty }], details: {}, isError: true };
 			}
 			if (!slot.recordHandback(message)) {
-				return { content: [{ type: "text" as const, text: text.alreadyDelivered }], details: {}, isError: true };
+				return { content: [{ type: "text" as const, text: text.alreadyDelivered({ sendMessage }) }], details: {}, isError: true };
 			}
 			return { content: [{ type: "text" as const, text: text.delivered }], details: { handback: true }, terminate: true };
 		},
@@ -82,9 +83,9 @@ export function subagentHandbackTool(slot: HandbackSlot): ToolDefinition {
  * child's task message and every later message of the run (a resident's
  * next turns hand back too), and never an inherited message of a fork.
  */
-export function subagentHandbackExtension(slot: HandbackSlot, options: { deferred?: boolean } = {}) {
+export function subagentHandbackExtension(slot: HandbackSlot, options: { deferred?: boolean; sendMessage?: boolean } = {}) {
 	return (pi: ExtensionAPI) => {
-		pi.registerTool(subagentHandbackTool(slot));
+		pi.registerTool(subagentHandbackTool(slot, options.sendMessage));
 		if (options.deferred) pi.events.emit(DEFER_CHANNEL, { name: SUBAGENT_HANDBACK, keywords: ["handback", "report", "result", "final", "caller"] });
 		pi.on("session_start", () => {
 			pi.events.emit(REMINDER_CHANNEL, {
