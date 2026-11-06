@@ -20,6 +20,7 @@ import { contextBudget } from "./context-budget/index.ts";
 import { doctor } from "./doctor/index.ts";
 import { effort } from "./effort/index.ts";
 import { fileTracker } from "./file-tracker/index.ts";
+import { handback } from "./handback/index.ts";
 import { hooks } from "./hooks/index.ts";
 import { init } from "./init/index.ts";
 import { lsp } from "./lsp/index.ts";
@@ -34,6 +35,7 @@ import { recap } from "./recap/index.ts";
 import { sessionTitle } from "./session-title/index.ts";
 import { shell } from "./shell/index.ts";
 import { skill } from "./skill/index.ts";
+import { subagentModels } from "./subagent-models/index.ts";
 import { systemPrompt } from "./system-prompt/index.ts";
 import { tasks } from "./tasks/index.ts";
 import { toolCallCorruption } from "./tool-call-corruption/index.ts";
@@ -50,5 +52,5 @@ export const profile: Profile = {
 	features: {},
 	tools: {},
 	childExtensions: [],
-	text: { systemPrompt, notebook, askUser, tasks, worktree, worktreeGuard, webFetch, webSearch, nativeWeb, sessionTitle, init, btw, recap, effort, planMode, skill, mcp, lsp, hooks, memory, background, artifacts, toolStyle, contextBudget, fileTracker, compaction, workflow, autoMode, shell, doctor, notifications, toolResults, toolCallCorruption, context, toolSearch, permissions },
+	text: { systemPrompt, notebook, askUser, tasks, worktree, worktreeGuard, webFetch, webSearch, nativeWeb, sessionTitle, init, btw, recap, effort, planMode, skill, mcp, lsp, hooks, memory, background, artifacts, toolStyle, contextBudget, fileTracker, compaction, workflow, autoMode, shell, doctor, notifications, toolResults, toolCallCorruption, context, toolSearch, permissions, handback, subagentModels },
 };

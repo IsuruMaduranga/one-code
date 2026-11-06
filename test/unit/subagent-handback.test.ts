@@ -13,16 +13,8 @@ import { AgentSession } from "@earendil-works/pi-coding-agent";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { DEFER_CHANNEL } from "../../extensions/lib/deferred.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
-import {
-	HANDBACK_ALREADY_DELIVERED,
-	HANDBACK_DELIVERED,
-	HANDBACK_EMPTY,
-	oneTurnHandbackSlot,
-	SUBAGENT_HANDBACK_DESCRIPTION,
-	SUBAGENT_HANDBACK_REMINDER,
-	subagentHandbackExtension,
-	subagentHandbackTool,
-} from "../../extensions/lib/subagent-handback.ts";
+import { oneTurnHandbackSlot, subagentHandbackExtension, subagentHandbackTool } from "../../extensions/lib/subagent-handback.ts";
+import { handback } from "../../profile/handback/index.ts";
 import { childToolAllowlist } from "../../extensions/subagents/agents.ts";
 import { forkTaskMessage } from "../../extensions/subagents/outcome.ts";
 import { SubagentRuntime } from "../../extensions/subagents/runner.ts";
@@ -39,8 +31,8 @@ describe("the SubagentHandback tool", () => {
 		expect(tool.description).toBe(
 			"Deliver your final report to the agent that spawned you (your caller). Use it once, for that hand-off only: when your work is complete, call SubagentHandback({message: <your full report>}). The call ends your run, so do everything else first and put everything your caller needs in that one report. It is not a messaging channel: do not use it for progress updates or questions.\n\nOnly a report delivered through SubagentHandback reaches your caller; plain text you write at the end of your run is NOT delivered. There is no recipient parameter: the report can only go to your caller.",
 		);
-		expect(tool.description).toBe(SUBAGENT_HANDBACK_DESCRIPTION);
-		expect(SUBAGENT_HANDBACK_REMINDER).toBe(
+		expect(tool.description).toBe(handback.description);
+		expect(handback.reminder).toBe(
 			"Your final report is delivered through SubagentHandback: when your work is complete, call SubagentHandback({message: <your full report>}). The call ends your run, so make it your last step. Only a SubagentHandback call reaches your caller as your result; plain text you write at the end is not delivered.",
 		);
 		const schema = tool.parameters as unknown as { type: string; properties: Record<string, { type: string; description: string }>; required: string[]; additionalProperties: boolean };
@@ -55,7 +47,7 @@ describe("the SubagentHandback tool", () => {
 		const run = (message: unknown) => tool.execute("h", { message } as never, undefined, undefined, {} as never) as Promise<ToolResult>;
 
 		const delivered = await run("The file is app.py.");
-		expect(delivered.content[0].text).toBe(HANDBACK_DELIVERED);
+		expect(delivered.content[0].text).toBe(handback.delivered);
 		expect(delivered.content[0].text).toBe("Report delivered to your caller.");
 		expect(delivered.terminate).toBe(true);
 		expect(delivered.isError).toBeUndefined();
@@ -63,7 +55,7 @@ describe("the SubagentHandback tool", () => {
 
 		const again = await run("a second report");
 		expect(again).toMatchObject({ isError: true });
-		expect(again.content[0].text).toBe(HANDBACK_ALREADY_DELIVERED);
+		expect(again.content[0].text).toBe(handback.alreadyDelivered);
 		expect(slot.report).toBe("The file is app.py.");
 	});
 
@@ -71,7 +63,7 @@ describe("the SubagentHandback tool", () => {
 		const slot = oneTurnHandbackSlot();
 		const result = (await subagentHandbackTool(slot).execute("h", { message: "  " } as never, undefined, undefined, {} as never)) as ToolResult;
 		expect(result).toMatchObject({ isError: true });
-		expect(result.content[0].text).toBe(HANDBACK_EMPTY);
+		expect(result.content[0].text).toBe(handback.empty);
 		expect(slot.report).toBeUndefined();
 	});
 });
@@ -88,7 +80,7 @@ describe("the hand-back extension a child loads", () => {
 		expect(deferred).toEqual([]);
 		expect(reminders).toEqual([]);
 		await fake.fire("session_start", { reason: "startup" });
-		expect(reminders).toEqual([{ text: SUBAGENT_HANDBACK_REMINDER, key: "subagent-handback", placement: "sticky-append" }]);
+		expect(reminders).toEqual([{ text: handback.reminder, key: "subagent-handback", placement: "sticky-append" }]);
 	});
 
 	it("defers the tool in a fork, which sends the parent's tool list", () => {

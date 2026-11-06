@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import systemReminderExtension from "../../extensions/system-reminder/index.ts";
 import { deferredAddendumText } from "../../extensions/lib/deferred.ts";
 import { wrapReminder } from "../../extensions/lib/reminders.ts";
-import { subagentHandbackExtension, SUBAGENT_HANDBACK_LOAD_FIRST } from "../../extensions/lib/subagent-handback.ts";
+import { subagentHandbackExtension } from "../../extensions/lib/subagent-handback.ts";
+import { handback } from "../../profile/handback/index.ts";
 import { withToolAdditions } from "../../extensions/lib/tool-additions.ts";
 import { toolSearch } from "../../profile/tool-search/index.ts";
 
@@ -120,7 +121,7 @@ describe("a fork's hand-back reminder", () => {
 		fake.events.on(REMINDER_CHANNEL, (data) => texts.push((data as { text: string }).text));
 		subagentHandbackExtension({ recordHandback: () => true }, { deferred: true })(fake.pi as never);
 		await fake.fireOne("session_start", {}, createFakeCtx());
-		expect(texts[0].startsWith(`${SUBAGENT_HANDBACK_LOAD_FIRST}\n`)).toBe(true);
+		expect(texts[0].startsWith(`${handback.loadFirst}\n`)).toBe(true);
 	});
 });
 

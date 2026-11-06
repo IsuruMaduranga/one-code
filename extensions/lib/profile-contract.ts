@@ -30,6 +30,7 @@ import type { PlanModeText } from "../plan-mode/text.ts";
 import type { RecapText } from "../recap/text.ts";
 import type { SessionTitleText } from "../session-title/text.ts";
 import type { SkillText } from "../skill/text.ts";
+import type { SubagentModelsText } from "../subagents/model-text.ts";
 import type { SystemPromptText } from "../system-prompt/text.ts";
 import type { TasksText } from "../tasks/text.ts";
 import type { ToolStyleText } from "../tool-style/text.ts";
@@ -38,6 +39,7 @@ import type { WebFetchText } from "../web-fetch/text.ts";
 import type { WorkflowText } from "../workflow/text.ts";
 import type { WebSearchText } from "../web/text.ts";
 import type { WorktreeGuardText, WorktreeText } from "../worktree/text.ts";
+import type { HandbackText } from "./handback-text.ts";
 import type { NativeWebText } from "./native-web-text.ts";
 import type { NotificationsText } from "./notifications-text.ts";
 import type { ContextText } from "./context-text.ts";
@@ -97,6 +99,10 @@ export interface ProfileText {
 	toolSearch?: ToolSearchText;
 	/** The permission gate always runs: a profile must supply it. */
 	permissions?: PermissionsText;
+	/** Every child session (subagents, forks, workflow agents) hands back through it. */
+	handback?: HandbackText;
+	/** Used by subagents and workflow agents (the model menu, the notices, the expensive-model gate). */
+	subagentModels?: SubagentModelsText;
 	/** Used by the worktree tools, subagents and workflows (each guards isolated sessions with it). */
 	worktreeGuard?: WorktreeGuardText;
 }

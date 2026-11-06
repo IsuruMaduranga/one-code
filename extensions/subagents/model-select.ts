@@ -49,6 +49,7 @@
 
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { SubagentDefault } from "./default-model.ts";
+import type { MenuLabel, SubagentModelNotice, SubagentModelsText } from "./model-text.ts";
 import {
 	crossesProvider,
 	findConfigured,
@@ -62,6 +63,7 @@ import {
 	supportsImageInput,
 } from "../lib/model-policy.ts";
 import { pairedModel } from "../lib/model-pairings.ts";
+import { requireText } from "../lib/profile.ts";
 import { atLeastTier, economicalContainedCandidates, intrinsicTier, type PromptTier, sameTierContainedCandidates } from "../lib/model-tier.ts";
 
 /**
@@ -183,18 +185,13 @@ export interface SubagentModelResolution {
  * notices used to end by listing which knob might serve next; naming the one
  * that actually did is the same information after the fact, and true.
  */
-const SOURCE_LABEL: Record<SubagentModelSource, string> = {
-	call: "the model this call named",
-	agent: "the agent's own model",
-	default: "the configured default",
-	automatic: "the automatic smaller default",
-	session: "this session's model",
-};
+/** The profile's words (model-text.ts); fails closed, as every Agent and workflow call reads them. */
+const words = (): SubagentModelsText => requireText("subagentModels");
 
 export function subagentModelNotes(resolution: Pick<SubagentModelResolution, "model" | "notices" | "source">): string[] {
 	if (resolution.notices.length === 0) return [];
 	if (!resolution.model) return [...resolution.notices];
-	return [...resolution.notices, `This subagent runs on ${spec(resolution.model)} (${SOURCE_LABEL[resolution.source]}).`];
+	return [...resolution.notices, words().runsOn({ model: spec(resolution.model), source: resolution.source })];
 }
 
 interface AliasResolution {
@@ -244,12 +241,13 @@ function resolveAlias(
 export function resolveSubagentModel(input: ResolveInput): SubagentModelResolution {
 	const { available, sessionModel } = input;
 	const notices: string[] = [];
+	const note = (notice: SubagentModelNotice) => notices.push(words().notice(notice));
 
-	const chain: { value: string; source: SubagentModelSource; knob: string }[] = [];
-	if (input.requested) chain.push({ value: input.requested, source: "call", knob: "the model field" });
-	if (input.agentModel) chain.push({ value: input.agentModel, source: "agent", knob: "the agent file's model" });
+	const chain: { value: string; source: "call" | "agent" | "default" }[] = [];
+	if (input.requested) chain.push({ value: input.requested, source: "call" });
+	if (input.agentModel) chain.push({ value: input.agentModel, source: "agent" });
 	if (input.configuredDefault) {
-		chain.push({ value: input.configuredDefault.spec, source: "default", knob: "the configured subagent default" });
+		chain.push({ value: input.configuredDefault.spec, source: "default" });
 	}
 
 	const contained = sessionModel ? modelsContainedToSession(available, sessionModel) : [];
@@ -289,20 +287,15 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 		if (alias in ALIAS_TIER) {
 			const resolved = resolveAlias(alias, contained, available, sessionModel, requireImageInput);
 			if (resolved?.how === "name") return { model: resolved.model, source: entry.source, notices };
-			// SCOPE the claim. "No sonnet model exists" is false at machine level
-			// whenever Anthropic is also authenticated, and a model relaying it tells
-			// the user "Sonnet is not available" — wrong, and the everyday case given
-			// a global "use Sonnet for subagents" memory on another provider. What is
-			// true is narrower: the alias cannot leave this session's containment.
-			// "Provider family" covers both a plain provider and a gateway, where
-			// containment is the model-creator namespace (`modelsContainedToSession`).
-			const family = sessionModel ? ` (${spec(sessionModel)})` : "";
+			// SCOPE the claim to this session's provider family (the profile's
+			// words say why).
+			const session = sessionModel ? spec(sessionModel) : undefined;
 			if (resolved) {
 				// The tier reading: what the alias meant, on this provider. Stated so
 				// the model that asked for "sonnet" knows which model actually runs
 				// (WEAK-MODEL-REVIEW-2026-09-06 L4) — `subagentModelNotes` repeats the
 				// spec, but this line says WHY it is not Sonnet.
-				notices.push(`No "${alias}" model in this session's provider family${family}; read as its Claude Code tier, "${alias}" resolves to ${spec(resolved.model)} here.`);
+				note({ kind: "aliasAsTier", alias, session, resolved: spec(resolved.model) });
 				return { model: resolved.model, source: entry.source, notices };
 			}
 			// Nothing capable contained at all (an unpriced/opaque provider, or no
@@ -310,7 +303,7 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 			// default may still resolve — then the automatic pick or the session
 			// model serve below. Never `unresolved`: unlike a literal typo, an
 			// off-family alias is a naming mismatch, not a retryable mistake.
-			notices.push(`No "${alias}" model in this session's provider family${family}.`);
+			note({ kind: "aliasMissing", alias, session });
 			continue;
 		}
 
@@ -326,15 +319,10 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 				// the user configured it once and it should not break a fork.
 				if (entry.source === "call") {
 					callFailed = wanted;
-					callFailedReason =
-						`Requested subagent model ${spec(resolved)} is text-only, but this session works with images or PDFs a subagent may need to read ` +
-						"(the inherited transcript, or a file it opens). Pick an image-capable model.";
+					callFailedReason = words().notice({ kind: "textOnlyCall", model: spec(resolved) });
 					notices.push(callFailedReason);
 				} else {
-					notices.push(
-						`${spec(resolved)} (from ${entry.knob}) is text-only, but this session works with images or PDFs a subagent may need to read; ` +
-							"an image-capable same-provider model runs this subagent instead.",
-					);
+					note({ kind: "textOnly", model: spec(resolved), source: entry.source });
 				}
 				continue;
 			}
@@ -346,22 +334,14 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 				// serve. Per-call `model` and the user's own `subagentModel` setting
 				// are explicit choices, so their crossings are still honored + announced.
 				if (entry.source === "agent" && !isClaudeFamilyModel(sessionModel)) {
-					notices.push(
-						`The agent file's model ${spec(resolved)} is a different provider than this session (${spec(sessionModel)}); ` +
-							"on a non-Claude session subagents stay on this provider, so a same-provider model runs this subagent instead.",
-					);
+					note({ kind: "agentOtherProvider", model: spec(resolved), session: spec(sessionModel) });
 					continue;
 				}
 				if (entry.source === "default" && settingIsStale) {
-					notices.push(
-						`The configured subagent default ${spec(resolved)} was set for a different provider than this session (${spec(sessionModel)}); ` +
-							"a same-provider model runs this subagent instead. Re-set it with /subagent on this session to use it here.",
-					);
+					note({ kind: "staleDefault", model: spec(resolved), session: spec(sessionModel) });
 					continue;
 				}
-				notices.push(
-					`Subagent model ${spec(resolved)} is a different provider/family than this session (${spec(sessionModel)}) — it was named via ${entry.knob}, so it is honored.`,
-				);
+				note({ kind: "otherProviderHonored", model: spec(resolved), session: spec(sessionModel), source: entry.source });
 			}
 			return { model: resolved, source: entry.source, notices };
 		}
@@ -371,9 +351,7 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 			// failure and keep walking, erroring after the loop only if nothing
 			// downstream resolves.
 			callFailed = wanted;
-			notices.push(
-				`Requested subagent model "${wanted}" is not available — falling back to the agent's configured model or the session default.`,
-			);
+			note({ kind: "callUnavailable", wanted });
 			continue;
 		}
 		// An explicit choice failed: the rest of the chain, then the automatic
@@ -381,11 +359,7 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 		// no more "a model nobody described" than the session model is, and it is
 		// the cheaper of the two (2026-09-11; before, this dropped straight to the
 		// session model).
-		notices.push(
-			entry.source === "agent"
-				? `Subagent model "${wanted}" (from ${entry.knob}) is not available — falling back to the configured default, the automatic same-provider pick, or the session model.`
-				: `Subagent model "${wanted}" (from ${entry.knob}) is not available — the automatic same-provider pick or the session model runs this subagent instead.`,
-		);
+		note({ kind: "unavailable", wanted, source: entry.source });
 	}
 
 	// Per-call model failed and nothing downstream resolved: surface it so the
@@ -445,10 +419,7 @@ export function expensiveModelGate(
 	const sessionPrice = pricedInput(sessionModel);
 	const requestedPrice = pricedInput(resolution.model);
 	if (sessionPrice === undefined || requestedPrice === undefined || requestedPrice <= sessionPrice) return undefined;
-	return (
-		`Requested model ${spec(resolution.model)}${price(resolution.model)} costs more per input token ` +
-		`than this session's model ${spec(sessionModel)}${price(sessionModel)}.`
-	);
+	return words().costsMore({ model: spec(resolution.model), price: requestedPrice, session: spec(sessionModel), sessionPrice });
 }
 
 export interface MenuOptions {
@@ -474,11 +445,6 @@ export interface MenuOptions {
 	configured?: SubagentDefault;
 }
 
-const price = (model: Model<Api>): string => {
-	const input = pricedInput(model);
-	return input === undefined ? "" : ` ($${input}/M in)`;
-};
-
 /**
  * The curated menu: never the catalog. Vendor-contained, variants and unpriced
  * entries dropped, dated duplicates collapsed, capped — useful, not complete,
@@ -490,22 +456,18 @@ export function subagentModelMenu({ available, sessionModel, defaultModel, defau
 	// On an image-capable session a text-only model is rejected on retry
 	// (`modalityMismatch`), so it never belongs in a retry menu.
 	const imageOk = (model: Model<Api>) => !requireImageInput || supportsImageInput(model);
-	const add = (model: Model<Api>, label: string) => {
+	const add = (model: Model<Api>, label: MenuLabel) => {
 		if (listed.has(spec(model)) || !imageOk(model)) return;
 		listed.add(spec(model));
-		lines.push(`- ${spec(model)}${price(model)} — ${label}`);
+		lines.push(words().menuLine({ model: spec(model), price: pricedInput(model), label }));
 	};
 
 	if (defaultModel) {
 		const label =
-			defaultSource === "automatic"
-				? "the automatic smaller default"
-				: sessionModel && spec(defaultModel) === spec(sessionModel)
-					? "the default (this session's model)"
-					: "the configured default";
+			defaultSource === "automatic" ? "automaticDefault" : sessionModel && spec(defaultModel) === spec(sessionModel) ? "sessionDefault" : "configuredDefault";
 		add(defaultModel, label);
 	}
-	if (sessionModel) add(sessionModel, "this session's model");
+	if (sessionModel) add(sessionModel, "session");
 
 	if (sessionModel) {
 		const contained = modelsContainedToSession(available, sessionModel).filter((model) => !listed.has(spec(model)));
@@ -519,7 +481,7 @@ export function subagentModelMenu({ available, sessionModel, defaultModel, defau
 		for (const entry of priced) {
 			if (lines.length >= (defaultModel ? 2 : 1) + maxCheaper) break;
 			if (sessionPrice !== undefined && entry.input >= sessionPrice) break;
-			add(entry.model, "cheaper, same provider");
+			add(entry.model, "cheaper");
 		}
 	}
 
@@ -538,10 +500,7 @@ export function defaultCostsMoreWarning({ sessionModel, defaultModel }: MenuOpti
 	const sessionPrice = pricedInput(sessionModel);
 	const defaultPrice = pricedInput(defaultModel);
 	if (sessionPrice === undefined || defaultPrice === undefined || defaultPrice <= sessionPrice) return undefined;
-	return (
-		`Note: the default subagent model${price(defaultModel)} costs more per input token than this session's model${price(sessionModel)}. ` +
-		"That may be deliberate, but for routine or mechanical tasks consider passing a cheaper listed model in the `model` field."
-	);
+	return words().defaultCostsMore({ price: defaultPrice, sessionPrice });
 }
 
 /**
@@ -559,13 +518,7 @@ export function settingOverrideNotice({ sessionModel, defaultModel, defaultSourc
 	// already explains the override — no "runs on it" line for the model then.
 	if (configured?.source !== "subagentModel setting" || defaultSource !== "default" || !defaultModel) return undefined;
 	const cross = sessionModel && crossesProvider(defaultModel, sessionModel);
-	return (
-		`The user pinned the subagent default to ${spec(defaultModel)} via the subagentModel setting; ` +
-		"subagents run on it unless you pass a different model in the `model` field" +
-		(cross
-			? ` — it is a different provider than this session (${spec(sessionModel as Model<Api>)}), so a subagent's inherited transcript goes to that provider; pass a listed same-provider model to keep it here.`
-			: ".")
-	);
+	return words().settingPinned({ model: spec(defaultModel), otherProvider: cross ? spec(sessionModel as Model<Api>) : undefined });
 }
 
 /**
@@ -574,10 +527,7 @@ export function settingOverrideNotice({ sessionModel, defaultModel, defaultSourc
  * session's own model).
  */
 export function refusedModelNote(refused: string, defaultModel: Model<Api> | undefined): string {
-	return (
-		`Model ${refused} is not usable on this account, so automatic selection skips it and the subagent/workflow \`model\` field should not name it. ` +
-		`The subagent default is now ${defaultModel ? spec(defaultModel) : "this session's model"}.`
-	);
+	return words().refused({ model: refused, newDefault: defaultModel ? spec(defaultModel) : undefined });
 }
 
 /** The every-turn reminder body. Kept short: its tokens are paid on every call. */
@@ -585,13 +535,5 @@ export function subagentModelsReminder(options: MenuOptions): string {
 	const menu = subagentModelMenu(options);
 	const setting = settingOverrideNotice(options);
 	const warning = defaultCostsMoreWarning(options);
-	return [
-		"Models for the subagent/workflow `model` field (omit it to use the default; set the default with /subagent):",
-		...menu,
-		...(setting ? [setting] : []),
-		...(warning ? [warning] : []),
-		"Aliases sonnet|opus|haiku|fable resolve within this session's provider — by name when a model carries it, else as the tier it names " +
-			'(haiku: the cheapest capable model, sonnet: the cheapest workhorse-class model, opus/fable: this session\'s model); "inherit" means the session model. ' +
-			"Any exact provider/model-id the user asked for also works, even from another provider (that is announced to the user) or unlisted here — this is a menu, not a whitelist.",
-	].join("\n");
+	return words().menu({ lines: menu, notes: [...(setting ? [setting] : []), ...(warning ? [warning] : [])] });
 }
