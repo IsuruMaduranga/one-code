@@ -99,7 +99,7 @@ describe("SessionTurnTracker — aborted turns (SUBAGENT-REVIEW M3)", () => {
 		t.beginTurn();
 		t.process(assistantEnd("partial", undefined, "toolUse"));
 		t.process(toolStart("bash", { command: "sleep 100" }));
-		t.markAborted("terminated: turn hit the wall-clock cap");
+		t.markAborted("wallClock");
 		t.process(settled);
 		expect(t.turnOutcome()).toMatchObject({ failed: true, output: "partial\n\n[terminated: turn hit the wall-clock cap]" });
 	});

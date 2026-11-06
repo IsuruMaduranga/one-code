@@ -57,8 +57,8 @@ const usingTools = (taskTools: boolean) => `# Using your tools
 export const USING_TOOLS = usingTools(true);
 
 // Sibling texts (same delegation policy, separately tuned registers — keep
-// aligned when editing): DELEGATING_WORK in mid.ts and DELEGATION_STEER in
-// extensions/subagents/index.ts (the tiny-tier reminder).
+// aligned when editing): DELEGATING_WORK in mid.ts and the delegation steer in
+// ../subagents/index.ts (the tiny-tier reminder).
 export const DELEGATE_STRICT = `# Delegate broad searches — never sweep the codebase yourself
 Before exploring, classify the request:
 - Needs MANY files (a codebase overview, how a feature works across modules, unfamiliar code): make one Agent tool call per independent question, with subagent_type: "explore" and the complete question as the task; issue several independent ones together in one message. Do NOT read the files one by one — that fills your context and degrades your answer. The agent searches in its own separate context and returns just the answer.

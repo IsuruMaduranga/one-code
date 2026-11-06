@@ -1,5 +1,8 @@
+import type { PendingRun } from "./text.ts";
+import { subagentWords } from "./words.ts";
+
 /**
- * The backstop for a fabricated agent result (pure).
+ * The backstop for a fabricated agent result.
  *
  * Putting Claude Code's prohibition in the Agent tool's RESULT rather than only
  * in its description was the first fix for WEAK-MODEL-REVIEW-2026-09-06 H1, and
@@ -16,22 +19,13 @@
  * fabrication survived into the final answer ("The agent confirmed the same
  * result").
  *
- * Wording is deliberately CONDITIONAL. The trigger fires on correct behaviour
+ * The profile words it (text.ts), deliberately CONDITIONAL. The trigger fires on correct behaviour
  * too — a model that said only "I'm waiting for the agent" ends its turn the
  * same way — so the text must not accuse. Measured precision on the six-run
  * battery: 4 fires, 3 of them real fabrications.
  */
 
-/** A live run the model started during the agent loop that just ended. */
-export interface PendingRun {
-	name: string;
-	taskId: string;
-}
-
-/** The runs by name and task id, comma-separated. */
-function namedRuns(runs: readonly PendingRun[]): string {
-	return runs.map((run) => `${run.name} (task ${run.taskId})`).join(", ");
-}
+export type { PendingRun } from "./text.ts";
 
 /**
  * The background agents still working when a compaction summarized the calls
@@ -41,8 +35,7 @@ function namedRuns(runs: readonly PendingRun[]): string {
  * task status after a compaction).
  */
 export function runningAfterCompactionReminder(runs: readonly PendingRun[]): string | undefined {
-	if (runs.length === 0) return undefined;
-	return `Background agents you started before this conversation was compacted are still running: ${namedRuns(runs)}. Each one notifies you when it finishes; do not start the same work again. Use task_output to check on one, or task_stop to end it.`;
+	return runs.length === 0 ? undefined : subagentWords().runningAfterCompaction({ runs: [...runs] });
 }
 
 /**
@@ -51,12 +44,5 @@ export function runningAfterCompactionReminder(runs: readonly PendingRun[]): str
  * which ones it cannot have heard from.
  */
 export function pendingClaimReminder(runs: readonly PendingRun[]): string | undefined {
-	if (runs.length === 0) return undefined;
-	const named = namedRuns(runs);
-	const subject = runs.length === 1 ? "It has" : "They have";
-	return (
-		`You ended that turn while ${named} ${runs.length === 1 ? "was" : "were"} still running. ${subject} not reported yet, ` +
-		"so anything you stated about the result did not come from the agent — if you gave the user a result, say plainly in your next message that it was not the agent's and correct it. " +
-		"Wait for the notification, or call task_output with block=true."
-	);
+	return runs.length === 0 ? undefined : subagentWords().pendingClaim({ runs: [...runs] });
 }

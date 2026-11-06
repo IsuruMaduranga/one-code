@@ -15,7 +15,7 @@ import { BASH_AVOID_SHELL_READS_LINE, BASH_LONG_DESCRIPTION, BASH_LONG_SEARCH_TO
 import bashExtension from "../../extensions/bash/index.ts";
 import { NOTEBOOK_EDIT_DESCRIPTION } from "../../profile/notebook/description.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts";
-import { AGENT_HOW_AGENTS_RUN, AGENT_LONG_DESCRIPTION, AGENT_SHORT_DESCRIPTION, agentDescription } from "../../extensions/subagents/agent-description.ts";
+import { AGENT_HOW_AGENTS_RUN, AGENT_LONG_DESCRIPTION, AGENT_SHORT_DESCRIPTION, agentDescription } from "../../profile/subagents/agent-description.ts";
 import { TASK_CREATE_DESCRIPTION, TASK_GET_DESCRIPTION, TASK_LIST_DESCRIPTION, TASK_UPDATE_DESCRIPTION } from "../../profile/tasks/descriptions.ts";
 import toolStyleExtension from "../../extensions/tool-style/index.ts";
 import { WRITE_LONG_DESCRIPTION, WRITE_SHORT_DESCRIPTION } from "../../profile/tool-style/index.ts";

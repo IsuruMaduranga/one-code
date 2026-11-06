@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../extensions/auto-mode/actions.ts";
 import { withReview } from "../../extensions/lib/notifications.ts";
-import { awaitHandBackReview, HAND_BACK_REVIEW_TIMEOUT_VERDICT } from "../../extensions/subagents/hand-back-review.ts";
+import { awaitHandBackReview, handBackReviewTimeoutVerdict } from "../../extensions/subagents/hand-back-review.ts";
 
 const run = { taskId: "t1", name: "worker" };
 const actions = [{ toolName: "bash", subject: "rm -rf build" }];
@@ -50,7 +50,7 @@ describe("awaitHandBackReview", () => {
 		const { events, emitted } = capturingEvents();
 		const pending = awaitHandBackReview(events, run, actions, 1000);
 		vi.advanceTimersByTime(1000);
-		await expect(pending).resolves.toBe(HAND_BACK_REVIEW_TIMEOUT_VERDICT);
+		await expect(pending).resolves.toEqual(handBackReviewTimeoutVerdict());
 		expect(() => emitted[0].payload.onReview?.({ kind: "blocked", reason: "late" })).not.toThrow();
 	});
 

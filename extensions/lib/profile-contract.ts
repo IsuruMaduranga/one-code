@@ -31,6 +31,7 @@ import type { RecapText } from "../recap/text.ts";
 import type { SessionTitleText } from "../session-title/text.ts";
 import type { SkillText } from "../skill/text.ts";
 import type { SubagentModelsText } from "../subagents/model-text.ts";
+import type { SubagentsText } from "../subagents/text.ts";
 import type { SystemPromptText } from "../system-prompt/text.ts";
 import type { TasksText } from "../tasks/text.ts";
 import type { ToolStyleText } from "../tool-style/text.ts";
@@ -101,6 +102,7 @@ export interface ProfileText {
 	permissions?: PermissionsText;
 	/** Every child session (subagents, forks, workflow agents) hands back through it. */
 	handback?: HandbackText;
+	subagents?: SubagentsText;
 	/** Used by subagents and workflow agents (the model menu, the notices, the expensive-model gate). */
 	subagentModels?: SubagentModelsText;
 	/** Used by the worktree tools, subagents and workflows (each guards isolated sessions with it). */

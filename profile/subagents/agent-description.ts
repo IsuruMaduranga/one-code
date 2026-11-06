@@ -12,7 +12,7 @@
  * the one-shot print session, run names and `action: "list"`.
  */
 
-import type { DescriptionForm } from "../lib/tool-variants.ts";
+import type { DescriptionForm } from "../../extensions/lib/tool-variants.ts";
 
 export const AGENT_SHORT_DESCRIPTION = `Launch a new agent to handle complex, multi-step tasks. Each agent type has specific capabilities and tools available to it.
 

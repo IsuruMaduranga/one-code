@@ -16,6 +16,7 @@ import { promisify } from "node:util";
 import { registerWorktreeIsolation, releaseWorktreeIsolation } from "../lib/worktree-isolation.ts";
 import { findProjectRoot, HARNESS_GIT_CONFIG, HARNESS_GIT_NO_HOOKS } from "../lib/git.ts";
 import { checkoutGitRunsProgram } from "../auto-mode/git-checkout-programs.ts";
+import { subagentWords } from "./words.ts";
 
 const run = promisify(execFile);
 
@@ -43,7 +44,7 @@ export async function isGitRepo(cwd: string): Promise<boolean> {
 export async function createWorktree(cwd: string, label: string): Promise<Worktree> {
 	const program = checkoutGitRunsProgram(cwd, homedir(), []);
 	if (program) {
-		throw new Error(`Cannot create an isolation worktree: ${program}. Create the worktree with an explicitly approved git worktree add command, then start a session there without automatic isolation.`);
+		throw new Error(subagentWords().worktreeRefused({ program }));
 	}
 	const safeLabel = label.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 24) || "agent";
 	const dir = mkdtempSync(join(tmpdir(), `cc-wt-${safeLabel}-`));
@@ -122,5 +123,5 @@ export async function cleanupWorktree(cwd: string, worktree: Worktree): Promise<
 
 /** The note a result carries for a worktree kept because it holds the agent's work. */
 export function keptWorktreeNote(path: string, branch: string | undefined): string {
-	return `(Changes or commits left in worktree ${path}${branch ? ` on branch ${branch}` : ""} — review or merge them.)`;
+	return subagentWords().worktreeKept({ path, branch });
 }

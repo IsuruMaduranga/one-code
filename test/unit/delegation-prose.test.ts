@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { DELEGATION_STEER } from "../../extensions/subagents/delegation-steer.ts";
+import { subagents } from "../../profile/subagents/index.ts";
+
+const DELEGATION_STEER = subagents.delegationSteer;
 import { DELEGATE_STRICT } from "../../profile/system-prompt/low.ts";
 import { DELEGATING_WORK } from "../../profile/system-prompt/mid.ts";
 
@@ -8,7 +10,7 @@ import { DELEGATING_WORK } from "../../profile/system-prompt/mid.ts";
  * per model tier. The registers may word things differently, but the policy
  * invariants must not drift apart. If this fails after editing one block,
  * bring the siblings along: DELEGATE_STRICT (tiers/low.ts), DELEGATING_WORK
- * (tiers/mid.ts), DELEGATION_STEER (subagents/delegation-steer.ts).
+ * (tiers/mid.ts), the delegation steer (profile/subagents/index.ts).
  */
 const REGISTERS = {
 	DELEGATE_STRICT,

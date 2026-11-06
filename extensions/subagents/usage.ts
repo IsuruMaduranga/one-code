@@ -6,6 +6,8 @@
  * them gives the run's totals, across every turn of a resident.
  */
 
+import { subagentWords } from "./words.ts";
+
 export interface UsageTotals {
 	input: number;
 	output: number;
@@ -51,15 +53,7 @@ export function formatTokenCount(n: number): string {
 	return `${k >= 100 ? Math.round(k) : k.toFixed(1)}k`;
 }
 
-/** Compact stats suffix, e.g. "45.3k tokens · $0.0421". Empty when nothing was recorded. */
-export function formatUsage(totals: UsageTotals): string {
-	if (totals.total <= 0) return "";
-	const parts = [`${formatTokenCount(totals.total)} tokens`];
-	if (totals.cost > 0) parts.push(`$${totals.cost.toFixed(4)}`);
-	return parts.join(" · ");
-}
-
-/** A run's "N tools · <usage>" line; the usage suffix is dropped when empty. */
+/** A run's statistics after its report, in the profile's words; tokens and cost are dropped when none were recorded. */
 export function formatStats(toolCalls: number, totals: UsageTotals): string {
-	return [`${toolCalls} tools`, formatUsage(totals)].filter(Boolean).join(" · ");
+	return subagentWords().stats({ toolCalls, ...(totals.total > 0 ? { tokens: formatTokenCount(totals.total), cost: totals.cost } : {}) });
 }

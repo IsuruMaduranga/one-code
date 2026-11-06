@@ -13,17 +13,19 @@
 
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { subagentWords } from "./words.ts";
 
 export function sendToMainTool(onMessage: (message: string, summary?: string) => void): ToolDefinition {
+	const words = subagentWords();
+	const text = words.toMain;
 	return {
 		name: "SendMessage",
 		label: "Send Message",
-		description:
-			'Report progress, findings, or a question to the main conversation mid-run (to: "main"). Your plain text output is NOT visible to the main conversation until you finish, so use this to surface something before then.',
+		description: text.description,
 		parameters: Type.Object({
-			to: Type.Optional(Type.String({ description: 'Recipient — only "main" is valid from inside a subagent' })),
-			message: Type.String({ description: "Plain text message for the main conversation" }),
-			summary: Type.Optional(Type.String({ description: "5-10 word preview shown in the UI" })),
+			to: Type.Optional(Type.String({ description: text.params.to })),
+			message: Type.String({ description: text.params.message }),
+			summary: Type.Optional(Type.String({ description: text.params.summary })),
 		}) as never,
 		async execute(_toolCallId: string, params: unknown) {
 			const p = (params ?? {}) as { to?: unknown; message?: unknown; summary?: unknown };
@@ -31,7 +33,7 @@ export function sendToMainTool(onMessage: (message: string, summary?: string) =>
 			// message returns isError with the fix named, never a silent success.
 			if (p.to !== undefined && p.to !== "main") {
 				return {
-					content: [{ type: "text" as const, text: `From inside a subagent the only recipient is "main" — got ${JSON.stringify(p.to)}. Omit \`to\` or pass "main".` }],
+					content: [{ type: "text" as const, text: words.refused({ kind: "onlyMain", got: JSON.stringify(p.to) }) }],
 					details: {},
 					isError: true,
 				};
@@ -39,7 +41,7 @@ export function sendToMainTool(onMessage: (message: string, summary?: string) =>
 			const message = typeof p.message === "string" ? p.message.trim() : "";
 			if (!message) {
 				return {
-					content: [{ type: "text" as const, text: "`message` is required: pass the plain text to deliver to the main conversation." }],
+					content: [{ type: "text" as const, text: words.refused({ kind: "messageRequired" }) }],
 					details: {},
 					isError: true,
 				};
@@ -47,7 +49,7 @@ export function sendToMainTool(onMessage: (message: string, summary?: string) =>
 			const summary = typeof p.summary === "string" ? p.summary : undefined;
 			onMessage(message, summary);
 			return {
-				content: [{ type: "text" as const, text: "Message delivered to the main conversation." }],
+				content: [{ type: "text" as const, text: text.delivered }],
 				details: { toMain: true, message, summary },
 			};
 		},

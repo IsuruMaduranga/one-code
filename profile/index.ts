@@ -36,6 +36,7 @@ import { sessionTitle } from "./session-title/index.ts";
 import { shell } from "./shell/index.ts";
 import { skill } from "./skill/index.ts";
 import { subagentModels } from "./subagent-models/index.ts";
+import { subagents } from "./subagents/index.ts";
 import { systemPrompt } from "./system-prompt/index.ts";
 import { tasks } from "./tasks/index.ts";
 import { toolCallCorruption } from "./tool-call-corruption/index.ts";
@@ -52,5 +53,5 @@ export const profile: Profile = {
 	features: {},
 	tools: {},
 	childExtensions: [],
-	text: { systemPrompt, notebook, askUser, tasks, worktree, worktreeGuard, webFetch, webSearch, nativeWeb, sessionTitle, init, btw, recap, effort, planMode, skill, mcp, lsp, hooks, memory, background, artifacts, toolStyle, contextBudget, fileTracker, compaction, workflow, autoMode, shell, doctor, notifications, toolResults, toolCallCorruption, context, toolSearch, permissions, handback, subagentModels },
+	text: { systemPrompt, notebook, askUser, tasks, worktree, worktreeGuard, webFetch, webSearch, nativeWeb, sessionTitle, init, btw, recap, effort, planMode, skill, mcp, lsp, hooks, memory, background, artifacts, toolStyle, contextBudget, fileTracker, compaction, workflow, autoMode, shell, doctor, notifications, toolResults, toolCallCorruption, context, toolSearch, permissions, handback, subagentModels, subagents },
 };

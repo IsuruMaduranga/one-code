@@ -33,8 +33,9 @@ import { parentModeExtension } from "./parent-mode.ts";
 import { type DeferRequest, deferLikeParentExtension, injectedByParent } from "../lib/deferred.ts";
 import type { ChildHandle, ChildOutcome, RpcChildHandle } from "./outcome.ts";
 import { sendToMainTool } from "./send-to-main-tool.ts";
-import { SessionTurnTracker } from "./session-turns.ts";
+import { type AbortReason, SessionTurnTracker } from "./session-turns.ts";
 import type { UsageTotals } from "./usage.ts";
+import { subagentWords } from "./words.ts";
 import { streamingText, type TranscriptBlock } from "./live-runs.ts";
 import { cutPlainText, firstNonEmptyLine, stripReminderBlocks, summarizeArgs, textContent } from "../lib/tui-render.ts";
 
@@ -454,7 +455,7 @@ export class SubagentRuntime {
 			if (spec.fallbackModel && spec.fallbackModel !== spec.model && isModelUnavailableError(message)) {
 				return {
 					session: await make(spec.fallbackModel),
-					note: `Subagent model ${spec.model} was unavailable (${message}); ran on the session model ${spec.fallbackModel} instead.`,
+					note: subagentWords().modelFallback({ model: spec.model, osMessage: message, fallback: spec.fallbackModel }),
 				};
 			}
 			throw error;
@@ -484,12 +485,12 @@ export class SubagentRuntime {
 			// Every way this turn can be cut short marks the tracker first, so the
 			// outcome read after prompt() resolves reports "terminated", never the
 			// partial text as a clean completion (M3).
-			const abortWith = (reason?: string) => {
+			const abortWith = (reason?: AbortReason) => {
 				tracker.markAborted(reason);
 				void session?.abort();
 			};
 			const unhookAbort = whenAborted(options.signal, () => abortWith());
-			const wallClock = setTimeout(() => abortWith("terminated: turn hit the wall-clock cap"), WALL_CLOCK_CAP_MS);
+			const wallClock = setTimeout(() => abortWith("wallClock"), WALL_CLOCK_CAP_MS);
 			wallClock.unref?.();
 
 			try {
@@ -518,7 +519,7 @@ export class SubagentRuntime {
 			} catch (error) {
 				// Keep the fallback note if the model was swapped before the turn failed.
 				return withNote(
-					{ output: `Subagent failed: ${(error as Error).message}`, toolCalls: tracker.toolCalls, usage: tracker.usage, actions: tracker.actions, failed: true },
+					{ output: subagentWords().failure({ kind: "failed", osMessage: (error as Error).message }), toolCalls: tracker.toolCalls, usage: tracker.usage, actions: tracker.actions, failed: true },
 					spawnNote,
 				);
 			} finally {
@@ -611,7 +612,7 @@ export class SubagentRuntime {
 				turnTimer = setTimeout(() => {
 					// Same rationale as kill(): the abort settles through the normal
 					// turn path, which would report the capped turn as a completion.
-					tracker.markAborted("terminated: turn hit the wall-clock cap");
+					tracker.markAborted("wallClock");
 					finishTurn(tracker.turnOutcome());
 					void session.abort();
 				}, WALL_CLOCK_CAP_MS);
@@ -643,7 +644,7 @@ export class SubagentRuntime {
 			// it as a failed turn instead of leaving the caller waiting forever.
 			void prompting.catch((error) => {
 				finishTurn({
-					output: `Subagent could not start the turn: ${(error as Error).message}`,
+					output: subagentWords().failure({ kind: "turnNotStarted", osMessage: (error as Error).message }),
 					toolCalls: tracker.toolCalls,
 					usage: tracker.usage,
 					actions: tracker.actions,

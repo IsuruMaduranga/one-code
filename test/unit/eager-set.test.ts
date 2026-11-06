@@ -9,7 +9,7 @@ import artifactsExtension from "../../extensions/artifacts/index.ts";
 import backgroundExtension from "../../extensions/background/index.ts";
 import { DEFER_CHANNEL } from "../../extensions/lib/deferred.ts";
 import subagentsExtension from "../../extensions/subagents/index.ts";
-import { AGENT_LONG_DESCRIPTION, AGENT_SHORT_DESCRIPTION, agentDescription } from "../../extensions/subagents/agent-description.ts";
+import { AGENT_LONG_DESCRIPTION, AGENT_SHORT_DESCRIPTION, agentDescription } from "../../profile/subagents/agent-description.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 function deferredBy(...extensions: Array<(pi: never) => void>) {

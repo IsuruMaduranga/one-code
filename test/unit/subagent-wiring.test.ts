@@ -365,7 +365,7 @@ describe("subagent runtime build failure", () => {
 		const first = (await h.call("SendMessage", { to: "worker", message: "Continue" })) as { content: Array<{ text: string }>; isError?: boolean };
 		expect(first.isError).toBe(true);
 		expect(first.content[0].text).toContain("could not start the subagent runtime: models.json: Unexpected token");
-		expect(await statusOf(h, "worker")).toBe("finished (resume with SendMessage)");
+		expect(await statusOf(h, "worker")).toBe("finished");
 		const second = (await h.call("SendMessage", { to: "worker", message: "Continue" })) as { isError?: boolean };
 		expect(second.isError).toBeUndefined();
 		expect(run).toHaveBeenCalledOnce();

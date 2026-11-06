@@ -22,6 +22,7 @@ import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
 import { projectConfigDir, userConfigDir } from "../lib/config-mode.ts";
 import { SUBAGENT_HANDBACK } from "../lib/subagent-handback.ts";
 import { normalizeToolName } from "../permissions/matcher.ts";
+import { subagentWords } from "./words.ts";
 
 export interface AgentDefinition {
 	name: string;
@@ -284,8 +285,5 @@ export function agentToolOptions(agent: AgentDefinition | undefined): { tools?: 
  */
 export function unusableAllowlistError(agent: AgentDefinition | undefined, registered: string[]): string | undefined {
 	if (!agent?.tools || usableAllowlistedTools(registered, agent.tools).length > 0) return undefined;
-	return (
-		`Agent "${agent.name}" lists tools (${agent.tools.join(", ")}) that match no available tool. ` +
-		"Use Claude Code names (Read, Edit, Write, Bash, Grep, Glob, WebFetch, WebSearch, NotebookEdit, Skill, Agent, SendMessage) or pi names (read, edit, write, bash, grep, find, ls, …) in the agent file's `tools` list."
-	);
+	return subagentWords().unusableTools({ name: agent.name, tools: agent.tools });
 }

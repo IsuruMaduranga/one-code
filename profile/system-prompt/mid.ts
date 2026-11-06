@@ -73,7 +73,7 @@ export const USING_TOOLS_WITHOUT_TASK_TOOLS = usingTools(false);
 
 // Sibling texts (same delegation policy, separately tuned registers — keep
 // aligned when editing): DELEGATE_STRICT in low.ts (tiny prompt) and
-// DELEGATION_STEER in extensions/subagents/index.ts (tiny-tier reminder).
+// the delegation steer in ../subagents/index.ts (tiny-tier reminder).
 export const DELEGATING_WORK = `# Delegating to agents
 The Agent tool runs a subagent in its own context window and returns only its final report. Delegate when:
  - Answering means sweeping many files or directories — broad codebase searches, "where is X handled", every place a convention is used. Use the explore agent and keep the conclusion instead of the file dumps.

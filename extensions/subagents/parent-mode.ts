@@ -18,12 +18,12 @@ import { RENDER_CHANNEL, type RenderRequest, toldBlockFact } from "../lib/remind
 import { PERMISSION_MODE_STATE } from "../permissions/modes.ts";
 import { normalizePermissionMode } from "../permissions/settings.ts";
 
+import { subagentWords } from "./words.ts";
 /** The told fact's key. */
 const PARENT_MODE_FACT = "parent-permission-mode";
 
 export function parentModeText(mode: string): string {
-	const plan = mode === "plan" ? " Only read-only tools run now: do not edit files or change state." : "";
-	return `The main session's permission mode is now "${mode}", and your tool calls are checked against it from here on.${plan}`;
+	return subagentWords().parentMode({ mode });
 }
 
 export function parentModeExtension(getMode: () => string) {

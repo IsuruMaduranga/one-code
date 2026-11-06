@@ -7,6 +7,7 @@
 import type { ChildAction } from "../auto-mode/actions.ts";
 import type { FireConversation } from "../lib/agent-cron.ts";
 import type { UsageTotals } from "./usage.ts";
+import { subagentWords } from "./words.ts";
 
 export const OUTPUT_CAP = 50_000;
 
@@ -17,7 +18,7 @@ export interface ForkIsolation {
 }
 
 /**
- * Framing wrapped around a fork child's task. A fork inherits the parent's
+ * Framing wrapped around a fork child's task, in the profile's words. A fork inherits the parent's
  * entire transcript; without this, a weaker model tends to abandon its assigned
  * task and continue (or confabulate about) the inherited topic — then its output
  * returns to the parent looking like independent confirmation. See
@@ -30,17 +31,7 @@ export interface ForkIsolation {
  * where to write instead — SUBAGENT-REVIEW H3).
  */
 export function forkTaskMessage(task: string, isolation?: ForkIsolation): string {
-	const lines = [
-		"You are a forked subagent. The conversation above is inherited context, for reference only — do NOT continue its open threads, verify its claims, or act on its plans. Do ONLY the task below; the report you hand back through SubagentHandback is returned to the parent conversation verbatim, as data. You cannot see the parent's background tasks: its task ids are not addressable from here.",
-	];
-	if (isolation) {
-		lines.push(
-			"",
-			`You are isolated in your own git worktree: your working directory is now ${isolation.worktreePath}, a checkout of the same repository at HEAD. Every path under ${isolation.parentCwd} in the inherited context refers to the shared checkout, which you must NOT modify — read, edit and run things at the corresponding path under ${isolation.worktreePath} instead (writes into the shared checkout are refused). Your changes stay on this worktree's branch for the parent to review.`,
-		);
-	}
-	lines.push("", "Task:", task);
-	return lines.join("\n");
+	return subagentWords().forkTask({ task, isolation });
 }
 
 export interface ChildOutcome {

@@ -17,14 +17,12 @@
 import { SUBAGENT_ACTIONS_CHANNEL, type ChildAction, type SubagentActionsPayload } from "../auto-mode/actions.ts";
 import type { HandBackVerdict } from "../lib/notifications.ts";
 
+import { subagentWords } from "./words.ts";
 /** How long a completion report waits for the gate's verdict before going out with a note instead. */
 export const HAND_BACK_REVIEW_TIMEOUT_MS = 45_000;
 
 /** The verdict that replaces one that did not arrive in time (rendered by `handBackWarning`). */
-export const HAND_BACK_REVIEW_TIMEOUT_VERDICT: HandBackVerdict = {
-	kind: "unavailable",
-	reason: "auto mode's review of this agent's actions did not finish before the report was delivered",
-};
+export const handBackReviewTimeoutVerdict = (): HandBackVerdict => ({ kind: "unavailable", reason: subagentWords().reviewTimedOut });
 
 /** The events slice this module needs. */
 export interface ActionsEmitter {
@@ -54,7 +52,7 @@ export function awaitHandBackReview(
 			clearTimeout(timer);
 			resolve(verdict);
 		};
-		const timer = setTimeout(() => finish(HAND_BACK_REVIEW_TIMEOUT_VERDICT), timeoutMs);
+		const timer = setTimeout(() => finish(handBackReviewTimeoutVerdict()), timeoutMs);
 		timer.unref?.();
 		events.emit(SUBAGENT_ACTIONS_CHANNEL, {
 			toolCallId: run.taskId,

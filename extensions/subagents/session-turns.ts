@@ -14,7 +14,12 @@
 import { recordAction, type ChildAction } from "../auto-mode/actions.ts";
 import type { HandbackSlot } from "../lib/subagent-handback.ts";
 import type { ChildOutcome } from "./outcome.ts";
+import type { RunFailure } from "./text.ts";
 import { addUsage, emptyUsage, type UsageTotals } from "./usage.ts";
+import { subagentWords } from "./words.ts";
+
+/** Why a turn was cut short: stopped, or the wall-clock cap. */
+export type AbortReason = Extract<RunFailure, { kind: "aborted" }>["why"];
 
 /** The subset of AgentSession events this tracker reads. */
 interface TrackedEvent {
@@ -46,7 +51,7 @@ export class SessionTurnTracker implements HandbackSlot {
 	 * aborted assistant message to observe. The `stopReason: "aborted"` branch
 	 * in `process` is belt-and-braces for an abort the runner did not initiate.
 	 */
-	aborted: string | undefined;
+	aborted: AbortReason | undefined;
 	/** Every turn's final text joined, for task_output on a resident agent. */
 	transcript = "";
 	/** The report this turn handed back through SubagentHandback, if it did. */
@@ -62,8 +67,8 @@ export class SessionTurnTracker implements HandbackSlot {
 		this.actions = [];
 	}
 
-	/** The runner cut this turn short (kill, wall-clock cap, cancelled signal); `reason` is the suffix the report carries. */
-	markAborted(reason = "terminated before the turn finished"): void {
+	/** The runner cut this turn short (kill, wall-clock cap, cancelled signal); the report says which. */
+	markAborted(reason: AbortReason = "stopped"): void {
 		// First reason wins: a wall-clock cap followed by a shutdown kill in the same
 		// abort-settling window keeps the more specific explanation.
 		this.aborted ??= reason;
@@ -93,7 +98,7 @@ export class SessionTurnTracker implements HandbackSlot {
 				addUsage(this.usage, event.message.usage);
 				this.providerError =
 					event.message.stopReason === "error" ? event.message.errorMessage || "unknown provider error" : undefined;
-				if (event.message.stopReason === "aborted") this.aborted ??= "terminated before the turn finished";
+				if (event.message.stopReason === "aborted") this.aborted ??= "stopped";
 				const blocks = Array.isArray(event.message.content) ? event.message.content : [];
 				const text = blocks
 					.filter((b): b is { type: string; text: string } => (b as { type?: string }).type === "text")
@@ -135,11 +140,11 @@ export function finishOutcome(
 	toolCalls: number,
 	usage: UsageTotals,
 	actions: ChildAction[],
-	aborted?: string,
+	aborted?: AbortReason,
 ): ChildOutcome {
 	if (aborted) {
 		return {
-			output: output.trim() ? `${output}\n\n[${aborted}]` : `Subagent ${aborted}.`,
+			output: subagentWords().failure({ kind: "aborted", why: aborted, output }),
 			toolCalls,
 			usage,
 			actions,
@@ -148,9 +153,7 @@ export function finishOutcome(
 	}
 	if (providerError) {
 		return {
-			output: output.trim()
-				? `${output}\n\n[The subagent's last request ended with a provider error: ${providerError}]`
-				: `Subagent failed with a provider error (its model could not be called — an auth/billing/rate-limit problem, not a task failure): ${providerError}`,
+			output: subagentWords().failure({ kind: "providerError", error: providerError, output }),
 			toolCalls,
 			usage,
 			actions,
