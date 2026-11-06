@@ -3,6 +3,12 @@ import { emptyCatalogSources, setCatalogSourcesForTest } from "../extensions/lib
 import { setModelTierOverridesForTest } from "../extensions/lib/model-tier.ts";
 import { bashParserReady } from "../extensions/lib/bash-parser.ts";
 import { resetConfigModeForTest } from "../extensions/lib/config-mode.ts";
+import { shareShippedProfileForTest } from "../extensions/lib/profile.ts";
+import { profile } from "../profile/index.ts";
+
+// The shipped profile through the test run's own module graph (lib/profile.ts
+// loads it on demand under jiti, where vitest's import is not the one used).
+shareShippedProfileForTest(profile);
 
 // Hermetic by default: an empty model catalog (see vitest.config.ts), so every
 // model takes the no-catalog rules unless a test pins sources with
