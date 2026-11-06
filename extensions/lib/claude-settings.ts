@@ -44,7 +44,7 @@ export function managedSettingsPaths(platform: NodeJS.Platform = process.platfor
  * adds Claude Code's user, project, local and managed files around them;
  * independent mode (lib/sources.ts) and a product without a provider
  * read the product's two alone. When no file is marked primary, the
- * product's user file is. Each consumer keeps the files its keys may come
+ * product's user file is; a repository's file never is. Each consumer keeps the files its keys may come
  * from.
  */
 export function settingsSources(cwd: string, home: string, opts: { productLocal?: boolean } = {}): SettingsFile[] {
@@ -53,9 +53,13 @@ export function settingsSources(cwd: string, home: string, opts: { productLocal?
 		// Finding it walks up for the project root: callers that want only user or borrowed files skip it.
 		...(opts.productLocal === false ? [] : [{ path: oneCodeProjectSettingsPath(cwd, home), scope: "local", owner: "product", label: "One Code project settings" } satisfies SettingsFile]),
 	];
-	const files = openSources(home).settings?.(base, { cwd }) ?? base;
+	// A repository's file is never the primary one: the keys read from it (MCP
+	// approvals, defaultMode, env) would let a repository grant itself access.
+	const files = (openSources(home).settings?.(base, { cwd }) ?? base).map((file) => (file.primary && file.repo ? { ...file, primary: false } : file));
 	if (files.some((file) => file.primary)) return files;
-	return files.map((file) => (file === base[0] ? { ...file, primary: true } : file));
+	// Marked by role, not identity, so a provider may hand back copies of the base's entries.
+	const own = files.findIndex((file) => file.owner === "product" && file.scope === "user" && !file.repo);
+	return files.map((file, index) => (index === own ? { ...file, primary: true } : file));
 }
 
 /** The primary user file: the one holding the keys a user edits by hand (`SettingsFile.primary`). */

@@ -14,9 +14,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
 import { safetyControlWrite } from "../../extensions/auto-mode/safety-floor.ts";
 import { loadPermissionSettings } from "../../extensions/permissions/settings.ts";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { settingsSources } from "../../extensions/lib/claude-settings.ts";
-import { instructionFileNames, instructionTargets } from "../../extensions/lib/instructions.ts";
+import { instructionFileNames, instructionTargets, openInstructions } from "../../extensions/lib/instructions.ts";
+import { autoModeSettingsFiles } from "../../extensions/auto-mode/config.ts";
+import { isClaudeLocation } from "../../extensions/lib/paths.ts";
 import { INIT_PROMPT, initPrompt } from "../../profile/init/prompt.ts";
 import { profileModuleKey, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile.ts";
 import { shareModuleForTest } from "../../extensions/lib/shared-module.ts";
@@ -110,6 +112,19 @@ describe("the settings ladder", () => {
 		expect(merged.defaultMode).toBeUndefined();
 	});
 
+	it("marks the product's user file primary by role, so a provider may copy the base's entries", () => {
+		useProvider({ open: () => ({ settings: (base) => base.map((file) => ({ ...file, label: `${file.label}!` })) }) });
+		expect(settingsSources(cwd, home).find((file) => file.primary)?.path).toBe(join(home, ".onecode", "settings.json"));
+	});
+
+	it("never makes a repository's file primary, nor reads auto-mode settings from one", () => {
+		const repoUser = join(home, "repo", ".tool", "settings.json");
+		useProvider({ open: () => ({ settings: (base) => [{ path: repoUser, scope: "user", owner: "borrowed", repo: true, primary: true, label: "repo file" }, ...base] }) });
+		const files = settingsSources(cwd, home);
+		expect(files.find((file) => file.primary)?.path).toBe(join(home, ".onecode", "settings.json"));
+		expect(autoModeSettingsFiles(home).map((file) => file.path)).not.toContain(repoUser);
+	});
+
 	it("puts another provider's state files under the safety floor", () => {
 		const state = join(home, ".other-tool.json");
 		expect(writes(state)).toBeUndefined();
@@ -137,5 +152,35 @@ describe("the instruction files a user writes", () => {
 		expect(agents.startsWith("Please analyze this codebase and create an AGENTS.md file,")).toBe(true);
 		expect(agents).toContain("Copilot rules (in .github/copilot-instructions.md), make sure");
 		expect(agents).toContain("```\n# AGENTS.md\n");
+	});
+});
+
+describe("independent mode's reads", () => {
+	it("keep ~/.claude.json out", () => {
+		expect(isClaudeLocation(join(home, ".claude.json"), join(home, ".claude"))).toBe(true);
+		expect(isClaudeLocation(join(home, "claude.json"), join(home, ".claude"))).toBe(false);
+	});
+
+	it("load an approved AGENTS.md import from outside the project, and ask for it first", () => {
+		resetConfigModeForTest("independent");
+		const project = join(home, "proj");
+		mkdirSync(join(home, "shared"), { recursive: true });
+		mkdirSync(project, { recursive: true });
+		writeFileSync(join(home, "shared", "rules.md"), "SHARED RULE\n");
+		writeFileSync(join(project, "AGENTS.md"), "@../shared/rules.md\n");
+		const instructions = openInstructions(home, undefined);
+		expect(instructions.externalIncludes({ cwd: project })).toEqual([realpathSync(join(home, "shared", "rules.md"))]);
+		expect(JSON.stringify(instructions.sections({ cwd: project, includeExternal: false }).contextFiles)).not.toContain("SHARED RULE");
+		expect(JSON.stringify(instructions.sections({ cwd: project, includeExternal: true }).contextFiles)).toContain("SHARED RULE");
+	});
+
+	it("leave an AGENTS.md that Claude Code's rule skips out of the approval question", () => {
+		const project = join(home, "proj");
+		mkdirSync(join(home, "shared"), { recursive: true });
+		mkdirSync(project, { recursive: true });
+		writeFileSync(join(home, "shared", "rules.md"), "SHARED RULE\n");
+		writeFileSync(join(project, "AGENTS.md"), "@../shared/rules.md\n");
+		writeFileSync(join(project, "CLAUDE.md"), "claude rules\n");
+		expect(openInstructions(home, undefined).externalIncludes({ cwd: project })).toEqual([]);
 	});
 });

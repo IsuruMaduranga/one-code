@@ -422,10 +422,11 @@ export function claudeCodeInstructionView(home: string): InstructionView {
 		// Its own reading replaces the base's (rule files, external chains, deduplication), so the base's contents are never read.
 		files: (base, { cwd, includeExternal }) => discoverContextFiles({ cwd, homeClaudeDir, rule: currentRule(), home, includeExternal, base: base.paths }),
 		nested: (_base, { filePath, cwd, includeExternal }) => nestedInstructionFiles({ filePath, cwd, rule: currentRule(), home, homeClaudeDir, includeExternal }),
+		// Its own scan covers AGENTS.md under the rule; the base's product-file scan is added.
 		externalIncludes: (base, { cwd }) => {
 			const outside = externalInstructionIncludes({ cwd, homeClaudeDir, rule: currentRule(), home });
 			const seen = new Set(outside);
-			return [...outside, ...base.filter((path) => !seen.has(path))];
+			return [...outside, ...base.product.filter((path) => !seen.has(path))];
 		},
 		classifier: (base, { cwd }) => classifierInstructionFiles({ cwd, home, homeClaudeDir, base: base.paths }),
 	};

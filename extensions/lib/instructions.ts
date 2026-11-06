@@ -342,8 +342,8 @@ export interface InstructionView {
 	files(base: BaseList<ContextFile>, opts: { cwd: string; includeExternal: boolean }): ContextFile[];
 	/** The files a read of `filePath` attaches, below `cwd` down to the file's directory. */
 	nested(base: () => NestedFile[], opts: { filePath: string; cwd: string; includeExternal: boolean }): NestedFile[];
-	/** Imports outside `cwd` the user is asked to approve. */
-	externalIncludes(base: string[], opts: { cwd: string }): string[];
+	/** Imports outside `cwd` the user is asked to approve, from the base's two scans. */
+	externalIncludes(base: ExternalIncludes, opts: { cwd: string }): string[];
 	/** The classifier's files, ahead of the product files: it may see more than the agent, never less. */
 	classifier(base: BaseList<ContextFile>, opts: { cwd: string }): ClassifierFile[];
 }
@@ -352,7 +352,7 @@ const BASE_VIEW: InstructionView = {
 	paths: (base) => base,
 	files: (base) => base.read(),
 	nested: (base) => base(),
-	externalIncludes: (base) => base,
+	externalIncludes: (base) => [...new Set([...base.agents, ...base.product])],
 	classifier: (base) => base.read(),
 };
 
@@ -434,20 +434,31 @@ function readProductFiles(paths: readonly ContextFilePath[], cwd: string, home: 
 	return readSources(paths.filter((entry) => PRODUCT_SOURCES.has(entry.descriptor)), home, readers, includeExternal ? readers.anywhere : readers.inProject);
 }
 
-/** A project ONECODE.md's imports outside the cwd, resolved by the expander that would load them. */
-function oneCodeExternalIncludes(opts: { cwd: string; home: string; homeOneCodeDir: string; allowPath: (path: string) => boolean }): string[] {
+/**
+ * The project's AGENTS.md and ONECODE.md imports outside the cwd, resolved by
+ * the expander that would load them, kept apart: a provider decides whether
+ * the AGENTS.md files load at all.
+ */
+function projectExternalIncludes(opts: { cwd: string; home: string; homeOneCodeDir: string; allowPath: (path: string) => boolean }): ExternalIncludes {
 	const cwd = tryRealpath(opts.cwd) ?? opts.cwd;
 	const { anywhere } = importReaders(opts.cwd, opts.allowPath);
-	const outside = new Set<string>();
-	for (const { path, descriptor } of basePaths(opts.cwd, { ...opts, agents: false })) {
-		const content = descriptor === ONECODE_DESCRIPTOR ? anywhere(path) : null;
-		if (content === null) continue;
+	const found: ExternalIncludes = { agents: [], product: [] };
+	for (const { path, descriptor } of basePaths(opts.cwd, opts)) {
+		const list = descriptor === ONECODE_DESCRIPTOR ? found.product : descriptor === AGENTS_DESCRIPTOR ? found.agents : undefined;
+		const content = list ? anywhere(path) : null;
+		if (!list || content === null) continue;
 		for (const imported of expandWithImports(content, dirname(path), { home: opts.home, read: anywhere }).imported) {
 			const key = tryRealpath(imported) ?? imported;
-			if (!isPathAtOrUnder(key, cwd)) outside.add(key);
+			if (!isPathAtOrUnder(key, cwd) && !list.includes(key)) list.push(key);
 		}
 	}
-	return [...outside];
+	return found;
+}
+
+/** Imports outside the cwd from the project's AGENTS.md files and from its product files. */
+export interface ExternalIncludes {
+	agents: string[];
+	product: string[];
 }
 
 /** The base's nested files for a read: each AGENTS.md and product file between `cwd` and the file, inside the project. */
@@ -466,8 +477,8 @@ function baseNestedFiles(opts: { filePath: string; cwd: string; home: string; in
 			const content = readFileIfPresent(path);
 			if (content === null || content.trim() === "") continue;
 			seen.add(key);
-			// The product file's imports load from anywhere once approved, as at startup.
-			const read = path === oneCode && opts.includeExternal ? readers.anywhere : readers.inProject;
+			// Imports load from anywhere once approved, as at startup.
+			const read = opts.includeExternal ? readers.anywhere : readers.inProject;
 			const expanded = expandWithImports(content, dirname(path), { home: opts.home, read });
 			const imported = expanded.imported.map((p) => tryRealpath(p) ?? p);
 			for (const p of imported) seen.add(p);
@@ -519,7 +530,8 @@ export function openInstructions(home: string, agentDir: string | undefined): In
 		const readers = importReaders(cwd, allowPath);
 		const external = includeExternal ?? readExternalIncludesApproval(cwd, home).approved;
 		return {
-			agents: { paths, read: () => readSources(paths, home, readers, readers.inProject) } satisfies BaseList<ContextFile>,
+			// With the user's approval a project AGENTS.md's imports load from anywhere, as the product file's do.
+			agents: { paths, read: () => readSources(paths, home, readers, external ? readers.anywhere : readers.inProject) } satisfies BaseList<ContextFile>,
 			product: () => readProductFiles(all, cwd, home, allowPath, external),
 			external,
 		};
@@ -534,7 +546,7 @@ export function openInstructions(home: string, agentDir: string | undefined): In
 			return view.paths(basePaths(cwd, { allowPath, globals, homeOneCodeDir: dir }), { cwd, homeOneCodeDir: dir });
 		},
 		nested: ({ filePath, cwd, includeExternal }) => view.nested(() => baseNestedFiles({ filePath, cwd, home, includeExternal, allowPath }), { filePath, cwd, includeExternal }),
-		externalIncludes: ({ cwd, homeOneCodeDir }) => view.externalIncludes(oneCodeExternalIncludes({ cwd, home, homeOneCodeDir: productDir(homeOneCodeDir), allowPath }), { cwd }),
+		externalIncludes: ({ cwd, homeOneCodeDir }) => view.externalIncludes(projectExternalIncludes({ cwd, home, homeOneCodeDir: productDir(homeOneCodeDir), allowPath }), { cwd }),
 		// The product files with the agent's approval, so the classifier never sees less of them than the agent.
 		classifier: ({ cwd, homeOneCodeDir }) => {
 			const { agents, product } = walk(cwd, homeOneCodeDir, undefined);

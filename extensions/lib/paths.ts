@@ -211,6 +211,7 @@ export function relativeDisplayPath(cwd: string, path: string): string {
 export function isClaudeLocation(path: string, userDir: string): boolean {
 	return [path, tryRealpath(path)].some((candidate) => candidate !== undefined && (
 		/(?:^|[/\\])\.claude(?:[/\\]|$)/i.test(candidate) ||
+		/(?:^|[/\\])\.claude\.json$/i.test(candidate) ||
 		/(?:^|[/\\])CLAUDE(?:\.local)?\.md$/i.test(candidate) ||
 		isPathAtOrUnder(candidate, tryRealpath(userDir) ?? userDir) ||
 		isPathAtOrUnder(candidate, claudeManagedDir())

@@ -46,7 +46,7 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { isBorrowedUserFile, settingsSources } from "../lib/claude-settings.ts";
+import { isBorrowedUserFile, isRepoFile, settingsSources } from "../lib/claude-settings.ts";
 import type { SettingsFile } from "../lib/sources.ts";
 import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
 import { DEFAULT_ENVIRONMENT, slotName } from "./defaults.ts";
@@ -110,7 +110,8 @@ export function autoModeSettingsPaths(home: string): string[] {
  * read: a repository could otherwise grant itself classifier exceptions.
  */
 export function autoModeSettingsFiles(home: string): SettingsFile[] {
-	return settingsSources(process.cwd(), home, { productLocal: false }).filter((file) => file.scope === "user" || file.scope === "managed");
+	// Never a repository's file, whatever scope a provider gives it.
+	return settingsSources(process.cwd(), home, { productLocal: false }).filter((file) => (file.scope === "user" || file.scope === "managed") && !isRepoFile(file));
 }
 
 function readFile(path: string, diagnostics: string[]): AutoModeSettingsFile | undefined {
