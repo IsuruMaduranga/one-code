@@ -32,6 +32,7 @@ import { FIND_PATTERN_TESTS, findNegatedPatterns } from "./read-only-options.ts"
 import { analyzeShellCommand, globComponentRegex, hasReadOnlyShellWords, isUnknownTilde, LOOPS, movesDirectory, parseCommand, resolvePayload, scopedTracker } from "./shell-analysis.ts";
 import type { Token } from "./shell-parse.ts";
 import { claudeUserSettingsPath, managedSettingsPaths, settingsSources } from "../lib/claude-settings.ts";
+import { openSources } from "../lib/sources.ts";
 import { CONSENT_STORE_TAIL, consentStorePaths } from "../lib/consent-stores.ts";
 import { oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { CATALOG_CACHE_TAIL, catalogCacheFiles } from "../lib/model-catalog-data.ts";
@@ -208,9 +209,9 @@ export function safetyFloorReason(target: FloorTarget): string {
 /** A cached catalog's file name, to word the reason (a false match only rewords it). */
 const CATALOG_FILE_NAME = /(^|[/\\])(models-dev|openrouter|huggingface|refresh-failed)\.json$/i;
 
-/** The session's settings ladder for the floor: every file a source provider adds is a gate control. */
+/** The session's settings ladder and state files for the floor: every file a source provider adds is a gate control. */
 export function sessionSettingsFiles(cwd: string, home: string): string[] {
-	return settingsSources(cwd, home).map((file) => file.path);
+	return [...settingsSources(cwd, home).map((file) => file.path), ...(openSources(home).protectedFiles ?? [])];
 }
 
 /**

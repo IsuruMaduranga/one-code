@@ -127,8 +127,8 @@ import { findProjectRoot } from "../lib/git.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 import { announceLocalCommand, registerLocalCommand } from "../lib/local-command.ts";
-import { claudeSourcesOn } from "../lib/config-mode.ts";
-import { claudeJsonPath, forwardSlashes, tildify, tryRealpath } from "../lib/paths.ts";
+import { openSources } from "../lib/sources.ts";
+import { forwardSlashes, tildify, tryRealpath } from "../lib/paths.ts";
 import { openPermissionsPanel, type PermissionsPanelHost } from "./panel/host.ts";
 import { PANEL_FOCUS_CHANNEL, PanelFocus, panelUi } from "../lib/panel-focus.ts";
 import {
@@ -1274,7 +1274,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 	 */
 	const firstOutsideRead = (ctx: ExtensionContext, toolName: string, path: string, signal = ctx.signal): Promise<"allow" | "block" | "ask_again"> => {
 		const home = os.homedir();
-		const settled = () => (outsideReadSeen ??= outsideReadPromptSeen(oneCodeSettingsPath(home), claudeSourcesOn() ? claudeJsonPath(home) : undefined));
+		const settled = () => (outsideReadSeen ??= outsideReadPromptSeen(oneCodeSettingsPath(home), openSources(home).protectedFiles ?? []));
 		if (!ctx.hasUI) return Promise.resolve("allow");
 		// Settled while this call waited (a parallel read's Block included).
 		if (settled()) return Promise.resolve(blockOutsideReads ? "block" : "allow");

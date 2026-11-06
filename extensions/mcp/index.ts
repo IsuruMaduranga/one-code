@@ -38,7 +38,7 @@ import {
 	readResourceDir,
 } from "./client.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../lib/reminders.ts";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import {
 	MCP_STATUS_CHANNEL,
 	MCP_STATUS_REQUEST_CHANNEL,
@@ -56,7 +56,8 @@ import { type McpEntry, type McpEntryStatus } from "./panel/model.ts";
 import { renderMcpPanel, type McpPaint } from "./panel/render.ts";
 import { applyMcpKey, initialMcpState, type McpEffect } from "./panel/state.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
-import { loadServers, type McpServer, noMcpServersMessage, piMcpConfigPaths, registeredMcpServers } from "./config.ts";
+import { loadServers, mcpConfigFiles, type McpServer, noMcpServersMessage, piMcpConfigPaths, registeredMcpServers } from "./config.ts";
+import type { McpFile } from "../lib/sources.ts";
 import { approveMcpServers, type McpTrustDeps, persistApproval, projectRootOf, reconnectRefusal } from "./trust.ts";
 import {
 	capDescription,
@@ -70,7 +71,7 @@ import {
 import { registerLocalCommand } from "../lib/local-command.ts";
 import { canShowCustomUi, notifyRpcReadOnly } from "../lib/headless-output.ts";
 import { claudeSourcesOn } from "../lib/config-mode.ts";
-import { claudeJsonPath } from "../lib/paths.ts";
+import { forwardSlashes } from "../lib/paths.ts";
 import { consentDialog, startupConsentReady } from "../lib/consent-dialogs.ts";
 import { panelUi } from "../lib/panel-focus.ts";
 import { requireText } from "../lib/profile.ts";
@@ -108,6 +109,9 @@ function mcpExtension(pi: ExtensionAPI) {
 	const withheldNames = new Map<string, string>();
 	// Config file paths contributed by plugins, so the panel can group them.
 	let pluginConfigPaths = new Set<string>();
+	/** Another tool's MCP files and their scopes (the source view's `mcpFiles`), and the cwd they were found for, as of the last load. */
+	let mcpFileScopes = new Map<string, McpFile["scope"]>();
+	let loadedCwd = process.cwd();
 	// pi 0.99's registry of servers other extensions register; absent on older pi.
 	// Registered after the session started: our servers are read once per session.
 	pi.on("mcp_servers_change", (_event, ctx) => {
@@ -380,6 +384,8 @@ function mcpExtension(pi: ExtensionAPI) {
 	const connectAll = async (ctx: ExtensionContext) => {
 		const plugins = discoverPlugins(defaultDiscoverRoots(getAgentDir(), ctx.cwd));
 		pluginConfigPaths = new Set(plugins.mcpConfigs);
+		loadedCwd = ctx.cwd;
+		mcpFileScopes = new Map(mcpConfigFiles(ctx.cwd, home).map((file) => [file.path, file.scope]));
 		configErrors = [];
 		const configNotes: string[] = [];
 		servers = loadServers(ctx.cwd, home, process.env, [...pluginConfigPaths], {
@@ -665,11 +671,13 @@ function mcpExtension(pi: ExtensionAPI) {
 		if (pluginConfigPaths.has(server.source)) {
 			return { rank: 3, group: "Plugin MCPs", configLocation: "Plugin configuration", scope: "project" };
 		}
-		if (server.source === claudeJsonPath(home) || server.piOrigin === "user") {
+		// Another tool's files (the source view's `mcpFiles`) by the scope it gives them.
+		const fileScope = mcpFileScopes.get(server.source);
+		if (fileScope === "user" || server.piOrigin === "user") {
 			return { rank: 0, group: `User MCPs (${shorten(server.source)})`, configLocation: shorten(server.source), scope: "user" };
 		}
-		if (server.source.endsWith(join(".claude", "settings.local.json"))) {
-			return { rank: 2, group: "Project MCPs (.claude/settings.local.json)", configLocation: shorten(server.source), scope: "project" };
+		if (fileScope === "local") {
+			return { rank: 2, group: `Project MCPs (${forwardSlashes(relative(loadedCwd, server.source))})`, configLocation: shorten(server.source), scope: "project" };
 		}
 		if (server.piOrigin === "extension") {
 			return { rank: 3, group: "Extension MCPs", configLocation: shorten(server.source), scope: "user" };

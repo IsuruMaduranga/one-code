@@ -21,7 +21,6 @@ import { feature } from "../lib/feature.ts";
 import { existsSync } from "node:fs";
 import os from "node:os";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { claudeConfigDir, claudeUserDir } from "../lib/paths.ts";
 
 import { BUNDLED_SKILLS_DIR, commandDirs, skillSourceDirs } from "../lib/skill-scan.ts";
 
@@ -31,23 +30,18 @@ import { BUNDLED_SKILLS_DIR, commandDirs, skillSourceDirs } from "../lib/skill-s
  * `~/.agents/skills` cross-tool convention, which Claude Code does not relocate
  * via that env var.
  */
-export function claudeResourcePaths(
-	cwd: string,
-	home: string,
-	claudeDir: string = claudeUserDir(home),
-	bundledSkillsDir?: string,
-): { skillPaths: string[]; promptPaths: string[] } {
-	// The folders follow the config mode (lib/skill-scan.ts, lib/config-mode.ts).
+export function claudeResourcePaths(cwd: string, home: string, bundledSkillsDir?: string): { skillPaths: string[]; promptPaths: string[] } {
+	// The folders come from the source view (lib/skill-scan.ts, lib/sources.ts).
 	const candidates = {
 		skillPaths: [
-			...skillSourceDirs(cwd, home, claudeDir).map(({ dir }) => dir),
+			...skillSourceDirs(cwd, home).map(({ dir }) => dir),
 			// The bundled catalog is listed LAST so it loses a name collision:
 			// pi keeps the first-loaded skill for a given name, so a user or
 			// project skill of the same name wins and the bundled one is the
 			// fallback (see working-docs/decisions/skills-plugins.md).
 			...(bundledSkillsDir ? [bundledSkillsDir] : []),
 		],
-		promptPaths: commandDirs(cwd, home, claudeDir),
+		promptPaths: commandDirs(cwd, home),
 	};
 	return {
 		skillPaths: candidates.skillPaths.filter((p) => existsSync(p)),
@@ -57,7 +51,7 @@ export function claudeResourcePaths(
 
 function claudeCompatExtension(pi: ExtensionAPI) {
 	pi.on("resources_discover", (event) => {
-		return claudeResourcePaths(event.cwd, os.homedir(), claudeConfigDir(), BUNDLED_SKILLS_DIR);
+		return claudeResourcePaths(event.cwd, os.homedir(), BUNDLED_SKILLS_DIR);
 	});
 }
 

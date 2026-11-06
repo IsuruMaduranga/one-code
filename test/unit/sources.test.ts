@@ -94,4 +94,11 @@ describe("the settings ladder", () => {
 		expect(settingsSources(cwd, home)[0].path).toBe(extra);
 		expect(writes(extra)).toBeDefined();
 	});
+
+	it("puts another provider's state files under the safety floor", () => {
+		const state = join(home, ".other-tool.json");
+		expect(writes(state)).toBeUndefined();
+		useProvider({ open: () => ({ protectedFiles: [state] }) });
+		expect(writes(state)).toBeDefined();
+	});
 });

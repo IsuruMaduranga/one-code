@@ -21,9 +21,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { PluginSkill } from "./plugins.ts";
 import type { SkillScope } from "./skill-overrides.ts";
-import { claudeSourcesOn } from "./config-mode.ts";
-import { projectConfigDir, userConfigDir } from "./sources.ts";
-import { claudeUserDir, isPathAtOrUnder, tryRealpath } from "./paths.ts";
+import { openSources, projectConfigDir, type SkillDir, userConfigDir } from "./sources.ts";
+import { isPathAtOrUnder, tryRealpath } from "./paths.ts";
 import { parseFrontmatterLoosely } from "./frontmatter.ts";
 
 /** The skill catalog shipped in this package: `<package>/skills` (Claude Code's self-contained built-in skills). */
@@ -36,36 +35,34 @@ export interface ScannedSkill {
 }
 
 /**
- * The one scope-classification rule for a skill path — user skills live under
- * `~/.claude/skills`, `~/.agents/skills` and `<agentDir>/skills`; everything else is project
- * scope. Both the scanner and the skill extension classify through this, so a
+ * The one scope-classification rule for a skill path: user skills live under
+ * the user-scope skill folders (`skillSourceDirs`) and `<agentDir>/skills`;
+ * everything else is project scope. Both the scanner and the skill extension classify through this, so a
  * skill never shows different scopes in /plugins vs the skill tool.
  */
 export function scopeForPath(path: string, home: string, agentDir: string): SkillScope {
-	const roots = [join(claudeUserDir(home), "skills"), join(home, ".agents", "skills"), join(agentDir, "skills")];
+	// The user-scope folders do not depend on the working directory, so `home` stands in for it.
+	const roots = [...skillSourceDirs(home, home).filter((d) => d.scope === "user").map((d) => d.dir), join(agentDir, "skills")];
 	return roots.some((root) => isPathAtOrUnder(path, root)) ? "user" : "project";
 }
 
 /**
  * The skill folders One Code adds to pi's own (`<agentDir>/skills`, which pi
- * scans itself), in load order: Claude Code's two only in Claude-compatible
- * mode (lib/config-mode.ts), the cross-tool `.agents` pair in both. `claudeDir`
- * defaults to `~/.claude` (`CLAUDE_CONFIG_DIR`); `~/.agents` is never moved.
+ * scans itself), in load order: the cross-tool `.agents` pair, as the source
+ * provider reshapes it (lib/sources.ts `skillDirs`; One Code's adds Claude
+ * Code's two, each before its `.agents` twin). `~/.agents` is never moved.
  */
-export function skillSourceDirs(cwd: string, home: string, claudeDir: string = claudeUserDir(home)): Array<{ dir: string; scope: SkillScope }> {
-	const claude = claudeSourcesOn();
-	const dirs: Array<{ dir: string; scope: SkillScope } | false> = [
-		claude && { dir: join(claudeDir, "skills"), scope: "user" },
+export function skillSourceDirs(cwd: string, home: string): SkillDir[] {
+	const base: SkillDir[] = [
 		{ dir: join(home, ".agents", "skills"), scope: "user" },
-		claude && { dir: join(cwd, ".claude", "skills"), scope: "project" },
 		{ dir: join(cwd, ".agents", "skills"), scope: "project" },
 	];
-	return dirs.filter((d): d is { dir: string; scope: SkillScope } => d !== false);
+	return openSources(home).skillDirs?.(base, { cwd }) ?? base;
 }
 
-/** The prompt-template folders: `~/.claude/commands` and `.claude/commands`, or their `.onecode` twins in independent mode. */
-export function commandDirs(cwd: string, home: string, claudeDir: string = claudeUserDir(home)): string[] {
-	return [join(claudeSourcesOn() ? claudeDir : userConfigDir(home), "commands"), join(projectConfigDir(cwd), "commands")];
+/** The prompt-template folders: `commands` in the user and project config folders (lib/sources.ts `configDirs`). */
+export function commandDirs(cwd: string, home: string): string[] {
+	return [join(userConfigDir(home), "commands"), join(projectConfigDir(cwd), "commands")];
 }
 
 function scanDir(dir: string, scope: SkillScope, into: Map<string, ScannedSkill>, seenFiles: Set<string>): void {

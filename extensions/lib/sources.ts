@@ -32,6 +32,31 @@ export interface SourceView {
 	 * Absent: the product's files alone.
 	 */
 	settings?(base: SettingsFile[], opts: { cwd: string }): SettingsFile[];
+	/** The skill folders besides pi's own, in load order: gets the base's (`.agents/skills`, user then project) and returns the final list (lib/skill-scan.ts). */
+	skillDirs?(base: SkillDir[], opts: { cwd: string }): SkillDir[];
+	/** Another tool's plugin install root, read only (lib/plugins.ts `DiscoverRoots`). */
+	pluginsDir?: string;
+	/** Another tool's MCP config files, read after pi's own `mcp.json` files, each with its scope (mcp/config.ts). */
+	mcpFiles?(opts: { cwd: string }): McpFile[];
+	/**
+	 * Another tool's global state files outside the settings ladder (One
+	 * Code's provider: `~/.claude.json`). They carry permission configuration,
+	 * so each joins the auto-mode safety floor; a first-run prompt the user
+	 * answered there (the outside-read prompt) counts as answered.
+	 */
+	protectedFiles?: string[];
+}
+
+/** A skill folder and the scope its skills load under. */
+export interface SkillDir {
+	dir: string;
+	scope: "user" | "project";
+}
+
+/** An MCP config file: `user` for the user's own, `project` checked into the repository, `local` the user's for one project. */
+export interface McpFile {
+	path: string;
+	scope: "user" | "project" | "local";
 }
 
 /**

@@ -272,14 +272,14 @@ export function persistBlockOutsideReads(filePath: string): void {
 
 /**
  * Whether the first outside-read prompt was answered on this machine: One
- * Code's own flag in its global settings, or Claude Code's
- * `hasSeenAutoModeOutsideReadPrompt` in `~/.claude.json` (read only), so a
- * user who answered it in Claude Code is not asked again.
+ * Code's own flag in its global settings, or `hasSeenAutoModeOutsideReadPrompt`
+ * in another tool's state files (the source view's `protectedFiles`; One
+ * Code's provider: `~/.claude.json`, read only), so a user who answered it in
+ * Claude Code is not asked again.
  */
-/** Whether the first outside-read prompt was answered; `claudeJson` is undefined in independent mode. */
-export function outsideReadPromptSeen(oneCodeSettings: string, claudeJson: string | undefined): boolean {
+export function outsideReadPromptSeen(oneCodeSettings: string, stateFiles: readonly string[]): boolean {
 	const seen = (path: string) => (readClaudeSettingsFile(path) as { hasSeenAutoModeOutsideReadPrompt?: unknown } | undefined)?.hasSeenAutoModeOutsideReadPrompt === true;
-	return seen(oneCodeSettings) || (claudeJson !== undefined && seen(claudeJson));
+	return seen(oneCodeSettings) || stateFiles.some(seen);
 }
 
 /** Record that the first outside-read prompt was answered (Claude Code's key, in One Code's file). */

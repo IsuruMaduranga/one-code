@@ -29,8 +29,8 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { claudeSourcesOn } from "../lib/config-mode.ts";
-import { claudeJsonPath, expandTilde } from "../lib/paths.ts";
+import { expandTilde } from "../lib/paths.ts";
+import { type McpFile, openSources } from "../lib/sources.ts";
 import { hashServerConfig } from "./trust.ts";
 
 export interface StdioServer {
@@ -249,10 +249,14 @@ export function piMcpConfigPaths(agentDir: string, cwd: string, configDirName = 
 	return { user: join(agentDir, "mcp.json"), project: join(cwd, configDirName, "mcp.json") };
 }
 
-/** Claude Code's MCP files; none in independent mode (lib/config-mode.ts), where pi's two `mcp.json` files remain. */
+/** Another tool's MCP files (the source view's `mcpFiles`; One Code's provider: Claude Code's); none without one, where pi's two `mcp.json` files remain. */
 export function configPaths(cwd: string, home: string): string[] {
-	if (!claudeSourcesOn()) return [];
-	return [claudeJsonPath(home), ...findProjectConfigs(cwd), join(cwd, ".claude", "settings.local.json")];
+	return mcpConfigFiles(cwd, home).map((file) => file.path);
+}
+
+/** `configPaths` with each file's scope. */
+export function mcpConfigFiles(cwd: string, home: string): McpFile[] {
+	return openSources(home).mcpFiles?.({ cwd }) ?? [];
 }
 
 /**

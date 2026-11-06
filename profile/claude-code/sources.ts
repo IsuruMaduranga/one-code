@@ -12,9 +12,11 @@
  */
 
 import { claudeSourcesOn } from "../../extensions/lib/config-mode.ts";
-import { claudeUserDir, isClaudeLocation } from "../../extensions/lib/paths.ts";
+import { join } from "node:path";
+import { findProjectConfigs } from "../../extensions/mcp/config.ts";
+import { claudeJsonPath, claudeUserDir, isClaudeLocation } from "../../extensions/lib/paths.ts";
 import { managedSettingsPaths, settingsPaths } from "../../extensions/lib/claude-settings.ts";
-import type { SettingsFile, SourceProvider } from "../../extensions/lib/sources.ts";
+import type { McpFile, SettingsFile, SourceProvider } from "../../extensions/lib/sources.ts";
 import { claudeCodeInstructionView } from "./instructions.ts";
 
 export const sources: SourceProvider = {
@@ -25,6 +27,20 @@ export const sources: SourceProvider = {
 			instructions: claudeCodeInstructionView(home),
 			configDirs: { user: homeClaudeDir, project: ".claude" },
 			settings: (base, { cwd }) => claudeCodeSettings(base, cwd, home),
+			// Each of Claude Code's two skill folders loads before its `.agents` twin.
+			skillDirs: (base, { cwd }) => [
+				{ dir: join(homeClaudeDir, "skills"), scope: "user" },
+				...base.filter((dir) => dir.scope === "user"),
+				{ dir: join(cwd, ".claude", "skills"), scope: "project" },
+				...base.filter((dir) => dir.scope === "project"),
+			],
+			pluginsDir: join(homeClaudeDir, "plugins"),
+			mcpFiles: ({ cwd }) => [
+				{ path: claudeJsonPath(home), scope: "user" },
+				...findProjectConfigs(cwd).map((path): McpFile => ({ path, scope: "project" })),
+				{ path: join(cwd, ".claude", "settings.local.json"), scope: "local" },
+			],
+			protectedFiles: [claudeJsonPath(home)],
 		};
 	},
 };

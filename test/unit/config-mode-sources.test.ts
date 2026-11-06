@@ -38,11 +38,11 @@ describe("independent mode reads no Claude Code folder for skills, commands, age
 	it("claude-compat feeds pi only the cross-tool skills and the .onecode commands", () => {
 		for (const dir of [join(home, ".claude", "skills"), join(cwd, ".claude", "skills"), join(home, ".agents", "skills"), join(cwd, ".agents", "skills")]) mkdirSync(dir, { recursive: true });
 		for (const dir of [join(home, ".claude", "commands"), join(cwd, ".onecode", "commands"), join(home, ".onecode", "commands")]) mkdirSync(dir, { recursive: true });
-		const compatible = claudeResourcePaths(cwd, home, join(home, ".claude"));
+		const compatible = claudeResourcePaths(cwd, home);
 		expect(compatible.skillPaths).toContain(join(home, ".claude", "skills"));
 		expect(compatible.promptPaths).toEqual([join(home, ".claude", "commands")]);
 		resetConfigModeForTest("independent");
-		const independent = claudeResourcePaths(cwd, home, join(home, ".claude"));
+		const independent = claudeResourcePaths(cwd, home);
 		expect(independent.skillPaths).toEqual([join(home, ".agents", "skills"), join(cwd, ".agents", "skills")]);
 		expect(independent.promptPaths).toEqual([join(home, ".onecode", "commands"), join(cwd, ".onecode", "commands")]);
 	});

@@ -37,8 +37,7 @@ import { readEnabledPlugins } from "./claude-settings.ts";
 import { readOverrides } from "./plugin-overrides.ts";
 import { pluginRoot } from "./plugin-root.ts";
 import { isSkillEnabled, readSkillStates, skillOverrideKey } from "./skill-overrides.ts";
-import { claudeSourcesOn } from "./config-mode.ts";
-import { claudeUserDir } from "./paths.ts";
+import { openSources } from "./sources.ts";
 
 export interface PluginManifest {
 	name?: string;
@@ -251,7 +250,7 @@ export function findPluginCommands(plugin: Pick<Plugin, "name">, commandsDir: st
 
 /** The two roots + settings locations discovery reads from. */
 export interface DiscoverRoots {
-	/** Claude Code's plugins dir (`~/.claude/plugins`) — read-only; unset in independent mode (lib/config-mode.ts). */
+	/** Another tool's plugin install root, read only (the source view's `pluginsDir`; One Code's provider: `~/.claude/plugins`); unset without one. */
 	claudePluginsDir?: string;
 	/** One Code's plugin root (`<agentDir>/plugins`) — ours to write. */
 	oneCodeRoot: string;
@@ -262,7 +261,7 @@ export interface DiscoverRoots {
 /** The standard roots; wiring passes `getAgentDir()` (pure modules can't). */
 export function defaultDiscoverRoots(agentDir: string, cwd: string = process.cwd(), home: string = os.homedir()): DiscoverRoots {
 	return {
-		claudePluginsDir: claudeSourcesOn() ? join(claudeUserDir(home), "plugins") : undefined,
+		claudePluginsDir: openSources(home).pluginsDir,
 		oneCodeRoot: pluginRoot(agentDir),
 		cwd,
 		home,

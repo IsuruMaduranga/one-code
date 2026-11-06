@@ -51,13 +51,13 @@ describe("claudeResourcePaths", () => {
 		const bundled = join(cwd, "bundled-skills");
 		mkdirSync(join(home, ".claude", "skills"), { recursive: true });
 		mkdirSync(bundled, { recursive: true });
-		const { skillPaths } = claudeResourcePaths(cwd, home, join(home, ".claude"), bundled);
+		const { skillPaths } = claudeResourcePaths(cwd, home, bundled);
 		expect(skillPaths).toEqual([join(home, ".claude", "skills"), bundled]);
 		expect(skillPaths[skillPaths.length - 1]).toBe(bundled);
 	});
 
 	it("omits the bundled skills dir when it does not exist", () => {
 		const bundled = join(cwd, "does-not-exist");
-		expect(claudeResourcePaths(cwd, home, join(home, ".claude"), bundled).skillPaths).toEqual([]);
+		expect(claudeResourcePaths(cwd, home, bundled).skillPaths).toEqual([]);
 	});
 });
