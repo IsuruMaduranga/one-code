@@ -21,7 +21,7 @@ import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../lib/child-writes.ts";
 import { canShowCustomUi } from "../lib/headless-output.ts";
 import { existsSync, mkdirSync, readdirSync, renameSync, writeFileSync, readFileSync } from "node:fs";
 import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, agentCronTools, agentOwnsCronJobs } from "../lib/agent-cron.ts";
-import { profileText } from "../lib/profile.ts";
+import { liveTools, profileText, toolLive } from "../lib/profile.ts";
 import os from "node:os";
 import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
@@ -532,10 +532,16 @@ function subagentsExtension(pi: ExtensionAPI) {
 		return catalog;
 	};
 
-	/** What an agent may use, for its catalog row (the profile words the clause). */
+	/**
+	 * What an agent may use, for its catalog row (the profile words the
+	 * clause). Tools the session cannot have are left out: the agent cannot use
+	 * them either way, and the row must not name them (lib/live-tools.ts).
+	 */
 	const agentTools = (a: AgentDefinition): AgentTools => {
-		if (a.tools && a.tools.length > 0) return { kind: "listed", tools: a.tools };
-		if (a.excludeTools && a.excludeTools.length > 0) return { kind: "allExcept", tools: a.excludeTools };
+		const listed = (a.tools ?? []).filter(toolLive);
+		const excluded = (a.excludeTools ?? []).filter(toolLive);
+		if (a.tools && a.tools.length > 0) return { kind: "listed", tools: listed };
+		if (excluded.length > 0) return { kind: "allExcept", tools: excluded };
 		return { kind: "all", builtIn: a.source === "built-in" || a.source.startsWith(BUNDLED_AGENTS_DIR) };
 	};
 
@@ -2089,7 +2095,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		...ccToolRenderers<{ subagent_type?: string; task?: string; prompt?: string; description?: string; action?: string }>("Agent", {
 			title: (a) => (a ? [a.subagent_type, a.description ?? a.task ?? a.prompt ?? a.action].filter(Boolean).join(": ") || undefined : undefined),
 		}),
-		description: words.agentDescription({ form: "short", configDir: projectConfigDirName() }),
+		description: words.agentDescription({ form: "short", configDir: projectConfigDirName(), live: liveTools }),
 		promptSnippet: words.agentPromptSnippet,
 		parameters: agentParams,
 		prepareArguments: prepareAgentArguments as (args: unknown) => SubagentParams,
@@ -2366,7 +2372,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			};
 		},
 	});
-	const setAgentForm = registerVariantTool<DescriptionForm>(pi, "short", (form) => ({ ...agentTool, description: words.agentDescription({ form, configDir: projectConfigDirName() }) }));
+	const setAgentForm = registerVariantTool<DescriptionForm>(pi, "short", (form) => ({ ...agentTool, description: words.agentDescription({ form, configDir: projectConfigDirName(), live: liveTools }) }));
 	followDescriptionForm(pi, setAgentForm);
 
 	const SendMessageParams = Type.Object({

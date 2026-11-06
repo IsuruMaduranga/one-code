@@ -8,11 +8,23 @@
 import type { PlanModeText } from "../../extensions/plan-mode/text.ts";
 import { buildPlanModeReminder } from "./reminder.ts";
 import { approvedPlanText, enteredPlanModeText, enterPlanModeDescription, EXIT_PLAN_MODE_DESCRIPTION, exitedPlanModeText } from "./texts.ts";
+import { type ToolPassages, withoutOff } from "../live-tools.ts";
 
 const CONTINUE = "If this plan is relevant to the current work and not already complete, continue working on it.";
 
+const ENTER_PASSAGES: ToolPassages = {
+	ask_user_question: ["   - If you would use ask_user_question to clarify the approach, use enter_plan_mode instead\n", "5. Use ask_user_question if you need to clarify approaches\n"],
+	Agent: [" (use the Agent tool instead)"],
+};
+const EXIT_PASSAGES: ToolPassages = {
+	ask_user_question: ["- If you have unresolved questions about requirements or approach, use ask_user_question first (in earlier phases)\n", "**Important:** Do NOT use ask_user_question to ask \"Is this plan okay?\" or \"Should I proceed?\" - that's exactly what THIS tool does. exit_plan_mode inherently requests user approval of your plan.\n", "3. Initial task: \"Add a new feature to handle user authentication\" - If unsure about auth method (OAuth, JWT, etc.), use ask_user_question first, then use exit plan mode tool after clarifying the approach.\n", "4. Use ask_user_question if you need to clarify the approach\n"],
+};
+
 export const planMode: PlanModeText = {
-	descriptions: { enter_plan_mode: enterPlanModeDescription, exit_plan_mode: EXIT_PLAN_MODE_DESCRIPTION },
+	descriptions: {
+		enter_plan_mode: (form, live) => withoutOff(enterPlanModeDescription(form), live, ENTER_PASSAGES),
+		exit_plan_mode: (live) => withoutOff(EXIT_PLAN_MODE_DESCRIPTION, live, EXIT_PASSAGES),
+	},
 	reminder: ({ planFile, planExists }) => buildPlanModeReminder(planFile, planExists),
 	entered: enteredPlanModeText,
 	notInPlanMode: "Not in plan mode, so there is no plan to approve. Call enter_plan_mode first, build the plan in the file it names, then call exit_plan_mode.",

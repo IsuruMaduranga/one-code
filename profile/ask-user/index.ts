@@ -7,6 +7,7 @@
 import type { AskUserText } from "../../extensions/ask-user/text.ts";
 import type { Answer, Question } from "../../extensions/ask-user/questions.ts";
 import { ASK_PARAMS, askDescription } from "./description.ts";
+import { type ToolPassages, withoutOff } from "../live-tools.ts";
 
 /**
  * Claude Code's answer list: `"question"="answer"` per answered question, with
@@ -49,8 +50,13 @@ export function formatDecline(questions: readonly Question[]): string {
 	return `The user declined to answer and wants to chat about these questions instead:\n\n${list}\n\nAsk them in your reply what they'd like to clarify; don't call ask_user_question again until the discussion resolves it.`;
 }
 
+const ASK_PASSAGES: ToolPassages = {
+	enter_plan_mode: ["\n\nPlan mode note: To switch into plan mode, use enter_plan_mode (not this tool). Once in plan mode, use this tool to clarify requirements or choose between approaches BEFORE finalizing your plan. Do NOT use this tool to ask \"Is my plan ready?\", \"Should I proceed?\", or otherwise reference \"the plan\" in questions — plan approval goes through exit_plan_mode."],
+	exit_plan_mode: ["\n\nPlan mode note: To switch into plan mode, use enter_plan_mode (not this tool). Once in plan mode, use this tool to clarify requirements or choose between approaches BEFORE finalizing your plan. Do NOT use this tool to ask \"Is my plan ready?\", \"Should I proceed?\", or otherwise reference \"the plan\" in questions — plan approval goes through exit_plan_mode."],
+};
+
 export const askUser: AskUserText = {
-	description: askDescription,
+	description: (form, live) => withoutOff(askDescription(form), live, ASK_PASSAGES),
 	promptSnippet: "Ask the user to decide between options when genuinely blocked",
 	params: ASK_PARAMS,
 	noInteractiveUi:

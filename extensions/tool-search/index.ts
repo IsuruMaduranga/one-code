@@ -26,7 +26,7 @@
  * and pi's event bus only delivers to listeners already registered.
  */
 
-import { activeProfile, requireText, toolSwitch } from "../lib/profile.ts";
+import { activeProfile, liveTools, requireText, toolSwitch } from "../lib/profile.ts";
 import { feature } from "../lib/feature.ts";
 import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -451,7 +451,7 @@ function toolSearchExtension(pi: ExtensionAPI) {
 		name: "tool_search",
 		label: "Tool Search",
 		...ccToolRenderers("Tool Search"),
-		description: words.description,
+		description: words.description({ live: liveTools }),
 		promptSnippet: words.promptSnippet,
 		parameters: Type.Object({
 			query: Type.String({ description: words.params.query }),

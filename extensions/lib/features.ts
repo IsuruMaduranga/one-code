@@ -92,6 +92,50 @@ export function isGuardFeature(id: string): boolean {
 	return isFeatureId(id) && "guard" in FEATURES[id];
 }
 
+/**
+ * The feature that registers each optional tool, so text that names another
+ * tool can leave it out when that feature is off (`toolLive` in
+ * lib/profile.ts). pi's built-in tools (read, edit, write, …) belong to no
+ * feature; only a tool switch turns them off. The golden sweep fails when a
+ * request names a tool that is off (test/e2e/golden-requests.mjs --sweep).
+ */
+export const TOOL_FEATURES: Readonly<Record<string, FeatureId>> = {
+	artifact: "artifacts",
+	ask_user_question: "ask-user",
+	bash: "bash",
+	cron_create: "background",
+	cron_delete: "background",
+	cron_list: "background",
+	monitor: "background",
+	schedule_wakeup: "background",
+	task_output: "background",
+	task_stop: "background",
+	lsp_diagnostics: "lsp",
+	list_mcp_resources: "mcp",
+	read_mcp_resource: "mcp",
+	read_mcp_resource_dir: "mcp",
+	notebook_edit: "notebook",
+	enter_plan_mode: "plan-mode",
+	exit_plan_mode: "plan-mode",
+	powershell: "powershell",
+	skill: "skill",
+	Agent: "subagents",
+	SendMessage: "subagents",
+	list_agents: "subagents",
+	web_fetch: "web-fetch",
+	web_search: "web",
+	workflow: "workflow",
+	enter_worktree: "worktree",
+	exit_worktree: "worktree",
+};
+
+/** The feature a bundled skill serves (its body drives that feature's tools); the skill is hidden when the feature is off. */
+export const BUNDLED_SKILL_FEATURES: Readonly<Record<string, FeatureId>> = {
+	"artifact-design": "artifacts",
+	loop: "background",
+	"workflow-authoring": "workflow",
+};
+
 /** The feature an entry file belongs to (`bash/child.ts` → `bash`), or undefined. */
 export function featureOfEntry(entry: string): FeatureId | undefined {
 	return FEATURE_IDS.find((id) => (FEATURES[id].entries as readonly string[]).includes(entry));

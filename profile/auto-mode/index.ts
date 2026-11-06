@@ -5,6 +5,7 @@
  */
 
 import type { AutoModeText, ClassifierBlock, FloorTarget } from "../../extensions/auto-mode/text.ts";
+import { type ToolPassages, withoutOff } from "../live-tools.ts";
 
 const OPUS_NOTE =
 	"While auto mode is active:\n\n" +
@@ -65,8 +66,12 @@ function floorReason({ kind, token }: FloorTarget): string {
 	}
 }
 
+const NOTE_PASSAGES: ToolPassages = {
+	edit: [["the dedicated read, edit, or write tools", "the dedicated read or write tools"], ["prefer edit or write when", "prefer write when"]],
+};
+
 export const autoMode: AutoModeText = {
-	systemNote: ({ firm }) => (firm ? FABLE_NOTE : OPUS_NOTE),
+	systemNote: ({ firm, live }) => withoutOff(firm ? FABLE_NOTE : OPUS_NOTE, live, NOTE_PASSAGES),
 	permissionGranted: ({ displays }) =>
 		`Permission granted for: ${displays.join(", ")}. You may now retry ${displays.length === 1 ? "this command" : "these commands"} if you would like.`,
 	classifierBlock,

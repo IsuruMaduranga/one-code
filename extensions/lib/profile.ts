@@ -17,7 +17,8 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { profile as shippedProfile } from "../../profile/index.ts";
-import { enabledFeatures, type FeatureId, featureProblems, isGuardFeature } from "./features.ts";
+import { enabledFeatures, type FeatureId, featureProblems, isGuardFeature, TOOL_FEATURES } from "./features.ts";
+import type { LiveTools } from "./live-tools.ts";
 import type { Profile, ProfileText, ToolSwitch } from "./profile-contract.ts";
 
 export const PROFILE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../profile");
@@ -124,3 +125,16 @@ export function toolSwitch(name: string): ToolSwitch | undefined {
 export function isToolDisabled(name: string): boolean {
 	return activeProfile().disabledTools.has(name);
 }
+
+/**
+ * Whether a tool can be in this session: no switch turned it off and the
+ * feature that registers it (TOOL_FEATURES) is on. Text that names another
+ * tool asks this and leaves out what is off.
+ */
+export function toolLive(name: string): boolean {
+	const feature = TOOL_FEATURES[name];
+	return !isToolDisabled(name) && (feature === undefined || featureEnabled(feature));
+}
+
+/** `toolLive` as the value the profile's text functions take. */
+export const liveTools: LiveTools = { has: toolLive };

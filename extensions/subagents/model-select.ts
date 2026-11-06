@@ -63,7 +63,7 @@ import {
 	supportsImageInput,
 } from "../lib/model-policy.ts";
 import { pairedModel } from "../lib/model-pairings.ts";
-import { requireText } from "../lib/profile.ts";
+import { liveTools, requireText } from "../lib/profile.ts";
 import { atLeastTier, economicalContainedCandidates, intrinsicTier, type PromptTier, sameTierContainedCandidates } from "../lib/model-tier.ts";
 
 /**
@@ -527,7 +527,7 @@ export function settingOverrideNotice({ sessionModel, defaultModel, defaultSourc
  * session's own model).
  */
 export function refusedModelNote(refused: string, defaultModel: Model<Api> | undefined): string {
-	return words().refused({ model: refused, newDefault: defaultModel ? spec(defaultModel) : undefined });
+	return words().refused({ model: refused, newDefault: defaultModel ? spec(defaultModel) : undefined, live: liveTools });
 }
 
 /** The every-turn reminder body. Kept short: its tokens are paid on every call. */
@@ -535,5 +535,5 @@ export function subagentModelsReminder(options: MenuOptions): string {
 	const menu = subagentModelMenu(options);
 	const setting = settingOverrideNotice(options);
 	const warning = defaultCostsMoreWarning(options);
-	return words().menu({ lines: menu, notes: [...(setting ? [setting] : []), ...(warning ? [warning] : [])] });
+	return words().menu({ lines: menu, notes: [...(setting ? [setting] : []), ...(warning ? [warning] : [])], live: liveTools });
 }

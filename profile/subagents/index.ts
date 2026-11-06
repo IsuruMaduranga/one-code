@@ -11,6 +11,7 @@
 import type { AgentTools, LaunchLine, PendingRun, RunFailure, RunStatus, SubagentRefusal, SubagentsText } from "../../extensions/subagents/text.ts";
 import { agentDescription } from "./agent-description.ts";
 import { guideAgent } from "./guide-agent.ts";
+import { type ToolPassages, withoutOff } from "../live-tools.ts";
 
 /**
  * The anti-fabrication sentence, carried by the RESULT of a background spawn
@@ -137,8 +138,13 @@ const STATUS: Record<RunStatus, string> = {
 /** The runs by name and task id, comma-separated. */
 const namedRuns = (runs: readonly PendingRun[]): string => runs.map((run) => `${run.name} (task ${run.taskId})`).join(", ");
 
+const AGENT_PASSAGES: ToolPassages = {
+	task_output: ["- Call task_output only if your next step cannot proceed without the result (block=true waits); stop a run with task_stop. Both are deferred — load them with tool_search first.\n"],
+	task_stop: ["- Call task_output only if your next step cannot proceed without the result (block=true waits); stop a run with task_stop. Both are deferred — load them with tool_search first.\n"],
+};
+
 export const subagents: SubagentsText = {
-	agentDescription: ({ form, configDir }) => agentDescription(form, configDir),
+	agentDescription: ({ form, configDir, live }) => withoutOff(agentDescription(form, configDir), live, AGENT_PASSAGES),
 	agentPromptSnippet: "Delegate scoped work to a specialist agent in its own context",
 	agentParams: {
 		subagent_type:

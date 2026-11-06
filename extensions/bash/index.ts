@@ -30,7 +30,7 @@ import { registerShellTool } from "../lib/shell-tool.ts";
 import { type DescriptionForm, followDescriptionForm } from "../lib/tool-variants.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../permissions/modes.ts";
 import type { ShellParams } from "../lib/shell-text.ts";
-import { requireText } from "../lib/profile.ts";
+import { liveTools, requireText } from "../lib/profile.ts";
 import { bashGuardReason } from "./guards.ts";
 
 /** The tool's parameters, described in the profile's words. */
@@ -83,7 +83,7 @@ export function bashTool(pi: ExtensionAPI, { announce }: { announce: boolean }) 
 	let searchTools = false;
 	let autoMode = false;
 	const text = requireText("shell");
-	const describe = () => text.bashDescription({ form, autoMode, searchTools });
+	const describe = () => text.bashDescription({ form, autoMode, searchTools, live: liveTools });
 	const setDescription = registerShellTool(pi, {
 		name: "bash",
 		ccLabel: "Bash",

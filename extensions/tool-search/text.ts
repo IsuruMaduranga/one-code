@@ -6,6 +6,8 @@
  * back by its head).
  */
 
+import type { LiveTools } from "../lib/live-tools.ts";
+
 /** What a tool_search call did, by tool name as the model wrote it. */
 export interface SearchOutcome {
 	/** Loaded by this call. */
@@ -21,7 +23,7 @@ export interface SearchOutcome {
 }
 
 export interface ToolSearchText {
-	description: string;
+	description(p: { live: LiveTools }): string;
 	promptSnippet: string;
 	params: { query: string; maxResults: string };
 	result(outcome: SearchOutcome): string;

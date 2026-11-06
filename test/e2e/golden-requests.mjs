@@ -15,8 +15,9 @@
  *   node test/e2e/golden-requests.mjs --jobs 2  runs at once (default: half the CPUs)
  *   node test/e2e/golden-requests.mjs --sweep   one turn per optional feature
  *       turned off (ONECODE_FEATURES_OFF), plus a tool-switch check
- *       (ONECODE_TOOLS_OFF): each run must finish and send a request, and the
- *       turned-off tools must be missing from it; a guard feature (hooks,
+ *       (ONECODE_TOOLS_OFF): each run must finish and send a request, the
+ *       turned-off tools must be missing from it, and no text may name one
+ *       (lib/live-tools.ts); a guard feature (hooks,
  *       the edit guard) turned off from the environment must stop pi at
  *       startup instead; with --dir, each run's requests are written there
  *
@@ -496,6 +497,25 @@ const toolNames = (body) => (body?.tools ?? []).map((t) => t.name ?? t.function?
 const mainBody = (requests) => (requests.find((r) => Array.isArray(r.body.tools) && r.body.tools.length > 0) ?? requests[0])?.body;
 
 /** --sweep: see the header. Exits the process with the outcome. */
+/**
+ * Phrases where a tool's name is an English word, not the tool (the same list
+ * as test/unit/profile-live-tools.test.ts ENGLISH, plus the frontier request's
+ * catalog and tool descriptions).
+ */
+const ENGLISH = {
+	edit: [/about to edit \(an edit needs a read first\)/g, /a shell edit/g, /edit that file/g],
+	monitor: [/monitor for regressions/g],
+	skill: [/a skill or slash command/g, /re-enters the skill/g, /with a skill, agent/g],
+	workflow: [/repo-specific workflow/g, /git workflow/g],
+};
+
+/** Whether a request's text names `tool` (a hyphenated word such as a skill name is not the tool). */
+function namesTool(text, tool) {
+	let rest = text;
+	for (const phrase of ENGLISH[tool] ?? []) rest = rest.replace(phrase, "");
+	return new RegExp(`(^|[^A-Za-z_-])${tool}([^A-Za-z_-]|$)`).test(rest);
+}
+
 async function sweep() {
 	const optional = FEATURE_IDS.filter((id) => !FEATURES[id].required);
 	const runs = optional.map((id) => ({
@@ -518,7 +538,6 @@ async function sweep() {
 	}
 	const baseline = toolNames(mainBody(baselineOutcome.value.requests));
 	let bad = 0;
-	const stillNamed = [];
 	outcomes.forEach((outcome, index) => {
 		const run = runs[index];
 		if (run.mustFail) {
@@ -550,12 +569,15 @@ async function sweep() {
 			return;
 		}
 		const text = JSON.stringify({ system: body?.system, messages: body?.messages, tools: body?.tools });
-		const named = baseline.filter((name) => !names.includes(name) && new RegExp(`(^|[^A-Za-z_])${name}([^A-Za-z_]|$)`).test(text));
-		if (named.length > 0) stillNamed.push(`${run.label}: ${named.join(", ")}`);
+		const named = baseline.filter((name) => !names.includes(name) && namesTool(text, name));
+		if (named.length > 0) {
+			bad += 1;
+			console.log(`FAIL  ${run.label}: text still names a tool that is off: ${named.join(", ")}`);
+			return;
+		}
 		console.log(`ok    ${run.label} (${requests.length} request(s), ${names.length} tools)`);
 	});
 	console.log(`${runs.length - bad}/${runs.length} sweep runs ok`);
-	if (stillNamed.length > 0) console.log(`\nText still naming a removed tool (report only until the text follows the switches):\n  ${stillNamed.join("\n  ")}`);
 	process.exit(bad > 0 ? 1 : 0);
 }
 if (opts.sweep) await sweep();

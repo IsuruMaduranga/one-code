@@ -6,6 +6,7 @@
 
 import type { AgentFailure, AgentNotice, RunReport, RunStop, ScriptCallProblem, ScriptProblem, WorkflowRefusal, WorkflowText } from "../../extensions/workflow/text.ts";
 import { workflowDescription } from "./description.ts";
+import { type ToolPassages, withoutOff } from "../live-tools.ts";
 
 function refused(refusal: WorkflowRefusal): string {
 	switch (refusal.kind) {
@@ -157,17 +158,28 @@ function notice(n: AgentNotice): string {
 		: `${label}: worktree kept at ${n.path} (branch ${n.branch}) with its changes or commits`;
 }
 
+const DESCRIPTION_PASSAGES: ToolPassages = {
+	Agent: [["Use the Agent tool (if available) for individual subagents, or ", "Instead, "]],
+	skill: ["\n\nBefore writing a script, load the `workflow-authoring` skill — the workflow authoring reference: script API and gotchas, resume, the **Ultracode** section, quality patterns, worked examples."],
+};
+const PARAM_PASSAGES: ToolPassages = {
+	edit: [["write/edit", "write"]],
+};
+
 export const workflow: WorkflowText = {
-	description: ({ guideline, configured }) => workflowDescription(guideline, configured),
+	description: ({ guideline, configured, live }) => withoutOff(workflowDescription(guideline, configured), live, DESCRIPTION_PASSAGES),
 	// Claude Code's parameter texts, with One Code's tool names; `name` also
 	// names the personal directory, and a run is stopped with /workflows stop.
-	params: ({ configDir }) => ({
+	params: ({ configDir, live }) => ({
 		script:
 			"Self-contained workflow script. Must begin with `export const meta = { name, description, phases }` (pure literal, no computed values) followed by the script body using agent()/parallel()/pipeline()/phase().",
 		name: `Name of a saved workflow from ${configDir}/workflows/ or ~/${configDir}/workflows/. Resolves to a self-contained script.`,
 		args: "Optional input value exposed to the script as the global `args`, verbatim. Pass arrays/objects as actual JSON values, NOT as a JSON-encoded string — a stringified list breaks `args.filter`/`args.map` in the script. Use for parameterized named workflows (e.g. a research question).",
-		scriptPath:
+		scriptPath: withoutOff(
 			"Path to a workflow script file on disk. Every workflow invocation persists its script under the session directory and returns the path in the tool result. To iterate, edit that file with write/edit and re-invoke workflow with the same `scriptPath` instead of re-sending the full script. Takes precedence over `script` and `name`.",
+			live,
+			PARAM_PASSAGES,
+		),
 		resumeFromRunId:
 			"Run ID of a prior workflow invocation to resume from. Completed agent() calls with unchanged (prompt, opts) return their cached results instantly; only edited or new calls re-run. Same-session only. Stop the prior run first (/workflows stop) before resuming.",
 		tokenBudget:

@@ -40,6 +40,7 @@ import { isUserRun, PROMPT_OPTIONS_CHANNEL } from "./prompt-options.ts";
 import { wrapReminder } from "./reminders.ts";
 import type { NotificationsText, OneShotWork } from "./notifications-text.ts";
 import { notificationWords } from "./notification-words.ts";
+import { liveTools } from "./profile.ts";
 
 /** pi's session-mode union, derived from the context (the package root does not export ExtensionMode itself). */
 type ExtensionMode = ExtensionContext["mode"];
@@ -925,7 +926,7 @@ export function sessionOutlivesTurn(mode: ExtensionMode): boolean {
  * Code sends no such block.
  */
 export function oneShotSessionNote(): string {
-	return notificationWords().oneShotSession;
+	return notificationWords().oneShotSession({ live: liveTools });
 }
 
 /**

@@ -6,10 +6,11 @@
 
 import type { DescriptionForm } from "../lib/tool-variants.ts";
 import type { Answer, Question } from "./questions.ts";
+import type { LiveTools } from "../lib/live-tools.ts";
 
 export interface AskUserText {
 	/** Short or long by the model's tier (lib/tool-variants.ts). */
-	description(form: DescriptionForm): string;
+	description(form: DescriptionForm, live: LiveTools): string;
 	/** The one-line entry in the system prompt's tool list. */
 	promptSnippet: string;
 	params: Record<"questions" | "question" | "header" | "options" | "multiSelect" | "label" | "optionDescription" | "preview", string>;

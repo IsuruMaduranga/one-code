@@ -8,6 +8,7 @@
 import type { ShellBlock, ShellEnd, ShellText } from "../../extensions/lib/shell-text.ts";
 import { BASH_PARAMS, bashDescription } from "./bash-description.ts";
 import { powerShellToolDescription } from "./powershell-description.ts";
+import { type ToolPassages, withoutOff } from "../live-tools.ts";
 
 function blocked(block: ShellBlock): string {
 	switch (block.kind) {
@@ -72,8 +73,14 @@ function finish(end: ShellEnd): string {
 	return `failed (${failureDetail(end) ?? `exit code ${end.kind === "exitCode" ? end.code : ""}`})`;
 }
 
+const BASH_PASSAGES: ToolPassages = {
+	monitor: [" Foreground `sleep` is blocked; use monitor with an until-loop to wait on a condition.", "  - Long leading `sleep` commands are blocked. To poll until a condition is met, use monitor with an until-loop (e.g. `until <check>; do sleep 2; done`) — you get a notification when the loop exits. Do not chain shorter sleeps to work around the block.\n", "  - Use the monitor tool to stream events from a background process (each stdout line is a notification). For one-shot \"wait until done,\" use bash with run_in_background instead.\n"],
+	Agent: [["task_create or Agent tools", "task_create tool"]],
+	edit: [" - Edit files: Use edit (NOT sed/awk)\n"],
+};
+
 export const shell: ShellText = {
-	bashDescription: ({ form, autoMode, searchTools }) => bashDescription(form, autoMode, searchTools),
+	bashDescription: ({ form, autoMode, searchTools, live }) => withoutOff(bashDescription(form, autoMode, searchTools), live, BASH_PASSAGES),
 	bashParams: BASH_PARAMS,
 	powershellDescription: ({ edition }) => powerShellToolDescription(edition),
 	powershellParams: {

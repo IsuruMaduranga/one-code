@@ -5,6 +5,7 @@
  */
 
 import type { SubagentModelSource } from "../../extensions/subagents/model-select.ts";
+import type { LiveTools } from "../../extensions/lib/live-tools.ts";
 import type { ChainSource, MenuLabel, SubagentModelNotice, SubagentModelsText } from "../../extensions/subagents/model-text.ts";
 
 /** Which choice a model came from, named for the reader. */
@@ -30,6 +31,9 @@ const LABEL: Record<MenuLabel, string> = {
 	session: "this session's model",
 	cheaper: "cheaper, same provider",
 };
+
+/** The tools whose `model` field the menu serves: workflow agents take one too, when workflows are on. */
+const modelField = (live: LiveTools): string => (live.has("workflow") ? "subagent/workflow" : "subagent");
 
 const price = (dollars: number | undefined): string => (dollars === undefined ? "" : ` ($${dollars}/M in)`);
 
@@ -81,13 +85,13 @@ export const subagentModels: SubagentModelsText = {
 		(otherProvider
 			? ` — it is a different provider than this session (${otherProvider}), so a subagent's inherited transcript goes to that provider; pass a listed same-provider model to keep it here.`
 			: "."),
-	refused: ({ model, newDefault }) =>
-		`Model ${model} is not usable on this account, so automatic selection skips it and the subagent/workflow \`model\` field should not name it. ` +
+	refused: ({ model, newDefault, live }) =>
+		`Model ${model} is not usable on this account, so automatic selection skips it and the ${modelField(live)} \`model\` field should not name it. ` +
 		`The subagent default is now ${newDefault ?? "this session's model"}.`,
 	// Kept short: its tokens are paid on every request.
-	menu: ({ lines, notes }) =>
+	menu: ({ lines, notes, live }) =>
 		[
-			"Models for the subagent/workflow `model` field (omit it to use the default; set the default with /subagent):",
+			`Models for the ${modelField(live)} \`model\` field (omit it to use the default; set the default with /subagent):`,
 			...lines,
 			...notes,
 			"Aliases sonnet|opus|haiku|fable resolve within this session's provider — by name when a model carries it, else as the tier it names " +

@@ -10,8 +10,8 @@ import { autoMode } from "../../profile/auto-mode/index.ts";
 
 describe("One Code's auto-mode text", () => {
 	it("gives the firmer note only when asked", () => {
-		expect(autoMode.systemNote({ firm: true })).toContain("Fall back to a dedicated tool only when bash genuinely cannot do the job.");
-		expect(autoMode.systemNote({ firm: false })).toContain("The choice is yours");
+		expect(autoMode.systemNote({ firm: true, live: { has: () => true } })).toContain("Fall back to a dedicated tool only when bash genuinely cannot do the job.");
+		expect(autoMode.systemNote({ firm: false, live: { has: () => true } })).toContain("The choice is yours");
 	});
 
 	it("words the retry note for one call and for several", () => {

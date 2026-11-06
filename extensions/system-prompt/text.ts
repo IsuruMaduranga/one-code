@@ -9,6 +9,7 @@
  */
 
 import type { PromptTier } from "../lib/model-tier.ts";
+import type { LiveTools } from "../lib/live-tools.ts";
 
 /** What a section may depend on: all of it fixed for the session (or until the model changes). */
 export interface SystemPromptSession {
@@ -17,6 +18,8 @@ export interface SystemPromptSession {
 	taskTools: boolean;
 	/** The session's active tools, as pi selects them; undefined before pi reports them. */
 	tools: readonly string[] | undefined;
+	/** Which tools the session can have: text naming another tool leaves out what is off. */
+	live: LiveTools;
 }
 
 export interface SystemPromptText {

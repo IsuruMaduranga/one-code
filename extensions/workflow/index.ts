@@ -37,7 +37,7 @@ import { readWorkflowSettings } from "../lib/one-code-settings.ts";
 import { registerVariantTool } from "../lib/tool-variants.ts";
 import type { WorkflowText } from "./text.ts";
 import { workflowWords } from "./words.ts";
-import { requireText } from "../lib/profile.ts";
+import { liveTools, requireText } from "../lib/profile.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent } from "../lib/model-unusable.ts";
 import { whenAborted } from "../lib/abort.ts";
 import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, taskNotification, taskStatusOf, workflowSummary } from "../lib/notifications.ts";
@@ -84,7 +84,7 @@ import { queryDeferred } from "../lib/deferred.ts";
 
 /** The tool's parameters, described in the profile's words. */
 function workflowParams(text: WorkflowText) {
-	const d = text.params({ configDir: projectConfigDirName() });
+	const d = text.params({ configDir: projectConfigDirName(), live: liveTools });
 	return Type.Object({
 		script: Type.Optional(Type.String({ description: d.script })),
 		name: Type.Optional(Type.String({ description: d.name })),
@@ -179,7 +179,7 @@ function workflowExtension(pi: ExtensionAPI) {
 					? `Running in background · /workflows to monitor and save · ${result.details.runId ?? ""}`.trimEnd()
 					: undefined,
 		}),
-		description: text.description({ guideline: "medium", configured: false }),
+		description: text.description({ guideline: "medium", configured: false, live: liveTools }),
 		prepareArguments: prepareWorkflowArguments as never,
 		promptSnippet: text.promptSnippet,
 		parameters: workflowParams(text),
@@ -313,7 +313,7 @@ function workflowExtension(pi: ExtensionAPI) {
 	const applyWorkflowSettings = (cwd: string) => {
 		const settings = readWorkflowSettings(cwd, os.homedir());
 		workflowsEnabled = settings.enabled;
-		setWorkflowDescription(text.description({ guideline: settings.sizeGuideline, configured: settings.sizeConfigured }));
+		setWorkflowDescription(text.description({ guideline: settings.sizeGuideline, configured: settings.sizeConfigured, live: liveTools }));
 		if (withholdIfOff()) {
 			workflowWithheld = true;
 		} else if (settings.enabled && workflowWithheld) {

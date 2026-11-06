@@ -16,9 +16,10 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { claudeFamily, usesClaudeCodeFastPaths } from "../lib/model-tier.ts";
 import { autoModeWords } from "./words.ts";
+import { liveTools } from "../lib/profile.ts";
 
 /** The note for a session opening in auto mode on `model`, or undefined on a cheap or tiny model. */
 export function autoModeSystemNote(model: Model<Api>): string | undefined {
 	if (!usesClaudeCodeFastPaths(model)) return undefined;
-	return autoModeWords().systemNote({ firm: claudeFamily(model.id) === "fable" });
+	return autoModeWords().systemNote({ firm: claudeFamily(model.id) === "fable", live: liveTools });
 }

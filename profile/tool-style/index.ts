@@ -9,6 +9,7 @@
  */
 
 import type { ToolStyleText } from "../../extensions/tool-style/text.ts";
+import { type ToolPassages, withoutOff } from "../live-tools.ts";
 
 export const WRITE_SHORT_DESCRIPTION = `Writes a file to the local filesystem, overwriting if one exists.
 
@@ -23,8 +24,12 @@ Usage:
 - NEVER create documentation files (*.md) or README files unless explicitly requested by the User.
 - Only use emojis if the user explicitly requests it. Avoid writing emojis to files unless asked.`;
 
+const WRITE_PASSAGES: ToolPassages = {
+	edit: [" For partial changes, use edit instead.", "\n- Prefer the edit tool for modifying existing files — it only sends the diff. Only use this tool to create new files or for complete rewrites."],
+};
+
 export const toolStyle: ToolStyleText = {
-	writeDescription: (form) => (form === "long" ? WRITE_LONG_DESCRIPTION : WRITE_SHORT_DESCRIPTION),
+	writeDescription: (form, live) => withoutOff(form === "long" ? WRITE_LONG_DESCRIPTION : WRITE_SHORT_DESCRIPTION, live, WRITE_PASSAGES),
 	/**
 	 * pi's edit description plus the rule the file tracker enforces, which pi's
 	 * text does not state (write's does). Without it, GPT-6 models read with

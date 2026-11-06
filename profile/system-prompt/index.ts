@@ -12,6 +12,11 @@ import { frontierBundle } from "./frontier.ts";
 import { lowBundle } from "./low.ts";
 import { memoryPromptSection } from "./memory.ts";
 import { midBundle } from "./mid.ts";
+import type { LiveTools } from "../../extensions/lib/live-tools.ts";
+import { type ToolPassages, withoutOff } from "../live-tools.ts";
+import { TYPED_SKILL_BULLET } from "./common.ts";
+import { DELEGATE_STRICT } from "./low.ts";
+import { DELEGATING_WORK, FORK_BULLET } from "./mid.ts";
 
 /**
  * Four tiers, three register texts. `workhorse` and `cheap` share Claude Code's
@@ -27,12 +32,23 @@ const BUNDLES: Record<PromptTier, PromptBundle> = {
 	tiny: lowBundle,
 };
 
+/** Per tool, the passages of the prompt that name it, cut when it is off. */
+const PROMPT_PASSAGES: ToolPassages = {
+	skill: [`\n${TYPED_SKILL_BULLET}`, "\n - When a skill fits the task, use it — invoke it with the skill tool instead of redoing the same work by hand. Skills are set up on purpose; reach for the matching one rather than improvising."],
+	Agent: [DELEGATING_WORK, DELEGATE_STRICT, `\n${FORK_BULLET}`],
+	edit: [["(read, edit, write)", "(read, write)"], ["call the edit or write tool", "call the write tool"], [" edit to change them (not sed/awk),", ""], ["the edit/write tools", "the write tool"]],
+};
+
+/** The sections without the passages of tools that are off; a section left empty is dropped. */
+const liveSections = (sections: readonly string[], live: LiveTools): string[] =>
+	sections.map((section) => withoutOff(section, live, PROMPT_PASSAGES)).filter((section) => section.trim() !== "");
+
 export const systemPrompt: SystemPromptText = {
-	lead({ tier, taskTools, tools }) {
+	lead({ tier, taskTools, tools, live }) {
 		const bundle = BUNDLES[tier];
-		return bundle.leadFor?.({ taskTools, tools }) ?? (taskTools ? bundle.lead : (bundle.leadWithoutTaskTools ?? bundle.lead));
+		return liveSections(bundle.leadFor?.({ taskTools, tools }) ?? (taskTools ? bundle.lead : (bundle.leadWithoutTaskTools ?? bundle.lead)), live);
 	},
-	tail: ({ tier }) => BUNDLES[tier].tail,
+	tail: ({ tier, live }) => liveSections(BUNDLES[tier].tail, live),
 	// Workhorse, cheap and tiny use the long memory spec.
 	memory: (dir, { tier }) => memoryPromptSection(dir, BUNDLES[tier].verboseMemory),
 	toolList(tools, guidelines) {

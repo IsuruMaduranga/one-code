@@ -12,6 +12,7 @@
 
 import type { DescriptionForm } from "../lib/tool-variants.ts";
 import type { GuideInput } from "./guide-agent.ts";
+import type { LiveTools } from "../lib/live-tools.ts";
 
 /** What an agent may use, as its catalog row says. */
 export type AgentTools =
@@ -92,7 +93,7 @@ export type LaunchLine =
 export type RunStatus = "resident" | "running" | "finishedInline" | "finished";
 
 export interface SubagentsText {
-	agentDescription(p: { form: DescriptionForm; configDir: string }): string;
+	agentDescription(p: { form: DescriptionForm; configDir: string; live: LiveTools }): string;
 	agentPromptSnippet: string;
 	agentParams: {
 		subagent_type: string;

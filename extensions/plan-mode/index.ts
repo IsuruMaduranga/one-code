@@ -33,7 +33,7 @@ import { ccToolRenderers, safeThemePaint } from "../lib/tui-render.ts";
 import { userDenialText } from "../lib/user-denial.ts";
 import type { PermissionMode } from "../permissions/matcher.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../permissions/modes.ts";
-import { requireText } from "../lib/profile.ts";
+import { liveTools, requireText } from "../lib/profile.ts";
 import { randomSlug } from "./slug.ts";
 import { readState, recordState } from "../lib/ledger/state.ts";
 
@@ -277,7 +277,7 @@ function planModeExtension(pi: ExtensionAPI) {
 			name: "enter_plan_mode",
 			label: "Enter plan mode",
 			...ccToolRenderers("Enter plan mode"),
-			description: text.descriptions.enter_plan_mode("short"),
+			description: text.descriptions.enter_plan_mode("short", liveTools),
 			parameters: Type.Object({}),
 			async execute(toolCallId, _params, _signal, _onUpdate, ctx) {
 				pi.events.emit(MODE_CHANNEL, { mode: "plan", toolCallId });
@@ -292,14 +292,14 @@ function planModeExtension(pi: ExtensionAPI) {
 				};
 			},
 		}),
-		text.descriptions.enter_plan_mode,
+		(form) => text.descriptions.enter_plan_mode(form, liveTools),
 	);
 
 	pi.registerTool({
 		name: "exit_plan_mode",
 		label: "Exit plan mode",
 		...ccToolRenderers("Exit plan mode"),
-		description: text.descriptions.exit_plan_mode,
+		description: text.descriptions.exit_plan_mode(liveTools),
 		parameters: Type.Object({}),
 		async execute(toolCallId, _params, signal, _onUpdate, ctx) {
 			// Guard the out-of-sequence call: without this, a cold exit_plan_mode

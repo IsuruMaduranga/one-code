@@ -7,6 +7,7 @@
  */
 
 import type { NotificationsText, OneShotWork, TaskSummary } from "../../extensions/lib/notifications-text.ts";
+import { type ToolPassages, withoutOff } from "../live-tools.ts";
 
 export const AGENT_MESSAGE_OPENER = "Another Claude session sent a message:";
 
@@ -63,6 +64,18 @@ function summary(s: TaskSummary): string {
 
 const ONE_SHOT_WORK: Record<OneShotWork, string> = { command: "command", workflow: "workflow", agent: "agent", agentTurn: "agent's turn", monitor: "monitor" };
 
+const ONE_SHOT_SESSION = [
+		"This is a non-interactive one-shot session: it ends when this turn ends, and nobody can reply before then.",
+		"- Work you start in the background (a shell command, an agent, a monitor) runs to completion before its call returns, and no notification follows. To overlap independent work, issue those calls together in one batch.",
+		"- Scheduled and recurring jobs never fire.",
+		"- No user can answer a question or approve a plan. State your assumption and proceed, or ask in your final reply and stop.",
+	].join("\n");
+
+const ONE_SHOT_PASSAGES: ToolPassages = {
+	monitor: [", a monitor"],
+	Agent: [", an agent"],
+};
+
 export const notifications: NotificationsText = {
 	agentMessage: {
 		opener: AGENT_MESSAGE_OPENER,
@@ -93,12 +106,7 @@ export const notifications: NotificationsText = {
 	 * work, notifications and questions a one-shot session cannot deliver
 	 * (2026-10-04 Codex battery).
 	 */
-	oneShotSession: [
-		"This is a non-interactive one-shot session: it ends when this turn ends, and nobody can reply before then.",
-		"- Work you start in the background (a shell command, an agent, a monitor) runs to completion before its call returns, and no notification follows. To overlap independent work, issue those calls together in one batch.",
-		"- Scheduled and recurring jobs never fire.",
-		"- No user can answer a question or approve a plan. State your assumption and proceed, or ask in your final reply and stop.",
-	].join("\n"),
+	oneShotSession: ({ live }) => withoutOff(ONE_SHOT_SESSION, live, ONE_SHOT_PASSAGES),
 	interactiveSession:
 		"This session is interactive now, although its first message said it was one-shot: a user can reply, background work notifies you when it ends, scheduled jobs fire, and questions and plan approvals reach the user.",
 	oneShotNote: (work) => `This is a one-shot session, so the ${ONE_SHOT_WORK[work]} ran to completion instead of in the background.`,
