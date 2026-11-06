@@ -5,7 +5,8 @@ import { bashParserReady } from "../extensions/lib/bash-parser.ts";
 import { resetConfigModeForTest } from "../extensions/lib/config-mode.ts";
 import { shareShippedProfileForTest } from "../extensions/lib/profile.ts";
 import { profile } from "../profile/index.ts";
-import { shareInstructionProviderForTest } from "../profile/claude-code/index.ts";
+import { INSTRUCTION_PROVIDER } from "../profile/claude-code/index.ts";
+import { shareModuleForTest } from "../extensions/lib/shared-module.ts";
 
 // The shipped profile through the test run's own module graph (lib/profile.ts
 // loads it on demand under jiti, where vitest's import is not the one used).
@@ -13,7 +14,7 @@ shareShippedProfileForTest(profile);
 // One Code's instruction provider loads on first use (profile/claude-code/index.ts).
 // Imported here once the test file is, so the lib/ modules it pulls in load
 // under the file's own vi.mock calls; set again for each file.
-beforeAll(async () => shareInstructionProviderForTest((await import("../profile/claude-code/instructions.ts")).claudeCodeInstructions));
+beforeAll(async () => shareModuleForTest(INSTRUCTION_PROVIDER, await import("../profile/claude-code/instructions.ts")));
 
 // Hermetic by default: an empty model catalog (see vitest.config.ts), so every
 // model takes the no-catalog rules unless a test pins sources with

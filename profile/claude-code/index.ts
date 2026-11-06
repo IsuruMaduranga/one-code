@@ -4,27 +4,18 @@
  * through lib/ modules (paths, settings, rules) that a profile import must
  * not pull in early. Under test, test/setup.ts loads the profile before a
  * test file's own mocks exist, and every module loaded then stays unmocked
- * for that file. Shared through a `Symbol.for` slot like the profile itself
- * (lib/profile.ts `shippedProfile`): it holds no state.
+ * for that file. Shared once per process like the profile itself
+ * (lib/shared-module.ts): it holds no state.
  */
 
-import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import type { InstructionProvider } from "../../extensions/lib/instructions.ts";
+import { sharedModule } from "../../extensions/lib/shared-module.ts";
 
-const PROVIDER = Symbol.for("one-code:claude-code-instructions");
+/** The slot the provider module is shared under; test/setup.ts fills it from its own import. */
+export const INSTRUCTION_PROVIDER = "one-code:claude-code-instructions";
+const PROVIDER_MODULE = fileURLToPath(new URL("./instructions.ts", import.meta.url));
 
-function provider(): InstructionProvider {
-	const slot = globalThis as { [PROVIDER]?: InstructionProvider };
-	if (!slot[PROVIDER]) {
-		const load = typeof require === "function" ? require : createRequire(import.meta.url);
-		slot[PROVIDER] = (load("./instructions.ts") as typeof import("./instructions.ts")).claudeCodeInstructions;
-	}
-	return slot[PROVIDER];
-}
-
-/** Puts the test run's own provider in the slot (test/setup.ts), loaded through vitest's module graph. */
-export function shareInstructionProviderForTest(instructions: InstructionProvider): void {
-	(globalThis as { [PROVIDER]?: InstructionProvider })[PROVIDER] = instructions;
-}
-
-export const claudeCodeInstructions: InstructionProvider = { open: (opts) => provider().open(opts) };
+export const claudeCodeInstructions: InstructionProvider = {
+	open: (opts) => sharedModule<typeof import("./instructions.ts")>(INSTRUCTION_PROVIDER, PROVIDER_MODULE).claudeCodeInstructions.open(opts),
+};

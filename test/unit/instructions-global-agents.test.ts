@@ -98,7 +98,7 @@ describe("the global AGENTS.md files under One Code's provider", () => {
 	});
 
 	it("leave pi's out when the caller has no agent dir", () => {
-		expect(openInstructions(home).sections({ cwd, includeExternal: false }).contextFiles.map((file) => file.path)).toEqual([userGlobal, project]);
+		expect(openInstructions(home, undefined).sections({ cwd, includeExternal: false }).contextFiles.map((file) => file.path)).toEqual([userGlobal, project]);
 	});
 });
 

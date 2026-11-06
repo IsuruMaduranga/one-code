@@ -93,7 +93,7 @@ describe("auto-memory off", () => {
 	});
 
 	it("drops the folder row from the /memory entries", () => {
-		const entries = buildMemoryEntries({ cwd, home, homeClaudeDir: join(home, ".claude"), homeOneCodeDir: join(home, ".onecode"), memoryDir: undefined });
+		const entries = buildMemoryEntries({ agentDir: undefined, cwd, home, homeClaudeDir: join(home, ".claude"), homeOneCodeDir: join(home, ".onecode"), memoryDir: undefined });
 		expect(entries.some((entry) => entry.kind === "folder")).toBe(false);
 	});
 });

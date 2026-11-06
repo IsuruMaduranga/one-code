@@ -310,7 +310,7 @@ describe("startup probe and approved readers", () => {
 		expect(oneCode(true)).toContain("ONECODE EXTERNAL SECRET");
 		expect(oneCode(true)).toContain("ONECODE HOME SECRET");
 		// ONECODE.md is the base's: its imports are asked about through every provider.
-		const asked = () => openInstructions(home).externalIncludes({ cwd, homeOneCodeDir: state });
+		const asked = () => openInstructions(home, undefined).externalIncludes({ cwd, homeOneCodeDir: state });
 		expect(asked()).toEqual([outside, personal]);
 		// The user's own global ONECODE.md is not project-controlled: its imports load and never ask.
 		write(join(state, "ONECODE.md"), `@${write(join(root, "global-import.md"), "GLOBAL ONECODE IMPORT")}`);

@@ -71,7 +71,7 @@ export function buildMemoryEntries(opts: {
 	homeClaudeDir: string;
 	homeOneCodeDir: string;
 	/** pi's agent dir (`getAgentDir()`), for its global AGENTS.md. */
-	agentDir?: string;
+	agentDir: string | undefined;
 	/** The auto-memory folder; undefined while auto-memory is off (no folder row, as in Claude Code). */
 	memoryDir: string | undefined;
 }): MemoryEntry[] {

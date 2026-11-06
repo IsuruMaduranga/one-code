@@ -28,7 +28,7 @@ import os from "node:os";
 import { dirname } from "node:path";
 import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { buildClaudeMdBlock, buildContextBlock, buildOneCodeBlock, dateBlock, dateChangeReminder, localDate, nestedInstructionText } from "../lib/claude-context.ts";
-import { collectImportedPaths, type Instructions, openInstructions } from "../lib/instructions.ts";
+import { collectImportedPaths, openInstructions } from "../lib/instructions.ts";
 import { collectGitStatus, GIT_SNAPSHOT_OWNER_CHANNEL } from "../lib/git-status.ts";
 import { readMemoryIndex } from "../lib/memory-index.ts";
 import { oneCodeStateDir, tildify, tryRealpath } from "../lib/paths.ts";
@@ -153,8 +153,6 @@ function claudeContextExtension(pi: ExtensionAPI) {
 		const location = data as WorktreeLocation | null | undefined;
 		entered = location?.path ? location : undefined;
 	});
-	/** The instruction files under the settings read with the startup block (read once a session, again at each refresh). */
-	let instructions: Instructions | undefined;
 	let includeExternal = false;
 	let approvalPending: Promise<void> | undefined;
 	let approvalAbort = new AbortController();
@@ -186,15 +184,12 @@ function claudeContextExtension(pi: ExtensionAPI) {
 	let livePrints: { atStart: LiveFingerprints; atCompaction: () => LiveFingerprints } | undefined;
 	/** True until this process's first request inside an epoch has compared the epoch's facts with the live workspace. */
 	let resumeCheck = true;
+	/** The blocks' files, with the instruction view they were read under: it holds the settings (One Code's rule) for nested reads until the next refresh. */
 	const readFiles = (cwd: string) => {
 		const view = openInstructions(os.homedir(), getAgentDir());
-		return { ...view.sections({ cwd, homeOneCodeDir: oneCodeStateDir(), includeExternal }), memoryIndex: readMemoryIndex(cwd), view };
+		return { ...view.sections({ cwd, includeExternal }), memoryIndex: readMemoryIndex(cwd), view };
 	};
 	let files: ReturnType<typeof readFiles> | undefined;
-	const adoptFiles = (current: ReturnType<typeof readFiles>) => {
-		files = current;
-		instructions = current.view;
-	};
 	/**
 	 * The files message 1 carries (or imports): never attached again on a read.
 	 * Taken when an epoch renders the blocks; a resumed epoch's are taken from
@@ -214,7 +209,7 @@ function claudeContextExtension(pi: ExtensionAPI) {
 		return takesGitSnapshot ? collectGitStatus(cwd, undefined, shellTool) : null;
 	};
 
-	const externalPaths = (cwd: string) => openInstructions(os.homedir(), getAgentDir()).externalIncludes({ cwd, homeOneCodeDir: oneCodeStateDir() });
+	const externalPaths = (cwd: string) => openInstructions(os.homedir(), getAgentDir()).externalIncludes({ cwd });
 	const saveApproval = (ctx: ExtensionContext, approved: boolean) => {
 		includeExternal = approved;
 		try { persistExternalIncludesApproval(ctx.cwd, os.homedir(), approved); }
@@ -310,7 +305,7 @@ function claudeContextExtension(pi: ExtensionAPI) {
 	};
 	const refreshInstructions = (cwd: string) => {
 		const current = readFiles(cwd);
-		adoptFiles(current);
+		files = current;
 		emitInstructions(current);
 	};
 	const askApproval = async (ctx: ExtensionContext, paths: string[], afterStartup = false) => {
@@ -505,11 +500,11 @@ function claudeContextExtension(pi: ExtensionAPI) {
 		if (event.toolName !== "read" || event.isError) return;
 		const raw = pathArgument(event.input);
 		if (!raw) return;
-		instructions ??= openInstructions(os.homedir(), getAgentDir());
+		const view = files?.view ?? openInstructions(os.homedir(), getAgentDir());
 		const filePath = resolveToolPath(raw, ctx.cwd);
 		// In a worktree, the directories between are below the worktree's root (its own root files
 		// are the shared checkout's, which the startup block carries).
-		const files = instructions.nested({ filePath, cwd: sessionWorkCwd(entered, ctx.cwd), includeExternal });
+		const nested = view.nested({ filePath, cwd: sessionWorkCwd(entered, ctx.cwd), includeExternal });
 		// A partial read is not evidence that the entire instruction file is shown.
 		const input = event.input as { offset?: number; limit?: number };
 		const truncated = (event.details as { truncation?: { truncated?: boolean } } | undefined)?.truncation?.truncated;
@@ -524,7 +519,7 @@ function claudeContextExtension(pi: ExtensionAPI) {
 		const shown: string[] = [];
 		const before = liveLoaded + nestedLoaded();
 		let used = before;
-		for (const file of files) {
+		for (const file of nested) {
 			if (attachedNested.has(file.key)) continue;
 			attachedNested.add(file.key);
 			shown.push(file.key);

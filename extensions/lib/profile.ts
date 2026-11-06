@@ -18,8 +18,8 @@
  */
 
 import { dirname, resolve } from "node:path";
-import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { shareModuleForTest, sharedModule } from "./shared-module.ts";
 import { enabledFeatures, type FeatureId, featureProblems, isGuardFeature, TOOL_FEATURES } from "./features.ts";
 import type { InstructionProvider } from "./instructions.ts";
 import type { LiveTools } from "./live-tools.ts";
@@ -93,35 +93,29 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		live,
 		childExtensionPaths: profile.childExtensions.map((entry) => resolve(profileDir, entry)),
 		text: profile.text({ live }),
-		...(profile.instructions ? { instructions: profile.instructions } : {}),
+		instructions: profile.instructions,
 		globalAgentsFiles: profile.globalAgentsFiles ?? [],
 	};
 }
 
-/** Where the evaluated profile module is kept for every extension's copy of this module. */
-const SHIPPED_PROFILE = Symbol.for("one-code:shipped-profile");
+/** The slot the evaluated profile module is shared under (lib/shared-module.ts). */
+const SHIPPED_PROFILE = "one-code:shipped-profile";
+const PROFILE_MODULE = resolve(PROFILE_DIR, "index.ts");
 
 /**
  * The shipped profile (`profile/index.ts`), evaluated by the first copy of
  * this module that needs it and shared with the rest (see the header). It is
  * loaded on demand rather than imported, so a copy that finds it in the slot
- * never evaluates it: under jiti `require` is the extension's own loader;
- * elsewhere (a script) Node's. The unit tests fill the slot in test/setup.ts.
- * Sharing is safe because the module holds no state: its text is constant,
- * and it imports only constants from the base.
+ * never evaluates it. Sharing is safe because the module holds no state: its
+ * text is constant, and its code (the instruction provider) loads on first use.
  */
 function shippedProfile(): Profile {
-	const slot = globalThis as { [SHIPPED_PROFILE]?: Profile };
-	if (!slot[SHIPPED_PROFILE]) {
-		const load = typeof require === "function" ? require : createRequire(import.meta.url);
-		slot[SHIPPED_PROFILE] = (load("../../profile/index.ts") as typeof import("../../profile/index.ts")).profile;
-	}
-	return slot[SHIPPED_PROFILE];
+	return sharedModule<typeof import("../../profile/index.ts")>(SHIPPED_PROFILE, PROFILE_MODULE).profile;
 }
 
-/** Test seam: the profile module the slot shares, from the test run's own import of it. */
+/** Test seam: the profile the slot shares, from the test run's own import of it. */
 export function shareShippedProfileForTest(profile: Profile): void {
-	(globalThis as { [SHIPPED_PROFILE]?: Profile })[SHIPPED_PROFILE] = profile;
+	shareModuleForTest(SHIPPED_PROFILE, { profile });
 }
 
 let active: ResolvedProfile | undefined;

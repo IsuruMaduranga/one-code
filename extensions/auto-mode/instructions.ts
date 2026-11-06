@@ -20,11 +20,10 @@
  * them safe; without it, a repository could ship its own authorisation.
  */
 
-import { agentInstructionSections, type ClassifierFile, openInstructions } from "../lib/instructions.ts";
+import { type ClassifierFile, openInstructions } from "../lib/instructions.ts";
 import { classifierInstructionNote, fitToWindow } from "../lib/instruction-budget.ts";
 import { estimateTextTokens } from "../lib/pi-ai-estimate.ts";
 import { tryRealpath } from "../lib/paths.ts";
-import { featureEnabled } from "../lib/profile.ts";
 
 /**
  * Concatenated instruction files in the agent's order (managed and global,
@@ -41,13 +40,11 @@ import { featureEnabled } from "../lib/profile.ts";
  * share what the agent's loaded files leave of the half. A transcript too
  * large for that window is not judged (`decisions/auto-mode.md`). With the
  * claude-context feature off the agent reads no instruction file, and
- * neither does the classifier. `agentDir`
+ * neither does the classifier (lib/instructions.ts). `agentDir`
  * is pi's (`getAgentDir()`), for its global AGENTS.md.
  */
-export function loadProjectInstructions(cwd: string, home: string, contextWindow?: number, agentDir?: string): string | undefined {
-	// The classifier sees what the agent sees: nothing while the agent's own
-	// instruction files are off (decisions/bi-fork.md).
-	if (!featureEnabled("claude-context")) return undefined;
+export function loadProjectInstructions(cwd: string, home: string, contextWindow: number | undefined, agentDir: string | undefined): string | undefined {
+	const instructions = openInstructions(home, agentDir);
 	const files: (ClassifierFile & { key: string })[] = [];
 	const seen = new Set<string>();
 	const add = (file: ClassifierFile) => {
@@ -56,12 +53,12 @@ export function loadProjectInstructions(cwd: string, home: string, contextWindow
 		seen.add(key);
 		files.push({ path: file.path, content: file.content, globs: file.globs, key });
 	};
-	for (const file of openInstructions(home, agentDir).classifier({ cwd })) add(file);
+	for (const file of instructions.classifier({ cwd })) add(file);
 
 	if (files.length === 0) return undefined;
 	// The agent's own fit decides its files; the files only the classifier reads
 	// share what the agent's loaded ones leave of the half, the largest going first.
-	const sections = agentInstructionSections({ cwd, home, agentDir });
+	const sections = instructions.sections({ cwd });
 	const agentFit = fitToWindow([...sections.contextFiles, ...sections.oneCodeFiles], contextWindow);
 	const realKey = (path: string) => tryRealpath(path) ?? path;
 	const agentFiles = new Set([...sections.contextFiles, ...sections.oneCodeFiles].map((file) => realKey(file.path)));
