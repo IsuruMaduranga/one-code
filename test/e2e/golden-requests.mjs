@@ -75,6 +75,9 @@ const CONFIGS = [
 	{ name: "anthropic-cheap", model: ANTHROPIC, tier: "cheap", mode: "print" },
 	{ name: "anthropic-tiny", model: ANTHROPIC, tier: "tiny", mode: "print" },
 	{ name: "openrouter-cheap", model: OPENROUTER, tier: "cheap", mode: "print" },
+	// Instruction files without a CLAUDE.md (AGENTS.md loads under the default rule), and in independent mode.
+	{ name: "agents-anthropic-frontier", model: ANTHROPIC, tier: "frontier", mode: "print", instructions: "agents" },
+	{ name: "independent-anthropic-frontier", model: ANTHROPIC, tier: "frontier", mode: "print", instructions: "independent", env: { ONECODE_CONFIG_MODE: "independent" } },
 	{ name: "tools-anthropic-frontier", model: ANTHROPIC, tier: "frontier", mode: "tools" },
 	{ name: "tools-anthropic-tiny", model: ANTHROPIC, tier: "tiny", mode: "tools" },
 	{ name: "tools-openrouter-cheap", model: OPENROUTER, tier: "cheap", mode: "tools" },
@@ -82,7 +85,7 @@ const CONFIGS = [
 	{ name: "session-anthropic-tiny", model: ANTHROPIC, tier: "tiny", mode: "session" },
 	{ name: "session-openrouter-cheap", model: OPENROUTER, tier: "cheap", mode: "session" },
 ];
-const PROMPTS = { print: "Reply with OK.", tools: "GOLDEN_TOOLS GOLDEN_AGENT GOLDEN_NOTEBOOK GOLDEN_TASKS GOLDEN_WEB_FETCH GOLDEN_SEARCH GOLDEN_SKILL GOLDEN_MCP GOLDEN_LSP GOLDEN_HOOKS GOLDEN_MEMORY GOLDEN_CRON GOLDEN_MONITOR GOLDEN_LOOP GOLDEN_ARTIFACT GOLDEN_FILES GOLDEN_WORKFLOW GOLDEN_AUTOMODE GOLDEN_PERMISSIONS GOLDEN_SUBAGENTS GOLDEN_SHELL GOLDEN_RESULTS GOLDEN_TOOLSEARCH GOLDEN_WORKTREE: make the scripted calls." };
+const PROMPTS = { print: "Reply with OK.", tools: "GOLDEN_TOOLS GOLDEN_AGENT GOLDEN_NOTEBOOK GOLDEN_TASKS GOLDEN_WEB_FETCH GOLDEN_SEARCH GOLDEN_SKILL GOLDEN_MCP GOLDEN_LSP GOLDEN_HOOKS GOLDEN_MEMORY GOLDEN_CRON GOLDEN_MONITOR GOLDEN_LOOP GOLDEN_ARTIFACT GOLDEN_FILES GOLDEN_WORKFLOW GOLDEN_AUTOMODE GOLDEN_PERMISSIONS GOLDEN_SUBAGENTS GOLDEN_SHELL GOLDEN_RESULTS GOLDEN_TOOLSEARCH GOLDEN_INSTRUCTIONS GOLDEN_WORKTREE: make the scripted calls." };
 
 /** A format 4.4 notebook (no cell ids, so nothing random) with the given code cells. */
 const notebook = (...sources) =>
@@ -112,14 +115,43 @@ function makeGitProject(project, home) {
 	git("config", "commit.gpgsign", "false");
 	mkdirSync(join(project, ".claude", "worktrees"), { recursive: true });
 	writeFileSync(join(project, ".claude", "worktrees", ".gitignore"), "*\n");
-	// One Code's own instructions file, so the context carries the oneCodeMd block.
-	writeFileSync(join(project, "ONECODE.md"), "Golden One Code instructions: reply plainly.\n");
 	git("add", "-A");
 	git("commit", "-q", "-m", "Golden project");
 	git("branch", "dup");
 	git("worktree", "add", "-q", "-b", "kept", ".claude/worktrees/kept");
 	git("worktree", "add", "-q", "-b", "gone", ".claude/worktrees/gone");
 	rmSync(join(project, ".claude", "worktrees", "gone"), { recursive: true, force: true });
+}
+
+/**
+ * Instruction files of every kind the agent, its children and the classifier
+ * read. `tools` (golden-fixture.ts INSTRUCTION_ROUNDS): the global and project
+ * CLAUDE.md with an import, CLAUDE.local.md, an unconditional and a
+ * path-conditional rule, an AGENTS.md beside the CLAUDE.md, and a nested
+ * CLAUDE.md. `agents`: AGENTS.md files and no CLAUDE.md. `independent`: both
+ * kinds, of which independent mode reads only AGENTS.md. Every kind also has
+ * the global AGENTS.md files (pi's agent dir and ~/.agents).
+ */
+function writeInstructionFiles(kind, project, home, agentDir) {
+	const write = (path, content) => {
+		mkdirSync(dirname(path), { recursive: true });
+		writeFileSync(path, content);
+	};
+	write(join(agentDir, "AGENTS.md"), "Golden pi global AGENTS.md.\n");
+	write(join(home, ".agents", "AGENTS.md"), "Golden user AGENTS.md.\n");
+	write(join(project, "AGENTS.md"), "Golden project AGENTS.md.\n");
+	write(join(project, "sub", "AGENTS.md"), "Golden nested AGENTS.md.\n");
+	if (kind === "agents") return;
+	write(join(project, "ONECODE.md"), "Golden One Code instructions: reply plainly.\n");
+	write(join(home, ".claude", "CLAUDE.md"), "Golden global CLAUDE.md.\n");
+	write(join(project, "CLAUDE.md"), "Golden project CLAUDE.md.\n\n@docs/conventions.md\n");
+	write(join(project, "docs", "conventions.md"), "Golden imported conventions.\n");
+	write(join(project, "CLAUDE.local.md"), "Golden local CLAUDE.md.\n");
+	write(join(project, ".claude", "rules", "style.md"), "Golden style rule.\n");
+	write(join(project, ".claude", "rules", "go.md"), "---\npaths: \"**/*.go\"\n---\n\nGolden Go rule.\n");
+	write(join(project, "sub", "CLAUDE.md"), "Golden nested CLAUDE.md.\n");
+	write(join(project, "sub", "code.go"), "package sub\n");
+	write(join(project, "sub", "notes.txt"), "Golden nested notes.\n");
 }
 
 /** The tools scenario's project skills (golden-fixture.ts SKILL_ROUNDS), by name: frontmatter lines and body. */
@@ -213,8 +245,10 @@ async function runConfig(config) {
 			writeProjectSkills(project, agentDir);
 			writeMcpServers(home);
 			writeLanguageServer(bin);
+			writeInstructionFiles("tools", project, home, agentDir);
 			makeGitProject(project, home);
 		}
+		if (config.instructions) writeInstructionFiles(config.instructions, project, home, agentDir);
 		if (config.mode !== "print") writeHooks(home, config.mode);
 		const settings = withCompactionKeepBackfilled({
 			quietStartup: true,
@@ -583,7 +617,7 @@ async function sweep() {
 if (opts.sweep) await sweep();
 
 mkdirSync(goldenDir, { recursive: true });
-const selected = CONFIGS.filter((c) => !opts.only || c.name === opts.only);
+const selected = CONFIGS.filter((c) => !opts.only || opts.only.split(",").includes(c.name));
 const outcomes = await pool(selected, runConfig);
 let failed = false;
 outcomes.forEach((outcome, index) => {

@@ -792,6 +792,14 @@ function chatReply(calls: ToolCall[] | undefined, text: string): string {
 	return `${body}${chunk({}, withTools ? "tool_calls" : "stop", usage)}data: [DONE]\n\n`;
 }
 
+/**
+ * The instruction files a read attaches, under GOLDEN_INSTRUCTIONS
+ * (golden-requests.mjs writeInstructionFiles): a file in `sub/` brings the
+ * nested CLAUDE.md, and a Go file there the path-conditional rule as well.
+ */
+const ins = (id: string, path: string): ToolCall => ({ id: `toolu_golden_instructions_${id}`, name: "read", input: { path } });
+const INSTRUCTION_ROUNDS: ToolCall[][] = [[ins("nested", "sub/notes.txt")], [ins("conditional", "sub/code.go")]];
+
 /** The rounds a GOLDEN_TOOLS message scripts, from its flags; round n answers the n-th reply's results. */
 function roundsFor(text: string): ToolCall[][] {
 	const has = (flag: string) => text.includes(flag);
@@ -827,6 +835,7 @@ function roundsFor(text: string): ToolCall[][] {
 	if (has("GOLDEN_TOOLSEARCH")) rounds.push(...TOOLSEARCH_ROUNDS);
 	if (has("GOLDEN_DENY")) rounds.push(...DENY_ROUNDS);
 	if (has("GOLDEN_BIGFILE")) rounds.push(...BIGFILE_ROUNDS);
+	if (has("GOLDEN_INSTRUCTIONS")) rounds.push(...INSTRUCTION_ROUNDS);
 	if (has("GOLDEN_WORKTREE")) rounds.push(...WORKTREE_ROUNDS);
 	return rounds;
 }
