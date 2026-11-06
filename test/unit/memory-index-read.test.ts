@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MAX_INSTRUCTION_BYTES } from "../../extensions/lib/claude-rules.ts";
-import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
+import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
 import { readMemoryIndex } from "../../extensions/lib/memory-index.ts";
 import { projectMemoryDir } from "../../extensions/lib/memory.ts";
 import { stubHome } from "./helpers/home.ts";

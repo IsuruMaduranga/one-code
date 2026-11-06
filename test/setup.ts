@@ -3,7 +3,7 @@ import { beforeAll, beforeEach } from "vitest";
 import { emptyCatalogSources, setCatalogSourcesForTest } from "../extensions/lib/model-catalog-data.ts";
 import { setModelTierOverridesForTest } from "../extensions/lib/model-tier.ts";
 import { bashParserReady } from "../extensions/lib/bash-parser.ts";
-import { resetConfigModeForTest } from "../extensions/lib/config-mode.ts";
+import { resetConfigModeForTest } from "../profile/claude-code/mode.ts";
 import { PROFILE_DIR, profileModuleKey, shareShippedProfileForTest } from "../extensions/lib/profile.ts";
 import { profile } from "../profile/index.ts";
 import { shareModuleForTest } from "../extensions/lib/shared-module.ts";

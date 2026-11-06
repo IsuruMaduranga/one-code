@@ -8,7 +8,7 @@
  * from the farthest ancestor down to the cwd `CLAUDE.md`, `.claude/CLAUDE.md`,
  * the base's AGENTS.md where Claude Code's `instructionFiles` rule takes it,
  * `.claude/AGENTS.md`, `.claude/rules` and `CLAUDE.local.md`. The block stays
- * byte-exact with Claude Code. In independent mode (lib/config-mode.ts) the
+ * byte-exact with Claude Code. In independent mode (mode.ts) the
  * provider opens no instruction view (sources.ts), so the base's files go
  * through as they are.
  *

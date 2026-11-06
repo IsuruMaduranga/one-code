@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
+import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
 import { safetyControlWrite } from "../../extensions/auto-mode/safety-floor.ts";
 import { settingsSources } from "../../extensions/lib/claude-settings.ts";
 import { instructionFileNames, instructionTargets } from "../../extensions/lib/instructions.ts";
@@ -100,7 +100,7 @@ describe("the settings ladder", () => {
 	it("puts another provider's state files under the safety floor", () => {
 		const state = join(home, ".other-tool.json");
 		expect(writes(state)).toBeUndefined();
-		useProvider({ open: () => ({ protectedFiles: [state] }) });
+		useProvider({ open: () => ({ protectedFiles: [{ path: state, label: "Other tool state" }] }) });
 		expect(writes(state)).toBeDefined();
 	});
 });

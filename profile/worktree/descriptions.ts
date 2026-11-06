@@ -10,7 +10,7 @@
  * clearing on exit. Tool names are One Code's.
  */
 
-/** Claude Code's EnterWorktree description, naming the mode's config directory (`.onecode` in independent mode, lib/config-mode.ts). */
+/** Claude Code's EnterWorktree description, naming the mode's config directory (`.onecode` in independent mode, claude-code/mode.ts). */
 export function enterWorktreeDescription(configDir = ".claude"): string {
 	return `Use this tool ONLY when explicitly instructed to work in a worktree — either by the user directly, or by project instructions (CLAUDE.md / memory). This tool creates an isolated git worktree and switches the current session into it.
 

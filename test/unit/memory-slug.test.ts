@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import os from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
+import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
 import { memoryDir, projectSlug } from "../../extensions/lib/memory.ts";
 import { oneCodeProjectSettingsPathFor } from "../../extensions/lib/one-code-settings.ts";
 

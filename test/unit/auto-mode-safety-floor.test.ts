@@ -4,7 +4,7 @@ import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { isSafetyControlTarget, safetyControlWrite, safetyFloorBlockText, safetyFloorReason } from "../../extensions/auto-mode/safety-floor.ts";
 import { analyzeShellCommand } from "../../extensions/auto-mode/shell-analysis.ts";
-import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
+import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
 import { oneCodeProjectSettingsPath } from "../../extensions/lib/one-code-settings.ts";
 import { claudeJsonPath, forwardSlashes, toPosixPath } from "../../extensions/lib/paths.ts";
 

@@ -1,6 +1,8 @@
 /**
- * Where One Code reads its configuration and context: the two modes
- * (working-docs/features/config-modes/).
+ * One Code's config mode, the state of its source provider's switch
+ * (sources.ts, "Config sources"; working-docs/features/config-modes/). The
+ * base never asks it: it sees the provider's view and switch
+ * (extensions/lib/sources.ts).
  *
  * - `claude-compatible` (the default): Claude Code's `~/.claude`,
  *   `<repo>/.claude`, `CLAUDE.md` and `~/.claude.json`, plus the cross-tool
@@ -24,8 +26,8 @@
 
 import os from "node:os";
 import { join } from "node:path";
-import { readJsonFile } from "./atomic-write.ts";
-import { oneCodeStateDir } from "./paths.ts";
+import { readJsonFile } from "../../extensions/lib/atomic-write.ts";
+import { oneCodeStateDir } from "../../extensions/lib/paths.ts";
 
 export type ConfigMode = "claude-compatible" | "independent";
 

@@ -29,7 +29,7 @@ function scanDir(dir: string, source: SavedWorkflow["source"]): SavedWorkflow[] 
 	return found;
 }
 
-/** `.claude/workflows` and `~/.claude/workflows`, or their `.onecode` twins in independent mode (lib/config-mode.ts). */
+/** `.claude/workflows` and `~/.claude/workflows`, or their `.onecode` twins in independent mode (lib/sources.ts). */
 export function workflowDirs(cwd: string, home: string): { project: string; user: string } {
 	return { project: join(projectConfigDir(cwd), "workflows"), user: join(userConfigDir(home), "workflows") };
 }

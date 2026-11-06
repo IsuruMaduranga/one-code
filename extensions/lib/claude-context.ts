@@ -24,7 +24,7 @@ export function nestedInstructionText(file: { path: string; content: string }): 
 	return contextWords().nestedFile({ path: file.path, content: file.content });
 }
 
-/** The block's preamble, naming the files above it: AGENTS.md in independent mode (lib/config-mode.ts). */
+/** The block's preamble, naming the files above it: AGENTS.md in independent mode (lib/sources.ts). */
 function oneCodePreamble(): string {
 	return contextWords().oneCodePreamble({ above: instructionTargets().project });
 }

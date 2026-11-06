@@ -6,7 +6,7 @@ import { buildDoctorReport, summarizeProviders } from "../../extensions/doctor/b
 import { collectModelFacts, modelsSection } from "../../extensions/doctor/models.ts";
 import { type DoctorEnvironment, type Finding, type RegistryView, renderDoctorReport, renderDoctorText } from "../../extensions/doctor/report.ts";
 import { TESTED_PI_MAX_EXCLUSIVE } from "../../extensions/lib/pi-version.ts";
-import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
+import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
 import { sourceSwitchStatus } from "../../extensions/lib/sources.ts";
 import { pinCatalog, pinReleaseDates } from "./catalog-fixture.ts";
 

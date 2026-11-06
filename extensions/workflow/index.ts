@@ -9,7 +9,7 @@
  * journals persist under the session dir, so `resumeFromRunId` replays the
  * unchanged prefix of an edited or interrupted run. Saved workflows live in
  * `.claude/workflows/` (project) and `~/.claude/workflows/` (user), or their
- * `.onecode` twins in independent mode (lib/config-mode.ts).
+ * `.onecode` twins in independent mode (lib/sources.ts).
  *
  * The description is Claude Code's (description.ts); the authoring reference
  * it points to is the bundled `workflow-authoring` skill. `enableWorkflows`,

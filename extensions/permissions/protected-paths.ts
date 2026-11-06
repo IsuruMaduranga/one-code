@@ -45,7 +45,7 @@ const PROTECTED_DIRS = [
 
 /**
  * `.claude/worktrees` is where the agent keeps its own git worktrees
- * (`.onecode/worktrees` in independent mode, lib/config-mode.ts), and
+ * (`.onecode/worktrees` in independent mode, lib/sources.ts), and
  * `.onecode/plans` holds plan-mode documents (rendered to the user, never
  * executed) — ordinary working space rather than configuration.
  */

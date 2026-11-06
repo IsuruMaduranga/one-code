@@ -6,7 +6,7 @@ import { collectCompat, importedConfigSection, mcpSection } from "../../extensio
 import { checkDependencies, projectLanguages, providerHasNativeSearch, webSearchRoute } from "../../extensions/doctor/dependencies.ts";
 import { whichOnPath } from "../../extensions/lib/which.ts";
 import { invalidatePluginsCache } from "../../extensions/lib/plugins.ts";
-import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
+import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
 import { resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
 
 let home: string;
@@ -59,7 +59,7 @@ describe("collectCompat: settings files", () => {
 		});
 		write(join(cwd, ".claude", "settings.json"), { permissions: { allow: ["Bash(npm test)"], defaultMode: "auto" }, autoMode: { allow: ["x"] } });
 		const compat = collectCompat(input());
-		const user = compat.files.find((f) => f.scope === "claude-user")!;
+		const user = compat.files.find((f) => f.scope === "borrowed-user")!;
 		expect(user.used).toEqual([
 			"permissions: 1 allow, 1 deny, 0 ask; defaultMode plan",
 			"hooks: PostToolUse ×1",
@@ -67,7 +67,7 @@ describe("collectCompat: settings files", () => {
 			'env.CLAUDE_CODE_SUBAGENT_MODEL = "sonnet"',
 		]);
 		expect(user.ignored).toEqual(["env (1 variable — One Code does not export settings env blocks)", "model", "statusLine"]);
-		const project = compat.files.find((f) => f.scope === "claude-project")!;
+		const project = compat.files.find((f) => f.scope === "borrowed-project")!;
 		expect(project.used).toEqual(["permissions: 1 allow, 0 deny, 0 ask; allow rules apply after a once-per-config consent"]);
 		expect(project.refused).toEqual([
 			'permissions.defaultMode "auto" — a repository\'s files may not select it',
@@ -85,9 +85,9 @@ describe("collectCompat: settings files", () => {
 		write(join(home, ".claude", "settings.json"), '{ "permissions": { "allow": [ ] }, }');
 		write(join(home, ".onecode", "settings.json"), { permissions: { defaultMode: "plan" }, subagentModel: "inherit", webSearch: { apiKeys: { brave: "k" } } });
 		const compat = collectCompat(input());
-		expect(compat.files.find((f) => f.scope === "claude-user")).toMatchObject({ exists: true, valid: false });
+		expect(compat.files.find((f) => f.scope === "borrowed-user")).toMatchObject({ exists: true, valid: false });
 		expect(compat.findings.find((f) => f.level === "error")?.text).toContain("is not valid JSON");
-		const onecode = compat.files.find((f) => f.scope === "onecode-user")!;
+		const onecode = compat.files.find((f) => f.scope === "product-user")!;
 		expect(onecode.refused[0]).toContain('permissions.defaultMode "plan" — never read from One Code\'s own files');
 		expect(onecode.used).toEqual(['subagentModel "inherit"', "webSearch (keys/order for the search fallback)"]);
 	});
@@ -101,7 +101,7 @@ describe("collectCompat: settings files", () => {
 			workflowSizeGuideline: "small",
 			compactionKeepDeclined: true,
 		});
-		const onecode = collectCompat(input()).files.find((f) => f.scope === "onecode-user")!;
+		const onecode = collectCompat(input()).files.find((f) => f.scope === "product-user")!;
 		expect(onecode.ignored).toEqual([]);
 		expect(onecode.used).toEqual(expect.arrayContaining(['configMode "independent" (/memory config sources)', "autoMemoryEnabled: false"]));
 	});
@@ -109,7 +109,7 @@ describe("collectCompat: settings files", () => {
 	it("refuses a classifier model in Claude Code's settings: One Code reads it from ~/.onecode only", () => {
 		write(join(home, ".claude", "settings.json"), { subagentModel: "sonnet", autoMode: { classifierModel: "anthropic/claude-haiku-4-5", environment: ["x"] } });
 		const compat = collectCompat(input());
-		const user = compat.files.find((f) => f.scope === "claude-user")!;
+		const user = compat.files.find((f) => f.scope === "borrowed-user")!;
 		expect(user.refused).toEqual(expect.arrayContaining([
 			"subagentModel — One Code's own key, read from ~/.onecode/settings.json only",
 			"autoMode.classifierModel — One Code's own key, read from ~/.onecode/settings.json only",
@@ -124,8 +124,17 @@ describe("collectCompat: content", () => {
 		write(join(home, ".claude", "settings.json"), "{not json");
 		resetConfigModeForTest("independent");
 		const compat = collectCompat(input());
-		expect(compat.files.map((f) => f.scope)).toEqual(["onecode-user", "onecode-project"]);
+		expect(compat.files.map((f) => f.scope)).toEqual(["product-user", "product-local"]);
 		expect(compat.findings.some((f) => f.text.includes(".claude"))).toBe(false);
+	});
+
+	it("reads the primary file's keys from One Code's own user file in independent mode", () => {
+		write(join(home, ".onecode", "settings.json"), { permissions: { defaultMode: "plan" }, hooks: { Stop: [{ hooks: [{ type: "command", command: "true" }] }] } });
+		resetConfigModeForTest("independent");
+		const onecode = collectCompat(input()).files.find((f) => f.scope === "product-user")!;
+		expect(onecode.refused).toEqual([]);
+		expect(onecode.ignored).toEqual([]);
+		expect(onecode.used).toEqual(["permissions: defaultMode plan", "hooks: Stop ×1"]);
 	});
 
 	it("sizes the instruction files and warns over the 40k soft limit", () => {

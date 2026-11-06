@@ -1,7 +1,12 @@
 /**
- * The imported-configuration scan (pure fs): what of the user's Claude Code
- * setup One Code found, what it reads from each file, and what it does NOT
- * honour — the compatibility report behind "your setup works unchanged".
+ * The imported-configuration scan (pure fs): what of the user's setup One
+ * Code found, what it reads from each file, and what it does NOT honour — the
+ * compatibility report behind "your setup works unchanged".
+ *
+ * The files are the settings ladder and the source provider's state files
+ * (lib/claude-settings.ts settingsSources, lib/sources.ts), each named by its
+ * label and judged by its role: with One Code's provider on, Claude Code's
+ * files and One Code's own; without it, One Code's two alone.
  *
  * Every settings file gets one row: present / valid / the keys One Code consumes
  * from it (permissions, hooks, plugins, MCP policy, the one `env` variable it
@@ -23,15 +28,14 @@ import { loadPluginHooks } from "../hooks/plugin-hooks.ts";
 import { type HooksSource, loadHookSettings } from "../hooks/settings.ts";
 // Claude Code's auto-memory switch, read through the whole settings ladder.
 import { AUTO_MEMORY_KEY as AUTO_MEMORY } from "../lib/auto-memory.ts";
-import { CONFIG_MODE_KEY, claudeSourcesOn } from "../lib/config-mode.ts";
-import { claudeJsonPath, claudeUserDir, oneCodeStateDir } from "../lib/paths.ts";
-import { claudeUserSettingsPath, managedSettingsPaths, settingsPaths } from "../lib/claude-settings.ts";
+import { oneCodeStateDir } from "../lib/paths.ts";
+import { isRepoFile, primarySettingsFile, settingsSources, sourceId } from "../lib/claude-settings.ts";
+import { openSources, type SettingsFile, sourceSwitch } from "../lib/sources.ts";
 import { agentSkippedInstructions, openInstructions } from "../lib/instructions.ts";
 import { CLAUDE_MD_CHAR_LIMIT, claudeMdLimitWarning, projectMemoryDir } from "../lib/memory.ts";
 import { skippedInstructionWarning } from "../lib/instruction-budget.ts";
 import { indexLimitStatus } from "../lib/memory-content.ts";
 import { readDisabledMcpServers } from "../lib/mcp-overrides.ts";
-import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
 import { defaultDiscoverRoots, discoverPlugins, type DiscoveredPlugins } from "../lib/plugins.ts";
 import { BUNDLED_SKILLS_DIR, promptTemplateNames, scanSkills } from "../lib/skill-scan.ts";
@@ -42,7 +46,8 @@ import { agentDirs, parseAgentFile } from "../subagents/agents.ts";
 import type { Finding, ReportLine, ReportSection, SessionView } from "./report.ts";
 import { countNoun, shortenHome } from "./report.ts";
 
-export type SettingsScope = "claude-user" | "claude-project" | "claude-local" | "managed" | "onecode-user" | "onecode-project" | "claude-json";
+/** A file's role (lib/claude-settings.ts sourceId), or another tool's state file. */
+export type SettingsScope = "borrowed-user" | "borrowed-project" | "borrowed-local" | "borrowed-managed" | "product-user" | "product-local" | "borrowed-state";
 
 export interface SettingsFileReport {
 	scope: SettingsScope;
@@ -92,19 +97,18 @@ const MCP_POLICY_KEYS = ["enableAllProjectMcpServers", "enabledMcpjsonServers", 
 const WORKFLOW_KEYS = ["enableWorkflows", "disableWorkflows", "workflowSizeGuideline"];
 const CLAUDE_PROJECT_KEYS = new Set(["permissions", "hooks", "enabledPlugins", AUTO_MEMORY, ...MCP_POLICY_KEYS]);
 const SCOPE_KEYS: Record<SettingsScope, ReadonlySet<string>> = {
-	"claude-user": new Set(["permissions", "hooks", "env", "enabledPlugins", "autoMode", AUTO_MEMORY, ...MCP_POLICY_KEYS]),
-	"claude-project": CLAUDE_PROJECT_KEYS,
-	"claude-local": CLAUDE_PROJECT_KEYS,
-	managed: new Set(["permissions", "hooks", "env", "autoMode", "enabledPlugins", AUTO_MEMORY]),
-	"onecode-user": new Set([
+	"borrowed-user": new Set(["permissions", "hooks", "env", "enabledPlugins", "autoMode", AUTO_MEMORY, ...MCP_POLICY_KEYS]),
+	"borrowed-project": CLAUDE_PROJECT_KEYS,
+	"borrowed-local": CLAUDE_PROJECT_KEYS,
+	"borrowed-managed": new Set(["permissions", "hooks", "env", "autoMode", "enabledPlugins", AUTO_MEMORY]),
+	"product-user": new Set([
 		"subagentModel",
 		"subagentModelSetFor",
 		"autoMode",
 		"permissions",
 		"webSearch",
 		"disabledMcpServers",
-		// The /memory panel's two rows (lib/config-mode.ts, lib/auto-memory.ts).
-		CONFIG_MODE_KEY,
+		// The /memory panel's auto-memory row (lib/auto-memory.ts); the source switch's key is added in knownKeys.
 		AUTO_MEMORY,
 		"modelTiers",
 		"suggestNewerModels",
@@ -115,7 +119,7 @@ const SCOPE_KEYS: Record<SettingsScope, ReadonlySet<string>> = {
 		"compactionKeepDeclined",
 		"piBuiltinsTurnOffDeclined",
 	]),
-	"onecode-project": new Set([
+	"product-local": new Set([
 		"permissions",
 		"disabledMcpServers",
 		AUTO_MEMORY,
@@ -125,8 +129,28 @@ const SCOPE_KEYS: Record<SettingsScope, ReadonlySet<string>> = {
 		"hasClaudeMdExternalIncludesWarningShown",
 		"claudeMdExternalIncludesRoot",
 	]),
-	"claude-json": new Set(),
+	"borrowed-state": new Set(),
 };
+
+/**
+ * The keys One Code reads from a file: its role's (with the source switch's
+ * key in the product's user file), plus, for the product's
+ * own user file when it is the primary one (no provider), the keys the
+ * loaders take from the primary file and its family (hooks, `env`, MCP
+ * approvals), and hooks and the MCP tightening list from the product's
+ * per-project file in that family.
+ */
+function knownKeys(file: SettingsFile, primary: SettingsFile | undefined): ReadonlySet<string> {
+	const keys = new Set(SCOPE_KEYS[sourceId(file) as SettingsScope]);
+	// The /memory panel's switch row, saved in the product's user file.
+	const sw = sourceSwitch();
+	if (sw && file.owner === "product" && file.scope === "user") keys.add(sw.key);
+	if (file.owner === "product" && primary?.owner === "product") {
+		if (file === primary) for (const key of ["hooks", "env", ...MCP_POLICY_KEYS]) keys.add(key);
+		if (file.scope === "local") for (const key of ["hooks", "disabledMcpjsonServers"]) keys.add(key);
+	}
+	return keys;
+}
 /** Never worth reporting as "ignored". */
 const SILENT_KEYS = new Set(["$schema"]);
 
@@ -145,7 +169,8 @@ function readJsonObject(path: string): { exists: boolean; value?: Json; error?: 
 
 const count = (value: unknown): number => (Array.isArray(value) ? value.length : 0);
 
-function permissionsSummary(perms: unknown, scope: SettingsScope, findings: Finding[], path: string, home: string): { used?: string; refused?: string } {
+function permissionsSummary(perms: unknown, file: SettingsFile, primaryPath: string, findings: Finding[], home: string): { used?: string; refused?: string } {
+	const { path } = file;
 	if (!perms || typeof perms !== "object") return {};
 	const p = perms as Json;
 	const parts: string[] = [];
@@ -153,26 +178,27 @@ function permissionsSummary(perms: unknown, scope: SettingsScope, findings: Find
 	const deny = count(p.deny);
 	const ask = count(p.ask);
 	if (allow || deny || ask) parts.push(`${allow} allow, ${deny} deny, ${ask} ask`);
-	if (scope === "claude-project" || scope === "claude-local") {
+	if (isRepoFile(file)) {
 		if (allow) parts.push("allow rules apply after a once-per-config consent");
 	}
 	let refused: string | undefined;
 	const mode = typeof p.defaultMode === "string" ? p.defaultMode : undefined;
 	if (mode) {
-		const repoFile = scope === "claude-project" || scope === "claude-local";
-		if (scope === "onecode-user" || scope === "onecode-project") {
+		const repoFile = isRepoFile(file);
+		// The loader's rule (permissions/settings.ts): the product's files give no defaultMode unless one is the primary user file.
+		if (file.owner === "product" && !file.primary) {
 			refused = `permissions.defaultMode "${mode}" — never read from One Code's own files`;
 			findings.push({
 				level: "warn",
 				text: `${shortenHome(path, home)} sets permissions.defaultMode "${mode}", which One Code does not read from its own settings files.`,
-				fix: "Set the default mode in ~/.claude/settings.json (or start with --permission-mode); remove the key here.",
+				fix: `Set the default mode in ${shortenHome(primaryPath, home)} (or start with --permission-mode); remove the key here.`,
 			});
 		} else if (repoFile && MODES_NEVER_FROM_PROJECT.has(mode as PermissionMode)) {
 			refused = `permissions.defaultMode "${mode}" — a repository's files may not select it`;
 			findings.push({
 				level: "warn",
 				text: `${shortenHome(path, home)} sets permissions.defaultMode "${mode}"; a repository's own settings never select that mode (it would let a cloned repo grant itself unattended approval). Claude Code applies the same rule.`,
-				fix: "Set it in ~/.claude/settings.json instead, or pass --permission-mode.",
+				fix: `Set it in ${shortenHome(primaryPath, home)} instead, or pass --permission-mode.`,
 			});
 		} else {
 			parts.push(`defaultMode ${mode}`);
@@ -181,7 +207,7 @@ function permissionsSummary(perms: unknown, scope: SettingsScope, findings: Find
 	if (p.disableBypassPermissionsMode === "disable") parts.push("bypass mode disabled");
 	if (Array.isArray(p.additionalDirectories) && p.additionalDirectories.length > 0) {
 		const dirs = p.additionalDirectories.length;
-		const fromRepo = scope === "claude-project" || scope === "claude-local";
+		const fromRepo = isRepoFile(file);
 		parts.push(`${dirs} workspace director${dirs === 1 ? "y" : "ies"}${fromRepo ? " (applied once you trust the repository's settings)" : ""}`);
 	}
 	return { used: parts.length ? `permissions: ${parts.join("; ")}` : undefined, refused };
@@ -195,31 +221,46 @@ function hooksSummary(hooks: unknown): string | undefined {
 	return events.length ? `hooks: ${events.join(", ")}` : undefined;
 }
 
-function summarizeFile(scope: SettingsScope, label: string, path: string, home: string, findings: Finding[]): SettingsFileReport {
+/** Another tool's state file: its user-scope MCP servers; the rest is that tool's own. */
+function summarizeStateFile(path: string, label: string, home: string, findings: Finding[]): SettingsFileReport {
+	const report = readReport("borrowed-state", label, path, home, findings);
+	if (!report.file) return report.row;
+	const servers = report.file.mcpServers && typeof report.file.mcpServers === "object" ? Object.keys(report.file.mcpServers as Json).length : 0;
+	if (servers) report.row.used.push(`mcpServers: ${countNoun(servers, "user-scope server")}`);
+	report.row.used.push("everything else in this file (onboarding state, usage counters) belongs to the tool that wrote it");
+	return report.row;
+}
+
+/** A file's row before its keys are judged, and its parsed object when it exists and is valid. */
+function readReport(scope: SettingsScope, label: string, path: string, home: string, findings: Finding[]): { row: SettingsFileReport; file?: Json } {
 	const read = readJsonObject(path);
-	const report: SettingsFileReport = { scope, label, path, exists: read.exists, valid: !read.error, error: read.error, used: [], ignored: [], refused: [] };
-	if (!read.exists) return report;
+	const row: SettingsFileReport = { scope, label, path, exists: read.exists, valid: !read.error, error: read.error, used: [], ignored: [], refused: [] };
+	if (!read.exists) return { row };
 	if (read.error || !read.value) {
 		findings.push({
 			level: "error",
 			text: `${shortenHome(path, home)} is not valid JSON (${read.error}); everything in it is ignored, so rules you believe are in force are not.`,
 			fix: "Fix the syntax (a trailing comma is the usual cause) and rerun /doctor.",
 		});
-		return report;
+		return { row };
 	}
-	const file = read.value;
-	const known = SCOPE_KEYS[scope];
+	return { row, file: read.value };
+}
+
+/** One ladder file's row: the keys One Code reads from it by its role, the ones it refuses there, and the ones it ignores. */
+function summarizeFile(source: SettingsFile, primary: SettingsFile | undefined, home: string, findings: Finding[]): SettingsFileReport {
+	const { path } = source;
+	const scope = sourceId(source) as SettingsScope;
+	const read = readReport(scope, source.label, path, home, findings);
+	const report = read.row;
+	if (!read.file) return report;
+	const file = read.file;
+	const known = knownKeys(source, primary);
 	/** Keys a branch below has already classified (used, refused or ignored), so the final sweep skips them. */
 	const handled = new Set<string>();
+	const borrowedUser = source.owner === "borrowed" && source.scope === "user";
 
-	if (scope === "claude-json") {
-		const servers = file.mcpServers && typeof file.mcpServers === "object" ? Object.keys(file.mcpServers as Json).length : 0;
-		if (servers) report.used.push(`mcpServers: ${countNoun(servers, "user-scope server")}`);
-		report.used.push("everything else in this file (onboarding state, usage counters) is Claude Code's own");
-		return report;
-	}
-
-	const perms = permissionsSummary(file.permissions, scope, findings, path, home);
+	const perms = permissionsSummary(file.permissions, source, primary?.path ?? path, findings, home);
 	if (perms.used) report.used.push(perms.used);
 	if (perms.refused) report.refused.push(perms.refused);
 	const hooks = hooksSummary(file.hooks);
@@ -246,15 +287,15 @@ function summarizeFile(scope: SettingsScope, label: string, path: string, home: 
 		const keys = Object.keys(auto);
 		if (known.has("autoMode")) {
 			// `classifierModel` is One Code's own key, read from ~/.onecode only.
-			if (scope === "claude-user" && ("classifierModel" in auto || "classifierModelSetFor" in auto)) {
+			if (borrowedUser && ("classifierModel" in auto || "classifierModelSetFor" in auto)) {
 				report.refused.push("autoMode.classifierModel — One Code's own key, read from ~/.onecode/settings.json only");
 				findings.push({
 					level: "warn",
 					text: `${shortenHome(path, home)} carries autoMode.classifierModel, a One Code key read only from ~/.onecode/settings.json; the value here is ignored.`,
-					fix: "Set it with /auto-mode model (which writes ~/.onecode/settings.json) and delete the stale key from ~/.claude/settings.json.",
+					fix: `Set it with /auto-mode model (which writes ~/.onecode/settings.json) and delete the stale key from ${shortenHome(path, home)}.`,
 				});
 			}
-			const consumed = keys.filter((k) => !(scope === "claude-user" && (k === "classifierModel" || k === "classifierModelSetFor")));
+			const consumed = keys.filter((k) => !(borrowedUser && (k === "classifierModel" || k === "classifierModelSetFor")));
 			if (consumed.length) report.used.push(`autoMode: ${consumed.join(", ")}`);
 		} else {
 			report.refused.push(`autoMode (${keys.join(", ")}) — never read from a repository's files`);
@@ -265,17 +306,18 @@ function summarizeFile(scope: SettingsScope, label: string, path: string, home: 
 			});
 		}
 	}
-	if (scope === "claude-user" && ("subagentModel" in file || "subagentModelSetFor" in file)) {
+	if (borrowedUser && ("subagentModel" in file || "subagentModelSetFor" in file)) {
 		handled.add("subagentModel").add("subagentModelSetFor");
 		report.refused.push("subagentModel — One Code's own key, read from ~/.onecode/settings.json only");
 		findings.push({
 			level: "warn",
 			text: `${shortenHome(path, home)} carries subagentModel, a One Code key that is now read only from ~/.onecode/settings.json; the value here is ignored.`,
-			fix: "Re-set it with /subagent (which writes the new location) and delete the stale key from ~/.claude/settings.json.",
+			fix: `Re-set it with /subagent (which writes the new location) and delete the stale key from ${shortenHome(path, home)}.`,
 		});
 	}
-	if (scope === "onecode-user") {
-		if (typeof file.configMode === "string") report.used.push(`configMode "${file.configMode}" (/memory config sources)`);
+	if (scope === "product-user") {
+		const sw = sourceSwitch();
+		if (sw && typeof file[sw.key] === "string") report.used.push(`${sw.key} "${file[sw.key]}" (/memory ${sw.title.toLowerCase()})`);
 		if (typeof file.subagentModel === "string") report.used.push(`subagentModel "${file.subagentModel}"`);
 		if (file.webSearch && typeof file.webSearch === "object") report.used.push("webSearch (keys/order for the search fallback)");
 	}
@@ -330,34 +372,18 @@ export interface CompatInput {
 export function collectCompat(input: CompatInput): CompatReport {
 	const { cwd, home, agentDir, env } = input;
 	const findings: Finding[] = [];
-	const claudeDir = claudeUserDir(home, env);
-	const claude = settingsPaths(cwd, home);
-
-	// Independent mode (lib/config-mode.ts) reads none of Claude Code's files, so
-	// none is opened here; an organisation's policy file it ignores is named.
-	const independent = !claudeSourcesOn();
+	// The ladder's files and the provider's state files: another tool's first,
+	// then the product's own. With the provider switched off only the product's
+	// two are opened, and the switch names what that leaves unapplied.
+	const ladder = settingsSources(cwd, home);
+	const primary = primarySettingsFile(ladder);
+	const summarize = (file: SettingsFile) => summarizeFile(file, primary, home, findings);
 	const files: SettingsFileReport[] = [
-		...(independent
-			? []
-			: [
-					summarizeFile("claude-user", "Claude Code user settings", claudeUserSettingsPath(home), home, findings),
-					summarizeFile("claude-project", "project settings (checked in)", claude.project, home, findings),
-					summarizeFile("claude-local", "project settings (local)", claude.local, home, findings),
-					...managedSettingsPaths().map((path) => summarizeFile("managed", "managed settings (organisation policy)", path, home, findings)),
-					summarizeFile("claude-json", "Claude Code's .claude.json", claudeJsonPath(home, env), home, findings),
-				]),
-		summarizeFile("onecode-user", "One Code user settings", oneCodeSettingsPath(home, env), home, findings),
-		summarizeFile("onecode-project", "One Code per-repository settings", oneCodeProjectSettingsPath(cwd, home, env), home, findings),
+		...ladder.filter((file) => file.owner === "borrowed").map(summarize),
+		...(openSources(home).protectedFiles ?? []).map((file) => summarizeStateFile(file.path, file.label, home, findings)),
+		...ladder.filter((file) => file.owner === "product").map(summarize),
 	];
-	if (independent) {
-		for (const path of managedSettingsPaths().filter((managed) => existsSync(managed))) {
-			findings.push({
-				level: "warn",
-				text: `An organisation policy file exists at ${path}, and independent mode does not apply it.`,
-				fix: "Switch config sources to Claude-compatible in /memory if this machine's policy must hold.",
-			});
-		}
-	}
+	for (const warning of sourceSwitch()?.offWarnings?.({ home }) ?? []) findings.push({ level: "warn", ...warning });
 
 	// The session's window budget, over the sections it loads (imports inlined,
 	// ONECODE.md included): past half the window, the largest are not loaded.

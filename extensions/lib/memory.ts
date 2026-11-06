@@ -35,7 +35,7 @@ export function projectSlug(projectRoot: string): string {
 
 /**
  * `~/.claude/projects/<slug>/memory` — the same location Claude Code uses —
- * or, in independent mode (lib/config-mode.ts), `~/.onecode/projects/<slug>/memory`.
+ * or, in independent mode (lib/sources.ts), `~/.onecode/projects/<slug>/memory`.
  * `projectRoot` must be the git repository root when there is one (all
  * worktrees and subdirectories share one memory directory), else the cwd.
  */

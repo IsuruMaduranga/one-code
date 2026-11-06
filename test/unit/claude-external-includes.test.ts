@@ -10,7 +10,7 @@ import { buildClaudeMdBlock } from "../../extensions/lib/claude-context.ts";
 import { discoverOneCodeFiles, openInstructions } from "../../extensions/lib/instructions.ts";
 import { discoverContextFiles, externalInstructionIncludes, nestedInstructionFiles } from "../../profile/claude-code/instructions.ts";
 import { EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_NONE, EXTERNAL_INCLUDES_TITLE, EXTERNAL_INCLUDES_YES, externalIncludesDialog, persistExternalIncludesApproval, readExternalIncludesApproval } from "../../extensions/lib/claude-external-includes.ts";
-import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
+import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
 import { oneCodeProjectSettingsPath } from "../../extensions/lib/one-code-settings.ts";
 import { forwardSlashes } from "../../extensions/lib/paths.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";

@@ -104,7 +104,7 @@ function readLoopFileAt(path: string): LoopFile | null {
 
 /**
  * The loop-tasks file: the project's `.claude/loop.md` (`.onecode/loop.md` in
- * independent mode, lib/config-mode.ts), else the user config directory's
+ * independent mode, lib/sources.ts), else the user config directory's
  * `loop.md` (Claude Code 2.1.296: `~/.claude/loop.md` or `CLAUDE_CONFIG_DIR`).
  */
 export function readLoopFile(cwd: string, home = homedir()): LoopFile | null {

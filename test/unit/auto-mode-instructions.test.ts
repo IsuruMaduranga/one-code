@@ -8,7 +8,7 @@ import { loadProjectInstructions } from "../../extensions/auto-mode/instructions
 import { buildClaudeMdBlock } from "../../extensions/lib/claude-context.ts";
 import { discoverContextFiles } from "../../profile/claude-code/instructions.ts";
 import { readInstructionFiles } from "../../extensions/lib/claude-settings.ts";
-import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
+import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
 import { classifierInstructionNote, skippedInstructionNote } from "../../extensions/lib/instruction-budget.ts";
 import { estimateTextTokens } from "../../extensions/lib/pi-ai-estimate.ts";
 

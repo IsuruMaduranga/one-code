@@ -272,7 +272,7 @@ function worktreeExtension(pi: ExtensionAPI) {
 			const program = checkoutGitRunsProgram(repoRoot, homedir(), []);
 			if (program) return fail({ kind: "checkoutRunsProgram", program });
 
-			// `.onecode/worktrees` in independent mode (lib/config-mode.ts).
+			// `.onecode/worktrees` in independent mode (lib/sources.ts).
 			const worktreesDir = join(projectConfigDir(repoRoot), "worktrees");
 			mkdirSync(worktreesDir, { recursive: true });
 			// Self-ignoring directory: worktrees never show up as untracked files.

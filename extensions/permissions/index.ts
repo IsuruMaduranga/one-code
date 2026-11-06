@@ -1274,7 +1274,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 	 */
 	const firstOutsideRead = (ctx: ExtensionContext, toolName: string, path: string, signal = ctx.signal): Promise<"allow" | "block" | "ask_again"> => {
 		const home = os.homedir();
-		const settled = () => (outsideReadSeen ??= outsideReadPromptSeen(oneCodeSettingsPath(home), openSources(home).protectedFiles ?? []));
+		const settled = () => (outsideReadSeen ??= outsideReadPromptSeen(oneCodeSettingsPath(home), (openSources(home).protectedFiles ?? []).map((file) => file.path)));
 		if (!ctx.hasUI) return Promise.resolve("allow");
 		// Settled while this call waited (a parallel read's Block included).
 		if (settled()) return Promise.resolve(blockOutsideReads ? "block" : "allow");

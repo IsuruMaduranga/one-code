@@ -7,7 +7,7 @@ import { readLoopFile } from "../../extensions/background/loop-fire.ts";
 import { claudeResourcePaths } from "../../extensions/claude-compat/index.ts";
 import { hookSettingsPaths } from "../../extensions/hooks/settings.ts";
 import { readSettingsEnv } from "../../extensions/lib/claude-settings.ts";
-import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
+import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
 import { defaultDiscoverRoots, discoverPlugins, invalidatePluginsCache } from "../../extensions/lib/plugins.ts";
 import { promptTemplateFiles, scanSkills } from "../../extensions/lib/skill-scan.ts";
 import { configPaths } from "../../extensions/mcp/config.ts";

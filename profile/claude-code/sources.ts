@@ -6,12 +6,13 @@
  * process: it reads files through lib/ modules that a profile import must not
  * pull in early, and it holds no state.
  *
- * Independent mode (lib/config-mode.ts) switches the provider off: the view
+ * Independent mode (mode.ts) switches the provider off: the view
  * then only keeps Claude Code's locations out of every read, and the base's
  * own lists go through as they are.
  */
 
-import { CONFIG_MODE_KEY, claudeSourcesOn, configModeFromEnv, MODE_LABELS, savedConfigMode } from "../../extensions/lib/config-mode.ts";
+import { CONFIG_MODE_KEY, claudeSourcesOn, configModeFromEnv, MODE_LABELS, savedConfigMode } from "./mode.ts";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { findProjectConfigs } from "../../extensions/mcp/config.ts";
 import { claudeJsonPath, claudeUserDir, isClaudeLocation, tildify } from "../../extensions/lib/paths.ts";
@@ -22,7 +23,7 @@ import { claudeCodeInstructionView } from "./instructions.ts";
 /**
  * "Config sources": Claude-compatible (the provider on) or independent (off),
  * `configMode` in One Code's user settings or `ONECODE_CONFIG_MODE` for a run
- * (lib/config-mode.ts).
+ * (mode.ts).
  */
 const configSources: SourceSwitch = {
 	title: "Config sources",
@@ -38,6 +39,16 @@ const configSources: SourceSwitch = {
 		const claudeDir = env.CLAUDE_CONFIG_DIR ? `${env.CLAUDE_CONFIG_DIR} (CLAUDE_CONFIG_DIR)` : tildify(join(home, ".claude"), home);
 		return `Claude Code config read from: ${claudeDir} (never written)`;
 	},
+	// Independent mode leaves an organisation's policy file unapplied: say so.
+	offWarnings: () =>
+		claudeSourcesOn()
+			? []
+			: managedSettingsPaths()
+					.filter((path) => existsSync(path))
+					.map((path) => ({
+						text: `An organisation policy file exists at ${path}, and independent mode does not apply it.`,
+						fix: "Switch config sources to Claude-compatible in /memory if this machine's policy must hold.",
+					})),
 };
 
 export const sources: SourceProvider = {
@@ -64,7 +75,7 @@ export const sources: SourceProvider = {
 				{ path: join(cwd, ".claude", "settings.local.json"), scope: "local" },
 			],
 			mcpWhere: ".mcp.json in the project, ~/.claude.json",
-			protectedFiles: [claudeJsonPath(home)],
+			protectedFiles: [{ path: claudeJsonPath(home), label: "Claude Code's .claude.json" }],
 		};
 	},
 };
@@ -83,6 +94,6 @@ function claudeCodeSettings(base: SettingsFile[], cwd: string, home: string): Se
 		{ path: paths.project, scope: "project", owner: "borrowed", label: "project settings (checked in)" },
 		{ path: paths.local, scope: "local", owner: "borrowed", label: "project settings (local)" },
 		...own("local"),
-		...managedSettingsPaths().map((path): SettingsFile => ({ path, scope: "managed", owner: "borrowed", label: "managed settings" })),
+		...managedSettingsPaths().map((path): SettingsFile => ({ path, scope: "managed", owner: "borrowed", label: "managed settings (organisation policy)" })),
 	];
 }

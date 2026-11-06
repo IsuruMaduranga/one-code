@@ -211,7 +211,7 @@ const CATALOG_FILE_NAME = /(^|[/\\])(models-dev|openrouter|huggingface|refresh-f
 
 /** The session's settings ladder and state files for the floor: every file a source provider adds is a gate control. */
 export function sessionSettingsFiles(cwd: string, home: string): string[] {
-	return [...settingsSources(cwd, home).map((file) => file.path), ...(openSources(home).protectedFiles ?? [])];
+	return [...settingsSources(cwd, home).map((file) => file.path), ...(openSources(home).protectedFiles ?? []).map((file) => file.path)];
 }
 
 /**

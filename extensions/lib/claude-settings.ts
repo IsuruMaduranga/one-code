@@ -77,7 +77,7 @@ export function readInstructionFiles(home: string): InstructionFiles {
  * (its user file and its per-project file in its state dir), as the source
  * provider reshapes them (lib/sources.ts `settings`). One Code's provider
  * adds Claude Code's user, project, local and managed files around them;
- * independent mode (lib/config-mode.ts) and a product without a provider
+ * independent mode (lib/sources.ts) and a product without a provider
  * read the product's two alone. When no file is marked primary, the
  * product's user file is. Each consumer keeps the files its keys may come
  * from.

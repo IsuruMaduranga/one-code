@@ -48,7 +48,13 @@ export interface SourceView {
 	 * so each joins the auto-mode safety floor; a first-run prompt the user
 	 * answered there (the outside-read prompt) counts as answered.
 	 */
-	protectedFiles?: string[];
+	protectedFiles?: StateFile[];
+}
+
+/** Another tool's state file, and how /doctor names it. */
+export interface StateFile {
+	path: string;
+	label: string;
 }
 
 /** A skill folder and the scope its skills load under. */
@@ -144,6 +150,8 @@ export interface SourceSwitch {
 	fromEnv(): boolean;
 	/** /doctor's line on what the provider reads in this process, for `home` and the process environment. */
 	describe(opts: { home: string; env: Record<string, string | undefined> }): string;
+	/** /doctor's warnings about what the provider would apply that the off state leaves out (an organisation policy file); none while on. */
+	offWarnings?(opts: { home: string }): Array<{ text: string; fix: string }>;
 }
 
 export interface SwitchState {

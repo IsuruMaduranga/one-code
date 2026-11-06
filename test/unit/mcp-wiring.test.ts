@@ -32,7 +32,7 @@ function renderInEpoch(events: { emit(channel: string, data: unknown): void }, t
 }
 import { createFakeCtx, createFakePi, type FakePi, renderRequest } from "./helpers/fake-pi.ts";
 import { localCommandBlocks } from "../../extensions/lib/local-command.ts";
-import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
+import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
 
 interface Fixture {
 	tools?: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }>;

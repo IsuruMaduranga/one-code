@@ -10,7 +10,7 @@
  *   <cwd>/.mcp.json                   (project, checked in — walked up to the repo root)
  *   <cwd>/.claude/settings.local.json (project, personal)
  *
- * Independent mode (lib/config-mode.ts) reads none of the three Claude Code
+ * Independent mode (lib/sources.ts) reads none of the three Claude Code
  * files: plugins, registered servers and pi's two files only.
  *
  * Every file holds an `mcpServers` object. A stdio server has `command` (plus

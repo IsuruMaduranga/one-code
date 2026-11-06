@@ -26,7 +26,6 @@ const CHECKED: Record<string, string> = {
 	"auto-mode/safety-floor.ts": "protection: gate-control files stay on the floor in both modes",
 	"memory/entries.ts": "independent rows offer ONECODE.md and AGENTS.md",
 	"mcp/trust.ts": "reads One Code's files in independent mode",
-	"doctor/compat.ts": "reports what each source holds; the mode line says what is read",
 	"auto-mode/classifier-prompt.ts": "Claude Code's ruleset verbatim, regenerated, never hand-edited",
 	"profile/claude-code/instructions.ts": "One Code's instruction view: sources.ts opens it only in Claude-compatible mode",
 	"profile/claude-code/sources.ts": "One Code's source provider: in independent mode its view only keeps Claude Code's locations out",
