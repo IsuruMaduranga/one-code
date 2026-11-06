@@ -16,7 +16,8 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { findProjectConfigs } from "../../extensions/mcp/config.ts";
 import { claudeJsonPath, claudeUserDir, isClaudeLocation, tildify } from "../../extensions/lib/paths.ts";
-import { managedSettingsPaths, settingsPaths } from "../../extensions/lib/claude-settings.ts";
+import { managedSettingsPaths } from "../../extensions/lib/claude-settings.ts";
+import { settingsPaths } from "./settings.ts";
 import type { McpFile, SettingsFile, SourceProvider, SourceSwitch } from "../../extensions/lib/sources.ts";
 import { claudeCodeInstructionView } from "./instructions.ts";
 

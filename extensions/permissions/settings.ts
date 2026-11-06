@@ -18,14 +18,13 @@
  * Unknown keys in the files are preserved on write.
  */
 
-import { isRepoFile, readSettingsFile as readClaudeSettingsFile, settingsPaths, settingsSources } from "../lib/claude-settings.ts";
+import { isRepoFile, readSettingsFile as readClaudeSettingsFile, settingsSources } from "../lib/claude-settings.ts";
 import type { SettingsFile } from "../lib/sources.ts";
 import { readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
 import { resolve } from "node:path";
 import { expandTilde } from "../lib/paths.ts";
 import type { PermissionMode } from "./matcher.ts";
 
-export { settingsPaths };
 
 export interface PermissionSettings {
 	/** Allow rules from sources the user wrote or that outrank the repo (user, One Code, managed). */

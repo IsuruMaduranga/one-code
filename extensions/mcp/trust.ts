@@ -32,6 +32,7 @@ import { primarySettingsFile, readSettingsFile, settingsSources } from "../lib/c
 import { boundConsentItems } from "../lib/consent-preview.ts";
 import { consentStorePath } from "../lib/consent-stores.ts";
 import { processState } from "../lib/process-state.ts";
+import { tildify } from "../lib/paths.ts";
 import type { McpServer } from "./config.ts";
 import { escapeControlText } from "../lib/terminal-text.ts";
 
@@ -70,7 +71,7 @@ function definedInMcpjson(server: McpServer): boolean {
 
 /** The project file a consent-gated server comes from, as the dialog names it. */
 function configLabel(server: McpServer): string {
-	if (definedInLocalSettings(server)) return ".claude/settings.local.json";
+	if (definedInLocalSettings(server)) return `${basename(dirname(server.source))}/${basename(server.source)}`;
 	// pi's project file is `<dir>/<pi's config dir>/mcp.json`, `.pi/mcp.json` unless pi is rebranded.
 	return server.piOrigin === "project" ? `${basename(dirname(server.source))}/mcp.json` : ".mcp.json";
 }
@@ -80,7 +81,7 @@ function configLabels(servers: McpServer[]): string {
 	return [...new Set(servers.map(configLabel))].join(" and ");
 }
 
-/** A server defined in `.claude/settings.local.json` rather than a `.mcp.json`. */
+/** A server defined in a local settings file (`.claude/settings.local.json`) rather than a `.mcp.json`. */
 function definedInLocalSettings(server: McpServer): boolean {
 	return basename(server.source) === "settings.local.json";
 }
@@ -384,8 +385,9 @@ export async function approveMcpServers(
 		// hint names it only when one of those is waiting.
 		const fromMcpjson = pending.some(definedInMcpjson);
 		const sources = configLabels(pending);
+		const primary = primarySettingsFile(settingsSources(cwd, home));
 		deps.notify(
-			`Skipped ${pending.length} MCP server${pending.length === 1 ? "" : "s"} from ${sources} (${pending.map((s) => s.name).join(", ")}): not yet approved and no UI to ask. Approve once in an interactive session${fromMcpjson ? ", or set enabledMcpjsonServers in ~/.claude/settings.json" : ""}.`,
+			`Skipped ${pending.length} MCP server${pending.length === 1 ? "" : "s"} from ${sources} (${pending.map((s) => s.name).join(", ")}): not yet approved and no UI to ask. Approve once in an interactive session${fromMcpjson && primary ? `, or set enabledMcpjsonServers in ${tildify(primary.path, home)}` : ""}.`,
 		);
 		return { approved, withheld };
 	}

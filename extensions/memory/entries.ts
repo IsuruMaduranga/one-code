@@ -7,7 +7,8 @@
  * (lib/instructions.ts and the profile's provider: the single source of truth
  * for "what's loaded into context"), so this never
  * re-derives discovery or drifts from it. Layered on top, for the picker only:
- * the two always-offered primaries (global + project `CLAUDE.md`, created on
+ * the two always-offered primaries (the instruction targets: global + project
+ * `CLAUDE.md`, or `ONECODE.md` and `AGENTS.md` without a provider, created on
  * save), AGENTS.md **when a loaded file `@`-imports it** (a standalone AGENTS.md
  * is not in our context, so trimming it changes nothing — CC has no AGENTS.md
  * concept at all), and the auto-memory folder as the last entry.
@@ -28,6 +29,7 @@ import {
 	PROJECT_DESCRIPTOR,
 } from "../lib/instructions.ts";
 import { forwardSlashes, isRelativeInside, tildify } from "../lib/paths.ts";
+import { projectConfigDirName } from "../lib/sources.ts";
 import { tryReadFile } from "../lib/plugins.ts";
 
 export interface MemoryEntry {
@@ -123,7 +125,6 @@ export function buildMemoryEntries(opts: {
 
 	for (const d of ancestorDirs(cwd)) {
 		const isCwd = d === cwd;
-		const claude = join(d, "CLAUDE.md");
 		if (isCwd) {
 			// Project instructions, always offered (created on save).
 			const project = join(d, targets.project);
@@ -134,14 +135,14 @@ export function buildMemoryEntries(opts: {
 				kind: "file",
 				exists: discoveredPaths.has(project),
 			});
-		} else if (found.has(`${PROJECT_DESCRIPTOR}\0${d}`)) {
-			add({ title: disp(claude), path: claude, kind: "file", exists: true });
+		} else {
+			// A provider's project file in an ancestor directory, as discovery found it.
+			const project = found.get(`${PROJECT_DESCRIPTOR}\0${d}`);
+			if (project) add({ title: disp(project), path: project, kind: "file", exists: true });
 		}
 
-		if (found.has(`${LOCAL_DESCRIPTOR}\0${d}`)) {
-			const local = join(d, "CLAUDE.local.md");
-			add({ title: disp(local), path: local, kind: "file", exists: true });
-		}
+		const local = found.get(`${LOCAL_DESCRIPTOR}\0${d}`);
+		if (local) add({ title: disp(local), path: local, kind: "file", exists: true });
 
 		// AGENTS.md is editable when it's in context: the CLAUDE.md fallback for this
 		// directory (in `found`), or `@`-imported into a CLAUDE.md/ONECODE.md.
@@ -155,9 +156,9 @@ export function buildMemoryEntries(opts: {
 				exists: true,
 			});
 		}
-		// `.claude/AGENTS.md`, which the AGENTS.md fallback loads too.
-		const dotClaudeAgents = found.get(`${AGENTS_DESCRIPTOR}\0${join(d, ".claude")}`);
-		if (dotClaudeAgents) add({ title: disp(dotClaudeAgents), path: dotClaudeAgents, kind: "file", exists: true });
+		// An AGENTS.md in the project's config folder (`.claude/AGENTS.md`), which a provider may load too.
+		const configAgents = found.get(`${AGENTS_DESCRIPTOR}\0${join(d, projectConfigDirName())}`);
+		if (configAgents) add({ title: disp(configAgents), path: configAgents, kind: "file", exists: true });
 
 		const oneCode = found.get(`${ONECODE_DESCRIPTOR}\0${d}`);
 		if (oneCode) {

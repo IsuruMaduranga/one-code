@@ -37,41 +37,6 @@ export function managedSettingsPaths(platform: NodeJS.Platform = process.platfor
 	return [joinFor(claudeManagedDir(platform), "managed-settings.json")];
 }
 
-/** Claude Code's `instructionFiles` values (findings §57); the default is `claude-md-or-agents-md`. */
-export type InstructionFiles = "claude-md" | "claude-md-or-agents-md" | "claude-md-and-agents-md" | "managed-only";
-const INSTRUCTION_FILES: readonly InstructionFiles[] = ["claude-md", "claude-md-or-agents-md", "claude-md-and-agents-md", "managed-only"];
-const LEGACY_PROJECT_INSTRUCTIONS: Record<string, InstructionFiles> = {
-	none: "managed-only",
-	claude: "claude-md",
-	"agents-fallback": "claude-md-or-agents-md",
-	both: "claude-md-and-agents-md",
-};
-/** The AGENTS.md plugin's `pluginConfigs` keys: the id is inferred, so the bare name counts too. */
-const AGENTS_MD_PLUGIN_KEYS = ["cc-plugin-agents-md@builtin", "cc-plugin-agents-md"];
-
-/**
- * Claude Code's `instructionFiles` (findings §57): the AGENTS.md plugin's option
- * under `pluginConfigs[<id>].options`, from the user and managed settings
- * (Claude Code reads no project file for it), managed winning. The legacy
- * top-level `projectInstructions` applies only while `instructionFiles` is unset,
- * mapped as Claude Code maps it (an unknown string reads as `claude-md`).
- */
-export function readInstructionFiles(home: string): InstructionFiles {
-	let instructionFiles: InstructionFiles | undefined;
-	let legacy: InstructionFiles | undefined;
-	for (const path of [claudeUserSettingsPath(home), ...managedSettingsPaths()]) {
-		const file = readSettingsFile(path);
-		if (!file) continue;
-		const configs = file.pluginConfigs as Record<string, { options?: Record<string, unknown> }> | undefined;
-		for (const key of AGENTS_MD_PLUGIN_KEYS) {
-			const value = configs?.[key]?.options?.instructionFiles;
-			if (INSTRUCTION_FILES.includes(value as InstructionFiles)) instructionFiles = value as InstructionFiles;
-		}
-		if (typeof file.projectInstructions === "string") legacy = LEGACY_PROJECT_INSTRUCTIONS[file.projectInstructions] ?? "claude-md";
-	}
-	return instructionFiles ?? legacy ?? "claude-md-or-agents-md";
-}
-
 /**
  * The settings ladder, lowest precedence first: the product's own two files
  * (its user file and its per-project file in its state dir), as the source
@@ -107,14 +72,6 @@ export function sourceId(file: Pick<SettingsFile, "owner" | "scope">): string {
 	return `${file.owner}-${file.scope}`;
 }
 
-export function settingsPaths(cwd: string, home: string): { user: string; project: string; local: string } {
-	return {
-		user: claudeUserSettingsPath(home),
-		project: join(cwd, ".claude", "settings.json"),
-		local: join(cwd, ".claude", "settings.local.json"),
-	};
-}
-
 export function readSettingsFile(path: string): ClaudeSettingsFile | undefined {
 	if (!existsSync(path)) return undefined;
 	try {
@@ -146,13 +103,15 @@ export function readSettingsEnv(home: string): Record<string, string> {
 }
 
 /**
- * Claude Code's plugin enabled-state map (`{"name@marketplace": boolean}`),
- * merged across the three settings files — later files win per key.
+ * Another tool's plugin enabled-state map (`{"name@marketplace": boolean}`;
+ * One Code's provider: Claude Code's), merged across the ladder's borrowed
+ * user, project and local files — later files win per key.
  */
 export function readEnabledPlugins(cwd: string, home: string): Record<string, boolean> {
 	const merged: Record<string, boolean> = {};
-	const paths = settingsPaths(cwd, home);
-	for (const path of [paths.user, paths.project, paths.local]) {
+	// The borrowed user, project and local files: the tool whose plugin root is read keeps its enabled state there.
+	const borrowed = settingsSources(cwd, home).filter((file) => file.owner === "borrowed" && file.scope !== "managed");
+	for (const { path } of borrowed) {
 		const enabled = readSettingsFile(path)?.enabledPlugins;
 		if (!enabled || typeof enabled !== "object") continue;
 		for (const [key, value] of Object.entries(enabled)) {

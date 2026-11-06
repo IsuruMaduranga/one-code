@@ -767,7 +767,7 @@ mcp/trust.ts
 	"New MCP server found in ${…}: ${…}"
 	"${…} new MCP servers found in ${…}"
 	"Skipped ${…} MCP server${…} from ${…} (${…}): not yet approved and no UI to ask. Approve once in an interactive session${…}."
-	", or set enabledMcpjsonServers in ~/.claude/settings.json"
+	", or set enabledMcpjsonServers in ${…}"
 	"${…}\n\n${…}\n\nThese run on your machine."
 
 memory/entries.ts

@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadProjectInstructions } from "../../extensions/auto-mode/instructions.ts";
 import { buildClaudeMdBlock } from "../../extensions/lib/claude-context.ts";
 import { discoverContextFiles } from "../../profile/claude-code/instructions.ts";
-import { readInstructionFiles } from "../../extensions/lib/claude-settings.ts";
+import { readInstructionFiles } from "../../profile/claude-code/settings.ts";
 import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
 import { classifierInstructionNote, skippedInstructionNote } from "../../extensions/lib/instruction-budget.ts";
 import { estimateTextTokens } from "../../extensions/lib/pi-ai-estimate.ts";

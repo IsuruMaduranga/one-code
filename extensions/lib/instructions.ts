@@ -34,7 +34,7 @@ import { readExternalIncludesApproval } from "./claude-external-includes.ts";
 import { fitToWindow, type SkippedInstruction } from "./instruction-budget.ts";
 import type { InstructionSource } from "./context-text.ts";
 import { activeProfile, featureEnabled } from "./profile.ts";
-import { allowPathOf, type InstructionTargets, openSources } from "./sources.ts";
+import { allowPathOf, type InstructionTargets, openSources, projectConfigDirName } from "./sources.ts";
 
 /** One instruction section. Legacy content stays raw; new parsed files carry CC's trimmed startup body. */
 export interface ContextFile {
@@ -569,8 +569,9 @@ export function instructionFileNames(home: string = os.homedir()): string[] {
 export function projectInstructionFiles(opts: { cwd: string; home: string; homeOneCodeDir?: string }): string[] {
 	const stop = findGitRoot(opts.cwd) ?? opts.cwd;
 	const files = openInstructions(opts.home, undefined).paths({ cwd: opts.cwd, homeOneCodeDir: opts.homeOneCodeDir });
-	// The directory a file belongs to: `.claude/AGENTS.md` counts as its parent's.
-	const owner = (path: string) => (basename(dirname(path)) === ".claude" ? dirname(dirname(path)) : dirname(path));
+	// The directory a file belongs to: one in a project's config folder (`.claude/AGENTS.md`) counts as its parent's.
+	const configDir = projectConfigDirName();
+	const owner = (path: string) => (basename(dirname(path)) === configDir ? dirname(dirname(path)) : dirname(path));
 	return files
 		.filter(({ path, descriptor }) => !GLOBAL_SOURCES.has(descriptor) && isPathAtOrUnder(path, stop))
 		.map(({ path }) => path)

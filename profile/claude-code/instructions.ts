@@ -18,7 +18,7 @@
  */
 
 import { basename, dirname, join } from "node:path";
-import { type InstructionFiles, readInstructionFiles } from "../../extensions/lib/claude-settings.ts";
+import { type InstructionFiles, readInstructionFiles } from "./settings.ts";
 import { claudeManagedDir, claudeUserDir, isPathAtOrUnder, tryRealpath, absoluteFrom } from "../../extensions/lib/paths.ts";
 import { discoverRules, readRuleInstructions, type RuleFile, type RuleOptions } from "../../extensions/lib/claude-rules.ts";
 import { readExternalIncludesApproval } from "../../extensions/lib/claude-external-includes.ts";

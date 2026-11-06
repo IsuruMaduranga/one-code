@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { sources } from "../../profile/claude-code/sources.ts";
-import { readInstructionFiles } from "../../extensions/lib/claude-settings.ts";
+import { readInstructionFiles } from "../../profile/claude-code/settings.ts";
 import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
 
 /** A temp home whose ~/.claude/settings.json holds `settings` (CLAUDE_CONFIG_DIR unset in tests). */
