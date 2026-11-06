@@ -10,18 +10,7 @@ import { describe, expect, it } from "vitest";
 import { TOOL_FEATURES } from "../../extensions/lib/features.ts";
 import type { LiveTools } from "../../extensions/lib/live-tools.ts";
 import type { DescriptionForm } from "../../extensions/lib/tool-variants.ts";
-import { artifacts } from "../../profile/artifacts/index.ts";
-import { askUser } from "../../profile/ask-user/index.ts";
-import { autoMode } from "../../profile/auto-mode/index.ts";
-import { notifications } from "../../profile/notifications/index.ts";
-import { planMode } from "../../profile/plan-mode/index.ts";
-import { shell } from "../../profile/shell/index.ts";
-import { subagentModels } from "../../profile/subagent-models/index.ts";
-import { subagents } from "../../profile/subagents/index.ts";
-import { systemPrompt } from "../../profile/system-prompt/index.ts";
-import { toolSearch } from "../../profile/tool-search/index.ts";
-import { toolStyle } from "../../profile/tool-style/index.ts";
-import { workflow } from "../../profile/workflow/index.ts";
+import { profile } from "../../profile/index.ts";
 
 /** Phrases where a tool's name is an English word, not the tool. */
 const ENGLISH: Readonly<Record<string, readonly RegExp[]>> = {
@@ -34,32 +23,34 @@ const FORMS: DescriptionForm[] = ["short", "long"];
 
 /** Every text that names another tool: its label, the feature that owns it (its own tools may name each other), and the text. */
 function texts(live: LiveTools): [string, string | undefined, string][] {
+	const t = profile.text({ live });
+	const { systemPrompt, planMode, askUser, subagents, toolStyle, shell, notifications, workflow, artifacts, toolSearch, subagentModels, autoMode } = t as Required<typeof t>;
 	const out: [string, string | undefined, string][] = [];
 	const push = (label: string, owner: string | undefined, text: string) => out.push([label, owner, text]);
 	for (const tier of ["frontier", "workhorse", "cheap", "tiny"] as const) {
 		for (const taskTools of [true, false]) {
-			push(`systemPrompt ${tier}${taskTools ? "" : " no task tools"}`, undefined, systemPrompt.lead({ tier, taskTools: taskTools && live.has("task_create"), tools: undefined, live }).join("\n\n"));
+			push(`systemPrompt ${tier}${taskTools ? "" : " no task tools"}`, undefined, systemPrompt.lead({ tier, taskTools: taskTools && live.has("task_create"), tools: undefined }).join("\n\n"));
 		}
-		push(`systemPrompt tail ${tier}`, undefined, systemPrompt.tail({ tier, taskTools: live.has("task_create"), tools: undefined, live }).join("\n\n"));
+		push(`systemPrompt tail ${tier}`, undefined, systemPrompt.tail({ tier, taskTools: live.has("task_create"), tools: undefined }).join("\n\n"));
 	}
 	for (const form of FORMS) {
-		push(`enter_plan_mode ${form}`, "plan-mode", planMode.descriptions.enter_plan_mode(form, live));
-		push(`ask_user_question ${form}`, "ask-user", askUser.description(form, live));
-		push(`Agent ${form}`, "subagents", subagents.agentDescription({ form, configDir: ".claude", live }));
-		push(`write ${form}`, undefined, toolStyle.writeDescription(form, live));
+		push(`enter_plan_mode ${form}`, "plan-mode", planMode.descriptions.enter_plan_mode(form));
+		push(`ask_user_question ${form}`, "ask-user", askUser.description(form));
+		push(`Agent ${form}`, "subagents", subagents.agentDescription({ form, configDir: ".claude" }));
+		push(`write ${form}`, undefined, toolStyle.writeDescription(form));
 		for (const autoModeOn of [true, false]) {
-			for (const searchTools of [true, false]) push(`bash ${form}`, "bash", shell.bashDescription({ form, autoMode: autoModeOn, searchTools, live }));
+			for (const searchTools of [true, false]) push(`bash ${form}`, "bash", shell.bashDescription({ form, autoMode: autoModeOn, searchTools }));
 		}
 	}
-	push("exit_plan_mode", "plan-mode", planMode.descriptions.exit_plan_mode(live));
-	push("one-shot note", undefined, notifications.oneShotSession({ live }));
-	push("workflow", "workflow", workflow.description({ guideline: "medium", configured: false, live }));
-	push("workflow params", "workflow", JSON.stringify(workflow.params({ configDir: ".claude", live })));
-	push("artifact", "artifacts", artifacts.description({ live }));
-	push("tool_search", "tool-search", toolSearch.description({ live }));
-	push("model menu", undefined, subagentModels.menu({ lines: [], notes: [], live }));
-	push("refused model", undefined, subagentModels.refused({ model: "a/b", live }));
-	for (const firm of [true, false]) push(`auto-mode note${firm ? " firm" : ""}`, undefined, autoMode.systemNote({ firm, live }));
+	push("exit_plan_mode", "plan-mode", planMode.descriptions.exit_plan_mode);
+	push("one-shot note", undefined, notifications.oneShotSession);
+	push("workflow", "workflow", workflow.description({ guideline: "medium", configured: false }));
+	push("workflow params", "workflow", JSON.stringify(workflow.params({ configDir: ".claude" })));
+	push("artifact", "artifacts", artifacts.description);
+	push("tool_search", "tool-search", toolSearch.description);
+	push("model menu", undefined, subagentModels.menu({ lines: [], notes: [] }));
+	push("refused model", undefined, subagentModels.refused({ model: "a/b" }));
+	for (const firm of [true, false]) push(`auto-mode note${firm ? " firm" : ""}`, undefined, autoMode.systemNote({ firm }));
 	return out;
 }
 
@@ -93,8 +84,8 @@ describe("text naming another tool", () => {
 	});
 
 	it("is unchanged when every tool is on", () => {
-		const all: LiveTools = { has: () => true };
-		expect(planMode.descriptions.exit_plan_mode(all)).toContain("ask_user_question");
-		expect(askUser.description("short", all)).toContain("enter_plan_mode");
+		const all = profile.text({ live: { has: () => true } });
+		expect(all.planMode?.descriptions.exit_plan_mode).toContain("ask_user_question");
+		expect(all.askUser?.description("short")).toContain("enter_plan_mode");
 	});
 });

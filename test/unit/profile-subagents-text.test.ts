@@ -7,8 +7,12 @@
  * spawned-agents list, a missing run, an inline resume and a fork's framing.
  */
 import { describe, expect, it } from "vitest";
-import { subagentModels } from "../../profile/subagent-models/index.ts";
-import { subagents } from "../../profile/subagents/index.ts";
+import { subagentModelsText } from "../../profile/subagent-models/index.ts";
+import { subagentsText } from "../../profile/subagents/index.ts";
+import { ALL_LIVE } from "./helpers/live.ts";
+
+const subagentModels = subagentModelsText(ALL_LIVE);
+const subagents = subagentsText(ALL_LIVE);
 
 describe("One Code's subagent text", () => {
 	it("closes each catalog row with Claude Code's tools clause", () => {

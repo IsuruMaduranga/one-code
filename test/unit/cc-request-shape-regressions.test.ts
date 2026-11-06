@@ -6,12 +6,14 @@ import { wrapReminder } from "../../extensions/lib/reminders.ts";
 import { subagentHandbackExtension } from "../../extensions/lib/subagent-handback.ts";
 import { handback } from "../../profile/handback/index.ts";
 import { withToolAdditions } from "../../extensions/lib/tool-additions.ts";
-import { toolSearch } from "../../profile/tool-search/index.ts";
+import { toolSearchText } from "../../profile/tool-search/index.ts";
 
-const TOOLS_AVAILABLE = toolSearch.toolsAvailable;
+const TOOLS_AVAILABLE = toolSearchText(ALL_LIVE).toolsAvailable;
 import { withTurnBudgetMessages } from "../../extensions/lib/turn-budget-layout.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { ALL_LIVE } from "./helpers/live.ts";
+
 
 const BUDGET = "<total_tokens>15000000 tokens left</total_tokens>";
 const mark = { type: "ephemeral", ttl: "1h" };

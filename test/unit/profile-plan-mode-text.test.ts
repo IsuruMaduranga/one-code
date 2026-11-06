@@ -4,7 +4,10 @@
  * re-attach. The golden snapshot pins the bytes of every other text.
  */
 import { describe, expect, it } from "vitest";
-import { planMode } from "../../profile/plan-mode/index.ts";
+import { planModeText } from "../../profile/plan-mode/index.ts";
+import { ALL_LIVE } from "./helpers/live.ts";
+
+const planMode = planModeText(ALL_LIVE);
 
 describe("One Code's plan-mode text", () => {
 	it("keeps a session with no user in plan mode and says so", () => {

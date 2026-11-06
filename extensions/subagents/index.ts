@@ -21,7 +21,7 @@ import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../lib/child-writes.ts";
 import { canShowCustomUi } from "../lib/headless-output.ts";
 import { existsSync, mkdirSync, readdirSync, renameSync, writeFileSync, readFileSync } from "node:fs";
 import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, agentCronTools, agentOwnsCronJobs } from "../lib/agent-cron.ts";
-import { liveTools, profileText, toolLive } from "../lib/profile.ts";
+import { profileText, toolLive } from "../lib/profile.ts";
 import os from "node:os";
 import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
@@ -2095,7 +2095,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		...ccToolRenderers<{ subagent_type?: string; task?: string; prompt?: string; description?: string; action?: string }>("Agent", {
 			title: (a) => (a ? [a.subagent_type, a.description ?? a.task ?? a.prompt ?? a.action].filter(Boolean).join(": ") || undefined : undefined),
 		}),
-		description: words.agentDescription({ form: "short", configDir: projectConfigDirName(), live: liveTools }),
+		description: words.agentDescription({ form: "short", configDir: projectConfigDirName() }),
 		promptSnippet: words.agentPromptSnippet,
 		parameters: agentParams,
 		prepareArguments: prepareAgentArguments as (args: unknown) => SubagentParams,
@@ -2372,7 +2372,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			};
 		},
 	});
-	const setAgentForm = registerVariantTool<DescriptionForm>(pi, "short", (form) => ({ ...agentTool, description: words.agentDescription({ form, configDir: projectConfigDirName(), live: liveTools }) }));
+	const setAgentForm = registerVariantTool<DescriptionForm>(pi, "short", (form) => ({ ...agentTool, description: words.agentDescription({ form, configDir: projectConfigDirName() }) }));
 	followDescriptionForm(pi, setAgentForm);
 
 	const SendMessageParams = Type.Object({

@@ -49,6 +49,7 @@ import type { ToolResultsText } from "./tool-results-text.ts";
 import type { ToolCallCorruptionText } from "../tool-call-corruption/text.ts";
 import type { ShellText } from "./shell-text.ts";
 import type { FeatureId } from "./features.ts";
+import type { LiveTools } from "./live-tools.ts";
 
 /**
  * Every text the base shows the model, one group per feature that owns it.
@@ -144,6 +145,16 @@ export interface Profile {
 	 * tools, commands, reminders and prompt sections.
 	 */
 	childExtensions: readonly string[];
-	/** The model-facing text, by owning feature. */
-	text: ProfileText;
+	/**
+	 * The model-facing text, by owning feature, built once when the profile
+	 * resolves. `live` answers which tools the session can have (the features
+	 * and tool switches after the environment's off-switches), so text that
+	 * names another tool, results and refusals included, leaves out what is off.
+	 */
+	text(env: TextEnv): ProfileText;
+}
+
+/** What the profile's text is built for. */
+export interface TextEnv {
+	live: LiveTools;
 }

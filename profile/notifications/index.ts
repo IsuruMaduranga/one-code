@@ -8,6 +8,7 @@
 
 import type { NotificationsText, OneShotWork, TaskSummary } from "../../extensions/lib/notifications-text.ts";
 import { type ToolPassages, withoutOff } from "../live-tools.ts";
+import type { LiveTools } from "../../extensions/lib/live-tools.ts";
 
 export const AGENT_MESSAGE_OPENER = "Another Claude session sent a message:";
 
@@ -76,7 +77,8 @@ const ONE_SHOT_PASSAGES: ToolPassages = {
 	Agent: [", an agent"],
 };
 
-export const notifications: NotificationsText = {
+/** The group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
+export const notificationsText = (live: LiveTools): NotificationsText => ({
 	agentMessage: {
 		opener: AGENT_MESSAGE_OPENER,
 		openerMidTurn: AGENT_MESSAGE_OPENER_MID_TURN,
@@ -106,7 +108,7 @@ export const notifications: NotificationsText = {
 	 * work, notifications and questions a one-shot session cannot deliver
 	 * (2026-10-04 Codex battery).
 	 */
-	oneShotSession: ({ live }) => withoutOff(ONE_SHOT_SESSION, live, ONE_SHOT_PASSAGES),
+	oneShotSession: withoutOff(ONE_SHOT_SESSION, live, ONE_SHOT_PASSAGES),
 	interactiveSession:
 		"This session is interactive now, although its first message said it was one-shot: a user can reply, background work notifies you when it ends, scheduled jobs fire, and questions and plan approvals reach the user.",
 	// Claude Code 2.1.288's caveat, naming the harness the command ran in.
@@ -117,4 +119,4 @@ export const notifications: NotificationsText = {
 	userMessageMidTurn: ({ text }) =>
 		`The user sent a new message while you were working:\n${text}\n\nThis is how Claude Code surfaces messages the user sends mid-turn — within the running turn, often alongside the next tool result, rather than as a separate conversation turn. Address the message above as you continue this turn.`,
 	oneShotNote: (work) => `This is a one-shot session, so the ${ONE_SHOT_WORK[work]} ran to completion instead of in the background.`,
-};
+});

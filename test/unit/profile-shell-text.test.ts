@@ -6,7 +6,10 @@
  * bash blocks and both one-shot background results.
  */
 import { describe, expect, it } from "vitest";
-import { shell } from "../../profile/shell/index.ts";
+import { shellText } from "../../profile/shell/index.ts";
+import { ALL_LIVE } from "./helpers/live.ts";
+
+const shell = shellText(ALL_LIVE);
 
 describe("One Code's shell text", () => {
 	it("words a standalone sleep and one with work after it", () => {

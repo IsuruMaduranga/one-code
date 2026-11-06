@@ -13,6 +13,7 @@ import { checkoutProgram } from "../worktree/guard.ts";
 import { agentDescription } from "./agent-description.ts";
 import { guideAgent } from "./guide-agent.ts";
 import { type ToolPassages, withoutOff } from "../live-tools.ts";
+import type { LiveTools } from "../../extensions/lib/live-tools.ts";
 
 /**
  * The anti-fabrication sentence, carried by the RESULT of a background spawn
@@ -147,8 +148,9 @@ const AGENT_PASSAGES: ToolPassages = {
 	task_stop: TASK_TOOLS_PASSAGE,
 };
 
-export const subagents: SubagentsText = {
-	agentDescription: ({ form, configDir, live }) => withoutOff(agentDescription(form, configDir), live, AGENT_PASSAGES),
+/** The group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
+export const subagentsText = (live: LiveTools): SubagentsText => ({
+	agentDescription: ({ form, configDir }) => withoutOff(agentDescription(form, configDir), live, AGENT_PASSAGES),
 	agentPromptSnippet: "Delegate scoped work to a specialist agent in its own context",
 	agentParams: {
 		subagent_type:
@@ -284,4 +286,4 @@ export const subagents: SubagentsText = {
 	delegationWithdrawn: "The subagent delegation guidance previously shown for this conversation is no longer active.",
 	reviewTimedOut: "auto mode's review of this agent's actions did not finish before the report was delivered",
 	guideAgent,
-};
+});

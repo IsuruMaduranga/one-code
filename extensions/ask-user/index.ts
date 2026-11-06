@@ -17,7 +17,7 @@ import { Type } from "typebox";
 import { canShowCustomUi } from "../lib/headless-output.ts";
 import { ccToolRenderers, safeThemeBold, safeThemeInverse, safeThemePaint } from "../lib/tui-render.ts";
 import { registerFormTool } from "../lib/tool-variants.ts";
-import { liveTools, requireText } from "../lib/profile.ts";
+import { requireText } from "../lib/profile.ts";
 import { askThroughDialogs } from "./dialogs.ts";
 import type { Answer, Question } from "./questions.ts";
 import type { AskUserText } from "./text.ts";
@@ -55,7 +55,7 @@ function askUserExtension(pi: ExtensionAPI) {
 		...ccToolRenderers<{ questions?: Array<{ question?: string }> }>("Ask User", {
 			title: (a) => a?.questions?.[0]?.question,
 		}),
-		description: text.description("short", liveTools),
+		description: text.description("short"),
 		promptSnippet: text.promptSnippet,
 		parameters: askParams(text.params),
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -119,7 +119,7 @@ function askUserExtension(pi: ExtensionAPI) {
 			};
 		},
 	});
-	registerFormTool(pi, tool, (form) => text.description(form, liveTools));
+	registerFormTool(pi, tool, (form) => text.description(form));
 }
 
 export default feature("ask-user", askUserExtension);

@@ -8,7 +8,6 @@
  * ruleset (working-docs/features/profiles/plan.md, Phase 5).
  */
 
-import type { LiveTools } from "../lib/live-tools.ts";
 
 /** A classifier model that could not be used, and why. */
 export interface UnusableClassifier {
@@ -48,7 +47,7 @@ export interface FloorTarget {
 
 export interface AutoModeText {
 	/** The note for a session that opens in auto mode; `firm` for models that need the firmer wording. */
-	systemNote(p: { firm: boolean; live: LiveTools }): string;
+	systemNote(p: { firm: boolean }): string;
 	/** After the user grants denied calls in /permissions; `displays` names each call. */
 	permissionGranted(p: { displays: readonly string[] }): string;
 	classifierBlock(block: ClassifierBlock): string;

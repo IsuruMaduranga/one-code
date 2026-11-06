@@ -29,7 +29,7 @@
  */
 
 import { feature } from "../lib/feature.ts";
-import { liveTools, requireText } from "../lib/profile.ts";
+import { requireText } from "../lib/profile.ts";
 import { readFile, stat } from "node:fs/promises";
 import type { ExtensionAPI, ExtensionToolContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
@@ -78,7 +78,7 @@ function builtins(text: ToolStyleText): BuiltinSpec[] {
 			title: (a) => a?.path as string | undefined,
 			rejectedAs: "write",
 			write: true,
-			description: (form) => text.writeDescription(form, liveTools),
+			description: (form) => text.writeDescription(form),
 		},
 		{
 			label: "Update",

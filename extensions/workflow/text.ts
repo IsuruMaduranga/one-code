@@ -9,7 +9,6 @@
  */
 
 import type { WorkflowSizeGuideline } from "../lib/one-code-settings.ts";
-import type { LiveTools } from "../lib/live-tools.ts";
 
 /** A workflow call refused before any run starts. */
 export type WorkflowRefusal =
@@ -105,9 +104,9 @@ export interface RunReport {
 
 export interface WorkflowText {
 	/** `configured`: the guideline comes from the user's settings, not the default. */
-	description(p: { guideline: WorkflowSizeGuideline; configured: boolean; live: LiveTools }): string;
+	description(p: { guideline: WorkflowSizeGuideline; configured: boolean }): string;
 	/** `configDir` is the project config folder saved workflows live under (`.claude`). */
-	params(p: { configDir: string; live: LiveTools }): { script: string; name: string; args: string; scriptPath: string; resumeFromRunId: string; tokenBudget: string; sync: string };
+	params(p: { configDir: string }): { script: string; name: string; args: string; scriptPath: string; resumeFromRunId: string; tokenBudget: string; sync: string };
 	promptSnippet: string;
 	/** The one-shot reminder when the user's message says "ultracode". */
 	ultracodeReminder: string;

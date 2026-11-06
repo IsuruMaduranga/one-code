@@ -7,6 +7,7 @@
 import type { AgentFailure, AgentNotice, RunReport, RunStop, ScriptCallProblem, ScriptProblem, WorkflowRefusal, WorkflowText } from "../../extensions/workflow/text.ts";
 import { workflowDescription } from "./description.ts";
 import { type ToolPassages, withoutOff } from "../live-tools.ts";
+import type { LiveTools } from "../../extensions/lib/live-tools.ts";
 
 function refused(refusal: WorkflowRefusal): string {
 	switch (refusal.kind) {
@@ -172,11 +173,12 @@ const PARAM_PASSAGES: ToolPassages = {
 	edit: [["write/edit", "write"]],
 };
 
-export const workflow: WorkflowText = {
-	description: ({ guideline, configured, live }) => withoutOff(workflowDescription(guideline, configured), live, DESCRIPTION_PASSAGES),
+/** The group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
+export const workflowText = (live: LiveTools): WorkflowText => ({
+	description: ({ guideline, configured }) => withoutOff(workflowDescription(guideline, configured), live, DESCRIPTION_PASSAGES),
 	// Claude Code's parameter texts, with One Code's tool names; `name` also
 	// names the personal directory, and a run is stopped with /workflows stop.
-	params: ({ configDir, live }) => ({
+	params: ({ configDir }) => ({
 		script:
 			"Self-contained workflow script. Must begin with `export const meta = { name, description, phases }` (pure literal, no computed values) followed by the script body using agent()/parallel()/pipeline()/phase().",
 		name: `Name of a saved workflow from ${configDir}/workflows/ or ~/${configDir}/workflows/. Resolves to a self-contained script.`,
@@ -233,4 +235,4 @@ export const workflow: WorkflowText = {
 		description: "Return the final machine-readable result for this task. Call exactly once, as your last action.",
 		received: "Structured output received.",
 	},
-};
+});

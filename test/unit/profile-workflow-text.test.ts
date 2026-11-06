@@ -6,7 +6,10 @@
  * failure and a completed run's report.
  */
 import { describe, expect, it } from "vitest";
-import { workflow } from "../../profile/workflow/index.ts";
+import { workflowText } from "../../profile/workflow/index.ts";
+import { ALL_LIVE } from "./helpers/live.ts";
+
+const workflow = workflowText(ALL_LIVE);
 
 describe("One Code's workflow text", () => {
 	it("says a background run's result comes later and must not be predicted", () => {

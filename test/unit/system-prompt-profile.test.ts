@@ -20,7 +20,7 @@ const markers: SystemPromptText = {
 };
 
 const use = (systemPrompt: SystemPromptText) => {
-	const profile: Profile = { features: {}, tools: {}, childExtensions: [], text: { systemPrompt } };
+	const profile: Profile = { features: {}, tools: {}, childExtensions: [], text: () => ({ systemPrompt }) };
 	setActiveProfileForTest(resolveProfile(profile, {}, "/profile"));
 };
 

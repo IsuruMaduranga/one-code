@@ -5,7 +5,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import bashExtension from "../../extensions/bash/index.ts";
 import { startBackgroundBash } from "../../extensions/bash/background.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
-import { shell as text } from "../../profile/shell/index.ts";
+import { shellText } from "../../profile/shell/index.ts";
+import { ALL_LIVE } from "./helpers/live.ts";
+
+const text = shellText(ALL_LIVE);
 
 describe("background shell output survives the memory cap and spool failure", () => {
 	const dirs: string[] = [];

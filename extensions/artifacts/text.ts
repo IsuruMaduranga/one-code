@@ -5,7 +5,6 @@
  * .html extension, versions) stay in the base and reach the words as values.
  */
 
-import type { LiveTools } from "../lib/live-tools.ts";
 
 /** Why no browser opened: an SSH session, no graphical display, or the opener failed. */
 export type NoBrowser = "ssh" | "noDisplay" | "launchFailed";
@@ -57,7 +56,7 @@ export type StoreBusy =
 export interface ArtifactsText {
 	/** Thrown by the store; the tool reports it as the failure's own message. */
 	storeBusy(busy: StoreBusy): string;
-	description(p: { live: LiveTools }): string;
+	description: string;
 	params: { action: string; filePath: string; title: string; description: string; id: string; url: string; limit: string };
 	/** An `id` or `url` that names no artifact. */
 	noMatch(p: { ref: string }): string;

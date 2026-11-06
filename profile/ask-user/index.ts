@@ -8,6 +8,7 @@ import type { AskUserText } from "../../extensions/ask-user/text.ts";
 import type { Answer, Question } from "../../extensions/ask-user/questions.ts";
 import { ASK_PARAMS, askDescription } from "./description.ts";
 import { type ToolPassages, withoutOff } from "../live-tools.ts";
+import type { LiveTools } from "../../extensions/lib/live-tools.ts";
 
 /**
  * Claude Code's answer list: `"question"="answer"` per answered question, with
@@ -58,8 +59,9 @@ const ASK_PASSAGES: ToolPassages = {
 	exit_plan_mode: PLAN_MODE_PASSAGE,
 };
 
-export const askUser: AskUserText = {
-	description: (form, live) => withoutOff(askDescription(form), live, ASK_PASSAGES),
+/** The group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
+export const askUserText = (live: LiveTools): AskUserText => ({
+	description: (form) => withoutOff(askDescription(form), live, ASK_PASSAGES),
 	promptSnippet: "Ask the user to decide between options when genuinely blocked",
 	params: ASK_PARAMS,
 	noInteractiveUi:
@@ -70,4 +72,4 @@ export const askUser: AskUserText = {
 			? `The user cancelled without submitting. They had made these selections before cancelling (NOT submitted — do not treat them as final answers): ${answerPairs(partial)}.`
 			: "The user cancelled without answering.",
 	declined: formatDecline,
-};
+});

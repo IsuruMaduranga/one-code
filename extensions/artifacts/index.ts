@@ -26,7 +26,7 @@ import { tildify } from "../lib/paths.ts";
 import { sanitizeDisplayText, terminalLink } from "../lib/terminal-text.ts";
 import { resolveToolPath } from "../lib/tool-path.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
-import { liveTools, requireText } from "../lib/profile.ts";
+import { requireText } from "../lib/profile.ts";
 import type { ArtifactsText, NoBrowser, PublishBrowser, PublishProblem } from "./text.ts";
 import {
 	type ArtifactMeta,
@@ -127,7 +127,7 @@ function artifactsExtension(pi: ExtensionAPI) {
 				return terminalLink(tildify(path, homedir()), fileUrl(path));
 			},
 		}),
-		description: text.description({ live: liveTools }),
+		description: text.description,
 		parameters: Type.Object({
 			action: Type.Optional(StringEnum(["publish", "list", "open", "delete"] as const, { description: text.params.action })),
 			file_path: Type.Optional(Type.String({ description: text.params.filePath })),

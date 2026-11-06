@@ -7,6 +7,7 @@
 
 import type { SearchOutcome, ToolSearchText } from "../../extensions/tool-search/text.ts";
 import { type ToolPassages, withoutOff } from "../live-tools.ts";
+import type { LiveTools } from "../../extensions/lib/live-tools.ts";
 
 /** The notes about names that were not loadable, each starting with a space. */
 function notFoundNote({ missing, withdrawn }: Pick<SearchOutcome, "missing" | "withdrawn">): string {
@@ -27,8 +28,9 @@ const DESCRIPTION_PASSAGES: ToolPassages = {
 	notebook_edit: EXAMPLE_SELECT,
 };
 
-export const toolSearch: ToolSearchText = {
-	description: ({ live }) => withoutOff(DESCRIPTION, live, DESCRIPTION_PASSAGES),
+/** The group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
+export const toolSearchText = (live: LiveTools): ToolSearchText => ({
+	description: withoutOff(DESCRIPTION, live, DESCRIPTION_PASSAGES),
 	promptSnippet: "Load additional tool schemas on demand",
 	params: {
 		query: "Tool names (`select:a,b`) or keywords describing the capability needed",
@@ -65,4 +67,4 @@ export const toolSearch: ToolSearchText = {
 		`\`${name}\` failed with "Tool ${name} not found" because it is no longer available in this session, although it is still declared. Do not retry it; continue without it.`,
 	loaderUnavailable:
 		"tool_search is not available in this session, so it cannot load the deferred tools listed earlier in this conversation. Use only the tools defined for this session.",
-};
+});

@@ -7,7 +7,6 @@
  */
 
 import type { SubagentModelSource } from "./model-select.ts";
-import type { LiveTools } from "../lib/live-tools.ts";
 
 /** Where a choice in the resolution chain came from, other than the automatic pick and the session. */
 export type ChainSource = "call" | "agent" | "default";
@@ -49,7 +48,7 @@ export interface SubagentModelsText {
 	/** The user pinned the default with the setting; `otherProvider` is the session's spec when the pin is another provider's. */
 	settingPinned(p: { model: string; otherProvider?: string }): string;
 	/** A model this account refused, and the default it leaves (absent: the session's model). */
-	refused(p: { model: string; newDefault?: string; live: LiveTools }): string;
+	refused(p: { model: string; newDefault?: string }): string;
 	/** The models note in the first-message block: the menu lines and the notes about the default. */
-	menu(p: { lines: string[]; notes: string[]; live: LiveTools }): string;
+	menu(p: { lines: string[]; notes: string[] }): string;
 }

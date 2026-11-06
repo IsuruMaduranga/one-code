@@ -36,9 +36,11 @@ export interface ResolvedProfile {
 	tools: ReadonlyMap<string, ToolSwitch>;
 	/** The tools the profile turns off (`enabled: false`). */
 	disabledTools: ReadonlySet<string>;
+	/** Which tools the session can have: the switch is not off and the feature registering it (TOOL_FEATURES) is on. */
+	live: LiveTools;
 	/** Absolute entry files child sessions load after the base's own. */
 	childExtensionPaths: readonly string[];
-	/** The profile's model-facing text, as the profile wrote it. */
+	/** The profile's model-facing text, built for `live`. */
 	text: ProfileText;
 }
 
@@ -68,12 +70,21 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		if (sw?.deferred === true) problems.push(`"${name}" cannot be deferred`);
 	}
 	if (problems.length > 0) throw new Error(`Invalid profile: ${problems.join("; ")}.`);
+	const features = enabledFeatures(featureMap);
+	const disabledTools = new Set([...tools].filter(([, sw]) => sw.enabled === false).map(([name]) => name));
+	const live: LiveTools = {
+		has: (name) => {
+			const feature = TOOL_FEATURES[name];
+			return !disabledTools.has(name) && (feature === undefined || features.has(feature));
+		},
+	};
 	return {
-		features: enabledFeatures(featureMap),
+		features,
 		tools,
-		disabledTools: new Set([...tools].filter(([, sw]) => sw.enabled === false).map(([name]) => name)),
+		disabledTools,
+		live,
 		childExtensionPaths: profile.childExtensions.map((entry) => resolve(profileDir, entry)),
-		text: profile.text,
+		text: profile.text({ live }),
 	};
 }
 
@@ -132,9 +143,5 @@ export function isToolDisabled(name: string): boolean {
  * tool asks this and leaves out what is off.
  */
 export function toolLive(name: string): boolean {
-	const feature = TOOL_FEATURES[name];
-	return !isToolDisabled(name) && (feature === undefined || featureEnabled(feature));
+	return activeProfile().live.has(name);
 }
-
-/** `toolLive` as the value the profile's text functions take. */
-export const liveTools: LiveTools = { has: toolLive };

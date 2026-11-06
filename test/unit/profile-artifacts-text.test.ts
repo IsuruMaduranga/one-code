@@ -5,7 +5,10 @@
  * pins the bytes of every other artifact text.
  */
 import { describe, expect, it } from "vitest";
-import { artifacts } from "../../profile/artifacts/index.ts";
+import { artifactsText } from "../../profile/artifacts/index.ts";
+import { ALL_LIVE } from "./helpers/live.ts";
+
+const artifacts = artifactsText(ALL_LIVE);
 
 const page = { id: "report-a1b2c3", title: "Report", version: 1, created: true, url: "file:///s/view.html", file: "/s/index.html", galleryUrl: "file:///g.html" };
 

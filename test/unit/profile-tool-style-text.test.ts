@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { toolStyle } from "../../profile/tool-style/index.ts";
+import { toolStyleText } from "../../profile/tool-style/index.ts";
+import { ALL_LIVE } from "./helpers/live.ts";
+
+const toolStyle = toolStyleText(ALL_LIVE);
 
 describe("One Code's tool-style text", () => {
 	it("picks Write's short or long description by form", () => {
-		expect(toolStyle.writeDescription("short", { has: () => true })).toMatch(/^Writes a file to the local filesystem, overwriting if one exists\./);
-		expect(toolStyle.writeDescription("long", { has: () => true })).toMatch(/^Writes a file to the local filesystem\.\n\nUsage:/);
+		expect(toolStyle.writeDescription("short")).toMatch(/^Writes a file to the local filesystem, overwriting if one exists\./);
+		expect(toolStyle.writeDescription("long")).toMatch(/^Writes a file to the local filesystem\.\n\nUsage:/);
 	});
 
 	it("keeps pi's edit description and appends the read rule", () => {

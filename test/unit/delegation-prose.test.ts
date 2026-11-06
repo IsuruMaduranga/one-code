@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { subagents } from "../../profile/subagents/index.ts";
+import { subagentsText } from "../../profile/subagents/index.ts";
 
-const DELEGATION_STEER = subagents.delegationSteer;
+const DELEGATION_STEER = subagentsText(ALL_LIVE).delegationSteer;
 import { DELEGATE_STRICT } from "../../profile/system-prompt/low.ts";
 import { DELEGATING_WORK } from "../../profile/system-prompt/mid.ts";
+import { ALL_LIVE } from "./helpers/live.ts";
+
 
 /**
  * The delegation policy ships as three separately tuned prose registers — one

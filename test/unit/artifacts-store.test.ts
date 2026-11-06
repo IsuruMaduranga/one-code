@@ -29,7 +29,10 @@ import {
 } from "../../extensions/artifacts/store.ts";
 import { renderViewer } from "../../extensions/artifacts/viewer.ts";
 import { noDisplayReason, openerPlan } from "../../extensions/lib/open-browser.ts";
-import { artifacts } from "../../profile/artifacts/index.ts";
+import { artifactsText } from "../../profile/artifacts/index.ts";
+import { ALL_LIVE } from "./helpers/live.ts";
+
+const artifacts = artifactsText(ALL_LIVE);
 
 let base: string;
 let root: string;

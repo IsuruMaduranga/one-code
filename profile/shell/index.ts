@@ -9,6 +9,7 @@ import type { ShellBlock, ShellEnd, ShellText } from "../../extensions/lib/shell
 import { BASH_PARAMS, bashDescription } from "./bash-description.ts";
 import { powerShellToolDescription } from "./powershell-description.ts";
 import { type ToolPassages, withoutOff } from "../live-tools.ts";
+import type { LiveTools } from "../../extensions/lib/live-tools.ts";
 
 function blocked(block: ShellBlock): string {
 	switch (block.kind) {
@@ -81,9 +82,10 @@ const BASH_PASSAGES: ToolPassages = {
 	edit: [" - Edit files: Use edit (NOT sed/awk)\n"],
 };
 
-export const shell: ShellText = {
+/** The group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
+export const shellText = (live: LiveTools): ShellText => ({
 	powershellPrimary: "PowerShell is the primary shell on this machine: use the powershell tool for terminal operations (git, npm, build tools)",
-	bashDescription: ({ form, autoMode, searchTools, live }) => withoutOff(bashDescription(form, autoMode, searchTools), live, BASH_PASSAGES),
+	bashDescription: ({ form, autoMode, searchTools }) => withoutOff(bashDescription(form, autoMode, searchTools), live, BASH_PASSAGES),
 	bashParams: BASH_PARAMS,
 	powershellDescription: ({ edition }) => powerShellToolDescription(edition),
 	powershellParams: {
@@ -109,4 +111,4 @@ export const shell: ShellText = {
 	emptyOutput: "(no output — the command wrote nothing to stdout or stderr)",
 	earlierTruncated: "… (earlier output truncated)\n",
 	spoolLost: ({ keptChars }) => `[The command's spool file could not be written, so only the last ${keptChars.toLocaleString("en-US")} characters of its output were kept.]\n`,
-};
+});

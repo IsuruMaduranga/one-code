@@ -14,7 +14,7 @@
 
 import type { BuildSystemPromptOptions } from "@earendil-works/pi-coding-agent";
 import type { PromptTier } from "../lib/model-tier.ts";
-import { liveTools, profileText } from "../lib/profile.ts";
+import { profileText } from "../lib/profile.ts";
 import type { EnvironmentInfo } from "./environment.ts";
 import type { SystemPromptSection, SystemPromptSession } from "./text.ts";
 
@@ -62,7 +62,7 @@ export function buildClaudeCodeSystemPrompt(
 	extraSections: readonly SystemPromptSection[] = [],
 ): string {
 	const text = profileText().systemPrompt;
-	const session: SystemPromptSession = { tier, taskTools, tools: options.selectedTools, live: liveTools };
+	const session: SystemPromptSession = { tier, taskTools, tools: options.selectedTools };
 	const extra = (place: SystemPromptSection["place"]) =>
 		extraSections.filter((section) => section.place === place).flatMap((section) => section.render(session) ?? []);
 	const { tools, guidelines } = toolListInputs(options);

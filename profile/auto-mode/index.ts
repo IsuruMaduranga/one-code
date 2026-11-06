@@ -6,6 +6,7 @@
 
 import type { AutoModeText, ClassifierBlock, FloorTarget } from "../../extensions/auto-mode/text.ts";
 import { type ToolPassages, withoutOff } from "../live-tools.ts";
+import type { LiveTools } from "../../extensions/lib/live-tools.ts";
 
 const OPUS_NOTE =
 	"While auto mode is active:\n\n" +
@@ -70,8 +71,9 @@ const NOTE_PASSAGES: ToolPassages = {
 	edit: [["the dedicated read, edit, or write tools", "the dedicated read or write tools"], ["prefer edit or write when", "prefer write when"]],
 };
 
-export const autoMode: AutoModeText = {
-	systemNote: ({ firm, live }) => withoutOff(firm ? FABLE_NOTE : OPUS_NOTE, live, NOTE_PASSAGES),
+/** The group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
+export const autoModeText = (live: LiveTools): AutoModeText => ({
+	systemNote: ({ firm }) => withoutOff(firm ? FABLE_NOTE : OPUS_NOTE, live, NOTE_PASSAGES),
 	permissionGranted: ({ displays }) =>
 		`Permission granted for: ${displays.join(", ")}. You may now retry ${displays.length === 1 ? "this command" : "these commands"} if you would like.`,
 	classifierBlock,
@@ -84,4 +86,4 @@ export const autoMode: AutoModeText = {
 		}
 		return `${opening} Writes to the gate's own configuration are never auto-approved. Do not retry or route around this; ask the user to make the change themselves.`;
 	},
-};
+});

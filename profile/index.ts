@@ -9,9 +9,9 @@
  */
 
 import type { Profile } from "../extensions/lib/profile-contract.ts";
-import { artifacts } from "./artifacts/index.ts";
-import { askUser } from "./ask-user/index.ts";
-import { autoMode } from "./auto-mode/index.ts";
+import { artifactsText } from "./artifacts/index.ts";
+import { askUserText } from "./ask-user/index.ts";
+import { autoModeText } from "./auto-mode/index.ts";
 import { background } from "./background/index.ts";
 import { btw } from "./btw/index.ts";
 import { compaction } from "./compaction/index.ts";
@@ -28,25 +28,25 @@ import { mcp } from "./mcp/index.ts";
 import { memory } from "./memory/index.ts";
 import { nativeWeb } from "./native-web/index.ts";
 import { notebook } from "./notebook/index.ts";
-import { notifications } from "./notifications/index.ts";
+import { notificationsText } from "./notifications/index.ts";
 import { permissions } from "./permissions/index.ts";
-import { planMode } from "./plan-mode/index.ts";
+import { planModeText } from "./plan-mode/index.ts";
 import { plugins } from "./plugins/index.ts";
 import { recap } from "./recap/index.ts";
 import { sessionTitle } from "./session-title/index.ts";
-import { shell } from "./shell/index.ts";
+import { shellText } from "./shell/index.ts";
 import { skill } from "./skill/index.ts";
-import { subagentModels } from "./subagent-models/index.ts";
-import { subagents } from "./subagents/index.ts";
-import { systemPrompt } from "./system-prompt/index.ts";
+import { subagentModelsText } from "./subagent-models/index.ts";
+import { subagentsText } from "./subagents/index.ts";
+import { systemPromptText } from "./system-prompt/index.ts";
 import { tasks } from "./tasks/index.ts";
 import { toolCallCorruption } from "./tool-call-corruption/index.ts";
 import { toolResults } from "./tool-results/index.ts";
-import { toolSearch } from "./tool-search/index.ts";
-import { toolStyle } from "./tool-style/index.ts";
+import { toolSearchText } from "./tool-search/index.ts";
+import { toolStyleText } from "./tool-style/index.ts";
 import { webFetch } from "./web-fetch/index.ts";
 import { webSearch } from "./web-search/index.ts";
-import { workflow } from "./workflow/index.ts";
+import { workflowText } from "./workflow/index.ts";
 import { worktreeGuard } from "./worktree/guard.ts";
 import { worktree } from "./worktree/index.ts";
 
@@ -54,5 +54,46 @@ export const profile: Profile = {
 	features: {},
 	tools: {},
 	childExtensions: [],
-	text: { systemPrompt, notebook, askUser, tasks, worktree, worktreeGuard, webFetch, webSearch, nativeWeb, sessionTitle, init, btw, recap, effort, planMode, skill, mcp, lsp, hooks, memory, background, artifacts, toolStyle, contextBudget, fileTracker, compaction, workflow, autoMode, shell, doctor, notifications, toolResults, toolCallCorruption, context, toolSearch, permissions, handback, subagentModels, subagents, plugins },
+	text: ({ live }) => ({
+		systemPrompt: systemPromptText(live),
+		notebook,
+		askUser: askUserText(live),
+		tasks,
+		worktree,
+		worktreeGuard,
+		webFetch,
+		webSearch,
+		nativeWeb,
+		sessionTitle,
+		init,
+		btw,
+		recap,
+		effort,
+		planMode: planModeText(live),
+		skill,
+		mcp,
+		lsp,
+		hooks,
+		memory,
+		background,
+		artifacts: artifactsText(live),
+		toolStyle: toolStyleText(live),
+		contextBudget,
+		fileTracker,
+		compaction,
+		workflow: workflowText(live),
+		autoMode: autoModeText(live),
+		shell: shellText(live),
+		doctor,
+		notifications: notificationsText(live),
+		toolResults,
+		toolCallCorruption,
+		context,
+		toolSearch: toolSearchText(live),
+		permissions,
+		handback,
+		subagentModels: subagentModelsText(live),
+		subagents: subagentsText(live),
+		plugins,
+	}),
 };

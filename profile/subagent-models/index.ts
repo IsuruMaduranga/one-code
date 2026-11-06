@@ -68,7 +68,8 @@ function notice(n: SubagentModelNotice): string {
 	}
 }
 
-export const subagentModels: SubagentModelsText = {
+/** The group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
+export const subagentModelsText = (live: LiveTools): SubagentModelsText => ({
 	notice,
 	runsOn: ({ model, source }) => `This subagent runs on ${model} (${SOURCE[source]}).`,
 	costsMore: ({ model, price: dollars, session, sessionPrice }) =>
@@ -85,11 +86,11 @@ export const subagentModels: SubagentModelsText = {
 		(otherProvider
 			? ` — it is a different provider than this session (${otherProvider}), so a subagent's inherited transcript goes to that provider; pass a listed same-provider model to keep it here.`
 			: "."),
-	refused: ({ model, newDefault, live }) =>
+	refused: ({ model, newDefault }) =>
 		`Model ${model} is not usable on this account, so automatic selection skips it and the ${modelField(live)} \`model\` field should not name it. ` +
 		`The subagent default is now ${newDefault ?? "this session's model"}.`,
 	// Kept short: its tokens are paid on every request.
-	menu: ({ lines, notes, live }) =>
+	menu: ({ lines, notes }) =>
 		[
 			`Models for the ${modelField(live)} \`model\` field (omit it to use the default; set the default with /subagent):`,
 			...lines,
@@ -98,4 +99,4 @@ export const subagentModels: SubagentModelsText = {
 				'(haiku: the cheapest capable model, sonnet: the cheapest workhorse-class model, opus/fable: this session\'s model); "inherit" means the session model. ' +
 				"Any exact provider/model-id the user asked for also works, even from another provider (that is announced to the user) or unlisted here — this is a menu, not a whitelist.",
 		].join("\n"),
-};
+});

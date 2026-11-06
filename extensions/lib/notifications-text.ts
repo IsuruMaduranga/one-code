@@ -9,7 +9,6 @@
  */
 
 import type { TaskStatus } from "./notifications.ts";
-import type { LiveTools } from "./live-tools.ts";
 
 /** A task notification's `<summary>`. */
 export type TaskSummary =
@@ -47,7 +46,7 @@ export interface NotificationsText {
 	/** Above each task notification; `withUserTurn` when it rides a genuine user message. */
 	preamble: { alone: string; withUserTurn: string };
 	/** Said before a one-shot session's first call. */
-	oneShotSession(p: { live: LiveTools }): string;
+	oneShotSession: string;
 	/** Said when a session whose first message said one-shot runs interactively. */
 	interactiveSession: string;
 	/** Heads a result a one-shot session ran to its end. */

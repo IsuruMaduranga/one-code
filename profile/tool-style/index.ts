@@ -10,6 +10,7 @@
 
 import type { ToolStyleText } from "../../extensions/tool-style/text.ts";
 import { type ToolPassages, withoutOff } from "../live-tools.ts";
+import type { LiveTools } from "../../extensions/lib/live-tools.ts";
 
 export const WRITE_SHORT_DESCRIPTION = `Writes a file to the local filesystem, overwriting if one exists.
 
@@ -28,8 +29,9 @@ const WRITE_PASSAGES: ToolPassages = {
 	edit: [" For partial changes, use edit instead.", "\n- Prefer the edit tool for modifying existing files — it only sends the diff. Only use this tool to create new files or for complete rewrites."],
 };
 
-export const toolStyle: ToolStyleText = {
-	writeDescription: (form, live) => withoutOff(form === "long" ? WRITE_LONG_DESCRIPTION : WRITE_SHORT_DESCRIPTION, live, WRITE_PASSAGES),
+/** The group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
+export const toolStyleText = (live: LiveTools): ToolStyleText => ({
+	writeDescription: (form) => withoutOff(form === "long" ? WRITE_LONG_DESCRIPTION : WRITE_SHORT_DESCRIPTION, live, WRITE_PASSAGES),
 	/**
 	 * pi's edit description plus the rule the file tracker enforces, which pi's
 	 * text does not state (write's does). Without it, GPT-6 models read with
@@ -37,4 +39,4 @@ export const toolStyle: ToolStyleText = {
 	 */
 	editDescription: ({ base }) =>
 		`${base} The file must have been read in this conversation, with the read tool or a shell command that printed the whole file as it is on disk (such as cat), or the edit is refused; if it changed on disk since, read it again first.`,
-};
+});

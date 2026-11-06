@@ -11,7 +11,10 @@ import {
 } from "../../extensions/bash/background.ts";
 import type { BackgroundTask } from "../../extensions/background/registry.ts";
 import { localPwsh } from "./helpers/local-pwsh.ts";
-import { shell as text } from "../../profile/shell/index.ts";
+import { shellText } from "../../profile/shell/index.ts";
+import { ALL_LIVE } from "./helpers/live.ts";
+
+const text = shellText(ALL_LIVE);
 
 function start(command: string, extra?: { timeoutSeconds?: number; logPath?: string }) {
 	let summary: BashFinishSummary | undefined;

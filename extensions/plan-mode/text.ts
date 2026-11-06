@@ -5,13 +5,12 @@
  */
 
 import type { DescriptionForm } from "../lib/tool-variants.ts";
-import type { LiveTools } from "../lib/live-tools.ts";
 
 export interface PlanModeText {
 	descriptions: {
 		/** Short on frontier and workhorse, long on cheap and tiny (lib/tool-variants.ts). */
-		enter_plan_mode(form: DescriptionForm, live: LiveTools): string;
-		exit_plan_mode(live: LiveTools): string;
+		enter_plan_mode(form: DescriptionForm): string;
+		exit_plan_mode: string;
 	};
 	/**
 	 * The plan-mode block carried while the mode lasts. `planExists` is decided

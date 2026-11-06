@@ -5,6 +5,7 @@
 
 import { type ToolPassages, withoutOff } from "../live-tools.ts";
 import type { ArtifactsText, NoBrowser, PublishBrowser, PublishProblem, ShownArtifact } from "../../extensions/artifacts/text.ts";
+import type { LiveTools } from "../../extensions/lib/live-tools.ts";
 
 const NO_BROWSER: Record<NoBrowser, string> = {
 	ssh: "this session runs over SSH",
@@ -69,7 +70,8 @@ const ARTIFACT_PASSAGES: ToolPassages = {
 	skill: ["\n\nBefore writing the page, load the `artifact-design` skill with the skill tool; it holds the page rules (title, both themes, phone-width layout, libraries). Write the page to one .html file (your scratchpad when there is one), then publish it with `file_path`. Keep it self-contained: inline the CSS and JS, load a library only as a pinned script from cdnjs.cloudflare.com or cdn.jsdelivr.net, fonts only from Google Fonts, and embed images as data: URIs. Only the one file is stored, so a relative link to another local file breaks."],
 };
 
-export const artifacts: ArtifactsText = {
+/** The group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
+export const artifactsText = (live: LiveTools): ArtifactsText => ({
 	storeBusy: (busy) => {
 		switch (busy.kind) {
 			case "creating":
@@ -84,7 +86,7 @@ export const artifacts: ArtifactsText = {
 				return `Another session is publishing the artifact "${busy.id}". Delete it again in a moment.`;
 		}
 	},
-	description: ({ live }) => withoutOff(ARTIFACT_DESCRIPTION, live, ARTIFACT_PASSAGES),
+	description: withoutOff(ARTIFACT_DESCRIPTION, live, ARTIFACT_PASSAGES),
 	params: {
 		action: "What to do. Defaults to publish.",
 		filePath: "publish: the .html file to store.",
@@ -119,4 +121,4 @@ export const artifacts: ArtifactsText = {
 			browserLine(browser),
 			`Gallery of all artifacts: ${galleryUrl}`,
 		].join("\n"),
-};
+});

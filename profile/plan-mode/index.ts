@@ -9,6 +9,7 @@ import type { PlanModeText } from "../../extensions/plan-mode/text.ts";
 import { buildPlanModeReminder } from "./reminder.ts";
 import { approvedPlanText, enteredPlanModeText, enterPlanModeDescription, EXIT_PLAN_MODE_DESCRIPTION, exitedPlanModeText } from "./texts.ts";
 import { type ToolPassages, withoutOff } from "../live-tools.ts";
+import type { LiveTools } from "../../extensions/lib/live-tools.ts";
 
 const CONTINUE = "If this plan is relevant to the current work and not already complete, continue working on it.";
 
@@ -20,10 +21,11 @@ const EXIT_PASSAGES: ToolPassages = {
 	ask_user_question: ["- If you have unresolved questions about requirements or approach, use ask_user_question first (in earlier phases)\n", "**Important:** Do NOT use ask_user_question to ask \"Is this plan okay?\" or \"Should I proceed?\" - that's exactly what THIS tool does. exit_plan_mode inherently requests user approval of your plan.\n", "3. Initial task: \"Add a new feature to handle user authentication\" - If unsure about auth method (OAuth, JWT, etc.), use ask_user_question first, then use exit plan mode tool after clarifying the approach.\n", "4. Use ask_user_question if you need to clarify the approach\n"],
 };
 
-export const planMode: PlanModeText = {
+/** The group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
+export const planModeText = (live: LiveTools): PlanModeText => ({
 	descriptions: {
-		enter_plan_mode: (form, live) => withoutOff(enterPlanModeDescription(form), live, ENTER_PASSAGES),
-		exit_plan_mode: (live) => withoutOff(EXIT_PLAN_MODE_DESCRIPTION, live, EXIT_PASSAGES),
+		enter_plan_mode: (form) => withoutOff(enterPlanModeDescription(form), live, ENTER_PASSAGES),
+		exit_plan_mode: withoutOff(EXIT_PLAN_MODE_DESCRIPTION, live, EXIT_PASSAGES),
 	},
 	reminder: ({ planFile, planExists }) => buildPlanModeReminder(planFile, planExists),
 	entered: enteredPlanModeText,
@@ -37,4 +39,4 @@ export const planMode: PlanModeText = {
 		content === undefined
 			? `A plan file exists from plan mode at: ${planFile}\n\nIt is too large to include here (${chars.toLocaleString("en-US")} characters); read it before continuing.\n\n${CONTINUE}`
 			: `A plan file exists from plan mode at: ${planFile}\n\nPlan contents:\n\n${content}\n\n${CONTINUE}`,
-};
+});

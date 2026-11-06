@@ -7,7 +7,6 @@
  */
 
 import type { DescriptionForm } from "./tool-variants.ts";
-import type { LiveTools } from "./live-tools.ts";
 
 /** The PowerShell edition the description is written for. */
 export type PowerShellEditionName = "core" | "desktop" | "unknown";
@@ -46,7 +45,7 @@ export interface ShellText {
 	/** `searchTools`: the session has the dedicated grep, find and ls tools. */
 	/** The system prompt guideline when PowerShell is the primary shell (Claude Code names it so). */
 	powershellPrimary: string;
-	bashDescription(p: { form: DescriptionForm; autoMode: boolean; searchTools: boolean; live: LiveTools }): string;
+	bashDescription(p: { form: DescriptionForm; autoMode: boolean; searchTools: boolean }): string;
 	bashParams: ShellParams;
 	powershellDescription(p: { edition: PowerShellEditionName }): string;
 	powershellParams: ShellParams;
