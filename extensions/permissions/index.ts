@@ -146,34 +146,15 @@ import { builtinRuleCounts } from "../auto-mode/rules.ts";
 import { autoModeSystemNote } from "../auto-mode/system-note.ts";
 import { announceArgumentHint } from "../lib/argument-hints.ts";
 import { userDenialText } from "../lib/user-denial.ts";
+import type { PermissionRefusal } from "./text.ts";
+import { permissionWords } from "./words.ts";
 import { liveUiCtx } from "../lib/tui-render.ts";
 
 /** Shown when a permission prompt is held behind an open panel (serializePrompt). */
 const PROMPT_WAITS_FOR_PANEL = "A permission request is waiting. Close this panel to answer it.";
 
-const DENIED_NON_INTERACTIVE =
-	"Permission required but this session is non-interactive, so the user cannot approve the call. It was blocked. Only pre-approved tools can run here; work within those, or ask the user to re-run interactively or with an allow rule / --dangerously-skip-permissions.";
-// Must agree with the plan-mode reminder (profile/plan-mode/reminder.ts): the plan is
-// built in the plan file and approved through exit_plan_mode, never presented
-// as chat text. A denial that said "present your plan to the user instead"
-// contradicted the reminder in the same turn.
-const DENIED_PLAN_MODE =
-	"You are in plan mode: only read-only tools may run, and edit/write are limited to the plan file. This call was blocked. Keep investigating with read-only tools and build the plan in the plan file named in the plan-mode reminder; finish the turn with ask_user_question or exit_plan_mode, not by presenting the plan as chat text.";
-/** A call to a tool the profile turned off (lib/profile.ts); it reaches the gate only by a stale or injected route. */
-const DENIED_PROFILE_DISABLED = "That tool is not available in this harness, so the call was blocked. Continue with the tools you have.";
-const DENIED_DONT_ASK =
-	"Permission mode is dontAsk: anything that would normally prompt the user is denied instead. Only pre-approved tools can run; work within those, or tell the user which allow rule would unblock you.";
-const DENIED_PROTECTED_PATH =
-	"That path is protected: it configures the user's tooling or this agent itself, so writes to it are never auto-approved and allow rules do not cover them. Achieve the goal another way, or ask the user to make the change.";
-/** A timed resume prompt nobody answered (Claude Code's denial-limit fallback timing). */
-const DENIED_UNANSWERED_RESUME =
-	"Auto mode is paused after repeated blocks, and nobody answered the approval prompt for this call in time, so it was denied to avoid blocking an unattended session. Do not retry it; continue with work that does not need it, or stop and wait for the user.";
-/** Claude Code's refusal when `blockReadsOutsideWorkingDirectories` is set. */
-const DENIED_BLOCKED_OUTSIDE_READ =
-	"That path is outside the working directories; the permissions.blockReadsOutsideWorkingDirectories setting blocks reads outside the working directories. Ask the user to add the directory with /add-dir, or to remove that setting.";
-/** Claude Code's refusal right after the user picks "block" in the first-read prompt. */
-const DENIED_CHOSE_BLOCK_OUTSIDE_READS =
-	"The user chose to block reads outside the working directories (permissions.blockReadsOutsideWorkingDirectories). Ask the user to add the directory with /add-dir, or to remove that setting.";
+/** Why the gate refused a call, in the profile's words (text.ts). */
+const refused = (refusal: PermissionRefusal): string => permissionWords().refused(refusal);
 /** Claude Code's first outside-read prompt in auto mode (2.1.282): title, question, answers. */
 const OUTSIDE_READ_TITLE = "Read outside the working directories";
 const OUTSIDE_READ_QUESTION = "Allow reads outside the working directories?";
@@ -185,41 +166,12 @@ const OUTSIDE_READ_ANSWERS = {
 /** Claude Code's explainer, without its sandbox sentences (One Code has no sandbox) and with One Code's settings file. */
 const OUTSIDE_READ_EXPLAINER = (settingsFile: string) =>
 	`Auto mode reads outside the working directories without asking. Yes or Block settles this question; Ask again asks on the next outside read. Block: the file tools refuse reads outside the working directories in every project. To undo, remove permissions.blockReadsOutsideWorkingDirectories from ${settingsFile}.`;
-const DENIED_OUTSIDE_WORKING_DIR =
-	"That path is outside the working directory, which needs the user's approval, and permission mode is dontAsk (anything that would prompt is denied instead). Work inside the project, or tell the user which allow rule (e.g. Read(~/dir/**)) would unblock you.";
-// Returned to the MODEL, not the user: auto mode exists to run unattended, so a
-// block is handed back so the model can accomplish the goal a safe way — mirrors
-// Claude Code's own auto-mode denial message rather than halting for a prompt.
-const DENIED_BY_CLASSIFIER = (reason: string) =>
-	`Permission for this action was denied by the auto-mode approval classifier. Reason: ${reason}\n\n` +
-	"If you have other tasks that don't depend on this action, continue with those. You *may* try to accomplish the goal a different, safe way (e.g. a less destructive command, or committing first so a change is recoverable), but do *not* try to work around or defeat this denial. If you believe this capability is essential, STOP and explain to the user what you were trying to do and why, and let them decide.";
-const BLOCKED_BY_TIMEOUT = (reason: string) =>
-	`${reason}\n\nThis was not a judgement that the call is unsafe. Wait a moment and try this action again. ` +
-	"If it keeps failing, continue with other tasks that do not require this action and come back to it later — " +
-	"reading files, searching code, and other read-only operations do not require the classifier and can still be used. " +
-	"Do not try to route around the gate; if this specific action is essential, tell the user what you were about to do so they can re-run interactively or switch the session model.";
-// The classifier ran but gave no verdict (a provider refusal or error, a
-// truncated reply, no usable model): not a denial, and nothing to route around.
-const BLOCKED_NOT_JUDGED = (reason: string) =>
-	`${reason}\n\nThis was not a judgement that the call is unsafe: the approval classifier gave no verdict, so the call did not run. ` +
-	"Do not rephrase it or route around the gate. Continue with other tasks that do not require this action — " +
-	"reading files, searching code, and other read-only operations do not require the classifier. " +
-	"If this action is essential, tell the user what you were about to do so they can re-run interactively or set another classifier model.";
 /** The text a classifier block hands the model: a timeout, a call never judged, or a denial. */
 const classifierBlockReason = (outcome: { tier?: string; noVerdict?: boolean; reason: string }): string =>
-	outcome.tier === "timeout"
-		? BLOCKED_BY_TIMEOUT(outcome.reason)
-		: outcome.noVerdict
-			? BLOCKED_NOT_JUDGED(outcome.reason)
-			: DENIED_BY_CLASSIFIER(outcome.reason);
-// "Choose a different approach" is exactly what a literal reader does with a
-// second command of the same effect: a tiny-tier model met `Bash(rm:*)` and
-// deleted the file with `python3 -c "import os; os.remove(…)"` 3/3 times
-// (WEAK-MODEL-REVIEW-2026-09-06 H2). A rule is the user's standing decision
-// about a CLASS of action, so the denial has to say that equivalents are denied
-// too — the wording the classifier's own denial already uses.
-const DENIED_BY_RULE = (rule: string) =>
-	`This tool call is denied by the permission rule "${rule}" in the user's settings. The rule is the user's standing decision about this class of action: do not retry it, and do not achieve the same effect another way (a different command, a script, or another tool). Continue with work that does not depend on it, and tell the user what was denied and by which rule.`;
+	refused({
+		kind: outcome.tier === "timeout" ? "classifierTimedOut" : outcome.noVerdict ? "classifierNoVerdict" : "classifierDenied",
+		reason: outcome.reason,
+	});
 
 /** The hidden message a /permissions retry starts its turn with. */
 const PERMISSION_RETRY_TYPE = "one-code:permission-retry";
@@ -246,19 +198,19 @@ const askTitle = (actor: string, preview: string, cause: string, pausedResume: b
 const denyReason = (result: { cause?: string; rule?: { raw?: string } }): string => {
 	switch (result.cause) {
 		case "plan-mode":
-			return DENIED_PLAN_MODE;
+			return refused({ kind: "planMode" });
 		case "protected-path":
-			return DENIED_PROTECTED_PATH;
+			return refused({ kind: "protectedPath" });
 		case "blocked-outside-read":
-			return DENIED_BLOCKED_OUTSIDE_READ;
+			return refused({ kind: "outsideReadsBlocked" });
 		case "working-dir":
-			return DENIED_OUTSIDE_WORKING_DIR;
+			return refused({ kind: "outsideWorkingDir" });
 		case "mode":
-			return DENIED_DONT_ASK;
+			return refused({ kind: "dontAsk" });
 		case "profile-disabled":
-			return DENIED_PROFILE_DISABLED;
+			return refused({ kind: "toolOff" });
 		default:
-			return DENIED_BY_RULE(result.rule?.raw ?? "deny");
+			return refused({ kind: "rule", rule: result.rule?.raw ?? "deny" });
 	}
 };
 
@@ -889,29 +841,20 @@ function permissionsExtension(pi: ExtensionAPI) {
 		// the change where it reads next. The standing block carries the rules
 		// from that point forward; the announcement also names the plan file
 		// (published by plan-mode's refresh inside the applyBadge broadcast above).
-		const planNote =
-			mode === "plan"
-				? planFilePath
-					? ` Only read-only tools are available now, plus one writable file: your plan file at ${planFilePath}. Build the plan there, then call exit_plan_mode.`
-					: " Only read-only tools are available now, plus the plan file named in the plan-mode reminder."
-				: "";
 		// Not at startup: "is now" beside the mode's own standing block read as a
 		// duplicate to both GPT-6 models in the 2026-10-04 self-test, and Claude
 		// Code announces only a switch. A startup that leaves the mode the branch
 		// recorded (a flag, a stored bypass that needs its flag again) is one.
 		if (!startup || (told !== undefined && told !== mode && requestOnBranch)) {
 			pi.events.emit(REMINDER_CHANNEL, {
-				text: `The user's permission mode is now "${mode}".${planNote}`,
+				text: permissionWords().modeChanged({ mode, planFile: planFilePath }),
 				key: "permission-mode-change",
 				toolCallId,
 			});
 		}
 		if (mode === "auto") {
 			pi.events.emit(REMINDER_CHANNEL, {
-				text:
-					"Auto mode is active: your tool calls run without per-action prompts, but each one is screened by an approval classifier that blocks anything irreversible, destructive, or aimed outside this environment. " +
-					"Work normally — do not narrate the classifier or try to phrase calls to get past it. If a call is blocked, take the block at face value: do not retry it, and do not reach the same result another way. Continue with work that does not depend on it, or explain what you were trying to do and let the user decide. " +
-					"Attempting to weaken this gate (editing permission settings, changing the mode, or routing work around it) is itself blocked.",
+				text: permissionWords().autoModeActive,
 				key: "permission-mode",
 				// Session state: rides every user message since auto mode came on, so
 				// the cached prefix holds turn to turn (lib/reminders.ts).
@@ -1261,7 +1204,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 	/** A context overflow judged nothing: ask once, or stop a headless turn. */
 	const transcriptOverflow = async (ctx: ExtensionContext, toolName: string, subject: string, signal = ctx.signal): Promise<ChildGateDecision> => {
 		if (!ctx.hasUI || ctx.mode === "print") {
-			const reason = "auto mode classifier transcript exceeded context window in headless mode";
+			const reason = refused({ kind: "classifierOverflowHeadless" });
 			ctx.ui.notify(`${reason}. Compact the session (/compact) and continue.`, "error");
 			// A failed one-shot run, not a user cancel (exit/index.ts).
 			pi.events.emit(TURN_FAILED_CHANNEL, { reason } satisfies TurnFailedEvent);
@@ -1284,7 +1227,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			), signal);
 			return { block: true, reason: userDenialText(feedback) };
 		}
-		return { block: true, reason: "Manual approval was not granted after the auto-mode classifier transcript exceeded its context window." };
+		return { block: true, reason: refused({ kind: "manualApprovalWithheld" }) };
 	};
 
 	/**
@@ -1344,7 +1287,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 	/** The block reason for a first-read prompt answered with Block or Ask again; undefined to run the read. */
 	const outsideReadRefusal = async (ctx: ExtensionContext, toolName: string, path: string, signal = ctx.signal): Promise<string | undefined> => {
 		const answer = await firstOutsideRead(ctx, toolName, path, signal);
-		return answer === "allow" ? undefined : answer === "block" ? DENIED_CHOSE_BLOCK_OUTSIDE_READS : userDenialText();
+		return answer === "allow" ? undefined : answer === "block" ? refused({ kind: "userBlockedOutsideReads" }) : userDenialText();
 	};
 
 	/**
@@ -1364,7 +1307,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		await bashParserReady();
 		const normalizedTool = normalizeToolName(event.toolName);
 		const conflict = isPathSubjectTool(normalizedTool) ? conflictingPathArguments(event.input as Record<string, unknown>) : undefined;
-		if (conflict) return { block: true, reason: conflict };
+		if (conflict) return { block: true, reason: refused({ kind: "conflictingPaths", fields: conflict }) };
 		const subject = extractSubject(normalizedTool, event.input as Record<string, unknown>);
 		// In a worktree session, worktree's tool_call handler (which runs before this
 		// one) cd-wraps bash commands for execution and publishes the model's
@@ -1596,7 +1539,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 
 		// ask
 		if (!ctx.hasUI) {
-			return { block: true, reason: DENIED_NON_INTERACTIVE };
+			return { block: true, reason: refused({ kind: "nonInteractive" }) };
 		}
 
 		const preview = previewSubject(matchSubject);
@@ -1618,10 +1561,10 @@ function permissionsExtension(pi: ExtensionAPI) {
 		const { choice, unanswered } = await askMaybeTimed(pausedResume, title, (show) => serializePrompt(show, ctx.signal), (text, timeout) =>
 			ctx.ui.select(text, askOptions(grant), { signal: ctx.signal, timeout }),
 		);
-		if (ctx.signal?.aborted) return { block: true, reason: "The turn was stopped while waiting for the user's approval." };
+		if (ctx.signal?.aborted) return { block: true, reason: refused({ kind: "stoppedWhileWaiting", who: "turn" }) };
 		if (unanswered) {
 			logDecision(ctx, { tool: event.toolName, subject: matchSubject, outcome: "block", source: "user", reason: "resume prompt unanswered" });
-			return { block: true, reason: DENIED_UNANSWERED_RESUME };
+			return { block: true, reason: refused({ kind: "unansweredResume" }) };
 		}
 
 		// The user's answer is itself a gate decision worth recording — it is the
@@ -1692,7 +1635,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		const { toolName, input, cwd } = call;
 		const normalizedTool = normalizeToolName(toolName);
 		const conflict = isPathSubjectTool(normalizedTool) ? conflictingPathArguments(input) : undefined;
-		if (conflict) return { block: true, reason: conflict };
+		if (conflict) return { block: true, reason: refused({ kind: "conflictingPaths", fields: conflict }) };
 		const subject = extractSubject(normalizedTool, input);
 		const resolvedSubject =
 			isPathSubjectTool(normalizedTool) && subject
@@ -1766,7 +1709,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		// handler's paused branch does — a pause is a full-session stop awaiting the
 		// user, and child work must not continue through it unattended.
 		if (!floorReason && result.decision === "classify" && !pauseTracker.isPaused()) {
-			if (!ctx) return { block: true, reason: DENIED_NON_INTERACTIVE };
+			if (!ctx) return { block: true, reason: refused({ kind: "nonInteractive" }) };
 			const appendEntry: TranscriptEntry = {
 				kind: "tool",
 				tool: normalizedTool,
@@ -1799,7 +1742,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		}
 
 		// ask: needs the user. Bubble it to the parent's terminal; no UI → fail closed.
-		if (!ctx || !ctx.hasUI) return { block: true, reason: DENIED_NON_INTERACTIVE };
+		if (!ctx || !ctx.hasUI) return { block: true, reason: refused({ kind: "nonInteractive" }) };
 		const preview = previewSubject(subject);
 		// Reaching here from the classify branch only happens while auto mode is
 		// paused — this is the resume prompt, not a per-action approval.
@@ -1818,10 +1761,10 @@ function permissionsExtension(pi: ExtensionAPI) {
 		const { choice, unanswered } = await askMaybeTimed(pausedResume, title, childPrompt, (text, timeout) =>
 			ctx.ui.select(text, askOptions(grant), { signal: call.signal, timeout }),
 		);
-		if (call.signal?.aborted) return { block: true, reason: "The agent was stopped while waiting for the user's approval." };
+		if (call.signal?.aborted) return { block: true, reason: refused({ kind: "stoppedWhileWaiting", who: "agent" }) };
 		if (unanswered) {
 			logDecision(ctx, { tool: toolName, subject, outcome: "block", source: "user", reason: "resume prompt unanswered" });
-			return { block: true, reason: DENIED_UNANSWERED_RESUME };
+			return { block: true, reason: refused({ kind: "unansweredResume" }) };
 		}
 
 		if (pausedResume) {
@@ -2386,7 +2329,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		};
 		reviewCompletedRun(payload.actions, ctx, label, new AbortController().signal, payload.startedBy)
 			.then(respondIfCurrent)
-			.catch((error) => respondIfCurrent({ kind: "unavailable", reason: `the review itself failed (${(error as Error).message})` }));
+			.catch((error) => respondIfCurrent({ kind: "unavailable", reason: permissionWords().reviewFailed({ osMessage: (error as Error).message }) }));
 	});
 
 	pi.on("tool_result", async (event, ctx) => {

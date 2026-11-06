@@ -25,6 +25,7 @@ import type { LspText } from "../lsp/text.ts";
 import type { McpText } from "../mcp/text.ts";
 import type { MemoryText } from "../memory/text.ts";
 import type { NotebookText } from "../notebook/text.ts";
+import type { PermissionsText } from "../permissions/text.ts";
 import type { PlanModeText } from "../plan-mode/text.ts";
 import type { RecapText } from "../recap/text.ts";
 import type { SessionTitleText } from "../session-title/text.ts";
@@ -94,6 +95,8 @@ export interface ProfileText {
 	context?: ContextText;
 	/** tool-search is part of the required core: a profile must supply it. */
 	toolSearch?: ToolSearchText;
+	/** The permission gate always runs: a profile must supply it. */
+	permissions?: PermissionsText;
 	/** Used by the worktree tools, subagents and workflows (each guards isolated sessions with it). */
 	worktreeGuard?: WorktreeGuardText;
 }

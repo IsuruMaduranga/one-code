@@ -48,6 +48,7 @@ import { decide, extractSubject, isPathSubjectTool, normalizeToolName, type Perm
 import { projectAllowApproved } from "../permissions/project-trust.ts";
 import { loadPermissionSettings, normalizePermissionMode } from "../permissions/settings.ts";
 import type { PermissionBridge } from "../permissions/subagent-gate.ts";
+import { refusalText } from "../permissions/words.ts";
 import { resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
 
 /** A directory's realpath for containment, or the path itself when nothing about it resolves. */
@@ -196,7 +197,7 @@ export function permissionGateFactory(
 						});
 					}
 				} catch (error) {
-					return { block: true, reason: `Permission bridge failed (${(error as Error).message}); denied to fail safe.` };
+					return { block: true, reason: refusalText({ kind: "bridgeFailed", osMessage: (error as Error).message }) };
 				}
 
 				if (!scratchpadDirPath && sessionId) {
@@ -241,16 +242,16 @@ export function permissionGateFactory(
 					powershellParse,
 				});
 				if (result.decision === "allow") return undefined;
-				const ruleNote = result.rule ? ` (rule: ${result.rule.raw})` : "";
-				const outside = result.cause === "working-dir" ? " outside the working directory" : "";
+				const outsideWorkingDir = result.cause === "working-dir";
 				return {
 					block: true,
-					reason:
+					reason: refusalText(
 						result.decision === "deny"
-							? `Denied by permission rules${ruleNote}.`
+							? { kind: "childDenied", rule: result.rule?.raw }
 							: liveMode === "auto"
-								? `Auto mode's classifier is only reachable through the parent session, which this agent has no link to; a call${outside} is denied to fail safe.`
-								: `This action${outside} needs interactive approval, which is not available inside an in-process agent. Ask for it to be added to the allow rules, or work around it.`,
+								? { kind: "childNoClassifier", outsideWorkingDir }
+								: { kind: "childNeedsApproval", outsideWorkingDir },
+					),
 				};
 			});
 		},

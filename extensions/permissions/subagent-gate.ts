@@ -21,6 +21,7 @@
 
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { type BridgeWatchApi, watchBridge } from "../lib/bridge-watch.ts";
+import { refusalText } from "./words.ts";
 
 export const SUBAGENT_GATE_CHANNEL = "one-code:subagent-permission-gate";
 
@@ -65,7 +66,7 @@ export type PermissionBridge = (call: ChildToolCall) => Promise<ChildGateDecisio
 export function sessionPermissionBridge(evaluate: PermissionBridge, parentSignal: AbortSignal): PermissionBridge {
 	return async (call) => {
 		const signal = call.signal ? AbortSignal.any([parentSignal, call.signal]) : parentSignal;
-		const stopped: ChildGateDecision = { block: true, reason: "The agent or its parent permission session has stopped; denied to fail safe." };
+		const stopped: ChildGateDecision = { block: true, reason: refusalText({ kind: "childStopped" }) };
 		if (signal.aborted) return stopped;
 		const result = await evaluate({ ...call, signal });
 		return signal.aborted ? stopped : result;

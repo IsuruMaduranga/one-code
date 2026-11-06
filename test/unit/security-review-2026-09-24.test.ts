@@ -44,10 +44,10 @@ const verdict = (command: string) => analyze(command).verdict;
 
 describe("H1: one target per file-tool call", () => {
 	it("names the conflict when path fields disagree, and only then", () => {
-		expect(conflictingPathArguments({ path: "/outside.txt", file_path: "ordinary.txt" })).toMatch(/`path` and `file_path`/);
+		expect(conflictingPathArguments({ path: "/outside.txt", file_path: "ordinary.txt" })).toEqual(["path", "file_path"]);
 		expect(conflictingPathArguments({ path: "a.txt", file_path: "a.txt" })).toBeUndefined();
 		expect(conflictingPathArguments({ path: "a.txt" })).toBeUndefined();
-		expect(conflictingPathArguments({ file_path: "a.txt", notebook_path: "b.ipynb" })).toMatch(/`file_path` and `notebook_path`/);
+		expect(conflictingPathArguments({ file_path: "a.txt", notebook_path: "b.ipynb" })).toEqual(["file_path", "notebook_path"]);
 	});
 
 	it("blocks a write whose file_path is in-project and whose path is not, in the real auto-mode gate", async () => {
