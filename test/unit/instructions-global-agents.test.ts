@@ -5,7 +5,7 @@
  * Claude Code's `instructionFiles` rule, with ~/.claude/CLAUDE.md in the role
  * a project's CLAUDE.md has for its AGENTS.md (decisions/bi-fork.md).
  */
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -13,6 +13,7 @@ import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
 import { openInstructions, projectInstructionFiles } from "../../extensions/lib/instructions.ts";
 import { resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile.ts";
 import { profile } from "../../profile/index.ts";
+import { buildMemoryEntries } from "../../extensions/memory/entries.ts";
 
 let root: string;
 let home: string;
@@ -112,3 +113,26 @@ describe("the global AGENTS.md files without a provider", () => {
 		expect(files[1].content).toContain("ELSEWHERE");
 	});
 });
+
+describe("a global AGENTS.md that is also a project's", () => {
+	it("stays the project's own file, listed once", () => {
+		const checkout = join(root, "dotfiles");
+		const own = write(join(checkout, "AGENTS.md"), "dotfiles\n");
+		rmSync(userGlobal);
+		symlinkSync(own, userGlobal);
+		write(join(home, ".claude", "CLAUDE.md"), "claude global\n");
+		const files = openInstructions(home, undefined).sections({ cwd: checkout, includeExternal: false }).contextFiles;
+		expect(files.map((file) => [file.path, file.descriptor])).toEqual([
+			[join(home, ".claude", "CLAUDE.md"), "global"],
+			[own, "agents"],
+		]);
+	});
+});
+
+describe("/memory's rows", () => {
+	it("offer each global AGENTS.md the agent reads", () => {
+		const rows = buildMemoryEntries({ cwd, home, homeClaudeDir: join(home, ".claude"), homeOneCodeDir: join(home, ".onecode"), agentDir, memoryDir: undefined });
+		expect(rows.filter((row) => row.title === "Global AGENTS.md").map((row) => row.path)).toEqual([piGlobal, userGlobal]);
+	});
+});
+

@@ -3,8 +3,9 @@
  * warning — mirroring Claude Code's picker, extended to the files One Code also
  * loads. Pure (fs reads only), so ordering and labelling are unit-testable.
  *
- * The CLAUDE.md family and ONECODE.md come straight from `discoverContextFilePaths`
- * (the single source of truth for "what's loaded into context"), so this never
+ * The instruction files come straight from `openInstructions().paths`
+ * (lib/instructions.ts and the profile's provider: the single source of truth
+ * for "what's loaded into context"), so this never
  * re-derives discovery or drifts from it. Layered on top, for the picker only:
  * the two always-offered primaries (global + project `CLAUDE.md`, created on
  * save), AGENTS.md **when a loaded file `@`-imports it** (a standalone AGENTS.md
@@ -15,6 +16,7 @@
 import { basename, dirname, join, relative, resolve } from "node:path";
 import {
 	AGENTS_DESCRIPTOR,
+	AGENTS_GLOBAL_DESCRIPTOR,
 	ancestorDirs,
 	collectImportedPaths,
 	type ContextFilePath,
@@ -114,6 +116,10 @@ export function buildMemoryEntries(opts: {
 			kind: "file",
 			exists: true,
 		});
+	}
+	// The user's global AGENTS.md files the agent reads (pi's and ~/.agents/AGENTS.md), when it reads them.
+	for (const { path, descriptor } of discovered) {
+		if (descriptor === AGENTS_GLOBAL_DESCRIPTOR) add({ title: "Global AGENTS.md", description: `${disp(path)} (cross-tool)`, path, kind: "file", exists: true });
 	}
 
 	for (const d of ancestorDirs(cwd)) {

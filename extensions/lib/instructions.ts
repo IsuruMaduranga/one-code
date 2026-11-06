@@ -381,7 +381,9 @@ function globalAgentsFiles(home: string, agentDir: string | undefined): string[]
  * directory from the farthest ancestor its AGENTS.md and product file. The
  * product files are listed only with `homeOneCodeDir`, the AGENTS.md files
  * unless `agents` is false. Each kind is deduplicated by real path on its
- * own, so a product file linked to an AGENTS.md still rides its own block.
+ * own, so a product file linked to an AGENTS.md still rides its own block; a
+ * global AGENTS.md that is also a directory's (a home-directory checkout) is
+ * listed as that directory's.
  */
 export function basePaths(cwd: string, opts: { allowPath?: (path: string) => boolean; globals?: readonly string[]; homeOneCodeDir?: string; agents?: boolean } = {}): ContextFilePath[] {
 	const allowPath = opts.allowPath ?? (() => true);
@@ -396,9 +398,13 @@ export function basePaths(cwd: string, opts: { allowPath?: (path: string) => boo
 		seen.add(key);
 		paths.push({ path, descriptor });
 	};
-	if (agents) for (const path of opts.globals ?? []) push(path, AGENTS_GLOBAL_DESCRIPTOR);
+	const dirs = ancestorDirs(cwd);
+	if (agents) {
+		const projectFiles = new Set(dirs.map((dir) => join(dir, "AGENTS.md")).filter(isPresentFile).map((path) => tryRealpath(path) ?? path));
+		for (const path of opts.globals ?? []) if (!projectFiles.has(tryRealpath(path) ?? path)) push(path, AGENTS_GLOBAL_DESCRIPTOR);
+	}
 	if (product !== undefined) push(firstOneCodeFile(product), ONECODE_GLOBAL_DESCRIPTOR);
-	for (const dir of ancestorDirs(cwd)) {
+	for (const dir of dirs) {
 		if (agents) push(join(dir, "AGENTS.md"), AGENTS_DESCRIPTOR);
 		if (product !== undefined) push(firstOneCodeFile(dir), ONECODE_DESCRIPTOR);
 	}
@@ -423,9 +429,13 @@ function readSources(paths: readonly ContextFilePath[], home: string, readers: R
  */
 export function discoverOneCodeFiles(opts: { cwd: string; homeOneCodeDir: string; home: string; includeExternal?: boolean; allowPath?: (path: string) => boolean }): ContextFile[] {
 	const allowPath = opts.allowPath ?? openView(opts.home).allowPath;
-	const readers = importReaders(opts.cwd, allowPath);
-	const product = basePaths(opts.cwd, { allowPath, homeOneCodeDir: opts.homeOneCodeDir, agents: false });
-	return readSources(product, opts.home, readers, opts.includeExternal ? readers.anywhere : readers.inProject);
+	return readProductFiles(basePaths(opts.cwd, { allowPath, homeOneCodeDir: opts.homeOneCodeDir, agents: false }), opts.cwd, opts.home, allowPath, opts.includeExternal ?? false);
+}
+
+/** The product files among `paths`, read with their imports (outside the project only with `includeExternal`). */
+function readProductFiles(paths: readonly ContextFilePath[], cwd: string, home: string, allowPath: (path: string) => boolean, includeExternal: boolean): ContextFile[] {
+	const readers = importReaders(cwd, allowPath);
+	return readSources(paths.filter((entry) => PRODUCT_SOURCES.has(entry.descriptor)), home, readers, includeExternal ? readers.anywhere : readers.inProject);
 }
 
 /** A project ONECODE.md's imports outside the cwd, resolved by the expander that would load them. */
@@ -507,18 +517,22 @@ export function openInstructions(home: string, agentDir: string | undefined): In
 	const { allowPath } = view;
 	const globals = globalAgentsFiles(home, agentDir);
 	const productDir = (dir: string | undefined) => dir ?? oneCodeStateDir(process.env, home);
-	const agentsList = (cwd: string): BaseList<ContextFile> => {
-		const paths = basePaths(cwd, { allowPath, globals });
+	/** One walk for both blocks: the AGENTS.md list a provider reshapes (contents on demand) and the product files, read with the user's approval. */
+	const walk = (cwd: string, homeOneCodeDir: string | undefined, includeExternal: boolean | undefined) => {
+		const all = basePaths(cwd, { allowPath, globals, homeOneCodeDir: productDir(homeOneCodeDir) });
+		const paths = all.filter((entry) => AGENTS_SOURCES.has(entry.descriptor));
 		const readers = importReaders(cwd, allowPath);
-		return { paths, read: () => readSources(paths, home, readers, readers.inProject) };
+		const external = includeExternal ?? readExternalIncludesApproval(cwd, home).approved;
+		return {
+			agents: { paths, read: () => readSources(paths, home, readers, readers.inProject) } satisfies BaseList<ContextFile>,
+			product: () => readProductFiles(all, cwd, home, allowPath, external),
+			external,
+		};
 	};
 	return {
 		sections: ({ cwd, homeOneCodeDir, includeExternal }) => {
-			const external = includeExternal ?? readExternalIncludesApproval(cwd, home).approved;
-			return {
-				contextFiles: view.files(agentsList(cwd), { cwd, includeExternal: external }),
-				oneCodeFiles: discoverOneCodeFiles({ cwd, homeOneCodeDir: productDir(homeOneCodeDir), home, includeExternal: external, allowPath }),
-			};
+			const { agents, product, external } = walk(cwd, homeOneCodeDir, includeExternal);
+			return { contextFiles: view.files(agents, { cwd, includeExternal: external }), oneCodeFiles: product() };
 		},
 		paths: ({ cwd, homeOneCodeDir }) => {
 			const dir = productDir(homeOneCodeDir);
@@ -526,10 +540,11 @@ export function openInstructions(home: string, agentDir: string | undefined): In
 		},
 		nested: ({ filePath, cwd, includeExternal }) => view.nested(() => baseNestedFiles({ filePath, cwd, home, includeExternal, allowPath }), { filePath, cwd, includeExternal }),
 		externalIncludes: ({ cwd, homeOneCodeDir }) => view.externalIncludes(oneCodeExternalIncludes({ cwd, home, homeOneCodeDir: productDir(homeOneCodeDir), allowPath }), { cwd }),
-		classifier: ({ cwd, homeOneCodeDir }) => [
-			...view.classifier(agentsList(cwd), { cwd }),
-			...discoverOneCodeFiles({ cwd, homeOneCodeDir: productDir(homeOneCodeDir), home, allowPath }),
-		],
+		// The product files with the agent's approval, so the classifier never sees less of them than the agent.
+		classifier: ({ cwd, homeOneCodeDir }) => {
+			const { agents, product } = walk(cwd, homeOneCodeDir, undefined);
+			return [...view.classifier(agents, { cwd }), ...product()];
+		},
 	};
 }
 

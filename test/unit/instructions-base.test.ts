@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openInstructions } from "../../extensions/lib/instructions.ts";
+import { persistExternalIncludesApproval } from "../../extensions/lib/claude-external-includes.ts";
 import { resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile.ts";
 import { profile } from "../../profile/index.ts";
 
@@ -90,4 +91,14 @@ describe("the base's instruction files without a provider", () => {
 		expect(instructions.paths({ cwd, homeOneCodeDir: state })).toEqual([]);
 		expect(instructions.classifier({ cwd, homeOneCodeDir: state })).toEqual([]);
 	});
+
+	it("shows the classifier a product file's approved external imports, as the agent gets them", () => {
+		write(join(root, "rules.md"), "NEVER DEPLOY\n");
+		write(join(cwd, "ONECODE.md"), "@../../rules.md\n");
+		const classifierText = () => openInstructions(home, undefined).classifier({ cwd, homeOneCodeDir: state }).map((file) => file.content).join("\n");
+		expect(classifierText()).not.toContain("NEVER DEPLOY");
+		persistExternalIncludesApproval(cwd, home, true);
+		expect(classifierText()).toContain("NEVER DEPLOY");
+	});
 });
+

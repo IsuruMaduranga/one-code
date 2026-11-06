@@ -16,7 +16,7 @@
  * matching live in lib/claude-rules.ts (the format stays in the base).
  */
 
-import { basename, dirname, join, relative } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { type InstructionFiles, readInstructionFiles } from "../../extensions/lib/claude-settings.ts";
 import { claudeSourcesOn } from "../../extensions/lib/config-mode.ts";
 import { claudeManagedDir, claudeUserDir, isClaudeLocation, isPathAtOrUnder, tryRealpath, absoluteFrom } from "../../extensions/lib/paths.ts";
@@ -32,9 +32,9 @@ import {
 	type ClassifierFile,
 	type ContextFile,
 	type ContextFilePath,
-	expandImports,
 	expandWithImports,
 	firstOneCodeFile,
+	importReaders,
 	GLOBAL_DESCRIPTOR,
 	GLOBAL_SOURCES,
 	type InstructionProvider,
@@ -127,7 +127,9 @@ function discoverInstructionEntries(
 	const claudeFiles = rule !== "agents-md" && rule !== "managed-only";
 	const dirs = ancestorDirs(opts.cwd);
 	const base = opts.base ?? basePaths(opts.cwd, { homeOneCodeDir: opts.homeOneCodeDir });
+	// Keyed by the directory as join() spells it, so a cwd given with a trailing separator still matches.
 	const inDir = (descriptor: InstructionSource) => new Map(base.filter((entry) => entry.descriptor === descriptor).map((entry) => [dirname(entry.path), entry]));
+	const at = (dir: string) => dirname(join(dir, "AGENTS.md"));
 	const baseAgents = inDir(AGENTS_DESCRIPTOR);
 	// The product files ride in the list only when the caller asked for them (/memory, /doctor, the banner).
 	const baseOneCode = inDir(ONECODE_DESCRIPTOR);
@@ -173,7 +175,7 @@ function discoverInstructionEntries(
 			if (dirname(d) !== d) push(join(d, ".claude", "CLAUDE.md"), PROJECT_DESCRIPTOR);
 		}
 		if (agentsFiles) {
-			const agentsFile = baseAgents.get(d);
+			const agentsFile = baseAgents.get(at(d));
 			if (agentsFile) push(agentsFile.path, agentsFile.descriptor);
 			// `.claude/AGENTS.md` is a Claude Code location; independent mode reads none.
 			if (claudeFiles) push(join(d, ".claude", "AGENTS.md"), AGENTS_DESCRIPTOR);
@@ -182,7 +184,7 @@ function discoverInstructionEntries(
 			if (dirname(d) !== d) paths.push(...rules(join(d, ".claude", "rules"), "Project", PROJECT_DESCRIPTOR));
 			push(join(d, "CLAUDE.local.md"), LOCAL_DESCRIPTOR);
 		}
-		const oneCode = baseOneCode.get(d);
+		const oneCode = baseOneCode.get(at(d));
 		if (oneCode) push(oneCode.path, oneCode.descriptor);
 	}
 
@@ -233,8 +235,7 @@ export function nestedInstructionFiles(opts: {
 		[...ancestorDirs(opts.cwd), ...walked].some((dir) => dirHasClaudeMd(dir));
 	const agents = opts.rule === "agents-md" || opts.rule === "claude-md-and-agents-md" || (opts.rule === "claude-md-or-agents-md" && !projectHasClaude());
 	// Approved external chains use the reference parser below; the legacy fallback stays confined.
-	const readAllowed = (path: string) => (allowedLocation(path) ? readFileIfPresent(path) : null);
-	const readInProject = (path: string) => (inProject(tryRealpath(path)) ? readAllowed(path) : null);
+	const { anywhere: readAllowed, inProject: readInProject } = importReaders(opts.cwd, allowedLocation);
 	const seen = new Set<string>(realTarget ? [realTarget] : []);
 	const files: NestedFile[] = [];
 	const addRules = (rulesDir: string, scope: RuleOptions["scope"], conditional: boolean) => {
@@ -307,12 +308,7 @@ export function discoverContextFiles(opts: DiscoveryOptions & {
 	const contents = new Set<string>();
 	const emitted = new Set<string>();
 	const parsedShown = new Set<string>();
-	const realCwd = tryRealpath(opts.cwd) ?? opts.cwd;
-	const readAllowedImport = (path: string) => opts.rule !== "agents-md" || !isClaudeLocation(path, opts.homeClaudeDir) ? readFileIfPresent(path) : null;
-	const readProjectImport = (path: string) => {
-		const key = tryRealpath(path);
-		return key && isPathAtOrUnder(key, realCwd) ? readAllowedImport(path) : null;
-	};
+	const { anywhere: readAllowedImport, inProject: readProjectImport } = importReaders(opts.cwd, (path) => opts.rule !== "agents-md" || !isClaudeLocation(path, opts.homeClaudeDir));
 	const appendParsed = (file: RuleFile, descriptor: InstructionSource) => {
 		if (emitted.has(file.key)) return;
 		emitted.add(file.key);
