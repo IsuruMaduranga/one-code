@@ -35,6 +35,6 @@ describe("One Code's /doctor fix prompt", () => {
 
 	it("maps Claude Code's paths to One Code's own only in independent mode", () => {
 		expect(doctor.fixPrompt(input)).not.toContain("This session runs in independent mode");
-		expect(doctor.fixPrompt({ ...input, independent: true })).toContain("This session runs in independent mode");
+		expect(doctor.fixPrompt({ ...input, sourcesOff: true })).toContain("This session runs in independent mode");
 	});
 });

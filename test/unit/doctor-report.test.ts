@@ -6,6 +6,8 @@ import { buildDoctorReport, summarizeProviders } from "../../extensions/doctor/b
 import { collectModelFacts, modelsSection } from "../../extensions/doctor/models.ts";
 import { type DoctorEnvironment, type Finding, type RegistryView, renderDoctorReport, renderDoctorText } from "../../extensions/doctor/report.ts";
 import { TESTED_PI_MAX_EXCLUSIVE } from "../../extensions/lib/pi-version.ts";
+import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
+import { sourceSwitchStatus } from "../../extensions/lib/sources.ts";
 import { pinCatalog, pinReleaseDates } from "./catalog-fixture.ts";
 
 /** Minimal structural stand-in; the checks read provider/id/api/cost/contextWindow only. */
@@ -55,7 +57,7 @@ function environment(overrides: Partial<DoctorEnvironment> = {}): DoctorEnvironm
 		home,
 		agentDir: join(home, ".onecode", "agent"),
 		stateDir: join(home, ".onecode"),
-		configMode: "claude-compatible",
+		sources: sourceSwitchStatus(home, {}),
 		// A clean env: no provider keys, no CLAUDE_CONFIG_DIR, a PATH with nothing on it.
 		env: { PATH: join(home, "empty-bin"), HOME: home },
 		platform: "darwin",
@@ -170,7 +172,8 @@ describe("buildDoctorReport", () => {
 		const compatible = renderDoctorText(buildDoctorReport({ env: environment(), registry: registry(anthropic), session: { model: anthropic[1], modelSource: "session" } }), 200);
 		expect(compatible).toContain("Config sources: Claude-compatible (switch in /memory)");
 		expect(compatible).toContain("Claude Code config read from:");
-		const independent = renderDoctorText(buildDoctorReport({ env: environment({ configMode: "independent" }), registry: registry(anthropic), session: { model: anthropic[1], modelSource: "session" } }), 200);
+		resetConfigModeForTest("independent");
+		const independent = renderDoctorText(buildDoctorReport({ env: environment(), registry: registry(anthropic), session: { model: anthropic[1], modelSource: "session" } }), 200);
 		expect(independent).toContain("Config sources: Independent (switch in /memory)");
 		expect(independent).toContain("Claude Code config: not read");
 		expect(independent).not.toContain("Claude Code config read from:");

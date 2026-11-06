@@ -59,7 +59,7 @@ import { applyDoctorKey, decodeDoctorKey, type DoctorViewerState, renderDoctorVi
 import { announceArgumentHint, extendingCompletions } from "../lib/argument-hints.ts";
 import { announceLocalCommand } from "../lib/local-command.ts";
 import { registeredMcpServers } from "../mcp/config.ts";
-import { configMode } from "../lib/config-mode.ts";
+import { sourceSwitchStatus, sourcesOff } from "../lib/sources.ts";
 import { promptCommandText } from "../skill/invoke.ts";
 import { panelUi } from "../lib/panel-focus.ts";
 
@@ -155,7 +155,7 @@ function doctorExtension(pi: ExtensionAPI) {
 				home,
 				agentDir: getAgentDir(),
 				stateDir: oneCodeStateDir(process.env, home),
-				configMode: configMode(),
+				sources: sourceSwitchStatus(home),
 				env: process.env,
 				platform: process.platform,
 				arch: process.arch,
@@ -203,7 +203,7 @@ function doctorExtension(pi: ExtensionAPI) {
 			oneCodeSettingsPath: oneCodeSettingsPath(home),
 			oneCodeProjectSettingsPath: oneCodeProjectSettingsPath(ctx.cwd, home),
 			decisionLogEnabled: loadAutoModeConfig(home).logDecisions,
-			independent: configMode() === "independent",
+			sourcesOff: sourcesOff(),
 			modeCycleKey: modeCycleKey(),
 			upgradeCommands: UPGRADE_COMMANDS,
 		});

@@ -18,8 +18,8 @@ export interface FixPromptInput {
 	oneCodeProjectSettingsPath: string;
 	/** True when auto mode is writing `auto-mode-decisions.jsonl` next to the session files. */
 	decisionLogEnabled: boolean;
-	/** True in independent mode (lib/config-mode.ts), where none of Claude Code's files are read. */
-	independent?: boolean;
+	/** True when the profile's source provider is switched off (One Code's independent mode, lib/sources.ts `sourcesOff`). */
+	sourcesOff?: boolean;
 	/** The key that cycles permission modes, as the TUI names it. */
 	modeCycleKey: string;
 	/** The commands that upgrade each install. */

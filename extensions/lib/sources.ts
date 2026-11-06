@@ -116,6 +116,63 @@ export interface ConfigDirs {
 export interface SourceProvider {
 	/** A view for the settings in force now; a session keeps one from its startup block to its next refresh. */
 	open(opts: { home: string }): SourceView;
+	/** The user's switch for the provider, which /memory and /doctor show; absent, the provider is always on and no row shows. */
+	switch?: SourceSwitch;
+}
+
+/**
+ * The user's switch that turns a source provider off, leaving the base's own
+ * locations: One Code's "Config sources" (Claude-compatible or independent).
+ * It is fixed for the process; a change saved in /memory applies from the
+ * next start.
+ */
+export interface SourceSwitch {
+	/** The setting's name in /memory and /doctor: "Config sources". */
+	title: string;
+	/** Its key in the product's user settings file. */
+	key: string;
+	/** The environment variable that sets it for one run. */
+	envVar: string;
+	/** The two states: the value saved under `key`, the label, and what the product reads in it. */
+	on: SwitchState;
+	off: SwitchState;
+	/** Whether the provider is on in this process. */
+	running(): boolean;
+	/** Whether it is on in the saved setting, for the next start. */
+	saved(): boolean;
+	/** Whether `envVar` sets it in this process. */
+	fromEnv(): boolean;
+	/** /doctor's line on what the provider reads in this process, for `home` and the process environment. */
+	describe(opts: { home: string; env: Record<string, string | undefined> }): string;
+}
+
+export interface SwitchState {
+	value: string;
+	label: string;
+	reads: string;
+}
+
+/** The profile's source switch, if its provider has one. */
+export function sourceSwitch(): SourceSwitch | undefined {
+	return sourceProvider()?.switch;
+}
+
+/** The switch's state for /doctor: its title, the running state's label, and what the provider reads. Undefined without a switch. */
+export function sourceSwitchStatus(home: string, env: Record<string, string | undefined> = process.env): SwitchStatus | undefined {
+	const sw = sourceSwitch();
+	if (!sw) return undefined;
+	return { title: sw.title, label: (sw.running() ? sw.on : sw.off).label, detail: sw.describe({ home, env }) };
+}
+
+export interface SwitchStatus {
+	title: string;
+	label: string;
+	detail: string;
+}
+
+/** Whether the profile's provider is switched off in this process (One Code's independent mode). */
+export function sourcesOff(): boolean {
+	return sourceSwitch()?.running() === false;
 }
 
 /** The active profile's view for `home`, or the base's own (an empty view) when it has no provider. */

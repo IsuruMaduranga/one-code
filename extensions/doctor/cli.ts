@@ -18,7 +18,7 @@ import { loadPermissionSettings } from "../permissions/settings.ts";
 import { buildDoctorReport } from "./build.ts";
 import { type DoctorReport, renderDoctorText, type SessionView } from "./report.ts";
 import { lookupLatestVersion } from "./update-lookup.ts";
-import { configMode } from "../lib/config-mode.ts";
+import { sourceSwitchStatus } from "../lib/sources.ts";
 
 export interface DoctorCliOptions {
 	agentDir: string;
@@ -70,7 +70,7 @@ export async function collectDoctorCliReport(options: DoctorCliOptions): Promise
 			home,
 			agentDir,
 			stateDir: oneCodeStateDir(env, home),
-			configMode: configMode(),
+			sources: sourceSwitchStatus(home, env),
 			env,
 			platform: process.platform,
 			arch: process.arch,

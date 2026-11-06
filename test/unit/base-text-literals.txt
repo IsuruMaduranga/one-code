@@ -268,7 +268,6 @@ doctor/build.ts
 	"Running: the bundled onecode app ${…}${…}"
 	"Running: one-code-extension ${…} on your own pi${…}"
 	"pi agent dir: ${…} (auth, models, sessions, pi settings)"
-	"Claude Code config read from: ${…} (never written)"
 	"pi ${…} is outside the tested range ${…} – <${…}"
 	"Upgrade One Code (it pins a tested pi)."
 	"Update one-code-extension, or pin pi inside the tested range."
@@ -782,11 +781,10 @@ memory/entries.ts
 memory/index.ts
 	"View or edit CLAUDE.md and memory files"
 	"/memory editing is unavailable in RPC; use the TUI or open a listed path in your editor.\n\n"
-	"Config sources are set by ONECODE_CONFIG_MODE. Unset it to switch here."
+	"${…} are set by ${…}. Unset it to switch here."
 	"Auto-memory is set by CLAUDE_CODE_DISABLE_AUTO_MEMORY. Unset it to switch here."
 	"${…} sets ${…}: ${…}, which outranks your user setting. Change it there."
 	"Couldn't save the auto-memory setting: ${…}"
-	"Couldn't save the config sources setting: ${…}"
 
 memory/open-external.ts
 	"> ${…} To change editor, set $EDITOR or $VISUAL environment variable."
@@ -794,11 +792,8 @@ memory/open-external.ts
 
 memory/panel.ts
 	"; applies from the next start"
-	"~/.claude, CLAUDE.md, .agents and pi's dirs"
-	"~/.onecode, ONECODE.md, .agents and pi's dirs"
-	"Enter to open or toggle · ↑ for auto-memory and config sources · Esc to close"
-	"Set config sources to ${…}${…}"
-	"Switch config sources to ${…}? One Code will read ${…} instead, from the next start."
+	"Enter to open or toggle · ↑ for auto-memory${…} · Esc to close"
+	"Switch ${…} to ${…}? One Code will read ${…} instead, from the next start."
 
 model-default/index.ts
 	" and saved as your default for new sessions"

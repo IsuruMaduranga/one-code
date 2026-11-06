@@ -28,8 +28,7 @@ import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil
 import { claudeMdLimitWarning, combinedLimitWarning, projectMemoryDir } from "../lib/memory.ts";
 import { INDEX_MAX_CHARS, INDEX_MAX_LINES, indexLimitStatus, stampFrontmatter } from "../lib/memory-content.ts";
 import { requireText } from "../lib/profile.ts";
-import { type ConfigMode, CONFIG_MODE_KEY, configMode, configModeFromEnv, savedConfigMode } from "../lib/config-mode.ts";
-import { allowPathOf, openSources } from "../lib/sources.ts";
+import { allowPathOf, openSources, sourceSwitch } from "../lib/sources.ts";
 import { agentSkippedInstructions } from "../lib/instructions.ts";
 import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
 import { comparablePath, isPathAtOrUnder, oneCodeStateDir, tildify, tryRealpath } from "../lib/paths.ts";
@@ -186,13 +185,14 @@ function memoryExtension(pi: ExtensionAPI) {
 				ctx.ui.notify(stdout, "info");
 				return ctx.mode === "rpc" ? limitation.trim() : undefined;
 			}
-			const mode: ModeView = { running: configMode(), saved: savedConfigMode(), fromEnv: configModeFromEnv() !== undefined };
+			const sw = sourceSwitch();
+			const mode: ModeView | undefined = sw && { running: sw.running(), saved: sw.saved(), fromEnv: sw.fromEnv(), switch: sw };
 			const autoMemory: AutoMemoryView = {
 				running: autoMemoryEnabled(ctx.cwd),
 				saved: savedAutoMemory(ctx.cwd),
 				fromEnv: autoMemoryFromEnv() !== undefined,
 			};
-			const before = { mode: mode.saved, autoMemory: autoMemory.saved };
+			const before = { mode: mode?.saved, autoMemory: autoMemory.saved };
 			const chosen = await openMemoryPanel(pi.events, ctx, entries, mode, autoMemory);
 			// A toggle's line leads CC's result when it changed something.
 			const changes = settingChanges(before, mode, autoMemory);
@@ -223,13 +223,13 @@ function saveUserSetting(key: string, value: unknown): void {
 /**
  * Show the Memory panel as a focused overlay; resolve to the chosen entry or
  * null. The toggle rows save into `autoMemory.saved` and `mode.saved` (the
- * config-sources row after a confirming second Enter) and keep the panel up.
+ * switch's row after a confirming second Enter) and keep the panel up.
  */
 function openMemoryPanel(
 	events: ExtensionAPI["events"],
 	ctx: ExtensionContext,
 	entries: MemoryEntry[],
-	mode: ModeView,
+	mode: ModeView | undefined,
 	autoMemory: AutoMemoryView,
 ): Promise<MemoryEntry | null> {
 	return panelUi(events, ctx.ui).custom<MemoryEntry | null>((tui, theme, _keybindings, done) => {
@@ -254,11 +254,11 @@ function openMemoryPanel(
 			handleInput: (data: string) => {
 				const key = decodeMemoryKey(data);
 				if (!key) return;
-				const effect = applyMemoryKey(state, key, entries);
-				if (effect?.kind === "confirm-mode" && mode.fromEnv) {
+				const effect = applyMemoryKey(state, key, entries, mode !== undefined);
+				if (effect?.kind === "confirm-mode" && mode?.fromEnv) {
 					// The variable outranks the saved setting, so a write here would never apply.
 					state.confirmingMode = false;
-					ctx.ui.notify("Config sources are set by ONECODE_CONFIG_MODE. Unset it to switch here.", "info");
+					ctx.ui.notify(`${mode.switch.title} are set by ${mode.switch.envVar}. Unset it to switch here.`, "info");
 					repaint();
 					return;
 				}
@@ -283,13 +283,13 @@ function openMemoryPanel(
 					repaint();
 					return;
 				}
-				if (effect?.kind === "toggle-mode") {
-					const next: ConfigMode = mode.saved === "independent" ? "claude-compatible" : "independent";
+				if (effect?.kind === "toggle-mode" && mode) {
+					const next = !mode.saved;
 					try {
-						saveUserSetting(CONFIG_MODE_KEY, next);
+						saveUserSetting(mode.switch.key, (next ? mode.switch.on : mode.switch.off).value);
 						mode.saved = next;
 					} catch (error) {
-						ctx.ui.notify(`Couldn't save the config sources setting: ${error instanceof Error ? error.message : error}`, "error");
+						ctx.ui.notify(`Couldn't save the ${mode.switch.title.toLowerCase()} setting: ${error instanceof Error ? error.message : error}`, "error");
 					}
 					repaint();
 					return;

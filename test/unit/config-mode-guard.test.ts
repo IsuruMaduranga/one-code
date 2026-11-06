@@ -28,7 +28,6 @@ const CHECKED: Record<string, string> = {
 	"mcp/trust.ts": "reads One Code's files in independent mode",
 	"doctor/compat.ts": "reports what each source holds; the mode line says what is read",
 	"auto-mode/classifier-prompt.ts": "Claude Code's ruleset verbatim, regenerated, never hand-edited",
-	"doctor/build.ts": "the mode line names what is read",
 	"profile/claude-code/instructions.ts": "One Code's instruction view: sources.ts opens it only in Claude-compatible mode",
 	"profile/claude-code/sources.ts": "One Code's source provider: in independent mode its view only keeps Claude Code's locations out",
 	"profile/init/prompt.ts": "words only: the caller passes the target file (instructionTargets); INIT_PROMPT is the CLAUDE.md one",

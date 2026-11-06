@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { sources } from "../../profile/claude-code/sources.ts";
 import { describe, expect, it } from "vitest";
 import { claudeMdLimitWarning, combinedLimitWarning } from "../../extensions/lib/memory.ts";
 import type { MemoryEntry } from "../../extensions/memory/entries.ts";
@@ -11,11 +12,14 @@ import {
 	modeConfirmQuestion,
 	renderMemoryPanel,
 	settingChanges,
+	type ModeView,
 	type PanelPaint,
 } from "../../extensions/memory/panel.ts";
 
 const plainPaint: PanelPaint = { fg: (_c, t) => t, bold: (t) => t };
-const MODE = { running: "claude-compatible", saved: "claude-compatible" } as const;
+/** One Code's "Config sources" switch, true for Claude-compatible. */
+const view = (running: boolean, saved: boolean, fromEnv?: boolean): ModeView => ({ running, saved, ...(fromEnv ? { fromEnv } : {}), switch: sources.switch! });
+const MODE = view(true, true);
 
 const entries: MemoryEntry[] = [
 	{ title: "User instructions", description: "Saved in ~/.claude/CLAUDE.md", path: "/h/.claude/CLAUDE.md", kind: "file", exists: true },
@@ -134,17 +138,17 @@ describe("config-sources row", () => {
 
 	it("renders the saved mode, marks a pending change, and names the key", () => {
 		const state = initialMemoryState();
-		const same = renderMemoryPanel({ state, entries, width: 100, height: 20, mode: { running: "claude-compatible", saved: "claude-compatible" } }, plainPaint);
+		const same = renderMemoryPanel({ state, entries, width: 100, height: 20, mode: view(true, true) }, plainPaint);
 		expect(same.some((l) => l.startsWith("  Config sources: Claude-compatible") && l.includes("~/.claude, CLAUDE.md"))).toBe(true);
 		expect(same.join("\n")).toContain("↑ for auto-memory and config sources");
 		state.cursor = -1;
-		const pending = renderMemoryPanel({ state, entries, width: 100, height: 20, mode: { running: "claude-compatible", saved: "independent" } }, plainPaint);
+		const pending = renderMemoryPanel({ state, entries, width: 100, height: 20, mode: view(true, false) }, plainPaint);
 		expect(pending.some((l) => l.startsWith("❯ Config sources: Independent (from next start)"))).toBe(true);
 		expect(pending.some((l) => l.startsWith("❯ 1."))).toBe(false);
 	});
 
 	it("shows the running mode and its source when ONECODE_CONFIG_MODE sets it", () => {
-		const lines = renderMemoryPanel({ state: initialMemoryState(), entries, width: 100, height: 20, mode: { running: "independent", saved: "claude-compatible", fromEnv: true } }, plainPaint);
+		const lines = renderMemoryPanel({ state: initialMemoryState(), entries, width: 100, height: 20, mode: view(false, true, true) }, plainPaint);
 		expect(lines.some((l) => l.startsWith("  Config sources: Independent (set by ONECODE_CONFIG_MODE)"))).toBe(true);
 	});
 });
@@ -167,9 +171,9 @@ describe("auto-memory row", () => {
 	});
 
 	it("reports each changed toggle, and nothing when none changed", () => {
-		const before = { mode: "claude-compatible", autoMemory: true } as const;
+		const before = { mode: true, autoMemory: true };
 		expect(settingChanges(before, { ...MODE }, { running: true, saved: true })).toBe("");
-		expect(settingChanges(before, { running: "claude-compatible", saved: "independent" }, { running: true, saved: false })).toBe(
+		expect(settingChanges(before, view(true, false), { running: true, saved: false })).toBe(
 			"Turned auto-memory off; applies from the next start\nSet config sources to Independent; applies from the next start",
 		);
 	});
@@ -229,5 +233,20 @@ describe("memoryDisplayPath (CC 2.1.288 /memory)", () => {
 	it("leaves a path outside both as is", () => {
 		const elsewhere = join("/", "etc", "CLAUDE.md");
 		expect(memoryDisplayPath(elsewhere, cwd, home)).toBe(elsewhere);
+	});
+});
+
+describe("the /memory panel without a source switch", () => {
+	const entries: MemoryEntry[] = [{ title: "Project instructions", path: "/p/AGENTS.md", kind: "file", exists: true }];
+
+	it("shows no switch row, and ↑ stops at auto-memory", () => {
+		const state = initialMemoryState();
+		const lines = renderMemoryPanel({ state, entries, width: 100, height: 20 }, plainPaint).join("\n");
+		expect(lines).not.toContain("Config sources");
+		expect(lines).toContain("↑ for auto-memory · Esc to close");
+		applyMemoryKey(state, { kind: "up" }, entries, false);
+		applyMemoryKey(state, { kind: "up" }, entries, false);
+		expect(state.cursor).toBe(-1);
+		expect(applyMemoryKey(state, { kind: "enter" }, entries, false)).toEqual({ kind: "toggle-auto-memory" });
 	});
 });

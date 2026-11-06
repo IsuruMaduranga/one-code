@@ -11,15 +11,37 @@
  * own lists go through as they are.
  */
 
-import { claudeSourcesOn } from "../../extensions/lib/config-mode.ts";
+import { CONFIG_MODE_KEY, claudeSourcesOn, configModeFromEnv, MODE_LABELS, savedConfigMode } from "../../extensions/lib/config-mode.ts";
 import { join } from "node:path";
 import { findProjectConfigs } from "../../extensions/mcp/config.ts";
-import { claudeJsonPath, claudeUserDir, isClaudeLocation } from "../../extensions/lib/paths.ts";
+import { claudeJsonPath, claudeUserDir, isClaudeLocation, tildify } from "../../extensions/lib/paths.ts";
 import { managedSettingsPaths, settingsPaths } from "../../extensions/lib/claude-settings.ts";
-import type { McpFile, SettingsFile, SourceProvider } from "../../extensions/lib/sources.ts";
+import type { McpFile, SettingsFile, SourceProvider, SourceSwitch } from "../../extensions/lib/sources.ts";
 import { claudeCodeInstructionView } from "./instructions.ts";
 
+/**
+ * "Config sources": Claude-compatible (the provider on) or independent (off),
+ * `configMode` in One Code's user settings or `ONECODE_CONFIG_MODE` for a run
+ * (lib/config-mode.ts).
+ */
+const configSources: SourceSwitch = {
+	title: "Config sources",
+	key: CONFIG_MODE_KEY,
+	envVar: "ONECODE_CONFIG_MODE",
+	on: { value: "claude-compatible", label: MODE_LABELS["claude-compatible"], reads: "~/.claude, CLAUDE.md, .agents and pi's dirs" },
+	off: { value: "independent", label: MODE_LABELS.independent, reads: "~/.onecode, ONECODE.md, .agents and pi's dirs" },
+	running: claudeSourcesOn,
+	saved: () => savedConfigMode() === "claude-compatible",
+	fromEnv: () => configModeFromEnv() !== undefined,
+	describe({ home, env }) {
+		if (!claudeSourcesOn()) return "Claude Code config: not read (~/.claude, .claude/, CLAUDE.md, ~/.claude.json, managed settings)";
+		const claudeDir = env.CLAUDE_CONFIG_DIR ? `${env.CLAUDE_CONFIG_DIR} (CLAUDE_CONFIG_DIR)` : tildify(join(home, ".claude"), home);
+		return `Claude Code config read from: ${claudeDir} (never written)`;
+	},
+};
+
 export const sources: SourceProvider = {
+	switch: configSources,
 	open({ home }) {
 		const homeClaudeDir = claudeUserDir(home);
 		if (!claudeSourcesOn()) return { allowPath: (path) => !isClaudeLocation(path, homeClaudeDir) };
