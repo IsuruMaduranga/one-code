@@ -77,7 +77,7 @@ import { canShowCustomUi } from "../lib/headless-output.ts";
 import { sessionWorkCwd } from "../lib/worktree-channel.ts";
 import { followEnteredWorktree } from "../lib/worktree-isolation.ts";
 import { isKeyRelease, keyId } from "../lib/key-input.ts";
-import { projectConfigDirName } from "../lib/config-mode.ts";
+import { projectConfigDirName } from "../lib/sources.ts";
 import { panelUi } from "../lib/panel-focus.ts";
 import { dockRowsReporter, trackDockRows } from "../lib/dock-rows.ts";
 import { queryDeferred } from "../lib/deferred.ts";

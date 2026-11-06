@@ -37,7 +37,7 @@ import type { EnterWorktreeFailure, RemoveBlocker, WorktreeGuardRefusal } from "
 import { rewriteToolInput, validateWorktreeName } from "./rewrite.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 import { findProjectRoot, HARNESS_GIT_CONFIG, HARNESS_GIT_NO_HOOKS, repositoryWorktrees } from "../lib/git.ts";
-import { projectConfigDir, projectConfigDirName } from "../lib/config-mode.ts";
+import { projectConfigDir, projectConfigDirName } from "../lib/sources.ts";
 import { readState, readStringsState, recordState } from "../lib/ledger/state.ts";
 import { processState } from "../lib/process-state.ts";
 

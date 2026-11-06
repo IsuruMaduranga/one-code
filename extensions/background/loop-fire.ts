@@ -11,7 +11,7 @@
  * the corresponding `.onecode` directories in independent mode).
  */
 
-import { projectConfigDir, userConfigDir } from "../lib/config-mode.ts";
+import { projectConfigDir, userConfigDir } from "../lib/sources.ts";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";

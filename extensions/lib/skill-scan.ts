@@ -21,7 +21,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { PluginSkill } from "./plugins.ts";
 import type { SkillScope } from "./skill-overrides.ts";
-import { claudeSourcesOn, projectConfigDir, userConfigDir } from "./config-mode.ts";
+import { claudeSourcesOn } from "./config-mode.ts";
+import { projectConfigDir, userConfigDir } from "./sources.ts";
 import { claudeUserDir, isPathAtOrUnder, tryRealpath } from "./paths.ts";
 import { parseFrontmatterLoosely } from "./frontmatter.ts";
 

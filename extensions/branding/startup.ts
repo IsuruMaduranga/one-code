@@ -16,7 +16,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import os from "node:os";
 import { projectInstructionFiles } from "../lib/instructions.ts";
-import { projectConfigDir, userConfigDir } from "../lib/config-mode.ts";
+import { projectConfigDir, userConfigDir } from "../lib/sources.ts";
 import { BUNDLED_SKILLS_DIR, scanSkills } from "../lib/skill-scan.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
 import { oneCodeStateDir } from "../lib/paths.ts";

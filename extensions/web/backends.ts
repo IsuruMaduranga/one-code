@@ -20,15 +20,19 @@ import type { BackendAttempt, BackendFailure, ChainFailure } from "./text.ts";
 
 /** A backend failed for a reason the profile words. */
 export class BackendError extends Error {
-	constructor(readonly failure: BackendFailure) {
+	readonly failure: BackendFailure;
+	constructor(failure: BackendFailure) {
 		super(`search backend failed: ${failure.kind}`);
+		this.failure = failure;
 	}
 }
 
 /** No backend answered (or the search was cancelled). */
 export class SearchChainError extends Error {
-	constructor(readonly failure: ChainFailure) {
+	readonly failure: ChainFailure;
+	constructor(failure: ChainFailure) {
 		super(`web search failed: ${failure.kind}`);
+		this.failure = failure;
 	}
 }
 

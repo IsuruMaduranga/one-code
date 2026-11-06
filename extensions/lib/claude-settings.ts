@@ -13,7 +13,8 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join, posix, win32 } from "node:path";
-import { claudeSourcesOn, userConfigDir } from "./config-mode.ts";
+import { claudeSourcesOn } from "./config-mode.ts";
+import { userConfigDir } from "./sources.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "./one-code-settings.ts";
 import { claudeManagedDir, claudeUserDir } from "./paths.ts";
 

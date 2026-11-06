@@ -10,7 +10,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { parseWorkflowScript } from "./script-source.ts";
 import type { SavedWorkflow } from "./types.ts";
-import { projectConfigDir, userConfigDir } from "../lib/config-mode.ts";
+import { projectConfigDir, userConfigDir } from "../lib/sources.ts";
 
 function scanDir(dir: string, source: SavedWorkflow["source"]): SavedWorkflow[] {
 	if (!existsSync(dir)) return [];

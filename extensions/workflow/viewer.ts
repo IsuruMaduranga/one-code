@@ -15,7 +15,7 @@ import { cutPlainText as cut, formatDuration, padPlainText, splitCell, splitRow,
 import { formatTokenCount } from "../subagents/usage.ts";
 import type { AgentRecord, RunStatus } from "./types.ts";
 import { keyId, keyText } from "../lib/key-input.ts";
-import { projectConfigDirName } from "../lib/config-mode.ts";
+import { projectConfigDirName } from "../lib/sources.ts";
 
 /** Theme access the renderer needs: fg tokens ("accent", "dim", "error", …) and bold. */
 export interface ViewerPaint {

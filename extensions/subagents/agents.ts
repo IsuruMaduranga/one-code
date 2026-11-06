@@ -19,7 +19,7 @@ import { readdirSync, readFileSync, type Stats, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
-import { projectConfigDir, userConfigDir } from "../lib/config-mode.ts";
+import { projectConfigDir, userConfigDir } from "../lib/sources.ts";
 import { SUBAGENT_HANDBACK } from "../lib/subagent-handback.ts";
 import { normalizeToolName } from "../permissions/matcher.ts";
 import { subagentWords } from "./words.ts";

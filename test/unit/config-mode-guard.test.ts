@@ -19,7 +19,6 @@ const CLAUDE_LOCATION =
 /** Each file, and how it treats independent mode. */
 const CHECKED: Record<string, string> = {
 	"lib/paths.ts": "defines the helpers",
-	"lib/config-mode.ts": "the mode itself",
 	"lib/claude-settings.ts": "readers gate on claudeSourcesOn; managed paths are shared",
 	"lib/claude-context.ts": "the oneCodeMd preamble names CLAUDE.md only in compatible mode",
 	"lib/instructions.ts": "reads no Claude Code location; the banner groups a provider's .claude/AGENTS.md with its directory",

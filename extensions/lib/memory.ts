@@ -18,7 +18,7 @@
 
 import os from "node:os";
 import { join } from "node:path";
-import { userConfigDir } from "./config-mode.ts";
+import { userConfigDir } from "./sources.ts";
 import { findProjectRoot } from "./git.ts";
 
 /** Claude Code's project-directory slug: 200 sanitized characters, then a hash for longer paths. */

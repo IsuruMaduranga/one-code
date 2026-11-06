@@ -25,7 +25,7 @@
 import os from "node:os";
 import { join } from "node:path";
 import { readJsonFile } from "./atomic-write.ts";
-import { claudeUserDir, oneCodeStateDir } from "./paths.ts";
+import { oneCodeStateDir } from "./paths.ts";
 
 export type ConfigMode = "claude-compatible" | "independent";
 
@@ -90,23 +90,4 @@ export function resetConfigModeForTest(mode?: ConfigMode): void {
 /** Whether Claude Code's own locations are read: `~/.claude`, `.claude/`, `CLAUDE.md`, `~/.claude.json`. */
 export function claudeSourcesOn(): boolean {
 	return configMode() === "claude-compatible";
-}
-
-/**
- * The user-level folder that holds agents, commands, workflows and the user
- * settings file: `~/.claude` (`CLAUDE_CONFIG_DIR`) in Claude-compatible mode,
- * `~/.onecode` (`ONECODE_STATE_DIR`) in independent mode.
- */
-export function userConfigDir(home: string, env: Record<string, string | undefined> = process.env): string {
-	return claudeSourcesOn() ? claudeUserDir(home, env) : oneCodeStateDir(env, home);
-}
-
-/** The project-level folder's name: `.claude`, or `.onecode` in independent mode. */
-export function projectConfigDirName(): string {
-	return claudeSourcesOn() ? ".claude" : ".onecode";
-}
-
-/** The project-level counterpart of `userConfigDir`: `<cwd>/.claude` or `<cwd>/.onecode`. */
-export function projectConfigDir(cwd: string): string {
-	return join(cwd, projectConfigDirName());
 }

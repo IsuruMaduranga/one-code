@@ -11,7 +11,10 @@
  * and loaded on first use (lib/profile.ts `sourceProvider`).
  */
 
+import os from "node:os";
+import { join } from "node:path";
 import type { InstructionView } from "./instructions.ts";
+import { oneCodeStateDir } from "./paths.ts";
 import { sourceProvider } from "./profile.ts";
 
 /** One session's view of the provider's sources. */
@@ -20,6 +23,19 @@ export interface SourceView {
 	allowPath?(path: string): boolean;
 	/** The product's instruction files, reshaping the base's lists (lib/instructions.ts). Absent: the base's lists. */
 	instructions?: InstructionView;
+	/** The user and project config folders, in place of the product's own. Absent: the product's. */
+	configDirs?: ConfigDirs;
+}
+
+/**
+ * Where agents, commands, workflows, `loop.md`, the memory folder and
+ * worktrees live: `user` is a folder, `project` the folder's name inside a
+ * project root. The project name reaches the model in tool descriptions, so
+ * it must hold for the whole process.
+ */
+export interface ConfigDirs {
+	user: string;
+	project: string;
 }
 
 /** A profile's source provider: the module `Profile.sources` names exports one as `sources`. */
@@ -31,6 +47,26 @@ export interface SourceProvider {
 /** The active profile's view for `home`, or the base's own (an empty view) when it has no provider. */
 export function openSources(home: string): SourceView {
 	return sourceProvider()?.open({ home }) ?? {};
+}
+
+/** The config folders for `home`: the provider's, else the product's own state dir and `.onecode`. */
+export function configDirs(home: string = os.homedir()): ConfigDirs {
+	return openSources(home).configDirs ?? { user: oneCodeStateDir(process.env, home), project: ".onecode" };
+}
+
+/** The user-level config folder (agents, commands, workflows, the memory folder). */
+export function userConfigDir(home: string): string {
+	return configDirs(home).user;
+}
+
+/** The project-level config folder's name. */
+export function projectConfigDirName(): string {
+	return configDirs().project;
+}
+
+/** The project-level counterpart of `userConfigDir`: `<cwd>/<project config folder>`. */
+export function projectConfigDir(cwd: string): string {
+	return join(cwd, projectConfigDirName());
 }
 
 /** `view.allowPath`, or every path when the view sets none. */

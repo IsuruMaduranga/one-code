@@ -18,10 +18,8 @@ import { claudeCodeInstructionView } from "./instructions.ts";
 
 export const sources: SourceProvider = {
 	open({ home }) {
-		if (!claudeSourcesOn()) {
-			const homeClaudeDir = claudeUserDir(home);
-			return { allowPath: (path) => !isClaudeLocation(path, homeClaudeDir) };
-		}
-		return { instructions: claudeCodeInstructionView(home) };
+		const homeClaudeDir = claudeUserDir(home);
+		if (!claudeSourcesOn()) return { allowPath: (path) => !isClaudeLocation(path, homeClaudeDir) };
+		return { instructions: claudeCodeInstructionView(home), configDirs: { user: homeClaudeDir, project: ".claude" } };
 	},
 };
