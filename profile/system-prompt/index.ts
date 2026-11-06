@@ -44,6 +44,7 @@ const liveSections = (sections: readonly string[], live: LiveTools): string[] =>
 	sections.map((section) => withoutOff(section, live, PROMPT_PASSAGES)).filter((section) => section.trim() !== "");
 
 export const systemPrompt: SystemPromptText = {
+	scratchpadMoved: ({ dir }) => `This session's scratchpad directory is now ${dir}. Use it for temporary files instead of the scratchpad named earlier in this conversation.`,
 	lead({ tier, taskTools, tools, live }) {
 		const bundle = BUNDLES[tier];
 		return liveSections(bundle.leadFor?.({ taskTools, tools }) ?? (taskTools ? bundle.lead : (bundle.leadWithoutTaskTools ?? bundle.lead)), live);

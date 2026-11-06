@@ -70,6 +70,20 @@ const ARTIFACT_PASSAGES: ToolPassages = {
 };
 
 export const artifacts: ArtifactsText = {
+	storeBusy: (busy) => {
+		switch (busy.kind) {
+			case "creating":
+				return "Another session is creating an artifact. Publish again in a moment.";
+			case "publishing":
+				return `Another session is publishing the artifact "${busy.id}". Publish again in a moment.`;
+			case "deletedWhilePublishing":
+				return `The artifact "${busy.id}" was deleted while this publish ran. Publish again to create a new one.`;
+			case "takenOver":
+				return `Another session took over publishing the artifact "${busy.id}". Publish again.`;
+			case "deleting":
+				return `Another session is publishing the artifact "${busy.id}". Delete it again in a moment.`;
+		}
+	},
 	description: ({ live }) => withoutOff(ARTIFACT_DESCRIPTION, live, ARTIFACT_PASSAGES),
 	params: {
 		action: "What to do. Defaults to publish.",

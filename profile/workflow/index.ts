@@ -94,6 +94,12 @@ function callProblem(problem: ScriptCallProblem): string {
 			return `workflow({scriptPath}): ${problem.path} does not exist`;
 		case "nestedBadRef":
 			return "workflow() takes a saved-workflow name or {scriptPath}";
+		case "nestedTooDeep":
+			return "workflow() nesting is one level only — this run cannot start another child workflow";
+		case "worktreeNeedsGit":
+			return 'isolation: "worktree" needs a git repository';
+		case "schemaNotObjectWithProperties":
+			return 'agent() schema must be a JSON Schema with top-level type "object" and properties';
 	}
 }
 

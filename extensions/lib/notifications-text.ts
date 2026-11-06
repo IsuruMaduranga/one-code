@@ -52,4 +52,8 @@ export interface NotificationsText {
 	interactiveSession: string;
 	/** Heads a result a one-shot session ran to its end. */
 	oneShotNote(work: OneShotWork): string;
+	/** Inside `<local-command-caveat>`: a local command's breadcrumb is context, not a request. */
+	localCommandCaveat: string;
+	/** What the user typed at a viewed agent, wrapped for that agent's turn. */
+	userMessageMidTurn(p: { text: string }): string;
 }

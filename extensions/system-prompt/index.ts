@@ -45,7 +45,7 @@ const ONE_SHOT_MODE = "one-shot";
 
 /** The notice that this session's scratchpad is not the one message 1 names (a /fork is a new session). */
 function scratchpadChangedNote(dir: string): string {
-	return `This session's scratchpad directory is now ${dir}. Use it for temporary files instead of the scratchpad named earlier in this conversation.`;
+	return profileText().systemPrompt.scratchpadMoved({ dir });
 }
 
 function systemPromptExtension(pi: ExtensionAPI) {

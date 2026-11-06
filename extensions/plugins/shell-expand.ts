@@ -18,7 +18,11 @@ import type { ChildProcess } from "node:child_process";
 import { detachedSpawnOptions, killProcessTree, waitForChildExit } from "../lib/process-tree.ts";
 import { bashSpawn, type ShellSpawn, spawnShellCommand } from "../lib/shell-spawn.ts";
 import { shellQuote } from "../lib/shell-quote.ts";
+import { requireText } from "../lib/profile.ts";
 import { splitShellPlaceholders, substituteArguments } from "./template.ts";
+import type { PluginsText } from "./text.ts";
+
+const words = (): PluginsText => requireText("plugins");
 
 export const SHELL_TIMEOUT_MS = 30_000;
 /** A placeholder output past this many characters stops being collected, and says so. */
@@ -35,12 +39,12 @@ export async function runPlaceholderCommand(
 	opts: { spec?: ShellSpawn; timeoutMs?: number; maxOutputChars?: number } = {},
 ): Promise<string> {
 	const spec = opts.spec ?? bashSpawn().spawn;
-	if (!spec) return `command failed: ${bashSpawn().error ?? "no bash shell found"}`;
+	if (!spec) return words().placeholderFailed({ osMessage: bashSpawn().error ?? words().noBash });
 	let child: ChildProcess;
 	try {
 		child = spawnShellCommand(spec, command, { cwd, stdio: ["ignore", "pipe", "pipe"], ...detachedSpawnOptions() });
 	} catch (error) {
-		return `command failed: ${error instanceof Error ? error.message : String(error)}`;
+		return words().placeholderFailed({ osMessage: error instanceof Error ? error.message : String(error) });
 	}
 	const maxChars = opts.maxOutputChars ?? MAX_OUTPUT_CHARS;
 	let stdout = "";
@@ -68,14 +72,14 @@ export async function runPlaceholderCommand(
 	try {
 		await waitForChildExit(child);
 	} catch (error) {
-		return `command failed: ${error instanceof Error ? error.message : String(error)}`;
+		return words().placeholderFailed({ osMessage: error instanceof Error ? error.message : String(error) });
 	} finally {
 		clearTimeout(timer);
 	}
 	// The model must know an output is incomplete (a `git diff` cut mid-file).
 	const shown = stdout ? "stdout" : "stderr";
-	const text = `${(stdout || stderr).trim()}${cut[shown] ? `\n[output cut after ${maxChars} characters]` : ""}`;
-	if (timedOut) return `${text ? `${text}\n` : ""}command timed out after ${Math.round(timeoutMs / 1000)} seconds`;
+	const text = `${(stdout || stderr).trim()}${cut[shown] ? `\n${words().outputCut({ chars: maxChars })}` : ""}`;
+	if (timedOut) return `${text ? `${text}\n` : ""}${words().placeholderTimedOut({ seconds: Math.round(timeoutMs / 1000) })}`;
 	return text;
 }
 

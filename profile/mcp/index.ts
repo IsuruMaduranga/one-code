@@ -115,6 +115,7 @@ function imageProblem(p: ImageProblem): string {
 }
 
 export const mcp: McpText = {
+	needsAuthentication: ({ server }) => `MCP server "${server}" needs authentication; run /mcp and choose Authenticate.`,
 	instructions,
 	instructionsCut: (head) => `${head}… [truncated]`,
 	failed,

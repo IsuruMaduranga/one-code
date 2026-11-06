@@ -122,6 +122,8 @@ export interface SubagentsText {
 	refused(refusal: SubagentRefusal): string;
 	runtimeProblem(problem: RuntimeProblem): string;
 	failure(failure: RunFailure): string;
+	/** The report of a run that finished without writing anything. */
+	noOutput: string;
 	/** The note when a run fell back to the session model. */
 	modelFallback(p: { model?: string; osMessage: string; fallback: string }): string;
 	/** A requested run name already taken. */

@@ -31,6 +31,7 @@ import { notebook } from "./notebook/index.ts";
 import { notifications } from "./notifications/index.ts";
 import { permissions } from "./permissions/index.ts";
 import { planMode } from "./plan-mode/index.ts";
+import { plugins } from "./plugins/index.ts";
 import { recap } from "./recap/index.ts";
 import { sessionTitle } from "./session-title/index.ts";
 import { shell } from "./shell/index.ts";
@@ -53,5 +54,5 @@ export const profile: Profile = {
 	features: {},
 	tools: {},
 	childExtensions: [],
-	text: { systemPrompt, notebook, askUser, tasks, worktree, worktreeGuard, webFetch, webSearch, nativeWeb, sessionTitle, init, btw, recap, effort, planMode, skill, mcp, lsp, hooks, memory, background, artifacts, toolStyle, contextBudget, fileTracker, compaction, workflow, autoMode, shell, doctor, notifications, toolResults, toolCallCorruption, context, toolSearch, permissions, handback, subagentModels, subagents },
+	text: { systemPrompt, notebook, askUser, tasks, worktree, worktreeGuard, webFetch, webSearch, nativeWeb, sessionTitle, init, btw, recap, effort, planMode, skill, mcp, lsp, hooks, memory, background, artifacts, toolStyle, contextBudget, fileTracker, compaction, workflow, autoMode, shell, doctor, notifications, toolResults, toolCallCorruption, context, toolSearch, permissions, handback, subagentModels, subagents, plugins },
 };

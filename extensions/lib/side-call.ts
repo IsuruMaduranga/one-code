@@ -15,7 +15,7 @@ import type { Tool } from "@earendil-works/pi-ai";
  * schema keeps the model answering in text on strict providers that reject a
  * history carrying `tool_use` blocks with no tools declared.
  */
-export function toolStubs(names: readonly string[], reason = "Unavailable for this call; answer in text."): Tool[] {
+export function toolStubs(names: readonly string[], reason: string): Tool[] {
 	return names.map(
 		(name) =>
 			({

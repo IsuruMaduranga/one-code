@@ -278,7 +278,7 @@ export class AgentRunner {
 		let cwd = this.options.cwd;
 		if (opts.isolation === "worktree") {
 			if (!(await isGitRepo(this.options.cwd))) {
-				throw new WorkflowScriptError('isolation: "worktree" needs a git repository');
+				throw new WorkflowScriptError(workflowWords().callProblem({ kind: "worktreeNeedsGit" }));
 			}
 			worktree = await createWorktree(this.options.cwd, opts.label ?? "wf-agent");
 			cwd = worktree.path;
@@ -504,7 +504,7 @@ function buildStructuredOutputTool(schema: Record<string, unknown>, capture: { c
 /** A structured_output schema must be an object schema with properties. */
 function assertObjectSchema(schema: Record<string, unknown>): void {
 	if (schema.type !== "object" || typeof schema.properties !== "object") {
-		throw new WorkflowScriptError("agent() schema must be a JSON Schema with top-level type \"object\" and properties");
+		throw new WorkflowScriptError(workflowWords().callProblem({ kind: "schemaNotObjectWithProperties" }));
 	}
 }
 

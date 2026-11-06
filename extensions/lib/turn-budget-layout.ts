@@ -24,13 +24,29 @@
 import { reseatMessageMark } from "./anthropic-payload.ts";
 import { wrapReminder } from "./reminders.ts";
 import { messagesKey, type SystemRoleLayout, systemMessage, type WireMessage, type WirePart, byWireCallId, withoutParts } from "./system-role.ts";
+import { totalTokensBlock } from "../context-budget/budget.ts";
+import { profileText } from "./profile.ts";
 
-/** The stored line, exactly. */
-const LINE = /^<total_tokens>(\d+) tokens left<\/total_tokens>$/;
+/** The budget line for `left` tokens, in the profile's words; undefined without context-budget's words (no lines then). */
+function budgetLine(left: number): string | undefined {
+	const words = profileText().contextBudget;
+	return words && totalTokensBlock(words.tokensLeft({ left }));
+}
 
-/** Claude Code's Fable nudge after a tool result's budget message. */
-export const CLEAR_AT_NUDGE =
-	"First privately list what you need next; then request every item that doesn't depend on another's result in this one response.";
+/** The tokens left in a stored budget line, exactly as `budgetLine` writes it, else undefined. */
+function tokensLeftIn(text: string): number | undefined {
+	const probe = budgetLine(987654321);
+	if (!probe) return undefined;
+	const [before, after] = probe.split("987654321");
+	if (!text.startsWith(before) || !text.endsWith(after)) return undefined;
+	const digits = text.slice(before.length, text.length - after.length);
+	return /^\d+$/.test(digits) ? Number(digits) : undefined;
+}
+
+/** Claude Code's Fable nudge after a tool result's budget message, in the profile's words. */
+export function clearAtNudge(): string {
+	return profileText().contextBudget?.clearAtNudge ?? "";
+}
 
 type StoredBlock = { type?: string; text?: string };
 type StoredMessage = { role: string; toolCallId?: string; content?: unknown };
@@ -47,12 +63,12 @@ export function resolveCountdowns<T extends StoredMessage>(messages: T[], system
 	const out = messages.map((message) => {
 		if (message.role !== "toolResult" || !Array.isArray(message.content) || !message.toolCallId) return message;
 		const blocks = message.content as StoredBlock[];
-		const at = blocks.findLastIndex((block) => block?.type === "text" && typeof block.text === "string" && LINE.test(block.text));
+		const at = blocks.findLastIndex((block) => block?.type === "text" && typeof block.text === "string" && tokensLeftIn(block.text) !== undefined);
 		if (at === -1) return message;
 		const line = blocks[at].text as string;
 		changed = true;
 		if (systemRole) {
-			left.set(message.toolCallId, Number(LINE.exec(line)?.[1]));
+			left.set(message.toolCallId, tokensLeftIn(line) ?? Number.NaN);
 			return { ...message, content: blocks.filter((_, index) => index !== at) };
 		}
 		return { ...message, content: blocks.map((block, index) => (index === at ? { ...block, text: `\n${wrapReminder(line)}` } : block)) };
@@ -118,7 +134,7 @@ export function withTurnBudgetMessages(payload: Record<string, unknown>, opts: T
 		// first prompt, which has no marker to find.
 		if (opts.markers !== false && !stackCarrier && message?.role === "user" && Array.isArray(message.content)) {
 			const parts = message.content as WirePart[];
-			const at = parts.findLastIndex((part) => typeof part?.text === "string" && LINE.test(part.text));
+			const at = parts.findLastIndex((part) => typeof part?.text === "string" && tokensLeftIn(part.text) !== undefined);
 			// The marker ends the message, so it carries pi's cache mark; withoutParts keeps it.
 			const rest = at === -1 ? undefined : withoutParts(parts, (_, index) => index === at);
 			if (rest) {
@@ -144,9 +160,10 @@ export function withTurnBudgetMessages(payload: Record<string, unknown>, opts: T
 			const runContinues = opts.shape !== "anthropic" && (next?.type === "function_call_output" || next?.role === "tool");
 			if (pending !== undefined && !runContinues && followedByUser(messages, i)) pending = undefined;
 			if (pending !== undefined && !runContinues) {
-				after.push(systemMessage(opts.shape, opts.role, `<total_tokens>${pending} tokens left</total_tokens>`));
+				after.push(systemMessage(opts.shape, opts.role, budgetLine(pending) ?? ""));
 				if (opts.nudge) {
-					after.push(opts.shape === "anthropic" ? ({ role: "system", content: CLEAR_AT_NUDGE, clear_at: "next_user_message" } as WireMessage) : systemMessage(opts.shape, opts.role, CLEAR_AT_NUDGE));
+					const nudge = clearAtNudge();
+					after.push(opts.shape === "anthropic" ? ({ role: "system", content: nudge, clear_at: "next_user_message" } as WireMessage) : systemMessage(opts.shape, opts.role, nudge));
 				}
 				pending = undefined;
 			}

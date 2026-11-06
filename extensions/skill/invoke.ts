@@ -13,6 +13,8 @@
  * is why the off-skill redaction below still matches it.
  */
 
+import { requireText } from "../lib/profile.ts";
+
 const SKILL_PREFIX = "/skill:";
 
 /** Parse a `/skill:<name> [args]` command; undefined if it is not one. */
@@ -101,7 +103,7 @@ export function substituteSkillArguments(text: string, args: string): string {
  */
 export function skillPromptText(body: string, args: string, baseDir: string | undefined): string {
 	const text = substituteSkillArguments(body, args);
-	return baseDir ? `Base directory for this skill: ${baseDir}\n\n${text}` : text;
+	return baseDir ? requireText("skill").withBaseDir({ dir: baseDir, text }) : text;
 }
 
 /**

@@ -4,7 +4,7 @@ import {
 	commandInputBlock,
 	commandStdoutBlock,
 	escapeXml,
-	LOCAL_COMMAND_CAVEAT,
+	localCommandCaveat,
 	localCommandBlocks,
 	registerLocalCommand,
 } from "../../extensions/lib/local-command.ts";
@@ -23,7 +23,7 @@ describe("local-command breadcrumbs (Claude Code's three blocks)", () => {
 
 	it("/clear carries an empty stdout block", () => {
 		expect(localCommandBlocks({ name: "clear" })[2]).toBe("<local-command-stdout></local-command-stdout>\n");
-		expect(LOCAL_COMMAND_CAVEAT.startsWith("<local-command-caveat>The command below was run directly in One Code")).toBe(true);
+		expect(localCommandCaveat().startsWith("<local-command-caveat>The command below was run directly in One Code")).toBe(true);
 	});
 
 	it("carries trimmed args and XML-escapes stdout like CC's escapeXml (& < > only)", () => {

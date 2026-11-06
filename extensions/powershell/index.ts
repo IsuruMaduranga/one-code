@@ -70,7 +70,7 @@ export function powershellTool(pi: ExtensionAPI, { announce }: { announce: boole
 		promptGuidelines: [
 			...(base.promptGuidelines ?? []),
 			...(startupPolicy.primary === "powershell"
-				? ["PowerShell is the primary shell on this machine: use the powershell tool for terminal operations (git, npm, build tools)"]
+				? [requireText("shell").powershellPrimary]
 				: []),
 		],
 		foreground: perCwd((cwd: string) => createPowerShellToolDefinition(cwd, { operations })),

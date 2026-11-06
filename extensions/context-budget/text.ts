@@ -9,4 +9,6 @@
 export interface ContextBudgetText {
 	/** The budget left, in tokens: the full budget at a turn's start, then the countdown on each tool result. */
 	tokensLeft(p: { left: number }): string;
+	/** Claude Code's Fable nudge after a tool result's budget line (cleared at the next user message). */
+	clearAtNudge: string;
 }

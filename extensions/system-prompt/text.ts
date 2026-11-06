@@ -23,6 +23,8 @@ export interface SystemPromptSession {
 }
 
 export interface SystemPromptText {
+	/** This session's scratchpad is not the one message 1 names (a /fork is a new session). */
+	scratchpadMoved(p: { dir: string }): string;
 	/** The sections before the tool list, in order. */
 	lead(session: SystemPromptSession): string[];
 	/** The sections after the memory section, in order. */

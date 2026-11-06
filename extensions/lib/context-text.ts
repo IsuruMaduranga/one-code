@@ -17,7 +17,18 @@ export type InstructionSource = "global" | "managed" | "project" | "local" | "me
 /** What changed in the workspace since the context block was told. */
 export type ContextChange = "git" | "memory" | "instructions";
 
+/** How far a MEMORY.md index is over its limits (sizes already formatted). */
+export type MemoryIndexSize =
+	| { kind: "chars"; size: string; limit: string }
+	| { kind: "lines"; lines: number; limit: number }
+	| { kind: "both"; lines: number; size: string };
+
+/** What of a MEMORY.md index was not loaded; `next` is the first line cut, shortened. */
+export type MemoryIndexCut = { kind: "firstLine"; chars: number } | { kind: "lines"; cut: number; total: number; from: number; next?: string };
+
 export interface ContextText {
+	/** The warning after a MEMORY.md index loaded in part. */
+	memoryIndexCut(p: { size: MemoryIndexSize; cut: MemoryIndexCut }): string;
 	/** Opens the instructions block. */
 	instructionsPreamble: string;
 	descriptor(source: InstructionSource): string;

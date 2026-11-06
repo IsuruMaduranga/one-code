@@ -32,8 +32,9 @@ import { readJsonFile, writeTextAtomic } from "../lib/atomic-write.ts";
 import { comparablePath, isPathAtOrUnder, oneCodeStateDir, tildify } from "../lib/paths.ts";
 import { sanitizeDisplayText } from "../lib/terminal-text.ts";
 import { renderDownloadPayload, renderGallery } from "./gallery.ts";
-import type { PublishProblem, ShownArtifact } from "./text.ts";
+import type { PublishProblem, ShownArtifact, StoreBusy } from "./text.ts";
 import { renderViewer } from "./viewer.ts";
+import { requireText } from "../lib/profile.ts";
 
 export interface ArtifactMeta {
 	id: string;
@@ -49,6 +50,9 @@ export interface ArtifactMeta {
 	version: number;
 }
 
+
+/** Why another session blocked the store, in the profile's words. */
+const busy = (b: StoreBusy): string => requireText("artifacts").storeBusy(b);
 /** Claude Code's page size limit for a published artifact. */
 export const MAX_ARTIFACT_BYTES = 16 * 1024 * 1024;
 
@@ -232,7 +236,7 @@ export function publishArtifact(root: string, input: PublishInput): PublishResul
 		// The lookup and a creation are one step under a store-wide lock, so two
 		// first publishes of one file cannot both miss and make two artifacts.
 		const key = comparablePath(sourcePath);
-		const outcome = withLock(join(root, ".create-lock"), "Another session is creating an artifact. Publish again in a moment.", () => {
+		const outcome = withLock(join(root, ".create-lock"), busy({ kind: "creating" }), () => {
 			const match = listArtifacts(root).find((meta) => comparablePath(meta.sourcePath) === key);
 			return match ? { match } : { created: createArtifact(root, input, sourcePath) };
 		});
@@ -244,9 +248,9 @@ export function publishArtifact(root: string, input: PublishInput): PublishResul
 	}
 	const id = found.id;
 	// Re-read under the lock: another session may have published a version since.
-	const result = withLock(join(root, id, ".lock"), `Another session is publishing the artifact "${id}". Publish again in a moment.`, (held) => {
+	const result = withLock(join(root, id, ".lock"), busy({ kind: "publishing", id }), (held) => {
 		const existing = getArtifact(root, id);
-		if (!existing) throw new Error(`The artifact "${id}" was deleted while this publish ran. Publish again to create a new one.`);
+		if (!existing) throw new Error(busy({ kind: "deletedWhilePublishing", id }));
 		return updateArtifact(root, existing, input, sourcePath, held);
 	});
 	writeGallery(root);
@@ -323,7 +327,7 @@ function updateArtifact(root: string, existing: ArtifactMeta, input: PublishInpu
 }
 
 function assertHeld(held: () => boolean, id: string): void {
-	if (!held()) throw new Error(`Another session took over publishing the artifact "${id}". Publish again.`);
+	if (!held()) throw new Error(busy({ kind: "takenOver", id }));
 }
 
 type StoreFile = [target: string, text: string];
@@ -517,7 +521,7 @@ export function withLock<T>(lock: string, busy: string, fn: (held: () => boolean
  */
 export function deleteArtifact(root: string, id: string): boolean {
 	if (!getArtifact(root, id)) return false;
-	const removed = withLock(join(root, id, ".lock"), `Another session is publishing the artifact "${id}". Delete it again in a moment.`, () => {
+	const removed = withLock(join(root, id, ".lock"), busy({ kind: "deleting", id }), () => {
 		if (!getArtifact(root, id)) return false;
 		rmSync(join(root, id), { recursive: true, force: true });
 		return true;

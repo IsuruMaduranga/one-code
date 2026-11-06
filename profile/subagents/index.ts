@@ -181,6 +181,7 @@ export const subagents: SubagentsText = {
 	runtimeProblem: (problem) =>
 		problem.kind === "sessionEnded" ? "the session ended before the agent started" : `could not start the subagent runtime: ${problem.osMessage}`,
 	failure,
+	noOutput: "(Subagent completed but returned no output.)",
 	modelFallback: ({ model, osMessage, fallback }) => `Subagent model ${model ?? "(none)"} was unavailable (${osMessage}); ran on the session model ${fallback} instead.`,
 	renamed: ({ wanted, takenBy, name }) => `Note: the name "${wanted}" is already used by task ${takenBy} in this session; this run is named "${name}".`,
 	unusableTools: ({ name, tools }) =>

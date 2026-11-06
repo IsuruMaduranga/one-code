@@ -55,7 +55,13 @@ export type ScriptCallProblem =
 	| { kind: "refusedByGate"; reason: string }
 	| { kind: "nestedUnknown"; name: string }
 	| { kind: "nestedPathMissing"; path: string }
-	| { kind: "nestedBadRef" };
+	| { kind: "nestedBadRef" }
+	/** workflow() from a run that is itself a child workflow. */
+	| { kind: "nestedTooDeep" }
+	/** agent() with worktree isolation outside a git repository. */
+	| { kind: "worktreeNeedsGit" }
+	/** agent()'s schema has no top-level object type with properties. */
+	| { kind: "schemaNotObjectWithProperties" };
 
 /** Why an agent call failed (the call resolves null; the failure shows in the progress lines). */
 export type AgentFailure = { kind: "noOutput" } | { kind: "noStructuredOutput" };

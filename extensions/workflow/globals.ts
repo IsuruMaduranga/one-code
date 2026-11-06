@@ -253,7 +253,7 @@ export function createScriptGlobals(options: ScriptGlobalsOptions): { globals: S
 
 	const workflowFn = async (nameOrRef: unknown, childArgs?: unknown): Promise<unknown> => {
 		if (!options.runWorkflow) {
-			throw new WorkflowScriptError("workflow() nesting is one level only — this run cannot start another child workflow");
+			throw new WorkflowScriptError(words.callProblem({ kind: "nestedTooDeep" }));
 		}
 		return options.runWorkflow(nameOrRef, childArgs);
 	};

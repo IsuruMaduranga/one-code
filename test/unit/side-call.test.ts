@@ -22,9 +22,9 @@ describe("toolStubs", () => {
 		}
 	});
 
-	it("uses a generic default reason", () => {
-		const [stub] = toolStubs(["Read"]) as unknown as { description: string }[];
-		expect(stub.description).toBe("Unavailable for this call; answer in text.");
+	it("describes each stub with the caller's reason", () => {
+		const [stub] = toolStubs(["Read"], "Not here.") as unknown as { description: string }[];
+		expect(stub.description).toBe("Not here.");
 	});
 });
 

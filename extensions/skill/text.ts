@@ -6,6 +6,8 @@
  */
 
 export interface SkillText {
+	/** A skill's text with its folder named first, so relative `references/` and `scripts/` resolve. */
+	withBaseDir(p: { dir: string; text: string }): string;
 	description: string;
 	/** The tool's line in the system prompt's tool list. */
 	promptSnippet: string;

@@ -6,6 +6,7 @@
  */
 
 import type { ContextChange, ContextText, InstructionSource } from "../../extensions/lib/context-text.ts";
+import type { MemoryIndexCut, MemoryIndexSize } from "../../extensions/lib/context-text.ts";
 
 const DESCRIPTORS: Record<InstructionSource, string> = {
 	global: "user's private global instructions for all projects",
@@ -24,7 +25,21 @@ const CHANGES: Record<ContextChange, string> = {
 	instructions: "CLAUDE.md-family instructions changed",
 };
 
+const MEMORY_SIZE = (size: MemoryIndexSize): string =>
+	size.kind === "chars"
+		? `${size.size} (limit: ${size.limit}) — index entries are too long`
+		: size.kind === "lines"
+			? `${size.lines} lines (limit: ${size.limit})`
+			: `${size.lines} lines and ${size.size}`;
+
+const MEMORY_CUT = (cut: MemoryIndexCut): string =>
+	cut.kind === "firstLine"
+		? `everything after the first ${cut.chars} characters of line 1 was cut off`
+		: `${cut.cut} of ${cut.total} lines were cut off, starting at line ${cut.from}${cut.next ? ` ("${cut.next}")` : ""}`;
+
 export const context: ContextText = {
+	memoryIndexCut: ({ size, cut }) =>
+		`> WARNING: MEMORY.md is ${MEMORY_SIZE(size)}. Only part of it was loaded: ${MEMORY_CUT(cut)}. Keep index entries to one line under ~200 chars; move detail into topic files.`,
 	instructionsPreamble:
 		"Codebase and user instructions are shown below. Be sure to adhere to these instructions. " +
 		"IMPORTANT: These instructions OVERRIDE any default behavior and you MUST follow them exactly as written.",

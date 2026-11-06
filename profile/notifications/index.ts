@@ -109,5 +109,12 @@ export const notifications: NotificationsText = {
 	oneShotSession: ({ live }) => withoutOff(ONE_SHOT_SESSION, live, ONE_SHOT_PASSAGES),
 	interactiveSession:
 		"This session is interactive now, although its first message said it was one-shot: a user can reply, background work notifies you when it ends, scheduled jobs fire, and questions and plan approvals reach the user.",
+	// Claude Code 2.1.288's caveat, naming the harness the command ran in.
+	localCommandCaveat:
+		"The command below was run directly in One Code, not sent to you as a request, and its output goes straight to the user. It's recorded here as context for later messages.",
+	// Claude Code's wrapper for a message the user types at an agent, idle or
+	// running (findings §40), verbatim.
+	userMessageMidTurn: ({ text }) =>
+		`The user sent a new message while you were working:\n${text}\n\nThis is how Claude Code surfaces messages the user sends mid-turn — within the running turn, often alongside the next tool result, rather than as a separate conversation turn. Address the message above as you continue this turn.`,
 	oneShotNote: (work) => `This is a one-shot session, so the ${ONE_SHOT_WORK[work]} ran to completion instead of in the background.`,
 };

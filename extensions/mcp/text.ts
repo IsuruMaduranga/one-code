@@ -54,6 +54,8 @@ export interface ServerInstructions {
 }
 
 export interface McpText {
+	/** A server whose sign-in expired or never happened, met during a call (the user signs in with /mcp). */
+	needsAuthentication(p: { server: string }): string;
 	/** Message 1's block of the servers' own instructions. */
 	instructions(servers: readonly ServerInstructions[]): string;
 	/** Instructions past the cap: the kept head. */

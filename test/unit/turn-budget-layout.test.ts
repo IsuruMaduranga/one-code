@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { wrapReminder } from "../../extensions/lib/reminders.ts";
-import { CLEAR_AT_NUDGE, resolveCountdowns, withTurnBudgetMessages } from "../../extensions/lib/turn-budget-layout.ts";
+import { clearAtNudge, resolveCountdowns, withTurnBudgetMessages } from "../../extensions/lib/turn-budget-layout.ts";
 
 const BUDGET = "<total_tokens>15000000 tokens left</total_tokens>";
 const left = (n: number) => `<total_tokens>${n} tokens left</total_tokens>`;
@@ -75,7 +75,7 @@ describe("withTurnBudgetMessages on a model that takes system messages", () => {
 
 	it("adds Fable's clear_at nudge after each tool result's message, the mark staying on the budget line", () => {
 		const messages = run(true);
-		expect(messages[4]).toEqual({ role: "system", content: CLEAR_AT_NUDGE, clear_at: "next_user_message" });
+		expect(messages[4]).toEqual({ role: "system", content: clearAtNudge(), clear_at: "next_user_message" });
 		const last = messages.findLastIndex((m) => m.clear_at !== undefined);
 		expect((messages[last - 1].content as Array<Record<string, unknown>>)[0].cache_control).toEqual(mark);
 	});

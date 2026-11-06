@@ -7,6 +7,8 @@
 
 import { isMap, isScalar, parseDocument, visit } from "yaml";
 import { parseRule } from "./claude-rules.ts";
+import type { MemoryIndexCut, MemoryIndexSize } from "./context-text.ts";
+import { contextWords } from "./context-words.ts";
 
 /**
  * Claude Code loads only the first 200 lines or 25,000 characters of
@@ -55,17 +57,17 @@ export function truncateIndex(content: string): string {
 	const nextStart = kept.length + 1;
 	const nextEnd = trimmed.indexOf("\n", nextStart);
 	const nextLine = trimmed.slice(nextStart, nextEnd < 0 ? undefined : nextEnd).trim();
-	const cut =
+	const cut: MemoryIndexCut =
 		keptLines === 0
-			? `everything after the first ${kept.length} characters of line 1 was cut off`
-			: `${lines - keptLines} of ${lines} lines were cut off, starting at line ${keptLines + 1}${nextLine ? ` ("${shortenLine(nextLine, 80)}")` : ""}`;
-	const size =
+			? { kind: "firstLine", chars: kept.length }
+			: { kind: "lines", cut: lines - keptLines, total: lines, from: keptLines + 1, ...(nextLine ? { next: shortenLine(nextLine, 80) } : {}) };
+	const size: MemoryIndexSize =
 		overChars && !overLines
-			? `${formatSize(chars)} (limit: ${formatSize(INDEX_MAX_CHARS)}) \u2014 index entries are too long`
+			? { kind: "chars", size: formatSize(chars), limit: formatSize(INDEX_MAX_CHARS) }
 			: overLines && !overChars
-				? `${lines} lines (limit: ${INDEX_MAX_LINES})`
-				: `${lines} lines and ${formatSize(chars)}`;
-	return `${kept}\n\n> WARNING: MEMORY.md is ${size}. Only part of it was loaded: ${cut}. Keep index entries to one line under ~200 chars; move detail into topic files.\n`;
+				? { kind: "lines", lines, limit: INDEX_MAX_LINES }
+				: { kind: "both", lines, size: formatSize(chars) };
+	return `${kept}\n\n${contextWords().memoryIndexCut({ size, cut })}\n`;
 }
 
 /** A size the way Claude Code prints it: `N bytes`, else `N.NKB`/`MB` with a trailing `.0` dropped. */

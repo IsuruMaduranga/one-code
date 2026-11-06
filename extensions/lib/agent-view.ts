@@ -10,6 +10,7 @@
 
 import { fitPainted, visibleWidth } from "./text-width.ts";
 import { cutPlainText } from "./tui-render.ts";
+import { notificationWords } from "./notification-words.ts";
 
 /** `{ target }` while an agent is viewed, `{}` when the view returns to main. */
 export const AGENT_VIEW_CHANNEL = "one-code:agent-view";
@@ -42,22 +43,21 @@ export function agentViewTarget(run: ViewedRun, fork: boolean): AgentViewTarget 
 	return { badge: fork ? `@${run.name}` : run.label, placeholder: `Message @${handle}…` };
 }
 
-/**
- * Claude Code's wrapper for a message the user types at an agent, idle or
- * running (findings §40), verbatim.
- */
+/** A message the user types at an agent, idle or running, in the profile's wrapper. */
 export function userMessageForAgent(text: string): string {
-	return `The user sent a new message while you were working:\n${text}\n\nThis is how Claude Code surfaces messages the user sends mid-turn — within the running turn, often alongside the next tool result, rather than as a separate conversation turn. Address the message above as you continue this turn.`;
+	return notificationWords().userMessageMidTurn({ text });
 }
-
-const USER_MESSAGE_OPENER = "The user sent a new message while you were working:\n";
-const USER_MESSAGE_CLOSER = "\n\nThis is how Claude Code surfaces messages the user sends mid-turn";
 
 /** The user's own text inside `userMessageForAgent`'s wrapper, or undefined for any other prompt. */
 export function unwrapUserMessage(prompt: string): string | undefined {
-	if (!prompt.startsWith(USER_MESSAGE_OPENER)) return undefined;
-	const end = prompt.lastIndexOf(USER_MESSAGE_CLOSER);
-	return end < USER_MESSAGE_OPENER.length ? undefined : prompt.slice(USER_MESSAGE_OPENER.length, end);
+	// The wrapper around the text, from the profile's own words.
+	const probe = userMessageForAgent("\u0000");
+	const at = probe.indexOf("\u0000");
+	const opener = probe.slice(0, at);
+	const closer = probe.slice(at + 1);
+	if (!opener || !prompt.startsWith(opener) || !prompt.endsWith(closer)) return undefined;
+	const end = prompt.length - closer.length;
+	return end < opener.length ? undefined : prompt.slice(opener.length, end);
 }
 
 /**

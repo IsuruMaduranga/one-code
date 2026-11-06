@@ -80,6 +80,7 @@ const BASH_PASSAGES: ToolPassages = {
 };
 
 export const shell: ShellText = {
+	powershellPrimary: "PowerShell is the primary shell on this machine: use the powershell tool for terminal operations (git, npm, build tools)",
 	bashDescription: ({ form, autoMode, searchTools, live }) => withoutOff(bashDescription(form, autoMode, searchTools), live, BASH_PASSAGES),
 	bashParams: BASH_PARAMS,
 	powershellDescription: ({ edition }) => powerShellToolDescription(edition),

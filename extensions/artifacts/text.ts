@@ -46,7 +46,17 @@ export type PublishBrowser =
 	| { kind: "autoOpenOff"; settingsPath: string }
 	| { kind: "tried"; failed?: NoBrowser };
 
+/** Another session holds the store, or changed it under this call. */
+export type StoreBusy =
+	| { kind: "creating" }
+	| { kind: "publishing"; id: string }
+	| { kind: "deletedWhilePublishing"; id: string }
+	| { kind: "takenOver"; id: string }
+	| { kind: "deleting"; id: string };
+
 export interface ArtifactsText {
+	/** Thrown by the store; the tool reports it as the failure's own message. */
+	storeBusy(busy: StoreBusy): string;
 	description(p: { live: LiveTools }): string;
 	params: { action: string; filePath: string; title: string; description: string; id: string; url: string; limit: string };
 	/** An `id` or `url` that names no artifact. */

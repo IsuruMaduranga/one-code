@@ -36,6 +36,7 @@
 
 import { announceArgumentHint, type HintEmitter, withoutExactMatch } from "./argument-hints.ts";
 import { REMINDER_CHANNEL, type ReminderPayload } from "./reminders.ts";
+import { notificationWords } from "./notification-words.ts";
 
 /** The slice of pi's ExtensionAPI the announcer needs (its event bus). */
 export interface ReminderEmitter {
@@ -49,9 +50,10 @@ export interface ReminderEmitter {
  */
 export const LOCAL_COMMAND_TAG_PREFIXES = ["<local-command-caveat>", "<command-name>", "<command-message>", "<local-command-stdout>"] as const;
 
-/** Claude Code 2.1.288's caveat, naming the harness the command ran in. */
-export const LOCAL_COMMAND_CAVEAT =
-	"<local-command-caveat>The command below was run directly in One Code, not sent to you as a request, and its output goes straight to the user. It's recorded here as context for later messages.</local-command-caveat>\n";
+/** Claude Code's caveat frame around the profile's words. */
+export function localCommandCaveat(): string {
+	return `<local-command-caveat>${notificationWords().localCommandCaveat}</local-command-caveat>\n`;
+}
 
 /** CC's `escapeXml` (utils/xml.ts): `& < >` only. */
 export function escapeXml(s: string): string {
@@ -88,7 +90,7 @@ const BLOCK_KEYS = ["caveat", "command", "stdout"] as const;
 
 /** The three bare text blocks a local command leaves for the model, in CC's order. */
 export function localCommandBlocks(command: LocalCommand): string[] {
-	return [LOCAL_COMMAND_CAVEAT, commandInputBlock(command.name, (command.args ?? "").trim()), commandStdoutBlock(command.stdout ?? "")];
+	return [localCommandCaveat(), commandInputBlock(command.name, (command.args ?? "").trim()), commandStdoutBlock(command.stdout ?? "")];
 }
 
 /**

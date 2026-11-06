@@ -16,6 +16,7 @@ const markers: SystemPromptText = {
 	memory: (dir) => `MEMORY ${dir}`,
 	toolList: (tools, guidelines) => `TOOLS ${tools.map((t) => `${t.name}=${t.snippet}`).join(",")} | ${guidelines.join(",")}`,
 	cwdLine: (cwd) => `CWD ${cwd}`,
+	scratchpadMoved: ({ dir }) => `SCRATCHPAD ${dir}`,
 };
 
 const use = (systemPrompt: SystemPromptText) => {

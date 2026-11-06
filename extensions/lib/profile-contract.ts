@@ -27,6 +27,7 @@ import type { MemoryText } from "../memory/text.ts";
 import type { NotebookText } from "../notebook/text.ts";
 import type { PermissionsText } from "../permissions/text.ts";
 import type { PlanModeText } from "../plan-mode/text.ts";
+import type { PluginsText } from "../plugins/text.ts";
 import type { RecapText } from "../recap/text.ts";
 import type { SessionTitleText } from "../session-title/text.ts";
 import type { SkillText } from "../skill/text.ts";
@@ -103,6 +104,8 @@ export interface ProfileText {
 	/** Every child session (subagents, forks, workflow agents) hands back through it. */
 	handback?: HandbackText;
 	subagents?: SubagentsText;
+	/** A plugin command body's placeholders. */
+	plugins?: PluginsText;
 	/** Used by subagents and workflow agents (the model menu, the notices, the expensive-model gate). */
 	subagentModels?: SubagentModelsText;
 	/** Used by the worktree tools, subagents and workflows (each guards isolated sessions with it). */
