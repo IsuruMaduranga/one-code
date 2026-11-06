@@ -5,7 +5,8 @@
  * first request of a resumed process compares them with the live files and git
  * status, and says what changed once. The historical blocks stay as sent.
  */
-import { buildClaudeMdBlock, type ContextFile } from "./claude-context.ts";
+import { buildClaudeMdBlock } from "./claude-context.ts";
+import type { ContextFile } from "./instructions.ts";
 import type { ToldFact } from "./ledger/records.ts";
 import { contentHash } from "./ledger/wire.ts";
 import { toldBlockFact } from "./reminders.ts";

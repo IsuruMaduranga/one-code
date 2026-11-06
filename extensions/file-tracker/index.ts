@@ -25,12 +25,12 @@ import { join } from "node:path";
 import { createReadToolDefinition, type ExtensionAPI, type ExtensionContext, type SessionCompactEvent } from "@earendil-works/pi-coding-agent";
 import { pathArgument } from "../auto-mode/paths.ts";
 import { bashParserReady } from "../lib/bash-parser.ts";
-import { agentInstructionSections } from "../lib/claude-context.ts";
+import { agentInstructionSections } from "../lib/instructions.ts";
 import { fitToWindow } from "../lib/instruction-budget.ts";
 import { inContextEntries, latestCompaction } from "../lib/compaction-boundary.ts";
 import { autoMemoryEnabled } from "../lib/auto-memory.ts";
 import { projectMemoryDir } from "../lib/memory.ts";
-import { claudeConfigDir, comparablePath, isPathAtOrUnder, tryRealpath } from "../lib/paths.ts";
+import { comparablePath, isPathAtOrUnder, tryRealpath } from "../lib/paths.ts";
 import { estimateTextTokens } from "../lib/pi-ai-estimate.ts";
 import { planFileOnBranch } from "../lib/plan-mode-channels.ts";
 import { requireText } from "../lib/profile.ts";
@@ -200,7 +200,7 @@ function inContextFiles(ctx: ExtensionContext, branch: readonly { type: string; 
 	const home = homedir();
 	// Use the context loader's import confinement and approval: a literal
 	// unapproved @import is not evidence that its file is still in context.
-	const { contextFiles, oneCodeFiles } = agentInstructionSections({ cwd: ctx.cwd, home, homeClaudeDir: claudeConfigDir() });
+	const { contextFiles, oneCodeFiles } = agentInstructionSections({ cwd: ctx.cwd, home });
 	const skipped = new Set(fitToWindow([...contextFiles, ...oneCodeFiles], ctx.model?.contextWindow).skipped.map((file) => file.path));
 	const stack = contextFiles.flatMap((file) => (skipped.has(file.path) ? [] : [file.path, ...(file.imported ?? [])]));
 	return new Set(

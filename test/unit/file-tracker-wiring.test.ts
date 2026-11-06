@@ -12,7 +12,7 @@ import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fileTrackerExtension from "../../extensions/file-tracker/index.ts";
 import { CHILD_WROTE_CHANNEL } from "../../extensions/lib/child-writes.ts";
-import { discoverContextFiles } from "../../extensions/lib/claude-context.ts";
+import { discoverContextFiles } from "../../profile/claude-code/instructions.ts";
 import { persistExternalIncludesApproval } from "../../extensions/lib/claude-external-includes.ts";
 import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";

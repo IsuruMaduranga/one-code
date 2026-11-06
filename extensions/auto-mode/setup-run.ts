@@ -27,7 +27,7 @@ import { buildSetupPrompt, parseGitRemotes, redactSecrets, type SetupDraft, pars
 import { claudeSourcesOn } from "../lib/config-mode.ts";
 import { claudeUserDir, oneCodeStateDir } from "../lib/paths.ts";
 import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
-import { firstOneCodeFile } from "../lib/claude-context.ts";
+import { firstOneCodeFile } from "../lib/instructions.ts";
 
 const PROBE_TIMEOUT_MS = 10_000;
 /** Drafting reads a big fact dump and writes a full slot list — give it room. */

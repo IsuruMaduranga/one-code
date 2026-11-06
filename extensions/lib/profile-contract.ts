@@ -9,6 +9,7 @@
  * extensions child sessions load, and the text groups moved so far.
  */
 
+import type { InstructionProvider } from "./instructions.ts";
 import type { ArtifactsText } from "../artifacts/text.ts";
 import type { AskUserText } from "../ask-user/text.ts";
 import type { AutoModeText } from "../auto-mode/text.ts";
@@ -152,6 +153,12 @@ export interface Profile {
 	 * names another tool, results and refusals included, leaves out what is off.
 	 */
 	text(env: TextEnv): ProfileText;
+	/**
+	 * The product's instruction files beyond the base's AGENTS.md and product
+	 * file (lib/instructions.ts): the provider gets the base's finished lists
+	 * and returns the final ones. Absent: the base's lists as they are.
+	 */
+	instructions?: InstructionProvider;
 }
 
 /** What the profile's text is built for. */

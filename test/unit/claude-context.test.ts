@@ -3,20 +3,9 @@ import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-	AGENTS_DESCRIPTOR,
-	buildClaudeMdBlock,
-	buildContextBlock,
-	dateBlock,
-	buildOneCodeBlock,
-	discoverContextFilePaths,
-	discoverContextFiles,
-	discoverOneCodeFiles,
-	expandImports,
-	ONECODE_DESCRIPTOR,
-	ONECODE_GLOBAL_DESCRIPTOR,
-	PROJECT_DESCRIPTOR,
-} from "../../extensions/lib/claude-context.ts";
+import { buildClaudeMdBlock, buildContextBlock, dateBlock, buildOneCodeBlock } from "../../extensions/lib/claude-context.ts";
+import { AGENTS_DESCRIPTOR, discoverOneCodeFiles, expandImports, ONECODE_DESCRIPTOR, ONECODE_GLOBAL_DESCRIPTOR, PROJECT_DESCRIPTOR } from "../../extensions/lib/instructions.ts";
+import { discoverContextFilePaths, discoverContextFiles } from "../../profile/claude-code/instructions.ts";
 import { wrapReminder } from "../../extensions/lib/reminders.ts";
 import { truncateIndex } from "../../extensions/lib/memory-content.ts";
 

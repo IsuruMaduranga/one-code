@@ -26,7 +26,7 @@ import { AUTO_MEMORY_KEY as AUTO_MEMORY } from "../lib/auto-memory.ts";
 import { CONFIG_MODE_KEY, claudeSourcesOn } from "../lib/config-mode.ts";
 import { claudeJsonPath, claudeUserDir, oneCodeStateDir } from "../lib/paths.ts";
 import { claudeUserSettingsPath, managedSettingsPaths, settingsPaths } from "../lib/claude-settings.ts";
-import { agentSkippedInstructions, discoverContextFilePaths, instructionRule } from "../lib/claude-context.ts";
+import { agentSkippedInstructions, openInstructions } from "../lib/instructions.ts";
 import { CLAUDE_MD_CHAR_LIMIT, claudeMdLimitWarning, projectMemoryDir } from "../lib/memory.ts";
 import { skippedInstructionWarning } from "../lib/instruction-budget.ts";
 import { indexLimitStatus } from "../lib/memory-content.ts";
@@ -361,18 +361,13 @@ export function collectCompat(input: CompatInput): CompatReport {
 
 	// The session's window budget, over the sections it loads (imports inlined,
 	// ONECODE.md included): past half the window, the largest are not loaded.
-	const skipped = agentSkippedInstructions({ cwd, home, homeClaudeDir: claudeDir, homeOneCodeDir: oneCodeStateDir(env, home), contextWindow: input.contextWindow });
+	const skipped = agentSkippedInstructions({ cwd, home, homeOneCodeDir: oneCodeStateDir(env, home), contextWindow: input.contextWindow });
 	const fix = "Trim the instruction files below half of the model's context window together, split this one into files the model reads when needed, or switch to a model with a larger window.";
 	for (const file of skipped) findings.push({ level: "warn", text: skippedInstructionWarning(shortenHome(file.path, home), file), fix });
 	const skippedPaths = new Set(skipped.map((file) => file.path));
 
 	// Context files, sized — the block every turn pays for.
-	const contextFiles: ContextFileReport[] = discoverContextFilePaths({
-		cwd,
-		homeClaudeDir: claudeDir,
-		homeOneCodeDir: oneCodeStateDir(env, home),
-		rule: instructionRule(home),
-	}).map(({ path, descriptor }) => {
+	const contextFiles: ContextFileReport[] = openInstructions(home).paths({ cwd, homeOneCodeDir: oneCodeStateDir(env, home) }).map(({ path, descriptor }) => {
 		let chars = 0;
 		try {
 			chars = readFileSync(path, "utf-8").length;

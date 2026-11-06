@@ -18,14 +18,14 @@ import {
 	ancestorDirs,
 	collectImportedPaths,
 	type ContextFilePath,
-	discoverContextFilePaths,
 	GLOBAL_DESCRIPTOR,
 	LOCAL_DESCRIPTOR,
 	ONECODE_DESCRIPTOR,
 	ONECODE_GLOBAL_DESCRIPTOR,
+	openInstructions,
 	PROJECT_DESCRIPTOR,
-	instructionRule,
-} from "../lib/claude-context.ts";
+} from "../lib/instructions.ts";
+import { claudeSourcesOn } from "../lib/config-mode.ts";
 import { forwardSlashes, isRelativeInside, tildify } from "../lib/paths.ts";
 import { tryReadFile } from "../lib/plugins.ts";
 
@@ -74,12 +74,11 @@ export function buildMemoryEntries(opts: {
 	memoryDir: string | undefined;
 }): MemoryEntry[] {
 	const { cwd, home, homeClaudeDir, homeOneCodeDir, memoryDir } = opts;
-	// The same rule the # claudeMd block uses, so the list matches what it sends.
-	const rule = instructionRule(home);
 	// Independent mode (lib/config-mode.ts) reads no CLAUDE.md: its always-offered
 	// files are the global ONECODE.md and the project's AGENTS.md instead.
-	const independent = rule === "agents-md";
-	const discovered = discoverContextFilePaths({ cwd, homeClaudeDir, homeOneCodeDir, rule });
+	const independent = !claudeSourcesOn();
+	// The same files the # claudeMd block takes, so the list matches what it sends.
+	const discovered = openInstructions(home).paths({ cwd, homeOneCodeDir });
 	const referenced = referencedImports(discovered, home);
 	// (descriptor, dir) → the discovered path, so per-dir lookups reuse the real
 	// on-disk casing discovery already resolved (no second stat/readdir here).

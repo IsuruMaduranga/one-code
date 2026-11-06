@@ -6,7 +6,9 @@ import claudeContextExtension from "../../extensions/claude-context/index.ts";
 import systemReminderExtension from "../../extensions/system-reminder/index.ts";
 import hooksExtension from "../../extensions/hooks/index.ts";
 import mcpExtension from "../../extensions/mcp/index.ts";
-import { buildClaudeMdBlock, discoverContextFiles, discoverOneCodeFiles, externalInstructionIncludes, nestedInstructionFiles } from "../../extensions/lib/claude-context.ts";
+import { buildClaudeMdBlock } from "../../extensions/lib/claude-context.ts";
+import { discoverOneCodeFiles, openInstructions } from "../../extensions/lib/instructions.ts";
+import { discoverContextFiles, externalInstructionIncludes, nestedInstructionFiles } from "../../profile/claude-code/instructions.ts";
 import { EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_NONE, EXTERNAL_INCLUDES_TITLE, EXTERNAL_INCLUDES_YES, externalIncludesDialog, persistExternalIncludesApproval, readExternalIncludesApproval } from "../../extensions/lib/claude-external-includes.ts";
 import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
 import { oneCodeProjectSettingsPath } from "../../extensions/lib/one-code-settings.ts";
@@ -307,11 +309,13 @@ describe("startup probe and approved readers", () => {
 		expect(oneCode()).not.toContain("ONECODE HOME SECRET");
 		expect(oneCode(true)).toContain("ONECODE EXTERNAL SECRET");
 		expect(oneCode(true)).toContain("ONECODE HOME SECRET");
-		expect(externalInstructionIncludes(opts())).toEqual([outside, personal]);
+		// ONECODE.md is the base's: its imports are asked about through every provider.
+		const asked = () => openInstructions(home).externalIncludes({ cwd, homeOneCodeDir: state });
+		expect(asked()).toEqual([outside, personal]);
 		// The user's own global ONECODE.md is not project-controlled: its imports load and never ask.
 		write(join(state, "ONECODE.md"), `@${write(join(root, "global-import.md"), "GLOBAL ONECODE IMPORT")}`);
 		expect(oneCode()).toContain("GLOBAL ONECODE IMPORT");
-		expect(externalInstructionIncludes(opts())).toEqual([outside, personal]);
+		expect(asked()).toEqual([outside, personal]);
 		// A nested ONECODE.md attached on a read follows the same consent.
 		write(join(cwd, "nested", "ONECODE.md"), "@../../shared.md");
 		const nested = { ...opts(), filePath: join(cwd, "nested", "file.ts") };

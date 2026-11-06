@@ -9,6 +9,8 @@ import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const ROOT = join(import.meta.dirname, "..", "..", "extensions");
+/** The profile's code reads Claude Code's files too (profile/claude-code/), and its text may name them. */
+const PROFILE = join(import.meta.dirname, "..", "..", "profile");
 
 /** Spellings of a Claude Code location in our source. */
 const CLAUDE_LOCATION =
@@ -19,7 +21,8 @@ const CHECKED: Record<string, string> = {
 	"lib/paths.ts": "defines the helpers",
 	"lib/config-mode.ts": "the mode itself",
 	"lib/claude-settings.ts": "readers gate on claudeSourcesOn; managed paths are shared",
-	"lib/claude-context.ts": "the instruction rule drops every Claude Code file under agents-md",
+	"lib/claude-context.ts": "the oneCodeMd preamble names CLAUDE.md only in compatible mode",
+	"lib/instructions.ts": "reads no Claude Code location; the banner groups a provider's .claude/AGENTS.md with its directory",
 	"lib/memory-index.ts": "independent memory indexes cannot resolve into Claude Code locations",
 	"lib/skill-scan.ts": "Claude Code skill folders only in compatible mode; commands via the config dirs",
 	"lib/plugins.ts": "readClaudePlugins is false in independent mode",
@@ -28,11 +31,8 @@ const CHECKED: Record<string, string> = {
 	"permissions/index.ts": ".claude.json flag and the ~/.claude allow warning gated",
 	"auto-mode/config.ts": "autoModeSettingsPaths reads One Code's file only in independent mode",
 	"auto-mode/safety-floor.ts": "protection: gate-control files stay on the floor in both modes",
-	"auto-mode/instructions.ts": "the classifier reads the union in compatible mode, AGENTS.md only in independent",
 	"auto-mode/setup-run.ts": "AGENTS.md and ONECODE.md in independent mode",
 	"claude-compat/index.ts": "Claude Code skill and command folders only in compatible mode",
-	"claude-context/index.ts": "passes the instruction rule",
-	"file-tracker/index.ts": "passes the instruction rule",
 	"memory/index.ts": "the picker's entries follow the instruction rule",
 	"memory/entries.ts": "independent rows offer ONECODE.md and AGENTS.md",
 	"hooks/settings.ts": "hookSettingsPaths reads One Code's files only in independent mode",
@@ -44,6 +44,11 @@ const CHECKED: Record<string, string> = {
 	"subagents/default-model.ts": "reads through autoModeSettingsPaths",
 	"auto-mode/classifier-prompt.ts": "Claude Code's ruleset verbatim, regenerated, never hand-edited",
 	"doctor/build.ts": "the mode line names what is read",
+	"profile/claude-code/instructions.ts": "One Code's instruction provider: passes the base's files through and reads no Claude Code location in independent mode",
+	"profile/doctor/fix-prompt.ts": "words only: names both modes' files, and says which the session reads",
+	"profile/subagents/agent-description.ts": "words only: the caller passes the mode's config dir",
+	"profile/subagents/guide-agent.ts": "words only: the caller passes which sources and config dir the mode reads",
+	"profile/worktree/descriptions.ts": "words only: the caller passes the mode's config dir",
 };
 
 /** Source without block and line comments, so a path named in prose is not a reader (`//` after `:` is a URL). */
@@ -61,9 +66,10 @@ function walk(dir: string): string[] {
 
 describe("config-mode guard", () => {
 	it("every module naming a Claude Code location has been checked against independent mode", () => {
-		const naming = walk(ROOT)
+		const key = (path: string) => (path.startsWith(PROFILE) ? `profile/${relative(PROFILE, path)}` : relative(ROOT, path)).split("\\").join("/");
+		const naming = [...walk(ROOT), ...walk(PROFILE)]
 			.filter((path) => CLAUDE_LOCATION.test(withoutComments(readFileSync(path, "utf8"))))
-			.map((path) => relative(ROOT, path).split("\\").join("/"));
+			.map(key);
 		const unchecked = naming.filter((file) => !(file in CHECKED));
 		expect(unchecked, "add each to CHECKED with how it treats independent mode").toEqual([]);
 		const stale = Object.keys(CHECKED).filter((file) => !naming.includes(file));

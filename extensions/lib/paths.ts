@@ -202,3 +202,12 @@ export function tildify(path: string, home: string): string {
 	return isRelativeInside(rest) ? `~/${forwardSlashes(rest)}` : path;
 }
 
+/** Independent mode excludes Claude locations even when reached through aliases or imports. */
+export function isClaudeLocation(path: string, userDir: string): boolean {
+	return [path, tryRealpath(path)].some((candidate) => candidate !== undefined && (
+		/(?:^|[/\\])\.claude(?:[/\\]|$)/i.test(candidate) ||
+		/(?:^|[/\\])CLAUDE(?:\.local)?\.md$/i.test(candidate) ||
+		isPathAtOrUnder(candidate, tryRealpath(userDir) ?? userDir) ||
+		isPathAtOrUnder(candidate, claudeManagedDir())
+	));
+}

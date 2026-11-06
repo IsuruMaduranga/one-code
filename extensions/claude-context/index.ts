@@ -27,23 +27,11 @@ import { readFileSync } from "node:fs";
 import os from "node:os";
 import { dirname } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import {
-	agentInstructionSections,
-	buildClaudeMdBlock,
-	buildContextBlock,
-	buildOneCodeBlock,
-	collectImportedPaths,
-	dateBlock,
-	dateChangeReminder,
-	externalInstructionIncludes,
-	localDate,
-	instructionRule,
-	nestedInstructionFiles,
-	nestedInstructionText,
-} from "../lib/claude-context.ts";
+import { buildClaudeMdBlock, buildContextBlock, buildOneCodeBlock, dateBlock, dateChangeReminder, localDate, nestedInstructionText } from "../lib/claude-context.ts";
+import { collectImportedPaths, type Instructions, openInstructions } from "../lib/instructions.ts";
 import { collectGitStatus, GIT_SNAPSHOT_OWNER_CHANNEL } from "../lib/git-status.ts";
 import { readMemoryIndex } from "../lib/memory-index.ts";
-import { claudeConfigDir, oneCodeStateDir, tildify, tryRealpath } from "../lib/paths.ts";
+import { oneCodeStateDir, tildify, tryRealpath } from "../lib/paths.ts";
 import { fitToWindow, restoredInstructionNotice, type SkippedInstruction, skippedInstructionWarning } from "../lib/instruction-budget.ts";
 import { queueNotice } from "../lib/notices.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, toldBlockFact } from "../lib/reminders.ts";
@@ -165,8 +153,8 @@ function claudeContextExtension(pi: ExtensionAPI) {
 		const location = data as WorktreeLocation | null | undefined;
 		entered = location?.path ? location : undefined;
 	});
-	/** The instruction rule, read with the startup block (it is settings, read once a session). */
-	let rule: ReturnType<typeof instructionRule> | undefined;
+	/** The instruction files under the settings read with the startup block (read once a session, again at each refresh). */
+	let instructions: Instructions | undefined;
 	let includeExternal = false;
 	let approvalPending: Promise<void> | undefined;
 	let approvalAbort = new AbortController();
@@ -198,14 +186,14 @@ function claudeContextExtension(pi: ExtensionAPI) {
 	let livePrints: { atStart: LiveFingerprints; atCompaction: () => LiveFingerprints } | undefined;
 	/** True until this process's first request inside an epoch has compared the epoch's facts with the live workspace. */
 	let resumeCheck = true;
-	const readFiles = (cwd: string) => ({
-		...agentInstructionSections({ cwd, home: os.homedir(), homeClaudeDir: claudeConfigDir(), homeOneCodeDir: oneCodeStateDir(), includeExternal }),
-		memoryIndex: readMemoryIndex(cwd),
-	});
+	const readFiles = (cwd: string) => {
+		const view = openInstructions(os.homedir());
+		return { ...view.sections({ cwd, homeOneCodeDir: oneCodeStateDir(), includeExternal }), memoryIndex: readMemoryIndex(cwd), view };
+	};
 	let files: ReturnType<typeof readFiles> | undefined;
 	const adoptFiles = (current: ReturnType<typeof readFiles>) => {
 		files = current;
-		rule = instructionRule(os.homedir());
+		instructions = current.view;
 	};
 	/**
 	 * The files message 1 carries (or imports): never attached again on a read.
@@ -226,7 +214,7 @@ function claudeContextExtension(pi: ExtensionAPI) {
 		return takesGitSnapshot ? collectGitStatus(cwd, undefined, shellTool) : null;
 	};
 
-	const externalPaths = (cwd: string) => externalInstructionIncludes({ cwd, homeClaudeDir: claudeConfigDir(), rule: instructionRule(os.homedir()), home: os.homedir() });
+	const externalPaths = (cwd: string) => openInstructions(os.homedir()).externalIncludes({ cwd, homeOneCodeDir: oneCodeStateDir() });
 	const saveApproval = (ctx: ExtensionContext, approved: boolean) => {
 		includeExternal = approved;
 		try { persistExternalIncludesApproval(ctx.cwd, os.homedir(), approved); }
@@ -398,11 +386,11 @@ function claudeContextExtension(pi: ExtensionAPI) {
 				approvalPending = askApproval(ctx, paths, true).catch(() => {});
 			}
 		}
-		// The instructions block carries the instruction files the mode and Claude
-		// Code's instructionFiles pick (lib/claude-context.ts instructionRule): by
-		// default the CLAUDE.md family, or the project's AGENTS.md files when it
-		// has no CLAUDE.md, byte-exact with Claude Code either way. ONECODE.md
-		// rides its own higher-precedence block.
+		// The instructions block carries the instruction files lib/instructions.ts
+		// and the profile's provider pick (One Code's: by default the CLAUDE.md
+		// family, or the project's AGENTS.md files when it has no CLAUDE.md,
+		// byte-exact with Claude Code either way). ONECODE.md rides its own
+		// higher-precedence block.
 		contextWindow = ctx.model?.contextWindow;
 		refreshInstructions(ctx.cwd);
 		toldPaths = new Set();
@@ -512,16 +500,16 @@ function claudeContextExtension(pi: ExtensionAPI) {
 
 	// A successful read attaches nested instruction files and matching path rules
 	// once each. These are one-shots: never replace the frozen first-prepend block.
-	// lib/claude-context.ts owns traversal, matching and source ordering.
+	// lib/instructions.ts and the profile's provider own traversal, matching and source ordering.
 	pi.on("tool_result", (event, ctx) => {
 		if (event.toolName !== "read" || event.isError) return;
 		const raw = pathArgument(event.input);
 		if (!raw) return;
-		rule ??= instructionRule(os.homedir());
+		instructions ??= openInstructions(os.homedir());
 		const filePath = resolveToolPath(raw, ctx.cwd);
 		// In a worktree, the directories between are below the worktree's root (its own root files
 		// are the shared checkout's, which the startup block carries).
-		const files = nestedInstructionFiles({ filePath, cwd: sessionWorkCwd(entered, ctx.cwd), rule, home: os.homedir(), includeExternal });
+		const files = instructions.nested({ filePath, cwd: sessionWorkCwd(entered, ctx.cwd), includeExternal });
 		// A partial read is not evidence that the entire instruction file is shown.
 		const input = event.input as { offset?: number; limit?: number };
 		const truncated = (event.details as { truncation?: { truncated?: boolean } } | undefined)?.truncation?.truncated;

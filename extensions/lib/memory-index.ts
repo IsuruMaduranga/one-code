@@ -1,12 +1,12 @@
 /** Read the startup/compaction memory index without loading excluded or non-text files. */
 import os from "node:os";
 import { join } from "node:path";
-import { isClaudeLocation, readFileIfPresent } from "./claude-context.ts";
+import { readFileIfPresent } from "./instructions.ts";
 import { autoMemoryEnabled } from "./auto-memory.ts";
 import { claudeSourcesOn } from "./config-mode.ts";
 import { projectMemoryDir } from "./memory.ts";
 import { truncateIndex } from "./memory-content.ts";
-import { claudeUserDir } from "./paths.ts";
+import { claudeUserDir, isClaudeLocation } from "./paths.ts";
 
 export function readMemoryIndex(cwd: string, home: string = os.homedir()): { path: string; content: string } | null {
 	if (!autoMemoryEnabled(cwd)) return null;

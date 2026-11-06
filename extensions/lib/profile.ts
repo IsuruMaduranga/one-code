@@ -21,6 +21,7 @@ import { dirname, resolve } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { enabledFeatures, type FeatureId, featureProblems, isGuardFeature, TOOL_FEATURES } from "./features.ts";
+import type { InstructionProvider } from "./instructions.ts";
 import type { LiveTools } from "./live-tools.ts";
 import type { Profile, ProfileText, ToolSwitch } from "./profile-contract.ts";
 
@@ -45,6 +46,8 @@ export interface ResolvedProfile {
 	childExtensionPaths: readonly string[];
 	/** The profile's model-facing text, built for `live`. */
 	text: ProfileText;
+	/** The profile's instruction provider (lib/instructions.ts), if it has one. */
+	instructions?: InstructionProvider;
 }
 
 function envList(env: NodeJS.ProcessEnv, name: string): string[] {
@@ -88,6 +91,7 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		live,
 		childExtensionPaths: profile.childExtensions.map((entry) => resolve(profileDir, entry)),
 		text: profile.text({ live }),
+		...(profile.instructions ? { instructions: profile.instructions } : {}),
 	};
 }
 

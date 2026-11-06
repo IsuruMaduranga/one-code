@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readRuleInstructions } from "../../extensions/lib/claude-rules.ts";
-import { discoverContextFiles } from "../../extensions/lib/claude-context.ts";
+import { discoverContextFiles } from "../../profile/claude-code/instructions.ts";
 
 let root: string;
 function write(path: string, content: string): string {

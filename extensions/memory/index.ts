@@ -29,9 +29,9 @@ import { claudeMdLimitWarning, combinedLimitWarning, projectMemoryDir } from "..
 import { INDEX_MAX_CHARS, INDEX_MAX_LINES, indexLimitStatus, stampFrontmatter } from "../lib/memory-content.ts";
 import { requireText } from "../lib/profile.ts";
 import { type ConfigMode, CONFIG_MODE_KEY, claudeSourcesOn, configMode, configModeFromEnv, savedConfigMode } from "../lib/config-mode.ts";
-import { agentSkippedInstructions, isClaudeLocation } from "../lib/claude-context.ts";
+import { agentSkippedInstructions } from "../lib/instructions.ts";
 import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
-import { claudeConfigDir, comparablePath, isPathAtOrUnder, oneCodeStateDir, tildify, tryRealpath } from "../lib/paths.ts";
+import { claudeConfigDir, comparablePath, isClaudeLocation, isPathAtOrUnder, oneCodeStateDir, tildify, tryRealpath } from "../lib/paths.ts";
 import { resolveThroughLinks } from "../auto-mode/paths.ts";
 import { resolveToolPath } from "../lib/tool-path.ts";
 import { tryReadFile } from "../lib/plugins.ts";

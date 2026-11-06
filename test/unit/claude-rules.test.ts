@@ -9,12 +9,8 @@ import { dirname, join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import claudeContextExtension from "../../extensions/claude-context/index.ts";
-import {
-	buildClaudeMdBlock,
-	discoverContextFiles,
-	nestedInstructionFiles,
-	nestedInstructionText,
-} from "../../extensions/lib/claude-context.ts";
+import { buildClaudeMdBlock, nestedInstructionText } from "../../extensions/lib/claude-context.ts";
+import { discoverContextFiles, nestedInstructionFiles } from "../../profile/claude-code/instructions.ts";
 import { discoverRules, parseRule, readRuleInstructions, ruleMatches, splitRulePaths } from "../../extensions/lib/claude-rules.ts";
 import { claudeManagedDir, forwardSlashes, isPathAtOrUnder } from "../../extensions/lib/paths.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";

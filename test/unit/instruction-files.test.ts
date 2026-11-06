@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { instructionRule } from "../../extensions/lib/claude-context.ts";
+import { instructionRule } from "../../profile/claude-code/instructions.ts";
 import { readInstructionFiles } from "../../extensions/lib/claude-settings.ts";
 import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
 
