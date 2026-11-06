@@ -3,9 +3,11 @@
  * to follow (decisions/bi-fork.md, "Claude Code compatibility is One Code's
  * profile code; the base reads AGENTS.md").
  *
- * The base reads each directory's `AGENTS.md`, from the farthest ancestor
- * down to the working directory, and the product's own file (`ONECODE.md`,
- * global and per directory), with `@path` imports expanded in place
+ * The base reads the user's global `AGENTS.md` files (pi's
+ * `<agent dir>/AGENTS.md`, then the profile's `globalAgentsFiles`), each
+ * directory's `AGENTS.md`, from the farthest ancestor down to the working
+ * directory, and the product's own file (`ONECODE.md`, global and per
+ * directory), with `@path` imports expanded in place
  * (recursive, depth-capped, cycle-safe, code-span aware) and confined to the
  * project unless the user approved external imports. A profile's provider
  * (`Profile.instructions`) reshapes the base's lists: it gets them finished
@@ -50,6 +52,7 @@ export const MEMORY_DESCRIPTOR: InstructionSource = "memory";
 export const ONECODE_DESCRIPTOR: InstructionSource = "oneCode";
 export const ONECODE_GLOBAL_DESCRIPTOR: InstructionSource = "oneCodeGlobal";
 export const AGENTS_DESCRIPTOR: InstructionSource = "agents";
+export const AGENTS_GLOBAL_DESCRIPTOR: InstructionSource = "agentsGlobal";
 
 /** One Code instruction filenames, in preference order (first present per dir wins). */
 const ONECODE_NAMES = ["ONECODE.md", "onecode.md", "One Code.md"] as const;
@@ -308,32 +311,51 @@ function openView(home: string): InstructionView {
 	return activeProfile().instructions?.open({ home }) ?? BASE_VIEW;
 }
 
-/** Each directory's AGENTS.md that exists, farthest ancestor first, as the base reads them. */
-export function baseAgentsPaths(cwd: string, allowPath: (path: string) => boolean = () => true): ContextFilePath[] {
+/**
+ * The user's global AGENTS.md files in reading order: pi's
+ * `<agent dir>/AGENTS.md` (pi's `getAgentDir()`, which the wiring passes),
+ * then the profile's `globalAgentsFiles`.
+ */
+function globalAgentsFiles(home: string, agentDir: string | undefined): string[] {
+	return [...(agentDir ? [join(agentDir, "AGENTS.md")] : []), ...activeProfile().globalAgentsFiles.map((path) => expandTilde(path, home))];
+}
+
+/**
+ * The AGENTS.md files that exist, as the base reads them: the user's global
+ * ones first (`globalAgentsFiles`), then each directory's, farthest ancestor
+ * first.
+ */
+export function baseAgentsPaths(cwd: string, allowPath: (path: string) => boolean = () => true, globals: readonly string[] = []): ContextFilePath[] {
 	const paths: ContextFilePath[] = [];
 	const seen = new Set<string>();
-	for (const dir of ancestorDirs(cwd)) {
-		const path = join(dir, "AGENTS.md");
-		if (!isPresentFile(path) || !allowPath(path)) continue;
+	const push = (path: string, descriptor: InstructionSource) => {
+		if (!isPresentFile(path) || !allowPath(path)) return;
 		const key = tryRealpath(path) ?? path;
-		if (seen.has(key)) continue;
+		if (seen.has(key)) return;
 		seen.add(key);
-		paths.push({ path, descriptor: AGENTS_DESCRIPTOR });
-	}
+		paths.push({ path, descriptor });
+	};
+	for (const path of globals) push(path, AGENTS_GLOBAL_DESCRIPTOR);
+	for (const dir of ancestorDirs(cwd)) push(join(dir, "AGENTS.md"), AGENTS_DESCRIPTOR);
 	return paths;
 }
 
-/** The base's AGENTS.md files with their imports expanded, confined to the project. */
-function baseAgentsFiles(cwd: string, home: string, allowPath: (path: string) => boolean): ContextFile[] {
+/**
+ * The base's AGENTS.md files with their imports expanded: a project file's
+ * confined to the project, a global one's anywhere (the user wrote it, as
+ * with the global ONECODE.md).
+ */
+function baseAgentsFiles(cwd: string, home: string, allowPath: (path: string) => boolean, globals: readonly string[]): ContextFile[] {
 	const realCwd = tryRealpath(cwd) ?? cwd;
-	const read = (path: string) => {
+	const anywhere = (path: string) => (allowPath(path) ? readFileIfPresent(path) : null);
+	const inProject = (path: string) => {
 		const key = tryRealpath(path);
-		return key && isPathAtOrUnder(key, realCwd) && allowPath(path) ? readFileIfPresent(path) : null;
+		return key && isPathAtOrUnder(key, realCwd) ? anywhere(path) : null;
 	};
-	return baseAgentsPaths(cwd, allowPath).flatMap(({ path, descriptor }) => {
+	return baseAgentsPaths(cwd, allowPath, globals).flatMap(({ path, descriptor }) => {
 		const content = readFileIfPresent(path);
 		if (content === null) return [];
-		const importOptions = { home, read };
+		const importOptions = { home, read: descriptor === AGENTS_GLOBAL_DESCRIPTOR ? anywhere : inProject };
 		const imported = [...collectImportedPaths(content, dirname(path), importOptions)];
 		return [{ path, descriptor, content: expandImports(content, dirname(path), importOptions), ...(content.includes("@") ? { imported } : {}) }];
 	});
@@ -444,11 +466,12 @@ function oneCodeExternalIncludes(opts: { cwd: string; home: string; homeOneCodeD
 	return outside;
 }
 
-/** The base's paths for the picker: the global product file, then per directory its AGENTS.md and product file. */
-function basePaths(cwd: string, homeOneCodeDir: string | undefined, allowPath: (path: string) => boolean): ContextFilePath[] {
-	if (homeOneCodeDir === undefined) return baseAgentsPaths(cwd, allowPath);
-	const agents = new Map(baseAgentsPaths(cwd, allowPath).map((entry) => [dirname(entry.path), entry]));
-	const paths: ContextFilePath[] = [];
+/** The base's paths for the picker: the global AGENTS.md and product files, then per directory its AGENTS.md and product file. */
+function basePaths(cwd: string, homeOneCodeDir: string | undefined, allowPath: (path: string) => boolean, globals: readonly string[]): ContextFilePath[] {
+	const all = baseAgentsPaths(cwd, allowPath, globals);
+	if (homeOneCodeDir === undefined) return all;
+	const agents = new Map(all.filter((entry) => entry.descriptor === AGENTS_DESCRIPTOR).map((entry) => [dirname(entry.path), entry]));
+	const paths: ContextFilePath[] = all.filter((entry) => entry.descriptor === AGENTS_GLOBAL_DESCRIPTOR);
 	const globalOneCode = firstOneCodeFile(homeOneCodeDir);
 	if (globalOneCode && allowPath(globalOneCode)) paths.push({ path: globalOneCode, descriptor: ONECODE_GLOBAL_DESCRIPTOR });
 	for (const dir of ancestorDirs(cwd)) {
@@ -476,25 +499,31 @@ export interface Instructions {
 	classifier(opts: { cwd: string; homeOneCodeDir?: string }): ClassifierFile[];
 }
 
-/** The instruction files under the settings in force now (the active profile's provider, else the base's). */
-export function openInstructions(home: string): Instructions {
+/**
+ * The instruction files under the settings in force now (the active
+ * profile's provider, else the base's). `agentDir` is pi's
+ * (`getAgentDir()`, passed by the wiring, since this module has no pi
+ * import): without it pi's global AGENTS.md is not read.
+ */
+export function openInstructions(home: string, agentDir?: string): Instructions {
 	const view = openView(home);
 	const allowPath = (path: string) => view.allowPath(path);
+	const globals = globalAgentsFiles(home, agentDir);
 	const productDir = (dir: string | undefined) => dir ?? oneCodeStateDir(process.env, home);
 	return {
 		allowPath,
 		sections: ({ cwd, homeOneCodeDir, includeExternal }) => {
 			const external = includeExternal ?? readExternalIncludesApproval(cwd, home).approved;
 			return {
-				contextFiles: view.files(baseAgentsFiles(cwd, home, allowPath), { cwd, includeExternal: external }),
+				contextFiles: view.files(baseAgentsFiles(cwd, home, allowPath, globals), { cwd, includeExternal: external }),
 				oneCodeFiles: discoverOneCodeFiles({ cwd, homeOneCodeDir: productDir(homeOneCodeDir), home, includeExternal: external, allowPath }),
 			};
 		},
-		paths: ({ cwd, homeOneCodeDir }) => view.paths(basePaths(cwd, homeOneCodeDir, allowPath), { cwd, homeOneCodeDir }),
+		paths: ({ cwd, homeOneCodeDir }) => view.paths(basePaths(cwd, homeOneCodeDir, allowPath, globals), { cwd, homeOneCodeDir }),
 		nested: ({ filePath, cwd, includeExternal }) => view.nested(baseNestedFiles({ filePath, cwd, home, allowPath }), { filePath, cwd, includeExternal }),
 		externalIncludes: ({ cwd, homeOneCodeDir }) => view.externalIncludes(oneCodeExternalIncludes({ cwd, home, homeOneCodeDir: productDir(homeOneCodeDir), allowPath }), { cwd }),
 		classifier: ({ cwd, homeOneCodeDir }) => [
-			...view.classifier(baseAgentsFiles(cwd, home, allowPath), { cwd }),
+			...view.classifier(baseAgentsFiles(cwd, home, allowPath, globals), { cwd }),
 			...discoverOneCodeFiles({ cwd, homeOneCodeDir: productDir(homeOneCodeDir), home, allowPath }),
 		],
 	};
@@ -506,12 +535,13 @@ export function openInstructions(home: string): Instructions {
  * `homeOneCodeDir`, its ONECODE.md files too. The startup banner lists these.
  */
 export function projectInstructionFiles(opts: { cwd: string; home: string; homeOneCodeDir?: string }): string[] {
+	const global = new Set([GLOBAL_DESCRIPTOR, ONECODE_GLOBAL_DESCRIPTOR, AGENTS_GLOBAL_DESCRIPTOR]);
 	const stop = findGitRoot(opts.cwd) ?? opts.cwd;
 	const files = openInstructions(opts.home).paths({ cwd: opts.cwd, homeOneCodeDir: opts.homeOneCodeDir });
 	// The directory a file belongs to: `.claude/AGENTS.md` counts as its parent's.
 	const owner = (path: string) => (basename(dirname(path)) === ".claude" ? dirname(dirname(path)) : dirname(path));
 	return files
-		.filter(({ path, descriptor }) => descriptor !== GLOBAL_DESCRIPTOR && descriptor !== ONECODE_GLOBAL_DESCRIPTOR && isPathAtOrUnder(path, stop))
+		.filter(({ path, descriptor }) => !global.has(descriptor) && isPathAtOrUnder(path, stop))
 		.map(({ path }) => path)
 		.sort((a, b) => owner(b).length - owner(a).length);
 }
@@ -523,8 +553,8 @@ export function projectInstructionFiles(opts: { cwd: string; home: string; homeO
  * so they all judge the same set. `includeExternal` defaults to the project's
  * saved approval; claude-context passes the session's own.
  */
-export function agentInstructionSections(opts: { cwd: string; home: string; homeOneCodeDir?: string; includeExternal?: boolean }): { contextFiles: ContextFile[]; oneCodeFiles: ContextFile[] } {
-	return openInstructions(opts.home).sections(opts);
+export function agentInstructionSections(opts: { cwd: string; home: string; agentDir: string | undefined; homeOneCodeDir?: string; includeExternal?: boolean }): { contextFiles: ContextFile[]; oneCodeFiles: ContextFile[] } {
+	return openInstructions(opts.home, opts.agentDir).sections(opts);
 }
 
 /** The sections the agent's window budget skips for `contextWindow` (lib/instruction-budget.ts); none without a window. */

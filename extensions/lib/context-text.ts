@@ -12,7 +12,7 @@ import type { EnvironmentFacts } from "./environment-block.ts";
 import type { GitSnapshot } from "./git-status.ts";
 
 /** Where an instruction file comes from; the key a section's descriptor is worded by. */
-export type InstructionSource = "global" | "managed" | "project" | "local" | "memory" | "oneCode" | "oneCodeGlobal" | "agents";
+export type InstructionSource = "global" | "managed" | "project" | "local" | "memory" | "oneCode" | "oneCodeGlobal" | "agents" | "agentsGlobal";
 
 /** What changed in the workspace since the context block was told. */
 export type ContextChange = "git" | "memory" | "instructions";

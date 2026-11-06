@@ -24,7 +24,7 @@ import { feature } from "../lib/feature.ts";
 import { mkdirSync, readFileSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { claudeMdLimitWarning, combinedLimitWarning, projectMemoryDir } from "../lib/memory.ts";
 import { INDEX_MAX_CHARS, INDEX_MAX_LINES, indexLimitStatus, stampFrontmatter } from "../lib/memory-content.ts";
 import { requireText } from "../lib/profile.ts";
@@ -63,6 +63,7 @@ function memoryEntriesFor(cwd: string): MemoryEntry[] {
 		home: os.homedir(),
 		homeClaudeDir: claudeConfigDir(),
 		homeOneCodeDir: oneCodeStateDir(),
+		agentDir: getAgentDir(),
 		memoryDir: autoMemoryEnabled(cwd) ? projectMemoryDir(cwd) : undefined,
 	});
 }
@@ -90,7 +91,7 @@ function memoryExtension(pi: ExtensionAPI) {
 			// instead; asked only once a file is over the char limit.
 			let skipped: Set<string> | undefined;
 			const isSkipped = (path: string) =>
-				(skipped ??= new Set(agentSkippedInstructions({ cwd: ctx.cwd, home: os.homedir(), contextWindow: ctx.model?.contextWindow }).map((file) => file.path))).has(path);
+				(skipped ??= new Set(agentSkippedInstructions({ cwd: ctx.cwd, home: os.homedir(), agentDir: getAgentDir(), contextWindow: ctx.model?.contextWindow }).map((file) => file.path))).has(path);
 			let total = 0;
 			let anyPerFile = false;
 			for (const entry of memoryEntriesFor(ctx.cwd)) {

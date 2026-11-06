@@ -22,7 +22,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { createReadToolDefinition, type ExtensionAPI, type ExtensionContext, type SessionCompactEvent } from "@earendil-works/pi-coding-agent";
+import { createReadToolDefinition, type ExtensionAPI, type ExtensionContext, getAgentDir, type SessionCompactEvent } from "@earendil-works/pi-coding-agent";
 import { pathArgument } from "../auto-mode/paths.ts";
 import { bashParserReady } from "../lib/bash-parser.ts";
 import { agentInstructionSections } from "../lib/instructions.ts";
@@ -200,7 +200,7 @@ function inContextFiles(ctx: ExtensionContext, branch: readonly { type: string; 
 	const home = homedir();
 	// Use the context loader's import confinement and approval: a literal
 	// unapproved @import is not evidence that its file is still in context.
-	const { contextFiles, oneCodeFiles } = agentInstructionSections({ cwd: ctx.cwd, home });
+	const { contextFiles, oneCodeFiles } = agentInstructionSections({ cwd: ctx.cwd, home, agentDir: getAgentDir() });
 	const skipped = new Set(fitToWindow([...contextFiles, ...oneCodeFiles], ctx.model?.contextWindow).skipped.map((file) => file.path));
 	const stack = contextFiles.flatMap((file) => (skipped.has(file.path) ? [] : [file.path, ...(file.imported ?? [])]));
 	return new Set(

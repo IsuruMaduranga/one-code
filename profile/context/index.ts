@@ -17,6 +17,7 @@ const DESCRIPTORS: Record<InstructionSource, string> = {
 	oneCode: "One Code-specific instructions, not read by Claude Code",
 	oneCodeGlobal: "One Code-specific global instructions for all projects, not read by Claude Code",
 	agents: "cross-tool agent instructions, AGENTS.md standard",
+	agentsGlobal: "user's private global cross-tool agent instructions for all projects, AGENTS.md standard",
 };
 
 const CHANGES: Record<ContextChange, string> = {

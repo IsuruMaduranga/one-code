@@ -99,4 +99,5 @@ export const profile: Profile = {
 		plugins,
 	}),
 	instructions: claudeCodeInstructions,
+	globalAgentsFiles: ["~/.agents/AGENTS.md"],
 };

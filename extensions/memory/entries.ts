@@ -70,15 +70,17 @@ export function buildMemoryEntries(opts: {
 	home: string;
 	homeClaudeDir: string;
 	homeOneCodeDir: string;
+	/** pi's agent dir (`getAgentDir()`), for its global AGENTS.md. */
+	agentDir?: string;
 	/** The auto-memory folder; undefined while auto-memory is off (no folder row, as in Claude Code). */
 	memoryDir: string | undefined;
 }): MemoryEntry[] {
-	const { cwd, home, homeClaudeDir, homeOneCodeDir, memoryDir } = opts;
+	const { cwd, home, homeClaudeDir, homeOneCodeDir, agentDir, memoryDir } = opts;
 	// Independent mode (lib/config-mode.ts) reads no CLAUDE.md: its always-offered
 	// files are the global ONECODE.md and the project's AGENTS.md instead.
 	const independent = !claudeSourcesOn();
 	// The same files the # claudeMd block takes, so the list matches what it sends.
-	const discovered = openInstructions(home).paths({ cwd, homeOneCodeDir });
+	const discovered = openInstructions(home, agentDir).paths({ cwd, homeOneCodeDir });
 	const referenced = referencedImports(discovered, home);
 	// (descriptor, dir) → the discovered path, so per-dir lookups reuse the real
 	// on-disk casing discovery already resolved (no second stat/readdir here).

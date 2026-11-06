@@ -38,9 +38,10 @@ import { tryRealpath } from "../lib/paths.ts";
  * agent's files are skipped exactly as the agent skips them; the files only
  * the classifier reads (path-conditional rules, AGENTS.md beside CLAUDE.md)
  * share what the agent's loaded files leave of the half. A transcript too
- * large for that window is not judged (`decisions/auto-mode.md`).
+ * large for that window is not judged (`decisions/auto-mode.md`). `agentDir`
+ * is pi's (`getAgentDir()`), for its global AGENTS.md.
  */
-export function loadProjectInstructions(cwd: string, home: string, contextWindow?: number): string | undefined {
+export function loadProjectInstructions(cwd: string, home: string, contextWindow?: number, agentDir?: string): string | undefined {
 	const files: (ClassifierFile & { key: string })[] = [];
 	const seen = new Set<string>();
 	const add = (file: ClassifierFile) => {
@@ -49,12 +50,12 @@ export function loadProjectInstructions(cwd: string, home: string, contextWindow
 		seen.add(key);
 		files.push({ path: file.path, content: file.content, globs: file.globs, key });
 	};
-	for (const file of openInstructions(home).classifier({ cwd })) add(file);
+	for (const file of openInstructions(home, agentDir).classifier({ cwd })) add(file);
 
 	if (files.length === 0) return undefined;
 	// The agent's own fit decides its files; the files only the classifier reads
 	// share what the agent's loaded ones leave of the half, the largest going first.
-	const sections = agentInstructionSections({ cwd, home });
+	const sections = agentInstructionSections({ cwd, home, agentDir });
 	const agentFit = fitToWindow([...sections.contextFiles, ...sections.oneCodeFiles], contextWindow);
 	const realKey = (path: string) => tryRealpath(path) ?? path;
 	const agentFiles = new Set([...sections.contextFiles, ...sections.oneCodeFiles].map((file) => realKey(file.path)));

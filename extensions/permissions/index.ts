@@ -21,7 +21,7 @@ import { feature } from "../lib/feature.ts";
 import os from "node:os";
 import { join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { type ChildAction, SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-mode/actions.ts";
 import { guideDocsDirs } from "../lib/guide-docs.ts";
 import { TURN_FAILED_CHANNEL, type TurnFailedEvent } from "../lib/interrupt.ts";
@@ -527,7 +527,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 	const instructionsFor = (cwd: string, contextWindow: number | undefined): string | undefined => {
 		const key = `${cwd}\0${contextWindow ?? ""}`;
 		if (!projectInstructionsByCwd.has(key)) {
-			projectInstructionsByCwd.set(key, loadProjectInstructions(cwd, os.homedir(), contextWindow));
+			projectInstructionsByCwd.set(key, loadProjectInstructions(cwd, os.homedir(), contextWindow, getAgentDir()));
 		}
 		return projectInstructionsByCwd.get(key);
 	};

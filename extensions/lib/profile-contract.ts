@@ -159,6 +159,11 @@ export interface Profile {
 	 * and returns the final ones. Absent: the base's lists as they are.
 	 */
 	instructions?: InstructionProvider;
+	/**
+	 * The user's global AGENTS.md files the base reads besides pi's own
+	 * `<agent dir>/AGENTS.md`, in order; `~/` is the home directory.
+	 */
+	globalAgentsFiles?: readonly string[];
 }
 
 /** What the profile's text is built for. */

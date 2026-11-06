@@ -48,6 +48,8 @@ export interface ResolvedProfile {
 	text: ProfileText;
 	/** The profile's instruction provider (lib/instructions.ts), if it has one. */
 	instructions?: InstructionProvider;
+	/** The user's global AGENTS.md files besides pi's own, `~/` unexpanded. */
+	globalAgentsFiles: readonly string[];
 }
 
 function envList(env: NodeJS.ProcessEnv, name: string): string[] {
@@ -92,6 +94,7 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		childExtensionPaths: profile.childExtensions.map((entry) => resolve(profileDir, entry)),
 		text: profile.text({ live }),
 		...(profile.instructions ? { instructions: profile.instructions } : {}),
+		globalAgentsFiles: profile.globalAgentsFiles ?? [],
 	};
 }
 

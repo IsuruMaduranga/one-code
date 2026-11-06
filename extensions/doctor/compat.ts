@@ -361,13 +361,13 @@ export function collectCompat(input: CompatInput): CompatReport {
 
 	// The session's window budget, over the sections it loads (imports inlined,
 	// ONECODE.md included): past half the window, the largest are not loaded.
-	const skipped = agentSkippedInstructions({ cwd, home, homeOneCodeDir: oneCodeStateDir(env, home), contextWindow: input.contextWindow });
+	const skipped = agentSkippedInstructions({ cwd, home, agentDir, homeOneCodeDir: oneCodeStateDir(env, home), contextWindow: input.contextWindow });
 	const fix = "Trim the instruction files below half of the model's context window together, split this one into files the model reads when needed, or switch to a model with a larger window.";
 	for (const file of skipped) findings.push({ level: "warn", text: skippedInstructionWarning(shortenHome(file.path, home), file), fix });
 	const skippedPaths = new Set(skipped.map((file) => file.path));
 
 	// Context files, sized — the block every turn pays for.
-	const contextFiles: ContextFileReport[] = openInstructions(home).paths({ cwd, homeOneCodeDir: oneCodeStateDir(env, home) }).map(({ path, descriptor }) => {
+	const contextFiles: ContextFileReport[] = openInstructions(home, agentDir).paths({ cwd, homeOneCodeDir: oneCodeStateDir(env, home) }).map(({ path, descriptor }) => {
 		let chars = 0;
 		try {
 			chars = readFileSync(path, "utf-8").length;

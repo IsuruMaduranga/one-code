@@ -26,7 +26,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import os from "node:os";
 import { dirname } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { buildClaudeMdBlock, buildContextBlock, buildOneCodeBlock, dateBlock, dateChangeReminder, localDate, nestedInstructionText } from "../lib/claude-context.ts";
 import { collectImportedPaths, type Instructions, openInstructions } from "../lib/instructions.ts";
 import { collectGitStatus, GIT_SNAPSHOT_OWNER_CHANNEL } from "../lib/git-status.ts";
@@ -187,7 +187,7 @@ function claudeContextExtension(pi: ExtensionAPI) {
 	/** True until this process's first request inside an epoch has compared the epoch's facts with the live workspace. */
 	let resumeCheck = true;
 	const readFiles = (cwd: string) => {
-		const view = openInstructions(os.homedir());
+		const view = openInstructions(os.homedir(), getAgentDir());
 		return { ...view.sections({ cwd, homeOneCodeDir: oneCodeStateDir(), includeExternal }), memoryIndex: readMemoryIndex(cwd), view };
 	};
 	let files: ReturnType<typeof readFiles> | undefined;
@@ -214,7 +214,7 @@ function claudeContextExtension(pi: ExtensionAPI) {
 		return takesGitSnapshot ? collectGitStatus(cwd, undefined, shellTool) : null;
 	};
 
-	const externalPaths = (cwd: string) => openInstructions(os.homedir()).externalIncludes({ cwd, homeOneCodeDir: oneCodeStateDir() });
+	const externalPaths = (cwd: string) => openInstructions(os.homedir(), getAgentDir()).externalIncludes({ cwd, homeOneCodeDir: oneCodeStateDir() });
 	const saveApproval = (ctx: ExtensionContext, approved: boolean) => {
 		includeExternal = approved;
 		try { persistExternalIncludesApproval(ctx.cwd, os.homedir(), approved); }
@@ -505,7 +505,7 @@ function claudeContextExtension(pi: ExtensionAPI) {
 		if (event.toolName !== "read" || event.isError) return;
 		const raw = pathArgument(event.input);
 		if (!raw) return;
-		instructions ??= openInstructions(os.homedir());
+		instructions ??= openInstructions(os.homedir(), getAgentDir());
 		const filePath = resolveToolPath(raw, ctx.cwd);
 		// In a worktree, the directories between are below the worktree's root (its own root files
 		// are the shared checkout's, which the startup block carries).
