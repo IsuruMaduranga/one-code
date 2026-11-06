@@ -28,8 +28,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { readSettingsFile, type SettingsSource, settingsSources } from "../lib/claude-settings.ts";
-import { claudeSourcesOn } from "../lib/config-mode.ts";
+import { primarySettingsFile, readSettingsFile, settingsSources } from "../lib/claude-settings.ts";
 import { boundConsentItems } from "../lib/consent-preview.ts";
 import { consentStorePath } from "../lib/consent-stores.ts";
 import { processState } from "../lib/process-state.ts";
@@ -140,21 +139,22 @@ function stringArray(value: unknown): string[] {
  * its callers; nothing here shells out any more.
  */
 export async function readClaudeMcpjsonPolicy(cwd: string, home: string): Promise<ClaudeMcpjsonPolicy> {
-	// Independent mode (lib/config-mode.ts) reads the same keys from One Code's
-	// user file, and only the tightening one from its per-repo file.
-	const claude = claudeSourcesOn();
-	const userScope: SettingsSource = claude ? "claude-user" : "onecode-user";
-	const localScope: SettingsSource = claude ? "project-local" : "onecode-project";
+	// The keys come from the primary user file (Claude Code's with One Code's
+	// provider on, One Code's own without it), and only the tightening one from
+	// the local file of the same family.
+	const files = settingsSources(cwd, home);
+	const primary = primarySettingsFile(files);
 	const policy: ClaudeMcpjsonPolicy = { enableAll: false, enabled: new Set(), disabled: new Set() };
 	// Deliberately not the project file: a checked-in settings.json granting
 	// enableAllProjectMcpServers would be the repo approving its own servers.
 	// The local file is in the checkout too, whatever git says about it.
-	for (const [source, path] of settingsSources(cwd, home)) {
-		if (source !== userScope && source !== localScope) continue;
-		const file = readSettingsFile(path);
+	for (const entry of files) {
+		const local = entry.scope === "local" && entry.owner === primary?.owner;
+		if (entry !== primary && !local) continue;
+		const file = readSettingsFile(entry.path);
 		if (!file) continue;
 		for (const name of stringArray(file.disabledMcpjsonServers)) policy.disabled.add(name);
-		if (source === localScope) continue;
+		if (local) continue;
 		if (typeof file.enableAllProjectMcpServers === "boolean") policy.enableAll = file.enableAllProjectMcpServers;
 		for (const name of stringArray(file.enabledMcpjsonServers)) policy.enabled.add(name);
 	}

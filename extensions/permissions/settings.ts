@@ -18,10 +18,10 @@
  * Unknown keys in the files are preserved on write.
  */
 
-import { readSettingsFile as readClaudeSettingsFile, type SettingsSource, settingsPaths, settingsSources } from "../lib/claude-settings.ts";
+import { isRepoFile, readSettingsFile as readClaudeSettingsFile, settingsPaths, settingsSources } from "../lib/claude-settings.ts";
+import type { SettingsFile } from "../lib/sources.ts";
 import { readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
 import { resolve } from "node:path";
-import { claudeSourcesOn } from "../lib/config-mode.ts";
 import { expandTilde } from "../lib/paths.ts";
 import type { PermissionMode } from "./matcher.ts";
 
@@ -107,24 +107,23 @@ function readSettingsFile(path: string): ClaudeSettingsFile | undefined {
 
 export function loadPermissionSettings(cwd: string, home: string): PermissionSettings {
 	const merged: PermissionSettings = { allow: [], projectAllow: [], deny: [], ask: [] };
-	// `defaultMode` comes from the user-scope file Claude Code's keys live in
-	// (`~/.claude/settings.json`, or One Code's own in independent mode,
-	// lib/config-mode.ts), project files and managed settings. One Code's other
-	// file only adds the rules it records (via /allow, the auto-mode setup),
-	// keeping the auto-mode reasoning to one place.
-	const userScope = claudeSourcesOn() ? "claude-user" : "onecode-user";
-	for (const [source, path] of settingsSources(cwd, home)) {
-		const file = readSettingsFile(path);
+	// `defaultMode` comes from the primary user file (`~/.claude/settings.json`
+	// with One Code's provider on, One Code's own without it), the borrowed
+	// project files and managed settings. One Code's other files only add the
+	// rules they record (via /allow, the auto-mode setup), keeping the
+	// auto-mode reasoning to one place.
+	for (const source of settingsSources(cwd, home)) {
+		const file = readSettingsFile(source.path);
 		const perms = file?.permissions;
 		if (!perms) continue;
-		const fromProject = source === "project" || source === "project-local";
+		const fromProject = isRepoFile(source);
 		const allowTarget = fromProject ? merged.projectAllow : merged.allow;
 		if (Array.isArray(perms.allow)) allowTarget.push(...perms.allow.filter((r) => typeof r === "string"));
 		if (Array.isArray(perms.deny)) merged.deny.push(...perms.deny.filter((r) => typeof r === "string"));
 		if (Array.isArray(perms.ask)) merged.ask.push(...perms.ask.filter((r) => typeof r === "string"));
 		if (perms.disableBypassPermissionsMode === "disable") merged.disableBypassPermissionsMode = true;
 		if (perms.blockReadsOutsideWorkingDirectories === true) merged.blockReadsOutsideWorkingDirectories = true;
-		if (source.startsWith("onecode-") && source !== userScope) continue;
+		if (source.owner === "product" && !source.primary) continue;
 		const defaultMode = normalizePermissionMode(perms.defaultMode);
 		// The modes a repo may not grant itself (MODES_NEVER_FROM_PROJECT) are
 		// honoured from user and managed scope only.
@@ -164,7 +163,7 @@ export function resolveStartupMode(
 export type RuleBehavior = "allow" | "ask" | "deny";
 
 /** Where a permission rule was read from, for the `/permissions` panel. */
-export type RuleSource = SettingsSource;
+export type RuleSource = SettingsFile;
 
 export interface SourcedRule {
 	behavior: RuleBehavior;
@@ -191,7 +190,8 @@ export interface SourcedDirectory {
  */
 export function listWorkspaceDirectories(cwd: string, home: string): SourcedDirectory[] {
 	const dirs: SourcedDirectory[] = [];
-	for (const [source, settingsPath] of settingsSources(cwd, home)) {
+	for (const source of settingsSources(cwd, home)) {
+		const settingsPath = source.path;
 		const list = readSettingsFile(settingsPath)?.permissions?.additionalDirectories;
 		if (!Array.isArray(list)) continue;
 		for (const raw of list) {
@@ -220,7 +220,8 @@ export function removeWorkspaceDirectory(raw: string, filePath: string): boolean
  */
 export function listPermissionRules(cwd: string, home: string): SourcedRule[] {
 	const rules: SourcedRule[] = [];
-	for (const [source, path] of settingsSources(cwd, home)) {
+	for (const source of settingsSources(cwd, home)) {
+		const { path } = source;
 		const perms = readSettingsFile(path)?.permissions;
 		if (!perms) continue;
 		for (const behavior of ["allow", "ask", "deny"] as const) {

@@ -25,6 +25,39 @@ export interface SourceView {
 	instructions?: InstructionView;
 	/** The user and project config folders, in place of the product's own. Absent: the product's. */
 	configDirs?: ConfigDirs;
+	/**
+	 * The settings ladder, lowest precedence first: gets the product's own
+	 * files and returns the final list (lib/claude-settings.ts
+	 * `settingsSources`). Every file in it joins the auto-mode safety floor.
+	 * Absent: the product's files alone.
+	 */
+	settings?(base: SettingsFile[], opts: { cwd: string }): SettingsFile[];
+}
+
+/**
+ * One settings file of the ladder, by role rather than by the tool it
+ * belongs to. The precedence logic stays in the base; each consumer keeps
+ * the files its keys may come from by these fields.
+ */
+export interface SettingsFile {
+	path: string;
+	/**
+	 * `user`: the user's own, for every project. `project`: checked into the
+	 * repository. `local`: the user's, for one project (another tool's sits in
+	 * the checkout; the product's in its state dir). `managed`: organisation
+	 * policy, highest authority.
+	 */
+	scope: "user" | "project" | "local" | "managed";
+	/** `product`: the harness's own file, which it may write. `borrowed`: another tool's, never written. */
+	owner: "product" | "borrowed";
+	/**
+	 * The user file holding the keys a user edits by hand (`defaultMode`, MCP
+	 * approvals, hooks, `env`). The base marks the product's user file when
+	 * the list has none.
+	 */
+	primary?: boolean;
+	/** How the file is named to the user, such as "managed settings". */
+	label: string;
 }
 
 /**

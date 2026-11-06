@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	autoModeSettingsPaths,
-	claudeUserPermissionAllow,
+	borrowedUserPermissionAllow,
 	loadAutoModeConfig,
 	loadAutoModeConfigWithDiagnostics,
 	oneCodePermissionAllow,
@@ -191,13 +191,13 @@ describe("loadAutoModeConfig", () => {
 		// .claude copy is never silently left behind.
 		writeUserSettings({ permissions: { allow: ["Bash(git status)", "Bash(*)"] } });
 		writeOneCodeSettings({ permissions: { allow: ["Bash(*)", "Read"] } });
-		expect(claudeUserPermissionAllow(home)).toEqual(["Bash(git status)", "Bash(*)"]);
+		expect(borrowedUserPermissionAllow(home)).toEqual(["Bash(git status)", "Bash(*)"]);
 		expect(oneCodePermissionAllow(home)).toEqual(["Bash(*)", "Read"]);
 		// "Bash(*)" is in both — it lands in the removable set AND the warn set.
 	});
 
 	it("returns an empty allow list when a settings file is absent or malformed", () => {
-		expect(claudeUserPermissionAllow(home)).toEqual([]);
+		expect(borrowedUserPermissionAllow(home)).toEqual([]);
 		mkdirSync(join(home, ".onecode"), { recursive: true });
 		writeFileSync(join(home, ".onecode", "settings.json"), "{not json");
 		expect(oneCodePermissionAllow(home)).toEqual([]);

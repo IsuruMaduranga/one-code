@@ -46,7 +46,7 @@ export function savedAutoMemory(cwd: string, home: string = os.homedir()): boole
 /** `savedAutoMemory` and the settings file that decides it (undefined: the default). */
 export function savedAutoMemorySource(cwd: string, home: string = os.homedir()): { enabled: boolean; path?: string } {
 	let decided: { enabled: boolean; path?: string } = { enabled: true };
-	for (const [, path] of settingsSources(cwd, home)) {
+	for (const { path } of settingsSources(cwd, home)) {
 		const value = readSettingsFile(path)?.[AUTO_MEMORY_KEY];
 		if (typeof value === "boolean") decided = { enabled: value, path };
 	}

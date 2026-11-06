@@ -50,7 +50,6 @@ import { contentText } from "@earendil-works/pi-ai";
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { RunOutcomeLatch } from "../lib/interrupt.ts";
 import { SESSION_WORK_CHANNEL, type SessionWorkQuery } from "../lib/session-work.ts";
-import { claudeConfigDir } from "../lib/paths.ts";
 import { defaultDiscoverRoots } from "../lib/plugins.ts";
 import { appendHookLog, formatDebugLine, hooksDebugEnabled, hooksLogPath } from "./debug.ts";
 import { runHookCommand } from "./executor.ts";
@@ -169,8 +168,7 @@ function hooksExtension(pi: ExtensionAPI) {
 		event: CcHookEvent,
 		matchValue: { candidates?: string[]; ignoreMatcher?: boolean },
 	): Promise<MatchedHook[]> => {
-		const claudeDir = claudeConfigDir();
-		const loaded = loadHookSettings(claudeDir, ctx.cwd);
+		const loaded = loadHookSettings(ctx.cwd);
 		const pluginSources = loaded.disabled ? [] : loadPluginHooks(defaultDiscoverRoots(getAgentDir(), ctx.cwd), loaded.diagnostics);
 		if (hooksDebugEnabled()) {
 			for (const diagnostic of loaded.diagnostics) process.stderr.write(`[hooks] ${diagnostic}\n`);

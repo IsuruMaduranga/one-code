@@ -187,7 +187,7 @@ describe("settings", () => {
 		writeFileSync(join(claudeDir, "settings.json"), JSON.stringify(hooksJson("user-hook")));
 		writeFileSync(join(cwd, ".claude", "settings.json"), JSON.stringify(hooksJson("project-hook")));
 		writeFileSync(join(cwd, ".claude", "settings.local.json"), JSON.stringify(hooksJson("local-hook")));
-		const loaded = loadHookSettings(claudeDir, cwd);
+		const loaded = loadHookSettings(cwd, join(claudeDir, ".."));
 		expect(loaded.sources.map((s) => s.scope)).toEqual(["user", "project", "local"]);
 		expect(loaded.diagnostics).toEqual([]);
 	});
@@ -203,7 +203,7 @@ describe("settings", () => {
 				},
 			}),
 		);
-		const loaded = loadHookSettings(claudeDir, cwd);
+		const loaded = loadHookSettings(cwd, join(claudeDir, ".."));
 		expect(loaded.sources).toEqual([]);
 		expect(loaded.diagnostics.join("\n")).toContain("unreadable");
 		expect(loaded.diagnostics.join("\n")).toContain('type "prompt"');
@@ -214,10 +214,10 @@ describe("settings", () => {
 		const path = join(claudeDir, "settings.json");
 		writeFileSync(path, JSON.stringify(hooksJson("v1")));
 		utimesSync(path, new Date(1000000), new Date(1000000));
-		expect(loadHookSettings(claudeDir, cwd).sources[0]?.config.PreToolUse?.[0]?.hooks[0]?.command).toBe("v1");
+		expect(loadHookSettings(cwd, join(claudeDir, "..")).sources[0]?.config.PreToolUse?.[0]?.hooks[0]?.command).toBe("v1");
 		writeFileSync(path, JSON.stringify(hooksJson("v2")));
 		utimesSync(path, new Date(2000000), new Date(2000000));
-		expect(loadHookSettings(claudeDir, cwd).sources[0]?.config.PreToolUse?.[0]?.hooks[0]?.command).toBe("v2");
+		expect(loadHookSettings(cwd, join(claudeDir, "..")).sources[0]?.config.PreToolUse?.[0]?.hooks[0]?.command).toBe("v2");
 	});
 
 	it("parseHooksBlock keeps timeout only when positive", () => {
@@ -231,7 +231,7 @@ describe("settings", () => {
 	});
 
 	it("names all four candidate paths", () => {
-		const paths = hookSettingsPaths("/h/.claude", "/p");
+		const paths = hookSettingsPaths("/p", "/h");
 		expect(paths.map((p) => p.scope)).toEqual(["user", "managed", "project", "local"]);
 	});
 });

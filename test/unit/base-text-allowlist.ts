@@ -69,6 +69,7 @@ export const BASE_TEXT_ALLOWLIST: Readonly<Record<string, BaseTextEntry>> = {
 	"lib/argument-hints.ts": { reason: "ui: An argument hint for /compact." },
 	"lib/bash-parser.ts": { reason: "ui: The grammar-load notice." },
 	"lib/btw-fork.ts": { reason: "ui: The fork-unavailable notification." },
+	"lib/claude-settings.ts": { reason: "ui: The names of the product's two settings files, shown in /permissions and /doctor (the brand moves in Phase 4c)." },
 	"lib/claude-external-includes.ts": { reason: "ui: The external-import consent dialog and the /config output." },
 	"lib/empty-tool-result.ts": { reason: "format: pi's own find output, matched so the profile's words replace it." },
 	"lib/features.ts": { reason: "user-error: A feature-map validation problem at startup." },

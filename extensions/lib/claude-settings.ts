@@ -13,8 +13,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join, posix, win32 } from "node:path";
-import { claudeSourcesOn } from "./config-mode.ts";
-import { userConfigDir } from "./sources.ts";
+import { openSources, type SettingsFile } from "./sources.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "./one-code-settings.ts";
 import { claudeManagedDir, claudeUserDir } from "./paths.ts";
 
@@ -73,32 +72,39 @@ export function readInstructionFiles(home: string): InstructionFiles {
 	return instructionFiles ?? legacy ?? "claude-md-or-agents-md";
 }
 
-/** Where a settings file sits: Claude Code's ladder, One Code's two files, or managed policy. */
-export type SettingsSource = "claude-user" | "onecode-user" | "project" | "project-local" | "onecode-project" | "managed";
-
 /**
- * Every settings file One Code reads Claude Code's keys from, lowest
- * precedence first, with its source. Managed settings last: Claude Code's
- * organisation policy outranks every user/project file (review P14).
- * Independent mode (lib/config-mode.ts) reads One Code's own two files only,
- * managed settings included in what it drops (decisions/memory-state.md).
- * Each consumer keeps the sources its keys may come from.
+ * The settings ladder, lowest precedence first: the product's own two files
+ * (its user file and its per-project file in its state dir), as the source
+ * provider reshapes them (lib/sources.ts `settings`). One Code's provider
+ * adds Claude Code's user, project, local and managed files around them;
+ * independent mode (lib/config-mode.ts) and a product without a provider
+ * read the product's two alone. When no file is marked primary, the
+ * product's user file is. Each consumer keeps the files its keys may come
+ * from.
  */
-export function settingsSources(cwd: string, home: string): Array<[SettingsSource, string]> {
-	const oneCode: Array<[SettingsSource, string]> = [
-		["onecode-user", oneCodeSettingsPath(home)],
-		["onecode-project", oneCodeProjectSettingsPath(cwd, home)],
+export function settingsSources(cwd: string, home: string): SettingsFile[] {
+	const base: SettingsFile[] = [
+		{ path: oneCodeSettingsPath(home), scope: "user", owner: "product", label: "One Code user settings" },
+		{ path: oneCodeProjectSettingsPath(cwd, home), scope: "local", owner: "product", label: "One Code project settings" },
 	];
-	if (!claudeSourcesOn()) return oneCode;
-	const paths = settingsPaths(cwd, home);
-	return [
-		["claude-user", paths.user],
-		oneCode[0],
-		["project", paths.project],
-		["project-local", paths.local],
-		oneCode[1],
-		...managedSettingsPaths().map((path): [SettingsSource, string] => ["managed", path]),
-	];
+	const files = openSources(home).settings?.(base, { cwd }) ?? base;
+	if (files.some((file) => file.primary)) return files;
+	return files.map((file) => (file === base[0] ? { ...file, primary: true } : file));
+}
+
+/** The primary user file: the one holding the keys a user edits by hand (`SettingsFile.primary`). */
+export function primarySettingsFile(files: readonly SettingsFile[]): SettingsFile | undefined {
+	return files.find((file) => file.primary);
+}
+
+/** Whether the repository supplies this file: another tool's project or local file, which sits in the checkout. */
+export function isRepoFile(file: SettingsFile): boolean {
+	return file.owner === "borrowed" && (file.scope === "project" || file.scope === "local");
+}
+
+/** A stable id for a file's role, for keys and comparisons: `product-user`, `borrowed-local` and so on. */
+export function sourceId(file: Pick<SettingsFile, "owner" | "scope">): string {
+	return `${file.owner}-${file.scope}`;
 }
 
 export function settingsPaths(cwd: string, home: string): { user: string; project: string; local: string } {
@@ -128,8 +134,9 @@ export function readSettingsFile(path: string): ClaudeSettingsFile | undefined {
  * its project-trust prompt).
  */
 export function readSettingsEnv(home: string): Record<string, string> {
-	// The mode's user file: One Code's own in independent mode (lib/config-mode.ts).
-	const env = readSettingsFile(join(userConfigDir(home), "settings.json"))?.env;
+	// The primary user file: Claude Code's with One Code's provider on, One Code's own without it.
+	const primary = primarySettingsFile(settingsSources(process.cwd(), home));
+	const env = primary ? readSettingsFile(primary.path)?.env : undefined;
 	if (!env || typeof env !== "object" || Array.isArray(env)) return {};
 	const out: Record<string, string> = {};
 	for (const [key, value] of Object.entries(env as Record<string, unknown>)) {

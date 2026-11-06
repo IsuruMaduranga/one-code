@@ -17,11 +17,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
-import { claudeUserSettingsPath, readSettingsFile } from "../lib/claude-settings.ts";
+import { readSettingsFile } from "../lib/claude-settings.ts";
 import { withReasoningFallback } from "../lib/model-policy.ts";
-import { oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
-import type { AutoModeConfig } from "./config.ts";
+import { type AutoModeConfig, autoModeSettingsFiles, isBorrowedUserFile } from "./config.ts";
 import { classifierCandidates, replyText, withAuthBaseUrl } from "./model-select.ts";
 import { buildSetupPrompt, parseGitRemotes, redactSecrets, type SetupDraft, parseSetupDraft, type SetupFacts } from "./setup.ts";
 import { claudeSourcesOn } from "../lib/config-mode.ts";
@@ -135,15 +134,15 @@ export async function gatherFacts(options: GatherOptions): Promise<SetupFacts> {
 	// the borrowed `.claude` file (read-only) and One Code's own file are gathered:
 	// a broad rule in either bypasses the classifier, and the audit later splits
 	// them (One Code's are removable; Claude Code's it can only warn about).
-	// Independent mode (lib/config-mode.ts) reads One Code's file alone.
-	const claudeUserPath = claudeUserSettingsPath(home);
+	// Without One Code's provider (independent mode) only One Code's file is read.
 	const permissionsAllow: string[] = [];
-	for (const path of claudeSourcesOn() ? [claudeUserPath, oneCodeSettingsPath(home)] : [oneCodeSettingsPath(home)]) {
+	for (const source of autoModeSettingsFiles(home).filter((file) => file.scope === "user")) {
+		const { path } = source;
 		const file = readSettingsFile(path) as { permissions?: { allow?: unknown } } | undefined;
 		// Present-but-unreadable is not the same as absent (readIfPresent's rule):
 		// a malformed `.claude` file must land in notes so the drafting evidence
 		// sees "present but unreadable", not silently "no broad rules here".
-		if (file === undefined && path === claudeUserPath && existsSync(path)) {
+		if (file === undefined && isBorrowedUserFile(source) && existsSync(path)) {
 			notes.push("user settings permissions.allow could not be read");
 			continue;
 		}

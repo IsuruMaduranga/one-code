@@ -31,9 +31,9 @@
 import { FIND_PATTERN_TESTS, findNegatedPatterns } from "./read-only-options.ts";
 import { analyzeShellCommand, globComponentRegex, hasReadOnlyShellWords, isUnknownTilde, LOOPS, movesDirectory, parseCommand, resolvePayload, scopedTracker } from "./shell-analysis.ts";
 import type { Token } from "./shell-parse.ts";
-import { claudeUserSettingsPath, managedSettingsPaths } from "../lib/claude-settings.ts";
+import { claudeUserSettingsPath, managedSettingsPaths, settingsSources } from "../lib/claude-settings.ts";
 import { CONSENT_STORE_TAIL, consentStorePaths } from "../lib/consent-stores.ts";
-import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
+import { oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { CATALOG_CACHE_TAIL, catalogCacheFiles } from "../lib/model-catalog-data.ts";
 import { claudeJsonPath, comparablePath, oneCodeStateDir } from "../lib/paths.ts";
 import { isWritingTool, resolveForContainment, toAbsolute, toAbsoluteBash } from "./paths.ts";
@@ -62,7 +62,7 @@ const SETTINGS_TAIL = /\/\.claude\/settings(\.local)?\.json$/;
  */
 const ONECODE_SETTINGS_TAIL = /\/\.onecode\/(projects\/[^/]+\/)?settings\.json$/;
 
-function safetyControlFiles(home: string, oneCodeProjectSettings?: string): string[] {
+function safetyControlFiles(home: string, sessionFiles: readonly string[] = []): string[] {
 	return [
 		// autoMode + user permission rules, and the managed-settings paths (the
 		// global ~/.onecode/settings.json here honours ONECODE_STATE_DIR). Spelled
@@ -75,10 +75,12 @@ function safetyControlFiles(home: string, oneCodeProjectSettings?: string): stri
 		// Claude Code's global state file also carries permission configuration;
 		// claudeJsonPath honours CLAUDE_CONFIG_DIR so a relocated file is still caught.
 		claudeJsonPath(home),
-		// The per-repo One Code settings file also carries permission rules. The
-		// tail regex catches it under a literal `.onecode`; this catches it when
-		// ONECODE_STATE_DIR relocated the state root (review L2).
-		...(oneCodeProjectSettings ? [oneCodeProjectSettings] : []),
+		// The session's settings ladder (lib/claude-settings.ts settingsSources):
+		// every file a source provider adds is a gate control in its own right,
+		// and the per-repo One Code settings file is caught here even when
+		// ONECODE_STATE_DIR relocated the state root, which the tail regex misses
+		// (review L2).
+		...sessionFiles,
 		// The consent stores: an entry approves a repository's hooks, MCP
 		// servers, allow rules or language servers for every later session.
 		...consentStorePaths(home),
@@ -90,11 +92,11 @@ function safetyControlFiles(home: string, oneCodeProjectSettings?: string): stri
 
 /**
  * Whether a *resolved* path (resolveForContainment output) is a gate control.
- * `oneCodeProjectSettings` is the current repo's One Code settings file, resolved
+ * `sessionFiles` are the session's settings ladder, resolved
  * by the caller (once per session) so this need not re-walk for the project root.
  */
-export function isSafetyControlTarget(resolved: string, home: string, oneCodeProjectSettings?: string): boolean {
-	return matchesControlFile(resolved, controlFileForms(home, oneCodeProjectSettings));
+export function isSafetyControlTarget(resolved: string, home: string, sessionFiles?: readonly string[]): boolean {
+	return matchesControlFile(resolved, controlFileForms(home, sessionFiles));
 }
 
 /**
@@ -102,9 +104,9 @@ export function isSafetyControlTarget(resolved: string, home: string, oneCodePro
  * target, or the two sides can disagree about the same file (macOS /var →
  * /private/var), plus its literal spelling.
  */
-function controlFileForms(home: string, oneCodeProjectSettings?: string): Set<string> {
+function controlFileForms(home: string, sessionFiles?: readonly string[]): Set<string> {
 	const forms = new Set<string>();
-	for (const file of safetyControlFiles(home, oneCodeProjectSettings)) {
+	for (const file of safetyControlFiles(home, sessionFiles)) {
 		forms.add(resolveForContainment(file) ?? fold(file));
 		forms.add(fold(file));
 	}
@@ -172,12 +174,13 @@ export interface FloorInput {
 	cwd: string;
 	home: string;
 	/**
-	 * The current repo's One Code settings file, resolved once per session by the
-	 * caller. When omitted it is derived from `cwd` (a filesystem walk) — fine for
-	 * tests, but the per-tool-call permission path passes it to avoid the walk
-	 * (distribution review 2026-09-09, L2 / efficiency pass).
+	 * The session's settings ladder (`sessionSettingsFiles`), resolved once per
+	 * session by the caller. When omitted it is derived from `cwd` (a
+	 * filesystem walk), fine for tests and the rarer child path; the
+	 * per-tool-call permission path passes it to avoid the walk (distribution
+	 * review 2026-09-09, L2 / efficiency pass).
 	 */
-	oneCodeProjectSettings?: string;
+	settingsFiles?: readonly string[];
 }
 
 /**
@@ -205,20 +208,25 @@ export function safetyFloorReason(target: FloorTarget): string {
 /** A cached catalog's file name, to word the reason (a false match only rewords it). */
 const CATALOG_FILE_NAME = /(^|[/\\])(models-dev|openrouter|huggingface|refresh-failed)\.json$/i;
 
+/** The session's settings ladder for the floor: every file a source provider adds is a gate control. */
+export function sessionSettingsFiles(cwd: string, home: string): string[] {
+	return settingsSources(cwd, home).map((file) => file.path);
+}
+
 /**
  * What this call writes that the floor protects, undefined otherwise.
  * Paths are resolved through symlinks (dangling leaves and not-yet-existing
  * files included), so linking a settings file elsewhere and writing the link
  * does not slip past.
  */
-export function safetyControlWrite({ toolName, input, cwd, home, oneCodeProjectSettings }: FloorInput): FloorTarget | undefined {
-	const perRepoSettings = oneCodeProjectSettings ?? oneCodeProjectSettingsPath(cwd, home);
+export function safetyControlWrite({ toolName, input, cwd, home, settingsFiles }: FloorInput): FloorTarget | undefined {
+	const sessionFiles = settingsFiles ?? sessionSettingsFiles(cwd, home);
 
 	if (isWritingTool(toolName)) {
 		const raw = input.path ?? input.file_path ?? input.notebook_path;
 		if (typeof raw !== "string" || raw.length === 0) return undefined;
 		const resolved = resolveForContainment(toAbsolute(cwd, raw, home));
-		return resolved && isSafetyControlTarget(resolved, home, perRepoSettings) ? REASON(raw) : undefined;
+		return resolved && isSafetyControlTarget(resolved, home, sessionFiles) ? REASON(raw) : undefined;
 	}
 
 	// `monitor` runs a shell command exactly as `bash` does (review L1).
@@ -226,7 +234,7 @@ export function safetyControlWrite({ toolName, input, cwd, home, oneCodeProjectS
 		const command = typeof input.command === "string" ? input.command : "";
 		if (!command) return undefined;
 		const evidence = analyzeShellCommand({ command, cwd, home });
-		const forms = controlFileForms(home, perRepoSettings);
+		const forms = controlFileForms(home, sessionFiles);
 		for (const write of evidence.writes) {
 			if (write.resolved && namesControlFile(write.resolved, forms, true)) return REASON(write.token);
 		}
@@ -241,7 +249,7 @@ export function safetyControlWrite({ toolName, input, cwd, home, oneCodeProjectS
 		// `readOnlyOutside` means every command was proven read-only by its
 		// options and only the location escalated: a read, not a hidden write.
 		if (evidence.verdict === "escalate" && !evidence.readOnlyOutside) {
-			const named = shellNamesControlFile(command, cwd, home, perRepoSettings, 0, forms);
+			const named = shellNamesControlFile(command, cwd, home, sessionFiles, 0, forms);
 			if (named) return REASON(named);
 		}
 	}
@@ -255,7 +263,7 @@ export function safetyControlWrite({ toolName, input, cwd, home, oneCodeProjectS
 		const command = typeof input.command === "string" ? input.command : "";
 		if (!command) return undefined;
 		// PowerShell wildcards (`*`, `?`, `[…]`) have no leading-dot rule.
-		const forms = controlFileForms(home, perRepoSettings);
+		const forms = controlFileForms(home, sessionFiles);
 		for (const token of powershellPathTokens(command, home)) {
 			const absolute = toAbsolute(cwd, token, home);
 			if (namesControlFile(resolveForContainment(absolute) ?? absolute, forms, false)) return REASON(token);
@@ -354,10 +362,10 @@ export function shellNamesControlFile(
 	command: string,
 	cwd: string,
 	home: string,
-	oneCodeProjectSettings?: string,
+	sessionFiles?: readonly string[],
 	depth = 0,
 	/** Resolved once per top-level call, not once per word. */
-	forms: ReadonlySet<string> = controlFileForms(home, oneCodeProjectSettings),
+	forms: ReadonlySet<string> = controlFileForms(home, sessionFiles),
 ): string | undefined {
 	const { segments, parseFailed, unknownQuoting, unattributedExpansion, definesFunction, pipelines } = parseCommand(command);
 	const dirs = scopedTracker(cwd);
@@ -471,7 +479,7 @@ export function shellNamesControlFile(
 			// `exec` or a descriptor (`{ echo '…'; } > s.sh; sh s.sh`). Only
 			// their path match is exempt.
 			if (depth < 3 && /\s/.test(word)) {
-				const nested = shellNamesControlFile(word, dir, home, oneCodeProjectSettings, depth + 1, forms);
+				const nested = shellNamesControlFile(word, dir, home, sessionFiles, depth + 1, forms);
 				if (nested) return nested;
 			}
 			if (exempt) continue;

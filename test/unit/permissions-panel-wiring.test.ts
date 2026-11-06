@@ -244,7 +244,7 @@ describe("/permissions wiring", () => {
 
 		// Rows now: Add a new rule…, Bash(npm test:*), Read (read-only).
 		await openPanel(DOWN, DOWN, ENTER);
-		expect(screens[2]).toContain("One Code does not edit Claude Code's files.");
+		expect(screens[2]).toContain("One Code does not edit Claude Code user settings.");
 		await openPanel(DOWN, ENTER, ENTER);
 		expect(JSON.parse(readFileSync(target, "utf-8")).permissions.allow).toEqual([]);
 		expect(JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf-8")).permissions.allow).toEqual(["Read"]);
@@ -282,7 +282,7 @@ describe("/permissions wiring", () => {
 			writeFileSync(join(home, ".onecode", "settings.json"), JSON.stringify({ autoMode: { allow: ["Mine: my rule"] }, other: 1 }));
 			// Rows: add, allow built-ins, CC Rule (read-only), Mine, …
 			await openPanel(LEFT, LEFT, LEFT, DOWN, DOWN, ENTER);
-			expect(screens[5]).toContain("One Code does not edit Claude Code's files.");
+			expect(screens[5]).toContain("One Code does not edit Claude Code user settings.");
 			await openPanel(LEFT, LEFT, LEFT, DOWN, DOWN, DOWN, ENTER, ENTER, "!", ENTER);
 			expect(settings().autoMode.allow).toEqual(["Mine: my rule!"]);
 			await openPanel(LEFT, LEFT, LEFT, DOWN, DOWN, DOWN, ENTER, "d", ENTER, "y", ENTER);

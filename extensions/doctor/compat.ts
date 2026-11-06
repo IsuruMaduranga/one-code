@@ -464,7 +464,7 @@ export function collectCompat(input: CompatInput): CompatReport {
 
 	// Hooks.
 	const hookDiagnostics: string[] = [];
-	const hooksLoaded = loadHookSettings(claudeDir, cwd);
+	const hooksLoaded = loadHookSettings(cwd, home);
 	hookDiagnostics.push(...hooksLoaded.diagnostics);
 	// Runtime dispatch skips plugin hooks when settings disable hooks; report what runs.
 	const pluginHooks = discovered && !hooksLoaded.disabled ? loadPluginHooks(defaultDiscoverRoots(agentDir, cwd, home), hookDiagnostics) : [];

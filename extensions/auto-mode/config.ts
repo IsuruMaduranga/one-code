@@ -46,8 +46,8 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { claudeUserSettingsPath, managedSettingsPaths } from "../lib/claude-settings.ts";
-import { claudeSourcesOn } from "../lib/config-mode.ts";
+import { settingsSources } from "../lib/claude-settings.ts";
+import type { SettingsFile } from "../lib/sources.ts";
 import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
 import { DEFAULT_ENVIRONMENT, slotName } from "./defaults.ts";
 
@@ -95,14 +95,27 @@ const DEFAULTS_TOKEN = "$defaults";
 /**
  * The files `autoMode` is read from, lowest precedence first. One Code's own
  * auto-mode keys (`classifierModel`, `classifierModelSetFor`) are deliberately
- * NOT collected from the borrowed `claudeUserSettingsPath` (see the read guard
+ * NOT collected from a borrowed user file (`isBorrowedUserFile`; see the read guard
  * in the loader).
  */
 export function autoModeSettingsPaths(home: string): string[] {
-	// Independent mode (lib/config-mode.ts) reads One Code's file alone; the
-	// built-in rules apply regardless, since settings only append to them.
-	if (!claudeSourcesOn()) return [oneCodeSettingsPath(home)];
-	return [claudeUserSettingsPath(home), oneCodeSettingsPath(home), ...managedSettingsPaths()];
+	return autoModeSettingsFiles(home).map((file) => file.path);
+}
+
+/**
+ * The ladder's user and managed files (lib/claude-settings.ts): with One
+ * Code's provider on, Claude Code's user file, One Code's, then managed
+ * policy; without it, One Code's file alone. The built-in rules apply
+ * regardless, since settings only append to them. Project files are never
+ * read: a repository could otherwise grant itself classifier exceptions.
+ */
+export function autoModeSettingsFiles(home: string): SettingsFile[] {
+	return settingsSources(process.cwd(), home).filter((file) => file.scope === "user" || file.scope === "managed");
+}
+
+/** Another tool's user file: never the home of One Code's own keys (`classifierModel`, `subagentModel`). */
+export function isBorrowedUserFile(file: SettingsFile): boolean {
+	return file.owner === "borrowed" && file.scope === "user";
 }
 
 function readFile(path: string, diagnostics: string[]): AutoModeSettingsFile | undefined {
@@ -258,8 +271,8 @@ export function loadAutoModeConfigWithDiagnostics(home: string): AutoModeConfigL
 		logDecisions?: boolean;
 	} = {};
 
-	const claudeUser = claudeUserSettingsPath(home);
-	for (const path of autoModeSettingsPaths(home)) {
+	for (const source of autoModeSettingsFiles(home)) {
+		const { path } = source;
 		const file = readFile(path, diagnostics);
 		const block = file?.autoMode;
 		if (file !== undefined && "autoMode" in file && (typeof block !== "object" || block === null || Array.isArray(block))) {
@@ -283,7 +296,7 @@ export function loadAutoModeConfigWithDiagnostics(home: string): AutoModeConfigL
 		// old One Code build may have left a stale value. A leftover in `~/.claude` is
 		// surfaced as a diagnostic so the user knows why it does not apply.
 		if (typeof block.classifierModel === "string" && block.classifierModel.trim()) {
-			if (path === claudeUser) {
+			if (isBorrowedUserFile(source)) {
 				diagnostics.push(
 					`${path}: autoMode.classifierModel is ignored here — One Code reads it from ~/.onecode/settings.json (set it with /auto-mode model)`,
 				);
@@ -388,7 +401,8 @@ export type AutoModeListKey = "allow" | "soft_deny" | "hard_deny" | "environment
 export interface SourcedAutoModeEntry {
 	key: AutoModeListKey;
 	text: string;
-	source: "claude-user" | "onecode-user" | "managed";
+	/** The settings file the entry is in. */
+	source: SettingsFile;
 	path: string;
 }
 
@@ -399,13 +413,11 @@ export interface SourcedAutoModeEntry {
  * splice point, shown as the built-in default rather than as an entry.
  */
 export function listAutoModeEntries(home: string): SourcedAutoModeEntry[] {
-	const claudeUser = claudeUserSettingsPath(home);
-	const oneCodeUser = oneCodeSettingsPath(home);
 	const entries: SourcedAutoModeEntry[] = [];
-	for (const path of autoModeSettingsPaths(home)) {
+	for (const source of autoModeSettingsFiles(home)) {
+		const { path } = source;
 		const block = asRecord(readFile(path, [])?.autoMode);
 		if (!block) continue;
-		const source = path === claudeUser ? "claude-user" : path === oneCodeUser ? "onecode-user" : "managed";
 		for (const key of ["allow", "soft_deny", "hard_deny", "environment"] as const) {
 			for (const text of stringArray(block[key]) ?? []) {
 				if (text.trim() !== DEFAULTS_TOKEN) entries.push({ key, text, source, path });
@@ -452,13 +464,15 @@ export function oneCodePermissionAllow(home: string): string[] {
 }
 
 /**
- * The `permissions.allow` entries in Claude Code's *user* settings file — the
- * borrowed half of the audit. These are One Code's to warn about, never to
- * delete: an entry here still bypasses the classifier even after its One Code
- * copy is removed, so the audit must flag it separately.
+ * The `permissions.allow` entries in another tool's *user* settings file (the
+ * ladder's borrowed user file, Claude Code's with One Code's provider on):
+ * the borrowed half of the audit. These are One Code's to warn about, never
+ * to delete: an entry here still bypasses the classifier even after its One
+ * Code copy is removed, so the audit must flag it separately. None when the
+ * ladder borrows no user file.
  */
-export function claudeUserPermissionAllow(home: string): string[] {
-	return permissionAllowIn(claudeUserSettingsPath(home));
+export function borrowedUserPermissionAllow(home: string): string[] {
+	return autoModeSettingsFiles(home).filter(isBorrowedUserFile).flatMap((file) => permissionAllowIn(file.path));
 }
 
 /** Shared lenient read of a settings file's `permissions.allow` string list. */

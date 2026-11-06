@@ -49,14 +49,14 @@ describe("hook settings: disableAllHooks", () => {
 	});
 
 	it("preserves the existing source collection order when hooks are enabled", () => {
-		const loaded = loadHookSettings(claudeDir, cwd);
+		const loaded = loadHookSettings(cwd, join(claudeDir, ".."));
 		expect(loaded.sources.map((source) => source.scope)).toEqual(["user", "managed", "project", "local"]);
 		expect(loaded).not.toHaveProperty("disabled");
 	});
 
 	it("a user disable preserves only managed hooks", () => {
 		write("user", true);
-		const loaded = loadHookSettings(claudeDir, cwd);
+		const loaded = loadHookSettings(cwd, join(claudeDir, ".."));
 		expect(loaded.sources.map((source) => source.scope)).toEqual(["managed"]);
 		expect(loaded).toHaveProperty("disabled", "unmanaged");
 	});
@@ -64,7 +64,7 @@ describe("hook settings: disableAllHooks", () => {
 	// A cloned repository must not switch off the user's own guard hooks.
 	it.each(["project", "local"] as const)("a %s disable drops only the repository's own hooks", (scope) => {
 		write(scope, true);
-		const loaded = loadHookSettings(claudeDir, cwd);
+		const loaded = loadHookSettings(cwd, join(claudeDir, ".."));
 		expect(loaded.sources.map((source) => source.scope)).toEqual(["user", "managed"]);
 		expect(loaded).not.toHaveProperty("disabled");
 	});
@@ -73,7 +73,7 @@ describe("hook settings: disableAllHooks", () => {
 		write("managed", true);
 		write("project", false);
 		write("local", false);
-		const loaded = loadHookSettings(claudeDir, cwd);
+		const loaded = loadHookSettings(cwd, join(claudeDir, ".."));
 		expect(loaded.sources).toEqual([]);
 		expect(loaded).toHaveProperty("disabled", "all");
 	});
@@ -81,7 +81,7 @@ describe("hook settings: disableAllHooks", () => {
 	it("managed false overrides a non-managed true without changing source order", () => {
 		write("local", true);
 		write("managed", false);
-		const loaded = loadHookSettings(claudeDir, cwd);
+		const loaded = loadHookSettings(cwd, join(claudeDir, ".."));
 		expect(loaded.sources.map((source) => source.scope)).toEqual(["user", "managed", "project", "local"]);
 		expect(loaded).not.toHaveProperty("disabled");
 	});
@@ -90,47 +90,47 @@ describe("hook settings: disableAllHooks", () => {
 		write("user", true);
 		write("project", false);
 		write("local", false);
-		expect(loadHookSettings(claudeDir, cwd)).toHaveProperty("disabled", "unmanaged");
+		expect(loadHookSettings(cwd, join(claudeDir, ".."))).toHaveProperty("disabled", "unmanaged");
 	});
 
 	it("local true overrides project false for the repository's own hooks", () => {
 		write("project", false);
 		write("local", true);
-		expect(loadHookSettings(claudeDir, cwd).sources.map((source) => source.scope)).toEqual(["user", "managed"]);
+		expect(loadHookSettings(cwd, join(claudeDir, "..")).sources.map((source) => source.scope)).toEqual(["user", "managed"]);
 	});
 
 	it("reads disabling flags from settings files without a hooks block", () => {
 		write("user", true, false);
-		const loaded = loadHookSettings(claudeDir, cwd);
+		const loaded = loadHookSettings(cwd, join(claudeDir, ".."));
 		expect(loaded.sources.map((source) => source.scope)).toEqual(["managed"]);
 		expect(loaded).toHaveProperty("disabled", "unmanaged");
 		write("user", undefined, false);
 		write("local", true, false);
 		resetHookSettingsCache();
-		expect(loadHookSettings(claudeDir, cwd).sources.map((source) => source.scope)).toEqual(["managed"]);
+		expect(loadHookSettings(cwd, join(claudeDir, "..")).sources.map((source) => source.scope)).toEqual(["managed"]);
 	});
 
 	it("retains disabling flags across cached reads and reloads them after mtime changes", () => {
 		write("user", true);
 		utimesSync(paths.user, new Date(1000000), new Date(1000000));
-		expect(loadHookSettings(claudeDir, cwd)).toHaveProperty("disabled", "unmanaged");
-		expect(loadHookSettings(claudeDir, cwd)).toHaveProperty("disabled", "unmanaged");
+		expect(loadHookSettings(cwd, join(claudeDir, ".."))).toHaveProperty("disabled", "unmanaged");
+		expect(loadHookSettings(cwd, join(claudeDir, ".."))).toHaveProperty("disabled", "unmanaged");
 		write("user", false);
 		utimesSync(paths.user, new Date(2000000), new Date(2000000));
-		expect(loadHookSettings(claudeDir, cwd)).not.toHaveProperty("disabled");
+		expect(loadHookSettings(cwd, join(claudeDir, ".."))).not.toHaveProperty("disabled");
 	});
 
 	it("drops a disabling flag when its settings file is deleted", () => {
 		write("managed", true);
-		expect(loadHookSettings(claudeDir, cwd)).toHaveProperty("disabled", "all");
+		expect(loadHookSettings(cwd, join(claudeDir, ".."))).toHaveProperty("disabled", "all");
 		rmSync(paths.managed);
-		expect(loadHookSettings(claudeDir, cwd).sources.map((source) => source.scope)).toEqual(["user", "project", "local"]);
-		expect(loadHookSettings(claudeDir, cwd)).not.toHaveProperty("disabled");
+		expect(loadHookSettings(cwd, join(claudeDir, "..")).sources.map((source) => source.scope)).toEqual(["user", "project", "local"]);
+		expect(loadHookSettings(cwd, join(claudeDir, ".."))).not.toHaveProperty("disabled");
 	});
 
 	it("ignores a non-boolean disabling flag rather than overwriting a valid lower-priority flag", () => {
 		write("user", true);
 		write("local", "false");
-		expect(loadHookSettings(claudeDir, cwd)).toHaveProperty("disabled", "unmanaged");
+		expect(loadHookSettings(cwd, join(claudeDir, ".."))).toHaveProperty("disabled", "unmanaged");
 	});
 });

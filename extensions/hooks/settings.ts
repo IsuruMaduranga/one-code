@@ -16,9 +16,8 @@
 
 import { readFileSync, statSync } from "node:fs";
 import os from "node:os";
-import { join } from "node:path";
-import { managedSettingsPaths, settingsSources } from "../lib/claude-settings.ts";
-import { claudeSourcesOn } from "../lib/config-mode.ts";
+import { isRepoFile, primarySettingsFile, settingsSources } from "../lib/claude-settings.ts";
+import type { SettingsFile } from "../lib/sources.ts";
 import { CC_HOOK_EVENTS, type CcHookEvent } from "./protocol.ts";
 
 /** Claude Code's per-hook `shell` field: which interpreter runs the command string. */
@@ -61,20 +60,26 @@ export interface LoadedHooks {
 }
 
 /**
- * The settings files hooks are read from, in collection order. Independent
- * mode (lib/config-mode.ts) reads One Code's user file and its per-repo file
- * under `~/.onecode/projects/<slug>/` instead; neither ships in a repository,
- * so both are user scope and need no project-trust prompt.
+ * The settings files hooks are read from, in collection order: the primary
+ * user file's family of the ladder (lib/claude-settings.ts settingsSources),
+ * the user files first, then managed policy, then the repository's. With One
+ * Code's provider on that is Claude Code's four files; without it, One
+ * Code's user file and its per-repo file under `~/.onecode/projects/<slug>/`,
+ * which no repository ships, so both are user scope and need no
+ * project-trust prompt.
  */
-export function hookSettingsPaths(claudeDir: string, cwd: string, home: string = os.homedir()): Array<{ scope: HookScope; path: string }> {
-	if (!claudeSourcesOn()) return settingsSources(cwd, home).map(([, path]) => ({ scope: "user" as const, path }));
-	return [
-		{ scope: "user", path: join(claudeDir, "settings.json") },
-		...managedSettingsPaths().map((path) => ({ scope: "managed" as const, path })),
-		{ scope: "project", path: join(cwd, ".claude", "settings.json") },
-		{ scope: "local", path: join(cwd, ".claude", "settings.local.json") },
-	];
+export function hookSettingsPaths(cwd: string, home: string = os.homedir()): Array<{ scope: HookScope; path: string }> {
+	const files = settingsSources(cwd, home);
+	const owner = primarySettingsFile(files)?.owner;
+	const scopeOf = (file: SettingsFile): HookScope => (isRepoFile(file) ? (file.scope as "project" | "local") : file.scope === "managed" ? "managed" : "user");
+	return files
+		.filter((file) => file.owner === owner)
+		.map((file) => ({ scope: scopeOf(file), path: file.path }))
+		.sort((a, b) => HOOK_SCOPE_ORDER.indexOf(a.scope) - HOOK_SCOPE_ORDER.indexOf(b.scope));
 }
+
+/** Claude Code's collection order: the user's files, managed policy, then the repository's. */
+const HOOK_SCOPE_ORDER: readonly HookScope[] = ["user", "managed", "project", "local"];
 
 /**
  * Validate one file's `hooks` block into HooksFileConfig. Unknown events,
@@ -172,13 +177,13 @@ function readHooksFile(path: string, diagnostics: string[]): CacheEntry | undefi
 	return entry;
 }
 
-export function loadHookSettings(claudeDir: string, cwd: string): LoadedHooks {
+export function loadHookSettings(cwd: string, home: string = os.homedir()): LoadedHooks {
 	const diagnostics: string[] = [];
 	const sources: HooksSource[] = [];
 	let userDisableAllHooks: boolean | undefined;
 	let managedDisableAllHooks: boolean | undefined;
 	let repoDisableAllHooks: boolean | undefined;
-	for (const { scope, path } of hookSettingsPaths(claudeDir, cwd)) {
+	for (const { scope, path } of hookSettingsPaths(cwd, home)) {
 		const entry = readHooksFile(path, diagnostics);
 		if (!entry) continue;
 		if (entry.disableAllHooks !== undefined) {

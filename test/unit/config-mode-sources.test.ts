@@ -101,7 +101,7 @@ describe("independent mode reads settings from One Code's files only", () => {
 		expect(readSettingsEnv(home)).toEqual({ A: "claude" });
 		resetConfigModeForTest("independent");
 		expect(autoModeSettingsPaths(home)).toEqual([ocUser]);
-		expect(hookSettingsPaths(join(home, ".claude"), cwd, home).map((s) => [s.scope, s.path.startsWith(join(home, ".onecode"))])).toEqual([
+		expect(hookSettingsPaths(cwd, home).map((s) => [s.scope, s.path.startsWith(join(home, ".onecode"))])).toEqual([
 			["user", true],
 			["user", true],
 		]);
