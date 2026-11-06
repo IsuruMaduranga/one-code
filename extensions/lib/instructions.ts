@@ -24,6 +24,7 @@
  */
 
 import { existsSync, readdirSync, statSync } from "node:fs";
+import os from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { findGitRoot } from "./git.ts";
 import { tryReadFile } from "./plugins.ts";
@@ -33,7 +34,7 @@ import { readExternalIncludesApproval } from "./claude-external-includes.ts";
 import { fitToWindow, type SkippedInstruction } from "./instruction-budget.ts";
 import type { InstructionSource } from "./context-text.ts";
 import { activeProfile, featureEnabled } from "./profile.ts";
-import { allowPathOf, openSources } from "./sources.ts";
+import { allowPathOf, type InstructionTargets, openSources } from "./sources.ts";
 
 /** One instruction section. Legacy content stays raw; new parsed files carry CC's trimmed startup body. */
 export interface ContextFile {
@@ -540,6 +541,23 @@ export function openInstructions(home: string, agentDir: string | undefined): In
 			return [...view.classifier(agents, { cwd }), ...product()];
 		},
 	};
+}
+
+/**
+ * The instruction files a user writes (lib/sources.ts `InstructionTargets`):
+ * the provider's, else each project's AGENTS.md and the product's global file
+ * in its state dir (the one present, else `ONECODE.md`).
+ */
+export function instructionTargets(home: string = os.homedir(), stateDir: string = oneCodeStateDir(process.env, home)): InstructionTargets {
+	const provided = openSources(home).instructionTargets;
+	if (provided) return provided;
+	return { project: "AGENTS.md", user: firstOneCodeFile(stateDir) ?? join(stateDir, "ONECODE.md") };
+}
+
+/** The names of the instruction files a user writes: `CLAUDE.md`, or `AGENTS.md` and the product file's. */
+export function instructionFileNames(home: string = os.homedir()): string[] {
+	const { project, user } = instructionTargets(home);
+	return [...new Set([project, basename(user)])];
 }
 
 /**

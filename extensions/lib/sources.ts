@@ -23,6 +23,8 @@ export interface SourceView {
 	allowPath?(path: string): boolean;
 	/** The product's instruction files, reshaping the base's lists (lib/instructions.ts). Absent: the base's lists. */
 	instructions?: InstructionView;
+	/** The instruction files a user writes, in place of the base's (lib/instructions.ts `instructionTargets`). */
+	instructionTargets?: InstructionTargets;
 	/** The user and project config folders, in place of the product's own. Absent: the product's. */
 	configDirs?: ConfigDirs;
 	/**
@@ -38,6 +40,8 @@ export interface SourceView {
 	pluginsDir?: string;
 	/** Another tool's MCP config files, read after pi's own `mcp.json` files, each with its scope (mcp/config.ts). */
 	mcpFiles?(opts: { cwd: string }): McpFile[];
+	/** Where a user adds servers in those files, for /mcp's empty message: ".mcp.json in the project, ~/.claude.json". */
+	mcpWhere?: string;
 	/**
 	 * Another tool's global state files outside the settings ladder (One
 	 * Code's provider: `~/.claude.json`). They carry permission configuration,
@@ -83,6 +87,18 @@ export interface SettingsFile {
 	primary?: boolean;
 	/** How the file is named to the user, such as "managed settings". */
 	label: string;
+}
+
+/**
+ * The instruction files a user writes: /memory's always-offered rows,
+ * `/init`'s target, the auto-mode setup's evidence and the `# oneCodeMd`
+ * preamble's name for the file above it.
+ */
+export interface InstructionTargets {
+	/** The per-project file's name, in a project root. */
+	project: string;
+	/** The user's global file. */
+	user: string;
 }
 
 /**

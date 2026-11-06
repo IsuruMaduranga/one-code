@@ -114,7 +114,7 @@ describe("the /memory picker in independent mode", () => {
 	it("offers the global ONECODE.md and the project's AGENTS.md, never a CLAUDE.md", () => {
 		resetConfigModeForTest("independent");
 		touch(join(cwd, "CLAUDE.md"));
-		const entries = buildMemoryEntries({ agentDir: undefined, cwd, home, homeClaudeDir: join(home, ".claude"), homeOneCodeDir: join(home, ".onecode"), memoryDir: join(home, "mem") });
+		const entries = buildMemoryEntries({ agentDir: undefined, cwd, home, homeOneCodeDir: join(home, ".onecode"), memoryDir: join(home, "mem") });
 		expect(entries.map((e) => [e.title, e.path])).toEqual([
 			["User instructions", join(home, ".onecode", "ONECODE.md")],
 			["Project instructions", join(cwd, "AGENTS.md")],
@@ -126,7 +126,7 @@ describe("the /memory picker in independent mode", () => {
 describe("the /memory picker and .claude/AGENTS.md", () => {
 	it("offers a .claude/AGENTS.md the fallback loads", () => {
 		touch(join(cwd, ".claude", "AGENTS.md"));
-		const entries = buildMemoryEntries({ agentDir: undefined, cwd, home, homeClaudeDir: join(home, ".claude"), homeOneCodeDir: join(home, ".onecode"), memoryDir: join(home, "mem") });
+		const entries = buildMemoryEntries({ agentDir: undefined, cwd, home, homeOneCodeDir: join(home, ".onecode"), memoryDir: join(home, "mem") });
 		expect(entries.map((e) => e.path)).toContain(join(cwd, ".claude", "AGENTS.md"));
 	});
 });

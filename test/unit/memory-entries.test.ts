@@ -24,7 +24,6 @@ describe("buildMemoryEntries", () => {
 		return buildMemoryEntries({ agentDir: undefined,
 			cwd,
 			home: root,
-			homeClaudeDir: join(root, ".claude"),
 			homeOneCodeDir: join(root, ".onecode"),
 			memoryDir: join(root, "mem"),
 		});

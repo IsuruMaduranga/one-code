@@ -45,8 +45,8 @@ export interface GuideInput {
 	docs: { guide: string; piDocs?: string; piExamples?: string };
 	install: GuideInstall;
 	setup: GuideSetup;
-	/** Whether Claude Code's sources are read (CLAUDE.md), and the project config folder's name. */
-	config: { claudeSources: boolean; configDir: string };
+	/** The names of the instruction files a user writes (lib/instructions.ts instructionTargets), and the project config folder's name. */
+	config: { instructionFiles: string[]; configDir: string };
 }
 
 /**

@@ -57,7 +57,7 @@ import { renderMcpPanel, type McpPaint } from "./panel/render.ts";
 import { applyMcpKey, initialMcpState, type McpEffect } from "./panel/state.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { loadServers, mcpConfigFiles, type McpServer, noMcpServersMessage, piMcpConfigPaths, registeredMcpServers } from "./config.ts";
-import type { McpFile } from "../lib/sources.ts";
+import { type McpFile, openSources } from "../lib/sources.ts";
 import { approveMcpServers, type McpTrustDeps, persistApproval, projectRootOf, reconnectRefusal } from "./trust.ts";
 import {
 	capDescription,
@@ -70,7 +70,6 @@ import {
 } from "./schema.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 import { canShowCustomUi, notifyRpcReadOnly } from "../lib/headless-output.ts";
-import { claudeSourcesOn } from "../lib/config-mode.ts";
 import { forwardSlashes } from "../lib/paths.ts";
 import { consentDialog, startupConsentReady } from "../lib/consent-dialogs.ts";
 import { panelUi } from "../lib/panel-focus.ts";
@@ -944,7 +943,7 @@ function mcpExtension(pi: ExtensionAPI) {
 		description: "Manage MCP servers (status, reconnect, authenticate, enable/disable)",
 		handler: async (args, ctx) => {
 			if (servers.length === 0) {
-				const stdout = noMcpServersMessage(claudeSourcesOn());
+				const stdout = noMcpServersMessage(openSources(home).mcpWhere);
 				ctx.ui.notify(stdout, "info");
 				return stdout;
 			}

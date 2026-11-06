@@ -14,6 +14,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
 import { safetyControlWrite } from "../../extensions/auto-mode/safety-floor.ts";
 import { settingsSources } from "../../extensions/lib/claude-settings.ts";
+import { instructionFileNames, instructionTargets } from "../../extensions/lib/instructions.ts";
+import { INIT_PROMPT, initPrompt } from "../../profile/init/prompt.ts";
 import { profileModuleKey, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile.ts";
 import { shareModuleForTest } from "../../extensions/lib/shared-module.ts";
 import { configDirs, projectConfigDir, type SourceProvider, userConfigDir } from "../../extensions/lib/sources.ts";
@@ -100,5 +102,27 @@ describe("the settings ladder", () => {
 		expect(writes(state)).toBeUndefined();
 		useProvider({ open: () => ({ protectedFiles: [state] }) });
 		expect(writes(state)).toBeDefined();
+	});
+});
+
+describe("the instruction files a user writes", () => {
+	it("are CLAUDE.md with One Code's provider on", () => {
+		expect(instructionTargets(home)).toEqual({ project: "CLAUDE.md", user: join(home, ".claude", "CLAUDE.md") });
+		expect(instructionFileNames(home)).toEqual(["CLAUDE.md"]);
+	});
+
+	it("are AGENTS.md and the global ONECODE.md in independent mode", () => {
+		resetConfigModeForTest("independent");
+		expect(instructionTargets(home)).toEqual({ project: "AGENTS.md", user: join(home, ".onecode", "ONECODE.md") });
+		expect(instructionFileNames(home)).toEqual(["AGENTS.md", "ONECODE.md"]);
+	});
+
+	it("give /init its target: the CLAUDE.md prompt unchanged, the AGENTS.md one without folding an AGENTS.md in", () => {
+		expect(initPrompt("CLAUDE.md")).toBe(INIT_PROMPT);
+		const agents = initPrompt("AGENTS.md");
+		expect(agents).not.toContain("CLAUDE.md");
+		expect(agents.startsWith("Please analyze this codebase and create an AGENTS.md file,")).toBe(true);
+		expect(agents).toContain("Copilot rules (in .github/copilot-instructions.md), make sure");
+		expect(agents).toContain("```\n# AGENTS.md\n");
 	});
 });

@@ -20,14 +20,13 @@ import {
 	ancestorDirs,
 	collectImportedPaths,
 	type ContextFilePath,
-	GLOBAL_DESCRIPTOR,
+	instructionTargets,
 	LOCAL_DESCRIPTOR,
 	ONECODE_DESCRIPTOR,
 	ONECODE_GLOBAL_DESCRIPTOR,
 	openInstructions,
 	PROJECT_DESCRIPTOR,
 } from "../lib/instructions.ts";
-import { claudeSourcesOn } from "../lib/config-mode.ts";
 import { forwardSlashes, isRelativeInside, tildify } from "../lib/paths.ts";
 import { tryReadFile } from "../lib/plugins.ts";
 
@@ -70,17 +69,17 @@ function referencedImports(discovered: ContextFilePath[], home: string): Set<str
 export function buildMemoryEntries(opts: {
 	cwd: string;
 	home: string;
-	homeClaudeDir: string;
 	homeOneCodeDir: string;
 	/** pi's agent dir (`getAgentDir()`), for its global AGENTS.md. */
 	agentDir: string | undefined;
 	/** The auto-memory folder; undefined while auto-memory is off (no folder row, as in Claude Code). */
 	memoryDir: string | undefined;
 }): MemoryEntry[] {
-	const { cwd, home, homeClaudeDir, homeOneCodeDir, agentDir, memoryDir } = opts;
-	// Independent mode (lib/config-mode.ts) reads no CLAUDE.md: its always-offered
-	// files are the global ONECODE.md and the project's AGENTS.md instead.
-	const independent = !claudeSourcesOn();
+	const { cwd, home, homeOneCodeDir, agentDir, memoryDir } = opts;
+	// The always-offered rows are the files a user writes: CLAUDE.md with One
+	// Code's provider on, the global ONECODE.md and the project's AGENTS.md
+	// without it (lib/instructions.ts instructionTargets).
+	const targets = instructionTargets(home, homeOneCodeDir);
 	// The same files the # claudeMd block takes, so the list matches what it sends.
 	const discovered = openInstructions(home, agentDir).paths({ cwd, homeOneCodeDir });
 	const referenced = referencedImports(discovered, home);
@@ -100,13 +99,13 @@ export function buildMemoryEntries(opts: {
 
 	// Global user instructions — always offered, matching CC (created on save).
 	const globalOneCode = found.get(`${ONECODE_GLOBAL_DESCRIPTOR}\0${homeOneCodeDir}`);
-	const globalUser = independent ? (globalOneCode ?? join(homeOneCodeDir, "ONECODE.md")) : join(homeClaudeDir, "CLAUDE.md");
+	const discoveredPaths = new Set(discovered.map(({ path }) => path));
 	add({
 		title: "User instructions",
-		description: `Saved in ${disp(globalUser)}`,
-		path: globalUser,
+		description: `Saved in ${disp(targets.user)}`,
+		path: targets.user,
 		kind: "file",
-		exists: independent ? globalOneCode !== undefined : found.has(`${GLOBAL_DESCRIPTOR}\0${homeClaudeDir}`),
+		exists: discoveredPaths.has(targets.user),
 	});
 	if (globalOneCode) {
 		add({
@@ -126,14 +125,14 @@ export function buildMemoryEntries(opts: {
 		const isCwd = d === cwd;
 		const claude = join(d, "CLAUDE.md");
 		if (isCwd) {
-			// Project instructions — always offered (created on save): AGENTS.md in independent mode.
-			const [name, descriptor] = independent ? ["AGENTS.md", AGENTS_DESCRIPTOR] : ["CLAUDE.md", PROJECT_DESCRIPTOR];
+			// Project instructions, always offered (created on save).
+			const project = join(d, targets.project);
 			add({
 				title: "Project instructions",
-				description: `Checked in at ${disp(join(d, name))}`,
-				path: join(d, name),
+				description: `Checked in at ${disp(project)}`,
+				path: project,
 				kind: "file",
-				exists: found.has(`${descriptor}\0${d}`),
+				exists: discoveredPaths.has(project),
 			});
 		} else if (found.has(`${PROJECT_DESCRIPTOR}\0${d}`)) {
 			add({ title: disp(claude), path: claude, kind: "file", exists: true });

@@ -23,10 +23,8 @@ import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { type AutoModeConfig, autoModeSettingsFiles, isBorrowedUserFile } from "./config.ts";
 import { classifierCandidates, replyText, withAuthBaseUrl } from "./model-select.ts";
 import { buildSetupPrompt, parseGitRemotes, redactSecrets, type SetupDraft, parseSetupDraft, type SetupFacts } from "./setup.ts";
-import { claudeSourcesOn } from "../lib/config-mode.ts";
-import { claudeUserDir, oneCodeStateDir } from "../lib/paths.ts";
 import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
-import { firstOneCodeFile } from "../lib/instructions.ts";
+import { instructionTargets } from "../lib/instructions.ts";
 
 const PROBE_TIMEOUT_MS = 10_000;
 /** Drafting reads a big fact dump and writes a full slot list — give it room. */
@@ -150,11 +148,10 @@ export async function gatherFacts(options: GatherOptions): Promise<SetupFacts> {
 		if (Array.isArray(allow)) permissionsAllow.push(...allow.filter((entry): entry is string => typeof entry === "string"));
 	}
 
-	// Independent mode (lib/config-mode.ts) reads no CLAUDE.md: the project's
-	// AGENTS.md and the global ONECODE.md stand in.
-	const instructions = claudeSourcesOn()
-		? { project: "CLAUDE.md", global: join(claudeUserDir(home), "CLAUDE.md") }
-		: { project: "AGENTS.md", global: firstOneCodeFile(oneCodeStateDir(process.env, home)) ?? undefined };
+	// The instruction files a user writes (CLAUDE.md with One Code's provider
+	// on; the project's AGENTS.md and the global ONECODE.md without it).
+	const targets = instructionTargets(home);
+	const instructions = { project: targets.project, global: targets.user };
 
 	return {
 		cwd,

@@ -148,7 +148,7 @@ describe("mcp wiring", () => {
 			if (payload.placement === "user-prepend" && payload.text !== undefined) blocks.push(payload.text);
 		});
 		const ctx = createFakeCtx({ cwd, hasUI: true, mode: "tui" });
-		const stdout = noMcpServersMessage(true);
+		const stdout = noMcpServersMessage(".mcp.json in the project, ~/.claude.json");
 		expect(stdout).toContain("Run /doctor if this is unexpected");
 		expect(stdout).toContain(".mcp.json in the project, ~/.claude.json");
 		expect(stdout).not.toMatch(/claude (doctor|mcp)|code\.claude\.com/);
@@ -182,7 +182,7 @@ describe("mcp wiring", () => {
 		});
 		const ctx = createFakeCtx({ cwd, hasUI: true, mode: "tui" });
 		await fake.commands.get("mcp")!.handler("", ctx);
-		const stdout = noMcpServersMessage(false);
+		const stdout = noMcpServersMessage(undefined);
 		expect(stdout).toContain("add servers to .pi/mcp.json or the agent dir's mcp.json");
 		expect(stdout).not.toContain(".claude");
 		expect(blocks).toEqual(localCommandBlocks({ name: "mcp", stdout }));

@@ -78,7 +78,7 @@ function guideSystemPrompt({ docs, install, setup, config }: GuideInput): string
 1. Read the One Code guide's index and pick the pages that cover the question
 2. Read those pages; search the docs with \`grep\` and \`find\` through the shell when the index does not name the topic
 3. For customization and extension questions, read pi's docs and examples too
-4. Read the user's own configuration (settings files, ${config.claudeSources ? "CLAUDE.md" : "AGENTS.md, ONECODE.md"}, \`${config.configDir}/\`) when it bears on the answer
+4. Read the user's own configuration (settings files, ${config.instructionFiles.join(", ")}, \`${config.configDir}/\`) when it bears on the answer
 5. Provide clear, actionable guidance based on the documentation, citing the file each fact came from
 
 **When One Code does not do what the user wants,** say so plainly, then suggest the smallest change that gets them there, in this order:

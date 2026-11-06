@@ -22,7 +22,7 @@ const input = (over: Partial<GuideInput> = {}): GuideInput => ({
 	docs: { guide: "/pkg/docs/guide", piDocs: "/pi/docs", piExamples: "/pi/examples" },
 	install: { shape: "app", method: "npm", agentDir: "/home/u/.onecode/agent", version: "0.4.1" },
 	setup: emptySetup,
-	config: { claudeSources: true, configDir: ".claude" },
+	config: { instructionFiles: ["CLAUDE.md"], configDir: ".claude" },
 	...over,
 });
 

@@ -504,7 +504,7 @@ idle-compact/policy.ts
 	"Compacted while idle, before the prompt cache expired"
 
 init/index.ts
-	"Initialize a new CLAUDE.md file with codebase documentation"
+	"Initialize a new ${…} file with codebase documentation"
 
 interrupted/line.ts
 	"Interrupted · What should One Code do instead?"
@@ -722,8 +722,7 @@ mcp/client.ts
 
 mcp/config.ts
 	"a `!command` value in env or headers is not supported"
-	".mcp.json in the project, ~/.claude.json, .pi/mcp.json or the agent dir's mcp.json"
-	".pi/mcp.json or the agent dir's mcp.json"
+	"${…}.pi/mcp.json or the agent dir's mcp.json"
 	"No MCP servers configured. Run /doctor if this is unexpected — it lists MCP config files that failed validation. Otherwise, add servers to ${…}; see ${…} to learn more."
 	"MCP server \"${…}\" in ${…} is overridden by the one in ${…}."
 

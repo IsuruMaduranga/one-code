@@ -25,6 +25,7 @@ export const sources: SourceProvider = {
 		if (!claudeSourcesOn()) return { allowPath: (path) => !isClaudeLocation(path, homeClaudeDir) };
 		return {
 			instructions: claudeCodeInstructionView(home),
+			instructionTargets: { project: "CLAUDE.md", user: join(homeClaudeDir, "CLAUDE.md") },
 			configDirs: { user: homeClaudeDir, project: ".claude" },
 			settings: (base, { cwd }) => claudeCodeSettings(base, cwd, home),
 			// Each of Claude Code's two skill folders loads before its `.agents` twin.
@@ -40,6 +41,7 @@ export const sources: SourceProvider = {
 				...findProjectConfigs(cwd).map((path): McpFile => ({ path, scope: "project" })),
 				{ path: join(cwd, ".claude", "settings.local.json"), scope: "local" },
 			],
+			mcpWhere: ".mcp.json in the project, ~/.claude.json",
 			protectedFiles: [claudeJsonPath(home)],
 		};
 	},

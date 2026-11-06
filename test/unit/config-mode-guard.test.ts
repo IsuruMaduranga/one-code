@@ -20,14 +20,10 @@ const CLAUDE_LOCATION =
 const CHECKED: Record<string, string> = {
 	"lib/paths.ts": "defines the helpers",
 	"lib/claude-settings.ts": "readers gate on claudeSourcesOn; managed paths are shared",
-	"lib/claude-context.ts": "the oneCodeMd preamble names CLAUDE.md only in compatible mode",
 	"lib/instructions.ts": "reads no Claude Code location; the banner groups a provider's .claude/AGENTS.md with its directory",
-	"lib/memory-index.ts": "independent memory indexes cannot resolve into Claude Code locations",
 	"lib/permission-gate.ts": "protection: ~/.claude stays protected and its secrets stay secret in both modes",
 	"permissions/protected-paths.ts": "protection: .claude stays protected in both modes",
 	"auto-mode/safety-floor.ts": "protection: gate-control files stay on the floor in both modes",
-	"auto-mode/setup-run.ts": "AGENTS.md and ONECODE.md in independent mode",
-	"memory/index.ts": "the picker's entries follow the instruction rule",
 	"memory/entries.ts": "independent rows offer ONECODE.md and AGENTS.md",
 	"mcp/trust.ts": "reads One Code's files in independent mode",
 	"doctor/compat.ts": "reports what each source holds; the mode line says what is read",
@@ -35,9 +31,9 @@ const CHECKED: Record<string, string> = {
 	"doctor/build.ts": "the mode line names what is read",
 	"profile/claude-code/instructions.ts": "One Code's instruction view: sources.ts opens it only in Claude-compatible mode",
 	"profile/claude-code/sources.ts": "One Code's source provider: in independent mode its view only keeps Claude Code's locations out",
+	"profile/init/prompt.ts": "words only: the caller passes the target file (instructionTargets); INIT_PROMPT is the CLAUDE.md one",
 	"profile/doctor/fix-prompt.ts": "words only: names both modes' files, and says which the session reads",
 	"profile/subagents/agent-description.ts": "words only: the caller passes the mode's config dir",
-	"profile/subagents/guide-agent.ts": "words only: the caller passes which sources and config dir the mode reads",
 	"profile/worktree/descriptions.ts": "words only: the caller passes the mode's config dir",
 };
 

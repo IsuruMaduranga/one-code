@@ -16,8 +16,7 @@
  * keeping that block byte-exact with Claude Code.
  */
 
-import { claudeSourcesOn } from "./config-mode.ts";
-import { type ContextFile, MEMORY_DESCRIPTOR } from "./instructions.ts";
+import { type ContextFile, instructionTargets, MEMORY_DESCRIPTOR } from "./instructions.ts";
 import { contextWords } from "./context-words.ts";
 
 /** Claude Code's `nested_memory` rendering (the reminder queue adds the `<system-reminder>` frame). */
@@ -27,7 +26,7 @@ export function nestedInstructionText(file: { path: string; content: string }): 
 
 /** The block's preamble, naming the files above it: AGENTS.md in independent mode (lib/config-mode.ts). */
 function oneCodePreamble(): string {
-	return contextWords().oneCodePreamble({ above: claudeSourcesOn() ? "CLAUDE.md" : "AGENTS.md" });
+	return contextWords().oneCodePreamble({ above: instructionTargets().project });
 }
 
 /**
