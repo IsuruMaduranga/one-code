@@ -610,6 +610,27 @@ const PERMISSION_ROUNDS: ToolCall[][] = [
 ];
 
 /**
+ * The subagent tools under GOLDEN_SUBAGENTS: an unknown agent type, an
+ * unknown model and the spawned-agents list, then a message to a run that
+ * does not exist, a message that resumes the round-1 agent (one-shot, so it
+ * runs inline) and a fork of this conversation.
+ */
+const sa = (id: string, name: string, input: ToolCall["input"]): ToolCall => ({ id: `toolu_golden_subagents_${id}`, name, input });
+const SUBAGENT_ROUNDS: ToolCall[][] = [
+	[
+		sa("load", "tool_search", { query: "select:SendMessage" }),
+		sa("unknown_type", "Agent", { subagent_type: "golden-nope", task: "Reply with OK." }),
+		sa("unknown_model", "Agent", { task: "Reply with OK.", model: "golden-nope-model" }),
+		sa("list", "list_agents", {}),
+	],
+	[
+		sa("nobody", "SendMessage", { to: "golden-nobody", message: "Hello." }),
+		sa("resume", "SendMessage", { to: "general-purpose-1", message: "Reply with OK again." }),
+		sa("fork", "Agent", { subagent_type: "fork", description: "Golden fork", task: "Reply with OK." }),
+	],
+];
+
+/**
  * The bash guards and background runs under GOLDEN_SHELL, all in one round:
  * a long sleep, chained short sleeps, a polling loop, two ways to detach, an
  * editor, watch, an interactive rebase and add, and two background commands
@@ -800,6 +821,7 @@ function roundsFor(text: string): ToolCall[][] {
 	if (has("GOLDEN_WORKFLOW")) rounds.push(...WORKFLOW_ROUNDS);
 	if (has("GOLDEN_AUTOMODE")) rounds.push(...AUTOMODE_ROUNDS);
 	if (has("GOLDEN_PERMISSIONS")) rounds.push(...PERMISSION_ROUNDS);
+	if (has("GOLDEN_SUBAGENTS")) rounds.push(...SUBAGENT_ROUNDS);
 	if (has("GOLDEN_SHELL")) rounds.push(...SHELL_ROUNDS);
 	if (has("GOLDEN_RESULTS")) rounds.push(...RESULT_ROUNDS);
 	if (has("GOLDEN_TOOLSEARCH")) rounds.push(...TOOLSEARCH_ROUNDS);
