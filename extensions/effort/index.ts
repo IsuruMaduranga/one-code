@@ -28,7 +28,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
 import { getAgentDir, SettingsManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { effortSetMessage, isPersistedEffort, type PersistedEffort } from "./settings.ts";
-import { requireText } from "../lib/profile.ts";
+import { requireText, toolLive } from "../lib/profile.ts";
 import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, stickyFact, toldBlockFact } from "../lib/reminders.ts";
 import { readState, recordState } from "../lib/ledger/state.ts";
 import { dimRightAlignedWidget, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
@@ -349,7 +349,8 @@ function effortExtension(pi: ExtensionAPI) {
 		applyStatus(ctx);
 	};
 	pi.on("session_start", (_event, ctx) => {
-		workflowsOn = readWorkflowSettings(ctx.cwd, os.homedir()).enabled;
+		// Ultracode tells the model to run workflows: never when the workflow tool is off.
+		workflowsOn = readWorkflowSettings(ctx.cwd, os.homedir()).enabled && toolLive("workflow");
 		followBranch(ctx, false);
 	});
 	pi.on("session_tree", (_event, ctx) => followBranch(ctx, true));

@@ -17,7 +17,7 @@ import { btw } from "./btw/index.ts";
 import { compaction } from "./compaction/index.ts";
 import { context } from "./context/index.ts";
 import { contextBudget } from "./context-budget/index.ts";
-import { doctor } from "./doctor/index.ts";
+import { doctorText } from "./doctor/index.ts";
 import { effort } from "./effort/index.ts";
 import { fileTracker } from "./file-tracker/index.ts";
 import { handback } from "./handback/index.ts";
@@ -29,7 +29,7 @@ import { memory } from "./memory/index.ts";
 import { nativeWeb } from "./native-web/index.ts";
 import { notebook } from "./notebook/index.ts";
 import { notificationsText } from "./notifications/index.ts";
-import { permissions } from "./permissions/index.ts";
+import { permissionsText } from "./permissions/index.ts";
 import { planModeText } from "./plan-mode/index.ts";
 import { plugins } from "./plugins/index.ts";
 import { recap } from "./recap/index.ts";
@@ -44,7 +44,7 @@ import { toolCallCorruption } from "./tool-call-corruption/index.ts";
 import { toolResults } from "./tool-results/index.ts";
 import { toolSearchText } from "./tool-search/index.ts";
 import { toolStyleText } from "./tool-style/index.ts";
-import { webFetch } from "./web-fetch/index.ts";
+import { webFetchText } from "./web-fetch/index.ts";
 import { webSearch } from "./web-search/index.ts";
 import { workflowText } from "./workflow/index.ts";
 import { worktreeGuard } from "./worktree/guard.ts";
@@ -61,7 +61,7 @@ export const profile: Profile = {
 		tasks,
 		worktree,
 		worktreeGuard,
-		webFetch,
+		webFetch: webFetchText(live),
 		webSearch,
 		nativeWeb,
 		sessionTitle,
@@ -84,13 +84,13 @@ export const profile: Profile = {
 		workflow: workflowText(live),
 		autoMode: autoModeText(live),
 		shell: shellText(live),
-		doctor,
+		doctor: doctorText(live),
 		notifications: notificationsText(live),
 		toolResults,
 		toolCallCorruption,
 		context,
 		toolSearch: toolSearchText(live),
-		permissions,
+		permissions: permissionsText(live),
 		handback,
 		subagentModels: subagentModelsText(live),
 		subagents: subagentsText(live),

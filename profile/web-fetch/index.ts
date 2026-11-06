@@ -6,6 +6,8 @@
 
 import type { FetchAnswer, FetchFailure, ReaderFailure, UrlProblem, WebFetchText } from "../../extensions/web-fetch/text.ts";
 import { webFetchDescription } from "./description.ts";
+import type { LiveTools } from "../../extensions/lib/live-tools.ts";
+import { type ToolPassages, withoutOff } from "../live-tools.ts";
 
 function urlRejected(problem: UrlProblem): string {
 	switch (problem.kind) {
@@ -77,7 +79,10 @@ function answerLines(answer: FetchAnswer): (string | undefined)[] {
 	}
 }
 
-export const webFetch: WebFetchText = {
+/** The group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
+const FAILED_PASSAGES: ToolPassages = { web_search: [["Verify the URL and host, retry, or use web_search instead.", "Verify the URL and host, or retry."]] };
+
+export const webFetchText = (live: LiveTools): WebFetchText => ({
 	description: webFetchDescription,
 	params: {
 		url: "URL to fetch (http is upgraded to https)",
@@ -89,7 +94,7 @@ export const webFetch: WebFetchText = {
 	searchKeywords: ["fetch", "url", "webpage", "web page", "read page", "http", "download", "docs", "article"],
 	urlRejected,
 	cancelled: (url) => `Fetch of ${url} was cancelled.`,
-	failed: ({ url, failure }) => `Could not fetch ${url}: ${failureReason(failure)}. Verify the URL and host, retry, or use web_search instead.`,
+	failed: ({ url, failure }) => withoutOff(`Could not fetch ${url}: ${failureReason(failure)}. Verify the URL and host, retry, or use web_search instead.`, live, FAILED_PASSAGES),
 	// Claude Code's WebFetch redirect result, with our tool name, and the prompt
 	// line only when the call had a prompt (ours is optional). Before it, the
 	// redirect read as a fetch failure ("Verify the URL and host, retry, or use
@@ -135,4 +140,4 @@ export const webFetch: WebFetchText = {
 				.filter((line) => line !== undefined)
 				.join("\n"),
 	},
-};
+});

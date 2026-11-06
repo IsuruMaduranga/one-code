@@ -10,21 +10,37 @@ import { describe, expect, it } from "vitest";
 import { TOOL_FEATURES } from "../../extensions/lib/features.ts";
 import type { LiveTools } from "../../extensions/lib/live-tools.ts";
 import type { DescriptionForm } from "../../extensions/lib/tool-variants.ts";
+import type { ShellBlock } from "../../extensions/lib/shell-text.ts";
+import type { FixPromptInput } from "../../extensions/doctor/text.ts";
 import { profile } from "../../profile/index.ts";
 
 /** Phrases where a tool's name is an English word, not the tool. */
 const ENGLISH: Readonly<Record<string, readonly RegExp[]>> = {
-	edit: [/about to edit \(an edit needs a read first\)/, /a shell edit/, /edit that file/],
+	edit: [/about to edit \(an edit needs a read first\)/, /a shell edit/, /edit that file/, /write or edit any files/, /allowed to edit/, /the only file you can edit/],
 	monitor: [/monitor for regressions/],
 	skill: [/a skill or slash command/],
+	workflow: [/through this workflow/],
 };
 
 const FORMS: DescriptionForm[] = ["short", "long"];
 
+const FIX_INPUT: FixPromptInput = {
+	reportText: "report",
+	install: "app",
+	oneCodeVersion: "1.0.0",
+	sessionsDir: "/s",
+	sessionDir: "/s/p",
+	oneCodeSettingsPath: "/u.json",
+	oneCodeProjectSettingsPath: "/p.json",
+	decisionLogEnabled: false,
+	modeCycleKey: "shift+tab",
+	upgradeCommands: { npm: "npm i", brew: "brew upgrade", "pi-package": "pi update" },
+};
+
 /** Every text that names another tool: its label, the feature that owns it (its own tools may name each other), and the text. */
 function texts(live: LiveTools): [string, string | undefined, string][] {
 	const t = profile.text({ live });
-	const { systemPrompt, planMode, askUser, subagents, toolStyle, shell, notifications, workflow, artifacts, toolSearch, subagentModels, autoMode } = t as Required<typeof t>;
+	const { systemPrompt, planMode, askUser, subagents, toolStyle, shell, notifications, workflow, artifacts, toolSearch, subagentModels, autoMode, permissions, webFetch } = t as Required<typeof t>;
 	const out: [string, string | undefined, string][] = [];
 	const push = (label: string, owner: string | undefined, text: string) => out.push([label, owner, text]);
 	for (const tier of ["frontier", "workhorse", "cheap", "tiny"] as const) {
@@ -51,6 +67,33 @@ function texts(live: LiveTools): [string, string | undefined, string][] {
 	push("model menu", undefined, subagentModels.menu({ lines: [], notes: [] }));
 	push("refused model", undefined, subagentModels.refused({ model: "a/b" }));
 	for (const firm of [true, false]) push(`auto-mode note${firm ? " firm" : ""}`, undefined, autoMode.systemNote({ firm }));
+
+	// Results, refusals and notes: sent whenever their own feature is on.
+	const blocks: ShellBlock[] = [
+		{ kind: "sleep", shown: "sleep 30", sleepName: "sleep", untilExample: "until test -f x; do sleep 2; done" },
+		{ kind: "pollingLoop", command: "while true; do sleep 5; done" },
+		{ kind: "detach", via: "`nohup`" },
+		{ kind: "editor", command: "vim" },
+		{ kind: "watch" },
+		{ kind: "rebaseInteractive", shell: "bash" },
+		{ kind: "addInteractive" },
+		{ kind: "consolePrompt", command: "Read-Host" },
+	];
+	for (const block of blocks) push(`shell blocked ${block.kind}`, "bash", shell.blocked(block));
+	push("shell background started", "bash", shell.backgroundStarted({ label: "Bash", id: "b1", description: "d", logPath: "/l" }));
+	for (const edition of ["core", "desktop", "unknown"] as const) push(`powershell ${edition}`, "bash", shell.powershellDescription({ edition }));
+	const runs = [{ name: "a", taskId: "t1" }];
+	push("Agent launched", "subagents", subagents.launched({ lines: ["x"] }));
+	push("Agent inline report", "subagents", subagents.inlineReport({ name: "a", taskId: "t1", note: "n" }));
+	push("SendMessage next turn", "subagents", subagents.nextTurn({ name: "a" }));
+	push("SendMessage to resident", "subagents", subagents.sentToResident({ name: "a", taskId: "t1" }));
+	push("SendMessage sent", "subagents", subagents.sent({ name: "a", taskId: "t1" }));
+	push("pending claim", "subagents", subagents.pendingClaim({ runs }));
+	push("running after compaction", "subagents", subagents.runningAfterCompaction({ runs }));
+	push("plan mode entered", "plan-mode", planMode.entered("/p.md"));
+	for (const planExists of [true, false]) push("plan mode reminder", "plan-mode", planMode.reminder({ planFile: "/p.md", planExists }));
+	push("plan mode refusal", undefined, permissions.refused({ kind: "planMode" }));
+	push("web_fetch failed", "web-fetch", webFetch.failed({ url: "u", failure: { kind: "httpStatus", status: 500, statusText: "x" } }));
 	return out;
 }
 
@@ -81,6 +124,13 @@ describe("text naming another tool", () => {
 			}
 		}
 		expect(leaks).toEqual([]);
+	});
+
+	it("leaves ask_user_question out of the /doctor fix prompt when it is off", () => {
+		// The prompt also names skill and Agent calls as transcript shapes to count, not as tools to call.
+		const off = profile.text({ live: { has: (tool) => tool !== "ask_user_question" } });
+		expect(off.doctor?.fixPrompt(FIX_INPUT)).not.toContain("ask_user_question");
+		expect(profile.text({ live: { has: () => true } }).doctor?.fixPrompt(FIX_INPUT)).toContain("with the `ask_user_question` tool");
 	});
 
 	it("is unchanged when every tool is on", () => {

@@ -7,7 +7,10 @@
  * announcement and auto mode's standing note.
  */
 import { describe, expect, it } from "vitest";
-import { permissions } from "../../profile/permissions/index.ts";
+import { permissionsText } from "../../profile/permissions/index.ts";
+import { ALL_LIVE } from "./helpers/live.ts";
+
+const permissions = permissionsText(ALL_LIVE);
 
 describe("One Code's permission-gate text", () => {
 	it("words each refusal a fixture cannot provoke", () => {

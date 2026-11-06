@@ -6,6 +6,8 @@
  */
 
 import type { PermissionRefusal, PermissionsText } from "../../extensions/permissions/text.ts";
+import type { LiveTools } from "../../extensions/lib/live-tools.ts";
+import { type ToolPassages, withoutOff } from "../live-tools.ts";
 
 // Must agree with the plan-mode reminder (plan-mode/reminder.ts): the plan is
 // built in the plan file and approved through exit_plan_mode, never presented
@@ -90,8 +92,21 @@ function refused(refusal: PermissionRefusal): string {
 	}
 }
 
-export const permissions: PermissionsText = {
-	refused,
+/** The group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
+/** The plan-mode refusal names both plan tools (exit_plan_mode's entry first, so both apply when both are off). */
+const REFUSAL_PASSAGES: ToolPassages = {
+	exit_plan_mode: [
+		[
+			" Keep investigating with read-only tools and build the plan in the plan file named in the plan-mode reminder; finish the turn with ask_user_question or exit_plan_mode, not by presenting the plan as chat text.",
+			" Keep investigating with read-only tools.",
+		],
+	],
+	ask_user_question: [["finish the turn with ask_user_question or exit_plan_mode", "finish the turn with exit_plan_mode"]],
+	edit: [["edit/write are limited to the plan file", "write is limited to the plan file"]],
+};
+
+export const permissionsText = (live: LiveTools): PermissionsText => ({
+	refused: (refusal) => withoutOff(refused(refusal), live, REFUSAL_PASSAGES),
 	modeChanged: ({ mode, planFile }) => {
 		const plan =
 			mode !== "plan"
@@ -106,4 +121,4 @@ export const permissions: PermissionsText = {
 		"Work normally — do not narrate the classifier or try to phrase calls to get past it. If a call is blocked, take the block at face value: do not retry it, and do not reach the same result another way. Continue with work that does not depend on it, or explain what you were trying to do and let the user decide. " +
 		"Attempting to weaken this gate (editing permission settings, changing the mode, or routing work around it) is itself blocked.",
 	reviewFailed: ({ osMessage }) => `the review itself failed (${osMessage})`,
-};
+});
