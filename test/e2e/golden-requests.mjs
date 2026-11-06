@@ -81,7 +81,7 @@ const CONFIGS = [
 	{ name: "session-anthropic-tiny", model: ANTHROPIC, tier: "tiny", mode: "session" },
 	{ name: "session-openrouter-cheap", model: OPENROUTER, tier: "cheap", mode: "session" },
 ];
-const PROMPTS = { print: "Reply with OK.", tools: "GOLDEN_TOOLS GOLDEN_AGENT GOLDEN_NOTEBOOK GOLDEN_TASKS GOLDEN_WEB_FETCH GOLDEN_SEARCH GOLDEN_SKILL GOLDEN_MCP GOLDEN_LSP GOLDEN_HOOKS GOLDEN_MEMORY GOLDEN_CRON GOLDEN_MONITOR GOLDEN_LOOP GOLDEN_ARTIFACT GOLDEN_FILES GOLDEN_WORKFLOW GOLDEN_AUTOMODE GOLDEN_SHELL GOLDEN_RESULTS GOLDEN_TOOLSEARCH GOLDEN_WORKTREE: make the scripted calls." };
+const PROMPTS = { print: "Reply with OK.", tools: "GOLDEN_TOOLS GOLDEN_AGENT GOLDEN_NOTEBOOK GOLDEN_TASKS GOLDEN_WEB_FETCH GOLDEN_SEARCH GOLDEN_SKILL GOLDEN_MCP GOLDEN_LSP GOLDEN_HOOKS GOLDEN_MEMORY GOLDEN_CRON GOLDEN_MONITOR GOLDEN_LOOP GOLDEN_ARTIFACT GOLDEN_FILES GOLDEN_WORKFLOW GOLDEN_AUTOMODE GOLDEN_PERMISSIONS GOLDEN_SHELL GOLDEN_RESULTS GOLDEN_TOOLSEARCH GOLDEN_WORKTREE: make the scripted calls." };
 
 /** A format 4.4 notebook (no cell ids, so nothing random) with the given code cells. */
 const notebook = (...sources) =>
@@ -156,7 +156,7 @@ function writeMcpServers(home) {
  * User-scope hooks (no consent dialog) running golden-hook.mjs: the tool hooks
  * and SessionStart, UserPromptSubmit and Stop in the tools scenario
  * (golden-fixture.ts HOOK_ROUNDS), the compaction hooks in the session
- * scenario.
+ * scenario. The tools scenario's settings also carry a deny rule.
  */
 function writeHooks(home, mode) {
 	const hook = (kind, extra = {}) => ({ hooks: [{ type: "command", command: `"${process.execPath}" "${join(repo, "test/e2e/golden-hook.mjs")}" ${kind}`, ...extra }] });
@@ -171,7 +171,9 @@ function writeHooks(home, mode) {
 				}
 			: { PreCompact: [hook("precompact")], PostCompact: [hook("postcompact")] };
 	mkdirSync(join(home, ".claude"), { recursive: true });
-	writeFileSync(join(home, ".claude", "settings.json"), `${JSON.stringify({ hooks }, null, 2)}\n`);
+	// The tools scenario's deny rule (golden-fixture.ts PERMISSION_ROUNDS).
+	const permissions = mode === "tools" ? { permissions: { deny: ["Bash(golden-denied:*)"] } } : {};
+	writeFileSync(join(home, ".claude", "settings.json"), `${JSON.stringify({ hooks, ...permissions }, null, 2)}\n`);
 }
 
 /** The tools scenario's `gopls`: a wrapper that runs the stub language server (golden-fixture.ts LSP_ROUNDS). */

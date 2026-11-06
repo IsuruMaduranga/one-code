@@ -599,6 +599,17 @@ const AUTOMODE_ROUNDS: ToolCall[][] = [
 ];
 
 /**
+ * The permission gate's own refusals under GOLDEN_PERMISSIONS, in one round:
+ * a command a user deny rule names (golden-requests.mjs writes
+ * `Bash(golden-denied:*)` into the tools scenario's user settings), and a
+ * read that names its target in two path fields with different values.
+ */
+const pm = (id: string, name: string, input: ToolCall["input"]): ToolCall => ({ id: `toolu_golden_permissions_${id}`, name, input });
+const PERMISSION_ROUNDS: ToolCall[][] = [
+	[pm("rule", "bash", { command: "golden-denied --now" }), pm("conflict", "read", { path: "README.md", file_path: "golden-other.md" })],
+];
+
+/**
  * The bash guards and background runs under GOLDEN_SHELL, all in one round:
  * a long sleep, chained short sleeps, a polling loop, two ways to detach, an
  * editor, watch, an interactive rebase and add, and two background commands
@@ -663,9 +674,9 @@ const BIGFILE_ROUNDS: ToolCall[][] = [
 
 /**
  * Plan mode under GOLDEN_PLAN, on its own (the session scenario's last
- * prompt): load the tools, exit before entering, enter, exit with an empty
- * plan, write the plan to the file enter_plan_mode named, and exit for
- * approval (golden-requests.mjs approves the plan dialog).
+ * prompt): load the tools, exit before entering, enter, run a command plan
+ * mode blocks, exit with an empty plan, write the plan to the file
+ * enter_plan_mode named, and exit for approval (golden-requests.mjs approves the plan dialog).
  */
 const pc = (id: string, name: string, input: ToolCall["input"] = {}): ToolCall => ({ id: `toolu_golden_plan_${id}`, name, input });
 const planFile = (messages: Messages) => /Your plan file is (\S+), the one file/.exec(JSON.stringify(messages))?.[1] ?? "plan.md";
@@ -673,6 +684,7 @@ const PLAN_ROUNDS: ToolCall[][] = [
 	[pc("load", "tool_search", { query: "select:enter_plan_mode,exit_plan_mode" })],
 	[pc("exit_early", "exit_plan_mode")],
 	[pc("enter", "enter_plan_mode")],
+	[pc("blocked", "bash", { command: "touch golden-plan-blocked.txt" })],
 	[pc("exit_empty", "exit_plan_mode")],
 	[pc("write", "write", (messages) => ({ path: planFile(messages), content: "# Golden plan\n\nRead the README, then reply OK.\n" }))],
 	[pc("exit", "exit_plan_mode")],
@@ -787,6 +799,7 @@ function roundsFor(text: string): ToolCall[][] {
 	if (has("GOLDEN_FILES")) rounds.push(...FILE_ROUNDS);
 	if (has("GOLDEN_WORKFLOW")) rounds.push(...WORKFLOW_ROUNDS);
 	if (has("GOLDEN_AUTOMODE")) rounds.push(...AUTOMODE_ROUNDS);
+	if (has("GOLDEN_PERMISSIONS")) rounds.push(...PERMISSION_ROUNDS);
 	if (has("GOLDEN_SHELL")) rounds.push(...SHELL_ROUNDS);
 	if (has("GOLDEN_RESULTS")) rounds.push(...RESULT_ROUNDS);
 	if (has("GOLDEN_TOOLSEARCH")) rounds.push(...TOOLSEARCH_ROUNDS);
