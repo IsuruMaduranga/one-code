@@ -6,7 +6,10 @@
  * the user's rules appended at the end of the hard-deny, soft-deny and allow
  * lists (exactly where Claude Code's own `/auto-mode-setup` config lands), the
  * username, and the user's instruction file. Everything else is the profile's
- * text, held byte-stable (working-docs/decisions/auto-mode.md).
+ * text, held byte-stable (working-docs/decisions/auto-mode.md). The ruleset's
+ * prose is not user-configurable: the one customization surface, as in Claude
+ * Code, is the `## Environment` section, whose default lines a user's
+ * `autoMode.environment` entries replace.
  *
  * Pure: no pi imports.
  */
@@ -27,6 +30,15 @@ export function classifierText(): ClassifierText {
  */
 export function defaultEnvironment(): string[] {
 	return [...classifierText().defaultEnvironment];
+}
+
+/**
+ * The `**Name**:` head of an Environment slot line, or undefined for header
+ * ("### Org-wide") and prose entries. Used to tell a full slot replacement
+ * (the wizard's normal output) from a partial one that silently drops slots.
+ */
+export function slotName(line: string): string | undefined {
+	return line.match(/^\*\*(.+?)\*\*:/)?.[1];
 }
 
 /** User rule extras appended to the embedded lists. */

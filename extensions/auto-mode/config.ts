@@ -50,8 +50,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { isBorrowedUserFile, isRepoFile, settingsSources } from "../lib/claude-settings.ts";
 import type { SettingsFile } from "../lib/sources.ts";
 import { productSettingsPath, readSettingsForWrite, SETTINGS_DISPLAY, writeSettings } from "../lib/product-settings.ts";
-import { defaultEnvironment } from "./classifier-prompt.ts";
-import { slotName } from "./defaults.ts";
+import { defaultEnvironment, slotName } from "./classifier-prompt.ts";
 
 export interface AutoModeConfig {
 	/** Environment slot lines spliced into CC's ruleset (prefix-less, CC's settings format). */

@@ -39,7 +39,8 @@ Running the whole package from source: [Getting started](docs/dev/getting-starte
 - `extensions/auto-mode/`: the auto-mode classifier library, used by
   `permissions`.
 - `app/`: the bundled `onecode` app, plain JavaScript.
-- `agents/`, `skills/`, `themes/`: bundled catalogs.
+- `profile/`: the One Code profile: its text (`profile/text/`), brand, and
+  the bundled `agents/`, `skills/` and `themes/` catalogs.
 - `test/unit/`: vitest. `test/e2e/`: live harnesses.
 - `docs/guide/`: the user guide. `docs/dev/`: the developer docs.
 
@@ -69,7 +70,7 @@ Each of these has caused a real bug. The reasons, and the full list, are in
 - Auto mode is security-sensitive. The shell pre-gate only proves "safe" and
   never denies; a command joins the read-only fast path only with an option
   table in `extensions/auto-mode/read-only-options.ts`; don't hand-edit
-  `classifier-prompt.ts`.
+  `profile/text/auto-mode/ruleset.ts`.
 - `~/.claude` is read-only (except the shared memory folder). One Code's
   settings go to `~/.onecode`; pi's state is resolved with `getAgentDir()`.
 - Spawn shells through `extensions/lib/shell-spawn.ts`, never `/bin/sh`,

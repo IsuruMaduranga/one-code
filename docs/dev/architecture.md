@@ -46,7 +46,7 @@ flowchart TB
         direction LR
         exts["extensions/&lt;name&gt;/index.ts<br/>loaded in package.json order"]
         lib["extensions/lib/<br/>shared pure modules"]
-        catalogs["agents/ · skills/ · themes/<br/>bundled catalogs"]
+        catalogs["profile/<br/>text, brand, bundled catalogs"]
     end
 
     subgraph outside["Outside the process"]

@@ -581,7 +581,7 @@ lib/profile.ts
 	"${…} cannot turn off \"${…}\": it guards tool calls (only a profile can)"
 	"\"${…}\" cannot be turned off"
 	"\nThe profile in profile/ is invalid, so the harness will not start: ${…}\n\n"
-	"it has no text for \"${…}\", and that feature is on"
+	"it has no text for \"${…}\", which this session reads"
 
 lib/reminders.ts
 	"The conversation history before this point was compacted into the following summary:\n\n<summary>\n"

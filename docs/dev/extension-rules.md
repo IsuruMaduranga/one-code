@@ -200,8 +200,8 @@ and the blocked direction live.
   it to `extensions/auto-mode/read-only-options.ts` with every option it
   accepts, never by name alone. A "read-only" command with one writing flag
   (`sort -o`, `find -delete`) is not read-only.
-- **`extensions/auto-mode/classifier-prompt.ts` is generated.** Don't edit it
-  by hand. Open an issue if the ruleset needs to change.
+- **`profile/text/auto-mode/ruleset.ts` is generated.** Don't edit it by
+  hand. Open an issue if the ruleset needs to change.
 - **Project settings can't turn on auto or bypass mode.** `autoMode`,
   `defaultMode: "auto"` and `bypassPermissions` are only read from the
   user's own settings. A repository you cloned must not be able to switch

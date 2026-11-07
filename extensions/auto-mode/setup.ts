@@ -19,8 +19,9 @@
  */
 
 import { isBroadExecutionRule, parseRule } from "../permissions/matcher.ts";
-import { slotName } from "./defaults.ts";
+import { slotName } from "./classifier-prompt.ts";
 import { requireText } from "../lib/profile.ts";
+import type { AutoModeSetupText } from "./text.ts";
 
 export interface SetupFacts {
 	cwd: string;
@@ -72,6 +73,11 @@ export function redactSecrets(line: string): string {
 		.replace(/\b(sk-|ghp_|gho_|github_pat_|xox[bap]-|AKIA)[A-Za-z0-9_-]+/g, "[redacted]");
 }
 
+/** The profile's `/auto-mode setup` text. */
+export function autoModeSetupText(): AutoModeSetupText {
+	return requireText("autoModeSetup");
+}
+
 /**
  * The drafting instruction. The model sees the gathered facts as JSON and the
  * current default Environment slots, and must return STRICT JSON — nothing
@@ -81,7 +87,7 @@ export function buildSetupPrompt(
 	facts: SetupFacts,
 	defaultEnvironment: string[],
 ): { system: string; user: string } {
-	const text = requireText("autoModeSetup");
+	const text = autoModeSetupText();
 	const user = [text.defaultsHeading, ...defaultEnvironment.map((line) => `- ${line}`), "", text.factsHeading, JSON.stringify(facts, null, 1)].join("\n");
 	return { system: text.system, user };
 }

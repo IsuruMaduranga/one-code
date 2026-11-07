@@ -27,6 +27,7 @@ import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type A
 import { profileText, toolLive } from "../lib/profile.ts";
 import os from "node:os";
 import { dirname, join } from "node:path";
+import { isPathAtOrUnder } from "../lib/paths.ts";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { StringEnum } from "../lib/string-enum.ts";
@@ -510,7 +511,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			},
 			setup: {
 				skills: scanSkills(cwd, os.homedir(), agentDir, plugins.skills).map((skill) => skill.name),
-				agents: catalog.filter((agent) => agent.source !== "built-in" && !agent.source.startsWith(BUNDLED_AGENTS_DIR)).map((agent) => agent.name),
+				agents: catalog.filter((agent) => agent.source !== "built-in" && !isPathAtOrUnder(agent.source, BUNDLED_AGENTS_DIR)).map((agent) => agent.name),
 				plugins: plugins.enabledPlugins.map((plugin) => plugin.name),
 				mcpServers,
 				extensions,
@@ -550,7 +551,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		const excluded = (a.excludeTools ?? []).filter(toolLive);
 		if (a.tools && a.tools.length > 0) return { kind: "listed", tools: listed };
 		if (excluded.length > 0) return { kind: "allExcept", tools: excluded };
-		return { kind: "all", builtIn: a.source === "built-in" || a.source.startsWith(BUNDLED_AGENTS_DIR) };
+		return { kind: "all", builtIn: a.source === "built-in" || isPathAtOrUnder(a.source, BUNDLED_AGENTS_DIR) };
 	};
 
 	/** One catalog row per agent, the shape every catalog the model reads uses. */

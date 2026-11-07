@@ -166,13 +166,13 @@ export function failClosed(error: unknown): never {
 }
 
 /**
- * A feature's text group, for a feature that is on. A profile may leave out
- * the group of a feature it turns off; one it leaves on without its text is
- * invalid and stops the process.
+ * A text group the session reads. A profile may leave out the group of a
+ * feature it turns off (the contract marks those optional); a missing group
+ * the session reads is invalid and stops the process.
  */
 export function requireText<K extends keyof ProfileText>(group: K): NonNullable<ProfileText[K]> {
 	const text = profileText()[group];
-	if (text === undefined) failClosed(new Error(`it has no text for "${group}", and that feature is on`));
+	if (text === undefined) failClosed(new Error(`it has no text for "${group}", which this session reads`));
 	return text as NonNullable<ProfileText[K]>;
 }
 

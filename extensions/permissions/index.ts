@@ -18,7 +18,6 @@
  */
 
 import { brand, brandedId } from "../lib/brand.mjs";
-import { requireText } from "../lib/profile.ts";
 import { feature } from "../lib/feature.ts";
 import os from "node:os";
 import { join } from "node:path";
@@ -50,7 +49,7 @@ import { modelPickerComponent, type PickerEntry, pickerSpec, toPickerEntries } f
 import { findConfigured, modelIdentity } from "../lib/model-policy.ts";
 import { CLASSIFIER_SETTING_CHANGED_CHANNEL } from "../lib/settings-channels.ts";
 import { readSuggestNewerModels, SETTINGS_DISPLAY } from "../lib/product-settings.ts";
-import { auditPermissionAllow, renderProposal, settingsPatch } from "../auto-mode/setup.ts";
+import { auditPermissionAllow, autoModeSetupText, renderProposal, settingsPatch } from "../auto-mode/setup.ts";
 import { draftSetup, gatherFacts } from "../auto-mode/setup-run.ts";
 import { buildRuleset, defaultEnvironment } from "../auto-mode/classifier-prompt.ts";
 import type { TranscriptEntry } from "../auto-mode/transcript.ts";
@@ -2367,7 +2366,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			ctx.ui.notify("/auto-mode setup is interactive — run it in a live session.", "warning");
 			return;
 		}
-		const usage = await ctx.ui.select(`How do you use ${brand.name} in this environment?`, [...requireText("autoModeSetup").usageOptions]);
+		const usage = await ctx.ui.select(`How do you use ${brand.name} in this environment?`, [...autoModeSetupText().usageOptions]);
 		if (!usage) return;
 		const history = await ctx.ui.select("Also scan recent shell history? (stays local except the drafting call; secrets are redacted)", [
 			"Yes",

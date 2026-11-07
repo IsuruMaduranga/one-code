@@ -23,10 +23,9 @@ import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { type AutoModeConfig, autoModeSettingsFiles } from "./config.ts";
 import { isBorrowedUserFile } from "../lib/claude-settings.ts";
 import { classifierCandidates, replyText, withAuthBaseUrl } from "./model-select.ts";
-import { buildSetupPrompt, parseGitRemotes, redactSecrets, type SetupDraft, parseSetupDraft, type SetupFacts } from "./setup.ts";
+import { autoModeSetupText, buildSetupPrompt, parseGitRemotes, redactSecrets, type SetupDraft, parseSetupDraft, type SetupFacts } from "./setup.ts";
 import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
 import { instructionTargets } from "../lib/instructions.ts";
-import { requireText } from "../lib/profile.ts";
 
 const PROBE_TIMEOUT_MS = 10_000;
 /** Drafting reads a big fact dump and writes a full slot list — give it room. */
@@ -36,7 +35,7 @@ const CLAUDE_MD_LIMIT = 4_000;
 const HISTORY_LINES = 200;
 
 /** The profile's notes on facts that could not be gathered. */
-const setupNotes = () => requireText("autoModeSetup").notes;
+const setupNotes = () => autoModeSetupText().notes;
 
 /** One probe: run a command, return trimmed stdout, or undefined on any failure. */
 function probe(cmd: string, args: string[], cwd: string, notes: string[], what: string): Promise<string | undefined> {

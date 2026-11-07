@@ -32,7 +32,7 @@ import { loadPluginHooks } from "../hooks/plugin-hooks.ts";
 import { type HooksSource, loadHookSettings } from "../hooks/settings.ts";
 // Claude Code's auto-memory switch, read through the whole settings ladder.
 import { AUTO_MEMORY_KEY as AUTO_MEMORY } from "../lib/auto-memory.ts";
-import { productStateDir } from "../lib/paths.ts";
+import { isPathAtOrUnder, productStateDir } from "../lib/paths.ts";
 import { isBorrowedUserFile, isRepoFile, primaryFamily, primarySettingsFile, settingsSources, type SourceId, sourceId } from "../lib/claude-settings.ts";
 import { protectedFiles, type SettingsFile, sourceSwitch } from "../lib/sources.ts";
 import { agentSkippedInstructions } from "../lib/instruction-budget.ts";
@@ -479,10 +479,10 @@ export function collectCompat(input: CompatInput): CompatReport {
 			// unreadable SKILL.md: pi reports it when it loads
 		}
 	}
-	const bundledSkills = scanned.filter((s) => s.path.startsWith(BUNDLED_SKILLS_DIR)).length;
+	const bundledSkills = scanned.filter((s) => isPathAtOrUnder(s.path, BUNDLED_SKILLS_DIR)).length;
 	const skills = {
-		user: scanned.filter((s) => s.scope === "user" && !s.path.startsWith(BUNDLED_SKILLS_DIR)).length,
-		project: scanned.filter((s) => s.scope === "project" && !s.path.startsWith(BUNDLED_SKILLS_DIR)).length,
+		user: scanned.filter((s) => s.scope === "user" && !isPathAtOrUnder(s.path, BUNDLED_SKILLS_DIR)).length,
+		project: scanned.filter((s) => s.scope === "project" && !isPathAtOrUnder(s.path, BUNDLED_SKILLS_DIR)).length,
 		plugin: scanned.filter((s) => s.scope === "plugin").length,
 		bundled: bundledSkills,
 		noDescription,
