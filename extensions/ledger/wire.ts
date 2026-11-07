@@ -11,7 +11,7 @@
  *    before a user message) and validates the request (lib/ledger/validate.ts): no reference to an
  *    undeclared tool, no system message stranded before a user message. A
  *    problem is a bug; it is dropped and reported, so it costs one block,
- *    never a 400. ONE_CODE_LEDGER_STRICT=1 sends it unrepaired instead, for
+ *    never a 400. ONECODE_LEDGER_STRICT=1 sends it unrepaired instead, for
  *    the live probes to see.
  * 3. It records the request as a delta against the fold's base (the request
  *    the fold rebuilds it on), with the pending items it carried and what its
@@ -42,6 +42,7 @@ import { settlePayload } from "../lib/ledger/layout.ts";
 import { appendPoint, encodeRequest, hasWarmCap, listKey, type RecordedRequest, recordedBody, recordedRequest, samePrefix, spliceRequest, type WirePayload, withBranchToolOrder, withRequestFields } from "../lib/ledger/wire.ts";
 import { type AffinityModel, affinityHeaders } from "../lib/request-replay.ts";
 import { extensionVersion } from "../lib/package-version.ts";
+import { brand, envName } from "../lib/brand.mjs";
 
 function ledgerWireExtension(pi: ExtensionAPI) {
 	const by = extensionVersion();
@@ -124,11 +125,12 @@ function ledgerWireExtension(pi: ExtensionAPI) {
 		let delivered: { consumed: string[]; facts: ToldFact[] } = { consumed: current.consumed, facts: current.carried.flatMap((block) => block.facts) };
 
 		const problems = validateRequest(payload, api);
+		const strict = process.env[envName("LEDGER_STRICT")] === "1";
 		if (problems.length > 0) {
 			const fresh = problems.map((problem) => JSON.stringify(problem)).filter((key) => !reported.has(key));
 			for (const key of fresh) reported.add(key);
-			if (fresh.length > 0) notifyOrPrint(ctx, `One Code: the request had ${problems.length} problem(s) the ledger ${process.env.ONE_CODE_LEDGER_STRICT === "1" ? "left in place" : "removed"}: ${fresh.join(", ")}`, "warning");
-			if (process.env.ONE_CODE_LEDGER_STRICT !== "1") {
+			if (fresh.length > 0) notifyOrPrint(ctx, `${brand.name}: the request had ${problems.length} problem(s) the ledger ${strict ? "left in place" : "removed"}: ${fresh.join(", ")}`, "warning");
+			if (!strict) {
 				payload = repairRequest(payload, api, problems);
 				delivered = deliveredAfterRepair(payload, api, delivered, current.fold.pending, new Set(current.base?.hashes ?? []), current.carried);
 			}

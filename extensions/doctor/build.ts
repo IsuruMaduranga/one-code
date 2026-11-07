@@ -290,5 +290,6 @@ export function resolveShells(procEnv: NodeJS.ProcessEnv, home: string, platform
 		bashExpected: policy.bashExpected,
 		primary: policy.primary,
 		notices: policy.notices,
+		switchVar: policy.switchVar,
 	};
 }

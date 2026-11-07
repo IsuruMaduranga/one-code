@@ -17,7 +17,7 @@
  * in each of the extensions' copies cost about a third of a second at startup.
  */
 
-import { brandedId } from "./brand.mjs";
+import { brandedId, envName } from "./brand.mjs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { shareModuleForTest, sharedModule } from "./shared-module.ts";
@@ -67,12 +67,12 @@ function envList(env: NodeJS.ProcessEnv, name: string): string[] {
  */
 export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profileDir: string): ResolvedProfile {
 	const featureMap: Partial<Record<string, boolean>> = { ...profile.features };
-	const envOff = envList(env, "ONECODE_FEATURES_OFF");
+	const envOff = envList(env, envName("FEATURES_OFF"));
 	for (const id of envOff) featureMap[id] = false;
 	const tools = new Map<string, ToolSwitch>(Object.entries(profile.tools));
-	for (const name of envList(env, "ONECODE_TOOLS_OFF")) tools.set(name, { ...tools.get(name), enabled: false });
+	for (const name of envList(env, envName("TOOLS_OFF"))) tools.set(name, { ...tools.get(name), enabled: false });
 	const problems = featureProblems(featureMap);
-	for (const id of envOff.filter(isGuardFeature)) problems.push(`ONECODE_FEATURES_OFF cannot turn off "${id}": it guards tool calls (only a profile can)`);
+	for (const id of envOff.filter(isGuardFeature)) problems.push(`${envName("FEATURES_OFF")} cannot turn off "${id}": it guards tool calls (only a profile can)`);
 	for (const name of PINNED_TOOLS) {
 		const sw = tools.get(name);
 		if (sw?.enabled === false) problems.push(`"${name}" cannot be turned off`);

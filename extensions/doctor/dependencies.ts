@@ -11,6 +11,8 @@
  * providers it depends on a third-party key.
  */
 
+import { envName } from "../lib/brand.mjs";
+import { POWERSHELL_KNOB } from "../powershell/policy.ts";
 import { type Dirent, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { whichOnPath } from "../lib/which.ts";
@@ -118,7 +120,7 @@ export interface DependencyInput {
 export interface ShellsInput {
 	/** The bash binary the bash tool runs, or undefined when none exists. */
 	bash?: string;
-	/** An ignored CLAUDE_CODE_GIT_BASH_PATH, in the resolver's words. */
+	/** An ignored `GIT_BASH_PATH` knob, in the resolver's words (they name the variable). */
 	bashWarning?: string;
 	/** The PowerShell executable the powershell tool would run, or undefined. */
 	powershell?: string;
@@ -128,6 +130,8 @@ export interface ShellsInput {
 	bashExpected: boolean;
 	primary: "powershell" | "bash" | "none";
 	notices: string[];
+	/** From `shellToolPolicy`: the variable that set the powershell switch, when one did. */
+	switchVar?: string;
 }
 
 function bashReason(s: ShellsInput): string {
@@ -137,7 +141,7 @@ function bashReason(s: ShellsInput): string {
 }
 
 function powershellReason(s: ShellsInput): string {
-	if (!s.powershellWanted) return s.bashExpected ? "the powershell tool (off; CLAUDE_CODE_USE_POWERSHELL_TOOL=1 turns it on with a pwsh on PATH)" : "the powershell tool (off: CLAUDE_CODE_USE_POWERSHELL_TOOL=0)";
+	if (!s.powershellWanted) return s.bashExpected ? `the powershell tool (off; ${envName(POWERSHELL_KNOB)}=1 turns it on with a pwsh on PATH)` : `the powershell tool (off: ${s.switchVar ?? envName(POWERSHELL_KNOB)}=0)`;
 	return s.primary === "powershell" ? "the primary shell tool" : "the powershell tool";
 }
 
@@ -160,13 +164,13 @@ export function checkDependencies(input: DependencyInput): DependencyReport {
 		const s = input.shells;
 		checks.push({ name: "bash", found: !!s.bash, path: s.bash, need: s.bashExpected ? "required" : "optional", reason: bashReason(s), hint: s.bashExpected ? undefined : "https://git-scm.com/download/win" });
 		checks.push({ name: "powershell", found: !!s.powershell, path: s.powershell, need: s.powershellWanted ? "required" : "unused", reason: powershellReason(s), hint: "https://aka.ms/powershell" });
-		if (s.bashWarning) findings.push({ level: "warn", text: s.bashWarning, fix: "Point CLAUDE_CODE_GIT_BASH_PATH at a bash.exe or sh.exe, or unset it to use Git for Windows' default location." });
+		if (s.bashWarning) findings.push({ level: "warn", text: s.bashWarning, fix: "Point that variable at a bash.exe or sh.exe, or unset it to use Git for Windows' default location." });
 		for (const notice of s.notices) {
-			const switchSet = notice.includes("CLAUDE_CODE_USE_POWERSHELL_TOOL");
+			const switchSet = s.switchVar !== undefined && notice.includes(s.switchVar);
 			findings.push({
 				level: s.primary === "none" ? "error" : "warn",
 				text: notice,
-				fix: switchSet ? "Install PowerShell 7 (pwsh) or unset CLAUDE_CODE_USE_POWERSHELL_TOOL." : "Install Git for Windows or PowerShell 7.",
+				fix: switchSet ? `Install PowerShell 7 (pwsh) or unset ${s.switchVar}.` : "Install Git for Windows or PowerShell 7.",
 			});
 		}
 	}

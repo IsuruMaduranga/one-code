@@ -18,11 +18,14 @@
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
+import { brand, envName } from "./brand.mjs";
 
-export const APP_PACKAGE = "@one-ai/one-code";
-export const EXTENSION_PACKAGE = "one-code-extension";
-/** The Homebrew formula (IsuruMaduranga/homebrew-one-ai), renamed from one-code at 0.3.0. */
-export const HOMEBREW_FORMULA = "onecode";
+export const APP_PACKAGE = brand.packages.app;
+export const EXTENSION_PACKAGE = brand.packages.extension;
+/** The Homebrew formula, when the product ships one (One Code: IsuruMaduranga/homebrew-one-ai's `onecode`). */
+export const HOMEBREW_FORMULA = brand.packages.homebrewFormula;
+const INSTALL_METHOD_VAR = envName("INSTALL_METHOD");
+const NO_UPDATE_CHECK_VAR = envName("NO_UPDATE_CHECK");
 /**
  * How each install method upgrades One Code; the doctor and the update notice
  * quote these. On the user's own pi a bare `pi update` updates pi itself and
@@ -30,7 +33,8 @@ export const HOMEBREW_FORMULA = "onecode";
  */
 export const UPGRADE_COMMANDS = {
 	npm: `npm install -g ${APP_PACKAGE}`,
-	brew: `brew upgrade ${HOMEBREW_FORMULA}`,
+	// Without a formula the launcher never reports a brew install (app-launch.mjs installMethodFor).
+	brew: HOMEBREW_FORMULA ? `brew upgrade ${HOMEBREW_FORMULA}` : `npm install -g ${APP_PACKAGE}`,
 	"pi-package": `pi update npm:${EXTENSION_PACKAGE}`,
 };
 
@@ -40,7 +44,7 @@ export const UPGRADE_COMMANDS = {
  */
 export function upgradeCommandFor(install, env = process.env) {
 	if (install !== "app") return UPGRADE_COMMANDS["pi-package"];
-	return env.ONECODE_INSTALL_METHOD === "brew" ? UPGRADE_COMMANDS.brew : UPGRADE_COMMANDS.npm;
+	return env[INSTALL_METHOD_VAR] === "brew" ? UPGRADE_COMMANDS.brew : UPGRADE_COMMANDS.npm;
 }
 
 /**
@@ -69,7 +73,7 @@ export const HOMEBREW_MIN_RELEASE_AGE_MS = DAY_MS;
  * from where the binary lives; a plain pi package never sets it.
  */
 export function minReleaseAgeFor(env = process.env) {
-	return env.ONECODE_INSTALL_METHOD === "brew" ? HOMEBREW_MIN_RELEASE_AGE_MS : 0;
+	return env[INSTALL_METHOD_VAR] === "brew" ? HOMEBREW_MIN_RELEASE_AGE_MS : 0;
 }
 
 /** pi's truthy-flag reading for PI_OFFLINE (1/true/yes). */
@@ -133,7 +137,7 @@ export function pickAvailableVersion(packument, { minReleaseAgeMs = 0, now = Dat
 export function createUpdateCheck({ currentVersion, upgradeHint, stampPath, minReleaseAgeMs = 0 }) {
 	return function updateCheckExtension(pi) {
 		pi.on("session_start", (_event, ctx) => {
-			if (process.env.ONECODE_NO_UPDATE_CHECK === "1") return;
+			if (process.env[NO_UPDATE_CHECK_VAR] === "1") return;
 			if (isOffline()) return;
 			if (!ctx.hasUI) return; // print/rpc runs stay clean for parsers
 			if (checkedRecently(stampPath)) return;
@@ -155,7 +159,7 @@ export function createUpdateCheck({ currentVersion, upgradeHint, stampPath, minR
 					const latest = pickAvailableVersion(await response.json(), { minReleaseAgeMs });
 					if (typeof latest === "string" && isNewerVersion(latest, currentVersion)) {
 						ctx.ui.notify(
-							`One Code ${latest} is available (you have ${currentVersion}). Upgrade: ${upgradeHint}`,
+							`${brand.name} ${latest} is available (you have ${currentVersion}). Upgrade: ${upgradeHint}`,
 							"info",
 						);
 					}

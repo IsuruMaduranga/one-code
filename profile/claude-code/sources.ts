@@ -61,6 +61,20 @@ const configSources: SourceSwitch = {
 /** Claude Code's project folder. */
 const PROJECT_DIR = ".claude";
 
+/** The knobs Claude Code spells `CLAUDE_CODE_<suffix>`, read after One Code's `ONECODE_<suffix>` (lib/knobs.ts). */
+const ENV_ALIASES: Readonly<Record<string, string>> = Object.fromEntries(
+	[
+		"SUBAGENT_MODEL",
+		"GIT_BASH_PATH",
+		"USE_POWERSHELL_TOOL",
+		"DISABLE_AUTO_MEMORY",
+		"LOOP_PERSISTENT",
+		"LOOP_KEEPALIVE",
+		"ENABLE_TODO_TOOLS",
+		"TICKLISH_WHISPER_TIMEOUT_MS",
+	].map((suffix) => [suffix, `CLAUDE_CODE_${suffix}`]),
+);
+
 export const sources: SourceProvider = {
 	switch: configSources,
 	open({ home }) {
@@ -86,6 +100,7 @@ export const sources: SourceProvider = {
 			],
 			mcpWhere: ".mcp.json in the project, ~/.claude.json",
 			protectedFiles: [{ path: claudeJsonPath(home), label: "Claude Code's .claude.json" }],
+			envAliases: ENV_ALIASES,
 		};
 	},
 };

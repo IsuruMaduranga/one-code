@@ -12,11 +12,17 @@
  * loud at startup in Claude Code's words.
  */
 
+import { envName } from "../lib/brand.mjs";
+import { knobValue, readKnob } from "../lib/knobs.ts";
+
 export type PowerShellSwitch = "on" | "off" | "unset";
 
-/** `CLAUDE_CODE_USE_POWERSHELL_TOOL` as Claude Code reads it: unset/empty → unset, `0`/`false`/`no`/`off` → off, anything else → on. */
+/** The knob that switches the powershell tool (lib/knobs.ts). */
+export const POWERSHELL_KNOB = "USE_POWERSHELL_TOOL";
+
+/** The `USE_POWERSHELL_TOOL` knob as Claude Code reads its switch: unset/empty → unset, `0`/`false`/`no`/`off` → off, anything else → on. */
 export function powerShellSwitch(env: NodeJS.ProcessEnv): PowerShellSwitch {
-	const raw = env.CLAUDE_CODE_USE_POWERSHELL_TOOL?.trim().toLowerCase();
+	const raw = knobValue(POWERSHELL_KNOB, env)?.trim().toLowerCase();
 	if (raw === undefined || raw === "") return "unset";
 	return ["0", "false", "no", "off"].includes(raw) ? "off" : "on";
 }
@@ -52,29 +58,32 @@ export interface ShellToolPolicy {
 	 * for bash reads this rather than re-deriving the platform rule.
 	 */
 	bashExpected: boolean;
+	/** The variable that set the switch, when one did, for messages that name it. */
+	switchVar?: string;
 }
 
-/** Claude Code's own wording for a Windows machine with no shell tool. */
+/** Claude Code's own wording for a Windows machine with no shell tool, naming the product's own switch. */
 export const NO_SHELL_NOTICE =
 	"No shell available: install Git for Windows (https://git-scm.com/download/win) so the bash tool can run, " +
-	"or install PowerShell and set CLAUDE_CODE_USE_POWERSHELL_TOOL=1.";
+	`or install PowerShell and set ${envName(POWERSHELL_KNOB)}=1.`;
 
 export function shellToolPolicy(a: ShellAvailability): ShellToolPolicy {
 	const sw = powerShellSwitch(a.env);
+	const switchVar = sw === "unset" ? undefined : readKnob(POWERSHELL_KNOB, a.env)?.name;
 	const wanted = sw === "on" ? true : sw === "off" ? false : a.platform === "win32";
 	const powershell = wanted && a.powershell;
 	const notices: string[] = [];
 	if (sw === "on" && !a.powershell) {
 		notices.push(
 			a.platform === "win32"
-				? "CLAUDE_CODE_USE_POWERSHELL_TOOL is set but no pwsh.exe or powershell.exe was found on PATH; the powershell tool stays off."
-				: "CLAUDE_CODE_USE_POWERSHELL_TOOL is set but no `pwsh` was found on PATH; install PowerShell 7 to use the powershell tool.",
+				? `${switchVar} is set but no pwsh.exe or powershell.exe was found on PATH; the powershell tool stays off.`
+				: `${switchVar} is set but no \`pwsh\` was found on PATH; install PowerShell 7 to use the powershell tool.`,
 		);
 	}
 	const bash = a.bash;
 	const primary: PrimaryShell = powershell ? "powershell" : bash ? "bash" : "none";
 	if (primary === "none" && a.platform === "win32") notices.push(NO_SHELL_NOTICE);
-	return { powershell, bash, primary, notices, powershellWanted: wanted, bashExpected: a.platform !== "win32" };
+	return { powershell, bash, primary, notices, powershellWanted: wanted, bashExpected: a.platform !== "win32", switchVar };
 }
 
 /**

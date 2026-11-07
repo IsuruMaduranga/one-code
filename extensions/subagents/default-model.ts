@@ -29,15 +29,23 @@
  * pass through to resolveSubagentModel, which owns the semantics.
  */
 
+import { type Knob, readKnob } from "../lib/knobs.ts";
 import { isBorrowedUserFile, readSettingsFile } from "../lib/claude-settings.ts";
 import { isClaudeFamilyModel } from "../lib/model-policy.ts";
 import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
 import { autoModeSettingsFiles } from "../auto-mode/config.ts";
 
+/** The environment knob for the subagent default (lib/knobs.ts). */
+export const SUBAGENT_MODEL_KNOB = "SUBAGENT_MODEL";
+
 export interface SubagentDefault {
 	spec: string;
-	/** Which knob set it, for notices. */
-	source: "subagentModel setting" | "CLAUDE_CODE_SUBAGENT_MODEL";
+	/** Which knob set it: the setting, or the `SUBAGENT_MODEL` environment knob (lib/knobs.ts). */
+	source: "subagentModel setting" | "env";
+	/** For `env`: the variable that set it, in the process or a settings `env` block, for notices. */
+	envVar?: string;
+	/** For `env`: set through another tool's spelling (One Code: `CLAUDE_CODE_SUBAGENT_MODEL`), so it applies only on a Claude model. */
+	borrowed?: boolean;
 	/**
 	 * For the `subagentModel` setting only: the *containment identity* of the
 	 * session it was stamped for when set via `/subagent` — `modelIdentity().containment`,
@@ -65,7 +73,7 @@ function readSettings(path: string): SettingsFile | undefined {
 export function loadSubagentDefault(home: string, env: NodeJS.ProcessEnv = process.env): SubagentDefault | undefined {
 	let setting: string | undefined;
 	let settingSetFor: string | undefined;
-	let settingsEnv: string | undefined;
+	let settingsEnv: Knob | undefined;
 
 	// `subagentModel` is One Code's own key — read from `~/.onecode` and managed
 	// settings, never from `~/.claude`, where an old build may have left a stale
@@ -84,17 +92,15 @@ export function loadSubagentDefault(home: string, env: NodeJS.ProcessEnv = proce
 					? file.subagentModelSetFor.trim()
 					: undefined;
 		}
-		const fromEnvBlock = file.env?.CLAUDE_CODE_SUBAGENT_MODEL;
-		if (typeof fromEnvBlock === "string" && fromEnvBlock.trim()) {
-			settingsEnv = fromEnvBlock.trim();
-		}
+		const fromEnvBlock = file.env ? readKnob(SUBAGENT_MODEL_KNOB, file.env) : undefined;
+		if (fromEnvBlock?.value.trim()) settingsEnv = fromEnvBlock;
 	}
 
 	if (setting) return { spec: setting, source: "subagentModel setting", setForContainment: settingSetFor };
 
-	const fromEnv = env.CLAUDE_CODE_SUBAGENT_MODEL?.trim();
-	if (fromEnv) return { spec: fromEnv, source: "CLAUDE_CODE_SUBAGENT_MODEL" };
-	if (settingsEnv) return { spec: settingsEnv, source: "CLAUDE_CODE_SUBAGENT_MODEL" };
+	const fromEnv = readKnob(SUBAGENT_MODEL_KNOB, env);
+	const knob = fromEnv?.value.trim() ? fromEnv : settingsEnv;
+	if (knob) return { spec: knob.value.trim(), source: "env", envVar: knob.name, borrowed: knob.borrowed };
 
 	return undefined;
 }
@@ -114,7 +120,7 @@ export function applicableSubagentDefault(
 	configured: SubagentDefault | undefined,
 	sessionModel: { provider: string; id: string } | undefined,
 ): SubagentDefault | undefined {
-	if (!configured || configured.source === "subagentModel setting") return configured;
+	if (!configured || !configured.borrowed) return configured;
 	if (!sessionModel) return configured;
 	return isClaudeFamilyModel(sessionModel) ? configured : undefined;
 }

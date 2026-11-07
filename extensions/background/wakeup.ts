@@ -12,6 +12,7 @@
  * loop. Texts are Claude Code's with our tool names.
  */
 
+import { knobValue } from "../lib/knobs.ts";
 import { type CronStore, RECURRING_MAX_AGE_MS } from "./cron.ts";
 
 export const MIN_DELAY_SECONDS = 60;
@@ -31,9 +32,9 @@ export function envFlag(value: string | undefined, fallback: boolean): boolean {
 	return !["", "0", "false", "no", "off"].includes(value.trim().toLowerCase());
 }
 
-/** Keepalive is on unless `CLAUDE_CODE_LOOP_KEEPALIVE` turns it off. */
+/** Keepalive is on unless the `LOOP_KEEPALIVE` knob (lib/knobs.ts) turns it off. */
 export function keepaliveEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-	return envFlag(env.CLAUDE_CODE_LOOP_KEEPALIVE, true);
+	return envFlag(knobValue("LOOP_KEEPALIVE", env), true);
 }
 
 export interface WakeupSchedule {

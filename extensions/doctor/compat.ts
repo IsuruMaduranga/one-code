@@ -22,6 +22,8 @@
  * Code's 40k-char soft limit, a hook or MCP config the loaders rejected.
  */
 
+import { knobNames } from "../lib/knobs.ts";
+import { SUBAGENT_MODEL_KNOB } from "../subagents/default-model.ts";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { loadPluginHooks } from "../hooks/plugin-hooks.ts";
@@ -274,9 +276,9 @@ function summarizeFile(source: SettingsFile, ladder: { primary?: SettingsFile; f
 		const env = file.env as Json;
 		const keys = Object.keys(env);
 		if (known.has("env")) {
-			const borrowed = typeof env.CLAUDE_CODE_SUBAGENT_MODEL === "string" ? `env.CLAUDE_CODE_SUBAGENT_MODEL = "${env.CLAUDE_CODE_SUBAGENT_MODEL}"` : undefined;
-			if (borrowed) report.used.push(borrowed);
-			const rest = keys.filter((k) => k !== "CLAUDE_CODE_SUBAGENT_MODEL");
+			const knobs = knobNames(SUBAGENT_MODEL_KNOB);
+			for (const k of keys) if (knobs.includes(k) && typeof env[k] === "string") report.used.push(`env.${k} = "${env[k]}"`);
+			const rest = keys.filter((k) => !knobs.includes(k));
 			if (rest.length) report.ignored.push(`env (${countNoun(rest.length, "variable")} — One Code does not export settings env blocks)`);
 		} else if (keys.length) {
 			report.refused.push(`env (${keys.length}) — a repository's env block is not applied`);

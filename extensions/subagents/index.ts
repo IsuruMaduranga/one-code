@@ -16,6 +16,8 @@
  * children persist their sessions per run to make that possible).
  */
 
+import { brand, envName } from "../lib/brand.mjs";
+import { knobNames } from "../lib/knobs.ts";
 import { feature } from "../lib/feature.ts";
 import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../lib/child-writes.ts";
 import { canShowCustomUi } from "../lib/headless-output.ts";
@@ -34,7 +36,7 @@ import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-m
 import { type AgentDefinition, agentFileSources, agentSourcesStamp, BUNDLED_AGENTS_DIR, discoverAgents } from "./agents.ts";
 import { findConfigured, modelIdentity, modelSpec, supportsImageInput } from "../lib/model-policy.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../lib/model-unusable.ts";
-import { applicableSubagentDefault, loadSubagentDefault, persistSubagentModel, type SubagentDefault } from "./default-model.ts";
+import { applicableSubagentDefault, loadSubagentDefault, persistSubagentModel, SUBAGENT_MODEL_KNOB, type SubagentDefault } from "./default-model.ts";
 import {
 	expensiveModelGate,
 	resolveSubagentModel,
@@ -500,8 +502,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 		return {
 			docs: guideDocs(),
 			install: {
-				shape: process.env.ONECODE_INSTALL_METHOD ? "app" : "extension",
-				method: process.env.ONECODE_INSTALL_METHOD,
+				shape: process.env[envName("INSTALL_METHOD")] ? "app" : "extension",
+				method: process.env[envName("INSTALL_METHOD")],
 				agentDir,
 				version: process.env.CC_VERSION ?? extensionVersion(),
 			},
@@ -2955,8 +2957,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 		ctx.ui.notify(
 			[
 				configured
-					? `subagentModel: ${configured.spec} (from the ${configured.source})` +
-						(applicable ? "" : " — not applied: CLAUDE_CODE_SUBAGENT_MODEL is Claude Code's knob, and this session is not on a Claude model")
+					? `subagentModel: ${configured.spec} (from ${configured.source === "env" ? configured.envVar : "the subagentModel setting"})` +
+						(applicable ? "" : ` — not applied: ${configured.envVar} is another tool's variable, applied only when this session is on a Claude model`)
 					: "subagentModel: (not set)",
 				`effective: ${resolution.model ? `${resolution.model.provider}/${resolution.model.id}` : "none"} (${resolution.source})`,
 				...(resolution.notices.length ? [resolution.notices.join("\n")] : []),
@@ -3062,7 +3064,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				}
 				emitModelStatus(ctx);
 				ctx.ui.notify(
-					"subagentModel cleared — the default is CLAUDE_CODE_SUBAGENT_MODEL or managed settings when applicable, else One Code's automatic same-provider profile.",
+					`subagentModel cleared — the default is ${knobNames(SUBAGENT_MODEL_KNOB).join(" or ")} or managed settings when applicable, else ${brand.name}'s automatic same-provider profile.`,
 					"info",
 				);
 				return;

@@ -12,6 +12,7 @@
 import { realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
+import { productStateDir } from "./brand.mjs";
 
 /**
  * Claude Code's config dir — the compat surface One Code reads, never writes.
@@ -71,7 +72,7 @@ export function expandTilde(path: string, home: string): string {
  * `ONECODE_STATE_DIR` is unset.
  */
 export function oneCodeStateDir(env: Record<string, string | undefined> = process.env, home: string = homedir()): string {
-	return env.ONECODE_STATE_DIR || join(home, ".onecode");
+	return productStateDir(env, home);
 }
 
 /**

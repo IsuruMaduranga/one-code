@@ -9,19 +9,21 @@
  * premise the user should re-examine.
  */
 
+import { knobValue } from "../lib/knobs.ts";
+
 export const CONSECUTIVE_BLOCK_LIMIT = 3;
 export const TOTAL_BLOCK_LIMIT = 20;
 
 /**
  * How long a timed resume prompt waits before denying the call, as Claude
  * Code's denial-limit fallback does (2.1.282: 120 s, overridden by
- * `CLAUDE_CODE_TICKLISH_WHISPER_TIMEOUT_MS`), so an unattended session is not
+ * the `TICKLISH_WHISPER_TIMEOUT_MS` knob, lib/knobs.ts), so an unattended session is not
  * held by a prompt nobody will answer.
  */
 export const UNATTENDED_PROMPT_TIMEOUT_MS = 120_000;
 
 export function unattendedPromptTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
-	const value = Number(env.CLAUDE_CODE_TICKLISH_WHISPER_TIMEOUT_MS);
+	const value = Number(knobValue("TICKLISH_WHISPER_TIMEOUT_MS", env));
 	return Number.isFinite(value) && value > 0 ? value : UNATTENDED_PROMPT_TIMEOUT_MS;
 }
 

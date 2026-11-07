@@ -166,8 +166,11 @@ describe("auto-memory row", () => {
 		state.cursor = -2;
 		const pending = renderMemoryPanel({ state, entries, width: 100, height: 20, mode: MODE, autoMemory: { running: true, saved: false } }, plainPaint);
 		expect(pending).toContain("❯ Auto-memory: off (from next start)");
-		const env = renderMemoryPanel({ state: initialMemoryState(), entries, width: 100, height: 20, mode: MODE, autoMemory: { running: false, saved: true, fromEnv: true } }, plainPaint);
+		const env = renderMemoryPanel({ state: initialMemoryState(), entries, width: 100, height: 20, mode: MODE, autoMemory: { running: false, saved: true, fromEnv: true, envVar: "CLAUDE_CODE_DISABLE_AUTO_MEMORY" } }, plainPaint);
 		expect(env).toContain("  Auto-memory: off (set by CLAUDE_CODE_DISABLE_AUTO_MEMORY)");
+		// Without the variable that set it, the row names the product's own spelling.
+		const own = renderMemoryPanel({ state: initialMemoryState(), entries, width: 100, height: 20, mode: MODE, autoMemory: { running: false, saved: true, fromEnv: true } }, plainPaint);
+		expect(own).toContain("  Auto-memory: off (set by ONECODE_DISABLE_AUTO_MEMORY)");
 	});
 
 	it("reports each changed toggle, and nothing when none changed", () => {

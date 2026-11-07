@@ -38,9 +38,18 @@ describe("gitBashOverride", () => {
 		expect(gitBashOverride({ CLAUDE_CODE_GIT_BASH_PATH: "C:\\a\\bash.exe" }, { CLAUDE_CODE_GIT_BASH_PATH: "C:\\b\\bash.exe" })).toEqual({
 			path: "C:\\a\\bash.exe",
 			source: "env",
+			name: "CLAUDE_CODE_GIT_BASH_PATH",
 		});
-		expect(gitBashOverride({}, { CLAUDE_CODE_GIT_BASH_PATH: "C:\\b\\bash.exe" })).toEqual({ path: "C:\\b\\bash.exe", source: "settings" });
+		expect(gitBashOverride({}, { CLAUDE_CODE_GIT_BASH_PATH: "C:\\b\\bash.exe" })).toEqual({ path: "C:\\b\\bash.exe", source: "settings", name: "CLAUDE_CODE_GIT_BASH_PATH" });
 		expect(gitBashOverride({ CLAUDE_CODE_GIT_BASH_PATH: "  " }, {})).toBeUndefined();
+	});
+
+	it("prefers the product's own spelling over the provider's alias", () => {
+		expect(gitBashOverride({ ONECODE_GIT_BASH_PATH: "C:\\own\\bash.exe", CLAUDE_CODE_GIT_BASH_PATH: "C:\\cc\\bash.exe" }, {})).toEqual({
+			path: "C:\\own\\bash.exe",
+			source: "env",
+			name: "ONECODE_GIT_BASH_PATH",
+		});
 	});
 });
 

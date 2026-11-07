@@ -20,6 +20,7 @@
  * alternatives: `working-docs/decisions/model-tiers.md`.
  */
 
+import { knobValue } from "./knobs.ts";
 import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import type { Api, Model } from "@earendil-works/pi-ai";
@@ -250,7 +251,7 @@ export function taskToolsEnabled(
 	/** Request-surface callers pass the session's frozen tier (session-model-tier.ts). */
 	tier?: PromptTier,
 ): boolean {
-	if (TRUTHY_ENV.has(env.CLAUDE_CODE_ENABLE_TODO_TOOLS?.trim().toLowerCase() ?? "")) return true;
+	if (TRUTHY_ENV.has(knobValue("ENABLE_TODO_TOOLS", env)?.trim().toLowerCase() ?? "")) return true;
 	if (!model) return true;
 	if ((tier ?? resolveModelTier(model, env)) === "frontier") return false;
 	if (model.provider !== "anthropic") return true;

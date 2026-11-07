@@ -25,6 +25,7 @@
  * lines pi runs on Windows, with the same error strings the tool formats.
  */
 
+import { readKnob } from "./knobs.ts";
 import { type ChildProcess, spawn, type SpawnOptions } from "node:child_process";
 import { constants, existsSync } from "node:fs";
 import { access } from "node:fs/promises";
@@ -68,7 +69,8 @@ export const POWERSHELL_TOOL_PREFIX =
 	"if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') { try { $OutputEncoding = [System.Text.UTF8Encoding]::new() } catch {}; " +
 	"if ($null -ne $PSStyle) { try { $PSStyle.OutputRendering = 'PlainText' } catch {} } };\n";
 
-export const GIT_BASH_PATH_VAR = "CLAUDE_CODE_GIT_BASH_PATH";
+/** The knob that points the shell tools at a bash (lib/knobs.ts). */
+export const GIT_BASH_PATH_KNOB = "GIT_BASH_PATH";
 
 // ---------------------------------------------------------------------------
 // bash
@@ -82,17 +84,19 @@ export function isBashBinaryName(path: string): boolean {
 export interface GitBashOverride {
 	path: string;
 	source: "env" | "settings";
+	/** The variable that set it. */
+	name: string;
 }
 
-/** The user's `CLAUDE_CODE_GIT_BASH_PATH`, process env first, then Claude Code's user-settings `env` block. */
+/** The user's `GIT_BASH_PATH` knob, process env first, then the primary user settings file's `env` block. */
 export function gitBashOverride(
 	env: NodeJS.ProcessEnv = process.env,
 	settingsEnv: Record<string, string> = {},
 ): GitBashOverride | undefined {
-	const fromEnv = env[GIT_BASH_PATH_VAR]?.trim();
-	if (fromEnv) return { path: fromEnv, source: "env" };
-	const fromSettings = settingsEnv[GIT_BASH_PATH_VAR]?.trim();
-	if (fromSettings) return { path: fromSettings, source: "settings" };
+	const fromEnv = readKnob(GIT_BASH_PATH_KNOB, env);
+	if (fromEnv?.value.trim()) return { path: fromEnv.value.trim(), source: "env", name: fromEnv.name };
+	const fromSettings = readKnob(GIT_BASH_PATH_KNOB, settingsEnv);
+	if (fromSettings?.value.trim()) return { path: fromSettings.value.trim(), source: "settings", name: fromSettings.name };
 	return undefined;
 }
 
@@ -120,7 +124,7 @@ export function resolveBashSpawn(input: BashResolveInput = {}): BashResolution {
 	const override = gitBashOverride(input.env, input.settingsEnv);
 	let warning: string | undefined;
 	if (override) {
-		const where = override.source === "env" ? `${GIT_BASH_PATH_VAR}` : `${GIT_BASH_PATH_VAR} (settings.json env)`;
+		const where = override.source === "env" ? override.name : `${override.name} (settings.json env)`;
 		if (!isBashBinaryName(override.path)) {
 			warning = `${where} ignored: "${override.path}" is not a bash or sh binary.`;
 		} else if (!exists(override.path)) {

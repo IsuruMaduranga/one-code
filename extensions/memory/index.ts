@@ -40,7 +40,7 @@ import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "
 import { buildMemoryEntries, entryName, type MemoryEntry } from "./entries.ts";
 import { editorHint, memoryDisplayPath, openPath } from "./open-external.ts";
 import { applyMemoryKey, type AutoMemoryView, decodeMemoryKey, initialMemoryState, type ModeView, renderMemoryPanel, settingChanges } from "./panel.ts";
-import { AUTO_MEMORY_KEY, autoMemoryEnabled, autoMemoryFromEnv, savedAutoMemory, savedAutoMemorySource } from "../lib/auto-memory.ts";
+import { AUTO_MEMORY_KEY, autoMemoryEnabled, autoMemoryEnvVar, autoMemoryFromEnv, savedAutoMemory, savedAutoMemorySource } from "../lib/auto-memory.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 import { canShowCustomUi } from "../lib/headless-output.ts";
 import { panelUi } from "../lib/panel-focus.ts";
@@ -191,6 +191,7 @@ function memoryExtension(pi: ExtensionAPI) {
 				running: autoMemoryEnabled(ctx.cwd),
 				saved: savedAutoMemory(ctx.cwd),
 				fromEnv: autoMemoryFromEnv() !== undefined,
+				envVar: autoMemoryEnvVar(),
 			};
 			const before = { mode: mode?.saved, autoMemory: autoMemory.saved };
 			const chosen = await openMemoryPanel(pi.events, ctx, entries, mode, autoMemory);
@@ -264,7 +265,7 @@ function openMemoryPanel(
 				}
 				if (effect?.kind === "toggle-auto-memory") {
 					if (autoMemory.fromEnv) {
-						ctx.ui.notify("Auto-memory is set by CLAUDE_CODE_DISABLE_AUTO_MEMORY. Unset it to switch here.", "info");
+						ctx.ui.notify(`Auto-memory is set by ${autoMemory.envVar}. Unset it to switch here.`, "info");
 						repaint();
 						return;
 					}

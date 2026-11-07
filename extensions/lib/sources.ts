@@ -49,6 +49,12 @@ export interface SourceView {
 	 * answered there (the outside-read prompt) counts as answered.
 	 */
 	protectedFiles?: StateFile[];
+	/**
+	 * Another tool's spelling of the product's environment knobs, by suffix:
+	 * `{ USE_POWERSHELL_TOOL: "CLAUDE_CODE_USE_POWERSHELL_TOOL" }`. Read after
+	 * the product's own `<envPrefix>_<suffix>` (lib/knobs.ts).
+	 */
+	envAliases?: Readonly<Record<string, string>>;
 }
 
 /** Another tool's state file, and how /doctor names it. */

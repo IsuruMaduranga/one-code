@@ -14,6 +14,8 @@
  * extension owns repaint, the overlay, and the actual open.
  */
 
+import { envName } from "../lib/brand.mjs";
+import { AUTO_MEMORY_KNOB } from "../lib/auto-memory.ts";
 import type { MemoryEntry } from "./entries.ts";
 import type { SourceSwitch } from "../lib/sources.ts";
 import { keyId } from "../lib/key-input.ts";
@@ -43,8 +45,10 @@ export interface SettingView<T> {
 	fromEnv?: boolean;
 }
 
-/** Auto-memory; `CLAUDE_CODE_DISABLE_AUTO_MEMORY` can set it. */
-export type AutoMemoryView = SettingView<boolean>;
+/** Auto-memory; its environment variable (`envVar`, lib/auto-memory.ts `autoMemoryEnvVar`) can set it. */
+export interface AutoMemoryView extends SettingView<boolean> {
+	envVar?: string;
+}
 
 /** The source provider's switch, true while the provider is on; its environment variable can set it. */
 export interface ModeView extends SettingView<boolean> {
@@ -203,7 +207,7 @@ function settingRow<T>(label: string, view: SettingView<T>, valueText: (value: T
 
 /** "Auto-memory: on|off". */
 function renderAutoMemoryRow(view: AutoMemoryView, selected: boolean, paint: PanelPaint): string {
-	const { left } = settingRow("Auto-memory", view, (on) => (on ? "on" : "off"), "CLAUDE_CODE_DISABLE_AUTO_MEMORY", selected);
+	const { left } = settingRow("Auto-memory", view, (on) => (on ? "on" : "off"), view.envVar ?? envName(AUTO_MEMORY_KNOB), selected);
 	return selected ? paint.fg("accent", left) : left;
 }
 

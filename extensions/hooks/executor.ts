@@ -46,9 +46,10 @@
  *   mechanism for the LSP client). A ref'd child holds the loop until `close`.
  */
 
+import { envName } from "../lib/brand.mjs";
 import type { ChildProcess } from "node:child_process";
 import { detachedSpawnOptions, killProcessTree, waitForChildExit } from "../lib/process-tree.ts";
-import { bashSpawn, POWERSHELL_UTF8_PREFIX, powerShellSpawn, type ShellSpawn, spawnShellCommand } from "../lib/shell-spawn.ts";
+import { bashSpawn, GIT_BASH_PATH_KNOB, POWERSHELL_UTF8_PREFIX, powerShellSpawn, type ShellSpawn, spawnShellCommand } from "../lib/shell-spawn.ts";
 import type { FinishedRun } from "./protocol.ts";
 import type { HookShell } from "./settings.ts";
 
@@ -73,7 +74,7 @@ export function hookShellSpawn(shell: HookShell | undefined): { spec?: ShellSpaw
 	if (resolved.spawn.commandTransport === "stdin") {
 		// pi's legacy-WSL launcher takes its script on stdin, which the hook
 		// payload already occupies.
-		return { error: `hook cannot run under ${resolved.spawn.shell} (a WSL launcher); set CLAUDE_CODE_GIT_BASH_PATH to Git Bash's bash.exe` };
+		return { error: `hook cannot run under ${resolved.spawn.shell} (a WSL launcher); set ${envName(GIT_BASH_PATH_KNOB)} to Git Bash's bash.exe` };
 	}
 	return { spec: resolved.spawn, shell: want };
 }

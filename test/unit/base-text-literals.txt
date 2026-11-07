@@ -344,12 +344,12 @@ doctor/dependencies.ts
 	"the primary shell tool"
 	"the bash tool, alongside PowerShell"
 	"the bash tool (Git for Windows provides one)"
-	"the powershell tool (off; CLAUDE_CODE_USE_POWERSHELL_TOOL=1 turns it on with a pwsh on PATH)"
+	"the powershell tool (off; ${…}=1 turns it on with a pwsh on PATH)"
 	"the primary shell tool"
 	"repository detection, auto mode's git status line for the classifier, worktree isolation"
 	"git is not on PATH: worktree isolation and auto mode's git status line for the classifier are unavailable."
 	"Install git and make sure it is on the PATH used to launch One Code."
-	"Point CLAUDE_CODE_GIT_BASH_PATH at a bash.exe or sh.exe, or unset it to use Git for Windows' default location."
+	"Point that variable at a bash.exe or sh.exe, or unset it to use Git for Windows' default location."
 	"Install Git for Windows or PowerShell 7."
 	"faster code search when the model shells out to ripgrep"
 	"${…} is not installed, so the model gets no language-server diagnostics after editing ${…} files here."
@@ -394,7 +394,7 @@ doctor/models.ts
 	"${…} is not in the public model catalogs (models.dev, OpenRouter), so its tier is a guess (${…}) and automatic picks never choose it."
 	"Set its tier in ~/.onecode/settings.json: { \"modelTiers\": { \"${…}\": \"workhorse\" } } (frontier, workhorse, cheap or tiny)."
 	"Subagents and workflow agents: ${…} — ${…}"
-	" — not applied: Claude Code's knob applies only when the main model is a Claude model"
+	" — not applied: ${…} is another tool's variable and applies only when the main model is a Claude model"
 	"${…} sets \"${…}\" for subagents, but it applies only when the main model is a Claude model, so it is not used here."
 	"Choose the subagent model with /subagent (it writes subagentModel in ~/.onecode/settings.json), or unset the variable."
 	"Re-set the default with /subagent on this session, or /subagent clear."
@@ -467,7 +467,7 @@ file-tracker/results.ts
 hooks/executor.ts
 	"hook needs PowerShell but no pwsh/powershell executable was found on PATH"
 	"hook needs bash but none was found"
-	"hook cannot run under ${…} (a WSL launcher); set CLAUDE_CODE_GIT_BASH_PATH to Git Bash's bash.exe"
+	"hook cannot run under ${…} (a WSL launcher); set ${…} to Git Bash's bash.exe"
 	"no shell available for the hook"
 
 hooks/index.ts
@@ -648,7 +648,7 @@ lib/powershell-parser.ts
 	"the PowerShell parser is off after ${…} failures (last: ${…})"
 
 lib/profile.ts
-	"ONECODE_FEATURES_OFF cannot turn off \"${…}\": it guards tool calls (only a profile can)"
+	"${…} cannot turn off \"${…}\": it guards tool calls (only a profile can)"
 	"\"${…}\" cannot be turned off"
 	"\nThe profile in profile/ is invalid, so the harness will not start: ${…}\n\n"
 	"it has no text for \"${…}\", and that feature is on"
@@ -777,7 +777,7 @@ memory/index.ts
 	"View or edit CLAUDE.md and memory files"
 	"/memory editing is unavailable in RPC; use the TUI or open a listed path in your editor.\n\n"
 	"${…} are set by ${…}. Unset it to switch here."
-	"Auto-memory is set by CLAUDE_CODE_DISABLE_AUTO_MEMORY. Unset it to switch here."
+	"Auto-memory is set by ${…}. Unset it to switch here."
 	"${…} sets ${…}: ${…}, which outranks your user setting. Change it there."
 	"Couldn't save the auto-memory setting: ${…}"
 
@@ -1115,9 +1115,9 @@ plugins/panel/render.ts
 
 powershell/policy.ts
 	"No shell available: install Git for Windows (https://git-scm.com/download/win) so the bash tool can run, "
-	"or install PowerShell and set CLAUDE_CODE_USE_POWERSHELL_TOOL=1."
-	"CLAUDE_CODE_USE_POWERSHELL_TOOL is set but no pwsh.exe or powershell.exe was found on PATH; the powershell tool stays off."
-	"CLAUDE_CODE_USE_POWERSHELL_TOOL is set but no `pwsh` was found on PATH; install PowerShell 7 to use the powershell tool."
+	"or install PowerShell and set ${…}=1."
+	"${…} is set but no pwsh.exe or powershell.exe was found on PATH; the powershell tool stays off."
+	"${…} is set but no `pwsh` was found on PATH; install PowerShell 7 to use the powershell tool."
 
 send-now/chord.ts
 	"ctrl+x ctrl+s to send now"
@@ -1151,7 +1151,7 @@ subagents/index.ts
 	"Open the live subagent panel, or list available agents"
 	"The live subagent panel requires TUI mode; showing spawned agents instead."
 	"Use /tasks for task status; task_output and task_stop inspect or stop a task."
-	" — not applied: CLAUDE_CODE_SUBAGENT_MODEL is Claude Code's knob, and this session is not on a Claude model"
+	" — not applied: ${…} is another tool's variable, applied only when this session is on a Claude model"
 	"Could not save subagent model: "
 	"Subagent default set to the session model (\"inherit\", saved to ~/.onecode/settings.json)."
 	"No available model matches \"${…}\"."
@@ -1159,7 +1159,7 @@ subagents/index.ts
 	"Subagent default set to \"${…}\" (saved to ~/.onecode/settings.json)."
 	"Set the default model for subagent/workflow runs: /subagent [provider/model-id|inherit|status|clear]"
 	"Could not update settings: "
-	"subagentModel cleared — the default is CLAUDE_CODE_SUBAGENT_MODEL or managed settings when applicable, else One Code's automatic same-provider profile."
+	"subagentModel cleared — the default is ${…} or managed settings when applicable, else ${…}'s automatic same-provider profile."
 	"No models are available — authenticate a provider first."
 	"Select the default subagent model"
 	"Default for subagent/workflow runs unless overridden"

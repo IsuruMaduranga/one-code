@@ -541,7 +541,7 @@ describe("subagentModelsReminder: setting override notice", () => {
 			defaultSource: "default" as const,
 		};
 		expect(
-			subagentModelsReminder({ ...base, configured: { spec: "sonnet", source: "CLAUDE_CODE_SUBAGENT_MODEL" } }),
+			subagentModelsReminder({ ...base, configured: { spec: "sonnet", source: "env", envVar: "CLAUDE_CODE_SUBAGENT_MODEL", borrowed: true } }),
 		).not.toContain("pinned the subagent default");
 		expect(subagentModelsReminder(base)).not.toContain("pinned the subagent default");
 	});
@@ -705,7 +705,7 @@ describe("loadSubagentDefault", () => {
 			join(home, ".claude", "settings.json"),
 			JSON.stringify({ env: { CLAUDE_CODE_SUBAGENT_MODEL: "sonnet" } }),
 		);
-		expect(loadSubagentDefault(home, {})).toEqual({ spec: "sonnet", source: "CLAUDE_CODE_SUBAGENT_MODEL" });
+		expect(loadSubagentDefault(home, {})).toEqual({ spec: "sonnet", source: "env", envVar: "CLAUDE_CODE_SUBAGENT_MODEL", borrowed: true });
 	});
 
 	it("lets the real environment override the settings env block", () => {
@@ -742,7 +742,7 @@ describe("loadSubagentDefault", () => {
 
 describe("applicableSubagentDefault", () => {
 	const setting = { spec: "openai/gpt-5-mini", source: "subagentModel setting" } as const;
-	const envVar = { spec: "sonnet", source: "CLAUDE_CODE_SUBAGENT_MODEL" } as const;
+	const envVar = { spec: "sonnet", source: "env", envVar: "CLAUDE_CODE_SUBAGENT_MODEL", borrowed: true } as const;
 
 	it("applies One Code's own setting on any provider", () => {
 		expect(applicableSubagentDefault(setting, openai[0])).toBe(setting);
@@ -757,6 +757,12 @@ describe("applicableSubagentDefault", () => {
 		expect(applicableSubagentDefault(envVar, openai[0])).toBeUndefined();
 	});
 
+	it("applies the product's own variable on any model", () => {
+		const own = { spec: "gpt-6-mini", source: "env", envVar: "ONECODE_SUBAGENT_MODEL", borrowed: false } as const;
+		expect(applicableSubagentDefault(own, openai[0])).toBe(own);
+		expect(applicableSubagentDefault(own, anthropic[0])).toBe(own);
+	});
+
 	it("passes through when nothing is configured or there is no session model", () => {
 		expect(applicableSubagentDefault(undefined, openai[0])).toBeUndefined();
 		expect(applicableSubagentDefault(envVar, undefined)).toBe(envVar);
@@ -765,7 +771,7 @@ describe("applicableSubagentDefault", () => {
 
 describe("subagentStatusModel", () => {
 	const setting = { source: "subagentModel setting" } as const;
-	const envVar = { source: "CLAUDE_CODE_SUBAGENT_MODEL" } as const;
+	const envVar = { source: "env", envVar: "CLAUDE_CODE_SUBAGENT_MODEL", borrowed: true } as const;
 
 	it("shows a configured default with its knob, even when it equals the session model", () => {
 		// A user who just ran /subagent must see their choice land in the banner;

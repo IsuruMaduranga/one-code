@@ -19,17 +19,21 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { brand, envName } from "./brand.mjs";
 
 /** The app-only override for the app's pi agent directory. */
-export const APP_AGENT_DIR_VAR = "ONECODE_AGENT_DIR";
+export const APP_AGENT_DIR_VAR = envName("AGENT_DIR");
 /** JSON of each launcher variable's value before the launcher set it (null: unset). */
-export const LAUNCHER_ENV_VAR = "ONECODE_LAUNCHER_ENV";
+export const LAUNCHER_ENV_VAR = envName("LAUNCHER_ENV");
 /** The variables the launcher sets for its own process. */
-export const LAUNCHER_VARS = ["PI_CODING_AGENT_DIR", "PI_SKIP_VERSION_CHECK", "CC_VERSION", "ONECODE_INSTALL_METHOD"];
+/** Where the launcher publishes how the app was installed (lib/update-check.mjs reads it). */
+export const INSTALL_METHOD_VAR = envName("INSTALL_METHOD");
+/** The variables the launcher sets for its own process. */
+export const LAUNCHER_VARS = ["PI_CODING_AGENT_DIR", "PI_SKIP_VERSION_CHECK", "CC_VERSION", INSTALL_METHOD_VAR];
 
 /** The app's pi agent directory: `ONECODE_AGENT_DIR`, else `~/.onecode/agent`. Never `PI_CODING_AGENT_DIR`. */
 export function appAgentDir(env = process.env, home = homedir()) {
-	return env[APP_AGENT_DIR_VAR] || join(home, ".onecode", "agent");
+	return env[APP_AGENT_DIR_VAR] || join(home, brand.stateDir, "agent");
 }
 
 /**
@@ -39,7 +43,10 @@ export function appAgentDir(env = process.env, home = homedir()) {
  * which is an npm install and upgrades with npm.
  */
 export function installMethodFor(binRealPath) {
-	return /[\\/]Cellar[\\/]onecode[\\/]/.test(String(binRealPath ?? "")) ? "brew" : "npm";
+	const formula = brand.packages.homebrewFormula;
+	if (!formula) return "npm";
+	const escaped = formula.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	return new RegExp(`[\\\\/]Cellar[\\\\/]${escaped}[\\\\/]`).test(String(binRealPath ?? "")) ? "brew" : "npm";
 }
 
 /**
@@ -56,9 +63,9 @@ export function applyLauncherEnv(env, { home = homedir(), appVersion, installMet
 	}
 	const agentDir = appAgentDir(env, home);
 	env.PI_CODING_AGENT_DIR = agentDir;
-	env.PI_SKIP_VERSION_CHECK = "1"; // One Code ships its own update check
+	env.PI_SKIP_VERSION_CHECK = "1"; // the app ships its own update check
 	env.CC_VERSION = appVersion; // the banner shows the app version
-	env.ONECODE_INSTALL_METHOD = installMethod;
+	env[INSTALL_METHOD_VAR] = installMethod;
 	return agentDir;
 }
 

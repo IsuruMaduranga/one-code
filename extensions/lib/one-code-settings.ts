@@ -21,13 +21,17 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
+import { brand } from "./brand.mjs";
 import { join } from "node:path";
 import { readJsonFile, writeJsonAtomic } from "./atomic-write.ts";
 import { findProjectRoot } from "./git.ts";
 import { projectSlug } from "./memory.ts";
 import { oneCodeStateDir, tryRealpath } from "./paths.ts";
 
-/** `~/.onecode/settings.json` — One Code's user-scope settings (writable). */
+/** The product's user settings file as messages show it: `~/.onecode/settings.json`. */
+export const SETTINGS_DISPLAY = `~/${brand.stateDir}/settings.json`;
+
+/** `~/.onecode/settings.json`: the product's user-scope settings (writable). */
 export function oneCodeSettingsPath(home: string, env: NodeJS.ProcessEnv = process.env): string {
 	return join(oneCodeStateDir(env, home), "settings.json");
 }

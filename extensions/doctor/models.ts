@@ -19,7 +19,7 @@ import { loadCatalogSources, readCatalogRefreshEnabled } from "../lib/model-cata
 import { autoSelectSkipReason, catalogModelFor } from "../lib/model-catalog.ts";
 import { DAY_MS, modelsContainedToSession, modelSpec, pricedInput, supportsImageInput } from "../lib/model-policy.ts";
 import { newerModelSuggestion, type NewerModelSuggestion } from "../lib/newer-model.ts";
-import { oneCodeSettingsPath, readSuggestNewerModels } from "../lib/one-code-settings.ts";
+import { oneCodeSettingsPath, readSuggestNewerModels, SETTINGS_DISPLAY } from "../lib/one-code-settings.ts";
 import { oneCodeStateDir } from "../lib/paths.ts";
 import {
 	classifyModelTier,
@@ -171,9 +171,9 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 	if (sub.model) {
 		lines.push({ text: `Subagents and workflow agents: ${modelSpec(sub.model)} — ${SUBAGENT_SOURCE[sub.source]}`, level: "ok" });
 		if (facts.subagentConfigured) {
-			const knob = facts.subagentConfigured.source === "subagentModel setting" ? "subagentModel in ~/.onecode/settings.json" : "CLAUDE_CODE_SUBAGENT_MODEL";
+			const knob = facts.subagentConfigured.source === "subagentModel setting" ? `subagentModel in ${SETTINGS_DISPLAY}` : facts.subagentConfigured.envVar;
 			lines.push({
-				text: `Setting: "${facts.subagentConfigured.spec}" via ${knob}${facts.subagentConfiguredInapplicable ? " — not applied: Claude Code's knob applies only when the main model is a Claude model" : ""}`,
+				text: `Setting: "${facts.subagentConfigured.spec}" via ${knob}${facts.subagentConfiguredInapplicable ? ` — not applied: ${knob} is another tool's variable and applies only when the main model is a Claude model` : ""}`,
 				indent: 1,
 				level: facts.subagentConfiguredInapplicable ? "warn" : "dim",
 			});

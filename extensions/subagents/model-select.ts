@@ -90,7 +90,7 @@ export interface SubagentStatus {
  * (off-family alias, unavailable model) honestly reads "session".
  */
 export function subagentStatusModel(
-	configured: { source: "subagentModel setting" | "CLAUDE_CODE_SUBAGENT_MODEL" } | undefined,
+	configured: { source: "subagentModel setting" | "env" } | undefined,
 	resolution: Pick<SubagentModelResolution, "model" | "source">,
 ): SubagentStatus {
 	if (!resolution.model) return {};

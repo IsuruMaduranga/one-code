@@ -2,7 +2,8 @@
  * Phase 4c's exit check (working-docs/features/profiles/plan.md): the base
  * names the product only through the profile's brand (extensions/lib/brand.mjs,
  * decisions/bi-fork.md "The brand is one static data file"). A new literal
- * fails here until it goes through `brandedId`, `envName` or `brand`.
+ * fails here until it goes through `brandedId`, `envName`, `brand` or a
+ * knob (lib/knobs.ts).
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -32,5 +33,9 @@ function offenders(pattern: RegExp): string[] {
 describe("the base names the product only through its brand", () => {
 	it("builds every internal id with brandedId", () => {
 		expect(offenders(/["'`]one-code:/)).toEqual([]);
+	});
+
+	it("reads an environment knob by its suffix, never by Claude Code's spelling (the provider's alias)", () => {
+		expect(offenders(/\bCLAUDE_CODE_[A-Z]/)).toEqual([]);
 	});
 });
