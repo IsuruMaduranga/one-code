@@ -28,6 +28,7 @@
  * subagent through the subagents extension (lib/btw-fork.ts).
  */
 
+import { brandedId } from "../lib/brand.mjs";
 import { feature } from "../lib/feature.ts";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import {
@@ -64,7 +65,7 @@ const BTW_TIMEOUT_MS = 120_000;
  * with `⎿  ⑂ forked <name> (<id>)` under it. A display-only session entry: it
  * never reaches the model, which learns of the fork from a one-shot reminder.
  */
-const FORK_ENTRY_TYPE = "one-code:btw-fork";
+const FORK_ENTRY_TYPE = brandedId("btw-fork");
 
 interface BtwForkEntry {
 	question: string;

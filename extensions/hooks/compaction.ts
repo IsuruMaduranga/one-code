@@ -1,5 +1,7 @@
 /** Successful PreCompact hook output, scoped to the compaction that requested it. */
-export const PRECOMPACT_INSTRUCTIONS_CHANNEL = "one-code:precompact-instructions";
+
+import { brandedId } from "../lib/brand.mjs";
+export const PRECOMPACT_INSTRUCTIONS_CHANNEL = brandedId("precompact-instructions");
 
 export interface PreCompactInstructions {
 	signal: AbortSignal;

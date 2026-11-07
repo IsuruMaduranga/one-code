@@ -19,9 +19,10 @@
  * Pure: no pi imports.
  */
 
+import { brandedId } from "./brand.mjs";
 import { visibleWidth } from "./tui-render.ts";
 
-export const ARGUMENT_HINT_CHANNEL = "one-code:argument-hint";
+export const ARGUMENT_HINT_CHANNEL = brandedId("argument-hint");
 
 export interface ArgumentHint extends CommandHint {
 	/** The command name, without the slash. */

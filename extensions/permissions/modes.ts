@@ -9,6 +9,7 @@
  * either — it is reachable only via flag or settings.
  */
 
+import { brandedId } from "../lib/brand.mjs";
 import type { PermissionMode } from "./matcher.ts";
 import { modeCycleKey, pauseGlyph } from "../lib/keys.ts";
 
@@ -126,7 +127,7 @@ function badgeBase(mode: PermissionMode, opts?: { paused?: boolean; classifier?:
  * startup banner can show them live. jiti gives each extension its own module
  * instance, so this goes over `pi.events` rather than shared state.
  */
-export const PERMISSION_STATUS_CHANNEL = "one-code:permission-status";
+export const PERMISSION_STATUS_CHANNEL = brandedId("permission-status");
 
 /** The `one-code:state` key the permission mode is recorded under on the branch; a fork's file carries the parent's. */
 export const PERMISSION_MODE_STATE = "permission-mode";

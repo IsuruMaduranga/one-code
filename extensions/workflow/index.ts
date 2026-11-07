@@ -23,6 +23,7 @@
  * delivers the message. On older pi a queued message does not arm.
  */
 
+import { brandedId } from "../lib/brand.mjs";
 import { feature } from "../lib/feature.ts";
 import { prepareWorkflowArguments } from "./args.ts";
 import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../lib/child-writes.ts";
@@ -144,7 +145,7 @@ function workflowExtension(pi: ExtensionAPI) {
 		// workflowSummary — unverified against CC.
 		const status = taskStatusOf(handle.status);
 		notifyTask(
-			"one-code:workflow-result",
+			brandedId("workflow-result"),
 			taskNotification({
 				kind: "workflow",
 				taskId: handle.runId,
@@ -157,7 +158,7 @@ function workflowExtension(pi: ExtensionAPI) {
 		);
 	};
 
-	pi.registerMessageRenderer("one-code:workflow-result", (message, options, theme) =>
+	pi.registerMessageRenderer(brandedId("workflow-result"), (message, options, theme) =>
 		notificationComponent(theme, customMessageText(message.content), options.expanded, { hint: expandHintFor(options) }),
 	);
 

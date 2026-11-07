@@ -8,7 +8,9 @@
  * /add-dir command output instead.
  */
 
-export const WORKSPACE_CHANNEL = "one-code:workspace-dirs";
+import { brandedId } from "./brand.mjs";
+
+export const WORKSPACE_CHANNEL = brandedId("workspace-dirs");
 
 export interface WorkspaceAnnouncement {
 	/** Absolute, resolved paths, in the order the gate applies them. */

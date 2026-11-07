@@ -10,12 +10,13 @@
  * fork still starting; `respond` settles the request once.
  */
 
+import { brandedId } from "./brand.mjs";
 import { randomBytes } from "node:crypto";
 import type { Message } from "@earendil-works/pi-ai";
 import { commandInputBlock, commandStdoutBlock } from "./local-command.ts";
 import { cutPlainText } from "./tui-render.ts";
 
-export const BTW_FORK_CHANNEL = "one-code:btw-fork";
+export const BTW_FORK_CHANNEL = brandedId("btw-fork");
 
 /** The started fork, or why it could not start. */
 export type BtwForkResult = { name: string; taskId: string } | { error: string };

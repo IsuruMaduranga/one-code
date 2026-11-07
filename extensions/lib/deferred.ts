@@ -10,6 +10,7 @@
  * `{ name, keywords? }` while extensions are loading (before session_start).
  */
 
+import { brandedId } from "./brand.mjs";
 import { createHash } from "node:crypto";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { toolResultsOnBranch } from "./branch-restore.ts";
@@ -34,7 +35,7 @@ export { DEFER_CHANNEL, type DeferRequest } from "./deferred-channel.ts";
  * first request the standing listing is rewritten without it; after that the
  * listing stays frozen and a load reports "not found" (tool-search/announce.ts).
  */
-export const WITHHOLD_CHANNEL = "one-code:withhold-tool";
+export const WITHHOLD_CHANNEL = brandedId("withhold-tool");
 
 
 /**
@@ -43,7 +44,7 @@ export const WITHHOLD_CHANNEL = "one-code:withhold-tool";
  * its parent injects into it (MCP, cron, SendMessage), whose owners run only
  * in the parent.
  */
-export const DEFERRED_QUERY_CHANNEL = "one-code:deferred-query";
+export const DEFERRED_QUERY_CHANNEL = brandedId("deferred-query");
 
 export interface DeferredQuery {
 	tools: DeferRequest[];

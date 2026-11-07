@@ -15,6 +15,7 @@
  * turn too, but gets no note: the user has already said what to do instead.
  */
 
+import { brandedId } from "../lib/brand.mjs";
 import { feature } from "../lib/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { wasInterrupted } from "../lib/interrupt.ts";
@@ -22,7 +23,7 @@ import { SEND_NOW_CHANNEL } from "../lib/send-now-channel.ts";
 import { linesComponent, safeThemePaint } from "../lib/tui-render.ts";
 import { INTERRUPTED_TEXT } from "./line.ts";
 
-const ENTRY_TYPE = "one-code:interrupted";
+const ENTRY_TYPE = brandedId("interrupted");
 
 function interruptedExtension(pi: ExtensionAPI) {
 	pi.registerEntryRenderer(ENTRY_TYPE, (_entry, _options, theme) => {

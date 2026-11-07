@@ -23,9 +23,10 @@
  * implement yet).
  */
 
+import { brandedId } from "../lib/brand.mjs";
 import { type BridgeWatchApi, watchBridge } from "../lib/bridge-watch.ts";
 
-export const SUBAGENT_HOOK_CHANNEL = "one-code:subagent-hook-bridge";
+export const SUBAGENT_HOOK_CHANNEL = brandedId("subagent-hook-bridge");
 
 /** One child tool call, as the child's `tool_call` handler sees it. */
 export interface ChildHookCall {

@@ -47,6 +47,7 @@
  * resolution accepts any available model whether or not it was listed.
  */
 
+import { brandedId } from "../lib/brand.mjs";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { SubagentDefault } from "./default-model.ts";
 import type { MenuLabel, SubagentModelNotice, SubagentModelsText } from "./model-text.ts";
@@ -71,7 +72,7 @@ import { atLeastTier, economicalContainedCandidates, intrinsicTier, type PromptT
  * banner can show it when it differs from the session model (jiti isolates
  * module state, so this goes over `pi.events`).
  */
-export const SUBAGENT_STATUS_CHANNEL = "one-code:subagent-status";
+export const SUBAGENT_STATUS_CHANNEL = brandedId("subagent-status");
 
 export interface SubagentStatus {
 	/** `provider/id` subagents will run on. Unset only when nothing resolves at all. */

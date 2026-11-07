@@ -13,6 +13,7 @@
  * is why the off-skill redaction below still matches it.
  */
 
+import { brandedId } from "../lib/brand.mjs";
 import { requireText } from "../lib/profile.ts";
 
 const SKILL_PREFIX = "/skill:";
@@ -131,7 +132,7 @@ export function promptCommandText(name: string, args: string, prompt: string): s
  * hooks extension's UserPromptSubmit context) can find the message that
  * replaced it.
  */
-export const SKILL_INVOCATION_TYPE = "one-code:skill-invocation";
+export const SKILL_INVOCATION_TYPE = brandedId("skill-invocation");
 export interface SkillInvocationDetails {
 	skill: string;
 	args: string;

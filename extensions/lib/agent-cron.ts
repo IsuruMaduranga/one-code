@@ -15,11 +15,12 @@
  * Pure: no pi imports.
  */
 
+import { brandedId } from "./brand.mjs";
 import { cronToolParameters, RECURRING_MAX_AGE_DAYS } from "../background/cron.ts";
 import type { CronText } from "../background/text.ts";
 
-export const AGENT_CRON_CHANNEL = "one-code:agent-cron";
-export const AGENT_CRON_FIRE_CHANNEL = "one-code:agent-cron-fire";
+export const AGENT_CRON_CHANNEL = brandedId("agent-cron");
+export const AGENT_CRON_FIRE_CHANNEL = brandedId("agent-cron-fire");
 
 export type AgentCronRequest =
 	| { op: "create"; agentId: string; cwd: string; cron: string; prompt: string; recurring?: boolean; result?: AgentCronResult }

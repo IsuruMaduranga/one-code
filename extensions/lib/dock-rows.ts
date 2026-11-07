@@ -10,7 +10,9 @@
  * on a change.
  */
 
-export const DOCK_ROWS_CHANNEL = "one-code:dock-rows";
+import { brandedId } from "./brand.mjs";
+
+export const DOCK_ROWS_CHANNEL = brandedId("dock-rows");
 
 export interface DockRowsEvent {
 	/** The reporting strip, e.g. "subagents" or "workflow". */

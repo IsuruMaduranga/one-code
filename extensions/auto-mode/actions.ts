@@ -17,9 +17,10 @@
  * path auto mode exists to close.
  */
 
+import { brandedId } from "../lib/brand.mjs";
 import type { HandBackVerdict } from "../lib/notifications.ts";
 
-export const SUBAGENT_ACTIONS_CHANNEL = "one-code:subagent-actions";
+export const SUBAGENT_ACTIONS_CHANNEL = brandedId("subagent-actions");
 
 export interface ChildAction {
 	toolName: string;

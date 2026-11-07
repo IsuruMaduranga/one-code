@@ -8,6 +8,7 @@
  * turn and must come out byte-identical (prompt-cache stability).
  */
 
+import { brandedId } from "../lib/brand.mjs";
 import type { PromptTier } from "../lib/model-tier.ts";
 
 /** What a section may depend on: all of it fixed for the session (or until the model changes). */
@@ -48,4 +49,4 @@ export interface SystemPromptSection {
 	render(session: SystemPromptSession): string | undefined;
 }
 
-export const SYSTEM_PROMPT_SECTION_CHANNEL = "one-code:system-prompt-section";
+export const SYSTEM_PROMPT_SECTION_CHANNEL = brandedId("system-prompt-section");

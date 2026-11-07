@@ -20,6 +20,7 @@
  * Code's notice. Failures are silent, as in Claude Code.
  */
 
+import { brandedId } from "../lib/brand.mjs";
 import { feature } from "../lib/feature.ts";
 import { type ExtensionAPI, type ExtensionContext, getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { hasOneHourCache } from "../lib/anthropic-payload.ts";
@@ -29,7 +30,7 @@ import { unrefTimers } from "../lib/timer-ops.ts";
 import { dimMarkedLine, liveUiCtx } from "../lib/tui-render.ts";
 import { type ArmedRequest, IDLE_COMPACT_NOTICE, IdleCompactTimer, type IdleCompactConfig, idleCompactConfig, idleRefusal } from "./policy.ts";
 
-const ENTRY_TYPE = "one-code:idle-compact";
+const ENTRY_TYPE = brandedId("idle-compact");
 const NOTICE_MARK = "●";
 const RATE_LIMIT_HEADER = "anthropic-ratelimit-unified-status";
 

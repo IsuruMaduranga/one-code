@@ -10,10 +10,11 @@
  * before editing it.
  */
 
+import { brandedId } from "./brand.mjs";
 import { isWritingTool, pathArgument } from "../auto-mode/paths.ts";
 import { resolveToolPath } from "./tool-path.ts";
 
-export const CHILD_WROTE_CHANNEL = "one-code:child-wrote";
+export const CHILD_WROTE_CHANNEL = brandedId("child-wrote");
 
 export interface ChildWrote {
 	/** Absolute path of the file the child changed. */

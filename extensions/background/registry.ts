@@ -6,11 +6,12 @@
  * event bus, since module state does not cross extension boundaries).
  */
 
+import { brandedId } from "../lib/brand.mjs";
 import { randomBytes } from "node:crypto";
 import type { ShownTask } from "./text.ts";
 
 /** Runtime event-bus channel other extensions use to register their tasks. */
-export const TASK_REGISTER_CHANNEL = "one-code:background-task";
+export const TASK_REGISTER_CHANNEL = brandedId("background-task");
 
 export type BackgroundStatus = "running" | "completed" | "failed" | "stopped";
 

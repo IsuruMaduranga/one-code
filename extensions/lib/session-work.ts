@@ -10,7 +10,9 @@
  * Pure: no pi imports.
  */
 
-export const SESSION_WORK_CHANNEL = "one-code:session-work";
+import { brandedId } from "./brand.mjs";
+
+export const SESSION_WORK_CHANNEL = brandedId("session-work");
 
 /** Claude Code's `session_crons` item. */
 export interface SessionCron {

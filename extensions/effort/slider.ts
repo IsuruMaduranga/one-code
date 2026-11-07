@@ -17,6 +17,7 @@
  * terminal; `index.ts` only wires it to pi.
  */
 
+import { brandedId } from "../lib/brand.mjs";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { keyId, keyText } from "../lib/key-input.ts";
 
@@ -36,7 +37,7 @@ export const ULTRACODE_STATUS_KEY = "ultracode";
  * steered worse than one. Emitted on change only (the bus does not replay);
  * the mode starts off, so a listener registered at load is never behind.
  */
-export const ULTRACODE_MODE_CHANNEL = "one-code:ultracode-mode";
+export const ULTRACODE_MODE_CHANNEL = brandedId("ultracode-mode");
 
 /** The reasoning level ultracode pins, when the model can reach it. */
 export const ULTRACODE_LEVEL: ThinkingLevel = "xhigh";

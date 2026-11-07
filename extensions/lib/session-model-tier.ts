@@ -9,11 +9,12 @@
  * and tier-dependent steering keep the same tier until the next boundary.
  */
 
+import { brandedId } from "./brand.mjs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { type PromptTier, resolveModelTier } from "./model-tier.ts";
 import { invalidateCatalogCache } from "./model-catalog-data.ts";
 
-const SESSION_TIER_REQUEST_CHANNEL = "one-code:session-tier-request";
+const SESSION_TIER_REQUEST_CHANNEL = brandedId("session-tier-request");
 
 interface TierRequest {
 	owned?: boolean;

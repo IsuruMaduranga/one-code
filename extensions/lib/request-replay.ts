@@ -19,6 +19,7 @@
  * Pure: no pi extension API; only pi-ai types and the vendored estimator.
  */
 
+import { brandedId } from "./brand.mjs";
 import type { Message } from "@earendil-works/pi-ai";
 import { settleSystemMessages } from "./ledger/layout.ts";
 import { isObject } from "./ledger/records.ts";
@@ -26,7 +27,7 @@ import { appendPoint, isToolsItem, leadingToolsItem, listKey, loadedInList, prel
 import { estimateMessageTokens } from "./pi-ai-estimate.ts";
 
 /** The compaction extension publishes a RequestCapture here, or undefined when none is valid. */
-export const LAST_REQUEST_CHANNEL = "one-code:last-request";
+export const LAST_REQUEST_CHANNEL = brandedId("last-request");
 
 /** The provider APIs whose request body can be extended by appending to one list. */
 export type ReplayApi =

@@ -21,9 +21,10 @@
  * error an extension shows on its own stay direct `ctx.ui.notify` calls.
  */
 
+import { brandedId } from "./brand.mjs";
 import type { EventBus, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-export const NOTICE_CHANNEL = "one-code:notice";
+export const NOTICE_CHANNEL = brandedId("notice");
 
 export type NoticeLevel = "info" | "warning" | "error";
 

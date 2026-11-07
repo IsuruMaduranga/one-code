@@ -22,6 +22,7 @@
  * injectable runner so the git commands can be faked in unit tests.
  */
 
+import { brandedId } from "./brand.mjs";
 import { execFileSync } from "node:child_process";
 import { HARNESS_GIT_CONFIG } from "./git.ts";
 import { contextWords } from "./context-words.ts";
@@ -38,7 +39,7 @@ export interface GitSnapshot {
 
 
 /** The main session's system-prompt extension claims the snapshot on this channel; a child session never does. */
-export const GIT_SNAPSHOT_OWNER_CHANNEL = "one-code:git-snapshot-owner";
+export const GIT_SNAPSHOT_OWNER_CHANNEL = brandedId("git-snapshot-owner");
 
 /** Claude Code's limit on the status inside the block, in characters. */
 export const GIT_STATUS_MAX_CHARS = 2000;

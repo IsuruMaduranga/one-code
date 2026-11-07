@@ -7,8 +7,10 @@
  * owner's own loader is the source of truth.
  */
 
+import { brandedId } from "./brand.mjs";
+
 /** `subagentModel` in ~/.onecode/settings.json changed; the subagents extension re-resolves and re-emits its status. */
-export const SUBAGENT_DEFAULT_CHANGED_CHANNEL = "one-code:subagent-default-changed";
+export const SUBAGENT_DEFAULT_CHANGED_CHANNEL = brandedId("subagent-default-changed");
 
 /** `autoMode.classifierModel` changed; the permissions extension drops its pinned classifier and cached config. */
-export const CLASSIFIER_SETTING_CHANGED_CHANNEL = "one-code:classifier-setting-changed";
+export const CLASSIFIER_SETTING_CHANGED_CHANNEL = brandedId("classifier-setting-changed");

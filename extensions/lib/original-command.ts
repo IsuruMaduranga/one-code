@@ -15,8 +15,10 @@
  * extension boundaries, findings §3); multiple bus listeners are fine.
  */
 
+import { brandedId } from "./brand.mjs";
+
 /** `{ toolCallId, command, cwd }` — the pre-wrapper command of one bash call and the directory it runs in. */
-export const ORIGINAL_COMMAND_CHANNEL = "one-code:bash-original-command";
+export const ORIGINAL_COMMAND_CHANNEL = brandedId("bash-original-command");
 
 export interface OriginalCommandRecord {
 	toolCallId: string;

@@ -50,13 +50,14 @@
  * other user turn.
  */
 
+import { brandedId } from "./brand.mjs";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import type { BlockFact, FileVersion, ToldFact } from "./ledger/records.ts";
 import { contentHash } from "./ledger/wire.ts";
 import type { MovedBlock } from "./system-role.ts";
 
-export const REMINDER_CHANNEL = "one-code:system-reminder";
+export const REMINDER_CHANNEL = brandedId("system-reminder");
 
 /**
  * Emitted by the system-reminder extension once per request, while it renders
@@ -67,7 +68,7 @@ export const REMINDER_CHANNEL = "one-code:system-reminder";
  * queued, so a capability that came and went before the request is never
  * announced.
  */
-export const RENDER_CHANNEL = "one-code:render";
+export const RENDER_CHANNEL = brandedId("render");
 
 /** See the module header for which placement fits which kind of reminder. */
 export type ReminderPlacement = "first-prepend" | "sticky-append" | "last-append" | "user-prepend";

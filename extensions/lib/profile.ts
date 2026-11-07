@@ -17,6 +17,7 @@
  * in each of the extensions' copies cost about a third of a second at startup.
  */
 
+import { brandedId } from "./brand.mjs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { shareModuleForTest, sharedModule } from "./shared-module.ts";
@@ -99,7 +100,7 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 }
 
 /** The slot the evaluated profile module is shared under (lib/shared-module.ts). */
-const SHIPPED_PROFILE = "one-code:shipped-profile";
+const SHIPPED_PROFILE = brandedId("shipped-profile");
 const PROFILE_MODULE = resolve(PROFILE_DIR, "index.ts");
 
 /**
@@ -128,7 +129,7 @@ export function activeProfile(): ResolvedProfile {
 
 /** The slot key a profile module is shared under (lib/shared-module.ts), by its absolute path. */
 export function profileModuleKey(absolutePath: string): string {
-	return `one-code:profile-module:${absolutePath}`;
+	return brandedId(`profile-module:${absolutePath}`);
 }
 
 /**

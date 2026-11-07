@@ -18,10 +18,11 @@
  * (process memory) — an entitlement can change between sessions.
  */
 
+import { brandedId } from "./brand.mjs";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { modelSpec } from "./model-policy.ts";
 
-export const MODEL_UNUSABLE_CHANNEL = "one-code:model-unusable";
+export const MODEL_UNUSABLE_CHANNEL = brandedId("model-unusable");
 
 export interface ModelUnusableEvent {
 	/** `provider/id` of the model the account cannot run. */

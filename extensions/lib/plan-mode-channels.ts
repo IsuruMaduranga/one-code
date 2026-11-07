@@ -7,16 +7,18 @@
  * reader.
  */
 
+import { brandedId } from "./brand.mjs";
+
 /** Request a permission-mode change (`{ mode, toolCallId? }`); permissions applies it and anchors a tool-driven switch to its result. */
-export const MODE_CHANNEL = "one-code:set-permission-mode";
+export const MODE_CHANNEL = brandedId("set-permission-mode");
 /** Announces plan mode's one writable file (`{ path }`); the permissions matcher consumes it. */
-export const PLAN_FILE_CHANNEL = "one-code:plan-file-path";
+export const PLAN_FILE_CHANNEL = brandedId("plan-file-path");
 /**
  * Session entry type persisting plan mode's allocated path across resume/branch
  * (`{ path, sessionId?, copiedFrom? }`): the session that allocated it, and the
  * plan a fork's copy was taken from.
  */
-export const PLAN_FILE_ENTRY = "one-code:plan-mode-file";
+export const PLAN_FILE_ENTRY = brandedId("plan-mode-file");
 
 export interface PlanFileRecord {
 	path: string;

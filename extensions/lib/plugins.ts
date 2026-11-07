@@ -28,6 +28,7 @@
  * two plugins can both ship a `commit` command.
  */
 
+import { brandedId } from "./brand.mjs";
 import { featureEnabled } from "./profile.ts";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import os from "node:os";
@@ -323,7 +324,7 @@ export interface DiscoveredPlugins {
  * memo of filesystem state (not steering state — the module-isolation rule in
  * CLAUDE.md is about *that*), read-through, cleared everywhere at once.
  */
-const CACHE_SLOT = Symbol.for("one-code:plugins-discovery-cache");
+const CACHE_SLOT = Symbol.for(brandedId("plugins-discovery-cache"));
 type CacheBox = { current?: { key: string; result: DiscoveredPlugins } };
 const box: CacheBox = ((globalThis as Record<symbol, unknown>)[CACHE_SLOT] ??= {}) as CacheBox;
 

@@ -6,7 +6,9 @@
  * `{ name, keywords? }`; tool-search is the one listener.
  */
 
-export const DEFER_CHANNEL = "one-code:defer-tool";
+import { brandedId } from "./brand.mjs";
+
+export const DEFER_CHANNEL = brandedId("defer-tool");
 
 export interface DeferRequest {
 	name: string;

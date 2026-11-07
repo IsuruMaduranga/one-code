@@ -21,6 +21,7 @@
  * extension (jiti gives each extension its own module instance).
  */
 
+import { brandedId } from "../lib/brand.mjs";
 import { feature } from "../lib/feature.ts";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -73,7 +74,7 @@ function readOrEmpty(path: string): string {
 }
 
 /** A tool result and the nested instruction files it carried into context (`remember`). */
-const NESTED_SHOWN_ENTRY = "one-code:nested-instructions-shown";
+const NESTED_SHOWN_ENTRY = brandedId("nested-instructions-shown");
 
 function claudeContextExtension(pi: ExtensionAPI) {
 	const resetConsentDialogs = installConsentDialogs(pi.events);

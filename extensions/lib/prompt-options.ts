@@ -18,7 +18,9 @@
  * The same module carries the fork's system-prompt request (below).
  */
 
-export const PROMPT_OPTIONS_CHANNEL = "one-code:prompt-options";
+import { brandedId } from "./brand.mjs";
+
+export const PROMPT_OPTIONS_CHANNEL = brandedId("prompt-options");
 
 /**
  * Whether a `before_agent_start` event opens a run the user typed. pi 1.2.0
@@ -65,7 +67,7 @@ export function announcePromptOptions(events: { emit(channel: string, data: unkn
  * request carries; no answer (not loaded, a named agent's own prompt, nothing
  * to build from) leaves the caller's fallback.
  */
-export const SYSTEM_PROMPT_REQUEST_CHANNEL = "one-code:system-prompt-request";
+export const SYSTEM_PROMPT_REQUEST_CHANNEL = brandedId("system-prompt-request");
 
 export interface SystemPromptRequest {
 	/** The requester's context: cwd and model shape the prompt. */

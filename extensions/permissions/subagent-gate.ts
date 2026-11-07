@@ -19,11 +19,12 @@
  * same shape as `MCP_TOOLS_CHANNEL` sharing tool definitions).
  */
 
+import { brandedId } from "../lib/brand.mjs";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { type BridgeWatchApi, watchBridge } from "../lib/bridge-watch.ts";
 import { refusalText } from "./words.ts";
 
-export const SUBAGENT_GATE_CHANNEL = "one-code:subagent-permission-gate";
+export const SUBAGENT_GATE_CHANNEL = brandedId("subagent-permission-gate");
 
 /** One child tool call to evaluate. `cwd` is the child's runtime cwd (a worktree, if isolated). */
 export interface ChildToolCall {

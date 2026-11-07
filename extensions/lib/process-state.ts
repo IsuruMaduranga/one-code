@@ -21,7 +21,9 @@
  * Pure: no pi imports.
  */
 
-const SLOT = Symbol.for("one-code:process-state");
+import { brandedId } from "./brand.mjs";
+
+const SLOT = Symbol.for(brandedId("process-state"));
 
 type Store = Map<string, unknown>;
 

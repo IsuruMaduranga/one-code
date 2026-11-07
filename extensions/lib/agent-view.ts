@@ -8,6 +8,7 @@
  * owns the editor and paints it (extensions share no module state).
  */
 
+import { brandedId } from "./brand.mjs";
 import { fitPainted, visibleWidth } from "./text-width.ts";
 import { cutPlainText } from "./tui-render.ts";
 import { notificationWords } from "./notification-words.ts";
@@ -15,7 +16,7 @@ import { around, fillOf, memoOn } from "./template-probe.ts";
 import type { NotificationsText } from "./notifications-text.ts";
 
 /** `{ target }` while an agent is viewed, `{}` when the view returns to main. */
-export const AGENT_VIEW_CHANNEL = "one-code:agent-view";
+export const AGENT_VIEW_CHANNEL = brandedId("agent-view");
 
 export interface AgentViewTarget {
 	/** The top-border label: `@<name>` for a fork, the run's description otherwise. */

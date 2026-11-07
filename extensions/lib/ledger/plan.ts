@@ -10,18 +10,19 @@
  *
  * Pure: no pi imports.
  */
+import { brandedId } from "../brand.mjs";
 import type { FoldedRequest, LedgerFold } from "./fold.ts";
 import type { Coverage, EpochCause, ToldFact } from "./records.ts";
 
 /** Published by the ledger's `context` hook, once per request. */
-export const LEDGER_PLAN_CHANNEL = "one-code:ledger-plan";
+export const LEDGER_PLAN_CHANNEL = brandedId("ledger-plan");
 
 /**
  * Published by the ledger's payload hook with the request as it goes out
  * (`LedgerSent`): the spliced, validated body, before cache-marks adds its
  * look-back mark. A pi cache warm publishes it again.
  */
-export const LEDGER_SENT_CHANNEL = "one-code:ledger-sent";
+export const LEDGER_SENT_CHANNEL = brandedId("ledger-sent");
 
 export interface LedgerSent {
 	payload: Record<string, unknown>;

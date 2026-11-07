@@ -84,3 +84,42 @@ declare module "*/compaction-keep.mjs" {
 	export function keepWindowPrompt(settingsPath: string): string;
 	export function keepWindowFix(settingsPath: string, model?: string): string;
 }
+
+/** Types for the plain-JS brand module (extensions/lib/brand.mjs); `profile/brand.json` must satisfy `Brand` (brand.test.ts). */
+declare module "*/brand.mjs" {
+	export interface Brand {
+		/** Display name, in UI text: "One Code". */
+		readonly name: string;
+		/** Prefix of internal event and session-entry ids (`<idPrefix>:<name>`); fixed once, old sessions record it. */
+		readonly idPrefix: string;
+		/** The CLI command, settings labels and the app's own names: "onecode". */
+		readonly bin: string;
+		/** Prefix of the product's environment variables (`<envPrefix>_<suffix>`). */
+		readonly envPrefix: string;
+		/** The state directory's name under the home directory: ".onecode". */
+		readonly stateDir: string;
+		/** The product's own instruction file: "ONECODE.md". */
+		readonly productFile: string;
+		/** The theme seeded on first run. */
+		readonly theme: string;
+		/** The product's home page, quoted in user agents. */
+		readonly homepage: string;
+		/** The banner's tagline. */
+		readonly subtitle: string;
+		/** The banner's wordmark rows. */
+		readonly wordmark: readonly string[];
+		readonly packages: {
+			/** The bundled app's npm package. */
+			readonly app: string;
+			/** The extension package the app depends on. */
+			readonly extension: string;
+			/** The Homebrew formula, when the product ships one. */
+			readonly homebrewFormula?: string;
+		};
+	}
+	export function checkBrand(value: unknown): Brand;
+	export const brand: Brand;
+	export function brandedId(name: string): string;
+	export function envName(suffix: string): string;
+	export function productStateDir(env?: Record<string, string | undefined>, home?: string): string;
+}

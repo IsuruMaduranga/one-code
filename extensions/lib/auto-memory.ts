@@ -10,6 +10,7 @@
  * a change applies from the next start.
  */
 
+import { brandedId } from "./brand.mjs";
 import { featureEnabled } from "./profile.ts";
 import os from "node:os";
 import { readSettingsFile, settingsSources } from "./claude-settings.ts";
@@ -57,7 +58,7 @@ export function readAutoMemory(cwd: string, home: string = os.homedir(), env: Re
 	return autoMemoryFromEnv(env) ?? savedAutoMemory(cwd, home);
 }
 
-const AUTO_MEMORY_SLOT = Symbol.for("one-code:auto-memory");
+const AUTO_MEMORY_SLOT = Symbol.for(brandedId("auto-memory"));
 
 /**
  * Whether auto-memory is on for this process: read once (for the first

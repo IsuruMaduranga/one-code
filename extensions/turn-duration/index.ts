@@ -13,6 +13,7 @@
  * background shells outlive the turn, `· N shells still running`.
  */
 
+import { brandedId } from "../lib/brand.mjs";
 import { feature } from "../lib/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { trackShellTasks } from "../lib/shell-tasks.ts";
@@ -21,7 +22,7 @@ import { formatDoneAt, TURN_MARK, turnDurationText } from "./line.ts";
 import { TurnSpan } from "./span.ts";
 import { pickCompletionVerb } from "./verbs.ts";
 
-const ENTRY_TYPE = "one-code:turn-duration";
+const ENTRY_TYPE = brandedId("turn-duration");
 
 interface TurnDurationData {
 	verb: string;

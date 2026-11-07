@@ -44,6 +44,7 @@
  * (settings, consent, logging) and a payload naming the child.
  */
 
+import { brandedId } from "../lib/brand.mjs";
 import { feature } from "../lib/feature.ts";
 import { randomUUID } from "node:crypto";
 import { contentText } from "@earendil-works/pi-ai";
@@ -119,7 +120,7 @@ interface HookDispatchCtx {
 const MAX_STOP_CONTINUATIONS = 8;
 
 /** The customType of the Stop hook's continuation message. */
-const STOP_CONTINUATION_TYPE = "one-code:hook-stop";
+const STOP_CONTINUATION_TYPE = brandedId("hook-stop");
 
 /** Whether a `before_agent_start` opens the Stop hook's own continuation run (pi 1.2.0 fires it for custom runs). */
 function isStopContinuation(event: unknown): boolean {

@@ -1,0 +1,24 @@
+{
+	"name": "One Code",
+	"idPrefix": "one-code",
+	"bin": "onecode",
+	"envPrefix": "ONECODE",
+	"stateDir": ".onecode",
+	"productFile": "ONECODE.md",
+	"theme": "onecode",
+	"homepage": "https://github.com/IsuruMaduranga/one-code",
+	"subtitle": "the Claude Code experience, on any model",
+	"wordmark": [
+		" ██████╗ ███╗   ██╗███████╗   ██████╗ ██████╗ ██████╗ ███████╗",
+		"██╔═══██╗████╗  ██║██╔════╝  ██╔════╝██╔═══██╗██╔══██╗██╔════╝",
+		"██║   ██║██╔██╗ ██║█████╗    ██║     ██║   ██║██║  ██║█████╗",
+		"██║   ██║██║╚██╗██║██╔══╝    ██║     ██║   ██║██║  ██║██╔══╝",
+		"╚██████╔╝██║ ╚████║███████╗  ╚██████╗╚██████╔╝██████╔╝███████╗",
+		" ╚═════╝ ╚═╝  ╚═══╝╚══════╝   ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝"
+	],
+	"packages": {
+		"app": "@one-ai/one-code",
+		"extension": "one-code-extension",
+		"homebrewFormula": "onecode"
+	}
+}

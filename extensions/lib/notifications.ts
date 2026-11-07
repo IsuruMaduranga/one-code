@@ -29,6 +29,7 @@
  * by test/unit/notification-fidelity.test.ts. The delivery engine
  * (`createTaskNotifier`, further down) is unchanged by the frame shape.
  */
+import { brandedId } from "./brand.mjs";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { type ExtensionAPI, type ExtensionContext, VERSION as PI_VERSION } from "@earendil-works/pi-coding-agent";
@@ -457,7 +458,7 @@ export interface TaskNotifier {
  * agents as well: the model already holds the output, so the notification
  * would only cost it a turn to say "nothing new".
  */
-export const TASK_OUTPUT_DELIVERED_CHANNEL = "one-code:task-output-delivered";
+export const TASK_OUTPUT_DELIVERED_CHANNEL = brandedId("task-output-delivered");
 export interface TaskOutputDelivered {
 	taskId: string;
 }
@@ -947,7 +948,7 @@ export function createUserMessageSender(pi: Pick<ExtensionAPI, "on" | "sendUserM
 	let previous = Promise.resolve();
 	// Each extension has its own module instance. Reserve the same position in
 	// all senders through the session bus, not shared module state.
-	pi.events.on("one-code:user-turn-queue", (data) => {
+	pi.events.on(brandedId("user-turn-queue"), (data) => {
 		if (!active) return;
 		const reservation = data as { before: Promise<void>[]; done: Promise<void> };
 		reservation.before.push(previous);
@@ -985,7 +986,7 @@ export function createUserMessageSender(pi: Pick<ExtensionAPI, "on" | "sendUserM
 		}
 		let release!: () => void;
 		const reservation = { before: [] as Promise<void>[], done: new Promise<void>((resolve) => { release = resolve; }) };
-		pi.events.emit("one-code:user-turn-queue", reservation);
+		pi.events.emit(brandedId("user-turn-queue"), reservation);
 		await withKeepAlive(async () => {
 			let start!: () => void;
 			let fail!: (error: Error) => void;

@@ -10,25 +10,27 @@
  * Pure: no pi imports.
  */
 
+import { brandedId } from "../brand.mjs";
+
 export const LEDGER_VERSION = 1;
 
 export const RECORD = {
 	/** One request as sent, as a delta against the previous one on the branch. */
-	request: "one-code:request",
+	request: brandedId("request"),
 	/** What each injected block announced (tool names, skills, a mode switch, a delivered pending item). */
-	told: "one-code:told",
+	told: brandedId("told"),
 	/** Durable session state, latest entry per key wins. */
-	state: "one-code:state",
+	state: brandedId("state"),
 	/** Produced for the model, not yet sent. */
-	pending: "one-code:pending",
+	pending: brandedId("pending"),
 	/**
 	 * An epoch opens at the next request: written right before the record of a
 	 * request that opened one, and by an owner that must change the history
 	 * above the append point (the no-op loop fold) to make the next one open.
 	 */
-	epoch: "one-code:epoch",
+	epoch: brandedId("epoch"),
 	/** Written at every `/tree`: pi keeps the leaf move only in memory. */
-	branch: "one-code:branch",
+	branch: brandedId("branch"),
 } as const;
 
 export type RecordKind = keyof typeof RECORD;

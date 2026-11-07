@@ -4,4 +4,6 @@
  * What should One Code do instead?" note for that abort: the user has already
  * said what to do instead.
  */
-export const SEND_NOW_CHANNEL = "one-code:send-now";
+
+import { brandedId } from "./brand.mjs";
+export const SEND_NOW_CHANNEL = brandedId("send-now");

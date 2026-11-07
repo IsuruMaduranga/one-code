@@ -13,8 +13,10 @@
  * Pure: no pi imports.
  */
 
-export const SKILL_BODY_CHANNEL = "one-code:skill-body";
-export const SLASH_EXPAND_CHANNEL = "one-code:slash-expand";
+import { brandedId } from "./brand.mjs";
+
+export const SKILL_BODY_CHANNEL = brandedId("skill-body");
+export const SLASH_EXPAND_CHANNEL = brandedId("slash-expand");
 
 export interface SkillBodyQuery {
 	/** The skill's name. */

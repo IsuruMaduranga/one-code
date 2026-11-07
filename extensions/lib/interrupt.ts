@@ -34,15 +34,17 @@
  * carry the outcome over from the runs' `agent_end`. Findings §3.
  */
 
+import { brandedId } from "./brand.mjs";
+
 /** A one-shot command failed before its user turn could settle (no agent_end to classify). */
-export const ONE_SHOT_COMMAND_FAILED_CHANNEL = "one-code:one-shot-command-failed";
+export const ONE_SHOT_COMMAND_FAILED_CHANNEL = brandedId("one-shot-command-failed");
 
 /**
  * The harness stopped the current turn as a failure (a broken provider stream,
  * a classifier that cannot judge). Emit it before `ctx.abort()`: the run then
  * ends `aborted`, which alone reads as a user cancel and exits 0.
  */
-export const TURN_FAILED_CHANNEL = "one-code:turn-failed";
+export const TURN_FAILED_CHANNEL = brandedId("turn-failed");
 export interface TurnFailedEvent {
 	reason: string;
 }

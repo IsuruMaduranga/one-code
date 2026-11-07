@@ -27,6 +27,7 @@
  * overrides the 5-minute delay.
  */
 
+import { brandedId } from "../lib/brand.mjs";
 import { feature } from "../lib/feature.ts";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
@@ -43,7 +44,7 @@ import { requireText } from "../lib/profile.ts";
 import { recapLine, recentForRecap, REFERENCE_MARK } from "./prompt.ts";
 import { RecapScheduler } from "./scheduler.ts";
 
-const ENTRY_TYPE = "one-code:recap";
+const ENTRY_TYPE = brandedId("recap");
 const DEFAULT_IDLE_MS = 5 * 60_000; // CC's BLUR_DELAY_MS
 const RECAP_MAX_TOKENS = 256; // 1-3 short sentences
 const RECAP_TIMEOUT_MS = 30_000;

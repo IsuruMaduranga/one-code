@@ -11,7 +11,9 @@
  * restore.
  */
 
-export const WORKTREE_CHANNEL = "one-code:worktree";
+import { brandedId } from "./brand.mjs";
+
+export const WORKTREE_CHANNEL = brandedId("worktree");
 
 /** Payload: the active worktree, or null when the session left it. */
 export interface WorktreeLocation {

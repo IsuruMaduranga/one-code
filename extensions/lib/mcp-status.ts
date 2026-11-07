@@ -10,8 +10,10 @@
  * long after the mcp extension's connect events fired.
  */
 
-export const MCP_STATUS_REQUEST_CHANNEL = "one-code:mcp-status-request";
-export const MCP_STATUS_CHANNEL = "one-code:mcp-status";
+import { brandedId } from "./brand.mjs";
+
+export const MCP_STATUS_REQUEST_CHANNEL = brandedId("mcp-status-request");
+export const MCP_STATUS_CHANNEL = brandedId("mcp-status");
 
 export type McpStatusKind = "connected" | "failed" | "authNeeded" | "connecting" | "disabled";
 

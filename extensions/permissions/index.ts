@@ -17,6 +17,7 @@
  *   write to `.git/hooks` or `.claude`.
  */
 
+import { brandedId } from "../lib/brand.mjs";
 import { feature } from "../lib/feature.ts";
 import os from "node:os";
 import { join } from "node:path";
@@ -175,7 +176,7 @@ const classifierBlockReason = (outcome: { tier?: string; noVerdict?: boolean; re
 	});
 
 /** The hidden message a /permissions retry starts its turn with. */
-const PERMISSION_RETRY_TYPE = "one-code:permission-retry";
+const PERMISSION_RETRY_TYPE = brandedId("permission-retry");
 /** Claude Code's denial notification: the tool, the reason cut to 80 columns, and where to act on it. */
 const deniedNotice = (toolName: string, reason: string): string =>
 	`${toolName} denied by auto mode · ${reason.length > 80 ? `${reason.slice(0, 79)}…` : reason} · /permissions`;

@@ -8,10 +8,11 @@
  * connection map, so they must only ever be used in the same process.
  */
 
+import { brandedId } from "./brand.mjs";
 import { featureEnabled } from "./profile.ts";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
-export const MCP_TOOLS_CHANNEL = "one-code:mcp-tools";
+export const MCP_TOOLS_CHANNEL = brandedId("mcp-tools");
 
 export interface McpToolsPayload {
 	/** Every MCP tool currently registered on the parent session (re-published as servers connect). */

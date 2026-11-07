@@ -17,7 +17,9 @@
  * no longer on screen.
  */
 
-export const PANEL_FOCUS_CHANNEL = "one-code:panel-focus";
+import { brandedId } from "./brand.mjs";
+
+export const PANEL_FOCUS_CHANNEL = brandedId("panel-focus");
 
 /** One panel's focus change; `id` is an object unique to the panel. */
 export interface PanelFocusEvent {

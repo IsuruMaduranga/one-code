@@ -16,6 +16,7 @@
  * rejected. Fire times carry Claude Code's deterministic jitter (`JITTER`).
  */
 
+import { brandedId } from "../lib/brand.mjs";
 import { randomUUID } from "node:crypto";
 import { Type } from "typebox";
 import { sliceColumns, visibleWidth } from "../lib/text-width.ts";
@@ -421,13 +422,13 @@ type BranchEntry = { type?: string; timestamp?: string; customType?: string; det
  * whatever way its notification is then delivered: a fire sent as a plain user
  * message (no turn prompted since a /reload) carries no details.
  */
-export const JOB_FIRED_ENTRY = "one-code:job-fired";
+export const JOB_FIRED_ENTRY = brandedId("job-fired");
 
 /**
  * The custom entry the loop's keepalive writes when it arms a wakeup itself
  * (`{ id, prompt, fireAt, startedAt }`): no `schedule_wakeup` result records that one.
  */
-export const WAKEUP_ARMED_ENTRY = "one-code:wakeup-armed";
+export const WAKEUP_ARMED_ENTRY = brandedId("wakeup-armed");
 type Message = { role?: string; toolName?: string; toolCallId?: string; isError?: boolean; details?: unknown; content?: unknown; timestamp?: number };
 
 /**

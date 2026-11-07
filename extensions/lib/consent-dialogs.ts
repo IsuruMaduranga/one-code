@@ -1,5 +1,8 @@
 /** Serialize startup consent modals over the event bus (jiti modules cannot share a queue). */
-const CHANNEL = "one-code:consent-dialog";
+
+import { brandedId } from "./brand.mjs";
+
+const CHANNEL = brandedId("consent-dialog");
 interface Events {
 	emit(channel: string, data: unknown): void;
 	on(channel: string, listener: (data: unknown) => void): unknown;

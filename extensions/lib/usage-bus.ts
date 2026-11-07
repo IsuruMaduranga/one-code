@@ -12,7 +12,9 @@
  * swallows its own errors — accounting must never break a tool path.
  */
 
-export const USAGE_CHANNEL = "one-code:usage-recorded";
+import { brandedId } from "./brand.mjs";
+
+export const USAGE_CHANNEL = brandedId("usage-recorded");
 
 /**
  * Session entry type each record is persisted under (`pi.appendEntry`), so the
@@ -20,7 +22,7 @@ export const USAGE_CHANNEL = "one-code:usage-recorded";
  * (the bus is live-only; the entries are the durable ledger the footer sums).
  * Custom entries never enter the LLM context.
  */
-export const USAGE_ENTRY_TYPE = "one-code:usage";
+export const USAGE_ENTRY_TYPE = brandedId("usage");
 
 export type UsageSource = "subagent" | "classifier" | "reader" | "web-fetch" | "web-search" | "recap" | "session-title" | "setup" | "btw";
 
