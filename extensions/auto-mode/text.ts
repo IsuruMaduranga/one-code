@@ -3,9 +3,9 @@
  * the note a session opening in auto mode gets, the retry note after the
  * user grants denied calls, and why a call was blocked (the classifier's
  * reasons and the safety floor's). The permission gate frames a block for
- * the model. The classifier's own prompt (the ruleset and its stage
- * instructions) and the `/auto-mode setup` drafting prompt move with the
- * ruleset (working-docs/features/profiles/plan.md, Phase 5).
+ * the model. The classifier's own prompt (`ClassifierText`, the ruleset and
+ * its stage instructions) and the `/auto-mode setup` drafting prompt
+ * (`AutoModeSetupText`) are their own groups, below.
  */
 
 
@@ -63,6 +63,12 @@ export interface AutoModeText {
  * `rulesetHead`, the user's hard-deny, soft-deny and allow rules after each
  * section, and the username in `sessionContext`. One Code's is Claude Code's
  * prompt, generated (profile/text/auto-mode/ruleset.ts).
+ *
+ * The base also reads the assembled text, so a ruleset must keep three shapes:
+ * the rule lists sit under the headings `## HARD BLOCK`, `## SOFT BLOCK` and
+ * `## ALLOW (exceptions)`, each rule a top-level `- Name: …` bullet
+ * (rules.ts, which maps a cited block to its rule); and the stage finals ask
+ * for the reply tags prompt.ts parses (`<severity>`, `<category>`, `<intent>`).
  */
 export interface ClassifierRuleset {
 	rulesetHead: string;

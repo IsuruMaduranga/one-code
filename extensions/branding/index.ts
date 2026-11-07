@@ -15,14 +15,14 @@
 
 import { brand } from "../lib/brand.mjs";
 import { feature } from "../lib/feature.ts";
+import { PROFILE_DIR } from "../lib/profile.ts";
 import { existsSync, readFileSync } from "node:fs";
 import { ARGUMENT_HINT_CHANNEL, type ArgumentHint, type CommandHint, frontmatterCommandHint, hintForInput, PI_BUILTIN_HINTS } from "../lib/argument-hints.ts";
 import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
 import { promptTemplateFiles } from "../lib/skill-scan.ts";
 import { modeCycleKey } from "../lib/keys.ts";
 import os from "node:os";
-import { fileURLToPath } from "node:url";
-import { basename, dirname, join } from "node:path";
+import { basename, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 // pi's loader maps this import to pi's own module, so keyText reads the keybindings pi loaded.
 import { getAgentDir, keyText as piKeyText, SettingsManager, VERSION as PI_VERSION } from "@earendil-works/pi-coding-agent";
@@ -495,7 +495,7 @@ function brandingExtension(pi: ExtensionAPI) {
 		// Use pi's effective settings, including project overrides, so the two
 		// listings agree on whether quiet startup is enabled.
 		const sections = quietStartupEnabled(effectiveQuietStartup(agentDir))
-			? collectStartupSections(ctx.cwd, home, join(dirname(fileURLToPath(import.meta.url)), "..", "..", "profile", "themes"), agentDir)
+			? collectStartupSections(ctx.cwd, home, join(PROFILE_DIR, "themes"), agentDir)
 			: undefined;
 
 		ctx.ui.setHeader((tui: unknown, theme: unknown) => {

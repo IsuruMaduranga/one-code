@@ -87,25 +87,25 @@ export interface ProfileText {
 	compaction?: CompactionText;
 	workflow?: WorkflowText;
 	/** Read by the permission gate, which always runs: a profile must supply it. */
-	autoMode?: AutoModeText;
-	/** The auto-mode classifier's prompt (One Code's: Claude Code's ruleset, generated). */
-	classifier?: ClassifierText;
-	/** The `/auto-mode setup` drafting call. */
-	autoModeSetup?: AutoModeSetupText;
+	autoMode: AutoModeText;
+	/** The auto-mode classifier's prompt (One Code's: Claude Code's ruleset, generated): the permission gate always runs, so a profile must supply it. */
+	classifier: ClassifierText;
+	/** The `/auto-mode setup` drafting call, part of the permission gate: a profile must supply it. */
+	autoModeSetup: AutoModeSetupText;
 	/** Used by bash and powershell (lib/shell-tool.ts). */
 	shell?: ShellText;
 	doctor?: DoctorText;
 	/** The shared notification frames (lib/notifications.ts): every session uses them, so a profile must supply them. */
-	notifications?: NotificationsText;
+	notifications: NotificationsText;
 	/** The base's shared result rewrites (empty results, persisted output, a user's denial): a profile must supply them. */
-	toolResults?: ToolResultsText;
+	toolResults: ToolResultsText;
 	toolCallCorruption?: ToolCallCorruptionText;
 	/** The first-message context (instructions, context block, date, environment, git status): every session sends it, so a profile must supply it. */
-	context?: ContextText;
+	context: ContextText;
 	/** tool-search is part of the required core: a profile must supply it. */
-	toolSearch?: ToolSearchText;
+	toolSearch: ToolSearchText;
 	/** The permission gate always runs: a profile must supply it. */
-	permissions?: PermissionsText;
+	permissions: PermissionsText;
 	/** Every child session (subagents, forks, workflow agents) hands back through it. */
 	handback?: HandbackText;
 	subagents?: SubagentsText;

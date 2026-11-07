@@ -9,7 +9,7 @@
  *                                                    Claude Code's $ARGUMENTS works as-is)
  *
  * It also points discovery at the catalog of skills bundled with this package
- * (`<package>/skills`) — Claude Code's self-contained built-in skills, which
+ * (`<package>/profile/skills`) — Claude Code's self-contained built-in skills, which
  * ship inside its binary rather than on disk, so nothing else would surface
  * them. See working-docs/decisions/skills-plugins.md and working-docs/findings (the extraction
  * process is recorded in .claude/skills/extract-cc-skills/).

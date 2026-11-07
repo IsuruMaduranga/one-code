@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { Profile } from "../../extensions/lib/profile-contract.ts";
 import { resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile.ts";
 import { buildClaudeCodeSystemPrompt } from "../../extensions/system-prompt/template.ts";
+import { profile as shipped } from "../../profile/index.ts";
 import type { SystemPromptSection, SystemPromptText } from "../../extensions/system-prompt/text.ts";
 
 const markers: SystemPromptText = {
@@ -20,7 +21,7 @@ const markers: SystemPromptText = {
 };
 
 const use = (systemPrompt: SystemPromptText) => {
-	const profile: Profile = { features: {}, tools: {}, childExtensions: [], text: () => ({ systemPrompt }) };
+	const profile: Profile = { features: {}, tools: {}, childExtensions: [], text: (options) => ({ ...shipped.text(options), systemPrompt }) };
 	setActiveProfileForTest(resolveProfile(profile, {}, "/profile"));
 };
 

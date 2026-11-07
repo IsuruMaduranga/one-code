@@ -52,8 +52,7 @@ import { CLASSIFIER_SETTING_CHANGED_CHANNEL } from "../lib/settings-channels.ts"
 import { readSuggestNewerModels, SETTINGS_DISPLAY } from "../lib/product-settings.ts";
 import { auditPermissionAllow, renderProposal, settingsPatch } from "../auto-mode/setup.ts";
 import { draftSetup, gatherFacts } from "../auto-mode/setup-run.ts";
-import { defaultEnvironment } from "../auto-mode/defaults.ts";
-import { buildRuleset } from "../auto-mode/classifier-prompt.ts";
+import { buildRuleset, defaultEnvironment } from "../auto-mode/classifier-prompt.ts";
 import type { TranscriptEntry } from "../auto-mode/transcript.ts";
 import { childHistoryCursor, classifierHistory, CLASSIFIER_TOOL_META, CLASSIFIER_USER_INPUT, type HistoryCursor, messageText, userMessageDigest } from "../auto-mode/history.ts";
 import { appendDecision, type DecisionEntry, decisionEntry } from "../auto-mode/decision-log.ts";

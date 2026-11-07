@@ -1,16 +1,13 @@
 /**
- * Built-in auto-mode configuration defaults.
+ * Built-in auto-mode configuration helpers.
  *
- * The ruleset itself is no longer configurable prose lists — the classifier
- * ruleset is the profile's fixed text (One Code's: Claude Code's classifier,
- * classifier-prompt.ts and working-docs/decisions/auto-mode.md). The one
- * customization surface Claude Code exposes, and the only one we expose, is the
- * `## Environment` section: `defaultEnvironment()` is the profile's default slot
- * text, and a user's `autoMode.environment` entries replace it. Re-exported here
- * so config.ts has a single stable import point.
+ * The classifier ruleset is not configurable prose lists: it is the profile's
+ * fixed text (One Code's: Claude Code's classifier; working-docs/decisions/auto-mode.md).
+ * The one customization surface Claude Code exposes, and the only one we
+ * expose, is the `## Environment` section: `defaultEnvironment()`
+ * (classifier-prompt.ts) is the profile's default slot text, and a user's
+ * `autoMode.environment` entries replace it.
  */
-
-export { defaultEnvironment } from "./classifier-prompt.ts";
 
 /**
  * The `**Name**:` head of an Environment slot line, or undefined for header

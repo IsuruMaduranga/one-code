@@ -35,12 +35,15 @@ const DRAFT_MAX_TOKENS = 8192;
 const CLAUDE_MD_LIMIT = 4_000;
 const HISTORY_LINES = 200;
 
+/** The profile's notes on facts that could not be gathered. */
+const setupNotes = () => requireText("autoModeSetup").notes;
+
 /** One probe: run a command, return trimmed stdout, or undefined on any failure. */
 function probe(cmd: string, args: string[], cwd: string, notes: string[], what: string): Promise<string | undefined> {
 	return new Promise((resolve) => {
 		execFile(cmd, args, { cwd, timeout: PROBE_TIMEOUT_MS, maxBuffer: 1024 * 1024 }, (error, stdout) => {
 			if (error) {
-				notes.push(requireText("autoModeSetup").notes.probeFailed(what, cmd, error.message.split("\n")[0]));
+				notes.push(setupNotes().probeFailed(what, cmd, error.message.split("\n")[0]));
 				resolve(undefined);
 			} else {
 				resolve(stdout.trim());
@@ -61,7 +64,7 @@ const readIfPresent = (path: string, limit: number, notes: string[], what: strin
 		const text = readFileSync(path, "utf-8");
 		return text.length > limit ? `${text.slice(0, limit)}\n…[truncated]` : text;
 	} catch (error) {
-		notes.push(requireText("autoModeSetup").notes.unreadable(what, (error as Error).message.split("\n")[0]));
+		notes.push(setupNotes().unreadable(what, (error as Error).message.split("\n")[0]));
 		return undefined;
 	}
 };
@@ -106,7 +109,7 @@ export async function gatherFacts(options: GatherOptions): Promise<SetupFacts> {
 			repoNameWithOwner = parsed.nameWithOwner;
 			defaultBranch = parsed.defaultBranchRef?.name;
 		} catch {
-			notes.push(requireText("autoModeSetup").notes.visibilityUnknown);
+			notes.push(setupNotes().visibilityUnknown);
 		}
 	}
 
@@ -124,10 +127,10 @@ export async function gatherFacts(options: GatherOptions): Promise<SetupFacts> {
 				.map((line) => redactSecrets(line.replace(/^:\s*\d+:\d+;/, "").trim()))
 				.filter(Boolean);
 		} else {
-			notes.push(requireText("autoModeSetup").notes.noShellHistory);
+			notes.push(setupNotes().noShellHistory);
 		}
 	} else {
-		notes.push(requireText("autoModeSetup").notes.historyDeclined);
+		notes.push(setupNotes().historyDeclined);
 	}
 
 	// User-scope permissions.allow — audit input, and evidence for carve-outs. Both
@@ -143,7 +146,7 @@ export async function gatherFacts(options: GatherOptions): Promise<SetupFacts> {
 		// a malformed `.claude` file must land in notes so the drafting evidence
 		// sees "present but unreadable", not silently "no broad rules here".
 		if (file === undefined && isBorrowedUserFile(source) && existsSync(path)) {
-			notes.push(requireText("autoModeSetup").notes.allowUnreadable);
+			notes.push(setupNotes().allowUnreadable);
 			continue;
 		}
 		const allow = file?.permissions?.allow;

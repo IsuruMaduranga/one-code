@@ -26,7 +26,7 @@
  *
  * ## The customization surface (CC 2.1.233's own)
  *
- * The ruleset is CC's fixed monolith (classifier-prompt.ts); its prose is not
+ * The ruleset is CC's fixed monolith (the profile's ruleset text); its prose is not
  * user-editable, by design — the ruleset *is* the security boundary. What CC's
  * `/auto-mode-setup` exposes (and we mirror exactly) is:
  *
@@ -50,7 +50,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { isBorrowedUserFile, isRepoFile, settingsSources } from "../lib/claude-settings.ts";
 import type { SettingsFile } from "../lib/sources.ts";
 import { productSettingsPath, readSettingsForWrite, SETTINGS_DISPLAY, writeSettings } from "../lib/product-settings.ts";
-import { defaultEnvironment, slotName } from "./defaults.ts";
+import { defaultEnvironment } from "./classifier-prompt.ts";
+import { slotName } from "./defaults.ts";
 
 export interface AutoModeConfig {
 	/** Environment slot lines spliced into CC's ruleset (prefix-less, CC's settings format). */

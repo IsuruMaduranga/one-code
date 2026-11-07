@@ -11,7 +11,7 @@ import {
 	persistClassifierModel,
 	spliceDefaults,
 } from "../../extensions/auto-mode/config.ts";
-import { defaultEnvironment } from "../../extensions/auto-mode/defaults.ts";
+import { defaultEnvironment } from "../../extensions/auto-mode/classifier-prompt.ts";
 
 let home: string;
 

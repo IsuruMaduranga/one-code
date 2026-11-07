@@ -366,7 +366,7 @@ export interface CompatInput {
 	home: string;
 	agentDir: string;
 	env: NodeJS.ProcessEnv;
-	/** `<package>/agents`, so bundled agents are counted. */
+	/** `<package>/profile/agents`, so bundled agents are counted. */
 	bundledAgentsDir?: string;
 	/** pi's `CONFIG_DIR_NAME` (`.pi` when absent): where the project's pi `mcp.json` is. */
 	piConfigDirName?: string;
