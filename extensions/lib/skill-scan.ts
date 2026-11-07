@@ -25,8 +25,8 @@ import { openSources, projectConfigDir, type SkillDir, userConfigDir } from "./s
 import { isPathAtOrUnder, tryRealpath } from "./paths.ts";
 import { parseFrontmatterLoosely } from "./frontmatter.ts";
 
-/** The skill catalog shipped in this package: `<package>/skills` (Claude Code's self-contained built-in skills). */
-export const BUNDLED_SKILLS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "skills");
+/** The profile's skill catalog, `<package>/profile/skills` (One Code's: Claude Code's self-contained built-in skills). */
+export const BUNDLED_SKILLS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "profile", "skills");
 
 export interface ScannedSkill {
 	name: string;

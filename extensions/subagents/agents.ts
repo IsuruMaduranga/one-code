@@ -184,8 +184,8 @@ export function agentDirs(cwd: string, home: string, bundled?: string): string[]
 	return [...(bundled ? [bundled] : []), join(userConfigDir(home), "agents"), join(projectConfigDir(cwd), "agents")];
 }
 
-/** The agent files the package ships (general-purpose, explore, plan, …). */
-export const BUNDLED_AGENTS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "agents");
+/** The profile's agent files (One Code's: general-purpose, explore, plan, …); `general-purpose` is the Agent tool's default. */
+export const BUNDLED_AGENTS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "profile", "agents");
 
 /**
  * Every agent-file source in rank order, as the Agent tool loads them:

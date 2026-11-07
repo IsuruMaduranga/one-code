@@ -16,7 +16,7 @@ thinkingOff thinkingMinimal thinkingLow thinkingMedium thinkingHigh thinkingXhig
 	.split(/\s+/)
 	.filter(Boolean);
 
-const themesDir = join(import.meta.dirname, "..", "..", "themes");
+const themesDir = join(import.meta.dirname, "..", "..", "profile", "themes");
 const themeFiles = readdirSync(themesDir).filter((f) => f.endsWith(".json"));
 
 describe("bundled themes", () => {

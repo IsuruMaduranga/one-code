@@ -81,15 +81,12 @@
 			"extensions/system-prompt/index.ts"
 		],
 		"themes": [
-			"./themes"
+			"./profile/themes"
 		]
 	},
 	"files": [
 		"extensions/",
 		"profile/",
-		"agents/",
-		"skills/",
-		"themes/",
 		"types/",
 		"README.md",
 		"LICENSE",

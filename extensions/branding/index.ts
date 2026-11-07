@@ -495,7 +495,7 @@ function brandingExtension(pi: ExtensionAPI) {
 		// Use pi's effective settings, including project overrides, so the two
 		// listings agree on whether quiet startup is enabled.
 		const sections = quietStartupEnabled(effectiveQuietStartup(agentDir))
-			? collectStartupSections(ctx.cwd, home, join(dirname(fileURLToPath(import.meta.url)), "..", "..", "themes"), agentDir)
+			? collectStartupSections(ctx.cwd, home, join(dirname(fileURLToPath(import.meta.url)), "..", "..", "profile", "themes"), agentDir)
 			: undefined;
 
 		ctx.ui.setHeader((tui: unknown, theme: unknown) => {
