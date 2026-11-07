@@ -12,9 +12,11 @@ describe("environment knobs", () => {
 		expect(readKnob("USE_POWERSHELL_TOOL", { ONECODE_USE_POWERSHELL_TOOL: "0", CLAUDE_CODE_USE_POWERSHELL_TOOL: "1" })).toEqual({ value: "0", name: "ONECODE_USE_POWERSHELL_TOOL", borrowed: false });
 	});
 
-	it("count a defined blank value as set, and ignore a non-string in a settings env block", () => {
+	it("let a blank spelling give way to a set one, keep a blank when nothing else is set, and ignore a non-string in a settings env block", () => {
 		resetConfigModeForTest("claude-compatible");
-		expect(knobValue("LOOP_KEEPALIVE", { ONECODE_LOOP_KEEPALIVE: "", CLAUDE_CODE_LOOP_KEEPALIVE: "1" })).toBe("");
+		expect(readKnob("LOOP_KEEPALIVE", { ONECODE_LOOP_KEEPALIVE: " ", CLAUDE_CODE_LOOP_KEEPALIVE: "1" })).toEqual({ value: "1", name: "CLAUDE_CODE_LOOP_KEEPALIVE", borrowed: true });
+		expect(readKnob("LOOP_KEEPALIVE", { ONECODE_LOOP_KEEPALIVE: "", CLAUDE_CODE_LOOP_KEEPALIVE: "" })).toEqual({ value: "", name: "ONECODE_LOOP_KEEPALIVE", borrowed: false });
+		expect(knobValue("LOOP_KEEPALIVE", { CLAUDE_CODE_LOOP_KEEPALIVE: "" })).toBe("");
 		expect(readKnob("SUBAGENT_MODEL", { ONECODE_SUBAGENT_MODEL: 5, CLAUDE_CODE_SUBAGENT_MODEL: "sonnet" })?.name).toBe("CLAUDE_CODE_SUBAGENT_MODEL");
 	});
 

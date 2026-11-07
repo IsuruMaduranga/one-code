@@ -6,6 +6,10 @@
  * app's dependency tree. It does four things before handing argv to pi's
  * `main()`:
  *
+ * Unlike the rest of lib/, this module is wiring, not a pure module: it imports
+ * pi (after the launcher environment is set) and patches its prototypes. Only
+ * the app's bin.mjs imports it; no extension or profile module may.
+ *
  * 1. Isolates all state under the brand's state dir (`~/.onecode`;
  *    PI_CODING_AGENT_DIR, set unconditionally; `<envPrefix>_AGENT_DIR`
  *    relocates it), so an existing `pi` install on the same machine is never

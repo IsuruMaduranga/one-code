@@ -24,7 +24,7 @@
 
 import { SETTINGS_DISPLAY } from "../lib/product-settings.ts";
 import { brand } from "../lib/brand.mjs";
-import { knobNames, readKnob } from "../lib/knobs.ts";
+import { readKnob } from "../lib/knobs.ts";
 import { SUBAGENT_MODEL_KNOB } from "../subagents/default-model.ts";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
@@ -280,9 +280,9 @@ function summarizeFile(source: SettingsFile, ladder: { primary?: SettingsFile; f
 		const keys = Object.keys(env);
 		if (known.has("env")) {
 			const knob = readKnob(SUBAGENT_MODEL_KNOB, env);
-			if (knob) report.used.push(`env.${knob.name} = "${knob.value}"`);
-			const knobs = knobNames(SUBAGENT_MODEL_KNOB);
-			const rest = keys.filter((k) => !knobs.includes(k));
+			const used = knob?.value.trim() ? knob.name : undefined;
+			if (used) report.used.push(`env.${used} = "${knob?.value}"`);
+			const rest = keys.filter((k) => k !== used);
 			if (rest.length) report.ignored.push(`env (${countNoun(rest.length, "variable")} — ${brand.name} does not export settings env blocks)`);
 		} else if (keys.length) {
 			report.refused.push(`env (${keys.length}) — a repository's env block is not applied`);

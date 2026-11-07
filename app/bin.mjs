@@ -10,7 +10,7 @@
  * version is checked: pi crashes on Node < 22.19 at import time (bundled
  * undici), so the friendly error must come first.
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -30,7 +30,20 @@ if (major < 22 || (major === 22 && minor < 19)) {
 	process.exit(1);
 }
 
+// The launcher lives in the extension package; an install that lacks it (a
+// missing or older extension copy) gets the fix, not a module-not-found trace.
 const require = createRequire(import.meta.url);
-const corePath = dirname(require.resolve(`${app.productExtension}/package.json`));
-const { createApp } = await import(pathToFileURL(join(corePath, "extensions", "lib", "create-app.mjs")).href);
+let createAppPath;
+try {
+	createAppPath = join(dirname(require.resolve(`${app.productExtension}/package.json`)), "extensions", "lib", "create-app.mjs");
+} catch {}
+if (!createAppPath || !existsSync(createAppPath)) {
+	process.stderr.write(
+		`${command} ${app.version} cannot start: ${createAppPath ? `the installed ${app.productExtension} package is from an older release` : `the ${app.productExtension} package is not installed`}.\n` +
+			`Reinstall the app: npm install -g ${app.name}\n`,
+	);
+	process.exit(1);
+}
+const corePath = dirname(dirname(dirname(createAppPath)));
+const { createApp } = await import(pathToFileURL(createAppPath).href);
 await createApp({ appVersion: app.version, corePath, argv: process.argv, resolve: (specifier) => import.meta.resolve(specifier) });

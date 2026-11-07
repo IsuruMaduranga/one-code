@@ -106,8 +106,8 @@ at the top are settings, and both take effect from the next session:
 - **Auto-memory** turns memory on or off. Off, the model gets no memory
   instructions and no `MEMORY.md` index, and the memory folder isn't
   offered. It's saved as `autoMemoryEnabled` in `~/.onecode/settings.json`,
-  Claude Code's setting name, and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`
-  overrides it.
+  Claude Code's setting name, and `ONECODE_DISABLE_AUTO_MEMORY=1` (or
+  Claude Code's `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`) overrides it.
 - **Config sources** switches between Claude-compatible and independent
   mode. It asks you to confirm with a second **Enter**.
 

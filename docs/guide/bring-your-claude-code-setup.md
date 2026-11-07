@@ -94,7 +94,7 @@ The keys One Code honors:
 | `permissions.additionalDirectories` | All | Project directories need one-time approval. See [Workspace directories](permissions-modes-and-auto-mode.md#workspace-directories). |
 | `autoMode.*` | User, managed | Never read from project files. See [Configure auto mode](permissions-modes-and-auto-mode.md#configure-auto-mode). |
 | `hooks` | All | Project hooks need one-time approval. See [Hooks](hooks.md). |
-| `env.CLAUDE_CODE_SUBAGENT_MODEL` | User, managed | The only `env` key read. |
+| `env.CLAUDE_CODE_SUBAGENT_MODEL` | User, managed | The only `env` key read, with One Code's `ONECODE_SUBAGENT_MODEL`. |
 | `enabledPlugins` | All | Later scope wins per plugin. |
 | `enabledMcpjsonServers`, `enableAllProjectMcpServers` | User | Never from a project file, local included. |
 | `disabledMcpjsonServers` | User, local | |

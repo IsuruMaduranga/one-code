@@ -24,20 +24,23 @@ optional; the section below says what it adds.
 
 | Tool | When it is active | What runs it |
 |---|---|---|
-| `powershell` | On by default on Windows. Off elsewhere unless `CLAUDE_CODE_USE_POWERSHELL_TOOL=1`. | `pwsh.exe`, else `powershell.exe`, from your PATH. On macOS and Linux, a `pwsh` on PATH. |
-| `bash` | Whenever a bash exists. | Git Bash (`Program Files\Git\bin\bash.exe`, then `bash.exe` on PATH), or the bash named by `CLAUDE_CODE_GIT_BASH_PATH`. |
+| `powershell` | On by default on Windows. Off elsewhere unless `ONECODE_USE_POWERSHELL_TOOL=1`. | `pwsh.exe`, else `powershell.exe`, from your PATH. On macOS and Linux, a `pwsh` on PATH. |
+| `bash` | Whenever a bash exists. | Git Bash (`Program Files\Git\bin\bash.exe`, then `bash.exe` on PATH), or the bash named by `ONECODE_GIT_BASH_PATH`. |
 
 When both are active, PowerShell is the primary shell: the system prompt says
 so and the model reaches for it first, with bash alongside for POSIX scripts.
-`CLAUDE_CODE_USE_POWERSHELL_TOOL=0` turns the PowerShell tool off and makes
+`ONECODE_USE_POWERSHELL_TOOL=0` turns the PowerShell tool off and makes
 bash primary again, which is the shape Claude Code had before 2.1.126.
 
 A Windows machine with neither Git for Windows nor PowerShell has no shell
 tool. One Code says so at startup, in Claude Code's words, and the fix is to
 install one of them.
 
-`CLAUDE_CODE_GIT_BASH_PATH` is read from your environment or from the `env`
-block of `~/.claude/settings.json`. A value that isn't a `bash` or `sh`
+`ONECODE_GIT_BASH_PATH` is read from your environment or from the `env`
+block of your user settings. Claude Code's spellings of these variables,
+`CLAUDE_CODE_USE_POWERSHELL_TOOL` and `CLAUDE_CODE_GIT_BASH_PATH`, work too in
+Claude-compatible mode; see [Variables with a Claude Code
+spelling](reference.md#variables-with-a-claude-code-spelling). A value that isn't a `bash` or `sh`
 binary is ignored with a warning, as Claude Code does since 2.1.219.
 
 ## The PowerShell tool

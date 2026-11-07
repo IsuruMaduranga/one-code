@@ -40,6 +40,8 @@ export function checkBrand(value) {
 	}
 	if (typeof value.envPrefix === "string" && !/^[A-Z][A-Z0-9_]*$/.test(value.envPrefix)) problems.push(`"envPrefix" must be upper-case letters, digits and underscores`);
 	if (typeof value.idPrefix === "string" && !/^[a-z][a-z0-9-]*$/.test(value.idPrefix)) problems.push(`"idPrefix" must be lower-case letters, digits and hyphens`);
+	// Path checks compare case-folded paths on macOS and Windows (lib/paths.ts comparablePath) against patterns built from this name.
+	if (typeof value.stateDir === "string" && !/^\.?[a-z0-9][a-z0-9._-]*$/.test(value.stateDir)) problems.push(`"stateDir" must be one lower-case folder name (letters, digits, ".", "_", "-")`);
 	if (problems.length > 0) throw new Error(`profile/brand.json: ${problems.join("; ")}`);
 	return value;
 }

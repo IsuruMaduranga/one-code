@@ -234,7 +234,7 @@ because it states what the model is.
 
 Like Claude Code, One Code gives frontier models and Sonnet 5 or later no
 task list: the `task_create` family is left out, along with the prompt line
-that points at it. Set `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` to turn the task
+that points at it. Set `ONECODE_ENABLE_TODO_TOOLS=1` to turn the task
 tools back on for them.
 
 ## Web search on providers without a search API

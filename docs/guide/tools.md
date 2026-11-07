@@ -58,7 +58,7 @@ panel below the editor. See
 `powershell` is Claude Code's PowerShell tool: on by default on Windows,
 where it becomes the primary shell and `bash` (Git Bash) stays alongside
 when Git for Windows is installed; off elsewhere unless
-`CLAUDE_CODE_USE_POWERSHELL_TOOL=1` and a `pwsh` is on your PATH. It has the
+`ONECODE_USE_POWERSHELL_TOOL=1` and a `pwsh` is on your PATH. It has the
 same `run_in_background`, the same background panel, and its description is
 Claude Code's own, with the edition section (PowerShell 7 or Windows
 PowerShell 5.1) picked from the executable found. Permission rules use

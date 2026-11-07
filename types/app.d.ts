@@ -6,7 +6,7 @@
 declare module "*/lib/update-check.mjs" {
 	export const APP_PACKAGE: string;
 	export const EXTENSION_PACKAGE: string;
-	export const HOMEBREW_FORMULA: string;
+	export const HOMEBREW_FORMULA: string | undefined;
 	export const NO_UPDATE_CHECK_VAR: string;
 	export const UPGRADE_COMMANDS: { npm: string; brew: string; "pi-package": string };
 	export function upgradeCommandFor(install: "app" | "pi-package", env?: Record<string, string | undefined>): string;
@@ -98,7 +98,7 @@ declare module "*/brand.mjs" {
 		readonly bin: string;
 		/** Prefix of the product's environment variables (`<envPrefix>_<suffix>`). */
 		readonly envPrefix: string;
-		/** The state directory's name under the home directory, and the project config folder's name: ".onecode". */
+		/** The state directory's name under the home directory, and the project config folder's name: ".onecode". One lower-case folder name: path checks compare case-folded paths against it. */
 		readonly stateDir: string;
 		/** The product's own instruction file: "ONECODE.md". */
 		readonly productFile: string;

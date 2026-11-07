@@ -10,11 +10,36 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, normalize, relative } from "node:path";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { profile } from "../../profile/index.ts";
 
 const ROOT = join(import.meta.dirname, "..", "..");
-const IMPORT = /^(?:import|export)\s+(type\s+)?([\s\S]*?)\s+from\s+"([^"]+)"|^import\s+"([^"]+)"/gm;
+/** The specifiers `source` loads as values: imports and re-exports that are not type-only, `import()` and `require()` of a literal. */
+function valueSpecifiers(source: string, path: string): string[] {
+	const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
+	const specs: string[] = [];
+	const visit = (node: ts.Node) => {
+		if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+			const clause = node.importClause;
+			const bindings = clause?.namedBindings;
+			const typeOnly =
+				clause !== undefined &&
+				(clause.isTypeOnly || (!clause.name && bindings !== undefined && ts.isNamedImports(bindings) && bindings.elements.length > 0 && bindings.elements.every((e) => e.isTypeOnly)));
+			if (!typeOnly) specs.push(node.moduleSpecifier.text);
+		} else if (ts.isExportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+			const clause = node.exportClause;
+			const typeOnly = node.isTypeOnly || (clause !== undefined && ts.isNamedExports(clause) && clause.elements.length > 0 && clause.elements.every((e) => e.isTypeOnly));
+			if (!typeOnly) specs.push(node.moduleSpecifier.text);
+		} else if (ts.isCallExpression(node) && node.arguments.length > 0 && ts.isStringLiteralLike(node.arguments[0])) {
+			const callee = node.expression;
+			if (callee.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(callee) && callee.text === "require")) specs.push(node.arguments[0].text);
+		}
+		ts.forEachChild(node, visit);
+	};
+	visit(file);
+	return specs;
+}
 
 /** Every value import of a pi package in the graph under `entry`, with the importing file. */
 function piValueImports(entry: string): string[] {
@@ -24,12 +49,7 @@ function piValueImports(entry: string): string[] {
 		const path = normalize(file);
 		if (seen.has(path) || !existsSync(path)) return;
 		seen.add(path);
-		for (const match of readFileSync(path, "utf8").matchAll(IMPORT)) {
-			const spec = match[3] ?? match[4];
-			if (match[1]) continue;
-			const names = (match[2] ?? "").trim();
-			const inner = names.replace(/^\{|\}$/g, "").trim();
-			if (names.startsWith("{") && inner && inner.split(",").every((name) => !name.trim() || name.trim().startsWith("type "))) continue;
+		for (const spec of valueSpecifiers(readFileSync(path, "utf8"), path)) {
 			if (spec.startsWith(".")) walk(join(dirname(path), spec));
 			else if (spec.startsWith("@earendil-works/")) found.push(`${relative(ROOT, path)} imports ${spec}`);
 		}
@@ -39,6 +59,14 @@ function piValueImports(entry: string): string[] {
 }
 
 describe("modules loaded through sharedModule", () => {
+	it("sees value imports the way the compiler does", () => {
+		const specs = valueSpecifiers(
+			'export { type Foo };\nimport { main } from "@earendil-works/a";\nimport { type B } from "@earendil-works/b";\nimport type C from "@earendil-works/c";\nexport { type D } from "@earendil-works/d";\nexport * from \'@earendil-works/e\';\nawait import("@earendil-works/f");\nrequire("@earendil-works/g");',
+			"x.ts",
+		);
+		expect(specs).toEqual(["@earendil-works/a", "@earendil-works/e", "@earendil-works/f", "@earendil-works/g"]);
+	});
+
 	it("import no pi package as a value: the profile", () => {
 		expect(piValueImports(join(ROOT, "profile", "index.ts"))).toEqual([]);
 	});

@@ -504,8 +504,9 @@ A pause after 20 blocks in total waits for your approval. So that an
 unattended session isn't held indefinitely, the first of these prompts after three blocks in a row denies
 the action if nobody answers within two minutes, as Claude Code does, and
 shows a countdown. A later prompt in the same run of blocks waits for you.
-To change the wait, set `CLAUDE_CODE_TICKLISH_WHISPER_TIMEOUT_MS`, Claude
-Code's variable for it, to a number of milliseconds.
+To change the wait, set `ONECODE_TICKLISH_WHISPER_TIMEOUT_MS` (or Claude
+Code's `CLAUDE_CODE_TICKLISH_WHISPER_TIMEOUT_MS`) to a number of
+milliseconds.
 
 ### Approve a call auto mode denied
 

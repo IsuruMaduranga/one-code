@@ -190,11 +190,27 @@ The `CC_` prefix is historical; `ONECODE_`-prefixed aliases are planned.
 | `CC_TOTAL_TOKENS=0` | Remove the `<total_tokens>` budget line. |
 | `CC_TOTAL_TOKENS_BUDGET` | The per-turn budget the line counts down from (default 15000000). |
 | `CC_PROMPT_TIER=frontier\|workhorse\|cheap\|tiny` | Force a system-prompt tier. |
-| `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` | Give frontier models and Sonnet 5 or later the task tools, which they run without by default. |
 | `CC_HOOKS_DEBUG=1` | Print hook dispatches to stderr and log decisions. |
 | `CC_AUTO_MODE_DEBUG=1` | Print classifier verdicts to stderr. `2` is more verbose. |
 | `CC_VERSION` | The version shown in the banner (set by the app, and not passed on to the commands it runs). |
 | `CC_PERMISSION_MODE` | Set by One Code to the live mode for child processes. Not an input; use `--permission-mode`. |
+
+### Variables with a Claude Code spelling
+
+Each of these variables also works under Claude Code's name, with
+`CLAUDE_CODE_` in place of `ONECODE_`, so the ones you set for Claude Code
+keep working. One Code reads Claude Code's spelling only in Claude-compatible
+mode. When both spellings are set, One Code's wins.
+
+| Variable | Effect |
+|---|---|
+| `ONECODE_USE_POWERSHELL_TOOL` | `1` turns the `powershell` tool on (the default on Windows), `0` turns it off. Off Windows it needs a `pwsh` on PATH. See [Windows](windows.md). |
+| `ONECODE_GIT_BASH_PATH` | The bash that drives the `bash` tool, hooks, and background shells. Also read from the `env` block of your user settings; a non-bash binary is ignored with a warning. |
+| `ONECODE_SUBAGENT_MODEL` | Default subagent model. Claude Code's `CLAUDE_CODE_SUBAGENT_MODEL` applies only on a Claude session. |
+| `ONECODE_DISABLE_AUTO_MEMORY=1` | Turn auto-memory off, overriding the setting in `/memory`. `0` turns it on. |
+| `ONECODE_ENABLE_TODO_TOOLS=1` | Give frontier models and Sonnet 5 or later the task tools, which they run without by default. |
+| `ONECODE_LOOP_KEEPALIVE=0` | Turn off the fallback wake-up of a self-paced `/loop`. |
+| `ONECODE_TICKLISH_WHISPER_TIMEOUT_MS` | How long an unanswered auto-mode prompt waits before it denies the action, in milliseconds (default 120000). |
 
 ### pi and Claude Code variables honored
 
@@ -205,9 +221,6 @@ The `CC_` prefix is historical; `ONECODE_`-prefixed aliases are planned.
 | `PI_OFFLINE=1` | Same as `--offline`. |
 | `CLAUDE_CONFIG_DIR` | Where Claude Code's user configuration is read from. |
 | `ONECODE_CONFIG_MODE` | `claude-compatible` or `independent`, overriding the mode saved by `/memory`. See [Run One Code on its own setup](bring-your-claude-code-setup.md#run-one-code-on-its-own-setup). |
-| `CLAUDE_CODE_USE_POWERSHELL_TOOL` | `1` turns the `powershell` tool on (the default on Windows), `0` turns it off. Off Windows it needs a `pwsh` on PATH. See [Windows](windows.md). |
-| `CLAUDE_CODE_GIT_BASH_PATH` | The bash that drives the `bash` tool, hooks, and background shells. Also read from the `env` block of `~/.claude/settings.json`; a non-bash binary is ignored with a warning. |
-| `CLAUDE_CODE_SUBAGENT_MODEL` | Default subagent model on a Claude session. |
 | `EDITOR`, `VISUAL` | Editor used by `/memory` (and pi's **ctrl+g**). |
 | `SHELL` | Shell used for commands (default `/bin/sh`). |
 | Provider keys | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `OPENCODE_API_KEY`, and the rest pi supports. |

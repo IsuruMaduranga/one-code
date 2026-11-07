@@ -48,6 +48,13 @@ describe("collectCompat: hooks", () => {
 });
 
 describe("collectCompat: settings files", () => {
+	it("reports the subagent-model spelling the loader uses, and the other with the ignored variables", () => {
+		write(join(home, ".claude", "settings.json"), { env: { ONECODE_SUBAGENT_MODEL: "", CLAUDE_CODE_SUBAGENT_MODEL: "sonnet" } });
+		const user = collectCompat(input()).files.find((f) => f.scope === "borrowed-user")!;
+		expect(user.used).toEqual(['env.CLAUDE_CODE_SUBAGENT_MODEL = "sonnet"']);
+		expect(user.ignored).toEqual(["env (1 variable — One Code does not export settings env blocks)"]);
+	});
+
 	it("reports what each Claude Code file contributes and which keys One Code leaves alone", () => {
 		write(join(home, ".claude", "settings.json"), {
 			permissions: { allow: ["Bash(git status)"], deny: ["Read(.env)"], defaultMode: "plan" },
