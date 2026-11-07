@@ -26,6 +26,7 @@ import { classifierCandidates, replyText, withAuthBaseUrl } from "./model-select
 import { buildSetupPrompt, parseGitRemotes, redactSecrets, type SetupDraft, parseSetupDraft, type SetupFacts } from "./setup.ts";
 import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
 import { instructionTargets } from "../lib/instructions.ts";
+import { requireText } from "../lib/profile.ts";
 
 const PROBE_TIMEOUT_MS = 10_000;
 /** Drafting reads a big fact dump and writes a full slot list — give it room. */
@@ -39,7 +40,7 @@ function probe(cmd: string, args: string[], cwd: string, notes: string[], what: 
 	return new Promise((resolve) => {
 		execFile(cmd, args, { cwd, timeout: PROBE_TIMEOUT_MS, maxBuffer: 1024 * 1024 }, (error, stdout) => {
 			if (error) {
-				notes.push(`${what} was not gathered (${cmd} failed: ${error.message.split("\n")[0]})`);
+				notes.push(requireText("autoModeSetup").notes.probeFailed(what, cmd, error.message.split("\n")[0]));
 				resolve(undefined);
 			} else {
 				resolve(stdout.trim());
@@ -60,7 +61,7 @@ const readIfPresent = (path: string, limit: number, notes: string[], what: strin
 		const text = readFileSync(path, "utf-8");
 		return text.length > limit ? `${text.slice(0, limit)}\n…[truncated]` : text;
 	} catch (error) {
-		notes.push(`${what} exists but could not be read (${(error as Error).message.split("\n")[0]})`);
+		notes.push(requireText("autoModeSetup").notes.unreadable(what, (error as Error).message.split("\n")[0]));
 		return undefined;
 	}
 };
@@ -105,7 +106,7 @@ export async function gatherFacts(options: GatherOptions): Promise<SetupFacts> {
 			repoNameWithOwner = parsed.nameWithOwner;
 			defaultBranch = parsed.defaultBranchRef?.name;
 		} catch {
-			notes.push("gh repo view returned unparseable JSON — repository visibility unknown");
+			notes.push(requireText("autoModeSetup").notes.visibilityUnknown);
 		}
 	}
 
@@ -123,10 +124,10 @@ export async function gatherFacts(options: GatherOptions): Promise<SetupFacts> {
 				.map((line) => redactSecrets(line.replace(/^:\s*\d+:\d+;/, "").trim()))
 				.filter(Boolean);
 		} else {
-			notes.push("no shell history file found — usage patterns not gathered");
+			notes.push(requireText("autoModeSetup").notes.noShellHistory);
 		}
 	} else {
-		notes.push("shell history scan declined by the user");
+		notes.push(requireText("autoModeSetup").notes.historyDeclined);
 	}
 
 	// User-scope permissions.allow — audit input, and evidence for carve-outs. Both
@@ -142,7 +143,7 @@ export async function gatherFacts(options: GatherOptions): Promise<SetupFacts> {
 		// a malformed `.claude` file must land in notes so the drafting evidence
 		// sees "present but unreadable", not silently "no broad rules here".
 		if (file === undefined && isBorrowedUserFile(source) && existsSync(path)) {
-			notes.push("user settings permissions.allow could not be read");
+			notes.push(requireText("autoModeSetup").notes.allowUnreadable);
 			continue;
 		}
 		const allow = file?.permissions?.allow;

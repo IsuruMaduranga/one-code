@@ -92,4 +92,27 @@ export interface ClassifierText extends ClassifierRuleset {
 	reviewAddendum: string;
 	/** The `resolvedPaths` meta line's own explanation, which the ruleset has no sentence for. */
 	resolvedPathsNote: string;
+	/** One of the user's deny rules as a HARD BLOCK line (permissions/rule-prose.ts): `name` survives the rule-name scan, `spec` is the rule verbatim. */
+	userDenyRule(name: string, spec: string): string;
+}
+
+/** The setup drafting call (`/auto-mode setup`): its instruction, and the notes on facts it could not gather. */
+export interface AutoModeSetupText {
+	/** The system prompt: the reply must be strict JSON with the keys the parser reads (`environment`, `allow`, `soft_deny`, `hard_deny`, `notes`). */
+	system: string;
+	/** The answers to "How do you use the product here?"; the chosen one reaches the facts as `usage`. */
+	usageOptions: readonly string[];
+	/** The heading above the default Environment slot lines in the user message. */
+	defaultsHeading: string;
+	/** The heading above the gathered facts, as JSON, in the user message. */
+	factsHeading: string;
+	/** Notes in the facts' `gatherNotes` on what could not be gathered. */
+	notes: {
+		probeFailed(what: string, command: string, error: string): string;
+		unreadable(what: string, error: string): string;
+		visibilityUnknown: string;
+		noShellHistory: string;
+		historyDeclined: string;
+		allowUnreadable: string;
+	};
 }

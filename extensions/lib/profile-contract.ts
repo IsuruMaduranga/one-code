@@ -11,7 +11,7 @@
 
 import type { ArtifactsText } from "../artifacts/text.ts";
 import type { AskUserText } from "../ask-user/text.ts";
-import type { AutoModeText, ClassifierText } from "../auto-mode/text.ts";
+import type { AutoModeSetupText, AutoModeText, ClassifierText } from "../auto-mode/text.ts";
 import type { BackgroundText } from "../background/text.ts";
 import type { BtwText } from "../btw/text.ts";
 import type { CompactionText } from "../compaction/text.ts";
@@ -90,6 +90,8 @@ export interface ProfileText {
 	autoMode?: AutoModeText;
 	/** The auto-mode classifier's prompt (One Code's: Claude Code's ruleset, generated). */
 	classifier?: ClassifierText;
+	/** The `/auto-mode setup` drafting call. */
+	autoModeSetup?: AutoModeSetupText;
 	/** Used by bash and powershell (lib/shell-tool.ts). */
 	shell?: ShellText;
 	doctor?: DoctorText;

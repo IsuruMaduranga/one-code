@@ -24,6 +24,7 @@
  * as the built-in rules (`rules.ts`), so a verdict citing one grounds.
  */
 
+import { requireText } from "../lib/profile.ts";
 import { parseRule } from "./matcher.ts";
 
 /** Bound on how many rules are described, so a long deny list cannot dominate the ruleset. */
@@ -69,11 +70,7 @@ export function denyRuleLines(deny: readonly string[]): string[] {
 		if (!full || seen.has(full)) continue;
 		seen.add(full);
 		const spec = full.length > MAX_SPEC ? `${full.slice(0, MAX_SPEC - 1)}…` : full;
-		lines.push(
-			`User Deny Rule ${nameFragment(spec)}: the user's own settings deny \`${spec}\`. ` +
-				"That is the user's standing decision about a CLASS of action, made in advance, so user intent does NOT clear it. " +
-				"BLOCK the action under review if it would achieve what that rule forbids, whatever command, interpreter, script or tool it is spelled with.",
-		);
+		lines.push(requireText("classifier").userDenyRule(nameFragment(spec), spec));
 	}
 	return lines;
 }

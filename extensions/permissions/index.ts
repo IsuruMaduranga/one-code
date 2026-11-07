@@ -18,6 +18,7 @@
  */
 
 import { brand, brandedId } from "../lib/brand.mjs";
+import { requireText } from "../lib/profile.ts";
 import { feature } from "../lib/feature.ts";
 import os from "node:os";
 import { join } from "node:path";
@@ -2367,11 +2368,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			ctx.ui.notify("/auto-mode setup is interactive — run it in a live session.", "warning");
 			return;
 		}
-		const usage = await ctx.ui.select(`How do you use ${brand.name} in this environment?`, [
-			"Software development in this repo",
-			"Mixed — coding and general tasks",
-			"Mostly questions and analysis",
-		]);
+		const usage = await ctx.ui.select(`How do you use ${brand.name} in this environment?`, [...requireText("autoModeSetup").usageOptions]);
 		if (!usage) return;
 		const history = await ctx.ui.select("Also scan recent shell history? (stays local except the drafting call; secrets are redacted)", [
 			"Yes",

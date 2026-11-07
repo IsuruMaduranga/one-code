@@ -4,9 +4,8 @@
  * base-text-literals.txt). Categories: ui
  * (dialogs, panels, notifications, local command output, /doctor), log,
  * user-error, format (frames and pi's own text, matched or copied byte for
- * byte), os-message (an error the profile embeds as the failure's own
- * message) and phase5 (the auto-mode classifier's prompt and the setup
- * drafting prompt, which move with the ruleset in Phase 5).
+ * byte) and os-message (an error the profile embeds as the failure's own
+ * message).
  */
 
 export interface BaseTextEntry {
@@ -24,11 +23,11 @@ export const BASE_TEXT_ALLOWLIST: Readonly<Record<string, BaseTextEntry>> = {
 	"auto-mode/config.ts": { reason: "user-error: Settings-file diagnostics shown by /auto-mode config." },
 	"auto-mode/model-select.ts": { reason: "ui: Classifier-choice notices and candidate descriptions (notifications, /doctor)." },
 	"auto-mode/pause.ts": { reason: "ui: The countdown warning in the permission dialog title." },
-	"auto-mode/read-only-options.ts": { reason: "mixed: Phase 5: option-check reasons for the shell notes; a developer-misuse error." },
-	"auto-mode/setup-run.ts": { reason: "mixed: Phase 5: notes for the setup drafting prompt; user errors from /auto-mode setup." },
-	"auto-mode/setup.ts": { reason: "mixed: Phase 5: the /auto-mode setup drafting prompt; user errors for draft parsing; UI for the proposal and the permission audit notes." },
-	"auto-mode/shell-analysis.ts": { reason: "phase5: Escalation notes on shell evidence, meant for the classifier; no production path reads them yet." },
-	"auto-mode/shell-parse.ts": { reason: "phase5: Parse reasons that become shell-analysis notes." },
+	"auto-mode/read-only-options.ts": { reason: "mixed: log: option-check reasons for the shell notes (diagnostics; no request carries them); a developer-misuse error." },
+	"auto-mode/setup-run.ts": { reason: "user-error: Why /auto-mode setup could not draft (no model, cancelled, truncated); the drafting prompt and its notes are the profile's." },
+	"auto-mode/setup.ts": { reason: "mixed: user-error: draft parse failures shown by /auto-mode setup; ui: the proposal and the permission audit notes. The drafting prompt is the profile's." },
+	"auto-mode/shell-analysis.ts": { reason: "log: Escalation notes on shell evidence (ShellEvidence.notes): diagnostics for tests and debugging; no request carries them. If a request ever does, they move to the profile." },
+	"auto-mode/shell-parse.ts": { reason: "log: Parse reasons that become shell-analysis notes (diagnostics; no request carries them)." },
 	"background/index.ts": { reason: "ui: Dialog titles and the shutdown notice." },
 	"background/switch-guard.ts": { reason: "ui: Switch-confirm dialog text." },
 	"branding/compaction-keep.ts": { reason: "ui: Notifications." },
@@ -109,14 +108,13 @@ export const BASE_TEXT_ALLOWLIST: Readonly<Record<string, BaseTextEntry>> = {
 	"memory/open-external.ts": { reason: "ui: Editor hint lines." },
 	"memory/panel.ts": { reason: "ui: /memory panel text and prompts." },
 	"model-default/index.ts": { reason: "ui: /model output and a notification." },
-	"permissions/index.ts": { reason: "mixed: UI: permission prompts, notifications, panel rows and the panel status line, slash-command descriptions, flag help; user errors from the panel host; /add-dir and panel change lines (local command output); the /auto-mode setup usage options, which reach the drafting prompt and move with it in Phase 5." },
+	"permissions/index.ts": { reason: "mixed: UI: permission prompts, notifications, panel rows and the panel status line, slash-command descriptions, flag help; user errors from the panel host; /add-dir and panel change lines (local command output)." },
 	"permissions/panel/render.ts": { reason: "ui: Panel rendering: subtitles, section descriptions, dialog text and key hints." },
 	"permissions/panel/state.ts": { reason: "ui: A panel notice." },
 	"permissions/powershell-paths.ts": { reason: "log: PowerShell path problems; feed only the unread pre-gate reasons." },
 	"permissions/powershell-rules.ts": { reason: "log: The reason of powershellReadOnly, which no caller reads." },
 	"permissions/powershell-tree.ts": { reason: "log: The pre-gate's reasons a PowerShell line is not read-only; no caller reads them yet (meant for the decision log)." },
 	"permissions/project-trust.ts": { reason: "ui: The title and message of the trust consent dialog." },
-	"permissions/rule-prose.ts": { reason: "phase5: The user's deny rules rendered into the classifier's ruleset (moves with the ruleset in Phase 5)." },
 	"permissions/session-grant.ts": { reason: "ui: Session-grant labels: ask-prompt options." },
 	"permissions/workspace.ts": { reason: "ui: Workspace directory validation errors, shown as notifications, in the panel and in /add-dir output." },
 	"plan-mode/index.ts": { reason: "ui: A notification and dialog option labels." },

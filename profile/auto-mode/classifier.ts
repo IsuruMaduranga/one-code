@@ -38,6 +38,13 @@ export const classifier: ClassifierText = {
 		"the transcript's trailing entries are the subagent's actions (summarized). You are not approving a " +
 		"pending action; judge the sequence of those actions AS A WHOLE and flag whether, together, they did " +
 		"something the rules forbid — not only the final entry.",
+	// The user's own deny rules, appended at the HARD BLOCK insertion point: a
+	// rule binds only the spelling it names, so the classifier generalizes it by
+	// effect, one-directionally (permissions/rule-prose.ts).
+	userDenyRule: (name, spec) =>
+		`User Deny Rule ${name}: the user's own settings deny \`${spec}\`. ` +
+		"That is the user's standing decision about a CLASS of action, made in advance, so user intent does NOT clear it. " +
+		"BLOCK the action under review if it would achieve what that rule forbids, whatever command, interpreter, script or tool it is spelled with.",
 	resolvedPathsNote:
 		"Measured by the harness, not written by the agent: each path below is named by the action under review as if inside the working directory, but resolves through a symbolic link to resolvesTo, outside every working directory. Judge the action as reading or writing resolvesTo.",
 };

@@ -14,6 +14,7 @@ import { artifactsText } from "./artifacts/index.ts";
 import { askUserText } from "./ask-user/index.ts";
 import { autoModeText } from "./auto-mode/index.ts";
 import { classifier } from "./auto-mode/classifier.ts";
+import { autoModeSetup } from "./auto-mode/setup.ts";
 import { background } from "./background/index.ts";
 import { btw } from "./btw/index.ts";
 import { compaction } from "./compaction/index.ts";
@@ -86,6 +87,7 @@ export const profile: Profile = {
 		workflow: workflowText(live),
 		autoMode: autoModeText(live),
 		classifier,
+		autoModeSetup,
 		shell: shellText(live),
 		doctor: doctorText(live),
 		notifications: notificationsText(live),

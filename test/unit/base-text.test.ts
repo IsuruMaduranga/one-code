@@ -3,8 +3,7 @@
  * Phase 3's exit). Every sentence-like literal in extensions/ (four or more
  * words, outside comments) sits in a file the allowlist names with why its
  * sentences are not the model's (UI, logs, errors only the user reads,
- * formats, or the auto-mode classifier's prompt, which moves with the
- * ruleset in Phase 5), and matches the reviewed list in
+ * formats), and matches the reviewed list in
  * base-text-literals.txt. A new or changed sentence fails until someone
  * decides where it belongs: the profile when the model reads it, the list
  * (`vitest -u`, reviewed in the diff) when only a person does.
