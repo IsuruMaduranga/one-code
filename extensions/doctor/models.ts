@@ -31,7 +31,8 @@ import {
 	servedCatalogIds,
 	tierOverride,
 } from "../lib/model-tier.ts";
-import { applicableSubagentDefault, loadSubagentDefault, type SubagentDefault } from "../subagents/default-model.ts";
+import { applicableSubagentDefault, loadSubagentDefault, SUBAGENT_MODEL_KNOB, type SubagentDefault } from "../subagents/default-model.ts";
+import { knobLimit } from "../lib/knobs.ts";
 import { resolveSubagentModel, type SubagentModelResolution } from "../subagents/model-select.ts";
 import { contextLabel, type Finding, priceLabel, type ReportLine, type ReportSection, type SessionView } from "./report.ts";
 
@@ -44,7 +45,7 @@ export interface ModelFacts {
 	promptTierForced: boolean;
 	subagent: SubagentModelResolution;
 	subagentConfigured?: SubagentDefault;
-	/** The configured default exists but does not apply to this session (Claude Code's env var on a non-Claude model). */
+	/** The configured default exists but does not apply to this session (another tool's variable on a model its provider excludes). */
 	subagentConfiguredInapplicable: boolean;
 	/** What the configured subagent default costs (newer model, far weaker than the session), when it is in effect. */
 	subagentWarnings: ChosenModelWarning[];
@@ -174,7 +175,7 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 		if (facts.subagentConfigured) {
 			const knob = facts.subagentConfigured.source === "subagentModel setting" ? `subagentModel in ${SETTINGS_DISPLAY}` : facts.subagentConfigured.envVar;
 			lines.push({
-				text: `Setting: "${facts.subagentConfigured.spec}" via ${knob}${facts.subagentConfiguredInapplicable ? ` — not applied: ${knob} is another tool's variable and applies only when the main model is a Claude model` : ""}`,
+				text: `Setting: "${facts.subagentConfigured.spec}" via ${knob}${facts.subagentConfiguredInapplicable ? ` — not applied: ${knob} is another tool's variable, ${knobLimit(SUBAGENT_MODEL_KNOB)}` : ""}`,
 				indent: 1,
 				level: facts.subagentConfiguredInapplicable ? "warn" : "dim",
 			});
@@ -182,7 +183,7 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 			if (facts.subagentConfiguredInapplicable) {
 				findings.push({
 					level: "warn",
-					text: `${knob} sets "${facts.subagentConfigured.spec}" for subagents, but it applies only when the main model is a Claude model, so it is not used here.`,
+					text: `${knob} sets "${facts.subagentConfigured.spec}" for subagents, but it is ${knobLimit(SUBAGENT_MODEL_KNOB)}, so it is not used here.`,
 					fix: `Choose the subagent model with /subagent (it writes subagentModel in ${SETTINGS_DISPLAY}), or unset the variable.`,
 				});
 			}

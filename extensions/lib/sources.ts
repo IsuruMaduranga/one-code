@@ -52,10 +52,19 @@ export interface SourceView {
 	protectedFiles?: StateFile[];
 	/**
 	 * Another tool's spelling of the product's environment knobs, by suffix:
-	 * `{ USE_POWERSHELL_TOOL: "CLAUDE_CODE_USE_POWERSHELL_TOOL" }`. Read after
-	 * the product's own `<envPrefix>_<suffix>` (lib/knobs.ts).
+	 * `{ USE_POWERSHELL_TOOL: { name: "CLAUDE_CODE_USE_POWERSHELL_TOOL" } }`.
+	 * Read after the product's own `<envPrefix>_<suffix>` (lib/knobs.ts).
 	 */
-	envAliases?: Readonly<Record<string, string>>;
+	envAliases?: Readonly<Record<string, EnvAlias>>;
+}
+
+/** Another tool's spelling of a knob, and the models a value set through it applies on. */
+export interface EnvAlias {
+	name: string;
+	/** Whether a value set through this spelling applies on the session's model. Absent: on every model. */
+	appliesTo?(model: { provider: string; id: string }): boolean;
+	/** The clause a message adds when it does not apply, such as "applied only when this session is on a Claude model". */
+	limit?: string;
 }
 
 /** Another tool's state file, and how /doctor names it. */

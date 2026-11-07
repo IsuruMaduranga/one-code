@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
-import { knobNames, knobValue, readKnob } from "../../extensions/lib/knobs.ts";
+import { knobAppliesTo, knobLimit, knobNames, knobValue, readKnob } from "../../extensions/lib/knobs.ts";
 
 afterEach(() => resetConfigModeForTest("claude-compatible"));
 
@@ -25,6 +25,17 @@ describe("environment knobs", () => {
 		expect(knobNames("USE_POWERSHELL_TOOL")).toEqual(["ONECODE_USE_POWERSHELL_TOOL"]);
 		expect(readKnob("USE_POWERSHELL_TOOL", { CLAUDE_CODE_USE_POWERSHELL_TOOL: "1" })).toBeUndefined();
 		expect(knobValue("USE_POWERSHELL_TOOL", { ONECODE_USE_POWERSHELL_TOOL: "1" })).toBe("1");
+	});
+
+	it("apply a borrowed spelling only where the provider says: Claude Code's subagent model on a Claude model", () => {
+		resetConfigModeForTest("claude-compatible");
+		const claude = { provider: "anthropic", id: "claude-sonnet-5" };
+		const other = { provider: "openrouter", id: "deepseek/deepseek-v4-flash" };
+		expect(knobAppliesTo("SUBAGENT_MODEL", { borrowed: true }, claude)).toBe(true);
+		expect(knobAppliesTo("SUBAGENT_MODEL", { borrowed: true }, other)).toBe(false);
+		expect(knobAppliesTo("SUBAGENT_MODEL", { borrowed: false }, other)).toBe(true);
+		expect(knobAppliesTo("GIT_BASH_PATH", { borrowed: true }, other)).toBe(true);
+		expect(knobLimit("SUBAGENT_MODEL")).toBe("applied only when this session is on a Claude model");
 	});
 
 	it("have no alias for a knob the provider does not name", () => {

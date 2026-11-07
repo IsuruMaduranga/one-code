@@ -18,7 +18,7 @@
 
 import { INSTALL_METHOD_VAR } from "../lib/app-launch.mjs";
 import { brand } from "../lib/brand.mjs";
-import { knobNames } from "../lib/knobs.ts";
+import { knobLimit, knobNames } from "../lib/knobs.ts";
 import { feature } from "../lib/feature.ts";
 import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../lib/child-writes.ts";
 import { canShowCustomUi } from "../lib/headless-output.ts";
@@ -2960,7 +2960,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				configured
 					? configured.source === "env"
 						? `subagentModel: ${configured.spec} (from ${configured.envVar})` +
-							(applicable ? "" : ` — not applied: ${configured.envVar} is another tool's variable, applied only when this session is on a Claude model`)
+							(applicable ? "" : ` — not applied: ${configured.envVar} is another tool's variable, ${knobLimit(SUBAGENT_MODEL_KNOB)}`)
 						: `subagentModel: ${configured.spec} (from the subagentModel setting)`
 					: "subagentModel: (not set)",
 				`effective: ${resolution.model ? `${resolution.model.provider}/${resolution.model.id}` : "none"} (${resolution.source})`,

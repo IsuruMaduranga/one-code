@@ -1,15 +1,6 @@
 import { type Api, clampThinkingLevel, type Model, type ThinkingLevel } from "@earendil-works/pi-ai";
 
-/**
- * Whether a session runs on a Claude-family model. Claude Code's own subagent
- * conventions (`CLAUDE_CODE_SUBAGENT_MODEL`, `.claude/agents` model fields) are
- * honored across providers only on such sessions; elsewhere subagents stay on
- * the session's provider. Only provider/id are consulted, so a minimal model
- * shape suffices.
- */
-export function isClaudeFamilyModel(model: { provider: string; id: string }): boolean {
-	return model.provider === "anthropic" || /claude/i.test(model.id);
-}
+export { isClaudeFamilyModel } from "./model-family.ts";
 
 /**
  * Whether a model accepts image input, from pi's catalog `input` modality

@@ -387,8 +387,8 @@ doctor/models.ts
 	"${…} is not in the public model catalogs (models.dev, OpenRouter), so its tier is a guess (${…}) and automatic picks never choose it."
 	"Set its tier in ${…}: { \"modelTiers\": { \"${…}\": \"workhorse\" } } (frontier, workhorse, cheap or tiny)."
 	"Subagents and workflow agents: ${…} — ${…}"
-	" — not applied: ${…} is another tool's variable and applies only when the main model is a Claude model"
-	"${…} sets \"${…}\" for subagents, but it applies only when the main model is a Claude model, so it is not used here."
+	" — not applied: ${…} is another tool's variable, ${…}"
+	"${…} sets \"${…}\" for subagents, but it is ${…}, so it is not used here."
 	"Choose the subagent model with /subagent (it writes subagentModel in ${…}), or unset the variable."
 	"Re-set the default with /subagent on this session, or /subagent clear."
 	" — screening this session on ${…}"
@@ -538,6 +538,9 @@ lib/instruction-budget.ts
 	"${…}-token context window; the model sees its path instead · /memory to trim it"
 	"${…} fits this model's ${…}-token context window and loads in full again"
 	"${…} loads in full again: this model's context window is unknown"
+
+lib/knobs.ts
+	"not applied on this model"
 
 lib/memory.ts
 	"${…} is over the ${…}-char limit (${…} chars) · /memory to free up context"
@@ -1126,7 +1129,7 @@ subagents/index.ts
 	"Open the live subagent panel, or list available agents"
 	"The live subagent panel requires TUI mode; showing spawned agents instead."
 	"Use /tasks for task status; task_output and task_stop inspect or stop a task."
-	" — not applied: ${…} is another tool's variable, applied only when this session is on a Claude model"
+	" — not applied: ${…} is another tool's variable, ${…}"
 	"subagentModel: ${…} (from the subagentModel setting)"
 	"Could not save subagent model: "
 	"Subagent default set to the session model (\"inherit\", saved to ${…})."

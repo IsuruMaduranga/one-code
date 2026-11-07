@@ -17,7 +17,7 @@
 
 import os from "node:os";
 import { envName } from "./brand.mjs";
-import { openSources } from "./sources.ts";
+import { type EnvAlias, openSources } from "./sources.ts";
 
 /** A knob's value and the spelling that supplied it. */
 export interface Knob {
@@ -28,10 +28,29 @@ export interface Knob {
 	borrowed: boolean;
 }
 
+/** The provider's spelling of knob `suffix`, while the provider is on. */
+function aliasOf(suffix: string): EnvAlias | undefined {
+	return openSources(os.homedir()).envAliases?.[suffix];
+}
+
 /** The spellings of knob `suffix`, the product's own first. */
 export function knobNames(suffix: string): string[] {
-	const alias = openSources(os.homedir()).envAliases?.[suffix];
-	return alias ? [envName(suffix), alias] : [envName(suffix)];
+	const alias = aliasOf(suffix);
+	return alias ? [envName(suffix), alias.name] : [envName(suffix)];
+}
+
+/**
+ * Whether `knob` applies on `model`: the product's own spelling always does,
+ * another tool's where its provider says (One Code's: Claude Code's
+ * `CLAUDE_CODE_SUBAGENT_MODEL` only on a Claude model).
+ */
+export function knobAppliesTo(suffix: string, knob: Pick<Knob, "borrowed">, model: { provider: string; id: string }): boolean {
+	return !knob.borrowed || (aliasOf(suffix)?.appliesTo?.(model) ?? true);
+}
+
+/** The provider's clause for a borrowed knob `suffix` that does not apply, for messages. */
+export function knobLimit(suffix: string): string {
+	return aliasOf(suffix)?.limit ?? "not applied on this model";
 }
 
 /** Knob `suffix` in `vars`, the process environment by default: the first spelling that is set. */

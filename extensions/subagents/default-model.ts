@@ -21,9 +21,9 @@
  *   (that key *is* Claude Code's). See "Own state, borrowed config" in
  *   working-docs/decisions/memory-state.md.
  *
- * Claude Code's spelling additionally applies only to Claude-family sessions
- * (see `applicableSubagentDefault`): its typical values ("sonnet") were
- * written for Anthropic models; the product's own spelling applies on any. On any other provider
+ * Another tool's spelling applies only where the source provider says (see
+ * `applicableSubagentDefault`); the product's own spelling applies on any
+ * model. On any other provider
  * it is ignored; One Code's automatic same-provider role profile then chooses the
  * default unless the user overrides it with `subagentModel`.
  *
@@ -31,9 +31,8 @@
  * pass through to resolveSubagentModel, which owns the semantics.
  */
 
-import { type Knob, readKnob } from "../lib/knobs.ts";
+import { type Knob, knobAppliesTo, readKnob } from "../lib/knobs.ts";
 import { isBorrowedUserFile, readSettingsFile } from "../lib/claude-settings.ts";
-import { isClaudeFamilyModel } from "../lib/model-policy.ts";
 import { productSettingsPath, readSettingsForWrite, writeSettings } from "../lib/product-settings.ts";
 import { autoModeSettingsFiles } from "../auto-mode/config.ts";
 
@@ -48,7 +47,7 @@ export interface SubagentEnvDefault {
 	source: "env";
 	/** The variable that set it, in the process or a settings `env` block, for notices. */
 	envVar: string;
-	/** Set through another tool's spelling (the provider's alias), so it applies only on a Claude model. */
+	/** Set through another tool's spelling (the provider's alias), so it applies where the provider says (lib/knobs.ts `knobAppliesTo`). */
 	borrowed: boolean;
 }
 
@@ -117,21 +116,18 @@ export function loadSubagentDefault(home: string, env: NodeJS.ProcessEnv = proce
 /**
  * The configured default that actually applies to this session.
  *
- * `subagentModel` is One Code's own setting — the user told *this* harness what
- * subagents run on, so it applies on any provider. `CLAUDE_CODE_SUBAGENT_MODEL`
- * was written for Claude Code, almost always as an Anthropic alias ("sonnet"),
- * so it applies only when the session is already on a Claude model — borrowing
- * it elsewhere silently moved subagent work off the provider the user chose
- * for this session (observed live: an opencode deepseek session's subagents
- * landing on claude-sonnet-5 because a settings `env` block said "sonnet").
+ * `subagentModel` is the product's own setting — the user told *this* harness
+ * what subagents run on, so it applies on any provider, and so does the
+ * product's own spelling of the knob. Another tool's spelling applies where
+ * the source provider says (lib/knobs.ts `knobAppliesTo`; One Code's: Claude
+ * Code's only on a Claude model).
  */
 export function applicableSubagentDefault(
 	configured: SubagentDefault | undefined,
 	sessionModel: { provider: string; id: string } | undefined,
 ): SubagentDefault | undefined {
-	if (configured?.source !== "env" || !configured.borrowed) return configured;
-	if (!sessionModel) return configured;
-	return isClaudeFamilyModel(sessionModel) ? configured : undefined;
+	if (configured?.source !== "env" || !sessionModel) return configured;
+	return knobAppliesTo(SUBAGENT_MODEL_KNOB, configured, sessionModel) ? configured : undefined;
 }
 
 /**

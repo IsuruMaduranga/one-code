@@ -73,6 +73,7 @@ export const BASE_TEXT_ALLOWLIST: Readonly<Record<string, BaseTextEntry>> = {
 	"lib/features.ts": { reason: "user-error: A feature-map validation problem at startup." },
 	"lib/fetch-timeout.ts": { reason: "user-error: The abort reason of marketplace and catalog fetches." },
 	"lib/headless-output.ts": { reason: "ui: A command's read-only-in-RPC line." },
+	"lib/knobs.ts": { reason: "ui: The fallback clause for a borrowed variable that does not apply, in /subagent and /doctor messages." },
 	"lib/instruction-budget.ts": { reason: "ui: Instruction-file notices for the UI and /doctor; the model's notes are the profile's." },
 	"lib/memory.ts": { reason: "ui: CLAUDE.md over-limit warnings (notification, /doctor)." },
 	"lib/model-catalog-data.ts": { reason: "log: A catalog-refresh failure reason." },

@@ -20,7 +20,8 @@ import { findProjectConfigs } from "../../extensions/mcp/config.ts";
 import { claudeJsonPath, claudeUserDir, isClaudeLocation, tildify } from "../../extensions/lib/paths.ts";
 import { managedSettingsPaths } from "../../extensions/lib/claude-settings.ts";
 import { settingsPaths } from "./settings.ts";
-import type { McpFile, SettingsFile, SourceProvider, SourceSwitch } from "../../extensions/lib/sources.ts";
+import type { EnvAlias, McpFile, SettingsFile, SourceProvider, SourceSwitch } from "../../extensions/lib/sources.ts";
+import { isClaudeFamilyModel } from "../../extensions/lib/model-family.ts";
 import { claudeCodeInstructionView } from "./instructions.ts";
 
 /**
@@ -61,8 +62,15 @@ const configSources: SourceSwitch = {
 /** Claude Code's project folder. */
 const PROJECT_DIR = ".claude";
 
-/** The knobs Claude Code spells `CLAUDE_CODE_<suffix>`, read after One Code's `ONECODE_<suffix>` (lib/knobs.ts). */
-const ENV_ALIASES: Readonly<Record<string, string>> = Object.fromEntries(
+/**
+ * The knobs Claude Code spells `CLAUDE_CODE_<suffix>`, read after One Code's
+ * `ONECODE_<suffix>` (lib/knobs.ts). `CLAUDE_CODE_SUBAGENT_MODEL` applies only
+ * on a Claude model: it was written for Claude Code, almost always as an
+ * Anthropic alias ("sonnet"), and borrowing it elsewhere moved subagent work
+ * off the provider the user chose (observed live: an opencode deepseek
+ * session's subagents landing on claude-sonnet-5).
+ */
+const ENV_ALIASES: Readonly<Record<string, EnvAlias>> = Object.fromEntries(
 	[
 		"SUBAGENT_MODEL",
 		"GIT_BASH_PATH",
@@ -72,7 +80,12 @@ const ENV_ALIASES: Readonly<Record<string, string>> = Object.fromEntries(
 		"LOOP_KEEPALIVE",
 		"ENABLE_TODO_TOOLS",
 		"TICKLISH_WHISPER_TIMEOUT_MS",
-	].map((suffix) => [suffix, `CLAUDE_CODE_${suffix}`]),
+	].map((suffix): [string, EnvAlias] => [
+		suffix,
+		suffix === "SUBAGENT_MODEL"
+			? { name: `CLAUDE_CODE_${suffix}`, appliesTo: isClaudeFamilyModel, limit: "applied only when this session is on a Claude model" }
+			: { name: `CLAUDE_CODE_${suffix}` },
+	]),
 );
 
 export const sources: SourceProvider = {
