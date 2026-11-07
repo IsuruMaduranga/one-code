@@ -66,14 +66,11 @@ export function expandTilde(path: string, home: string): string {
 }
 
 /**
- * One Code's own state dir — everything One Code generates goes here. `home`
- * defaults to the real home; callers that already thread a `home` (the settings
- * loaders, hermetic in tests) pass it so the root stays under that home when
- * `ONECODE_STATE_DIR` is unset.
+ * The product's own state dir (`~/.onecode`, or `ONECODE_STATE_DIR`): everything
+ * the product generates goes here. Callers that already thread a `home` (the
+ * settings loaders, hermetic in tests) pass it so the root stays under that home.
  */
-export function oneCodeStateDir(env: Record<string, string | undefined> = process.env, home: string = homedir()): string {
-	return productStateDir(env, home);
-}
+export { productStateDir };
 
 /**
  * A path with forward slashes, in Claude Code's POSIX shape on Windows

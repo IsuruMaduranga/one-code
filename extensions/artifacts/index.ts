@@ -20,7 +20,7 @@ import { readJsonFile } from "../lib/atomic-write.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { findProjectRoot } from "../lib/git.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
-import { oneCodeSettingsPath } from "../lib/one-code-settings.ts";
+import { productSettingsPath } from "../lib/product-settings.ts";
 import { launchOpener, noDisplayReason, openerPlan } from "../lib/open-browser.ts";
 import { tildify } from "../lib/paths.ts";
 import { sanitizeDisplayText, terminalLink } from "../lib/terminal-text.ts";
@@ -65,7 +65,7 @@ interface PublishDetails {
 
 /** `artifacts.autoOpen` in ~/.onecode/settings.json; true unless set to false. */
 function autoOpenEnabled(): boolean {
-	const settings = readJsonFile<{ artifacts?: { autoOpen?: unknown } }>(oneCodeSettingsPath(homedir()));
+	const settings = readJsonFile<{ artifacts?: { autoOpen?: unknown } }>(productSettingsPath(homedir()));
 	return settings?.artifacts?.autoOpen !== false;
 }
 
@@ -209,7 +209,7 @@ function artifactsExtension(pi: ExtensionAPI) {
 			const browser: PublishBrowser = !created
 				? { kind: "notReopened" }
 				: !autoOpenEnabled()
-					? { kind: "autoOpenOff", settingsPath: tildify(oneCodeSettingsPath(homedir()), homedir()) }
+					? { kind: "autoOpenOff", settingsPath: tildify(productSettingsPath(homedir()), homedir()) }
 					: { kind: "tried", failed: await showInBrowser(viewer) };
 			const details: PublishDetails = { id: meta.id, version: meta.version, path: viewer, created };
 			return textResult(

@@ -32,7 +32,7 @@ const snapshot = (name: string, plugins: Array<{ name: string; description?: str
 
 const plugin = (overrides: Partial<Plugin> & { id: string; name: string }): Plugin => ({
 	path: "/x",
-	originRoot: "one-code",
+	originRoot: "product",
 	enabled: true,
 	dataRoot: "/data",
 	...overrides,

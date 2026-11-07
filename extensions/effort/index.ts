@@ -53,7 +53,7 @@ import {
 	ULTRACODE_STATUS_KEY,
 } from "./slider.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
-import { readWorkflowSettings } from "../lib/one-code-settings.ts";
+import { readWorkflowSettings } from "../lib/product-settings.ts";
 import { panelUi } from "../lib/panel-focus.ts";
 import { extendingCompletions } from "../lib/argument-hints.ts";
 

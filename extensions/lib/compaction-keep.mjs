@@ -19,6 +19,8 @@
  * on bare Node before pi does.
  */
 
+import { brand } from "./brand.mjs";
+
 /** The keep window One Code wants. */
 export const ONE_CODE_KEEP_RECENT_TOKENS = 0;
 
@@ -70,7 +72,7 @@ export const KEEP_NO = "No, leave the setting";
 /** The startup question on the user's own pi. */
 export function keepWindowPrompt(settingsPath) {
 	return [
-		`One Code compacts like Claude Code: it keeps only the last reply after the summary.`,
+		`${brand.name} compacts like Claude Code: it keeps only the last reply after the summary.`,
 		`pi's compaction.keepRecentTokens (${PI_DEFAULT_KEEP_RECENT_TOKENS} by default) no longer changes what is kept; it only makes /compact refuse a session shorter than that.`,
 		`Set it to 0 in ${settingsPath}? It takes effect from the next start.`,
 	].join("\n");

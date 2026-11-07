@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseFrontmatterLoosely } from "../../extensions/lib/frontmatter.ts";
-import { oneCodeProjectSettingsPath, oneCodeSettingsPath, readWorkflowSettings } from "../../extensions/lib/one-code-settings.ts";
+import { productProjectSettingsPath, productSettingsPath, readWorkflowSettings } from "../../extensions/lib/product-settings.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { BUNDLED_SKILLS_DIR, scanSkills } from "../../extensions/lib/skill-scan.ts";
 import { WORKFLOW_DESCRIPTION_BODY, workflowDescription, workflowSizeLine } from "../../profile/workflow/description.ts";
@@ -43,24 +43,24 @@ describe("readWorkflowSettings", () => {
 	});
 
 	it("disableWorkflows wins over enableWorkflows, from either file", () => {
-		write(oneCodeSettingsPath(home, env()), { enableWorkflows: true, disableWorkflows: true });
+		write(productSettingsPath(home, env()), { enableWorkflows: true, disableWorkflows: true });
 		expect(readWorkflowSettings(cwd, home, env()).enabled).toBe(false);
-		write(oneCodeSettingsPath(home, env()), { enableWorkflows: true });
-		write(oneCodeProjectSettingsPath(cwd, home, env()), { disableWorkflows: true });
+		write(productSettingsPath(home, env()), { enableWorkflows: true });
+		write(productProjectSettingsPath(cwd, home, env()), { disableWorkflows: true });
 		expect(readWorkflowSettings(cwd, home, env()).enabled).toBe(false);
 	});
 
 	it("enableWorkflows: false turns them off; the project file overrides the user file", () => {
-		write(oneCodeSettingsPath(home, env()), { enableWorkflows: false, workflowSizeGuideline: "small" });
+		write(productSettingsPath(home, env()), { enableWorkflows: false, workflowSizeGuideline: "small" });
 		expect(readWorkflowSettings(cwd, home, env())).toEqual({ enabled: false, sizeGuideline: "small", sizeConfigured: true });
-		write(oneCodeProjectSettingsPath(cwd, home, env()), { enableWorkflows: true, workflowSizeGuideline: "large" });
+		write(productProjectSettingsPath(cwd, home, env()), { enableWorkflows: true, workflowSizeGuideline: "large" });
 		expect(readWorkflowSettings(cwd, home, env())).toEqual({ enabled: true, sizeGuideline: "large", sizeConfigured: true });
 	});
 
 	it("ignores an unknown size and a malformed file", () => {
-		write(oneCodeSettingsPath(home, env()), { workflowSizeGuideline: "huge" });
+		write(productSettingsPath(home, env()), { workflowSizeGuideline: "huge" });
 		expect(readWorkflowSettings(cwd, home, env()).sizeGuideline).toBe("medium");
-		writeFileSync(oneCodeSettingsPath(home, env()), "{ not json");
+		writeFileSync(productSettingsPath(home, env()), "{ not json");
 		expect(readWorkflowSettings(cwd, home, env())).toEqual({ enabled: true, sizeGuideline: "medium", sizeConfigured: false });
 	});
 });
@@ -98,7 +98,7 @@ describe("workflow wiring: settings at session start", () => {
 	};
 
 	it("renders a configured guideline into the description", async () => {
-		write(oneCodeProjectSettingsPath(cwd, home, env()), { workflowSizeGuideline: "large" });
+		write(productProjectSettingsPath(cwd, home, env()), { workflowSizeGuideline: "large" });
 		const fake = createFakePi();
 		workflowExtension(fake.pi as never);
 		expect(fake.tools.get("workflow")!.description).toBe(workflowDescription("medium", false));
@@ -107,7 +107,7 @@ describe("workflow wiring: settings at session start", () => {
 	});
 
 	it("disabled: the tool leaves the active set and the keyword arms nothing", async () => {
-		write(oneCodeProjectSettingsPath(cwd, home, env()), { disableWorkflows: true });
+		write(productProjectSettingsPath(cwd, home, env()), { disableWorkflows: true });
 		const fake = createFakePi();
 		const reminders: unknown[] = [];
 		fake.events.on(REMINDER_CHANNEL, (data) => reminders.push(data));
@@ -128,7 +128,7 @@ describe("workflow wiring: settings at session start", () => {
 		expect(refused.content[0].text).toMatch(/^Workflows are turned off/);
 
 		// A later session with workflows on brings the tool back.
-		write(oneCodeProjectSettingsPath(cwd, home, env()), {});
+		write(productProjectSettingsPath(cwd, home, env()), {});
 		await start(fake);
 		expect(fake.getActiveTools()).toEqual(["read", "bash", "workflow"]);
 	});

@@ -13,6 +13,7 @@
  * Set `CC_NO_BANNER=1` to keep pi's original header.
  */
 
+import { brand } from "../lib/brand.mjs";
 import { feature } from "../lib/feature.ts";
 import { existsSync, readFileSync } from "node:fs";
 import { ARGUMENT_HINT_CHANNEL, type ArgumentHint, type CommandHint, frontmatterCommandHint, hintForInput, PI_BUILTIN_HINTS } from "../lib/argument-hints.ts";
@@ -54,9 +55,9 @@ import { sanitizeTitle } from "../lib/terminal-text.ts";
 
 export { truncateLine };
 
-const NAME = "One Code";
-/** Tagline under the wordmark — the "any model" positioning, matching the README. */
-const SUBTITLE = "the Claude Code experience, on any model";
+const NAME = brand.name;
+/** Tagline under the wordmark, from the profile's brand. */
+const SUBTITLE = brand.subtitle;
 
 export interface BannerInput {
 	version: string;
@@ -72,20 +73,13 @@ export interface BannerInput {
 }
 
 /**
- * "ONE CODE" wordmark (figlet "ANSI Shadow"), ONE and CODE on a single line.
- * Rendered as its own block above the text column. Rows are normalised to a
- * single width at load, so a trailing-space trim in the source can never
- * misalign the block. Below WORDMARK_WIDTH a compact "One Code" title replaces
- * it, so a narrow pane never shows sheared glyphs.
+ * The wordmark (One Code's: "ONE CODE" in figlet "ANSI Shadow"), from the
+ * profile's brand. Rendered as its own block above the text column. Rows are
+ * normalised to a single width at load, so a trailing-space trim in the source
+ * can never misalign the block. Below WORDMARK_WIDTH the product's name
+ * replaces it, so a narrow pane never shows sheared glyphs.
  */
-const WORDMARK_RAW = [
-	" ██████╗ ███╗   ██╗███████╗   ██████╗ ██████╗ ██████╗ ███████╗",
-	"██╔═══██╗████╗  ██║██╔════╝  ██╔════╝██╔═══██╗██╔══██╗██╔════╝",
-	"██║   ██║██╔██╗ ██║█████╗    ██║     ██║   ██║██║  ██║█████╗",
-	"██║   ██║██║╚██╗██║██╔══╝    ██║     ██║   ██║██║  ██║██╔══╝",
-	"╚██████╔╝██║ ╚████║███████╗  ╚██████╗╚██████╔╝██████╔╝███████╗",
-	" ╚═════╝ ╚═╝  ╚═══╝╚══════╝   ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝",
-];
+const WORDMARK_RAW = brand.wordmark;
 /** Display width every wordmark row is padded to (the widest raw row). */
 export const WORDMARK_WIDTH = Math.max(...WORDMARK_RAW.map((r) => [...r].length));
 export const WORDMARK = WORDMARK_RAW.map((r) => r + " ".repeat(WORDMARK_WIDTH - [...r].length));
@@ -551,7 +545,7 @@ function brandingExtension(pi: ExtensionAPI) {
 		// and points at the guide, not pi's files (distribution review M3).
 		if (!isRealModel(ctx.model?.id)) {
 			ctx.ui.notify(
-				"No model provider yet. Run /login to connect one (free options at https://github.com/IsuruMaduranga/one-code/blob/master/docs/guide/providers-and-models.md).",
+				`No model provider yet. Run /login to connect one (free options at ${brand.homepage}/blob/master/docs/guide/providers-and-models.md).`,
 				"warning",
 			);
 		}

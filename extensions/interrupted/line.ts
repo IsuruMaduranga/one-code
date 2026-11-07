@@ -5,5 +5,7 @@
  * leading mark, matching CC (its InterruptedByUser renders bare dim text).
  */
 
+import { brand } from "../lib/brand.mjs";
+
 /** The dim interrupted note, One Code's wording of CC's InterruptedByUser. */
-export const INTERRUPTED_TEXT = "Interrupted · What should One Code do instead?";
+export const INTERRUPTED_TEXT = `Interrupted · What should ${brand.name} do instead?`;

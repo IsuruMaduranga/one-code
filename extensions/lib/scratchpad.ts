@@ -14,6 +14,7 @@
  * module state — so each re-derives it through `sessionScratchpadDir`.
  */
 
+import { brand } from "./brand.mjs";
 import { chmodSync, lstatSync, mkdirSync } from "node:fs";
 import os from "node:os";
 import { dirname, join } from "node:path";
@@ -28,7 +29,7 @@ export function scratchpadDir(
 	projectRoot: string,
 	sessionId: string,
 ): string {
-	const owner = uid === undefined ? "onecode" : `onecode-${uid}`;
+	const owner = uid === undefined ? brand.bin : `${brand.bin}-${uid}`;
 	return join(tmpRoot, owner, projectSlug(projectRoot), sessionId, "scratchpad");
 }
 

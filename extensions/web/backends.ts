@@ -16,6 +16,7 @@
  * Failures are data (text.ts); the profile words them.
  */
 
+import { SETTINGS_DISPLAY } from "../lib/product-settings.ts";
 import type { BackendAttempt, BackendFailure, ChainFailure } from "./text.ts";
 
 /** A backend failed for a reason the profile words. */
@@ -83,7 +84,7 @@ const BACKEND_NAMES: readonly BackendName[] = ["brave", "tavily", "exa-free"];
 
 /** The one-line settings snippet both warnings point at: the fix, spelled out. */
 export const SETTINGS_SNIPPET = '{ "webSearch": { "apiKeys": { "brave": "<key>" } } }';
-export const SETTINGS_FILE = "~/.onecode/settings.json";
+export const SETTINGS_FILE = SETTINGS_DISPLAY;
 /**
  * User-facing one-time notice (TUI) the first time a session searches keyless.
  * The model's own note on every keyless result is the profile's (text.ts chainResults).

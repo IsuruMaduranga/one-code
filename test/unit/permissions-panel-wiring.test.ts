@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
 
 import { completeSimple } from "@earendil-works/pi-ai/compat";
-import { oneCodeProjectSettingsPath } from "../../extensions/lib/one-code-settings.ts";
+import { productProjectSettingsPath } from "../../extensions/lib/product-settings.ts";
 import { forwardSlashes } from "../../extensions/lib/paths.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
@@ -234,7 +234,7 @@ describe("/permissions wiring", () => {
 		writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ permissions: { allow: ["Read"] } }));
 		// Allow tab (opened first: no denials): Add a new rule…, type, save to the project file.
 		await openPanel(ENTER, ..."Bash(npm test:*)".split(""), ENTER, ENTER);
-		const target = oneCodeProjectSettingsPath(cwd, home);
+		const target = productProjectSettingsPath(cwd, home);
 		expect(JSON.parse(readFileSync(target, "utf-8")).permissions.allow).toEqual(["Bash(npm test:*)"]);
 		expect(reminders.some((r) => r.includes("<local-command-stdout>Added allow rule Bash(npm test:*) to "))).toBe(true);
 		// The same rule again is refused, not reported as added.

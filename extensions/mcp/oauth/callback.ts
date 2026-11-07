@@ -8,6 +8,7 @@
  * port, so a fresh port per flow is fine even against a previously-registered client.
  */
 
+import { brand } from "../../lib/brand.mjs";
 import { createServer, type Server } from "node:http";
 
 export interface CallbackServer {
@@ -22,7 +23,7 @@ const DEFAULT_TIMEOUT_MS = 5 * 60_000;
 
 /** HTML the browser lands on after redirect — self-closes where the browser allows it. */
 function landingPage(message: string): string {
-	return `<!doctype html><meta charset="utf-8"><title>One Code</title><body style="font-family:system-ui;padding:3rem;text-align:center"><h2>${message}</h2><p>You can close this tab and return to the terminal.</p><script>setTimeout(()=>window.close(),1500)</script></body>`;
+	return `<!doctype html><meta charset="utf-8"><title>${brand.name}</title><body style="font-family:system-ui;padding:3rem;text-align:center"><h2>${message}</h2><p>You can close this tab and return to the terminal.</p><script>setTimeout(()=>window.close(),1500)</script></body>`;
 }
 
 export async function startCallbackServer(): Promise<CallbackServer> {

@@ -7,12 +7,13 @@
  * MCP servers reachable, what external programs are missing — then the issues.
  */
 
+import { brand } from "../lib/brand.mjs";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { extensionVersion } from "../lib/package-version.ts";
 import { piVersionWarning, TESTED_PI_MAX_EXCLUSIVE, TESTED_PI_MIN } from "../lib/pi-version.ts";
 import { modelSpec } from "../lib/model-policy.ts";
 import { readJsonFile } from "../lib/atomic-write.ts";
-import { oneCodeSettingsPath } from "../lib/one-code-settings.ts";
+import { productSettingsPath } from "../lib/product-settings.ts";
 import { webSearchSettingsFrom } from "../web/backends.ts";
 import { collectCompat, importedConfigSection, mcpSection } from "./compat.ts";
 import { checkDependencies, dependenciesSection, type ShellsInput } from "./dependencies.ts";
@@ -55,12 +56,12 @@ export function installationSection(env: DoctorEnvironment, findings: Finding[])
 	const lines: ReportLine[] = [];
 	const pi = env.piVersion ? ` · pi ${env.piVersion}` : "";
 	lines.push({
-		text: env.install === "app" ? `Running: the bundled onecode app ${env.oneCodeVersion}${pi}` : `Running: one-code-extension ${env.oneCodeVersion} on your own pi${pi}`,
+		text: env.install === "app" ? `Running: the bundled ${brand.bin} app ${env.productVersion}${pi}` : `Running: ${brand.packages.extension} ${env.productVersion} on your own pi${pi}`,
 		level: "ok",
 	});
 	lines.push({ text: `Node ${env.nodeVersion} · ${env.platform}-${env.arch}`, level: "dim" });
 	lines.push({ text: `pi agent dir: ${shortenHome(env.agentDir, env.home)} (auth, models, sessions, pi settings)`, level: "dim" });
-	lines.push({ text: `One Code state: ${shortenHome(env.stateDir, env.home)} (own settings, plans)`, level: "dim" });
+	lines.push({ text: `${brand.name} state: ${shortenHome(env.stateDir, env.home)} (own settings, plans)`, level: "dim" });
 	if (env.sources) {
 		lines.push({ text: `${env.sources.title}: ${env.sources.label} (switch in /memory)`, level: "dim" });
 		lines.push({ text: env.sources.detail, level: "dim" });
@@ -69,7 +70,7 @@ export function installationSection(env: DoctorEnvironment, findings: Finding[])
 	const versionWarning = piVersionWarning(env.piVersion);
 	if (versionWarning) {
 		lines.push({ text: `pi ${env.piVersion} is outside the tested range ${TESTED_PI_MIN} – <${TESTED_PI_MAX_EXCLUSIVE}`, level: "warn" });
-		findings.push({ level: "warn", text: versionWarning, fix: env.install === "app" ? "Upgrade One Code (it pins a tested pi)." : "Update one-code-extension, or pin pi inside the tested range." });
+		findings.push({ level: "warn", text: versionWarning, fix: env.install === "app" ? `Upgrade ${brand.name} (it pins a tested pi).` : `Update ${brand.packages.extension}, or pin pi inside the tested range.` });
 	}
 	replacedBuiltinsLines(env, lines, findings);
 	compactionKeepLines(env, lines, findings);
@@ -77,11 +78,11 @@ export function installationSection(env: DoctorEnvironment, findings: Finding[])
 	if (env.latest) {
 		switch (env.latest.status) {
 			case "current":
-				lines.push({ text: `Updates: up to date (${env.oneCodeVersion} is the latest release)`, level: "ok" });
+				lines.push({ text: `Updates: up to date (${env.productVersion} is the latest release)`, level: "ok" });
 				break;
 			case "behind":
 				lines.push({
-					text: `Updates: ${env.latest.version} is available (you have ${env.oneCodeVersion}) — ${upgradeCommandFor(env.install, env.env)}`,
+					text: `Updates: ${env.latest.version} is available (you have ${env.productVersion}) — ${upgradeCommandFor(env.install, env.env)}`,
 					level: "warn",
 				});
 				break;
@@ -100,14 +101,14 @@ function replacedBuiltinsLines(env: DoctorEnvironment, lines: ReportLine[], find
 	const view = env.replacedBuiltins;
 	if (!view) return;
 	if (view.left.length === 0) {
-		lines.push({ text: "pi's built-in tool-search and mcp: off (One Code provides its own)", level: "dim" });
+		lines.push({ text: `pi's built-in tool-search and mcp: off (${brand.name} provides its own)`, level: "dim" });
 		return;
 	}
 	const names = view.left.map((builtin) => builtin.name).join(" and ");
 	lines.push({ text: `pi's built-in ${names}: still on, so pi warns at every start`, level: "warn" });
 	findings.push({
 		level: "warn",
-		text: `pi skips its built-in ${names} because One Code provides its own, and warns about it at every start, advising you to remove One Code. Keep One Code; turning the built-in off silences the warning.`,
+		text: `pi skips its built-in ${names} because ${brand.name} provides its own, and warns about it at every start, advising you to remove ${brand.name}. Keep ${brand.name}; turning the built-in off silences the warning.`,
 		fix: replacedBuiltinsFix(view.left, view.paths, configCommand(env.install)),
 	});
 }
@@ -117,14 +118,14 @@ function compactionKeepLines(env: DoctorEnvironment, lines: ReportLine[], findin
 	const view = env.compactionKeep;
 	if (!view) return;
 	if (view.value === 0) {
-		lines.push({ text: "pi's compaction keep window: 0 (One Code keeps the last reply, as Claude Code does)", level: "dim" });
+		lines.push({ text: `pi's compaction keep window: 0 (${brand.name} keeps the last reply, as Claude Code does)`, level: "dim" });
 		return;
 	}
 	const where = view.source === "default" ? "pi's default" : `set in the ${view.source} settings${view.model ? ` for ${view.model}` : ""}`;
 	lines.push({ text: `pi's compaction keep window: ${view.value} tokens (${where}), so /compact refuses shorter sessions`, level: "warn" });
 	findings.push({
 		level: "warn",
-		text: `One Code keeps only the last reply after a compaction, so pi's keep window of ${view.value} tokens only stops /compact on a session shorter than that.`,
+		text: `${brand.name} keeps only the last reply after a compaction, so pi's keep window of ${view.value} tokens only stops /compact on a session shorter than that.`,
 		fix: keepWindowFix(shortenHome(view.source === "project" ? view.paths.project : view.paths.user, env.home), view.model),
 	});
 }
@@ -189,7 +190,7 @@ export function providersSection(registry: RegistryView, findings: Finding[]): {
 		findings.push({
 			level: "error",
 			text: "No model provider is configured, so no session can send a request yet.",
-			fix: `Run /login inside One Code, or export a key such as ${COMMON_KEY_ENV_VARS.slice(0, 2).join(" or ")} before launching. Free options: OpenCode Zen (deepseek-v4-flash-free) and OpenRouter's :free models.`,
+			fix: `Run /login inside ${brand.name}, or export a key such as ${COMMON_KEY_ENV_VARS.slice(0, 2).join(" or ")} before launching. Free options: OpenCode Zen (deepseek-v4-flash-free) and OpenRouter's :free models.`,
 		});
 	} else if (rest > 0) {
 		lines.push({ text: `${countNoun(rest, "more provider")} without credentials — /login to add one, or set its API-key environment variable`, level: "dim" });
@@ -231,7 +232,7 @@ export function buildDoctorReport({ env, registry, session }: BuildInput): Docto
 	sections.push(importedConfigSection(compat, env.home));
 	sections.push(mcpSection(compat, session, env.home));
 
-	const webSearchSettings = webSearchSettingsFrom(readJsonFile<{ webSearch?: unknown }>(oneCodeSettingsPath(env.home, env.env))?.webSearch);
+	const webSearchSettings = webSearchSettingsFrom(readJsonFile<{ webSearch?: unknown }>(productSettingsPath(env.home, env.env))?.webSearch);
 	const deps = checkDependencies({ cwd: env.cwd, env: env.env, platform: env.platform, agentDir: env.agentDir, mcpServers: compat.mcp.servers, sessionModel: session.model, webSearchSettings, shells: resolveShells(env.env, env.home, env.platform) });
 	findings.push(...deps.findings);
 	sections.push(dependenciesSection(deps));
@@ -272,7 +273,7 @@ function summaryText(input: {
 }
 
 /** The extension's own version — the app overrides it with CC_VERSION (lockstep releases). */
-export function oneCodeVersion(env: NodeJS.ProcessEnv = process.env): string {
+export function productVersion(env: NodeJS.ProcessEnv = process.env): string {
 	return env.CC_VERSION ?? extensionVersion();
 }
 

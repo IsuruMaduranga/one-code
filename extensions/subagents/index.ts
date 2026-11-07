@@ -49,7 +49,7 @@ import {
 } from "./model-select.ts";
 import { modelPickerComponent, pickerSpec, toPickerEntries, type PickerEntry } from "../lib/model-picker.ts";
 import { chosenModelWarnings } from "../lib/model-choice-warnings.ts";
-import { readSuggestNewerModels } from "../lib/one-code-settings.ts";
+import { readSuggestNewerModels, SETTINGS_DISPLAY } from "../lib/product-settings.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
 import { guideDocs } from "../lib/guide-docs.ts";
 import { extensionVersion } from "../lib/package-version.ts";
@@ -2987,7 +2987,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				return;
 			}
 			emitModelStatus(ctx);
-			ctx.ui.notify('Subagent default set to the session model ("inherit", saved to ~/.onecode/settings.json).', "info");
+			ctx.ui.notify(`Subagent default set to the session model ("inherit", saved to ${SETTINGS_DISPLAY}).`, "info");
 			return;
 		}
 
@@ -3036,7 +3036,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			ctx.ui.notify("Could not save subagent model: " + (error as Error).message, "error");
 			return;
 		}
-		ctx.ui.notify(`Subagent default set to "${spec}" (saved to ~/.onecode/settings.json).`, "info");
+		ctx.ui.notify(`Subagent default set to "${spec}" (saved to ${SETTINGS_DISPLAY}).`, "info");
 		// What the choice costs, shown now even if an earlier choice already
 		// raised the same line; marked noticed so the status refresh is quiet.
 		if (resolved) {

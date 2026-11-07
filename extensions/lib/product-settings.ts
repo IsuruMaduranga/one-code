@@ -15,8 +15,8 @@
  * The state root is resolved against an explicit `home` (not `os.homedir()`)
  * so callers that already thread `home` — the auto-mode and subagent settings
  * loaders — stay hermetic under a temp home in tests. `ONECODE_STATE_DIR` is
- * honoured exactly as `oneCodeStateDir()` does; when it is unset the root is
- * `<home>/.onecode`, which equals `oneCodeStateDir()` in production where
+ * honoured exactly as `productStateDir()` does; when it is unset the root is
+ * `<home>/.onecode`, which equals `productStateDir()` in production where
  * `home === os.homedir()`.
  */
 
@@ -26,14 +26,14 @@ import { join } from "node:path";
 import { readJsonFile, writeJsonAtomic } from "./atomic-write.ts";
 import { findProjectRoot } from "./git.ts";
 import { projectSlug } from "./memory.ts";
-import { oneCodeStateDir, tryRealpath } from "./paths.ts";
+import { productStateDir, tryRealpath } from "./paths.ts";
 
 /** The product's user settings file as messages show it: `~/.onecode/settings.json`. */
 export const SETTINGS_DISPLAY = `~/${brand.stateDir}/settings.json`;
 
 /** `~/.onecode/settings.json`: the product's user-scope settings (writable). */
-export function oneCodeSettingsPath(home: string, env: NodeJS.ProcessEnv = process.env): string {
-	return join(oneCodeStateDir(env, home), "settings.json");
+export function productSettingsPath(home: string, env: NodeJS.ProcessEnv = process.env): string {
+	return join(productStateDir(env, home), "settings.json");
 }
 
 /**
@@ -41,25 +41,25 @@ export function oneCodeSettingsPath(home: string, env: NodeJS.ProcessEnv = proce
  * there is one (shared by worktrees and subdirectories), else the cwd, through
  * symlinks so an aliased checkout is the same project.
  */
-export function oneCodeProjectRoot(cwd: string): string {
+export function productProjectRoot(cwd: string): string {
 	const root = findProjectRoot(cwd) ?? cwd;
 	return tryRealpath(root) ?? root;
 }
 
 /**
  * `~/.onecode/projects/<slug>/settings.json` — One Code's per-repo settings
- * (writable), for `oneCodeProjectRoot`. The slug is the memory dir's
+ * (writable), for `productProjectRoot`. The slug is the memory dir's
  * (`projectSlug`), but of the resolved root, where the memory dir slugs the
  * root as found. It is lossy (`my_app` and `my-app` share a file), so a setting
  * that grants trust records the root it was given for (claude-external-includes.ts).
  */
-export function oneCodeProjectSettingsPath(cwd: string, home: string, env: NodeJS.ProcessEnv = process.env): string {
-	return oneCodeProjectSettingsPathFor(oneCodeProjectRoot(cwd), home, env);
+export function productProjectSettingsPath(cwd: string, home: string, env: NodeJS.ProcessEnv = process.env): string {
+	return productProjectSettingsPathFor(productProjectRoot(cwd), home, env);
 }
 
 /** Resolve a project settings path without moving existing permission or trust state. */
-export function oneCodeProjectSettingsPathFor(root: string, home: string, env: NodeJS.ProcessEnv = process.env): string {
-	const projects = join(oneCodeStateDir(env, home), "projects");
+export function productProjectSettingsPathFor(root: string, home: string, env: NodeJS.ProcessEnv = process.env): string {
+	const projects = join(productStateDir(env, home), "projects");
 	const legacy = join(projects, root.replace(/[^A-Za-z0-9-]/g, "-"), "settings.json");
 	if (existsSync(legacy)) return legacy;
 	return join(projects, projectSlug(root), "settings.json");
@@ -88,7 +88,7 @@ export function writeSettings(path: string, file: Record<string, unknown>): void
 
 /** User-only upgrade advice, enabled unless explicitly disabled in One Code's settings. */
 export function readSuggestNewerModels(home: string, env: NodeJS.ProcessEnv = process.env): boolean {
-	const file = readJsonFile<{ suggestNewerModels?: unknown }>(oneCodeSettingsPath(home, env));
+	const file = readJsonFile<{ suggestNewerModels?: unknown }>(productSettingsPath(home, env));
 	return file?.suggestNewerModels !== false;
 }
 
@@ -119,7 +119,7 @@ interface WorkflowSettingsFile {
  * unknown value is ignored). Read leniently: a malformed file is skipped.
  */
 export function readWorkflowSettings(cwd: string, home: string, env: NodeJS.ProcessEnv = process.env): WorkflowSettings {
-	const files = [oneCodeSettingsPath(home, env), oneCodeProjectSettingsPath(cwd, home, env)].map((path) => readJsonFile<WorkflowSettingsFile>(path));
+	const files = [productSettingsPath(home, env), productProjectSettingsPath(cwd, home, env)].map((path) => readJsonFile<WorkflowSettingsFile>(path));
 	let enable = true;
 	let disable = false;
 	let size: WorkflowSizeGuideline | undefined;

@@ -52,7 +52,7 @@ export interface PanelView {
 export type PanelEffect =
 	| { kind: "close" }
 	| { kind: "installToggle"; row: DiscoverRow }
-	| { kind: "setPluginEnabled"; id: string; origin: "claude" | "one-code"; enabled: boolean }
+	| { kind: "setPluginEnabled"; id: string; origin: "claude" | "product"; enabled: boolean }
 	| { kind: "uninstall"; id: string }
 	| { kind: "setSkillEnabled"; overrideKey: string; enabled: boolean }
 	| { kind: "toggleFavorite"; target: "plugin" | "skill"; key: string }
@@ -138,7 +138,7 @@ function installedLetterEffect(row: InstalledRow, letter: string): PanelEffect |
 	if (row.kind === "plugin") {
 		if (letter === "e") return { kind: "setPluginEnabled", id: row.id, origin: row.origin, enabled: true };
 		if (letter === "d") return { kind: "setPluginEnabled", id: row.id, origin: row.origin, enabled: false };
-		if (letter === "u" && row.origin === "one-code") return { kind: "uninstall", id: row.id };
+		if (letter === "u" && row.origin === "product") return { kind: "uninstall", id: row.id };
 		if (letter === "f") return { kind: "toggleFavorite", target: "plugin", key: row.id };
 	}
 	if (row.kind === "skill") {

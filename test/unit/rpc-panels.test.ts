@@ -9,7 +9,7 @@ import pluginsExtension from "../../extensions/plugins/index.ts";
 import skillExtension from "../../extensions/skill/index.ts";
 import { invalidatePluginsCache } from "../../extensions/lib/plugins.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
-import { oneCodeProjectSettingsPath } from "../../extensions/lib/one-code-settings.ts";
+import { productProjectSettingsPath } from "../../extensions/lib/product-settings.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 
@@ -75,7 +75,7 @@ describe("RPC commands never silently mount unsupported custom UI", () => {
 		mkdirSync(external);
 		(ctx.ui as { select: ReturnType<typeof vi.fn> }).select.mockResolvedValue("yes");
 		await fake.commands.get("add-dir")!.handler(external, ctx);
-		expect(existsSync(oneCodeProjectSettingsPath(cwd, home))).toBe(false);
+		expect(existsSync(productProjectSettingsPath(cwd, home))).toBe(false);
 		expect(notices()).not.toContain("Added directory");
 	});
 
@@ -86,7 +86,7 @@ describe("RPC commands never silently mount unsupported custom UI", () => {
 		(ctx.ui as { select: ReturnType<typeof vi.fn> }).select.mockResolvedValue(choice);
 		await fake.commands.get("add-dir")!.handler(external, ctx);
 		expect(notices()).toContain("Added directory");
-		const settings = oneCodeProjectSettingsPath(cwd, home);
+		const settings = productProjectSettingsPath(cwd, home);
 		if (choice === "Yes, for this session") expect(existsSync(settings)).toBe(false);
 		else expect(JSON.parse(readFileSync(settings, "utf8")).permissions.additionalDirectories).toHaveLength(1);
 	});

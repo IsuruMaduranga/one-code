@@ -22,6 +22,7 @@
  * working-docs/decisions/model-tiers.md.
  */
 
+import { brand, stateDirPattern } from "./brand.mjs";
 import { closeSync, openSync, readSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -234,7 +235,7 @@ export function catalogCacheFiles(stateDir: string): string[] {
  * forward-slashed path tail: the floor's counterpart of `catalogCacheFiles`,
  * for one in another home or spelled through a symlink the resolver missed.
  */
-export const CATALOG_CACHE_TAIL = new RegExp(`/\\.onecode/cache/model-catalog/(${[...Object.values(FILES), FAILURE_FILE].map((file) => file.replace(/[.]/g, "\\.")).join("|")})$`);
+export const CATALOG_CACHE_TAIL = new RegExp(`/${stateDirPattern}/cache/model-catalog/(${[...Object.values(FILES), FAILURE_FILE].map((file) => file.replace(/[.]/g, "\\.")).join("|")})$`);
 
 function isCatalogFile(value: unknown): value is CatalogFile<unknown> {
 	const file = record(value);
@@ -440,7 +441,7 @@ export async function refreshModelCatalog(options: {
 
 function fetchJson(url: string, fetchImpl: typeof fetch | undefined, signal: AbortSignal | undefined): Promise<unknown> {
 	// models.dev answers a bare client with 403; a browser User-Agent is accepted.
-	const init: RequestInit = { headers: { accept: "application/json", "user-agent": "Mozilla/5.0 (compatible; one-code-model-catalog)" } };
+	const init: RequestInit = { headers: { accept: "application/json", "user-agent": `Mozilla/5.0 (compatible; ${brand.idPrefix}-model-catalog)` } };
 	return fetchWithTimeout(
 		url,
 		CATALOG_FETCH_TIMEOUT_MS,

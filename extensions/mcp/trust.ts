@@ -25,6 +25,7 @@
  * only. Same shape as `hooks/trust.ts`.
  */
 
+import { brand } from "../lib/brand.mjs";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -212,7 +213,7 @@ export function persistEnableAll(projectRoot: string, storePath = approvalStoreP
 export function reconnectRefusal(server: McpServer): string | undefined {
 	if (!server.missingEnv?.length) return undefined;
 	const names = server.missingEnv.join(", ");
-	return `"${server.name}" needs ${names} set in the environment. Set ${server.missingEnv.length === 1 ? "it" : "them"} and restart One Code.`;
+	return `"${server.name}" needs ${names} set in the environment. Set ${server.missingEnv.length === 1 ? "it" : "them"} and restart ${brand.name}.`;
 }
 
 export const CHOICE_ALL = "Use this and all future MCP servers in this project";

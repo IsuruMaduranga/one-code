@@ -12,7 +12,7 @@ import type { EnvironmentFacts } from "./environment-block.ts";
 import type { GitSnapshot } from "./git-status.ts";
 
 /** Where an instruction file comes from; the key a section's descriptor is worded by. */
-export type InstructionSource = "global" | "managed" | "project" | "local" | "memory" | "oneCode" | "oneCodeGlobal" | "agents" | "agentsGlobal";
+export type InstructionSource = "global" | "managed" | "project" | "local" | "memory" | "product" | "productGlobal" | "agents" | "agentsGlobal";
 
 /** What changed in the workspace since the context block was told. */
 export type ContextChange = "git" | "memory" | "instructions";
@@ -34,7 +34,7 @@ export interface ContextText {
 	/** One file's section, naming where it comes from; `content` ends in a newline. */
 	section(p: { path: string; source: InstructionSource; content: string }): string;
 	/** Opens the ONECODE.md block; `above` names the instruction files above it (CLAUDE.md, or AGENTS.md in independent mode). */
-	oneCodePreamble(p: { above: string }): string;
+	productPreamble(p: { above: string }): string;
 	/** An instruction file attached when the model reads a file below the working directory. */
 	nestedFile(p: { path: string; content: string }): string;
 	/** Opens the context block. */

@@ -11,7 +11,8 @@
  * providers it depends on a third-party key.
  */
 
-import { envName } from "../lib/brand.mjs";
+import { SETTINGS_DISPLAY } from "../lib/product-settings.ts";
+import { brand, envName } from "../lib/brand.mjs";
 import { POWERSHELL_KNOB } from "../powershell/policy.ts";
 import { type Dirent, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -154,7 +155,7 @@ export function checkDependencies(input: DependencyInput): DependencyReport {
 
 	const git = which("git");
 	checks.push({ name: "git", found: !!git, path: git, need: "required", reason: "repository detection, auto mode's git status line for the classifier, worktree isolation", hint: "https://git-scm.com/downloads" });
-	if (!git) findings.push({ level: "warn", text: "git is not on PATH: worktree isolation and auto mode's git status line for the classifier are unavailable.", fix: "Install git and make sure it is on the PATH used to launch One Code." });
+	if (!git) findings.push({ level: "warn", text: "git is not on PATH: worktree isolation and auto mode's git status line for the classifier are unavailable.", fix: `Install git and make sure it is on the PATH used to launch ${brand.name}.` });
 
 	// pi downloads ripgrep into <agentDir>/bin on first run when PATH has none
 	// and puts that dir on the shell tools' PATH, so a copy there is "found".
@@ -240,7 +241,7 @@ export function webSearchRoute(input: Pick<DependencyInput, "env" | "sessionMode
 		};
 	}
 	const envVar = first.name === "brave" ? BRAVE_KEY_ENV : TAVILY_KEY_ENV;
-	return { route: first.name, detail: `${first.label} (${input.env[envVar]?.trim() ? envVar : "key in ~/.onecode/settings.json"})` };
+	return { route: first.name, detail: `${first.label} (${input.env[envVar]?.trim() ? envVar : `key in ${SETTINGS_DISPLAY}`})` };
 }
 
 export function dependenciesSection(report: DependencyReport): ReportSection {

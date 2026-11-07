@@ -14,6 +14,7 @@
  * concept at all), and the auto-memory folder as the last entry.
  */
 
+import { brand } from "../lib/brand.mjs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import {
 	AGENTS_DESCRIPTOR,
@@ -23,8 +24,8 @@ import {
 	type ContextFilePath,
 	instructionTargets,
 	LOCAL_DESCRIPTOR,
-	ONECODE_DESCRIPTOR,
-	ONECODE_GLOBAL_DESCRIPTOR,
+	PRODUCT_DESCRIPTOR,
+	PRODUCT_GLOBAL_DESCRIPTOR,
 	openInstructions,
 	PROJECT_DESCRIPTOR,
 } from "../lib/instructions.ts";
@@ -100,7 +101,7 @@ export function buildMemoryEntries(opts: {
 	const disp = (path: string) => displayPath(path, cwd, home);
 
 	// Global user instructions — always offered, matching CC (created on save).
-	const globalOneCode = found.get(`${ONECODE_GLOBAL_DESCRIPTOR}\0${homeOneCodeDir}`);
+	const globalOneCode = found.get(`${PRODUCT_GLOBAL_DESCRIPTOR}\0${homeOneCodeDir}`);
 	const discoveredPaths = new Set(discovered.map(({ path }) => path));
 	add({
 		title: "User instructions",
@@ -111,8 +112,8 @@ export function buildMemoryEntries(opts: {
 	});
 	if (globalOneCode) {
 		add({
-			title: "One Code user instructions",
-			description: `${disp(globalOneCode)} (One Code only)`,
+			title: `${brand.name} user instructions`,
+			description: `${disp(globalOneCode)} (${brand.name} only)`,
 			path: globalOneCode,
 			kind: "file",
 			exists: true,
@@ -161,11 +162,11 @@ export function buildMemoryEntries(opts: {
 		const configAgents = found.get(`${AGENTS_DESCRIPTOR}\0${join(d, configDir)}`);
 		if (configAgents) add({ title: disp(configAgents), path: configAgents, kind: "file", exists: true });
 
-		const oneCode = found.get(`${ONECODE_DESCRIPTOR}\0${d}`);
+		const oneCode = found.get(`${PRODUCT_DESCRIPTOR}\0${d}`);
 		if (oneCode) {
 			add({
-				title: isCwd ? "One Code instructions" : disp(oneCode),
-				description: `${disp(oneCode)} (One Code only)`,
+				title: isCwd ? `${brand.name} instructions` : disp(oneCode),
+				description: `${disp(oneCode)} (${brand.name} only)`,
 				path: oneCode,
 				kind: "file",
 				exists: true,

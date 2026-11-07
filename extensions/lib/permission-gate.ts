@@ -40,7 +40,7 @@ import type { PowerShellParse } from "./powershell-parser.ts";
 import { usesClaudeCodeFastPaths } from "./model-tier.ts";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { claudeConfigDir, claudeJsonPath, oneCodeStateDir } from "./paths.ts";
+import { claudeConfigDir, claudeJsonPath, productStateDir } from "./paths.ts";
 import { sessionResultsDir } from "./persisted-output.ts";
 import { powerShellParser } from "./shell-spawn.ts";
 import { isPrivateScratchpad, sessionScratchpadDir } from "./scratchpad.ts";
@@ -70,7 +70,7 @@ export const resolvedOrSelf = (dir: string) => resolveForContainment(dir) ?? dir
  * definition for both gates (PERMISSIONS-REVIEW-2026-09-05 M7).
  */
 export function runtimeProtectedDirs(): string[] {
-	const roots = [getAgentDir(), claudeConfigDir(), oneCodeStateDir()];
+	const roots = [getAgentDir(), claudeConfigDir(), productStateDir()];
 	return [...new Set(roots.flatMap((dir) => [dir, resolvedOrSelf(dir)]))];
 }
 
@@ -85,7 +85,7 @@ export function runtimeProtectedDirs(): string[] {
  * for `runtimeProtectedDirs`; `DecideInput.secretPaths` is the consumer.
  */
 export function runtimeSecretPaths(home: string = homedir()): string[] {
-	const stateDir = oneCodeStateDir(process.env, home);
+	const stateDir = productStateDir(process.env, home);
 	const agentDir = getAgentDir();
 	const paths = [
 		join(stateDir, "settings.json"),

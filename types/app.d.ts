@@ -96,7 +96,7 @@ declare module "*/brand.mjs" {
 		readonly bin: string;
 		/** Prefix of the product's environment variables (`<envPrefix>_<suffix>`). */
 		readonly envPrefix: string;
-		/** The state directory's name under the home directory: ".onecode". */
+		/** The state directory's name under the home directory, and the project config folder's name: ".onecode". */
 		readonly stateDir: string;
 		/** The product's own instruction file: "ONECODE.md". */
 		readonly productFile: string;
@@ -122,4 +122,5 @@ declare module "*/brand.mjs" {
 	export function brandedId(name: string): string;
 	export function envName(suffix: string): string;
 	export function productStateDir(env?: Record<string, string | undefined>, home?: string): string;
+	export const stateDirPattern: string;
 }

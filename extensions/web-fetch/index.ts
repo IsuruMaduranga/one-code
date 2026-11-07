@@ -16,6 +16,7 @@
  * answer from a successful fetch.
  */
 
+import { brand } from "../lib/brand.mjs";
 import { feature } from "../lib/feature.ts";
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -45,7 +46,7 @@ const MAX_REDIRECTS = 5;
 const MAX_CACHE_ENTRIES = 50;
 /** Longer than the classifier's cap: the reader ingests whole pages. */
 const READER_TIMEOUT_MS = 60_000;
-const USER_AGENT = "one-code/0.1 (+https://github.com/IsuruMaduranga/one-code)";
+const USER_AGENT = `${brand.idPrefix}/0.1 (+${brand.homepage})`;
 
 /**
  * Declared up front because pi infers a tool's `details` generic from the first

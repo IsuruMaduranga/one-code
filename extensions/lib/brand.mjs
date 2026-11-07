@@ -39,8 +39,13 @@ export function checkBrand(value) {
 	return value;
 }
 
-/** The shipped product's brand. */
-export const brand = Object.freeze(checkBrand(data));
+/**
+ * The shipped product's brand: a frozen copy, never the JSON module's own
+ * object, which a loader may still extend (jiti adds `default` to it on a later
+ * import).
+ */
+const checked = checkBrand(structuredClone(data));
+export const brand = Object.freeze({ ...checked, wordmark: Object.freeze([...checked.wordmark]), packages: Object.freeze({ ...checked.packages }) });
 
 /** An internal event-channel or session-entry id: `<idPrefix>:<name>`. Changing the prefix orphans state in old sessions. */
 export function brandedId(name) {
@@ -51,6 +56,12 @@ export function brandedId(name) {
 export function envName(suffix) {
 	return `${brand.envPrefix}_${suffix}`;
 }
+
+/**
+ * The state directory's name as a regular-expression fragment that matches it
+ * literally (`\\.onecode`), for the safety floor's path-tail patterns.
+ */
+export const stateDirPattern = brand.stateDir.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
 
 /** The product's state directory: `<envPrefix>_STATE_DIR`, else `~/<stateDir>`. */
 export function productStateDir(env = process.env, home = homedir()) {

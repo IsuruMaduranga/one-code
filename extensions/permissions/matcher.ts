@@ -867,7 +867,7 @@ export interface DecideInput {
 	 * protected-paths.ts (see `runtimeProtectedDirs()`, the sole producer): pi's
 	 * own agent directory (`getAgentDir()` — `~/.pi/agent` for stock pi,
 	 * `~/.onecode/agent` bundled), Claude Code's config dir (`claudeConfigDir()`)
-	 * and One Code's state dir (`oneCodeStateDir()`). The last two catch a
+	 * and One Code's state dir (`productStateDir()`). The last two catch a
 	 * relocated `CLAUDE_CONFIG_DIR` / `ONECODE_STATE_DIR`, which the static
 	 * segment list cannot (distribution review 2026-09-09, L2). Absolute paths; a
 	 * write landing inside one is judged like a protected path

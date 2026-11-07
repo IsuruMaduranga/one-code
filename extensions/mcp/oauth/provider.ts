@@ -12,6 +12,7 @@
  * using stored tokens) is constructed without an opener and refuses to redirect.
  */
 
+import { brand } from "../../lib/brand.mjs";
 import type {
 	OAuthClientInformationFull,
 	OAuthClientInformationMixed,
@@ -82,7 +83,7 @@ export class McpOAuthProvider implements OAuthClientProvider {
 		const stored = this.load().clientMetadata;
 		if (stored) return stored;
 		return {
-			client_name: "One Code",
+			client_name: `${brand.name}`,
 			redirect_uris: this._redirectUrl ? [this._redirectUrl] : [],
 			grant_types: ["authorization_code", "refresh_token"],
 			response_types: ["code"],

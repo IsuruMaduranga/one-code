@@ -28,7 +28,7 @@
  * two plugins can both ship a `commit` command.
  */
 
-import { brandedId } from "./brand.mjs";
+import { brand, brandedId } from "./brand.mjs";
 import { featureEnabled } from "./profile.ts";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import os from "node:os";
@@ -45,7 +45,7 @@ export interface PluginManifest {
 	description?: string;
 }
 
-export type PluginOrigin = "claude" | "one-code";
+export type PluginOrigin = "claude" | "product";
 
 export interface Plugin {
 	/** Raw registry key (`<name>@<marketplace>`) — what enabledPlugins/overrides key on. */
@@ -64,7 +64,7 @@ export interface Plugin {
 	overridden?: boolean;
 	/** Base dir for the plugin's `${CLAUDE_PLUGIN_DATA}` (per-origin). */
 	dataRoot: string;
-	/** Raw `enabled` from the installed_plugins.json entry (meaningful only for one-code origin). */
+	/** Raw `enabled` from the installed_plugins.json entry (meaningful only for the product origin). */
 	rawEnabled?: boolean;
 }
 
@@ -369,7 +369,7 @@ export function discoverPlugins(roots: DiscoverRoots): DiscoveredPlugins {
 
 	const oneCodePlugins: Plugin[] = loadInstalledPlugins(roots.oneCodeRoot, roots.cwd).map((p) => ({
 		...p,
-		originRoot: "one-code" as const,
+		originRoot: "product" as const,
 		enabled: oneCodePluginEnabled(p.rawEnabled),
 		dataRoot: join(roots.oneCodeRoot, "data"),
 	}));
@@ -419,7 +419,7 @@ export function discoverPlugins(roots: DiscoverRoots): DiscoveredPlugins {
 				result.mcpConfigPlugins.set(resources.mcpConfig, plugin.name);
 			}
 		} catch (error) {
-			console.error(`One Code: skipping plugin "${plugin.id}" — its resources could not be read: ${(error as Error).message}`);
+			console.error(`${brand.name}: skipping plugin "${plugin.id}" — its resources could not be read: ${(error as Error).message}`);
 		}
 	}
 

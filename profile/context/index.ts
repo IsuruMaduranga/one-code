@@ -14,8 +14,8 @@ const DESCRIPTORS: Record<InstructionSource, string> = {
 	project: "project instructions, checked into the codebase",
 	local: "user's private project instructions, not checked in",
 	memory: "user's auto-memory, persists across conversations",
-	oneCode: "One Code-specific instructions, not read by Claude Code",
-	oneCodeGlobal: "One Code-specific global instructions for all projects, not read by Claude Code",
+	product: "One Code-specific instructions, not read by Claude Code",
+	productGlobal: "One Code-specific global instructions for all projects, not read by Claude Code",
 	agents: "cross-tool agent instructions, AGENTS.md standard",
 	agentsGlobal: "user's private global cross-tool agent instructions for all projects, AGENTS.md standard",
 };
@@ -45,7 +45,7 @@ export const context: ContextText = {
 		"Codebase and user instructions are shown below. Be sure to adhere to these instructions. " +
 		"IMPORTANT: These instructions OVERRIDE any default behavior and you MUST follow them exactly as written.",
 	section: ({ path, source, content }) => `Contents of ${path} (${DESCRIPTORS[source]}):\n\n${content}`,
-	oneCodePreamble: ({ above }) =>
+	productPreamble: ({ above }) =>
 		"# oneCodeMd\n" +
 		"The following are One Code-specific instructions, read only by One Code and not by other tools. " +
 		`IMPORTANT: they take precedence over the ${above} instructions above and over any default behavior — ` +

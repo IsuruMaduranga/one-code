@@ -41,7 +41,7 @@ import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import { isObject } from "../lib/ledger/records.ts";
 import { readState, recordState } from "../lib/ledger/state.ts";
 import { announceLocalCommand } from "../lib/local-command.ts";
-import { readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
+import { readSettingsForWrite, writeSettings } from "../lib/product-settings.ts";
 
 /** Pure merge: set the default model, preserving every other settings key. */
 export function applyDefaultModel(

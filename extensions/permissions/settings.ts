@@ -20,7 +20,7 @@
 
 import { isRepoFile, readSettingsFile as readClaudeSettingsFile, settingsSources } from "../lib/claude-settings.ts";
 import type { SettingsFile } from "../lib/sources.ts";
-import { readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
+import { readSettingsForWrite, writeSettings } from "../lib/product-settings.ts";
 import { resolve } from "node:path";
 import { expandTilde } from "../lib/paths.ts";
 import type { PermissionMode } from "./matcher.ts";

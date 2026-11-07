@@ -10,10 +10,11 @@
  * `buildDoctorReport` the `/doctor` command uses.
  */
 
+import { brand } from "../lib/brand.mjs";
 import { join } from "node:path";
 import { CONFIG_DIR_NAME, ModelRegistry, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { keepView, replacedBuiltinsView } from "./builtins.ts";
-import { oneCodeStateDir } from "../lib/paths.ts";
+import { productStateDir } from "../lib/paths.ts";
 import { loadPermissionSettings } from "../permissions/settings.ts";
 import { buildDoctorReport } from "./build.ts";
 import { type DoctorReport, renderDoctorText, type SessionView } from "./report.ts";
@@ -60,7 +61,7 @@ export async function collectDoctorCliReport(options: DoctorCliOptions): Promise
 	const permissions = loadPermissionSettings(cwd, home);
 	session.permission = {
 		mode: permissions.defaultMode ?? "auto",
-		source: permissions.defaultMode ? "permissions.defaultMode in settings" : "One Code's default",
+		source: permissions.defaultMode ? "permissions.defaultMode in settings" : `${brand.name}'s default`,
 	};
 
 	const latest = await latestPending;
@@ -69,13 +70,13 @@ export async function collectDoctorCliReport(options: DoctorCliOptions): Promise
 			cwd,
 			home,
 			agentDir,
-			stateDir: oneCodeStateDir(env, home),
+			stateDir: productStateDir(env, home),
 			sources: sourceSwitchStatus(home, env),
 			env,
 			platform: process.platform,
 			arch: process.arch,
 			nodeVersion: process.versions.node,
-			oneCodeVersion: options.version,
+			productVersion: options.version,
 			install: options.install,
 			piVersion: options.piVersion,
 			replacedBuiltins: replacedBuiltinsView(options.piVersion, () => settings, { agentDir, cwd }),
@@ -98,7 +99,7 @@ export async function runDoctorCli(options: DoctorCliOptions, write: (text: stri
 	const report = await collectDoctorCliReport(options);
 	const width = options.columns ?? process.stdout.columns ?? 100;
 	write(`${renderDoctorText(report, Math.max(60, Math.min(width, 120)))}\n\n`);
-	const where = options.install === "app" ? "an onecode session" : "a pi session";
+	const where = options.install === "app" ? brand.bin : "a pi session";
 	write(`For a full setup checkup that can also fix issues, run /doctor inside ${where}.\n`);
 	write("Inside a session, /doctor report shows this report alone.\n");
 	return report.findings.some((finding) => finding.level === "error") ? 1 : 0;

@@ -11,10 +11,11 @@
  * Code goes to the One Code plugin root (lib/plugin-overrides.ts), never here.
  */
 
+import { brand } from "./brand.mjs";
 import { existsSync, readFileSync } from "node:fs";
 import { join, posix, win32 } from "node:path";
 import { openSources, type SettingsFile } from "./sources.ts";
-import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "./one-code-settings.ts";
+import { productProjectSettingsPath, productSettingsPath } from "./product-settings.ts";
 import { claudeManagedDir, claudeUserDir } from "./paths.ts";
 
 export interface ClaudeSettingsFile {
@@ -49,9 +50,9 @@ export function managedSettingsPaths(platform: NodeJS.Platform = process.platfor
  */
 export function settingsSources(cwd: string, home: string, opts: { productLocal?: boolean } = {}): SettingsFile[] {
 	const base: SettingsFile[] = [
-		{ path: oneCodeSettingsPath(home), scope: "user", owner: "product", label: "One Code user settings" },
+		{ path: productSettingsPath(home), scope: "user", owner: "product", label: `${brand.name} user settings` },
 		// Finding it walks up for the project root: callers that want only user or borrowed files skip it.
-		...(opts.productLocal === false ? [] : [{ path: oneCodeProjectSettingsPath(cwd, home), scope: "local", owner: "product", label: "One Code project settings" } satisfies SettingsFile]),
+		...(opts.productLocal === false ? [] : [{ path: productProjectSettingsPath(cwd, home), scope: "local", owner: "product", label: `${brand.name} project settings` } satisfies SettingsFile]),
 	];
 	// A repository's file is never the primary one: the keys read from it (MCP
 	// approvals, defaultMode, env) would let a repository grant itself access.

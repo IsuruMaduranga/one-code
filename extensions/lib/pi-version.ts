@@ -16,6 +16,8 @@
  * `test/e2e/pi-floor-smoke.mjs` against it.
  */
 
+import { brand } from "./brand.mjs";
+
 /** Inclusive minimum and exclusive maximum pi version this release is tested against. */
 export const TESTED_PI_MIN = "1.0.0";
 export const TESTED_PI_MAX_EXCLUSIVE = "1.6.0";
@@ -53,8 +55,8 @@ export function piVersionWarning(runningPiVersion: string | undefined): string |
 	if (belowMin >= 0 && atOrAboveMax < 0) return undefined;
 	const tested = `${TESTED_PI_MIN} – <${TESTED_PI_MAX_EXCLUSIVE}`;
 	return (
-		`one-code-extension is tested against pi ${tested}; you are running pi ${runningPiVersion}. ` +
-		`Things may still work, but if tools or settings misbehave, update one-code-extension ` +
+		`${brand.packages.extension} is tested against pi ${tested}; you are running pi ${runningPiVersion}. ` +
+		`Things may still work, but if tools or settings misbehave, update ${brand.packages.extension} ` +
 		`(or pin pi inside the tested range).`
 	);
 }

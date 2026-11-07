@@ -23,12 +23,13 @@
  * Pure: no pi imports.
  */
 
+import { brand } from "./brand.mjs";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import os from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { findGitRoot } from "./git.ts";
 import { tryReadFile } from "./plugins.ts";
-import { absoluteFrom, expandTilde, isPathAtOrUnder, oneCodeStateDir, tryRealpath } from "./paths.ts";
+import { absoluteFrom, expandTilde, isPathAtOrUnder, productStateDir, tryRealpath } from "./paths.ts";
 import { MAX_INSTRUCTION_BYTES } from "./claude-rules.ts";
 import { readExternalIncludesApproval } from "./claude-external-includes.ts";
 import { fitToWindow, type SkippedInstruction } from "./instruction-budget.ts";
@@ -52,13 +53,13 @@ export const MANAGED_DESCRIPTOR: InstructionSource = "managed";
 export const PROJECT_DESCRIPTOR: InstructionSource = "project";
 export const LOCAL_DESCRIPTOR: InstructionSource = "local";
 export const MEMORY_DESCRIPTOR: InstructionSource = "memory";
-export const ONECODE_DESCRIPTOR: InstructionSource = "oneCode";
-export const ONECODE_GLOBAL_DESCRIPTOR: InstructionSource = "oneCodeGlobal";
+export const PRODUCT_DESCRIPTOR: InstructionSource = "product";
+export const PRODUCT_GLOBAL_DESCRIPTOR: InstructionSource = "productGlobal";
 export const AGENTS_DESCRIPTOR: InstructionSource = "agents";
 export const AGENTS_GLOBAL_DESCRIPTOR: InstructionSource = "agentsGlobal";
 
 /** One Code instruction filenames, in preference order (first present per dir wins). */
-const ONECODE_NAMES = ["ONECODE.md", "onecode.md", "One Code.md"] as const;
+const PRODUCT_FILE_NAMES = [brand.productFile, brand.productFile.toLowerCase(), `${brand.name}.md`] as const;
 
 /** Max `@import` hops, matching Claude Code. Depth 0 is the importing file itself. */
 const MAX_IMPORT_DEPTH = 5;
@@ -96,15 +97,15 @@ export function isPresentFile(path: string): boolean {
  * costs a few stats and never lists the directory. Only when a probe hits do we
  * read the directory once to recover the real casing.
  */
-export function firstOneCodeFile(dir: string): string | null {
-	if (!ONECODE_NAMES.some((n) => isPresentFile(join(dir, n)))) return null;
+export function firstProductFile(dir: string): string | null {
+	if (!PRODUCT_FILE_NAMES.some((n) => isPresentFile(join(dir, n)))) return null;
 	let entries: string[];
 	try {
 		entries = readdirSync(dir);
 	} catch {
 		return null;
 	}
-	const pick = ONECODE_NAMES.find((n) => entries.includes(n)) ?? entries.find((e) => e.toLowerCase() === "onecode.md");
+	const pick = PRODUCT_FILE_NAMES.find((n) => entries.includes(n)) ?? entries.find((e) => e.toLowerCase() === brand.productFile.toLowerCase());
 	if (pick && isPresentFile(join(dir, pick))) return join(dir, pick);
 	return null;
 }
@@ -320,9 +321,9 @@ export interface ClassifierFile {
 }
 
 /** Which sources are the user's global files, AGENTS.md files, or the product's own. */
-export const GLOBAL_SOURCES: ReadonlySet<InstructionSource> = new Set([GLOBAL_DESCRIPTOR, AGENTS_GLOBAL_DESCRIPTOR, ONECODE_GLOBAL_DESCRIPTOR]);
+export const GLOBAL_SOURCES: ReadonlySet<InstructionSource> = new Set([GLOBAL_DESCRIPTOR, AGENTS_GLOBAL_DESCRIPTOR, PRODUCT_GLOBAL_DESCRIPTOR]);
 export const AGENTS_SOURCES: ReadonlySet<InstructionSource> = new Set([AGENTS_DESCRIPTOR, AGENTS_GLOBAL_DESCRIPTOR]);
-export const PRODUCT_SOURCES: ReadonlySet<InstructionSource> = new Set([ONECODE_DESCRIPTOR, ONECODE_GLOBAL_DESCRIPTOR]);
+export const PRODUCT_SOURCES: ReadonlySet<InstructionSource> = new Set([PRODUCT_DESCRIPTOR, PRODUCT_GLOBAL_DESCRIPTOR]);
 
 /** The base's list for a provider: the files that exist, and their contents on demand (a provider that reads them itself never pays for it). */
 export interface BaseList<T> {
@@ -399,10 +400,10 @@ export function basePaths(cwd: string, opts: { allowPath?: (path: string) => boo
 		const projectFiles = new Set(dirs.map((dir) => join(dir, "AGENTS.md")).filter(isPresentFile).map((path) => tryRealpath(path) ?? path));
 		for (const path of opts.globals ?? []) if (!projectFiles.has(tryRealpath(path) ?? path)) push(path, AGENTS_GLOBAL_DESCRIPTOR);
 	}
-	if (product !== undefined) push(firstOneCodeFile(product), ONECODE_GLOBAL_DESCRIPTOR);
+	if (product !== undefined) push(firstProductFile(product), PRODUCT_GLOBAL_DESCRIPTOR);
 	for (const dir of dirs) {
 		if (agents) push(join(dir, "AGENTS.md"), AGENTS_DESCRIPTOR);
-		if (product !== undefined) push(firstOneCodeFile(dir), ONECODE_DESCRIPTOR);
+		if (product !== undefined) push(firstProductFile(dir), PRODUCT_DESCRIPTOR);
 	}
 	return paths;
 }
@@ -444,7 +445,7 @@ function projectExternalIncludes(opts: { cwd: string; home: string; homeOneCodeD
 	const { anywhere } = importReaders(opts.cwd, opts.allowPath);
 	const found: ExternalIncludes = { agents: [], product: [] };
 	for (const { path, descriptor } of basePaths(opts.cwd, opts)) {
-		const list = descriptor === ONECODE_DESCRIPTOR ? found.product : descriptor === AGENTS_DESCRIPTOR ? found.agents : undefined;
+		const list = descriptor === PRODUCT_DESCRIPTOR ? found.product : descriptor === AGENTS_DESCRIPTOR ? found.agents : undefined;
 		const content = list ? anywhere(path) : null;
 		if (!list || content === null) continue;
 		for (const imported of expandWithImports(content, dirname(path), { home: opts.home, read: anywhere }).imported) {
@@ -470,7 +471,7 @@ function baseNestedFiles(opts: { filePath: string; cwd: string; home: string; in
 	const seen = new Set<string>(realTarget ? [realTarget] : []);
 	const files: NestedFile[] = [];
 	for (const dir of nestedDirs(target, opts.cwd)) {
-		const oneCode = firstOneCodeFile(dir);
+		const oneCode = firstProductFile(dir);
 		for (const path of [join(dir, "AGENTS.md"), oneCode]) {
 			const key = path ? tryRealpath(path) : undefined;
 			if (!path || !key || !isPathAtOrUnder(key, realCwd) || seen.has(key) || !opts.allowPath(path)) continue;
@@ -522,7 +523,7 @@ export function openInstructions(home: string, agentDir: string | undefined): In
 	if (!featureEnabled("claude-context")) return NO_INSTRUCTIONS;
 	const { view, allowPath } = openView(home);
 	const globals = globalAgentsFiles(home, agentDir);
-	const productDir = (dir: string | undefined) => dir ?? oneCodeStateDir(process.env, home);
+	const productDir = (dir: string | undefined) => dir ?? productStateDir(process.env, home);
 	/** One walk for both blocks: the AGENTS.md list a provider reshapes (contents on demand) and the product files, read with the user's approval. */
 	const walk = (cwd: string, homeOneCodeDir: string | undefined, includeExternal: boolean | undefined) => {
 		const all = basePaths(cwd, { allowPath, globals, homeOneCodeDir: productDir(homeOneCodeDir) });
@@ -560,10 +561,10 @@ export function openInstructions(home: string, agentDir: string | undefined): In
  * the provider's, else each project's AGENTS.md and the product's global file
  * in its state dir (the one present, else `ONECODE.md`).
  */
-export function instructionTargets(home: string = os.homedir(), stateDir: string = oneCodeStateDir(process.env, home)): InstructionTargets {
+export function instructionTargets(home: string = os.homedir(), stateDir: string = productStateDir(process.env, home)): InstructionTargets {
 	const provided = openSources(home).instructionTargets;
 	if (provided) return provided;
-	return { project: "AGENTS.md", user: firstOneCodeFile(stateDir) ?? join(stateDir, "ONECODE.md") };
+	return { project: "AGENTS.md", user: firstProductFile(stateDir) ?? join(stateDir, brand.productFile) };
 }
 
 /** The names of the instruction files a user writes: `CLAUDE.md`, or `AGENTS.md` and the product file's. */

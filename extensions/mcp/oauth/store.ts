@@ -26,7 +26,7 @@ import { join } from "node:path";
 import type { OAuthClientInformationFull, OAuthClientMetadata, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { OAuthDiscoveryState } from "@modelcontextprotocol/sdk/client/auth.js";
 import { readJsonFile, writeJsonAtomic } from "../../lib/atomic-write.ts";
-import { oneCodeStateDir } from "../../lib/paths.ts";
+import { productStateDir } from "../../lib/paths.ts";
 
 /** The part of an http server's config its credentials are bound to. */
 export interface OAuthServer {
@@ -58,7 +58,7 @@ function slug(server: OAuthServer): string {
 }
 
 export function authStoreDir(home: string = os.homedir(), env: NodeJS.ProcessEnv = process.env): string {
-	return join(oneCodeStateDir(env, home), "mcp-auth");
+	return join(productStateDir(env, home), "mcp-auth");
 }
 
 function authFilePath(server: OAuthServer, home: string, env: NodeJS.ProcessEnv): string {

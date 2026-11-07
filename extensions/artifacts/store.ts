@@ -29,7 +29,7 @@ import { uptime } from "node:os";
 import { basename, extname, join, posix, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { readJsonFile, writeTextAtomic } from "../lib/atomic-write.ts";
-import { comparablePath, isPathAtOrUnder, oneCodeStateDir, tildify } from "../lib/paths.ts";
+import { comparablePath, isPathAtOrUnder, productStateDir, tildify } from "../lib/paths.ts";
 import { sanitizeDisplayText } from "../lib/terminal-text.ts";
 import { renderDownloadPayload, renderGallery } from "./gallery.ts";
 import type { PublishProblem, ShownArtifact, StoreBusy } from "./text.ts";
@@ -61,7 +61,7 @@ const HTML_EXTENSIONS = new Set([".html", ".htm"]);
 
 /** `~/.onecode/artifacts`, honouring `ONECODE_STATE_DIR`. */
 export function artifactsRoot(env: Record<string, string | undefined> = process.env, home?: string): string {
-	return join(oneCodeStateDir(env, home), "artifacts");
+	return join(productStateDir(env, home), "artifacts");
 }
 
 function isArtifactId(id: string): boolean {

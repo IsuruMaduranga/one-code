@@ -1,6 +1,7 @@
 /** Claude Code's project-scoped external instruction consent; pure fs/text, no pi imports. */
+import { brand } from "./brand.mjs";
 import { readJsonFile } from "./atomic-write.ts";
-import { oneCodeProjectRoot, oneCodeProjectSettingsPathFor, readSettingsForWrite, writeSettings } from "./one-code-settings.ts";
+import { productProjectRoot, productProjectSettingsPathFor, readSettingsForWrite, writeSettings } from "./product-settings.ts";
 import { comparablePath, tildify } from "./paths.ts";
 import { escapeControlText } from "./terminal-text.ts";
 
@@ -31,8 +32,8 @@ const APPROVAL_ROOT_KEY = "claudeMdExternalIncludesRoot";
 
 /** Only One Code's out-of-checkout project state grants consent, never merged project settings. */
 export function readExternalIncludesApproval(cwd: string, home: string): ExternalIncludesApproval {
-	const root = oneCodeProjectRoot(cwd);
-	const file = readJsonFile<Record<string, unknown>>(oneCodeProjectSettingsPathFor(root, home));
+	const root = productProjectRoot(cwd);
+	const file = readJsonFile<Record<string, unknown>>(productProjectSettingsPathFor(root, home));
 	const recorded = file?.[APPROVAL_ROOT_KEY];
 	if (!file || typeof recorded !== "string" || comparablePath(recorded) !== comparablePath(root)) return { approved: false, warningShown: false };
 	return {
@@ -43,8 +44,8 @@ export function readExternalIncludesApproval(cwd: string, home: string): Externa
 
 /** Both answers are remembered, and cover future imports, not just the files in the preview. */
 export function persistExternalIncludesApproval(cwd: string, home: string, approved: boolean): void {
-	const root = oneCodeProjectRoot(cwd);
-	const path = oneCodeProjectSettingsPathFor(root, home);
+	const root = productProjectRoot(cwd);
+	const path = productProjectSettingsPathFor(root, home);
 	writeSettings(path, {
 		...readSettingsForWrite(path),
 		hasClaudeMdExternalIncludesApproved: approved,
@@ -63,6 +64,6 @@ export function externalIncludesDialog(paths: string[], home: string): string {
 		EXTERNAL_INCLUDES_TITLE,
 		"This project's CLAUDE.md or .claude/rules imports files outside the current working directory. Never allow this for third-party repositories.",
 		...(paths.length ? [`External imports:\n${preview.join("\n")}`] : []),
-		"Important: Only use One Code with files you trust. Accessing untrusted files may pose security risks.",
+		`Important: Only use ${brand.name} with files you trust. Accessing untrusted files may pose security risks.`,
 	].join("\n\n");
 }

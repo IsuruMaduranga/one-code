@@ -7,7 +7,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { oneCodeProjectSettingsPath } from "../../extensions/lib/one-code-settings.ts";
+import { productProjectSettingsPath } from "../../extensions/lib/product-settings.ts";
 import { forwardSlashes } from "../../extensions/lib/paths.ts";
 import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
 import { WORKSPACE_CHANNEL } from "../../extensions/lib/workspace-channel.ts";
@@ -206,7 +206,7 @@ describe("workspace directories in the gate", () => {
 
 		selectAnswer = "Yes, and remember this directory";
 		await fake.commands.get("add-dir")!.handler(shared, ctx);
-		const saved = JSON.parse(readFileSync(oneCodeProjectSettingsPath(cwd, home), "utf-8"));
+		const saved = JSON.parse(readFileSync(productProjectSettingsPath(cwd, home), "utf-8"));
 		expect(saved.permissions.additionalDirectories).toEqual([shared]);
 		await fake.fire("session_start", { reason: "new" }, ctx);
 		expect(await read(join(shared, "notes.md"))).toBeUndefined();

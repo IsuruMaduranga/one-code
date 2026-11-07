@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { isSafetyControlTarget, safetyControlWrite, safetyFloorBlockText, safetyFloorReason } from "../../extensions/auto-mode/safety-floor.ts";
 import { analyzeShellCommand } from "../../extensions/auto-mode/shell-analysis.ts";
 import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
-import { oneCodeProjectSettingsPath } from "../../extensions/lib/one-code-settings.ts";
+import { productProjectSettingsPath } from "../../extensions/lib/product-settings.ts";
 import { claudeJsonPath, forwardSlashes, toPosixPath } from "../../extensions/lib/paths.ts";
 
 let home: string;
@@ -279,14 +279,14 @@ describe("safetyControlWrite: relocated config dirs (distribution L2)", () => {
 	});
 
 	it("floors the per-repo One Code settings file for the current cwd", () => {
-		const perRepo = oneCodeProjectSettingsPath(cwd, home);
+		const perRepo = productProjectSettingsPath(cwd, home);
 		expect(check("write", { path: perRepo })).toBeDefined();
 	});
 
 	it("floors the per-repo One Code settings file under a relocated ONECODE_STATE_DIR", () => {
 		const state = join(cwd, "state");
 		process.env.ONECODE_STATE_DIR = state;
-		const perRepo = oneCodeProjectSettingsPath(cwd, home);
+		const perRepo = productProjectSettingsPath(cwd, home);
 		expect(perRepo.startsWith(state)).toBe(true);
 		expect(check("write", { path: perRepo })).toBeDefined();
 	});

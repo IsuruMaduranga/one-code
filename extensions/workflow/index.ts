@@ -34,7 +34,7 @@ import { contentText } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { recordUsage } from "../lib/usage-bus.ts";
-import { readWorkflowSettings } from "../lib/one-code-settings.ts";
+import { readWorkflowSettings } from "../lib/product-settings.ts";
 import { registerVariantTool } from "../lib/tool-variants.ts";
 import type { WorkflowText } from "./text.ts";
 import { workflowWords } from "./words.ts";

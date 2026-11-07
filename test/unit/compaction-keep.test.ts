@@ -48,7 +48,7 @@ describe("/doctor's keep-window line", () => {
 						platform: "darwin",
 						arch: "arm64",
 						nodeVersion: "26.3.1",
-						oneCodeVersion: "0.5.0",
+						productVersion: "0.5.0",
 						install: "pi-package",
 						piVersion: "0.99.2",
 						compactionKeep: { ...compactionKeep, paths: { user: join(home, ".pi", "agent", "settings.json"), project: join(home, ".pi", "settings.json") } },

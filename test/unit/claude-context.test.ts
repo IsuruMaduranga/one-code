@@ -4,7 +4,7 @@ import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildClaudeMdBlock, buildContextBlock, dateBlock, buildOneCodeBlock } from "../../extensions/lib/claude-context.ts";
-import { AGENTS_DESCRIPTOR, discoverOneCodeFiles, expandImports, ONECODE_DESCRIPTOR, ONECODE_GLOBAL_DESCRIPTOR, openInstructions, PROJECT_DESCRIPTOR } from "../../extensions/lib/instructions.ts";
+import { AGENTS_DESCRIPTOR, discoverOneCodeFiles, expandImports, PRODUCT_DESCRIPTOR, PRODUCT_GLOBAL_DESCRIPTOR, openInstructions, PROJECT_DESCRIPTOR } from "../../extensions/lib/instructions.ts";
 import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
 import { discoverContextFilePaths, discoverContextFiles } from "../../profile/claude-code/instructions.ts";
 import { wrapReminder } from "../../extensions/lib/reminders.ts";
@@ -87,7 +87,7 @@ describe("buildClaudeMdBlock", () => {
 		expect(inner).toContain("Use tabs.\n\nContents of /m/MEMORY.md");
 		expect(inner).toContain("- [entry 200](e200.md) — one line\n\n> WARNING: MEMORY.md is 230 lines (limit: 200).");
 		expect(inner?.endsWith("move detail into topic files.")).toBe(true);
-		const oneCode = buildOneCodeBlock([{ path: "/p/ONECODE.md", content: "Be brief.", descriptor: ONECODE_DESCRIPTOR }, { path: "/q/ONECODE.md", content: "x\n", descriptor: ONECODE_DESCRIPTOR }]);
+		const oneCode = buildOneCodeBlock([{ path: "/p/ONECODE.md", content: "Be brief.", descriptor: PRODUCT_DESCRIPTOR }, { path: "/q/ONECODE.md", content: "x\n", descriptor: PRODUCT_DESCRIPTOR }]);
 		expect(oneCode).toContain("Be brief.\n\nContents of /q/ONECODE.md");
 		expect(oneCode?.endsWith("x")).toBe(true);
 	});
@@ -221,9 +221,9 @@ describe("ONECODE.md discovery", () => {
 
 		expect(paths).toEqual([
 			expect.objectContaining({ path: gClaude }),
-			{ path: gOneCode, descriptor: ONECODE_GLOBAL_DESCRIPTOR },
+			{ path: gOneCode, descriptor: PRODUCT_GLOBAL_DESCRIPTOR },
 			expect.objectContaining({ path: pClaude }),
-			{ path: pOneCode, descriptor: ONECODE_DESCRIPTOR },
+			{ path: pOneCode, descriptor: PRODUCT_DESCRIPTOR },
 		]);
 	});
 
@@ -294,7 +294,7 @@ describe("ONECODE.md discovery", () => {
 		const paths = openInstructions(root, undefined).paths({ cwd: join(root, "proj"), homeOneCodeDir: join(root, "home-onecode") });
 		expect(paths).toEqual([
 			{ path: agents, descriptor: AGENTS_DESCRIPTOR },
-			{ path: oneCode, descriptor: ONECODE_DESCRIPTOR },
+			{ path: oneCode, descriptor: PRODUCT_DESCRIPTOR },
 		]);
 	});
 
@@ -312,7 +312,7 @@ describe("ONECODE.md discovery", () => {
 			homeClaudeDir: join(root, "home-claude"),
 			homeOneCodeDir: join(root, "home-onecode"),
 		});
-		expect(paths).toContainEqual({ path: p, descriptor: ONECODE_DESCRIPTOR });
+		expect(paths).toContainEqual({ path: p, descriptor: PRODUCT_DESCRIPTOR });
 	});
 
 	it("expands @imports in a discovered file's content (the @AGENTS.md reuse case)", () => {

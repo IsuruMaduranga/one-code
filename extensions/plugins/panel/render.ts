@@ -6,6 +6,7 @@
  * on overwide lines, so both layers guard).
  */
 
+import { brand } from "../../lib/brand.mjs";
 import { formatInstallCount } from "../counts.ts";
 import { cutPlainText, hintLines, panelTopRule, type RenderBlock as Block, searchBoxLines, windowBlocks } from "../../lib/tui-render.ts";
 import type { DiscoverRow, InstalledRow } from "./rows.ts";
@@ -37,7 +38,7 @@ export interface PanelRenderInput {
 }
 
 export const TRUST_NOTE =
-	"Make sure you trust a plugin before installing or enabling it: plugins can run commands, add MCP servers, and start language servers on your machine. One Code does not review plugin content — check the plugin's homepage and source.";
+	`Make sure you trust a plugin before installing or enabling it: plugins can run commands, add MCP servers, and start language servers on your machine. ${brand.name} does not review plugin content — check the plugin's homepage and source.`;
 
 const TAB_TITLES: Record<Tab, string> = {
 	discover: "Discover",
@@ -75,7 +76,7 @@ function installedLine(row: Exclude<InstalledRow, { kind: "section" }>, paint: P
 	const off = paint.fg("error", "✘");
 	if (row.kind === "plugin") {
 		const state = row.busy ? "…" : row.enabled ? `${on} enabled` : `${off} disabled`;
-		const override = row.overridden ? " · One Code override" : "";
+		const override = row.overridden ? ` · ${brand.name} override` : "";
 		const marketplace = row.marketplace ? ` · ${row.marketplace}` : "";
 		return `${row.name} Plugin${marketplace} · ${state}${override}`;
 	}
@@ -199,12 +200,12 @@ function detailLines(input: PanelRenderInput, paint: PanelPaint): { lines: strin
 
 	if ("kind" in row && row.kind === "plugin") {
 		push(`${row.name} Plugin${row.marketplace ? ` · ${row.marketplace}` : ""}`, paint.bold);
-		push(`Origin: ${row.origin === "one-code" ? "installed by One Code" : "installed by Claude Code (read-only files)"}`);
-		push(`State: ${row.enabled ? "enabled" : "disabled"}${row.overridden ? " (One Code override)" : ""}`);
+		push(`Origin: ${row.origin === "product" ? `installed by ${brand.name}` : "installed by Claude Code (read-only files)"}`);
+		push(`State: ${row.enabled ? "enabled" : "disabled"}${row.overridden ? ` (${brand.name} override)` : ""}`);
 		push("");
 		for (const noteLine of wrapNote(TRUST_NOTE, width - 4)) push(noteLine, (t) => paint.fg("warning", t));
-		const uninstall = row.origin === "one-code" ? " · u to uninstall" : "";
-		const overrideNote = row.origin === "claude" ? " (One Code override — Claude Code settings untouched)" : "";
+		const uninstall = row.origin === "product" ? " · u to uninstall" : "";
+		const overrideNote = row.origin === "claude" ? ` (${brand.name} override — Claude Code settings untouched)` : "";
 		return { lines, footer: `Enter/Space/e/d to toggle${overrideNote}${uninstall} · f to favorite · Esc to go back` };
 	}
 

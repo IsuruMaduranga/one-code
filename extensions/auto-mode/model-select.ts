@@ -29,6 +29,7 @@
  * choice and warnings for what it costs (`lib/model-choice-warnings.ts`).
  */
 
+import { brand } from "../lib/brand.mjs";
 import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 import { type ChosenModelWarning, chosenModelWarnings } from "../lib/model-choice-warnings.ts";
 import {
@@ -179,7 +180,7 @@ function automaticClassifierCandidates(available: Model<Api>[], sessionModel: Mo
 	if (paired?.kind === "session") {
 		return sessionOnly({
 			reason: "paired-session",
-			text: `Auto mode is screening calls with ${spec(sessionModel)}, this session's model: One Code's model pairing table finds no smaller model of its vendor close enough in capability to screen for it.`,
+			text: `Auto mode is screening calls with ${spec(sessionModel)}, this session's model: ${brand.name}'s model pairing table finds no smaller model of its vendor close enough in capability to screen for it.`,
 		});
 	}
 	// Never weaker than the session, strictly cheaper per call (the user,
@@ -247,7 +248,7 @@ export function describeCandidate(candidate: Candidate): string {
 		case "configured":
 			return `${name} (autoMode.classifierModel)`;
 		case "paired":
-			return `${name} (paired with the session model in One Code's model pairing table)`;
+			return `${name} (paired with the session model in ${brand.name}'s model pairing table)`;
 		case "economical":
 			return `${name} (cheapest model within ${where} in the session's tier or above that contains the session catalog context window)`;
 		case "session":

@@ -9,6 +9,7 @@
  * premise the user should re-examine.
  */
 
+import { brand } from "../lib/brand.mjs";
 import { knobValue } from "../lib/knobs.ts";
 
 export const CONSECUTIVE_BLOCK_LIMIT = 3;
@@ -32,7 +33,7 @@ export function unattendedPromptNotice(timeoutMs: number): string {
 	const minutes = Math.round(timeoutMs / 60_000);
 	const seconds = Math.max(1, Math.round(timeoutMs / 1000));
 	const left = timeoutMs >= 60_000 ? `about ${minutes} ${minutes === 1 ? "minute" : "minutes"}` : `about ${seconds} ${seconds === 1 ? "second" : "seconds"}`;
-	return `⚠ One Code will automatically deny this request in ${left}, to avoid blocking progress on an unattended session`;
+	return `⚠ ${brand.name} will automatically deny this request in ${left}, to avoid blocking progress on an unattended session`;
 }
 
 export interface Denial {

@@ -28,15 +28,16 @@
  * fires on routine work teaches the user to approve without reading.
  */
 
+import { stateDirPattern } from "../lib/brand.mjs";
 import { FIND_PATTERN_TESTS, findNegatedPatterns } from "./read-only-options.ts";
 import { analyzeShellCommand, globComponentRegex, hasReadOnlyShellWords, isUnknownTilde, LOOPS, movesDirectory, parseCommand, resolvePayload, scopedTracker } from "./shell-analysis.ts";
 import type { Token } from "./shell-parse.ts";
 import { claudeUserSettingsPath, managedSettingsPaths, settingsSources } from "../lib/claude-settings.ts";
 import { protectedFiles } from "../lib/sources.ts";
 import { CONSENT_STORE_TAIL, consentStorePaths } from "../lib/consent-stores.ts";
-import { oneCodeSettingsPath } from "../lib/one-code-settings.ts";
+import { productSettingsPath } from "../lib/product-settings.ts";
 import { CATALOG_CACHE_TAIL, catalogCacheFiles } from "../lib/model-catalog-data.ts";
-import { claudeJsonPath, comparablePath, oneCodeStateDir } from "../lib/paths.ts";
+import { claudeJsonPath, comparablePath, productStateDir } from "../lib/paths.ts";
 import { isWritingTool, resolveForContainment, toAbsolute, toAbsoluteBash } from "./paths.ts";
 import type { FloorTarget } from "./text.ts";
 import { autoModeWords } from "./words.ts";
@@ -61,7 +62,7 @@ const SETTINGS_TAIL = /\/\.claude\/settings(\.local)?\.json$/;
  * file is also reached via `autoModeSettingsPaths`; this covers the per-repo one,
  * which that list never includes, and both under any checkout).
  */
-const ONECODE_SETTINGS_TAIL = /\/\.onecode\/(projects\/[^/]+\/)?settings\.json$/;
+const PRODUCT_SETTINGS_TAIL = new RegExp(`\\/${stateDirPattern}\\/(projects\\/[^/]+\\/)?settings\\.json$`);
 
 function safetyControlFiles(home: string, sessionFiles: readonly string[] = []): string[] {
 	return [
@@ -71,7 +72,7 @@ function safetyControlFiles(home: string, sessionFiles: readonly string[] = []):
 		// Claude Code file, but one written there would take effect the moment
 		// the user switches back, so the floor guards it in both modes.
 		claudeUserSettingsPath(home),
-		oneCodeSettingsPath(home),
+		productSettingsPath(home),
 		...managedSettingsPaths(),
 		// Claude Code's global state file also carries permission configuration;
 		// claudeJsonPath honours CLAUDE_CONFIG_DIR so a relocated file is still caught.
@@ -87,7 +88,7 @@ function safetyControlFiles(home: string, sessionFiles: readonly string[] = []):
 		...consentStorePaths(home),
 		// The cached model catalogs decide the model's tier, and the tier decides
 		// which fast paths skip the classifier.
-		...catalogCacheFiles(oneCodeStateDir(process.env, home)),
+		...catalogCacheFiles(productStateDir(process.env, home)),
 	];
 }
 
@@ -116,7 +117,7 @@ function controlFileForms(home: string, sessionFiles?: readonly string[]): Set<s
 
 function matchesControlFile(resolved: string, forms: ReadonlySet<string>): boolean {
 	const target = fold(resolved);
-	return SETTINGS_TAIL.test(target) || ONECODE_SETTINGS_TAIL.test(target) || CONSENT_STORE_TAIL.test(target) || CATALOG_CACHE_TAIL.test(target) || forms.has(target);
+	return SETTINGS_TAIL.test(target) || PRODUCT_SETTINGS_TAIL.test(target) || CONSENT_STORE_TAIL.test(target) || CATALOG_CACHE_TAIL.test(target) || forms.has(target);
 }
 
 const GLOB_CHARS = /[*?[]/;
@@ -312,8 +313,10 @@ const VAR_REDIRECT = /\{[A-Za-z_][A-Za-z0-9_]*\}[<>]/;
  * The gate-control file spellings the textual floor matches in a command line,
  * lowercased, with `\\` turned to `/` and `/./`, `//` collapsed.
  */
-const CONTROL_FILE_TEXT =
-	/(^|[\s'"=/<>|;&(:])(\.claude\/settings(\.local)?\.json|\.onecode\/(projects\/[^\s'"/]+\/)?settings\.json|\.onecode\/cache\/model-catalog\/(models-dev|openrouter|huggingface|refresh-failed)\.json|managed-settings\.json|\.claude\.json)(?=$|[\s'";|&)<>])/;
+const STATE_DIR_TEXT = stateDirPattern.toLowerCase();
+const CONTROL_FILE_TEXT = new RegExp(
+	`(^|[\\s'"=/<>|;&(:])(\\.claude\\/settings(\\.local)?\\.json|${STATE_DIR_TEXT}\\/(projects\\/[^\\s'"/]+\\/)?settings\\.json|${STATE_DIR_TEXT}\\/cache\\/model-catalog\\/(models-dev|openrouter|huggingface|refresh-failed)\\.json|managed-settings\\.json|\\.claude\\.json)(?=$|[\\s'";|&)<>])`,
+);
 
 /**
  * `$_` (or `${_}`, `${#_}`, …) anywhere in the line: bash's last argument of

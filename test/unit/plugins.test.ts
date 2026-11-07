@@ -258,7 +258,7 @@ describe("discoverPlugins two-root merge", () => {
 		writeRegistry(roots.oneCodeRoot, { "ours@market": [{ scope: "user", installPath: a, enabled: false }] });
 
 		const plugin = discoverPlugins(roots).plugins[0];
-		expect(plugin).toMatchObject({ originRoot: "one-code", enabled: false, rawEnabled: false });
+		expect(plugin).toMatchObject({ originRoot: "product", enabled: false, rawEnabled: false });
 		expect(plugin?.dataRoot).toBe(join(roots.oneCodeRoot, "data"));
 	});
 
@@ -270,7 +270,7 @@ describe("discoverPlugins two-root merge", () => {
 
 		const discovered = discoverPlugins(roots);
 		expect(discovered.plugins).toHaveLength(1);
-		expect(discovered.plugins[0]).toMatchObject({ originRoot: "one-code", path: ours });
+		expect(discovered.plugins[0]).toMatchObject({ originRoot: "product", path: ours });
 	});
 
 	it("disabled plugins contribute no resources but still appear in plugins/byPlugin", () => {

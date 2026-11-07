@@ -5,13 +5,13 @@
  * The authoring reference (script API, quality patterns, resume, worked
  * examples) is the bundled `workflow-authoring` skill, which the description
  * tells the model to load before writing a script. The size line follows
- * `workflowSizeGuideline` in One Code's settings (lib/one-code-settings.ts);
+ * `workflowSizeGuideline` in One Code's settings (lib/product-settings.ts);
  * "unrestricted" sends no line, as in Claude Code. Changes from Claude Code's
  * text: the setting is named where Claude Code points to its /config row, and
  * tool names are One Code's.
  */
 
-import type { WorkflowSizeGuideline } from "../../extensions/lib/one-code-settings.ts";
+import type { WorkflowSizeGuideline } from "../../extensions/lib/product-settings.ts";
 
 export const WORKFLOW_DESCRIPTION_BODY = `Execute a workflow script that orchestrates multiple subagents deterministically. Workflows run in the background — this tool returns immediately with a task ID, and a <task-notification> arrives when the workflow completes. Use /workflows to watch live progress.
 

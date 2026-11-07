@@ -4,7 +4,7 @@ import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
 import { memoryDir, projectSlug } from "../../extensions/lib/memory.ts";
-import { oneCodeProjectSettingsPathFor } from "../../extensions/lib/one-code-settings.ts";
+import { productProjectSettingsPathFor } from "../../extensions/lib/product-settings.ts";
 
 // Golden suffixes come from Claude Code 2.1.296's DO/Le/Use expressions:
 // 200 sanitized characters, then "-" and abs(signed UTF-16 hash).toString(36).
@@ -58,7 +58,7 @@ describe("projectSlug long-path compatibility", () => {
 		const saved = JSON.stringify({ permissions: { deny: ["Bash(rm:*)"] }, hasTrustDialogAccepted: true });
 		writeFileSync(legacy, saved);
 
-		expect(oneCodeProjectSettingsPathFor(project, root, {})).toBe(legacy);
+		expect(productProjectSettingsPathFor(project, root, {})).toBe(legacy);
 		expect(readFileSync(legacy, "utf8")).toBe(saved);
 		expect(existsSync(join(root, ".onecode", "projects", projectSlug(project), "settings.json"))).toBe(false);
 	});
@@ -68,13 +68,13 @@ describe("projectSlug long-path compatibility", () => {
 		scratch = root;
 		const project = `/tmp/${"a".repeat(196)}`;
 		const hashed = join(root, ".onecode", "projects", projectSlug(project), "settings.json");
-		expect(oneCodeProjectSettingsPathFor(project, root, {})).toBe(hashed);
+		expect(productProjectSettingsPathFor(project, root, {})).toBe(hashed);
 		mkdirSync(join(hashed, ".."), { recursive: true });
 		writeFileSync(hashed, "{}");
 		const legacy = join(root, ".onecode", "projects", project.replace(/[^A-Za-z0-9-]/g, "-"), "settings.json");
 		mkdirSync(join(legacy, ".."), { recursive: true });
 		writeFileSync(legacy, '{"permissions":{"deny":["Write"]}}');
-		expect(oneCodeProjectSettingsPathFor(project, root, {})).toBe(legacy);
+		expect(productProjectSettingsPathFor(project, root, {})).toBe(legacy);
 		expect(readFileSync(hashed, "utf8")).toBe("{}");
 	});
 

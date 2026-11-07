@@ -27,6 +27,7 @@
  * ignored. A Claude Code file's server of the same name wins, with a note.
  */
 
+import { brand } from "../lib/brand.mjs";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { expandTilde } from "../lib/paths.ts";
@@ -235,7 +236,7 @@ export function findProjectConfigs(cwd: string): string[] {
  * tool's files as the source view words them (`mcpWhere`), then pi's own.
  * Claude Code names its own CLI and docs here; One Code names its own.
  */
-export const MCP_GUIDE_URL = "https://github.com/IsuruMaduranga/one-code/blob/master/docs/guide/skills-plugins-and-mcp.md#mcp-servers";
+export const MCP_GUIDE_URL = `${brand.homepage}/blob/master/docs/guide/skills-plugins-and-mcp.md#mcp-servers`;
 export function noMcpServersMessage(otherFiles: string | undefined): string {
 	const where = `${otherFiles ? `${otherFiles}, ` : ""}.pi/mcp.json or the agent dir's mcp.json`;
 	return `No MCP servers configured. Run /doctor if this is unexpected — it lists MCP config files that failed validation. Otherwise, add servers to ${where}; see ${MCP_GUIDE_URL} to learn more.`;

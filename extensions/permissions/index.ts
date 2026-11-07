@@ -17,7 +17,7 @@
  *   write to `.git/hooks` or `.claude`.
  */
 
-import { brandedId } from "../lib/brand.mjs";
+import { brand, brandedId } from "../lib/brand.mjs";
 import { feature } from "../lib/feature.ts";
 import os from "node:os";
 import { join } from "node:path";
@@ -48,7 +48,7 @@ import {
 import { modelPickerComponent, type PickerEntry, pickerSpec, toPickerEntries } from "../lib/model-picker.ts";
 import { findConfigured, modelIdentity } from "../lib/model-policy.ts";
 import { CLASSIFIER_SETTING_CHANGED_CHANNEL } from "../lib/settings-channels.ts";
-import { readSuggestNewerModels } from "../lib/one-code-settings.ts";
+import { readSuggestNewerModels, SETTINGS_DISPLAY } from "../lib/product-settings.ts";
 import { auditPermissionAllow, renderProposal, settingsPatch } from "../auto-mode/setup.ts";
 import { draftSetup, gatherFacts } from "../auto-mode/setup-run.ts";
 import { DEFAULT_ENVIRONMENT } from "../auto-mode/defaults.ts";
@@ -125,7 +125,7 @@ import { describeProjectAllow, persistProjectAllowApproval, projectAllowApproved
 import { parseAddDirFlag, tooBroadForWorkspace, validateWorkspaceDirectory } from "./workspace.ts";
 import { WORKSPACE_CHANNEL, type WorkspaceAnnouncement } from "../lib/workspace-channel.ts";
 import { findProjectRoot } from "../lib/git.ts";
-import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
+import { productProjectSettingsPath, productSettingsPath } from "../lib/product-settings.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 import { announceLocalCommand, registerLocalCommand } from "../lib/local-command.ts";
 import { protectedFiles } from "../lib/sources.ts";
@@ -257,6 +257,9 @@ const approved = (choice: string | undefined, grant: SessionGrant | undefined) =
 
 /** Panel keys for the product's own files (lib/claude-settings.ts sourceId): the only ones it edits. */
 const PRODUCT_USER = sourceId({ owner: "product", scope: "user" });
+/** The rule dialog's destinations for the product's own two settings files (`onecode-user`, `onecode-project`). */
+const PRODUCT_USER_DESTINATION = `${brand.bin}-user`;
+const PRODUCT_PROJECT_DESTINATION = `${brand.bin}-project`;
 const PRODUCT_LOCAL = sourceId({ owner: "product", scope: "local" });
 
 /** Where a panel row came from, and why the panel cannot edit it when it cannot. */
@@ -293,7 +296,7 @@ function originOf(source: SettingsFile, path: string, cwd: string, home: string,
 		return { label: `From the repository's ${file}${repo.label ?? ""}`, editable: false, note: `This ${kind} ships with the repository. Change it in ${file}.${repo.note ?? ""}` };
 	}
 	if (source.scope === "managed") return { label: "From managed settings", editable: false, note: MANAGED_NOTE[kind] };
-	return { label: `From ${source.label} (${where})`, editable: false, note: `One Code does not edit ${source.label}. ${BORROWED_CHANGE[kind](where)}` };
+	return { label: `From ${source.label} (${where})`, editable: false, note: `${brand.name} does not edit ${source.label}. ${BORROWED_CHANGE[kind](where)}` };
 }
 
 function permissionsExtension(pi: ExtensionAPI) {
@@ -1041,7 +1044,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		// awaits it per call. Only a failed load is worth telling the user about.
 		void bashParserReady().then(() => {
 			const why = bashParserUnavailable();
-			if (why && ctx.hasUI) ctx.ui.notify(`One Code: ${why}. Every bash command will be escalated or prompted.`, "error");
+			if (why && ctx.hasUI) ctx.ui.notify(`${brand.name}: ${why}. Every bash command will be escalated or prompted.`, "error");
 		});
 		// A new session (`/clear`, `/resume`, a fork) starts with a clean gate: the
 		// previous conversation's user messages are not intent evidence for this
@@ -1145,7 +1148,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 				"info",
 				fastPaths
 					? `${name}: permissions now follow Claude Code's fast paths.`
-					: `${name}: permissions now use One Code's stricter checks, so more calls prompt or go to the auto-mode classifier.`,
+					: `${name}: permissions now use ${brand.name}'s stricter checks, so more calls prompt or go to the auto-mode classifier.`,
 			);
 		}
 		gateFastPaths = fastPaths;
@@ -1306,21 +1309,21 @@ function permissionsExtension(pi: ExtensionAPI) {
 	 */
 	const firstOutsideRead = (ctx: ExtensionContext, toolName: string, path: string, signal = ctx.signal): Promise<"allow" | "block" | "ask_again"> => {
 		const home = os.homedir();
-		const settled = () => (outsideReadSeen ??= outsideReadPromptSeen(oneCodeSettingsPath(home), protectedFiles(home).map((file) => file.path)));
+		const settled = () => (outsideReadSeen ??= outsideReadPromptSeen(productSettingsPath(home), protectedFiles(home).map((file) => file.path)));
 		if (!ctx.hasUI) return Promise.resolve("allow");
 		// Settled while this call waited (a parallel read's Block included).
 		if (settled()) return Promise.resolve(blockOutsideReads ? "block" : "allow");
 		return serializePrompt(async () => {
 			if (signal?.aborted) return "ask_again";
 			if (settled()) return blockOutsideReads ? "block" : "allow";
-			const settingsFile = tildify(oneCodeSettingsPath(home), home);
+			const settingsFile = tildify(productSettingsPath(home), home);
 			const title = `${OUTSIDE_READ_TITLE}\n\n  ${toolName} ${path}\n\n${OUTSIDE_READ_QUESTION}\n\n${OUTSIDE_READ_EXPLAINER(settingsFile)}`;
 			const choice = await ctx.ui.select(title, Object.values(OUTSIDE_READ_ANSWERS), { signal });
 			if (signal?.aborted || (choice !== OUTSIDE_READ_ANSWERS.allow && choice !== OUTSIDE_READ_ANSWERS.block)) return "ask_again";
 			outsideReadSeen = true;
-			markOutsideReadPromptSeen(oneCodeSettingsPath(home));
+			markOutsideReadPromptSeen(productSettingsPath(home));
 			if (choice === OUTSIDE_READ_ANSWERS.allow) return "allow";
-			persistBlockOutsideReads(oneCodeSettingsPath(home));
+			persistBlockOutsideReads(productSettingsPath(home));
 			blockOutsideReads = true;
 			return "block";
 		}, signal);
@@ -1865,8 +1868,8 @@ function permissionsExtension(pi: ExtensionAPI) {
 	};
 
 	const ruleDestinations = (cwd: string, home: string): Destination[] => [
-		{ id: "onecode-project", label: "One Code project settings", description: `Saved in ${tildify(oneCodeProjectSettingsPath(cwd, home), home)}, for this project only` },
-		{ id: "onecode-user", label: "One Code user settings", description: `Saved in ${tildify(oneCodeSettingsPath(home), home)}, for every project` },
+		{ id: PRODUCT_PROJECT_DESTINATION, label: `${brand.name} project settings`, description: `Saved in ${tildify(productProjectSettingsPath(cwd, home), home)}, for this project only` },
+		{ id: PRODUCT_USER_DESTINATION, label: `${brand.name} user settings`, description: `Saved in ${tildify(productSettingsPath(home), home)}, for every project` },
 	];
 
 	/** The status line under the panel's tabs. */
@@ -1938,7 +1941,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 	/** A panel row key for an auto-mode entry: source, file, section, text. */
 	const parseAutoKey = (key: string) => {
 		const [source, path, section, text] = key.split("\0");
-		if (source !== PRODUCT_USER) throw new Error(`One Code can only change auto mode rules in its own settings file; this one is in ${tildify(path, os.homedir())}.`);
+		if (source !== PRODUCT_USER) throw new Error(`${brand.name} can only change auto mode rules in its own settings file; this one is in ${tildify(path, os.homedir())}.`);
 		return { section: section as (typeof AUTO_SECTIONS)[number], text };
 	};
 	const autoLabel = (section: (typeof AUTO_SECTIONS)[number]) => AUTO_SECTION_LABELS[section].toLowerCase();
@@ -1975,7 +1978,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			home,
 		);
 		autoConfig = undefined;
-		return lines.length > 0 ? `Saved your auto mode environment to ${tildify(oneCodeSettingsPath(home), home)}` : "Restored the built-in auto mode environment";
+		return lines.length > 0 ? `Saved your auto mode environment to ${tildify(productSettingsPath(home), home)}` : "Restored the built-in auto mode environment";
 	};
 
 	/** Where a workspace directory came from, and why the panel cannot remove it when it cannot. */
@@ -1989,7 +1992,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			});
 			rows.push({ key, path: dir.path, sourceLabel: origin.label, editable: origin.editable, ...(origin.note ? { readOnlyNote: origin.note } : {}) });
 		}
-		for (const path of flagWorkspaceDirs) rows.push({ key: `flag\0\0${path}`, path, sourceLabel: "From --add-dir", editable: false, readOnlyNote: "Added with --add-dir for this run. Start One Code without it to leave it out." });
+		for (const path of flagWorkspaceDirs) rows.push({ key: `flag\0\0${path}`, path, sourceLabel: "From --add-dir", editable: false, readOnlyNote: `Added with --add-dir for this run. Start ${brand.name} without it to leave it out.` });
 		for (const path of sessionWorkspaceDirs) rows.push({ key: `session\0\0${path}`, path, sourceLabel: "Added for this session", editable: true });
 		return rows;
 	};
@@ -1998,7 +2001,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 	const addWorkspaceDirectory = (ctx: ExtensionContext, path: string, remember: boolean): string => {
 		const home = os.homedir();
 		if (remember) {
-			const target = oneCodeProjectSettingsPath(ctx.cwd, home);
+			const target = productProjectSettingsPath(ctx.cwd, home);
 			persistWorkspaceDirectory(path, target);
 			reloadRules(ctx);
 			return `Added directory ${path} to workspace and saved to ${tildify(target, home)}`;
@@ -2026,7 +2029,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			}),
 			status: panelStatus,
 			addRule: (behavior, rule, destination) => {
-				const target = destination === "onecode-user" ? oneCodeSettingsPath(home) : oneCodeProjectSettingsPath(ctx.cwd, home);
+				const target = destination === PRODUCT_USER_DESTINATION ? productSettingsPath(home) : productProjectSettingsPath(ctx.cwd, home);
 				if (!persistPermissionRule(behavior, rule, target)) throw new Error(`That ${behavior} rule is already in ${tildify(target, home)}.`);
 				reloadRules(ctx);
 				return `Added ${behavior} rule ${rule} to ${tildify(target, home)}`;
@@ -2040,7 +2043,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 					if (!removePermissionRule(behavior, raw, path)) throw new Error(`${raw} is no longer in ${tildify(path, home)}.`);
 					reloadRules(ctx);
 				} else {
-					throw new Error(`One Code can only delete rules from its own settings files; ${raw} is in ${tildify(path, home)}.`);
+					throw new Error(`${brand.name} can only delete rules from its own settings files; ${raw} is in ${tildify(path, home)}.`);
 				}
 				return `Deleted ${behavior} rule ${raw}`;
 			},
@@ -2100,7 +2103,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 					if (!removeWorkspaceDirectory(raw, settingsPath)) throw new Error(`${raw} is no longer in ${tildify(settingsPath, home)}.`);
 					reloadRules(ctx);
 				} else {
-					throw new Error(`One Code can only remove directories it added; ${raw} comes from elsewhere.`);
+					throw new Error(`${brand.name} can only remove directories it added; ${raw} comes from elsewhere.`);
 				}
 				return `Removed directory ${raw} from workspace`;
 			},
@@ -2191,7 +2194,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			const input = args.trim();
 			if (!ctx.hasUI) {
 				announceLocalCommand(pi, { name: "add-dir", args });
-				ctx.ui.notify("/add-dir needs the interactive UI; start One Code with --add-dir instead.", "warning");
+				ctx.ui.notify(`/add-dir needs the interactive UI; start ${brand.name} with --add-dir instead.`, "warning");
 				return;
 			}
 			if (!input) {
@@ -2213,7 +2216,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 				ctx.ui.notify(checked.error, "warning");
 				return;
 			}
-			const choice = await ctx.ui.select(`Add ${checked.path} to the workspace? One Code will be able to read files in it and make edits when auto-accept edits is on.`, [
+			const choice = await ctx.ui.select(`Add ${checked.path} to the workspace? ${brand.name} will be able to read files in it and make edits when auto-accept edits is on.`, [
 				"Yes, for this session",
 				"Yes, and remember this directory",
 				"No",
@@ -2364,7 +2367,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			ctx.ui.notify("/auto-mode setup is interactive — run it in a live session.", "warning");
 			return;
 		}
-		const usage = await ctx.ui.select("How do you use One Code in this environment?", [
+		const usage = await ctx.ui.select(`How do you use ${brand.name} in this environment?`, [
 			"Software development in this repo",
 			"Mixed — coding and general tasks",
 			"Mostly questions and analysis",
@@ -2402,7 +2405,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		}
 
 		ctx.ui.notify(`Proposed auto-mode setup\n\n${renderProposal(draft)}`, "info");
-		const decision = await ctx.ui.select("Save this auto-mode setup to ~/.onecode/settings.json?", [
+		const decision = await ctx.ui.select(`Save this auto-mode setup to ${SETTINGS_DISPLAY}?`, [
 			"Looks good — save it",
 			"Discard",
 		]);
@@ -2410,7 +2413,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			try {
 				persistAutoModeSetup(settingsPatch(draft), os.homedir());
 			} catch (error) {
-				ctx.ui.notify(`Could not write One Code settings: ${(error as Error).message}`, "warning");
+				ctx.ui.notify(`Could not write ${brand.name} settings: ${(error as Error).message}`, "warning");
 				return;
 			}
 			autoConfig = loadAutoModeConfig(os.homedir());
@@ -2442,14 +2445,14 @@ function permissionsExtension(pi: ExtensionAPI) {
 		);
 		if (claudeSide.length > 0) {
 			ctx.ui.notify(
-				"These live in your Claude Code settings (~/.claude) and stay in force even after any One Code copy is removed. One Code never edits Claude Code's files — remove them there yourself if you want them gated:\n" +
+				`These live in your Claude Code settings (~/.claude) and stay in force even after any ${brand.name} copy is removed. ${brand.name} never edits Claude Code's files — remove them there yourself if you want them gated:\n` +
 					claudeSide.map((entry) => `  · ${entry.rule}`).join("\n"),
 				"warning",
 			);
 		}
 		if (removable.length === 0) return;
 		const act = await ctx.ui.select(
-			`Remove ${removable.length} broad ${removable.length === 1 ? "entry" : "entries"} from One Code settings (~/.onecode/settings.json)?`,
+			`Remove ${removable.length} broad ${removable.length === 1 ? "entry" : "entries"} from ${brand.name} settings (${SETTINGS_DISPLAY})?`,
 			["Remove them", "Leave them"],
 		);
 		if (act === "Remove them") {
@@ -2459,11 +2462,11 @@ function permissionsExtension(pi: ExtensionAPI) {
 					os.homedir(),
 				);
 				ctx.ui.notify(
-					`Removed ${removed} allow ${removed === 1 ? "entry" : "entries"} from One Code settings. Removed entries can be restored by re-adding them verbatim.`,
+					`Removed ${removed} allow ${removed === 1 ? "entry" : "entries"} from ${brand.name} settings. Removed entries can be restored by re-adding them verbatim.`,
 					"info",
 				);
 			} catch (error) {
-				ctx.ui.notify(`Could not update One Code settings: ${(error as Error).message}`, "warning");
+				ctx.ui.notify(`Could not update ${brand.name} settings: ${(error as Error).message}`, "warning");
 			}
 		}
 	};
@@ -2497,7 +2500,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		// Re-plan, then announce the choice with its warnings, in any mode: the
 		// setting applies whenever auto mode is on.
 		resetClassifierChoice(ctx.model, false);
-		announceClassifierChoice(ctx.model, { lead: `Auto-mode classifier set to ${resolved} (saved to ~/.onecode/settings.json).`, force: true });
+		announceClassifierChoice(ctx.model, { lead: `Auto-mode classifier set to ${resolved} (saved to ${SETTINGS_DISPLAY}).`, force: true });
 	};
 
 	/** `/auto-mode model` — show the picker, or apply a named model / `clear`. */
@@ -2649,7 +2652,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			// Allow rules are One Code's own state — never written into Claude Code's
 			// files. `global` lands in ~/.onecode/settings.json; a project rule in a
 			// per-repo file under ~/.onecode, keyed by the repo root.
-			const target = global ? oneCodeSettingsPath(os.homedir()) : oneCodeProjectSettingsPath(ctx.cwd, os.homedir());
+			const target = global ? productSettingsPath(os.homedir()) : productProjectSettingsPath(ctx.cwd, os.homedir());
 			persistAllowRule(raw, target);
 			allow.push(rule);
 			ctx.ui.notify(`Added allow rule ${raw} to ${target}`, "info");

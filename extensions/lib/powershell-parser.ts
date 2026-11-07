@@ -27,6 +27,7 @@
  * its own launcher.
  */
 
+import { brandedId } from "./brand.mjs";
 import type { ChildProcess } from "node:child_process";
 import { POWERSHELL_PARSE_BOOTSTRAP, POWERSHELL_PARSE_WALKER } from "./powershell-parse-script.ts";
 import { unrefHandle } from "./process-tree.ts";
@@ -324,7 +325,7 @@ function message(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
-const STATE_KEY = Symbol.for("one-code.powershell-parser");
+const STATE_KEY = Symbol.for(brandedId("powershell-parser"));
 
 /**
  * The process-wide parser for one PowerShell executable. It lives on

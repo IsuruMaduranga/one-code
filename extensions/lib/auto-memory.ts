@@ -10,9 +10,9 @@
  * a change applies from the next start.
  */
 
-import { envName } from "./brand.mjs";
+import { brandedId, envName } from "./brand.mjs";
 import { knobValue, readKnob } from "./knobs.ts";
-import { brandedId } from "./brand.mjs";
+
 import { featureEnabled } from "./profile.ts";
 import os from "node:os";
 import { readSettingsFile, settingsSources } from "./claude-settings.ts";

@@ -49,7 +49,7 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { type CatalogSources, loadCatalogSources, MODELS_DEV_PROVIDER, type ModelsDevModel, type OpenRouterModel } from "./model-catalog-data.ts";
 import { BUILTIN_PROVIDER_POLICIES, baseModelId, DAY_MS, isExperimentalBuild, isMovingAlias, modelIdentity, stripSnapshotDate, vendorProfile } from "./model-policy.ts";
-import { oneCodeStateDir } from "./paths.ts";
+import { productStateDir } from "./paths.ts";
 
 export const TINY_PARAMS = 40e9;
 export const SIZE_RATIO = 0.5;
@@ -433,7 +433,7 @@ export function autoSelectSkipReason(model: CatalogModel, served: ReadonlySet<st
 
 /** The index over the sources in use (bundled or refreshed, whichever is newer). */
 export function currentCatalog(): CatalogIndex {
-	return buildCatalogIndex(loadCatalogSources(oneCodeStateDir()));
+	return buildCatalogIndex(loadCatalogSources(productStateDir()));
 }
 
 /**

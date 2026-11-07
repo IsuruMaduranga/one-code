@@ -14,14 +14,14 @@
  * extension owns repaint, the overlay, and the actual open.
  */
 
-import { envName } from "../lib/brand.mjs";
+import { brand, envName } from "../lib/brand.mjs";
 import { AUTO_MEMORY_KNOB } from "../lib/auto-memory.ts";
 import type { MemoryEntry } from "./entries.ts";
 import type { SourceSwitch } from "../lib/sources.ts";
 import { keyId } from "../lib/key-input.ts";
 import { wrapHints, wrapProse } from "../lib/tui-render.ts";
 
-export const MEMORY_DOCS_URL = "https://github.com/IsuruMaduranga/one-code";
+export const MEMORY_DOCS_URL = brand.homepage;
 
 /** Cursor rows above the list: the switch's row just above it, when there is one, and auto-memory above that. */
 const SWITCH_ROW = -1;
@@ -191,7 +191,7 @@ export function settingChanges(before: { mode?: boolean; autoMemory: boolean }, 
 /** The question the config-sources confirmation asks. */
 export function modeConfirmQuestion(mode: ModeView): string {
 	const next = switchState(mode, !mode.saved);
-	return `Switch ${mode.switch.title.toLowerCase()} to ${next.label}? One Code will read ${next.reads} instead, from the next start.`;
+	return `Switch ${mode.switch.title.toLowerCase()} to ${next.label}? ${brand.name} will read ${next.reads} instead, from the next start.`;
 }
 
 /**

@@ -22,6 +22,8 @@
  * Code's 40k-char soft limit, a hook or MCP config the loaders rejected.
  */
 
+import { SETTINGS_DISPLAY } from "../lib/product-settings.ts";
+import { brand } from "../lib/brand.mjs";
 import { knobNames } from "../lib/knobs.ts";
 import { SUBAGENT_MODEL_KNOB } from "../subagents/default-model.ts";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -30,7 +32,7 @@ import { loadPluginHooks } from "../hooks/plugin-hooks.ts";
 import { type HooksSource, loadHookSettings } from "../hooks/settings.ts";
 // Claude Code's auto-memory switch, read through the whole settings ladder.
 import { AUTO_MEMORY_KEY as AUTO_MEMORY } from "../lib/auto-memory.ts";
-import { oneCodeStateDir } from "../lib/paths.ts";
+import { productStateDir } from "../lib/paths.ts";
 import { isBorrowedUserFile, isRepoFile, primaryFamily, primarySettingsFile, settingsSources, type SourceId, sourceId } from "../lib/claude-settings.ts";
 import { protectedFiles, type SettingsFile, sourceSwitch } from "../lib/sources.ts";
 import { agentSkippedInstructions, openInstructions } from "../lib/instructions.ts";
@@ -95,7 +97,7 @@ export interface CompatReport {
  * (a checked-in env block must not route subagents).
  */
 const MCP_POLICY_KEYS = ["enableAllProjectMcpServers", "enabledMcpjsonServers", "disabledMcpjsonServers"];
-/** One Code's workflow keys, read from its user and project files (lib/one-code-settings.ts). */
+/** One Code's workflow keys, read from its user and project files (lib/product-settings.ts). */
 const WORKFLOW_KEYS = ["enableWorkflows", "disableWorkflows", "workflowSizeGuideline"];
 const CLAUDE_PROJECT_KEYS = new Set(["permissions", "hooks", "enabledPlugins", AUTO_MEMORY, ...MCP_POLICY_KEYS]);
 const SCOPE_KEYS: Partial<Record<SettingsScope, ReadonlySet<string>>> = {
@@ -190,10 +192,10 @@ function permissionsSummary(perms: unknown, file: SettingsFile, primaryPath: str
 		const repoFile = isRepoFile(file);
 		// The loader's rule (permissions/settings.ts): the product's files give no defaultMode unless one is the primary user file.
 		if (file.owner === "product" && !file.primary) {
-			refused = `permissions.defaultMode "${mode}" — never read from One Code's own files`;
+			refused = `permissions.defaultMode "${mode}" — never read from ${brand.name}'s own files`;
 			findings.push({
 				level: "warn",
-				text: `${shortenHome(path, home)} sets permissions.defaultMode "${mode}", which One Code does not read from its own settings files.`,
+				text: `${shortenHome(path, home)} sets permissions.defaultMode "${mode}", which ${brand.name} does not read from its own settings files.`,
 				fix: `Set the default mode in ${shortenHome(primaryPath, home)} (or start with --permission-mode); remove the key here.`,
 			});
 		} else if (repoFile && MODES_NEVER_FROM_PROJECT.has(mode as PermissionMode)) {
@@ -279,7 +281,7 @@ function summarizeFile(source: SettingsFile, ladder: { primary?: SettingsFile; f
 			const knobs = knobNames(SUBAGENT_MODEL_KNOB);
 			for (const k of keys) if (knobs.includes(k) && typeof env[k] === "string") report.used.push(`env.${k} = "${env[k]}"`);
 			const rest = keys.filter((k) => !knobs.includes(k));
-			if (rest.length) report.ignored.push(`env (${countNoun(rest.length, "variable")} — One Code does not export settings env blocks)`);
+			if (rest.length) report.ignored.push(`env (${countNoun(rest.length, "variable")} — ${brand.name} does not export settings env blocks)`);
 		} else if (keys.length) {
 			report.refused.push(`env (${keys.length}) — a repository's env block is not applied`);
 		}
@@ -291,11 +293,11 @@ function summarizeFile(source: SettingsFile, ladder: { primary?: SettingsFile; f
 		if (known.has("autoMode")) {
 			// `classifierModel` is One Code's own key, read from ~/.onecode only.
 			if (borrowedUser && ("classifierModel" in auto || "classifierModelSetFor" in auto)) {
-				report.refused.push("autoMode.classifierModel — One Code's own key, read from ~/.onecode/settings.json only");
+				report.refused.push(`autoMode.classifierModel — ${brand.name}'s own key, read from ${SETTINGS_DISPLAY} only`);
 				findings.push({
 					level: "warn",
-					text: `${shortenHome(path, home)} carries autoMode.classifierModel, a One Code key read only from ~/.onecode/settings.json; the value here is ignored.`,
-					fix: `Set it with /auto-mode model (which writes ~/.onecode/settings.json) and delete the stale key from ${shortenHome(path, home)}.`,
+					text: `${shortenHome(path, home)} carries autoMode.classifierModel, a ${brand.name} key read only from ${SETTINGS_DISPLAY}; the value here is ignored.`,
+					fix: `Set it with /auto-mode model (which writes ${SETTINGS_DISPLAY}) and delete the stale key from ${shortenHome(path, home)}.`,
 				});
 			}
 			const consumed = keys.filter((k) => !(borrowedUser && (k === "classifierModel" || k === "classifierModelSetFor")));
@@ -305,16 +307,16 @@ function summarizeFile(source: SettingsFile, ladder: { primary?: SettingsFile; f
 			findings.push({
 				level: "warn",
 				text: `${shortenHome(path, home)} has an autoMode block; auto-mode configuration is read from user and managed settings only, so it is ignored here (Claude Code does the same).`,
-				fix: "Move the block to ~/.onecode/settings.json (or run /auto-mode setup there).",
+				fix: `Move the block to ${SETTINGS_DISPLAY} (or run /auto-mode setup there).`,
 			});
 		}
 	}
 	if (borrowedUser && ("subagentModel" in file || "subagentModelSetFor" in file)) {
 		handled.add("subagentModel").add("subagentModelSetFor");
-		report.refused.push("subagentModel — One Code's own key, read from ~/.onecode/settings.json only");
+		report.refused.push(`subagentModel — ${brand.name}'s own key, read from ${SETTINGS_DISPLAY} only`);
 		findings.push({
 			level: "warn",
-			text: `${shortenHome(path, home)} carries subagentModel, a One Code key that is now read only from ~/.onecode/settings.json; the value here is ignored.`,
+			text: `${shortenHome(path, home)} carries subagentModel, a ${brand.name} key that is now read only from ${SETTINGS_DISPLAY}; the value here is ignored.`,
 			fix: `Re-set it with /subagent (which writes the new location) and delete the stale key from ${shortenHome(path, home)}.`,
 		});
 	}
@@ -390,13 +392,13 @@ export function collectCompat(input: CompatInput): CompatReport {
 
 	// The session's window budget, over the sections it loads (imports inlined,
 	// ONECODE.md included): past half the window, the largest are not loaded.
-	const skipped = agentSkippedInstructions({ cwd, home, agentDir, homeOneCodeDir: oneCodeStateDir(env, home), contextWindow: input.contextWindow });
+	const skipped = agentSkippedInstructions({ cwd, home, agentDir, homeOneCodeDir: productStateDir(env, home), contextWindow: input.contextWindow });
 	const fix = "Trim the instruction files below half of the model's context window together, split this one into files the model reads when needed, or switch to a model with a larger window.";
 	for (const file of skipped) findings.push({ level: "warn", text: skippedInstructionWarning(shortenHome(file.path, home), file), fix });
 	const skippedPaths = new Set(skipped.map((file) => file.path));
 
 	// Context files, sized — the block every turn pays for.
-	const contextFiles: ContextFileReport[] = openInstructions(home, agentDir).paths({ cwd, homeOneCodeDir: oneCodeStateDir(env, home) }).map(({ path, descriptor }) => {
+	const contextFiles: ContextFileReport[] = openInstructions(home, agentDir).paths({ cwd, homeOneCodeDir: productStateDir(env, home) }).map(({ path, descriptor }) => {
 		let chars = 0;
 		try {
 			chars = readFileSync(path, "utf-8").length;
@@ -431,7 +433,7 @@ export function collectCompat(input: CompatInput): CompatReport {
 	} catch (error) {
 		findings.push({ level: "warn", text: `Plugin discovery failed: ${(error as Error).message}` });
 	}
-	const pluginCounts = (origin: "claude" | "one-code") => {
+	const pluginCounts = (origin: "claude" | "product") => {
 		const list = (discovered?.plugins ?? []).filter((p) => p.originRoot === origin);
 		return { total: list.length, enabled: list.filter((p) => p.enabled).length };
 	};
@@ -533,7 +535,7 @@ export function collectCompat(input: CompatInput): CompatReport {
 		agents,
 		skills,
 		commands: promptTemplateNames(cwd, home, agentDir).length,
-		plugins: { claude: pluginCounts("claude"), oneCode: pluginCounts("one-code") },
+		plugins: { claude: pluginCounts("claude"), oneCode: pluginCounts("product") },
 		hooks: { sources: hookSources, commands: hookCommands, diagnostics: hookDiagnostics },
 		mcp: { servers, disabled: readDisabledMcpServers(cwd, home, env), configErrors },
 		findings,
@@ -555,10 +557,10 @@ export function importedConfigSection(compat: CompatReport, home: string): Repor
 			lines.push({ text: `${file.label} ${path}: invalid JSON — ignored`, level: "error" });
 			continue;
 		}
-		const used = file.used.length ? file.used.join(" · ") : "nothing One Code reads";
+		const used = file.used.length ? file.used.join(" · ") : `nothing ${brand.name} reads`;
 		lines.push({ text: `${file.label} ${path}: ${used}`, level: "ok" });
 		for (const refused of file.refused) lines.push({ text: `not honoured here: ${refused}`, indent: 1, level: "warn" });
-		if (file.ignored.length) lines.push({ text: `not used by One Code: ${file.ignored.join(", ")}`, indent: 1, level: "dim" });
+		if (file.ignored.length) lines.push({ text: `not used by ${brand.name}: ${file.ignored.join(", ")}`, indent: 1, level: "dim" });
 	}
 	if (lines.length === 0) lines.push({ text: "No settings files found — defaults apply (auto permission mode, no hooks, no plugins).", level: "dim" });
 
@@ -569,7 +571,7 @@ export function importedConfigSection(compat: CompatReport, home: string): Repor
 			lines.push({ text: `${shortenHome(file.path, home)} — ${(file.chars / 1000).toFixed(1)}k chars${file.overLimit ? " (over the 40k soft limit)" : ""}`, indent: 1, level: file.overLimit ? "warn" : "dim" });
 		}
 	} else {
-		lines.push({ text: "Instruction files: none (no CLAUDE.md, AGENTS.md or ONECODE.md from here to the repository root)", level: "dim" });
+		lines.push({ text: `Instruction files: none (no CLAUDE.md, AGENTS.md or ${brand.productFile} from here to the repository root)`, level: "dim" });
 	}
 	lines.push({
 		text: compat.memory.indexExists
@@ -589,7 +591,7 @@ export function importedConfigSection(compat: CompatReport, home: string): Repor
 	});
 	const p = compat.plugins;
 	lines.push({
-		text: `Plugins: ${p.claude.enabled}/${p.claude.total} Claude Code-installed enabled (read-only; toggle in /plugins), ${p.oneCode.enabled}/${p.oneCode.total} installed by One Code`,
+		text: `Plugins: ${p.claude.enabled}/${p.claude.total} Claude Code-installed enabled (read-only; toggle in /plugins), ${p.oneCode.enabled}/${p.oneCode.total} installed by ${brand.name}`,
 		level: "ok",
 	});
 	if (compat.hooks.sources.length) {
@@ -598,7 +600,7 @@ export function importedConfigSection(compat: CompatReport, home: string): Repor
 	} else {
 		lines.push({ text: "Hooks: none configured", level: "dim" });
 	}
-	return { title: "Imported configuration", subtitle: "what One Code reads from your Claude Code and One Code files", lines };
+	return { title: "Imported configuration", subtitle: `what ${brand.name} reads from your Claude Code and ${brand.name} files`, lines };
 }
 
 export function mcpSection(compat: CompatReport, session: SessionView | undefined, home: string): ReportSection {

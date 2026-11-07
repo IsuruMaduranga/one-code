@@ -45,10 +45,11 @@
  * working-docs/decisions/auto-mode.md.)
  */
 
+import { brand } from "../lib/brand.mjs";
 import { existsSync, readFileSync } from "node:fs";
 import { isBorrowedUserFile, isRepoFile, settingsSources } from "../lib/claude-settings.ts";
 import type { SettingsFile } from "../lib/sources.ts";
-import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
+import { productSettingsPath, readSettingsForWrite, SETTINGS_DISPLAY, writeSettings } from "../lib/product-settings.ts";
 import { DEFAULT_ENVIRONMENT, slotName } from "./defaults.ts";
 
 export interface AutoModeConfig {
@@ -294,7 +295,7 @@ export function loadAutoModeConfigWithDiagnostics(home: string): AutoModeConfigL
 		if (typeof block.classifierModel === "string" && block.classifierModel.trim()) {
 			if (isBorrowedUserFile(source)) {
 				diagnostics.push(
-					`${path}: autoMode.classifierModel is ignored here — One Code reads it from ~/.onecode/settings.json (set it with /auto-mode model)`,
+					`${path}: autoMode.classifierModel is ignored here — ${brand.name} reads it from ${SETTINGS_DISPLAY} (set it with /auto-mode model)`,
 				);
 			} else {
 				collected.classifierModel = block.classifierModel.trim();
@@ -343,7 +344,7 @@ export function loadAutoModeConfig(home: string): AutoModeConfig {
  * rules, but a lenient write would replace the whole settings file with only ours.
  */
 export function persistClassifierModel(spec: string | undefined, home: string, setForContainment?: string): void {
-	const path = oneCodeSettingsPath(home);
+	const path = productSettingsPath(home);
 	const file = readSettingsForWrite(path);
 	const block = asRecord(file.autoMode) ?? {};
 	if (spec === undefined) {
@@ -378,7 +379,7 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
  * replacing the settings with only ours.
  */
 export function persistAutoModeSetup(patch: Record<string, string[] | undefined>, home: string): void {
-	const path = oneCodeSettingsPath(home);
+	const path = productSettingsPath(home);
 	const file = readSettingsForWrite(path);
 	const block = asRecord(file.autoMode) ?? {};
 	for (const key of ["environment", ...RULE_LIST_KEYS] as const) {
@@ -425,7 +426,7 @@ export function listAutoModeEntries(home: string): SourcedAutoModeEntry[] {
 
 /** Whether One Code's own `autoMode.environment` keeps the built-in default through `"$defaults"`. */
 export function oneCodeEnvironmentExtendsDefault(home: string): boolean {
-	const block = asRecord(readFile(oneCodeSettingsPath(home), [])?.autoMode);
+	const block = asRecord(readFile(productSettingsPath(home), [])?.autoMode);
 	return (stringArray(block?.environment) ?? []).some((text) => text.trim() === DEFAULTS_TOKEN);
 }
 
@@ -436,7 +437,7 @@ export function oneCodeEnvironmentExtendsDefault(home: string): boolean {
  * writers.
  */
 export function updateOneCodeAutoModeList(key: AutoModeListKey, update: (entries: string[]) => string[], home: string): void {
-	const path = oneCodeSettingsPath(home);
+	const path = productSettingsPath(home);
 	const file = readSettingsForWrite(path);
 	const block = asRecord(file.autoMode) ?? {};
 	const next = update(stringArray(block[key]) ?? []);
@@ -456,7 +457,7 @@ export function oneCodePermissionAllow(home: string): string[] {
 	// Lenient read (a missing/malformed file is skipped) — this is a read for
 	// auditing, not a write, so leniency is correct; the writers still refuse to
 	// clobber a malformed file. Diagnostics are discarded here.
-	return permissionAllowIn(oneCodeSettingsPath(home));
+	return permissionAllowIn(productSettingsPath(home));
 }
 
 /**
@@ -485,7 +486,7 @@ function permissionAllowIn(path: string): string[] {
  * how many entries were actually removed.
  */
 export function removeOneCodePermissionAllow(entries: string[], home: string): number {
-	const path = oneCodeSettingsPath(home);
+	const path = productSettingsPath(home);
 	const file = readSettingsForWrite(path);
 	const permissions = asRecord(file.permissions);
 	const allowList = permissions?.allow;

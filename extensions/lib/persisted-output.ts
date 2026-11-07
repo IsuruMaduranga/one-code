@@ -15,7 +15,7 @@
 import { closeSync, mkdirSync, openSync, readSync, statSync, writeFileSync } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
 import { join } from "node:path";
-import { oneCodeStateDir } from "./paths.ts";
+import { productStateDir } from "./paths.ts";
 import { privateSessionTempDir } from "./scratchpad.ts";
 import { toolResultWords } from "./tool-results-words.ts";
 
@@ -48,7 +48,7 @@ export function sessionResultsDir(
 	const id = (sessionId || `process-${process.pid}`).replace(/[^A-Za-z0-9._-]/g, "_");
 	const temp = privateSessionTempDir(ctx?.cwd ?? process.cwd(), id);
 	if (temp) return temp;
-	const fallback = join(oneCodeStateDir(), "tmp", id);
+	const fallback = join(productStateDir(), "tmp", id);
 	try {
 		mkdirSync(fallback, { recursive: true, mode: 0o700 });
 	} catch {

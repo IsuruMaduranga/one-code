@@ -11,7 +11,7 @@ import { discoverOneCodeFiles, openInstructions } from "../../extensions/lib/ins
 import { discoverContextFiles, externalInstructionIncludes, nestedInstructionFiles } from "../../profile/claude-code/instructions.ts";
 import { EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_NONE, EXTERNAL_INCLUDES_TITLE, EXTERNAL_INCLUDES_YES, externalIncludesDialog, persistExternalIncludesApproval, readExternalIncludesApproval } from "../../extensions/lib/claude-external-includes.ts";
 import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
-import { oneCodeProjectSettingsPath } from "../../extensions/lib/one-code-settings.ts";
+import { productProjectSettingsPath } from "../../extensions/lib/product-settings.ts";
 import { forwardSlashes } from "../../extensions/lib/paths.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { safetyControlWrite } from "../../extensions/auto-mode/safety-floor.ts";
@@ -103,7 +103,7 @@ describe("external instruction include approval", () => {
 		const { select, texts } = await start(EXTERNAL_INCLUDES_YES, false);
 		expect(select).not.toHaveBeenCalled();
 		expect(texts.join("\n")).not.toContain("APPROVED EXTERNAL INSTRUCTION");
-		expect(existsSync(oneCodeProjectSettingsPath(cwd, home))).toBe(false);
+		expect(existsSync(productProjectSettingsPath(cwd, home))).toBe(false);
 	});
 
 	it("ignores approval keys in every project-controlled settings file", async () => {
@@ -122,7 +122,7 @@ describe("external instruction include approval", () => {
 		const { select, texts } = await start(EXTERNAL_INCLUDES_YES);
 		expect(select).not.toHaveBeenCalled();
 		expect(texts).toEqual([before]);
-		expect(existsSync(oneCodeProjectSettingsPath(cwd, home))).toBe(false);
+		expect(existsSync(productProjectSettingsPath(cwd, home))).toBe(false);
 	});
 
 	it.each(["new", "reload", "resume", "fork"])("does not turn %s into another startup approval opportunity", async (reason) => {
@@ -131,7 +131,7 @@ describe("external instruction include approval", () => {
 		await fake.fire("session_start", { reason }, ctx);
 		await fake.fire("before_agent_start", {}, ctx);
 		expect(select).not.toHaveBeenCalled();
-		expect(existsSync(oneCodeProjectSettingsPath(cwd, home))).toBe(false);
+		expect(existsSync(productProjectSettingsPath(cwd, home))).toBe(false);
 	});
 
 	it("opens the RPC dialog without awaiting session_start, but holds the first turn", async () => {
@@ -460,8 +460,8 @@ describe("durable approval and dialog fidelity", () => {
 		const underscored = join(root, "my_app");
 		mkdirSync(dashed);
 		mkdirSync(underscored);
-		const path = oneCodeProjectSettingsPath(dashed, home);
-		const otherPath = oneCodeProjectSettingsPath(underscored, home);
+		const path = productProjectSettingsPath(dashed, home);
+		const otherPath = productProjectSettingsPath(underscored, home);
 		persistExternalIncludesApproval(dashed, home, true);
 		expect(readExternalIncludesApproval(dashed, home)).toEqual({ approved: true, warningShown: true });
 		// Long paths have distinct hashed slugs. Copy the other project's settings
@@ -484,11 +484,11 @@ describe("durable approval and dialog fidelity", () => {
 		expect(readExternalIncludesApproval(cwd, home)).toEqual({ approved: true, warningShown: true });
 		persistExternalIncludesApproval(cwd, home, false);
 		expect(readExternalIncludesApproval(alias, home)).toEqual({ approved: false, warningShown: true });
-		expect(safetyControlWrite({ cwd: alias, home, toolName: "write", input: { path: oneCodeProjectSettingsPath(cwd, home) } })).toBeDefined();
+		expect(safetyControlWrite({ cwd: alias, home, toolName: "write", input: { path: productProjectSettingsPath(cwd, home) } })).toBeDefined();
 	});
 
 	it("round-trips other keys, treats malformed/non-boolean values as no approval, and never writes Claude state", () => {
-		const path = oneCodeProjectSettingsPath(cwd, home);
+		const path = productProjectSettingsPath(cwd, home);
 		write(path, JSON.stringify({ unrelated: 7, hasClaudeMdExternalIncludesApproved: "true" }));
 		expect(readExternalIncludesApproval(cwd, home).approved).toBe(false);
 		persistExternalIncludesApproval(cwd, home, true);
@@ -501,7 +501,7 @@ describe("durable approval and dialog fidelity", () => {
 	});
 
 	it("keeps the approval file behind the gate-control safety floor", () => {
-		const path = oneCodeProjectSettingsPath(cwd, home);
+		const path = productProjectSettingsPath(cwd, home);
 		for (const toolName of ["write", "edit"]) expect(safetyControlWrite({ cwd, home, toolName, input: { path } })).toBeDefined();
 		expect(safetyControlWrite({ cwd, home, toolName: "bash", input: { command: `echo '{}' > '${path}'` } })).toBeDefined();
 	});

@@ -3,6 +3,7 @@
  * lifecycle, timeouts, and failure reporting.
  */
 
+import { brand } from "../lib/brand.mjs";
 import { isDeepStrictEqual } from "node:util";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -320,7 +321,7 @@ async function openClient(
 	keepOAuthOpen?: () => boolean,
 ): Promise<{ client: Client; transport: Transport; stderrTail: () => string }> {
 	const sdk = await loadSdk();
-	const client = new sdk.Client({ name: "one-code", version: "0.1.0" }, { capabilities: {} });
+	const client = new sdk.Client({ name: brand.idPrefix, version: "0.1.0" }, { capabilities: {} });
 	return { client, ...buildTransport(server, sdk, authProvider, keepOAuthOpen) };
 }
 

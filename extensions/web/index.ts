@@ -42,7 +42,7 @@ import { requireText } from "../lib/profile.ts";
 import { readJsonFile } from "../lib/atomic-write.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 import { DEFER_CHANNEL, WITHHOLD_CHANNEL } from "../lib/deferred.ts";
-import { oneCodeSettingsPath } from "../lib/one-code-settings.ts";
+import { productSettingsPath } from "../lib/product-settings.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 import { registerFormTool } from "../lib/tool-variants.ts";
@@ -62,7 +62,7 @@ import type { ChainFailure, ProviderSearchFailure } from "./text.ts";
 
 /** `webSearch` from ~/.onecode/settings.json, read leniently — a bad file skips the setting, never breaks the tool. */
 function readWebSearchSettings(): WebSearchSettings {
-	return webSearchSettingsFrom(readJsonFile<{ webSearch?: unknown }>(oneCodeSettingsPath(homedir()))?.webSearch);
+	return webSearchSettingsFrom(readJsonFile<{ webSearch?: unknown }>(productSettingsPath(homedir()))?.webSearch);
 }
 
 /** Declared up front: pi infers `details` from the first return it sees. */

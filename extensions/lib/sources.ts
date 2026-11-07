@@ -11,10 +11,11 @@
  * and loaded on first use (lib/profile.ts `sourceProvider`).
  */
 
+import { brand } from "./brand.mjs";
 import os from "node:os";
 import { join } from "node:path";
 import type { InstructionView } from "./instructions.ts";
-import { oneCodeStateDir } from "./paths.ts";
+import { productStateDir } from "./paths.ts";
 import { sourceProvider } from "./profile.ts";
 
 /** One session's view of the provider's sources. */
@@ -203,7 +204,7 @@ export function openSources(home: string): SourceView {
 
 /** The config folders for `home`: the provider's, else the product's own state dir and `.onecode`. */
 export function configDirs(home: string = os.homedir()): ConfigDirs {
-	return openSources(home).configDirs ?? { user: oneCodeStateDir(process.env, home), project: ".onecode" };
+	return openSources(home).configDirs ?? { user: productStateDir(process.env, home), project: brand.stateDir };
 }
 
 /** The user-level config folder (agents, commands, workflows, the memory folder). */

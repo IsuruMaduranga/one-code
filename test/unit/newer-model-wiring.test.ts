@@ -5,7 +5,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { pinReleaseDates } from "./catalog-fixture.ts";
 import { MODEL_UNUSABLE_CHANNEL } from "../../extensions/lib/model-unusable.ts";
-import { oneCodeSettingsPath, readSuggestNewerModels } from "../../extensions/lib/one-code-settings.ts";
+import { productSettingsPath, readSuggestNewerModels } from "../../extensions/lib/product-settings.ts";
 import newerModelExtension from "../../extensions/newer-model/index.ts";
 import { NOTICE_CHANNEL } from "../../extensions/lib/notices.ts";
 import { createFakeCtx, createFakePi, flushNotices } from "./helpers/fake-pi.ts";
@@ -137,7 +137,7 @@ describe("newer-model notices", () => {
 
 describe("readSuggestNewerModels", () => {
 	const home = () => join(dir, "home");
-	const path = () => oneCodeSettingsPath(home(), {});
+	const path = () => productSettingsPath(home(), {});
 	const write = (value: unknown) => {
 		mkdirSync(dirname(path()), { recursive: true });
 		writeFileSync(path(), JSON.stringify(value));

@@ -12,9 +12,10 @@
  * left off the floor.
  */
 
+import { stateDirPattern } from "./brand.mjs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { oneCodeStateDir } from "./paths.ts";
+import { productStateDir } from "./paths.ts";
 
 /** Each consent store, relative to One Code's state dir. */
 const CONSENT_STORES = {
@@ -28,7 +29,7 @@ export type ConsentStore = keyof typeof CONSENT_STORES;
 
 /** One consent store's file, under `ONECODE_STATE_DIR` when it is set. */
 export function consentStorePath(store: ConsentStore, env: Record<string, string | undefined> = process.env, home: string = homedir()): string {
-	return join(oneCodeStateDir(env, home), ...CONSENT_STORES[store]);
+	return join(productStateDir(env, home), ...CONSENT_STORES[store]);
 }
 
 /** Every consent store's file, for the safety floor. */
@@ -42,7 +43,7 @@ export function consentStorePaths(home: string, env: Record<string, string | und
  * store in another home or spelled through a symlink the resolver missed.
  */
 export const CONSENT_STORE_TAIL = new RegExp(
-	`/\\.onecode/(${Object.values(CONSENT_STORES)
+	`/${stateDirPattern}/(${Object.values(CONSENT_STORES)
 		.map((parts) => parts.join("/").replace(/[.]/g, "\\."))
 		.join("|")})$`,
 );

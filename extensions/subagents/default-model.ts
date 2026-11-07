@@ -32,7 +32,7 @@
 import { type Knob, readKnob } from "../lib/knobs.ts";
 import { isBorrowedUserFile, readSettingsFile } from "../lib/claude-settings.ts";
 import { isClaudeFamilyModel } from "../lib/model-policy.ts";
-import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
+import { productSettingsPath, readSettingsForWrite, writeSettings } from "../lib/product-settings.ts";
 import { autoModeSettingsFiles } from "../auto-mode/config.ts";
 
 /** The environment knob for the subagent default (lib/knobs.ts). */
@@ -142,7 +142,7 @@ export function applicableSubagentDefault(
  * it is cleared for `inherit` (never cross-provider) and on removal.
  */
 export function persistSubagentModel(spec: string | undefined, home: string, setForContainment?: string): void {
-	const path = oneCodeSettingsPath(home);
+	const path = productSettingsPath(home);
 	const file = readSettingsForWrite(path);
 	if (spec === undefined) {
 		delete file.subagentModel;

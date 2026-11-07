@@ -16,6 +16,7 @@
  * a Claude Code user needs, without patching pi.
  */
 
+import { brand } from "../lib/brand.mjs";
 import { feature } from "../lib/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { ONE_SHOT_COMMAND_FAILED_CHANNEL, type RunOutcome, RunOutcomeLatch, TURN_FAILED_CHANNEL } from "../lib/interrupt.ts";
@@ -52,7 +53,7 @@ function exitExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("exit", {
-		description: "Quit One Code (same as /quit)",
+		description: `Quit ${brand.name} (same as /quit)`,
 		handler: async (_args, ctx) => {
 			ctx.shutdown();
 		},

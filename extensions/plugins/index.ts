@@ -16,6 +16,7 @@
  * ~/.claude is read-only here, always.
  */
 
+import { brand } from "../lib/brand.mjs";
 import { feature } from "../lib/feature.ts";
 import { randomUUID } from "node:crypto";
 import { readFileSync, rmSync } from "node:fs";
@@ -106,7 +107,7 @@ function safeDiscover(roots: ReturnType<typeof defaultDiscoverRoots>): Discovere
 	try {
 		return discoverPlugins(roots);
 	} catch (error) {
-		console.error(`One Code: plugin discovery failed, continuing without plugins: ${(error as Error).message}`);
+		console.error(`${brand.name}: plugin discovery failed, continuing without plugins: ${(error as Error).message}`);
 		return emptyDiscovered();
 	}
 }
@@ -380,7 +381,7 @@ function pluginsExtension(pi: ExtensionAPI) {
 							void guarded(installToggle(effect.row));
 							return;
 						case "setPluginEnabled": {
-							if (effect.origin === "one-code") setInstalledEnabled(oneCodeRoot, effect.id, effect.enabled);
+							if (effect.origin === "product") setInstalledEnabled(oneCodeRoot, effect.id, effect.enabled);
 							else setOverride(oneCodeRoot, effect.id, effect.enabled);
 							state.restartNeeded = true;
 							rediscover();

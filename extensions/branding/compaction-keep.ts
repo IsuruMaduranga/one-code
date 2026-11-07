@@ -11,6 +11,7 @@
  * and is never questioned; `/doctor` shows it. The bundled app sets 0 itself.
  */
 
+import { brand } from "../lib/brand.mjs";
 import os from "node:os";
 import { join } from "node:path";
 import { type ExtensionContext, getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
@@ -23,7 +24,7 @@ import {
 	ONE_CODE_KEEP_RECENT_TOKENS,
 	withCompactionKeepBackfilled,
 } from "../lib/compaction-keep.mjs";
-import { readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
+import { readSettingsForWrite, SETTINGS_DISPLAY, writeSettings } from "../lib/product-settings.ts";
 import { tildify } from "../lib/paths.ts";
 import { declined, recordDeclined } from "./declined.ts";
 
@@ -50,7 +51,7 @@ export async function handleCompactionKeep(ctx: ExtensionContext): Promise<void>
 			try {
 				recordDeclined(KEEP_DECLINED_KEY);
 			} catch (error) {
-				ctx.ui.notify(`Could not remember the answer in ~/.onecode/settings.json: ${(error as Error).message}. One Code asks again next start.`, "warning");
+				ctx.ui.notify(`Could not remember the answer in ${SETTINGS_DISPLAY}: ${(error as Error).message}. ${brand.name} asks again next start.`, "warning");
 			}
 		}
 	} catch (error) {

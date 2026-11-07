@@ -12,6 +12,7 @@
  * the check runs before allow rules are evaluated.
  */
 
+import { brand } from "../lib/brand.mjs";
 import { relative, resolve, sep } from "node:path";
 
 /** Directories whose entire contents are protected. */
@@ -29,7 +30,7 @@ const PROTECTED_DIRS = [
 	// One Code's own state dir — the deny-direction twin of protecting `.claude`:
 	// as generated state moves here, a write that reconfigures the gate must
 	// stay just as guarded in its new home.
-	".onecode",
+	brand.stateDir.toLowerCase(),
 	// Run-at-login and on-PATH locations (PERMISSIONS-REVIEW-2026-09-05 M7): a
 	// launchd agent plist runs at the next login, a fish config at the next
 	// shell, and `~/.local/bin` is where the `pi` shim and user tools live.
@@ -49,7 +50,7 @@ const PROTECTED_DIRS = [
  * `.onecode/plans` holds plan-mode documents (rendered to the user, never
  * executed) — ordinary working space rather than configuration.
  */
-const PROTECTED_DIR_EXCEPTIONS = [".claude/worktrees", ".onecode/worktrees", ".onecode/plans"];
+const PROTECTED_DIR_EXCEPTIONS = [".claude/worktrees", `${brand.stateDir}/worktrees`, `${brand.stateDir}/plans`];
 
 const PROTECTED_FILES = new Set([
 	// A `.git` FILE is a gitlink (`gitdir: <path>`): written into a subdirectory

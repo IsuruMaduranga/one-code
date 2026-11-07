@@ -63,7 +63,7 @@ function environment(overrides: Partial<DoctorEnvironment> = {}): DoctorEnvironm
 		platform: "darwin",
 		arch: "arm64",
 		nodeVersion: "26.3.1",
-		oneCodeVersion: "0.2.1",
+		productVersion: "0.2.1",
 		install: "app",
 		piVersion: "0.85.1",
 		...overrides,

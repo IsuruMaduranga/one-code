@@ -19,6 +19,7 @@
  * builds a native addon on install, which this package never uses.
  */
 
+import { brandedId } from "./brand.mjs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,7 +32,7 @@ interface BashParserState {
 	error?: string;
 }
 
-const STATE_KEY = Symbol.for("one-code.bash-parser");
+const STATE_KEY = Symbol.for(brandedId("bash-parser"));
 
 const GRAMMAR_PATH = join(dirname(fileURLToPath(import.meta.url)), "grammars", "tree-sitter-bash.wasm");
 

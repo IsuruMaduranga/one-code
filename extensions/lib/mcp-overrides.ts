@@ -16,7 +16,7 @@
 
 import os from "node:os";
 import { readJsonFile } from "./atomic-write.ts";
-import { oneCodeProjectSettingsPath, oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "./one-code-settings.ts";
+import { productProjectSettingsPath, productSettingsPath, readSettingsForWrite, writeSettings } from "./product-settings.ts";
 
 const KEY = "disabledMcpServers";
 
@@ -39,7 +39,7 @@ export function readDisabledMcpServers(
 	home: string = os.homedir(),
 	env: NodeJS.ProcessEnv = process.env,
 ): Set<string> {
-	return new Set([...namesAt(oneCodeSettingsPath(home, env)), ...namesAt(oneCodeProjectSettingsPath(cwd, home, env))]);
+	return new Set([...namesAt(productSettingsPath(home, env)), ...namesAt(productProjectSettingsPath(cwd, home, env))]);
 }
 
 /** Add or remove a server from the disabled list at the given scope. */
@@ -51,7 +51,7 @@ export function setMcpServerDisabled(
 	home: string = os.homedir(),
 	env: NodeJS.ProcessEnv = process.env,
 ): void {
-	const path = scope === "user" ? oneCodeSettingsPath(home, env) : oneCodeProjectSettingsPath(cwd, home, env);
+	const path = scope === "user" ? productSettingsPath(home, env) : productProjectSettingsPath(cwd, home, env);
 	const file = readSettingsForWrite(path);
 	const set = new Set(stringArray(file[KEY]));
 	if (disabled) set.add(name);

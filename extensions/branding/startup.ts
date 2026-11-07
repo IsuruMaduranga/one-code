@@ -19,7 +19,7 @@ import { projectInstructionFiles } from "../lib/instructions.ts";
 import { projectConfigDir, userConfigDir } from "../lib/sources.ts";
 import { BUNDLED_SKILLS_DIR, scanSkills } from "../lib/skill-scan.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
-import { oneCodeStateDir } from "../lib/paths.ts";
+import { productStateDir } from "../lib/paths.ts";
 import { boundKey } from "../lib/tui-render.ts";
 
 export interface StartupSection {
@@ -34,7 +34,7 @@ export interface StartupSection {
  * so an AGENTS.md is listed only when it is really in play.
  */
 export function contextFileNames(cwd: string, home: string = os.homedir()): string[] {
-	return projectInstructionFiles({ cwd, home, homeOneCodeDir: oneCodeStateDir(process.env, home) }).map((path) => relative(cwd, path) || basename(path));
+	return projectInstructionFiles({ cwd, home, homeOneCodeDir: productStateDir(process.env, home) }).map((path) => relative(cwd, path) || basename(path));
 }
 
 /**

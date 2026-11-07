@@ -7,7 +7,7 @@ import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from
 import { newerModelSuggestion } from "../lib/newer-model.ts";
 import { queueNotice } from "../lib/notices.ts";
 import { sessionOutlivesTurn } from "../lib/notifications.ts";
-import { readSuggestNewerModels } from "../lib/one-code-settings.ts";
+import { readSuggestNewerModels } from "../lib/product-settings.ts";
 
 function newerModelExtension(pi: ExtensionAPI) {
 	const shown = new Set<string>();

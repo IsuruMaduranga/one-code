@@ -15,6 +15,7 @@
  * them to `buildDoctorReport`; everything below is deterministic given them.
  */
 
+import { brand } from "../lib/brand.mjs";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { PromptTier } from "../lib/model-tier.ts";
 import { tildify } from "../lib/paths.ts";
@@ -74,7 +75,7 @@ export interface DoctorEnvironment {
 	platform: string;
 	arch: string;
 	nodeVersion: string;
-	oneCodeVersion: string;
+	productVersion: string;
 	/** How One Code was launched: the bundled `onecode` app or the extension on the user's own pi. */
 	install: "app" | "pi-package";
 	piVersion?: string;
@@ -112,7 +113,7 @@ export interface SessionView {
 	mcp?: McpStatusEvent;
 }
 
-export const REPORT_TITLE = "One Code doctor";
+export const REPORT_TITLE = `${brand.name} doctor`;
 
 const GLYPH: Record<LineLevel, string> = { ok: "✔", info: "", warn: "⚠", error: "✘", dim: "" };
 

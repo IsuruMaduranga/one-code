@@ -12,6 +12,7 @@
  * works. When the script cannot load, the button falls back to opening the page.
  */
 
+import { brand } from "../lib/brand.mjs";
 import { homedir } from "node:os";
 import { tildify } from "../lib/paths.ts";
 import type { ArtifactMeta } from "./store.ts";
@@ -127,13 +128,13 @@ export function renderGallery(artifacts: ArtifactMeta[], home: string = homedir(
 	const body = count
 		? `<ul class="list" id="list">\n${artifacts.map((meta) => renderEntry(meta, home)).join("\n")}\n</ul>
 <p class="empty" id="no-match" hidden>No artifact matches that filter.</p>`
-		: `<p class="empty">No artifacts yet. Ask One Code for a page, a report or a small tool, and it lands here.</p>`;
+		: `<p class="empty">No artifacts yet. Ask ${escapeHtml(brand.name)} for a page, a report or a small tool, and it lands here.</p>`;
 	return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>One Code Artifacts</title>
+<title>${escapeHtml(brand.name)} Artifacts</title>
 <style>
 ${THEME_TOKENS}
 * { box-sizing: border-box; }
@@ -189,7 +190,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, summary:focus-visibl
 <div class="wrap">
 <header>
   <div>
-    <h1>One Code Artifacts</h1>
+    <h1>${escapeHtml(brand.name)} Artifacts</h1>
     <p class="count">${count} ${count === 1 ? "artifact" : "artifacts"}, newest first. Stored in this folder.</p>
   </div>
   ${count ? '<input type="search" id="filter" placeholder="Filter by title or project" aria-label="Filter artifacts">' : ""}

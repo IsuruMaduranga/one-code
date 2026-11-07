@@ -38,7 +38,7 @@ import {
 	providerPolicy,
 	supportsImageInput,
 } from "./model-policy.ts";
-import { oneCodeSettingsPath } from "./one-code-settings.ts";
+import { productSettingsPath } from "./product-settings.ts";
 
 export type PromptTier = "frontier" | "workhorse" | "cheap" | "tiny";
 
@@ -206,7 +206,7 @@ export function setModelTierOverridesForTest(tiers: Record<string, PromptTier> |
  */
 export function modelTierOverrides(): Record<string, PromptTier> {
 	if (overridesPinned) return overridesPinned;
-	const path = oneCodeSettingsPath(homedir());
+	const path = productSettingsPath(homedir());
 	const now = Date.now();
 	if (overrideMemo && overrideMemo.path === path && now - overrideMemo.at < 1000) return overrideMemo.tiers;
 	let mtimeMs = -1;

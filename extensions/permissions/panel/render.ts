@@ -6,6 +6,7 @@
  * One Code where Claude Code names itself.
  */
 
+import { brand } from "../../lib/brand.mjs";
 import { cutPlainText, hintLines, panelTopRule, type RenderBlock as Block, searchBoxLines, truncateLine, visibleWidth, windowBlocks, wrapPlainText } from "../../lib/tui-render.ts";
 import {
 	AUTO_SECTION_LABELS,
@@ -52,14 +53,14 @@ const TAB_TITLES: Record<Tab, string> = {
 	workspace: "Workspace",
 };
 
-const WORKSPACE_SUBTITLE = "One Code can read files in the workspace, and make edits when auto-accept edits is on.";
+const WORKSPACE_SUBTITLE = `${brand.name} can read files in the workspace, and make edits when auto-accept edits is on.`;
 /** Claude Code's three answers when a directory is added. */
 const REMEMBER_OPTIONS = ["Yes, for this session", "Yes, and remember this directory", "No"];
 
 const SUBTITLES: Record<RuleTab | "automode", string> = {
-	allow: "One Code won't ask before using allowed tools.",
-	ask: "One Code will always ask for confirmation before using these tools.",
-	deny: "One Code will always reject requests to use denied tools.",
+	allow: `${brand.name} won't ask before using allowed tools.`,
+	ask: `${brand.name} will always ask for confirmation before using these tools.`,
+	deny: `${brand.name} will always reject requests to use denied tools.`,
 	automode: "Extra rules for the auto mode classifier. Rules are plain sentences; new rules are saved to your user settings.",
 };
 
@@ -276,7 +277,7 @@ function dialogLines(dialog: Dialog, input: PanelRenderInput, paint: PanelPaint)
 					...wrapped("Write the rule as a plain sentence. A short label up front helps, e.g., Database Writes: UPDATE statements against the local dev database."),
 					"",
 					...draftBox(dialog.draft, "Enter rule…"),
-					paint.fg("dim", text("Saved to your One Code user settings, for every project.")),
+					paint.fg("dim", text(`Saved to your ${brand.name} user settings, for every project.`)),
 				],
 				footer: "Enter to save · Esc to cancel",
 			};
@@ -315,7 +316,7 @@ function dialogLines(dialog: Dialog, input: PanelRenderInput, paint: PanelPaint)
 					paint.fg(SECTION_COLOR[dialog.section], paint.bold(text(`${SECTION_LABEL[dialog.section]} · built-in rules`))),
 					"",
 					...wrapped(
-						`The ${view.autoMode.builtins[dialog.section]} built-in ${SECTION_LABEL[dialog.section].toLowerCase()} rules are always in effect in One Code. Your own rules are added after them and never replace them, so a rule can tighten or carve out, but not switch the built-ins off.`,
+						`The ${view.autoMode.builtins[dialog.section]} built-in ${SECTION_LABEL[dialog.section].toLowerCase()} rules are always in effect in ${brand.name}. Your own rules are added after them and never replace them, so a rule can tighten or carve out, but not switch the built-ins off.`,
 					),
 					"",
 					...wrapped("They are Claude Code's own classifier rules, embedded verbatim."),
@@ -346,10 +347,10 @@ function dialogLines(dialog: Dialog, input: PanelRenderInput, paint: PanelPaint)
 					paint.fg("accent", paint.bold(text("Add directory to workspace"))),
 					"",
 					`   ${paint.fg("accent", cutPlainText(dialog.path, width - 4))}`,
-					...wrapped("One Code will be able to read files in this directory and make edits when auto-accept edits is on. Auto mode still judges every write there."),
+					...wrapped(`${brand.name} will be able to read files in this directory and make edits when auto-accept edits is on. Auto mode still judges every write there.`),
 					"",
 					...REMEMBER_OPTIONS.map((option, index) => listLine(option, index === dialog.cursor, paint, width)),
-					paint.fg("dim", text("Remembered directories are saved to One Code's project settings.")),
+					paint.fg("dim", text(`Remembered directories are saved to ${brand.name}'s project settings.`)),
 				],
 				footer: "↑↓ to choose · Enter to confirm · Esc to go back",
 			};
@@ -366,7 +367,7 @@ function dialogLines(dialog: Dialog, input: PanelRenderInput, paint: PanelPaint)
 					"",
 					...details,
 					"",
-					text("One Code will no longer have access to files in this directory."),
+					text(`${brand.name} will no longer have access to files in this directory.`),
 					...choiceLines(["Yes", "No"], dialog.cursor, paint, width),
 				],
 				footer: "↑↓ to choose · Enter to confirm · Esc to go back",

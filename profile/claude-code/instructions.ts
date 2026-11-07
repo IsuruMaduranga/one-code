@@ -33,7 +33,7 @@ import {
 	type ContextFile,
 	type ContextFilePath,
 	expandWithImports,
-	firstOneCodeFile,
+	firstProductFile,
 	importReaders,
 	GLOBAL_DESCRIPTOR,
 	GLOBAL_SOURCES,
@@ -43,8 +43,8 @@ import {
 	MANAGED_DESCRIPTOR,
 	type NestedFile,
 	nestedDirs,
-	ONECODE_DESCRIPTOR,
-	ONECODE_GLOBAL_DESCRIPTOR,
+	PRODUCT_DESCRIPTOR,
+	PRODUCT_GLOBAL_DESCRIPTOR,
 	PROJECT_DESCRIPTOR,
 	readFileIfPresent,
 } from "../../extensions/lib/instructions.ts";
@@ -118,7 +118,7 @@ function discoverInstructionEntries(
 	const at = (dir: string) => dirname(join(dir, "AGENTS.md"));
 	const baseAgents = inDir(AGENTS_DESCRIPTOR);
 	// The product files ride in the list only when the caller asked for them (/memory, /doctor, the banner).
-	const baseOneCode = inDir(ONECODE_DESCRIPTOR);
+	const baseOneCode = inDir(PRODUCT_DESCRIPTOR);
 	// Each path is checked once per call: the per-project test and the walk share it.
 	const presence = new Map<string, boolean>();
 	const present = (path: string): boolean => {
@@ -150,7 +150,7 @@ function discoverInstructionEntries(
 	// only without it, or not at all (decisions/bi-fork.md).
 	const globalAgents = rule === "claude-md-and-agents-md" || (rule === "claude-md-or-agents-md" && !present(join(opts.homeClaudeDir, "CLAUDE.md")));
 	if (globalAgents) for (const entry of base) if (entry.descriptor === AGENTS_GLOBAL_DESCRIPTOR) push(entry.path, entry.descriptor);
-	for (const entry of base) if (entry.descriptor === ONECODE_GLOBAL_DESCRIPTOR) push(entry.path, entry.descriptor);
+	for (const entry of base) if (entry.descriptor === PRODUCT_GLOBAL_DESCRIPTOR) push(entry.path, entry.descriptor);
 
 	for (const d of dirs) {
 		if (claudeFiles) {
@@ -232,7 +232,7 @@ export function nestedInstructionFiles(opts: {
 			if (claudeFiles) candidates.push(join(dir, ".claude", "AGENTS.md"));
 		}
 		if (claudeFiles) candidates.push(join(dir, "CLAUDE.local.md"));
-		const oneCode = firstOneCodeFile(dir);
+		const oneCode = firstProductFile(dir);
 		if (oneCode) candidates.push(oneCode);
 		for (const path of candidates) {
 			const key = tryRealpath(path);
@@ -372,7 +372,7 @@ export function externalInstructionIncludes(opts: DiscoveryOptions & { home: str
 			.map((ruleFile) => ({ path: ruleFile.path, descriptor, ruleFile }));
 	});
 	for (const { path, descriptor, ruleFile } of entries) {
-		if (GLOBAL_SOURCES.has(descriptor) || descriptor === ONECODE_DESCRIPTOR) continue;
+		if (GLOBAL_SOURCES.has(descriptor) || descriptor === PRODUCT_DESCRIPTOR) continue;
 		if (ruleFile) { add(ruleFile); continue; }
 		const dotClaude = descriptor === PROJECT_DESCRIPTOR && basename(dirname(path)) === ".claude" && basename(path) === "CLAUDE.md";
 		for (const file of readRuleInstructions(path, { cwd: opts.cwd, home: opts.home, scope: descriptor === MANAGED_DESCRIPTOR ? "Managed" : "Project", includeExternal: true,

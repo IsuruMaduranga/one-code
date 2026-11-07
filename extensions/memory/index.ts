@@ -30,8 +30,8 @@ import { INDEX_MAX_CHARS, INDEX_MAX_LINES, indexLimitStatus, stampFrontmatter } 
 import { requireText } from "../lib/profile.ts";
 import { allowedPath, sourceSwitch } from "../lib/sources.ts";
 import { agentSkippedInstructions } from "../lib/instructions.ts";
-import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
-import { comparablePath, isPathAtOrUnder, oneCodeStateDir, tildify, tryRealpath } from "../lib/paths.ts";
+import { productSettingsPath, readSettingsForWrite, writeSettings } from "../lib/product-settings.ts";
+import { comparablePath, isPathAtOrUnder, productStateDir, tildify, tryRealpath } from "../lib/paths.ts";
 import { resolveThroughLinks } from "../auto-mode/paths.ts";
 import { resolveToolPath } from "../lib/tool-path.ts";
 import { tryReadFile } from "../lib/plugins.ts";
@@ -61,7 +61,7 @@ function memoryEntriesFor(cwd: string): MemoryEntry[] {
 	return buildMemoryEntries({
 		cwd,
 		home: os.homedir(),
-		homeOneCodeDir: oneCodeStateDir(),
+		homeOneCodeDir: productStateDir(),
 		agentDir: getAgentDir(),
 		memoryDir: autoMemoryEnabled(cwd) ? projectMemoryDir(cwd) : undefined,
 	});
@@ -217,7 +217,7 @@ const CANCELLED = "Cancelled memory editing";
 
 /** Save one key to One Code's user settings; the running process keeps its value. */
 function saveUserSetting(key: string, value: unknown): void {
-	const path = oneCodeSettingsPath(os.homedir());
+	const path = productSettingsPath(os.homedir());
 	writeSettings(path, { ...readSettingsForWrite(path), [key]: value });
 }
 

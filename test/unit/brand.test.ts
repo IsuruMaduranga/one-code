@@ -21,4 +21,10 @@ describe("brand", () => {
 		expect(() => checkBrand({ ...data, packages: { app: "a" } })).toThrow(/"packages.extension"/);
 		expect(checkBrand(data)).toEqual(data);
 	});
+
+	it("freezes a copy, leaving the JSON module's object for loaders that extend it (jiti adds `default`)", () => {
+		expect(Object.isFrozen(brand)).toBe(true);
+		expect(Object.isFrozen(data)).toBe(false);
+		expect(brand).toEqual(data);
+	});
 });

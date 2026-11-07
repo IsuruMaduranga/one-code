@@ -15,6 +15,8 @@
  * bare Node before pi does.
  */
 
+import { brand } from "./brand.mjs";
+
 /** pi's built-in extensions One Code replaces, and what of ours replaces each. */
 export const REPLACED_BUILTINS = [
 	{ name: "tool-search", ours: "tool search" },
@@ -138,8 +140,8 @@ export function replacedBuiltinsNotice(left, configCommand = "pi config") {
 	const names = nameList(left);
 	const plural = left.length > 1;
 	return (
-		`One Code provides its own ${ours}, so pi skips its built-in ${names} ${plural ? "extensions" : "extension"} and warns about ${plural ? "them" : "it"} at startup. ` +
-		`Keep One Code installed. To hide the ${plural ? "warnings" : "warning"}, run \`${configCommand}\` and turn off ${names} under Built-in, or run /doctor to have it done for you.`
+		`${brand.name} provides its own ${ours}, so pi skips its built-in ${names} ${plural ? "extensions" : "extension"} and warns about ${plural ? "them" : "it"} at startup. ` +
+		`Keep ${brand.name} installed. To hide the ${plural ? "warnings" : "warning"}, run \`${configCommand}\` and turn off ${names} under Built-in, or run /doctor to have it done for you.`
 	);
 }
 
@@ -192,8 +194,8 @@ export function turnOffPrompt(left, settingsPath, configCommand = "pi config") {
 	return [
 		`Turn off pi's built-in ${names}?`,
 		"",
-		`pi ${plural ? "ships these" : "ships this"} as built-in ${plural ? "extensions" : "extension"}. One Code brings its own ${ours} (Claude Code's tool search, and MCP that reads your Claude Code config), so pi already skips ${plural ? "them" : "it"} and warns about ${plural ? "each" : "it"} at every start, telling you to remove One Code.`,
+		`pi ${plural ? "ships these" : "ships this"} as built-in ${plural ? "extensions" : "extension"}. ${brand.name} brings its own ${ours} (Claude Code's tool search, and MCP that reads your Claude Code config), so pi already skips ${plural ? "them" : "it"} and warns about ${plural ? "each" : "it"} at every start, telling you to remove ${brand.name}.`,
 		"",
-		`Turning ${plural ? "them" : "it"} off changes nothing while One Code is installed and silences the ${plural ? "warnings" : "warning"} from the next start. One Code adds ${left.map((builtin) => `"-${PREFIX}${builtin.name}"`).join(" and ")} to "extensions" in ${settingsPath}. If you remove One Code later, turn ${plural ? "them" : "it"} back on with \`${configCommand}\`.`,
+		`Turning ${plural ? "them" : "it"} off changes nothing while ${brand.name} is installed and silences the ${plural ? "warnings" : "warning"} from the next start. ${brand.name} adds ${left.map((builtin) => `"-${PREFIX}${builtin.name}"`).join(" and ")} to "extensions" in ${settingsPath}. If you remove ${brand.name} later, turn ${plural ? "them" : "it"} back on with \`${configCommand}\`.`,
 	].join("\n");
 }

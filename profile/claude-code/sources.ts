@@ -14,7 +14,7 @@
 import { CONFIG_MODE_ENV, CONFIG_MODE_KEY, claudeSourcesOn, configModeFromEnv, savedConfigMode } from "./mode.ts";
 import { existsSync } from "node:fs";
 import os from "node:os";
-import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../../extensions/lib/one-code-settings.ts";
+import { productSettingsPath, readSettingsForWrite, writeSettings } from "../../extensions/lib/product-settings.ts";
 import { join } from "node:path";
 import { findProjectConfigs } from "../../extensions/mcp/config.ts";
 import { claudeJsonPath, claudeUserDir, isClaudeLocation, tildify } from "../../extensions/lib/paths.ts";
@@ -38,7 +38,7 @@ const configSources: SourceSwitch = {
 	saved: () => savedConfigMode() === "claude-compatible",
 	fromEnv: () => configModeFromEnv() !== undefined,
 	save(on) {
-		const path = oneCodeSettingsPath(os.homedir());
+		const path = productSettingsPath(os.homedir());
 		writeSettings(path, { ...readSettingsForWrite(path), [CONFIG_MODE_KEY]: on ? "claude-compatible" : "independent" });
 	},
 	describe({ home, env }) {

@@ -27,7 +27,7 @@
 import os from "node:os";
 import { join } from "node:path";
 import { readJsonFile } from "../../extensions/lib/atomic-write.ts";
-import { oneCodeStateDir } from "../../extensions/lib/paths.ts";
+import { productStateDir } from "../../extensions/lib/paths.ts";
 
 export type ConfigMode = "claude-compatible" | "independent";
 
@@ -58,11 +58,11 @@ export function configModeFromEnv(env: Record<string, string | undefined> = proc
 
 /**
  * `configMode` in `~/.onecode/settings.json` alone, ignoring the env override.
- * The path is spelled out: importing `oneCodeSettingsPath` would cycle through
- * `one-code-settings.ts` and `memory.ts`.
+ * The path is spelled out: importing `productSettingsPath` would cycle through
+ * `product-settings.ts` and `memory.ts`.
  */
 export function savedConfigMode(home: string = os.homedir(), env: Record<string, string | undefined> = process.env): ConfigMode {
-	const value = readJsonFile<Record<string, unknown>>(join(oneCodeStateDir(env, home), "settings.json"))?.[CONFIG_MODE_KEY];
+	const value = readJsonFile<Record<string, unknown>>(join(productStateDir(env, home), "settings.json"))?.[CONFIG_MODE_KEY];
 	return isConfigMode(value) ? value : DEFAULT_CONFIG_MODE;
 }
 

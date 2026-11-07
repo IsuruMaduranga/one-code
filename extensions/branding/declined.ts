@@ -4,12 +4,12 @@
  */
 
 import os from "node:os";
-import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
+import { productSettingsPath, readSettingsForWrite, writeSettings } from "../lib/product-settings.ts";
 
 /** Whether the user answered "No" to the question kept under `key`; a malformed settings file reads as not declined. */
 export function declined(key: string): boolean {
 	try {
-		return readSettingsForWrite(oneCodeSettingsPath(os.homedir()))[key] === true;
+		return readSettingsForWrite(productSettingsPath(os.homedir()))[key] === true;
 	} catch {
 		return false;
 	}
@@ -17,6 +17,6 @@ export function declined(key: string): boolean {
 
 /** Remember a "No" to the question kept under `key`. */
 export function recordDeclined(key: string): void {
-	const path = oneCodeSettingsPath(os.homedir());
+	const path = productSettingsPath(os.homedir());
 	writeSettings(path, { ...readSettingsForWrite(path), [key]: true });
 }

@@ -6,6 +6,7 @@
  * never at session start.
  */
 
+import { brand } from "../../lib/brand.mjs";
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { readJsonFile, writeJsonAtomic } from "../../lib/atomic-write.ts";
@@ -53,7 +54,7 @@ async function fetchManifestJson(url: string): Promise<unknown> {
 			if (!response.ok) throw new Error(`HTTP ${response.status}`);
 			return (await response.json()) as unknown;
 		},
-		{ init: { headers: { "user-agent": "one-code-plugins" } } },
+		{ init: { headers: { "user-agent": `${brand.idPrefix}-plugins` } } },
 	);
 }
 

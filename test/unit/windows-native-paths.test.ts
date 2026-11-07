@@ -14,7 +14,7 @@ import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { resolveForContainment } from "../../extensions/auto-mode/paths.ts";
-import { forwardSlashes, oneCodeStateDir, tildify, toPosixPath } from "../../extensions/lib/paths.ts";
+import { forwardSlashes, productStateDir, tildify, toPosixPath } from "../../extensions/lib/paths.ts";
 import { sessionScratchpadDir } from "../../extensions/lib/scratchpad.ts";
 import { whichOnPath } from "../../extensions/lib/which.ts";
 import { commandLaunch } from "../../extensions/lib/command-launch.ts";
@@ -29,7 +29,7 @@ describe.skipIf(!win32)("Windows: home, state dir and display paths", () => {
 	it("homedir() is USERPROFILE (HOME is unset for a Node process there) and ~/.onecode sits under it", () => {
 		expect(process.env.USERPROFILE, "USERPROFILE").toBeTruthy();
 		expect(home).toBe(process.env.USERPROFILE);
-		expect(oneCodeStateDir({})).toBe(join(process.env.USERPROFILE as string, ".onecode"));
+		expect(productStateDir({})).toBe(join(process.env.USERPROFILE as string, ".onecode"));
 	});
 
 	it("tildify shows a profile path as ~/… whatever its spelling, and leaves others alone", () => {

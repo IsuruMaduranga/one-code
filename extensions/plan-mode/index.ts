@@ -26,7 +26,7 @@ import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-
 import { registerFormTool } from "../lib/tool-variants.ts";
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
-import { oneCodeStateDir } from "../lib/paths.ts";
+import { productStateDir } from "../lib/paths.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { canShowCustomUi } from "../lib/headless-output.ts";
 import { ccToolRenderers, safeThemePaint } from "../lib/tui-render.ts";
@@ -59,7 +59,7 @@ import { MODE_CHANNEL, PLAN_FILE_CHANNEL, PLAN_FILE_ENTRY, planFileOnBranch, pla
 import { panelUi } from "../lib/panel-focus.ts";
 export { MODE_CHANNEL, PLAN_FILE_CHANNEL };
 
-const PLANS_DIR = () => join(oneCodeStateDir(), "plans");
+const PLANS_DIR = () => join(productStateDir(), "plans");
 
 /** How each mode is named in the approval choices. */
 const MODE_NAMES: Record<PermissionMode, string> = {

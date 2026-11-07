@@ -21,7 +21,7 @@
  * extension (jiti gives each extension its own module instance).
  */
 
-import { brandedId } from "../lib/brand.mjs";
+import { brand, brandedId } from "../lib/brand.mjs";
 import { feature } from "../lib/feature.ts";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -32,7 +32,7 @@ import { buildClaudeMdBlock, buildContextBlock, buildOneCodeBlock, dateBlock, da
 import { collectImportedPaths, openInstructions } from "../lib/instructions.ts";
 import { collectGitStatus, GIT_SNAPSHOT_OWNER_CHANNEL } from "../lib/git-status.ts";
 import { readMemoryIndex } from "../lib/memory-index.ts";
-import { oneCodeStateDir, tildify, tryRealpath } from "../lib/paths.ts";
+import { productStateDir, tildify, tryRealpath } from "../lib/paths.ts";
 import { fitToWindow, restoredInstructionNotice, type SkippedInstruction, skippedInstructionWarning } from "../lib/instruction-budget.ts";
 import { queueNotice } from "../lib/notices.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, toldBlockFact } from "../lib/reminders.ts";
@@ -50,7 +50,7 @@ import { foldSession } from "../lib/ledger/fold-memo.ts";
 import { sessionIdentity } from "../lib/anthropic-auth.ts";
 
 const REMINDER_KEY = "claude-context";
-const ONECODE_REMINDER_KEY = "one-code-context";
+const PRODUCT_REMINDER_KEY = `${brand.idPrefix}-context`;
 const CONTEXT_REMINDER_KEY = "claude-context-context";
 const DATE_REMINDER_KEY = "claude-context-date";
 
@@ -284,11 +284,11 @@ function claudeContextExtension(pi: ExtensionAPI) {
 		if (oneCode) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text: oneCode,
-				key: ONECODE_REMINDER_KEY,
+				key: PRODUCT_REMINDER_KEY,
 				placement: "first-prepend",
 				order: CONTEXT_ORDER.oneCodeMd,
 			});
-		} else pi.events.emit(REMINDER_CHANNEL, { remove: true, key: ONECODE_REMINDER_KEY });
+		} else pi.events.emit(REMINDER_CHANNEL, { remove: true, key: PRODUCT_REMINDER_KEY });
 	};
 	const emitContextBlock = (gitText: string | null, atCompaction: boolean) => {
 		const context = buildContextBlock({ email, gitStatus: gitText });

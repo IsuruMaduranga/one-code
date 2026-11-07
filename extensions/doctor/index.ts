@@ -41,13 +41,13 @@ import { canShowCustomUi, notifyOrPrint } from "../lib/headless-output.ts";
 import { createUserMessageSender, sessionOutlivesTurn } from "../lib/notifications.ts";
 import { modelSpec } from "../lib/model-policy.ts";
 import { sessionModelTier } from "../lib/session-model-tier.ts";
-import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
-import { oneCodeStateDir } from "../lib/paths.ts";
+import { productProjectSettingsPath, productSettingsPath, SETTINGS_DISPLAY } from "../lib/product-settings.ts";
+import { productStateDir } from "../lib/paths.ts";
 import { CLASSIFIER_SETTING_CHANGED_CHANNEL, SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../lib/settings-channels.ts";
 import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../permissions/modes.ts";
 import { persistSubagentModel } from "../subagents/default-model.ts";
-import { buildDoctorReport, oneCodeVersion } from "./build.ts";
+import { buildDoctorReport, productVersion } from "./build.ts";
 import { installKind, keepView, replacedBuiltinsView } from "./builtins.ts";
 import { requireText } from "../lib/profile.ts";
 import { modeCycleKey } from "../lib/keys.ts";
@@ -109,9 +109,9 @@ function doctorExtension(pi: ExtensionAPI) {
 	let refreshWarned = false;
 	let refreshAbort = new AbortController();
 	const refreshCatalog = async (ctx: ExtensionContext, home: string): Promise<void> => {
-		if (!readCatalogRefreshEnabled(oneCodeSettingsPath(home))) return;
+		if (!readCatalogRefreshEnabled(productSettingsPath(home))) return;
 		const outcome = await refreshModelCatalog({
-			stateDir: oneCodeStateDir(process.env, home),
+			stateDir: productStateDir(process.env, home),
 			piProviders: Object.keys(BUILTIN_PROVIDER_POLICIES),
 			signal: refreshAbort.signal,
 		});
@@ -127,8 +127,8 @@ function doctorExtension(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		if (refreshAbort.signal.aborted) refreshAbort = new AbortController();
 		const home = os.homedir();
-		if (!sessionOutlivesTurn(ctx.mode) || !readCatalogRefreshEnabled(oneCodeSettingsPath(home))) return;
-		if (!catalogRefreshDue(oneCodeStateDir(process.env, home))) return;
+		if (!sessionOutlivesTurn(ctx.mode) || !readCatalogRefreshEnabled(productSettingsPath(home))) return;
+		if (!catalogRefreshDue(productStateDir(process.env, home))) return;
 		void refreshCatalog(ctx, home).catch(() => {});
 	});
 	pi.on("session_shutdown", () => {
@@ -138,7 +138,7 @@ function doctorExtension(pi: ExtensionAPI) {
 
 	const gather = async (ctx: ExtensionContext, options: { network: boolean }): Promise<DoctorReport> => {
 		const home = os.homedir();
-		const version = oneCodeVersion();
+		const version = productVersion();
 		// Unrelated endpoints (npm registry, the model catalogs): overlap them.
 		// The catalog refresh is a no-op when fresh or turned off, bounded by its fetch timeout.
 		const [latest] = options.network
@@ -154,13 +154,13 @@ function doctorExtension(pi: ExtensionAPI) {
 				cwd: ctx.cwd,
 				home,
 				agentDir: getAgentDir(),
-				stateDir: oneCodeStateDir(process.env, home),
+				stateDir: productStateDir(process.env, home),
 				sources: sourceSwitchStatus(home),
 				env: process.env,
 				platform: process.platform,
 				arch: process.arch,
 				nodeVersion: process.versions.node,
-				oneCodeVersion: version,
+				productVersion: version,
 				install: installKind(),
 				piVersion: PI_VERSION,
 				replacedBuiltins: replacedBuiltinsView(PI_VERSION, piSettings, piPaths),
@@ -197,11 +197,11 @@ function doctorExtension(pi: ExtensionAPI) {
 		const prompt = requireText("doctor").fixPrompt({
 			reportText: renderDoctorText(report, 100),
 			install: installKind(),
-			oneCodeVersion: oneCodeVersion(),
+			productVersion: productVersion(),
 			sessionsDir: join(getAgentDir(), "sessions"),
 			sessionDir: ctx.sessionManager.getSessionDir(),
-			oneCodeSettingsPath: oneCodeSettingsPath(home),
-			oneCodeProjectSettingsPath: oneCodeProjectSettingsPath(ctx.cwd, home),
+			productSettingsPath: productSettingsPath(home),
+			productProjectSettingsPath: productProjectSettingsPath(ctx.cwd, home),
 			decisionLogEnabled: loadAutoModeConfig(home).logDecisions,
 			sourcesOff: sourcesOff(),
 			modeCycleKey: modeCycleKey(),
@@ -293,7 +293,7 @@ function doctorExtension(pi: ExtensionAPI) {
 			text: [
 				`Applied the ${preset.label} preset:`,
 				...describePresetChanges(preset, mainSwitched).map((line) => `  ${line}`),
-				"Saved to ~/.onecode/settings.json; the main model is remembered as pi's default.",
+				`Saved to ${SETTINGS_DISPLAY}; the main model is remembered as pi's default.`,
 			].join("\n"),
 			type: "info",
 		};

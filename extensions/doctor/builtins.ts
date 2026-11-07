@@ -5,6 +5,7 @@
  * session and from `onecode doctor`.
  */
 
+import { brand } from "../lib/brand.mjs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { CONFIG_DIR_NAME, getPackageDir, type SettingsManager } from "@earendil-works/pi-coding-agent";
@@ -78,7 +79,7 @@ export function installKind(env: NodeJS.ProcessEnv = process.env): "app" | "pi-p
 	return env.CC_VERSION ? "app" : "pi-package";
 }
 
-/** How the user opens pi's config UI: `onecode config` under the bundled app. */
+/** How the user opens pi's config UI: `<bin> config` (`onecode config`) under the bundled app. */
 export function configCommand(install: "app" | "pi-package"): string {
-	return install === "app" ? "onecode config" : "pi config";
+	return install === "app" ? `${brand.bin} config` : "pi config";
 }

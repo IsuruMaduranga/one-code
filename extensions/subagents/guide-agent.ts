@@ -12,6 +12,7 @@
  * gathers the inputs.
  */
 
+import { brand } from "../lib/brand.mjs";
 import type { AgentDefinition } from "./agents.ts";
 import { subagentWords } from "./words.ts";
 
@@ -66,7 +67,9 @@ export function settingsSetup(raw: string | undefined, ownRoot: string): Pick<Gu
 	const sources = (Array.isArray(record.packages) ? record.packages : [])
 		.map((entry) => (typeof entry === "string" ? entry : (entry as { source?: unknown } | null)?.source))
 		.filter((source): source is string => typeof source === "string");
-	const own = (source: string) => source === ownRoot || /[/\\]one-code-extension$/.test(source) || /^npm:one-code-extension(@.*)?$/.test(source);
+	const extension = brand.packages.extension;
+	const own = (source: string) =>
+		source === ownRoot || source.replaceAll("\\", "/").endsWith(`/${extension}`) || source === `npm:${extension}` || source.startsWith(`npm:${extension}@`);
 	return { packages: sources.filter((source) => !own(source)), settingsKeys: Object.keys(record).sort() };
 }
 

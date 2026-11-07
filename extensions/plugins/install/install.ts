@@ -11,6 +11,7 @@
  * dependencies) fail loudly with the reason named.
  */
 
+import { brand } from "../../lib/brand.mjs";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, readdirSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, relative, sep } from "node:path";
@@ -109,7 +110,7 @@ export async function installPlugin(
 			throw new Error(`${id}: commit-sha pinning is not supported yet — use a ref (branch/tag) instead`);
 		}
 		const url = source.source === "github" ? `https://github.com/${source.repo}.git` : source.url;
-		const temp = mkdtempSync(join(tmpdir(), "one-code-plugin-"));
+		const temp = mkdtempSync(join(tmpdir(), `${brand.idPrefix}-plugin-`));
 		cleanup = temp;
 		const cloneDir = join(temp, "clone");
 		await gitClone(url, cloneDir, {

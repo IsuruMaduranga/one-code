@@ -25,8 +25,8 @@ export function nestedInstructionText(file: { path: string; content: string }): 
 }
 
 /** The block's preamble, naming the files above it: AGENTS.md in independent mode (lib/sources.ts). */
-function oneCodePreamble(): string {
-	return contextWords().oneCodePreamble({ above: instructionTargets().project });
+function productPreamble(): string {
+	return contextWords().productPreamble({ above: instructionTargets().project });
 }
 
 /**
@@ -37,7 +37,7 @@ function oneCodePreamble(): string {
  */
 export function buildOneCodeBlock(files: ContextFile[]): string | null {
 	if (files.length === 0) return null;
-	return withoutFinalNewline(`${oneCodePreamble()}\n\n${files.map(section).join("\n")}`);
+	return withoutFinalNewline(`${productPreamble()}\n\n${files.map(section).join("\n")}`);
 }
 
 /**

@@ -10,6 +10,7 @@
  * own notice, not a paraphrase.
  */
 
+import { brand } from "../lib/brand.mjs";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { modeCycleKey } from "../lib/keys.ts";
 import { loadAutoModeConfig } from "../auto-mode/config.ts";
@@ -19,8 +20,8 @@ import { loadCatalogSources, readCatalogRefreshEnabled } from "../lib/model-cata
 import { autoSelectSkipReason, catalogModelFor } from "../lib/model-catalog.ts";
 import { DAY_MS, modelsContainedToSession, modelSpec, pricedInput, supportsImageInput } from "../lib/model-policy.ts";
 import { newerModelSuggestion, type NewerModelSuggestion } from "../lib/newer-model.ts";
-import { oneCodeSettingsPath, readSuggestNewerModels, SETTINGS_DISPLAY } from "../lib/one-code-settings.ts";
-import { oneCodeStateDir } from "../lib/paths.ts";
+import { productSettingsPath, readSuggestNewerModels, SETTINGS_DISPLAY } from "../lib/product-settings.ts";
+import { productStateDir } from "../lib/paths.ts";
 import {
 	classifyModelTier,
 	intrinsicTier,
@@ -83,13 +84,13 @@ export function collectModelFacts(available: Model<Api>[], session: SessionView,
 	});
 	const first = chain.candidates[0];
 	const reader = pickEconomicalContainedModel(available, sessionModel);
-	const sources = loadCatalogSources(oneCodeStateDir(env, home));
+	const sources = loadCatalogSources(productStateDir(env, home));
 	const entry = sessionModel ? catalogModelFor(sessionModel) : undefined;
 	return {
 		catalog: {
 			fetchedAt: sources.modelsDev.fetchedAt,
 			refreshed: sources.refreshed === true,
-			refreshEnabled: readCatalogRefreshEnabled(oneCodeSettingsPath(home, env), env),
+			refreshEnabled: readCatalogRefreshEnabled(productSettingsPath(home, env), env),
 		},
 		tierReason: sessionModel ? classifyModelTier(sessionModel, {}, "capability").reason : undefined,
 		inCatalog: entry !== undefined,
@@ -162,7 +163,7 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 		findings.push({
 			level: "warn",
 			text: `${modelSpec(main)} is not in the public model catalogs (models.dev, OpenRouter), so its tier is a guess (${facts.sessionTier}) and automatic picks never choose it.`,
-			fix: `Set its tier in ~/.onecode/settings.json: { "modelTiers": { "${modelSpec(main)}": "workhorse" } } (frontier, workhorse, cheap or tiny).`,
+			fix: `Set its tier in ${SETTINGS_DISPLAY}: { "modelTiers": { "${modelSpec(main)}": "workhorse" } } (frontier, workhorse, cheap or tiny).`,
 		});
 	}
 	if (session.thinkingLevel) lines.push({ text: `Effort: ${session.thinkingLevel} (/effort or shift+tab to change)`, indent: 1, level: "dim" });
@@ -182,7 +183,7 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 				findings.push({
 					level: "warn",
 					text: `${knob} sets "${facts.subagentConfigured.spec}" for subagents, but it applies only when the main model is a Claude model, so it is not used here.`,
-					fix: "Choose the subagent model with /subagent (it writes subagentModel in ~/.onecode/settings.json), or unset the variable.",
+					fix: `Choose the subagent model with /subagent (it writes subagentModel in ${SETTINGS_DISPLAY}), or unset the variable.`,
 				});
 			}
 		}
@@ -204,10 +205,10 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 		const pinned = session.permission?.pinned && live ? ` — screening this session on ${live}` : "";
 		lines.push({ text: `Auto-mode classifier: ${classifier.description ?? modelSpec(classifier.model)}${pinned}`, level: "ok" });
 		if (classifier.configured) {
-			lines.push({ text: `Setting: "${classifier.configured}" via autoMode.classifierModel in ~/.onecode/settings.json (/auto-mode model clear returns to automatic)`, indent: 1, level: "dim" });
+			lines.push({ text: `Setting: "${classifier.configured}" via autoMode.classifierModel in ${SETTINGS_DISPLAY} (/auto-mode model clear returns to automatic)`, indent: 1, level: "dim" });
 		}
 		lines.push({
-			text: "Classifier policy: for the models One Code's pairing table names, the table's pick on this provider (or this session's model), unless it costs more than this session's model or its window is smaller; otherwise the cheapest model on this provider in this session's tier or above, strictly cheaper than it, with a context window at least as large, not an experimental build and not a moving -latest alias, else this session's model; /auto-mode model chooses one by hand.",
+			text: `Classifier policy: for the models ${brand.name}'s pairing table names, the table's pick on this provider (or this session's model), unless it costs more than this session's model or its window is smaller; otherwise the cheapest model on this provider in this session's tier or above, strictly cheaper than it, with a context window at least as large, not an experimental build and not a moving -latest alias, else this session's model; /auto-mode model chooses one by hand.`,
 			indent: 1,
 			level: "dim",
 		});
@@ -244,7 +245,7 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 	const ageDays = Math.floor((Date.now() - Date.parse(cat.fetchedAt)) / DAY_MS);
 	const age = ageDays <= 0 ? "today" : ageDays === 1 ? "1 day ago" : `${ageDays} days ago`;
 	lines.push({
-		text: `Model catalogs: models.dev, OpenRouter and Hugging Face, fetched ${age} (${cat.refreshed ? "refreshed by One Code" : "bundled with this release"})${cat.refreshEnabled ? "; refreshed daily from interactive sessions" : "; daily refresh off (refreshModelCatalog: false, or PI_OFFLINE)"}`,
+		text: `Model catalogs: models.dev, OpenRouter and Hugging Face, fetched ${age} (${cat.refreshed ? `refreshed by ${brand.name}` : "bundled with this release"})${cat.refreshEnabled ? "; refreshed daily from interactive sessions" : "; daily refresh off (refreshModelCatalog: false, or PI_OFFLINE)"}`,
 		level: "dim",
 	});
 	if (session.permission) {
