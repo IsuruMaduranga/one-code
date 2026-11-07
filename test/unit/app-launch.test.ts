@@ -175,8 +175,8 @@ describe("spawned commands under the app get the user's environment", { timeout:
 	});
 });
 
-describe("app/bin.mjs applies the launcher environment", () => {
-	const source = readFileSync(join(repoRoot, "app", "bin.mjs"), "utf8");
+describe("the app launcher (lib/create-app.mjs) applies the launcher environment", () => {
+	const source = readFileSync(join(repoRoot, "extensions", "lib", "create-app.mjs"), "utf8");
 
 	it("sets it through app-launch.mjs, never inheriting PI_CODING_AGENT_DIR", () => {
 		expect(source).toContain("applyLauncherEnv(process.env,");
@@ -188,6 +188,6 @@ describe("app/bin.mjs applies the launcher environment", () => {
 		const applyAt = source.indexOf("applyLauncherEnv(process.env,");
 		expect(applyAt).toBeGreaterThan(0);
 		expect(source.indexOf("if (runDoctor) {")).toBeGreaterThan(applyAt);
-		expect(source.indexOf('await import("@earendil-works/pi-coding-agent")')).toBeGreaterThan(applyAt);
+		expect(source.indexOf('await import(resolve("@earendil-works/pi-coding-agent"))')).toBeGreaterThan(applyAt);
 	});
 });

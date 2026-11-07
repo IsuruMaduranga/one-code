@@ -124,3 +124,9 @@ declare module "*/brand.mjs" {
 	export function productStateDir(env?: Record<string, string | undefined>, home?: string): string;
 	export const stateDirPattern: string;
 }
+
+/** Types for the brand stamp (scripts/apply-brand.mjs). */
+declare module "*/apply-brand.mjs" {
+	export function stampExtension<T extends Record<string, unknown>>(pkg: T): T & { name: string };
+	export function stampApp(pkg: Record<string, unknown>): Record<string, unknown>;
+}

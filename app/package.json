@@ -30,6 +30,7 @@
 	"bin": {
 		"onecode": "bin.mjs"
 	},
+	"productExtension": "one-code-extension",
 	"files": [
 		"bin.mjs",
 		"README.md",

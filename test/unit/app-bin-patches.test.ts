@@ -51,8 +51,8 @@ describe("app/bin.mjs pi-internal patch points (A3)", () => {
 	});
 
 	it("bin.mjs backfills the compaction keep window, and pi still reads that setting", () => {
-		const bin = readFileSync(new URL("../../app/bin.mjs", import.meta.url), "utf8");
-		expect(bin).toContain('"compaction-keep.mjs"');
+		const bin = readFileSync(new URL("../../extensions/lib/create-app.mjs", import.meta.url), "utf8");
+		expect(bin).toContain('from "./compaction-keep.mjs"');
 		expect(bin).toContain("withCompactionKeepBackfilled(settings)");
 		expect(settingsTypes()).toContain("keepRecentTokens");
 	});
