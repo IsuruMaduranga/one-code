@@ -16,7 +16,8 @@
  * children persist their sessions per run to make that possible).
  */
 
-import { brand, envName } from "../lib/brand.mjs";
+import { INSTALL_METHOD_VAR } from "../lib/app-launch.mjs";
+import { brand } from "../lib/brand.mjs";
 import { knobNames } from "../lib/knobs.ts";
 import { feature } from "../lib/feature.ts";
 import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../lib/child-writes.ts";
@@ -502,8 +503,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 		return {
 			docs: guideDocs(),
 			install: {
-				shape: process.env[envName("INSTALL_METHOD")] ? "app" : "extension",
-				method: process.env[envName("INSTALL_METHOD")],
+				shape: process.env[INSTALL_METHOD_VAR] ? "app" : "extension",
+				method: process.env[INSTALL_METHOD_VAR],
 				agentDir,
 				version: process.env.CC_VERSION ?? extensionVersion(),
 			},
@@ -616,7 +617,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		configured: SubagentDefault | undefined,
 	): SubagentModelResolution => {
 		const session = sessionModel ? modelSpec(sessionModel) : "(none)";
-		const signature = `${session}|${configured?.spec ?? ""}|${configured?.setForContainment ?? ""}|${configured?.source ?? ""}|${unusableModels.size}`;
+		const signature = `${session}|${configured?.spec ?? ""}|${configured?.source === "subagentModel setting" ? (configured.setForContainment ?? "") : ""}|${configured?.source ?? ""}|${unusableModels.size}`;
 		if (autoDefaultCache?.signature === signature) return autoDefaultCache.resolution;
 		// The image-modality gate keys off the session model, which is part of the
 		// cache signature above, so the cached resolution stays correct per session.
@@ -2957,8 +2958,10 @@ function subagentsExtension(pi: ExtensionAPI) {
 		ctx.ui.notify(
 			[
 				configured
-					? `subagentModel: ${configured.spec} (from ${configured.source === "env" ? configured.envVar : "the subagentModel setting"})` +
-						(applicable ? "" : ` — not applied: ${configured.envVar} is another tool's variable, applied only when this session is on a Claude model`)
+					? configured.source === "env"
+						? `subagentModel: ${configured.spec} (from ${configured.envVar})` +
+							(applicable ? "" : ` — not applied: ${configured.envVar} is another tool's variable, applied only when this session is on a Claude model`)
+						: `subagentModel: ${configured.spec} (from the subagentModel setting)`
 					: "subagentModel: (not set)",
 				`effective: ${resolution.model ? `${resolution.model.provider}/${resolution.model.id}` : "none"} (${resolution.source})`,
 				...(resolution.notices.length ? [resolution.notices.join("\n")] : []),

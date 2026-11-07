@@ -18,14 +18,15 @@
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
+import { INSTALL_METHOD_VAR } from "./app-launch.mjs";
 import { brand, envName } from "./brand.mjs";
 
 export const APP_PACKAGE = brand.packages.app;
 export const EXTENSION_PACKAGE = brand.packages.extension;
 /** The Homebrew formula, when the product ships one (One Code: IsuruMaduranga/homebrew-one-ai's `onecode`). */
 export const HOMEBREW_FORMULA = brand.packages.homebrewFormula;
-const INSTALL_METHOD_VAR = envName("INSTALL_METHOD");
-const NO_UPDATE_CHECK_VAR = envName("NO_UPDATE_CHECK");
+/** Set to `1`, it turns off the session's update check and the doctor's lookup. */
+export const NO_UPDATE_CHECK_VAR = envName("NO_UPDATE_CHECK");
 /**
  * How each install method upgrades One Code; the doctor and the update notice
  * quote these. On the user's own pi a bare `pi update` updates pi itself and

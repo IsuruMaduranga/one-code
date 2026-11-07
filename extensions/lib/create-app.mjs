@@ -173,7 +173,7 @@ export async function createApp({ appVersion, corePath, argv: processArgv, resol
 			// Write-then-rename: a crash mid-write must not leave a truncated
 			// settings.json that the next launch reports as unregistered extensions
 			// (review L4). Rename is atomic within the same directory. Same pattern as
-			// the extensions' lib/atomic-write.ts, inlined to keep bin.mjs import-free.
+			// lib/atomic-write.ts, inlined because this module must stay plain JS.
 			const tempPath = `${settingsPath}.${process.pid}.tmp`;
 			writeFileSync(tempPath, JSON.stringify(settings, null, "\t") + "\n");
 			renameSync(tempPath, settingsPath);

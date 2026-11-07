@@ -27,6 +27,7 @@
 import os from "node:os";
 import { join } from "node:path";
 import { readJsonFile } from "../../extensions/lib/atomic-write.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 import { productStateDir } from "../../extensions/lib/paths.ts";
 
 export type ConfigMode = "claude-compatible" | "independent";
@@ -35,7 +36,7 @@ const DEFAULT_CONFIG_MODE: ConfigMode = "claude-compatible";
 
 /** The key in `~/.onecode/settings.json`. */
 export const CONFIG_MODE_KEY = "configMode";
-export const CONFIG_MODE_ENV = "ONECODE_CONFIG_MODE";
+export const CONFIG_MODE_ENV = envName("CONFIG_MODE");
 
 function isConfigMode(value: unknown): value is ConfigMode {
 	return value === "claude-compatible" || value === "independent";

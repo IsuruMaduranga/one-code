@@ -7,13 +7,16 @@
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 const ROOT = join(import.meta.dirname, "..", "..", "extensions");
 
-/** Source without block and line comments (`//` after `:` is a URL). */
-function withoutComments(source: string): string {
-	return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+const printer = ts.createPrinter({ removeComments: true });
+
+/** Source without comments, by the compiler's own parse: a `//` or `/*` inside a string, template or regex stays. */
+function withoutComments(source: string, path: string): string {
+	return printer.printFile(ts.createSourceFile(path, source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS));
 }
 
 function walk(dir: string): string[] {
@@ -26,11 +29,19 @@ function walk(dir: string): string[] {
 
 function offenders(pattern: RegExp): string[] {
 	return walk(ROOT)
-		.filter((path) => pattern.test(withoutComments(readFileSync(path, "utf8"))))
+		.filter((path) => pattern.test(withoutComments(readFileSync(path, "utf8"), path)))
 		.map((path) => relative(ROOT, path).split("\\").join("/"));
 }
 
 describe("the base names the product only through its brand", () => {
+	it("strips comments but keeps every literal that looks like one", () => {
+		const kept = withoutComments('const g = "**/*.ts"; /* gone */ const u = `a//b`; // gone\nconst n = "One Code";', "x.ts");
+		expect(kept).not.toContain("gone");
+		expect(kept).toContain('"**/*.ts"');
+		expect(kept).toContain("`a//b`");
+		expect(kept).toContain('"One Code"');
+	});
+
 	it("builds every internal id with brandedId", () => {
 		expect(offenders(/["'`]one-code:/)).toEqual([]);
 	});

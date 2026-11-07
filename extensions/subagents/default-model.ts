@@ -1,9 +1,11 @@
 /**
  * The configured default subagent model (pure fs).
  *
- * Two knobs, Claude Code's first:
+ * Two knobs, the environment's first:
  *
- * - `CLAUDE_CODE_SUBAGENT_MODEL` — Claude Code's env var. Honored from the real
+ * - The `SUBAGENT_MODEL` knob (lib/knobs.ts): the product's
+ *   `<envPrefix>_SUBAGENT_MODEL`, or Claude Code's `CLAUDE_CODE_SUBAGENT_MODEL`
+ *   while its sources are on. Honored from the real
  *   environment, and from the `env` block of *user and managed* settings files
  *   (Claude Code applies settings `env` to the process; One Code does not, so this
  *   reads the one variable it needs). Project-scope settings are deliberately
@@ -19,9 +21,9 @@
  *   (that key *is* Claude Code's). See "Own state, borrowed config" in
  *   working-docs/decisions/memory-state.md.
  *
- * The env var additionally applies only to Claude-family sessions (see
- * `applicableSubagentDefault`): it is Claude Code's knob, and its typical
- * values ("sonnet") were written for Anthropic models. On any other provider
+ * Claude Code's spelling additionally applies only to Claude-family sessions
+ * (see `applicableSubagentDefault`): its typical values ("sonnet") were
+ * written for Anthropic models; the product's own spelling applies on any. On any other provider
  * it is ignored; One Code's automatic same-provider role profile then chooses the
  * default unless the user overrides it with `subagentModel`.
  *
@@ -38,23 +40,30 @@ import { autoModeSettingsFiles } from "../auto-mode/config.ts";
 /** The environment knob for the subagent default (lib/knobs.ts). */
 export const SUBAGENT_MODEL_KNOB = "SUBAGENT_MODEL";
 
-export interface SubagentDefault {
+/** The configured default, from the `subagentModel` setting or the `SUBAGENT_MODEL` environment knob (lib/knobs.ts). */
+export type SubagentDefault = SubagentSettingDefault | SubagentEnvDefault;
+
+export interface SubagentEnvDefault {
 	spec: string;
-	/** Which knob set it: the setting, or the `SUBAGENT_MODEL` environment knob (lib/knobs.ts). */
-	source: "subagentModel setting" | "env";
-	/** For `env`: the variable that set it, in the process or a settings `env` block, for notices. */
-	envVar?: string;
-	/** For `env`: set through another tool's spelling (One Code: `CLAUDE_CODE_SUBAGENT_MODEL`), so it applies only on a Claude model. */
-	borrowed?: boolean;
+	source: "env";
+	/** The variable that set it, in the process or a settings `env` block, for notices. */
+	envVar: string;
+	/** Set through another tool's spelling (the provider's alias), so it applies only on a Claude model. */
+	borrowed: boolean;
+}
+
+export interface SubagentSettingDefault {
+	spec: string;
+	source: "subagentModel setting";
 	/**
-	 * For the `subagentModel` setting only: the *containment identity* of the
+	 * The *containment identity* of the
 	 * session it was stamped for when set via `/subagent` — `modelIdentity().containment`,
 	 * i.e. the plain provider for direct vendors but `provider:route:vendor` on a
 	 * gateway (openrouter etc.), matching the granularity `crossesProvider` uses.
 	 * When it differs from the current session's containment, a cross-provider
 	 * setting is treated as stale (set for a session since left) and a
 	 * same-provider model runs instead — see `resolveSubagentModel`. Undefined for
-	 * a hand-edited setting (no stamp) and for the env var.
+	 * a hand-edited setting (no stamp).
 	 */
 	setForContainment?: string;
 }
@@ -120,7 +129,7 @@ export function applicableSubagentDefault(
 	configured: SubagentDefault | undefined,
 	sessionModel: { provider: string; id: string } | undefined,
 ): SubagentDefault | undefined {
-	if (!configured || !configured.borrowed) return configured;
+	if (configured?.source !== "env" || !configured.borrowed) return configured;
 	if (!sessionModel) return configured;
 	return isClaudeFamilyModel(sessionModel) ? configured : undefined;
 }

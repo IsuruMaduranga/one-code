@@ -1127,6 +1127,7 @@ subagents/index.ts
 	"The live subagent panel requires TUI mode; showing spawned agents instead."
 	"Use /tasks for task status; task_output and task_stop inspect or stop a task."
 	" — not applied: ${…} is another tool's variable, applied only when this session is on a Claude model"
+	"subagentModel: ${…} (from the subagentModel setting)"
 	"Could not save subagent model: "
 	"Subagent default set to the session model (\"inherit\", saved to ${…})."
 	"No available model matches \"${…}\"."

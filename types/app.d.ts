@@ -7,6 +7,7 @@ declare module "*/lib/update-check.mjs" {
 	export const APP_PACKAGE: string;
 	export const EXTENSION_PACKAGE: string;
 	export const HOMEBREW_FORMULA: string;
+	export const NO_UPDATE_CHECK_VAR: string;
 	export const UPGRADE_COMMANDS: { npm: string; brew: string; "pi-package": string };
 	export function upgradeCommandFor(install: "app" | "pi-package", env?: Record<string, string | undefined>): string;
 	export function registryPackumentUrl(name: string): string;
@@ -32,6 +33,7 @@ declare module "*/lib/update-check.mjs" {
 declare module "*/app-launch.mjs" {
 	export const APP_AGENT_DIR_VAR: string;
 	export const LAUNCHER_ENV_VAR: string;
+	export const INSTALL_METHOD_VAR: string;
 	export const LAUNCHER_VARS: readonly string[];
 	export function appAgentDir(env?: Record<string, string | undefined>, home?: string): string;
 	export function installMethodFor(binRealPath: string | undefined): "brew" | "npm";

@@ -9,8 +9,7 @@
  */
 
 import { compareVersions } from "../lib/pi-version.ts";
-import { envName } from "../lib/brand.mjs";
-import { APP_PACKAGE, EXTENSION_PACKAGE, minReleaseAgeFor, pickAvailableVersion, registryPackumentUrl } from "../lib/update-check.mjs";
+import { APP_PACKAGE, EXTENSION_PACKAGE, NO_UPDATE_CHECK_VAR, minReleaseAgeFor, pickAvailableVersion, registryPackumentUrl } from "../lib/update-check.mjs";
 import type { DoctorEnvironment } from "./report.ts";
 
 export const APP_REGISTRY_URL = registryPackumentUrl(APP_PACKAGE);
@@ -32,7 +31,7 @@ export async function lookupLatestVersion(input: {
 	timeoutMs?: number;
 }): Promise<LatestLookup> {
 	if (isOffline(input.env)) return { status: "skipped", reason: "offline" };
-	if (input.env[envName("NO_UPDATE_CHECK")] === "1") return { status: "skipped", reason: `${envName("NO_UPDATE_CHECK")}=1` };
+	if (input.env[NO_UPDATE_CHECK_VAR] === "1") return { status: "skipped", reason: `${NO_UPDATE_CHECK_VAR}=1` };
 	const url = input.install === "app" ? APP_REGISTRY_URL : PACKAGE_REGISTRY_URL;
 	const fetchImpl = input.fetchImpl ?? globalThis.fetch;
 	try {

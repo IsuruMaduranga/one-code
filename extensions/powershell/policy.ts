@@ -1,13 +1,13 @@
 /**
  * When the `powershell` tool is on, and which shell tool is primary (pure).
  *
- * Claude Code's gate (2.1.276 binary function `f0`, findings §22):
- * `CLAUDE_CODE_USE_POWERSHELL_TOOL` wins wherever it is set — truthy turns the
+ * Claude Code's gate (2.1.276 binary function `f0`, findings §22), read
+ * through the `USE_POWERSHELL_TOOL` knob (lib/knobs.ts: the product's spelling,
+ * or Claude Code's while its sources are on). It wins wherever it is set — truthy turns the
  * tool on, `0`/`false` off. Unset: on Windows the tool is on (Git Bash absent
  * → on by necessity; Git Bash present → on, the claude.ai/Console default the
  * docs describe — plan §Open questions 1, resolved "on"); off Windows it is
- * off, so a Mac or Linux user opts in with the same variable Claude Code
- * uses. When it is on, PowerShell is the primary shell (CC 2.1.126) and bash
+ * off, so a Mac or Linux user opts in with the knob. When it is on, PowerShell is the primary shell (CC 2.1.126) and bash
  * stays alongside when a bash exists. A Windows box with neither shell fails
  * loud at startup in Claude Code's words.
  */
@@ -22,7 +22,11 @@ export const POWERSHELL_KNOB = "USE_POWERSHELL_TOOL";
 
 /** The `USE_POWERSHELL_TOOL` knob as Claude Code reads its switch: unset/empty → unset, `0`/`false`/`no`/`off` → off, anything else → on. */
 export function powerShellSwitch(env: NodeJS.ProcessEnv): PowerShellSwitch {
-	const raw = knobValue(POWERSHELL_KNOB, env)?.trim().toLowerCase();
+	return switchOf(knobValue(POWERSHELL_KNOB, env));
+}
+
+function switchOf(value: string | undefined): PowerShellSwitch {
+	const raw = value?.trim().toLowerCase();
 	if (raw === undefined || raw === "") return "unset";
 	return ["0", "false", "no", "off"].includes(raw) ? "off" : "on";
 }
@@ -68,8 +72,9 @@ export const NO_SHELL_NOTICE =
 	`or install PowerShell and set ${envName(POWERSHELL_KNOB)}=1.`;
 
 export function shellToolPolicy(a: ShellAvailability): ShellToolPolicy {
-	const sw = powerShellSwitch(a.env);
-	const switchVar = sw === "unset" ? undefined : readKnob(POWERSHELL_KNOB, a.env)?.name;
+	const knob = readKnob(POWERSHELL_KNOB, a.env);
+	const sw = switchOf(knob?.value);
+	const switchVar = sw === "unset" ? undefined : knob?.name;
 	const wanted = sw === "on" ? true : sw === "off" ? false : a.platform === "win32";
 	const powershell = wanted && a.powershell;
 	const notices: string[] = [];

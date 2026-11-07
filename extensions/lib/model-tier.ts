@@ -239,7 +239,7 @@ const TRUTHY_ENV = new Set(["1", "true", "yes", "on"]);
 /**
  * Whether the session model gets the task tools (`task_create` and family),
  * Claude Code's model gate for a foreground session: its current models run
- * without a task list, which `CLAUDE_CODE_ENABLE_TODO_TOOLS` turns back on
+ * without a task list, which the `ENABLE_TODO_TOOLS` knob (lib/knobs.ts) turns back on
  * (findings §31). Off for the frontier tier and first-party Sonnet 5 or later;
  * on for everything else, including an unknown model (Claude Code keeps the
  * tools for a model it does not recognise). Claude Code also turns them on in

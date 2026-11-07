@@ -14,8 +14,7 @@
  * extension owns repaint, the overlay, and the actual open.
  */
 
-import { brand, envName } from "../lib/brand.mjs";
-import { AUTO_MEMORY_KNOB } from "../lib/auto-memory.ts";
+import { brand } from "../lib/brand.mjs";
 import type { MemoryEntry } from "./entries.ts";
 import type { SourceSwitch } from "../lib/sources.ts";
 import { keyId } from "../lib/key-input.ts";
@@ -196,18 +195,18 @@ export function modeConfirmQuestion(mode: ModeView): string {
 
 /**
  * A toggle row's plain text, "<label>: <saved>", with "(from next start)" while
- * the saved value differs from the running one; when `envName` sets it, the
- * running value and that it is set there. Also returns the value shown.
+ * the saved value differs from the running one; when the variable `setBy` sets
+ * it, the running value and that it is set there. Also returns the value shown.
  */
-function settingRow<T>(label: string, view: SettingView<T>, valueText: (value: T) => string, envName: string, selected: boolean): { left: string; shown: T } {
+function settingRow<T>(label: string, view: SettingView<T>, valueText: (value: T) => string, setBy: string | undefined, selected: boolean): { left: string; shown: T } {
 	const shown = view.fromEnv ? view.running : view.saved;
-	const note = view.fromEnv ? ` (set by ${envName})` : view.saved !== view.running ? " (from next start)" : "";
+	const note = view.fromEnv ? ` (set by ${setBy})` : view.saved !== view.running ? " (from next start)" : "";
 	return { left: `${selected ? "❯ " : "  "}${label}: ${valueText(shown)}${note}`, shown };
 }
 
 /** "Auto-memory: on|off". */
 function renderAutoMemoryRow(view: AutoMemoryView, selected: boolean, paint: PanelPaint): string {
-	const { left } = settingRow("Auto-memory", view, (on) => (on ? "on" : "off"), view.envVar ?? envName(AUTO_MEMORY_KNOB), selected);
+	const { left } = settingRow("Auto-memory", view, (on) => (on ? "on" : "off"), view.envVar, selected);
 	return selected ? paint.fg("accent", left) : left;
 }
 

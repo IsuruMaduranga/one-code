@@ -25,7 +25,6 @@ import { brand, envName } from "./brand.mjs";
 export const APP_AGENT_DIR_VAR = envName("AGENT_DIR");
 /** JSON of each launcher variable's value before the launcher set it (null: unset). */
 export const LAUNCHER_ENV_VAR = envName("LAUNCHER_ENV");
-/** The variables the launcher sets for its own process. */
 /** Where the launcher publishes how the app was installed (lib/update-check.mjs reads it). */
 export const INSTALL_METHOD_VAR = envName("INSTALL_METHOD");
 /** The variables the launcher sets for its own process. */
@@ -45,8 +44,7 @@ export function appAgentDir(env = process.env, home = homedir()) {
 export function installMethodFor(binRealPath) {
 	const formula = brand.packages.homebrewFormula;
 	if (!formula) return "npm";
-	const escaped = formula.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-	return new RegExp(`[\\\\/]Cellar[\\\\/]${escaped}[\\\\/]`).test(String(binRealPath ?? "")) ? "brew" : "npm";
+	return String(binRealPath ?? "").replaceAll("\\", "/").includes(`/Cellar/${formula}/`) ? "brew" : "npm";
 }
 
 /**

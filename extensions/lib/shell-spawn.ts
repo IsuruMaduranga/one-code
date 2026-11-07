@@ -4,8 +4,8 @@
  *
  * Claude Code's shape (findings §22, working-docs/decisions/windows.md): Git for
  * Windows is optional. When a bash is available it drives the `bash` tool,
- * hooks and background shells; `CLAUDE_CODE_GIT_BASH_PATH` (process env, or
- * Claude Code's user-settings `env` block) names a custom bash and is ignored
+ * hooks and background shells; the `GIT_BASH_PATH` knob (lib/knobs.ts; process
+ * env, or the user-settings `env` block) names a custom bash and is ignored
  * with a warning when it is not a bash/sh binary (CC 2.1.219). PowerShell is
  * `pwsh.exe` then `powershell.exe` on Windows (pi's own resolution), and a
  * `pwsh` on PATH elsewhere — which is how the tool is developed and tested on
@@ -151,7 +151,7 @@ let cachedBash: BashResolution | undefined;
  * Windows lookup runs `where`, and hooks resolve on every tool call). The
  * resolution reads Claude Code's user-settings `env` block itself, so every
  * consumer — bash tool, hooks, monitor, PowerShell fallback — sees the same
- * `CLAUDE_CODE_GIT_BASH_PATH`. Note the cache is per extension file: jiti
+ * `GIT_BASH_PATH` knob. Note the cache is per extension file: jiti
  * gives each extension its own copy of this module (findings §3), so this is
  * a memo, never a cross-extension channel — each extension resolves once.
  */

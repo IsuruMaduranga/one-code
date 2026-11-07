@@ -39,7 +39,11 @@ export function stampExtension(pkg) {
 	return { ...pkg, name: brand.packages.extension, ...listing(pkg, "extension") };
 }
 
-/** The app package with the brand's names; the extension dependency is renamed in place, keeping its version and position. */
+/**
+ * The app package with the brand's names. Overriding a key in a spread keeps
+ * its position, so the stamp moves nothing; the extension dependency is renamed
+ * in place, keeping its version and position.
+ */
 export function stampApp(pkg) {
 	const previous = pkg.productExtension;
 	const dependencies = {};
@@ -47,19 +51,14 @@ export function stampApp(pkg) {
 		dependencies[name === previous ? brand.packages.extension : name] = version;
 	}
 	if (!(brand.packages.extension in dependencies)) throw new Error(`app/package.json: no dependency named by productExtension ("${previous}") to rename to ${brand.packages.extension}`);
-	const stamped = { name: brand.packages.app, dependencies, ...listing(pkg, "app") };
-	const out = {};
-	for (const [key, value] of Object.entries(pkg)) {
-		if (key === "productExtension") continue;
-		out[key] = key in stamped ? stamped[key] : value;
-		if (key === "bin") {
-			out.bin = { [brand.bin]: "bin.mjs" };
-			out.productExtension = brand.packages.extension;
-		}
-	}
-	// A stamped field the package lacks goes last.
-	for (const [key, value] of Object.entries(stamped)) if (!(key in out)) out[key] = value;
-	return out;
+	return {
+		...pkg,
+		name: brand.packages.app,
+		bin: { [brand.bin]: "bin.mjs" },
+		productExtension: brand.packages.extension,
+		dependencies,
+		...listing(pkg, "app"),
+	};
 }
 
 const format = (pkg) => `${JSON.stringify(pkg, null, "\t")}\n`;

@@ -1,6 +1,7 @@
 /**
- * Whether auto-memory is on: Claude Code's `autoMemoryEnabled` setting and its
- * `CLAUDE_CODE_DISABLE_AUTO_MEMORY` override (pure fs, no pi imports).
+ * Whether auto-memory is on: Claude Code's `autoMemoryEnabled` setting and the
+ * `DISABLE_AUTO_MEMORY` knob that overrides it (lib/knobs.ts; pure fs, no pi
+ * imports).
  *
  * Off means the system prompt has no memory section, the MEMORY.md index is
  * not loaded, and the memory folder is neither created nor offered by
@@ -10,7 +11,7 @@
  * a change applies from the next start.
  */
 
-import { brandedId, envName } from "./brand.mjs";
+import { brandedId } from "./brand.mjs";
 import { knobValue, readKnob } from "./knobs.ts";
 
 import { featureEnabled } from "./profile.ts";
@@ -38,9 +39,9 @@ export function autoMemoryFromEnv(env: Record<string, string | undefined> = proc
 	return undefined;
 }
 
-/** The variable that sets auto-memory in `env`, else the product's own spelling, for messages. */
-export function autoMemoryEnvVar(env: Record<string, string | undefined> = process.env): string {
-	return readKnob(AUTO_MEMORY_KNOB, env)?.name ?? envName(AUTO_MEMORY_KNOB);
+/** The variable that sets auto-memory in `env`, when one does, for messages. */
+export function autoMemoryEnvVar(env: Record<string, string | undefined> = process.env): string | undefined {
+	return readKnob(AUTO_MEMORY_KNOB, env)?.name;
 }
 
 /**

@@ -73,6 +73,9 @@ import {
 	type ViewerRunSnapshot,
 } from "./viewer.ts";
 import { WorkflowWidget } from "./widget.ts";
+
+/** The custom-message type a finished workflow's result is delivered as. */
+const WORKFLOW_RESULT_TYPE = brandedId("workflow-result");
 import { registerLocalCommand } from "../lib/local-command.ts";
 import { canShowCustomUi } from "../lib/headless-output.ts";
 import { sessionWorkCwd } from "../lib/worktree-channel.ts";
@@ -145,7 +148,7 @@ function workflowExtension(pi: ExtensionAPI) {
 		// workflowSummary — unverified against CC.
 		const status = taskStatusOf(handle.status);
 		notifyTask(
-			brandedId("workflow-result"),
+			WORKFLOW_RESULT_TYPE,
 			taskNotification({
 				kind: "workflow",
 				taskId: handle.runId,
@@ -158,7 +161,7 @@ function workflowExtension(pi: ExtensionAPI) {
 		);
 	};
 
-	pi.registerMessageRenderer(brandedId("workflow-result"), (message, options, theme) =>
+	pi.registerMessageRenderer(WORKFLOW_RESULT_TYPE, (message, options, theme) =>
 		notificationComponent(theme, customMessageText(message.content), options.expanded, { hint: expandHintFor(options) }),
 	);
 
