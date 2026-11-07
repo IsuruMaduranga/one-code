@@ -29,7 +29,7 @@ import { claudeMdLimitWarning, combinedLimitWarning, projectMemoryDir } from "..
 import { INDEX_MAX_CHARS, INDEX_MAX_LINES, indexLimitStatus, stampFrontmatter } from "../lib/memory-content.ts";
 import { requireText } from "../lib/profile.ts";
 import { allowedPath, sourceSwitch } from "../lib/sources.ts";
-import { agentSkippedInstructions } from "../lib/instructions.ts";
+import { agentSkippedInstructions } from "../lib/instruction-budget.ts";
 import { productSettingsPath, readSettingsForWrite, writeSettings } from "../lib/product-settings.ts";
 import { comparablePath, isPathAtOrUnder, productStateDir, tildify, tryRealpath } from "../lib/paths.ts";
 import { resolveThroughLinks } from "../auto-mode/paths.ts";

@@ -16,6 +16,7 @@
 import { formatTokens } from "../footer/footer-line.ts";
 import { estimateTextTokens } from "./pi-ai-estimate.ts";
 import { contextWords } from "./context-words.ts";
+import { agentInstructionSections } from "./instructions.ts";
 
 /** The share of the context window instruction files may take together. */
 const INSTRUCTION_WINDOW_SHARE = 0.5;
@@ -99,3 +100,9 @@ export function restoredInstructionNotice(path: string, contextWindow: number | 
 		: `${path} loads in full again: this model's context window is unknown`;
 }
 
+/** The sections the agent's window budget skips for `contextWindow` (above); none without a window. */
+export function agentSkippedInstructions(opts: Parameters<typeof agentInstructionSections>[0] & { contextWindow: number | undefined }): SkippedInstruction[] {
+	if (!opts.contextWindow) return [];
+	const { contextFiles, oneCodeFiles } = agentInstructionSections(opts);
+	return fitToWindow([...contextFiles, ...oneCodeFiles], opts.contextWindow).skipped;
+}

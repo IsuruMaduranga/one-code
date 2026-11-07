@@ -32,7 +32,6 @@ import { tryReadFile } from "./plugins.ts";
 import { absoluteFrom, expandTilde, isPathAtOrUnder, productStateDir, tryRealpath } from "./paths.ts";
 import { MAX_INSTRUCTION_BYTES } from "./claude-rules.ts";
 import { readExternalIncludesApproval } from "./claude-external-includes.ts";
-import { fitToWindow, type SkippedInstruction } from "./instruction-budget.ts";
 import type { InstructionSource } from "./context-text.ts";
 import { activeProfile, featureEnabled } from "./profile.ts";
 import { allowedPath, allowPathOf, type InstructionTargets, openSources, projectConfigDirName } from "./sources.ts";
@@ -602,9 +601,3 @@ export function agentInstructionSections(opts: { cwd: string; home: string; agen
 	return openInstructions(opts.home, opts.agentDir).sections(opts);
 }
 
-/** The sections the agent's window budget skips for `contextWindow` (lib/instruction-budget.ts); none without a window. */
-export function agentSkippedInstructions(opts: Parameters<typeof agentInstructionSections>[0] & { contextWindow: number | undefined }): SkippedInstruction[] {
-	if (!opts.contextWindow) return [];
-	const { contextFiles, oneCodeFiles } = agentInstructionSections(opts);
-	return fitToWindow([...contextFiles, ...oneCodeFiles], opts.contextWindow).skipped;
-}
