@@ -359,7 +359,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 	const stage1Text = stage1User(userPrefix);
 	// A permission rule refused something this turn, so stage 2 gets the extra
 	// instruction that the user's intent does not excuse an equivalent-effect
-	// retry (prompt.ts STAGE2_DENIAL_ADDENDUM). Stage 1 grades harm only and is
+	// retry (the profile's `stage2DenialAddendum`). Stage 1 grades harm only and is
 	// left byte-identical to CC's.
 	const afterRuleDenial = request.transcript.some((entry) => entry.kind === "denied");
 	const debug = process.env.CC_AUTO_MODE_DEBUG;

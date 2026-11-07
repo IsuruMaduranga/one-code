@@ -11,7 +11,7 @@ import {
 	persistClassifierModel,
 	spliceDefaults,
 } from "../../extensions/auto-mode/config.ts";
-import { DEFAULT_ENVIRONMENT } from "../../extensions/auto-mode/defaults.ts";
+import { defaultEnvironment } from "../../extensions/auto-mode/defaults.ts";
 
 let home: string;
 
@@ -48,7 +48,7 @@ describe("spliceDefaults", () => {
 describe("loadAutoModeConfig", () => {
 	it("returns the built-in environment with no settings present", () => {
 		const config = loadAutoModeConfig(home);
-		expect(config.environment).toEqual(DEFAULT_ENVIRONMENT);
+		expect(config.environment).toEqual(defaultEnvironment());
 		expect(config.classifyAllShell).toBe(false);
 	});
 
@@ -58,7 +58,7 @@ describe("loadAutoModeConfig", () => {
 		});
 		const config = loadAutoModeConfig(home);
 		expect(config.environment).toContain("Source control: github.example.com/acme");
-		expect(config.environment.length).toBe(DEFAULT_ENVIRONMENT.length + 1);
+		expect(config.environment.length).toBe(defaultEnvironment().length + 1);
 	});
 
 	it("reads classifierModel and its stamp from One Code's settings", () => {
@@ -95,7 +95,7 @@ describe("loadAutoModeConfig", () => {
 
 	it("ignores malformed files rather than failing open", () => {
 		writeFileSync(join(home, ".claude", "settings.json"), "{not json");
-		expect(loadAutoModeConfig(home).environment).toEqual(DEFAULT_ENVIRONMENT);
+		expect(loadAutoModeConfig(home).environment).toEqual(defaultEnvironment());
 	});
 
 	it("drops non-string environment entries", () => {
@@ -156,7 +156,7 @@ describe("loadAutoModeConfig", () => {
 		expect(diagnostics.some((line) => line.includes("environment must be an array"))).toBe(true);
 		// Lenient loading: the mistyped fields fall back rather than failing.
 		expect(config.classifyAllShell).toBe(false);
-		expect(config.environment).toEqual(DEFAULT_ENVIRONMENT);
+		expect(config.environment).toEqual(defaultEnvironment());
 	});
 
 	it("warns when environment omits $defaults AND drops built-in slots", () => {
@@ -169,7 +169,7 @@ describe("loadAutoModeConfig", () => {
 	it("does not warn on a full slot replacement — the wizard's normal output", () => {
 		// Every built-in slot restated (values edited or not), no "$defaults":
 		// exactly what /auto-mode setup and CC's own wizard write.
-		writeUserSettings({ autoMode: { environment: [...DEFAULT_ENVIRONMENT, "**Extra slot**: added"] } });
+		writeUserSettings({ autoMode: { environment: [...defaultEnvironment(), "**Extra slot**: added"] } });
 		const { diagnostics } = loadAutoModeConfigWithDiagnostics(home);
 		expect(diagnostics).toEqual([]);
 	});

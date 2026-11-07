@@ -33,10 +33,6 @@ export interface ResolvedPathFact {
 	resolvesTo: string;
 }
 
-/** The line's own explanation, since the ruleset has no sentence for it. */
-export const RESOLVED_PATHS_NOTE =
-	"Measured by the harness, not written by the agent: each path below is named by the action under review as if inside the working directory, but resolves through a symbolic link to resolvesTo, outside every working directory. Judge the action as reading or writing resolvesTo.";
-
 /** The most words one action has resolved: a huge command must not stall the gate. */
 const MAX_CANDIDATES = 256;
 /** A word longer than this is not a path worth resolving; it also bounds the line, whose words the agent wrote. */

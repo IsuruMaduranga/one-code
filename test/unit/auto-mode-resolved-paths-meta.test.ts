@@ -8,7 +8,8 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { actionResolvedPaths, bashPathCandidates, RESOLVED_PATHS_NOTE, resolvedPathFacts } from "../../extensions/auto-mode/resolved-paths-meta.ts";
+import { classifierText } from "../../extensions/auto-mode/classifier-prompt.ts";
+import { actionResolvedPaths, bashPathCandidates, resolvedPathFacts } from "../../extensions/auto-mode/resolved-paths-meta.ts";
 import { renderTranscript } from "../../extensions/auto-mode/transcript.ts";
 import { HAVE_POWERSHELL, POWERSHELL_TEST_TIMEOUT, psParse } from "./helpers/powershell-parse.ts";
 
@@ -89,7 +90,7 @@ describe("the rendered line", () => {
 		]);
 		expect(text.split("\n")).toEqual([
 			"<transcript>",
-			JSON.stringify({ meta: { resolvedPaths: [{ path: " leading.txt", resolvesTo: secret }], note: RESOLVED_PATHS_NOTE } }),
+			JSON.stringify({ meta: { resolvedPaths: [{ path: " leading.txt", resolvesTo: secret }], note: classifierText().resolvedPathsNote } }),
 			'{"PowerShell":"Set-Content \' leading.txt\' x"}',
 			"</transcript>",
 		]);

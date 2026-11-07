@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildRuleset, DEFAULT_ENVIRONMENT } from "../../extensions/auto-mode/classifier-prompt.ts";
+import { buildRuleset, defaultEnvironment } from "../../extensions/auto-mode/classifier-prompt.ts";
 import { buildCategoryIndex, groundCategory, normalizeName } from "../../extensions/auto-mode/rules.ts";
 import { denyRuleLines } from "../../extensions/permissions/rule-prose.ts";
 
@@ -42,7 +42,7 @@ describe("injected deny rules ground as HARD BLOCK categories", () => {
 	// specs contain both, which is why the name carries a stripped form.
 	it("indexes the rule name and grounds a verdict citing it", () => {
 		const lines = denyRuleLines(["Bash(rm:*)", "Edit(src/**)"]);
-		const ruleset = buildRuleset([...DEFAULT_ENVIRONMENT], { hardDeny: lines });
+		const ruleset = buildRuleset(defaultEnvironment(), { hardDeny: lines });
 		const index = buildCategoryIndex(ruleset);
 
 		const rm = groundCategory(index, "User Deny Rule Bash rm");
@@ -55,25 +55,25 @@ describe("injected deny rules ground as HARD BLOCK categories", () => {
 
 	it("grounds a verdict that quotes the whole rule line", () => {
 		const lines = denyRuleLines(["Bash(rm:*)"]);
-		const index = buildCategoryIndex(buildRuleset([...DEFAULT_ENVIRONMENT], { hardDeny: lines }));
+		const index = buildCategoryIndex(buildRuleset(defaultEnvironment(), { hardDeny: lines }));
 		expect(groundCategory(index, lines[0])?.tier).toBe("hard_deny");
 	});
 
 	it("leaves the built-in rules and the default ruleset untouched", () => {
-		const bare = buildRuleset([...DEFAULT_ENVIRONMENT]);
-		const withRules = buildRuleset([...DEFAULT_ENVIRONMENT], { hardDeny: denyRuleLines(["Bash(rm:*)"]) });
+		const bare = buildRuleset(defaultEnvironment());
+		const withRules = buildRuleset(defaultEnvironment(), { hardDeny: denyRuleLines(["Bash(rm:*)"]) });
 		// Additive only: the default prompt is a prefix-compatible subset.
 		expect(buildCategoryIndex(bare).rules.length).toBeGreaterThan(0);
 		expect(buildCategoryIndex(withRules).rules.length).toBe(buildCategoryIndex(bare).rules.length + 1);
 		// And an empty deny list changes nothing at all.
-		expect(buildRuleset([...DEFAULT_ENVIRONMENT], { hardDeny: denyRuleLines([]) })).toBe(bare);
+		expect(buildRuleset(defaultEnvironment(), { hardDeny: denyRuleLines([]) })).toBe(bare);
 	});
 
 	it("a name that collides with a built-in rule does not steal its tier", () => {
 		// `byName` keeps the first (HARD) binding, so a user line cannot rename a
 		// built-in rule; check the built-in still grounds as itself.
-		const index = buildCategoryIndex(buildRuleset([...DEFAULT_ENVIRONMENT], { hardDeny: denyRuleLines(["Bash(rm:*)"]) }));
-		const builtins = buildCategoryIndex(buildRuleset([...DEFAULT_ENVIRONMENT])).rules;
+		const index = buildCategoryIndex(buildRuleset(defaultEnvironment(), { hardDeny: denyRuleLines(["Bash(rm:*)"]) }));
+		const builtins = buildCategoryIndex(buildRuleset(defaultEnvironment())).rules;
 		for (const rule of builtins) {
 			expect(groundCategory(index, rule.name)?.tier, rule.name).toBe(rule.tier);
 		}

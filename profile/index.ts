@@ -13,6 +13,7 @@ import type { Profile } from "../extensions/lib/profile-contract.ts";
 import { artifactsText } from "./artifacts/index.ts";
 import { askUserText } from "./ask-user/index.ts";
 import { autoModeText } from "./auto-mode/index.ts";
+import { classifier } from "./auto-mode/classifier.ts";
 import { background } from "./background/index.ts";
 import { btw } from "./btw/index.ts";
 import { compaction } from "./compaction/index.ts";
@@ -84,6 +85,7 @@ export const profile: Profile = {
 		compaction,
 		workflow: workflowText(live),
 		autoMode: autoModeText(live),
+		classifier,
 		shell: shellText(live),
 		doctor: doctorText(live),
 		notifications: notificationsText(live),

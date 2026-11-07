@@ -56,3 +56,40 @@ export interface AutoModeText {
 	/** The block the model gets for a floor reason. */
 	floorBlock(target: FloorTarget): string;
 }
+
+/**
+ * The auto-mode classifier's ruleset (a side call's system prompt), split at
+ * the insertion points the base fills: the `## Environment` slot lines after
+ * `rulesetHead`, the user's hard-deny, soft-deny and allow rules after each
+ * section, and the username in `sessionContext`. One Code's is Claude Code's
+ * prompt, generated (profile/auto-mode/ruleset.ts).
+ */
+export interface ClassifierRuleset {
+	rulesetHead: string;
+	hardSection: string;
+	softSection: string;
+	allowSection: string;
+	rulesetTail: string;
+	/** The default `## Environment` slot lines, without the "- " bullet; a user's `autoMode.environment` replaces them. */
+	defaultEnvironment: readonly string[];
+	/** The Session Context block; `__USERNAME__` marks the username. */
+	sessionContext: string;
+	/** The user-role framing around the user's instruction file; the base sends none when there is no file. */
+	instructionsFraming: { prefix: string; suffix: string };
+	/** Stage 1's final instruction (harm only). */
+	stage1Final: string;
+	/** Stage 2's final instruction (intent and the allow exceptions). */
+	stage2Final: string;
+}
+
+/** The classifier's prompt: the ruleset and the additions the base appends to stage 2 when their case holds. */
+export interface ClassifierText extends ClassifierRuleset {
+	/** Always after `stage2Final`: a block cleared on the user's intent must quote the user, which the base checks against the transcript. */
+	stage2IntentAddendum: string;
+	/** After it, when the transcript holds a permission-rule denial: a rule outranks the user's stated intent. */
+	stage2DenialAddendum: string;
+	/** After `stage2Final` in the completed-run subagent review: judge the finished run as a whole. */
+	reviewAddendum: string;
+	/** The `resolvedPaths` meta line's own explanation, which the ruleset has no sentence for. */
+	resolvedPathsNote: string;
+}

@@ -26,11 +26,11 @@ const PROTECTIVE: Record<string, string> = {
 	"lib/permission-gate.ts": "protection: ~/.claude stays protected and its secrets stay secret",
 	"permissions/protected-paths.ts": "protection: .claude stays a protected directory",
 	"auto-mode/safety-floor.ts": "protection: gate-control files stay on the floor",
-	"auto-mode/classifier-prompt.ts": "Claude Code's ruleset verbatim, regenerated, never hand-edited; moves to the profile in Phase 5",
 };
 
 /** The profile files that name one: One Code's provider, and words its callers fill in. */
 const PROFILE_FILES: Record<string, string> = {
+	"profile/auto-mode/ruleset.ts": "Claude Code's classifier ruleset verbatim, generated, never hand-edited",
 	"profile/claude-code/instructions.ts": "One Code's instruction view: sources.ts opens it only with the provider on",
 	"profile/claude-code/settings.ts": "Claude Code's settings paths and instructionFiles rule, for the provider",
 	"profile/claude-code/sources.ts": "One Code's source provider: switched off, its view only keeps Claude Code's locations out",

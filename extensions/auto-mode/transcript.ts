@@ -19,7 +19,8 @@ import { ccToolName } from "../hooks/matcher.ts";
 // The shell tools render as `{"<Tool>":"<command>"}` (lib/shell-tools.ts is the one list).
 import { SHELL_TOOLS } from "../lib/shell-tools.ts";
 import type { GitStatusMeta } from "./git-status-meta.ts";
-import { RESOLVED_PATHS_NOTE, type ResolvedPathFact } from "./resolved-paths-meta.ts";
+import { classifierText } from "./classifier-prompt.ts";
+import type { ResolvedPathFact } from "./resolved-paths-meta.ts";
 
 export { ccToolName };
 
@@ -66,7 +67,7 @@ function renderEntry(entry: TranscriptEntry): string {
 	if (entry.kind === "user") return JSON.stringify({ user: entry.text });
 	if (entry.kind === "summary") return JSON.stringify({ summary: entry.text });
 	if (entry.kind === "meta") return JSON.stringify({ meta: { gitStatus: entry.gitStatus } });
-	if (entry.kind === "resolved-paths") return JSON.stringify({ meta: { resolvedPaths: entry.resolvedPaths, note: RESOLVED_PATHS_NOTE } });
+	if (entry.kind === "resolved-paths") return JSON.stringify({ meta: { resolvedPaths: entry.resolvedPaths, note: classifierText().resolvedPathsNote } });
 	if (entry.kind === "denied") {
 		return JSON.stringify({
 			denied_by_permission_rule: { tool: ccToolName(entry.tool), attempted: entry.subject, rule: entry.rule },

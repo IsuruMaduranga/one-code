@@ -50,7 +50,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { isBorrowedUserFile, isRepoFile, settingsSources } from "../lib/claude-settings.ts";
 import type { SettingsFile } from "../lib/sources.ts";
 import { productSettingsPath, readSettingsForWrite, SETTINGS_DISPLAY, writeSettings } from "../lib/product-settings.ts";
-import { DEFAULT_ENVIRONMENT, slotName } from "./defaults.ts";
+import { defaultEnvironment, slotName } from "./defaults.ts";
 
 export interface AutoModeConfig {
 	/** Environment slot lines spliced into CC's ruleset (prefix-less, CC's settings format). */
@@ -195,7 +195,7 @@ function validateAutoModeBlock(block: Record<string, unknown>, path: string, dia
 		const strings = environment.filter((entry): entry is string => typeof entry === "string");
 		if (strings.length > 0 && !strings.some((entry) => entry.trim() === DEFAULTS_TOKEN)) {
 			const present = new Set(strings.map(slotName).filter(Boolean));
-			const missing = DEFAULT_ENVIRONMENT.map(slotName).filter((name): name is string => !!name && !present.has(name));
+			const missing = defaultEnvironment().map(slotName).filter((name): name is string => !!name && !present.has(name));
 			if (missing.length > 0) {
 				const shown = missing.slice(0, 3).join(", ") + (missing.length > 3 ? ", …" : "");
 				diagnostics.push(
@@ -317,7 +317,7 @@ export function loadAutoModeConfigWithDiagnostics(home: string): AutoModeConfigL
 
 	return {
 		config: {
-			environment: spliceDefaults(collected.environment, DEFAULT_ENVIRONMENT),
+			environment: spliceDefaults(collected.environment, defaultEnvironment()),
 			hardDeny: ruleExtras(collected.hard_deny),
 			softDeny: ruleExtras(collected.soft_deny),
 			allow: ruleExtras(collected.allow),

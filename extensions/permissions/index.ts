@@ -51,7 +51,7 @@ import { CLASSIFIER_SETTING_CHANGED_CHANNEL } from "../lib/settings-channels.ts"
 import { readSuggestNewerModels, SETTINGS_DISPLAY } from "../lib/product-settings.ts";
 import { auditPermissionAllow, renderProposal, settingsPatch } from "../auto-mode/setup.ts";
 import { draftSetup, gatherFacts } from "../auto-mode/setup-run.ts";
-import { DEFAULT_ENVIRONMENT } from "../auto-mode/defaults.ts";
+import { defaultEnvironment } from "../auto-mode/defaults.ts";
 import { buildRuleset } from "../auto-mode/classifier-prompt.ts";
 import type { TranscriptEntry } from "../auto-mode/transcript.ts";
 import { childHistoryCursor, classifierHistory, CLASSIFIER_TOOL_META, CLASSIFIER_USER_INPUT, type HistoryCursor, messageText, userMessageDigest } from "../auto-mode/history.ts";
@@ -1925,8 +1925,8 @@ function permissionsExtension(pi: ExtensionAPI) {
 		const environment = loadAutoModeConfig(home).environment;
 		const envSources = [...new Set(listed.filter((e) => e.key === "environment").map((e) => autoSource(e, home).label.replace(/^From /, "").replace(/ \(.*\)$/, "")))];
 		const isDefault = envSources.length === 0;
-		const extendsDefault = !isDefault && DEFAULT_ENVIRONMENT.every((line) => environment.includes(line));
-		builtinCounts ??= builtinRuleCounts(buildRuleset(DEFAULT_ENVIRONMENT));
+		const extendsDefault = !isDefault && defaultEnvironment().every((line) => environment.includes(line));
+		builtinCounts ??= builtinRuleCounts(buildRuleset(defaultEnvironment()));
 		return {
 			builtins: builtinCounts,
 			entries,
@@ -1959,7 +1959,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		// `"$defaults"` in the list: the user's lines extend the built-in default,
 		// which stays out of the editor and is kept on save.
 		const extendsDefault = oneCodeEnvironmentExtendsDefault(home);
-		const start = own.length > 0 ? own : others > 0 || extendsDefault ? [] : DEFAULT_ENVIRONMENT;
+		const start = own.length > 0 ? own : others > 0 || extendsDefault ? [] : defaultEnvironment();
 		const title =
 			"Auto mode environment: one entry per line, `### ` lines are section headers. Save it empty to restore the built-in default." +
 			(extendsDefault ? " These lines are added to the built-in default." : "") +
@@ -2394,7 +2394,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 				registry: ctx.modelRegistry,
 				sessionModel: ctx.model,
 				config: autoConfig ?? loadAutoModeConfig(os.homedir()),
-				defaultEnvironment: DEFAULT_ENVIRONMENT,
+				defaultEnvironment: defaultEnvironment(),
 				signal: ctx.signal,
 				onNotice: (message, level) => ctx.ui.notify(message, level),
 				onUsage: (usage) => recordUsage(pi, "setup", usage),
@@ -2589,7 +2589,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			// refreshes the cached copy.
 			const loaded = which === "config" ? loadAutoModeConfigWithDiagnostics(os.homedir()) : undefined;
 			if (loaded) autoConfig = loaded.config;
-			const shown = loaded ? loaded.config : { environment: DEFAULT_ENVIRONMENT };
+			const shown = loaded ? loaded.config : { environment: defaultEnvironment() };
 			const section = (title: string, entries: string[]) =>
 				`${title} (${entries.length}):\n${entries.map((entry) => `  - ${entry}`).join("\n")}`;
 			const ruleSections =
