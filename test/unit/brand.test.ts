@@ -19,11 +19,14 @@ describe("brand", () => {
 		expect(() => checkBrand({ ...data, envPrefix: "one-code" })).toThrow(/"envPrefix" must be upper-case/);
 		expect(() => checkBrand({ ...data, idPrefix: "One Code" })).toThrow(/"idPrefix" must be lower-case/);
 		expect(() => checkBrand({ ...data, packages: { app: "a" } })).toThrow(/"packages.extension"/);
+		expect(() => checkBrand({ ...data, packageInfo: { app: data.packageInfo.app } })).toThrow(/"packageInfo.extension.description"/);
+		expect(() => checkBrand({ ...data, packageInfo: { ...data.packageInfo, app: { description: "a", keywords: [1] } } })).toThrow(/"packageInfo.app.keywords"/);
 		expect(checkBrand(data)).toEqual(data);
 	});
 
 	it("freezes a copy, leaving the JSON module's object for loaders that extend it (jiti adds `default`)", () => {
 		expect(Object.isFrozen(brand)).toBe(true);
+		expect(Object.isFrozen(brand.packageInfo.app.keywords)).toBe(true);
 		expect(Object.isFrozen(data)).toBe(false);
 		expect(brand).toEqual(data);
 	});

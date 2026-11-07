@@ -33,9 +33,23 @@ export function checkBrand(value) {
 		}
 		if (packages.homebrewFormula !== undefined && typeof packages.homebrewFormula !== "string") problems.push(`"packages.homebrewFormula" must be a string when set`);
 	}
+	for (const key of ["app", "extension"]) {
+		const info = value.packageInfo?.[key];
+		if (typeof info?.description !== "string" || info.description === "") problems.push(`"packageInfo.${key}.description" must be a non-empty string`);
+		if (!Array.isArray(info?.keywords) || info.keywords.some((word) => typeof word !== "string")) problems.push(`"packageInfo.${key}.keywords" must be an array of strings`);
+	}
 	if (typeof value.envPrefix === "string" && !/^[A-Z][A-Z0-9_]*$/.test(value.envPrefix)) problems.push(`"envPrefix" must be upper-case letters, digits and underscores`);
 	if (typeof value.idPrefix === "string" && !/^[a-z][a-z0-9-]*$/.test(value.idPrefix)) problems.push(`"idPrefix" must be lower-case letters, digits and hyphens`);
 	if (problems.length > 0) throw new Error(`profile/brand.json: ${problems.join("; ")}`);
+	return value;
+}
+
+/** `value` and everything under it, frozen in place. */
+function deepFreeze(value) {
+	if (typeof value === "object" && value !== null) {
+		for (const child of Object.values(value)) deepFreeze(child);
+		Object.freeze(value);
+	}
 	return value;
 }
 
@@ -44,8 +58,7 @@ export function checkBrand(value) {
  * object, which a loader may still extend (jiti adds `default` to it on a later
  * import).
  */
-const checked = checkBrand(structuredClone(data));
-export const brand = Object.freeze({ ...checked, wordmark: Object.freeze([...checked.wordmark]), packages: Object.freeze({ ...checked.packages }) });
+export const brand = deepFreeze(checkBrand(structuredClone(data)));
 
 /** An internal event-channel or session-entry id: `<idPrefix>:<name>`. Changing the prefix orphans state in old sessions. */
 export function brandedId(name) {

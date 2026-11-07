@@ -102,7 +102,7 @@ declare module "*/brand.mjs" {
 		readonly productFile: string;
 		/** The theme seeded on first run. */
 		readonly theme: string;
-		/** The product's home page, quoted in user agents. */
+		/** The product's repository web URL (`https://github.com/<owner>/<repo>`): user agents, doc links under `/blob/master/`, and package.json's repository, homepage and bugs fields. */
 		readonly homepage: string;
 		/** The banner's tagline. */
 		readonly subtitle: string;
@@ -116,6 +116,15 @@ declare module "*/brand.mjs" {
 			/** The Homebrew formula, when the product ships one. */
 			readonly homebrewFormula?: string;
 		};
+		/** Each package's npm listing, stamped into its package.json (scripts/apply-brand.mjs). */
+		readonly packageInfo: {
+			readonly app: PackageInfo;
+			readonly extension: PackageInfo;
+		};
+	}
+	export interface PackageInfo {
+		readonly description: string;
+		readonly keywords: readonly string[];
 	}
 	export function checkBrand(value: unknown): Brand;
 	export const brand: Brand;
@@ -127,6 +136,15 @@ declare module "*/brand.mjs" {
 
 /** Types for the brand stamp (scripts/apply-brand.mjs). */
 declare module "*/apply-brand.mjs" {
-	export function stampExtension<T extends Record<string, unknown>>(pkg: T): T & { name: string };
-	export function stampApp(pkg: Record<string, unknown>): Record<string, unknown>;
+	/** The npm listing fields the stamp writes into both packages. */
+	export interface Listing {
+		name: string;
+		description: string;
+		keywords: string[];
+		repository: { type: "git"; url: string; directory?: string };
+		homepage: string;
+		bugs: { url: string };
+	}
+	export function stampExtension<T extends Record<string, unknown>>(pkg: T): Omit<T, keyof Listing> & Listing;
+	export function stampApp(pkg: Record<string, unknown>): Record<string, unknown> & Listing;
 }
