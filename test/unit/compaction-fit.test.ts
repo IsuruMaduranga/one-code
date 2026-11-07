@@ -21,7 +21,7 @@ import {
 	withoutUsage,
 } from "../../extensions/compaction/fit.ts";
 import { standaloneRequest } from "../../extensions/compaction/index.ts";
-import { compaction } from "../../profile/compaction/index.ts";
+import { compaction } from "../../profile/text/compaction/index.ts";
 
 const model = (contextWindow: number, maxTokens = 8000) => ({ contextWindow, maxTokens }) as Model<Api>;
 const user = (text: string): Message => ({ role: "user", content: text, timestamp: 1 });

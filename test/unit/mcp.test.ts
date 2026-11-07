@@ -15,7 +15,7 @@ import {
 	validateImageData,
 } from "../../extensions/mcp/schema.ts";
 import { createTailBuffer, mcpInstructionsReminder as instructionsWith } from "../../extensions/mcp/client.ts";
-import { mcp as mcpText } from "../../profile/mcp/index.ts";
+import { mcp as mcpText } from "../../profile/text/mcp/index.ts";
 import { TINY_GIF, TINY_JPEG, TINY_PNG, TINY_WEBP } from "./helpers/tiny-images.ts";
 
 /** The pure functions with One Code's text, as the extension passes it. */

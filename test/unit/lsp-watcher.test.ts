@@ -10,7 +10,7 @@ import {
 	markDelivered,
 	MAX_CHARS,
 } from "../../extensions/lsp/watcher.ts";
-import { lsp as lspText } from "../../profile/lsp/index.ts";
+import { lsp as lspText } from "../../profile/text/lsp/index.ts";
 
 const diag = (message: string, severity?: number, line = 0, character = 0, extra?: Partial<LspDiagnostic>): LspDiagnostic => ({
 	message,

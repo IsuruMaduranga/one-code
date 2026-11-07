@@ -1,11 +1,11 @@
 /**
- * One Code's compaction wording (profile/compaction/) where the golden
+ * One Code's compaction wording (profile/text/compaction/) where the golden
  * snapshot cannot reach it: a kept tail that opens on a tool result or a
  * bare tool call, and a tool result cleared to fit a standalone request. The
  * golden snapshot pins the manual and overflow requests and the stored summary.
  */
 import { describe, expect, it } from "vitest";
-import { compaction, keptTailNote } from "../../profile/compaction/index.ts";
+import { compaction, keptTailNote } from "../../profile/text/compaction/index.ts";
 
 describe("One Code's compaction text", () => {
 	it("names each kind of first kept message", () => {

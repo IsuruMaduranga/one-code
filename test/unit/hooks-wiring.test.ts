@@ -25,7 +25,7 @@ import { resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
 import { type HookBridge, SUBAGENT_HOOK_CHANNEL } from "../../extensions/hooks/subagent-bridge.ts";
 import { REMINDER_CHANNEL, wrapReminder } from "../../extensions/lib/reminders.ts";
 import { SKILL_INVOCATION_TYPE } from "../../extensions/skill/invoke.ts";
-import { hooks } from "../../profile/hooks/index.ts";
+import { hooks } from "../../profile/text/hooks/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
 const hookContextText = (event: CcHookEvent, text: string) => hooks.additionalContext({ event, text });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { describeChanges, FileTracker, RACY_STAMP_MS } from "../../extensions/file-tracker/tracker.ts";
-import { fileTracker } from "../../profile/file-tracker/index.ts";
+import { fileTracker } from "../../profile/text/file-tracker/index.ts";
 import { looksLikeAnthropicRequest, withClearThinking } from "../../extensions/context-management/index.ts";
 
 describe("FileTracker.status", () => {

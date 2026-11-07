@@ -17,7 +17,7 @@ import {
 	ONE_CODE_CWD_SENTENCE,
 	ONE_CODE_FILE_OPERATIONS,
 	powerShellToolDescription,
-} from "../../profile/shell/powershell-description.ts";
+} from "../../profile/text/shell/powershell-description.ts";
 
 const CAPTURE = "tools/powershell-tool-2.1.276-macos-pwsh7.json";
 

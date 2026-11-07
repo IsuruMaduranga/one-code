@@ -1,11 +1,11 @@
 /**
- * One Code's worktree-tool wording (profile/worktree/) for the results the
+ * One Code's worktree-tool wording (profile/text/worktree/) for the results the
  * golden snapshot cannot reach offline: a failing git, a checkout filter, a
  * worktree deleted under the session. The golden snapshot pins the bytes of
  * every other result.
  */
 import { describe, expect, it } from "vitest";
-import { worktree } from "../../profile/worktree/index.ts";
+import { worktree } from "../../profile/text/worktree/index.ts";
 
 const session = { path: "/repo/.claude/worktrees/wt", branch: "wt", originalCwd: "/repo" };
 

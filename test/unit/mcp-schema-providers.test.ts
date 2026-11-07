@@ -7,7 +7,7 @@ import { getJsonSchemaToolParameters, makeStrictJsonSchema, resolveJsonSchemaStr
 import { convertResponsesTools } from "@earendil-works/pi-ai/api/openai-responses-shared";
 import { convertTools as convertGoogleTools } from "@earendil-works/pi-ai/api/google-shared";
 import { jsonSchemaToTypeBox as convertSchema } from "../../extensions/mcp/schema.ts";
-import { mcp as mcpText } from "../../profile/mcp/index.ts";
+import { mcp as mcpText } from "../../profile/text/mcp/index.ts";
 
 /** One Code's description-cut label, as the extension passes it. */
 const jsonSchemaToTypeBox = (schema: Parameters<typeof convertSchema>[0]) => convertSchema(schema, mcpText.tool.descriptionCut);

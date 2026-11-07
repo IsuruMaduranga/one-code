@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { formatHiddenTaskWidget, formatTaskWidget, TaskStore, taskView } from "../../extensions/tasks/store.ts";
-import { tasks as text } from "../../profile/tasks/index.ts";
+import { tasks as text } from "../../profile/text/tasks/index.ts";
 
 describe("TaskStore", () => {
 	it("creates tasks with incrementing ids and pending status", () => {

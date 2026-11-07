@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ToldFact } from "../../extensions/lib/ledger/records.ts";
 import { mcpChangeNotices as changeNotices, mcpDelta as delta, mcpFacts as facts, type McpDelta, type McpSnapshot, mcpStartupNotices } from "../../extensions/mcp/announce.ts";
-import { mcp as mcpText } from "../../profile/mcp/index.ts";
+import { mcp as mcpText } from "../../profile/text/mcp/index.ts";
 
 /** The pure functions with One Code's text, as the extension passes it. */
 const mcpFacts = (snapshot: McpSnapshot) => facts(snapshot, mcpText);

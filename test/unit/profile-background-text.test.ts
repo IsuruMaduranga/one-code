@@ -1,5 +1,5 @@
 /**
- * One Code's background wording (profile/background/) for what the golden
+ * One Code's background wording (profile/text/background/) for what the golden
  * snapshot cannot reach: a full job store, a subagent's refusals, a wakeup
  * whose loop aged out or that had nothing to cancel, and what a background
  * monitor and task_stop say outside a one-shot run. The golden snapshot pins
@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { shownJob } from "../../extensions/background/cron.ts";
-import { background } from "../../profile/background/index.ts";
+import { background } from "../../profile/text/background/index.ts";
 
 const { cron, wakeup, monitor, tasks } = background;
 

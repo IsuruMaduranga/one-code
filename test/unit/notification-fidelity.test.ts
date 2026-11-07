@@ -33,7 +33,7 @@ import {
 	HAND_BACK_PREAMBLE,
 	TASK_NOTIFICATION_PREAMBLE,
 	TASK_NOTIFICATION_PREAMBLE_WITH_USER_TURN,
-} from "../../profile/notifications/index.ts";
+} from "../../profile/text/notifications/index.ts";
 
 describe("Claude Code 2.1.278 notification literals", () => {
 	it("agent-message envelope: opener, guard, reply hint, hand-back preamble", () => {

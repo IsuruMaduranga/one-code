@@ -13,7 +13,7 @@ import {
 	worktreeWriteGuardReason as writeRefusal,
 } from "../../extensions/lib/worktree-isolation.ts";
 import type { WorktreeGuardRefusal } from "../../extensions/worktree/text.ts";
-import { worktreeGuard } from "../../profile/worktree/guard.ts";
+import { worktreeGuard } from "../../profile/text/worktree/guard.ts";
 
 /** A guard's refusal in One Code's words, so each case checks the decision and the text the model reads. */
 const worded = (refusal: WorktreeGuardRefusal | undefined) => refusal && worktreeGuard.refusal(refusal);

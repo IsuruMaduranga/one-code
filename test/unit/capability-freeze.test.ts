@@ -14,7 +14,7 @@ import { pluginRoot } from "../../extensions/lib/plugin-root.ts";
 import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/reminders.ts";
 import { setSkillState } from "../../extensions/lib/skill-overrides.ts";
 import { listableSkillNames } from "../../extensions/skill/announce.ts";
-import { skill } from "../../profile/skill/index.ts";
+import { skill } from "../../profile/text/skill/index.ts";
 
 const SKILL_LISTING_HEADER = skill.listingHeader;
 import skillExtension from "../../extensions/skill/index.ts";

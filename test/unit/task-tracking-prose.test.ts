@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { USING_TOOLS as LONG_USING_TOOLS, USING_TOOLS_WITHOUT_TASK_TOOLS } from "../../profile/system-prompt/mid.ts";
-import { USING_TOOLS } from "../../profile/system-prompt/low.ts";
+import { USING_TOOLS as LONG_USING_TOOLS, USING_TOOLS_WITHOUT_TASK_TOOLS } from "../../profile/text/system-prompt/mid.ts";
+import { USING_TOOLS } from "../../profile/text/system-prompt/low.ts";
 
 /**
  * The long and tiny prompt registers each carry a line steering the model to

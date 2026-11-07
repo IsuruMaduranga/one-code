@@ -7,8 +7,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { userDenialKind, userDenialText } from "../../extensions/lib/user-denial.ts";
-import { toolCallCorruption } from "../../profile/tool-call-corruption/index.ts";
-import { toolResults } from "../../profile/tool-results/index.ts";
+import { toolCallCorruption } from "../../profile/text/tool-call-corruption/index.ts";
+import { toolResults } from "../../profile/text/tool-results/index.ts";
 
 describe("One Code's tool-result text", () => {
 	it("says when a large output could not be saved", () => {

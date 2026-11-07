@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import fileTrackerExtension from "../../extensions/file-tracker/index.ts";
 import { fileToolResultContent } from "../../extensions/file-tracker/results.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
-import { fileTracker } from "../../profile/file-tracker/index.ts";
+import { fileTracker } from "../../profile/text/file-tracker/index.ts";
 
 const STATE = " (file state is current in your context — no need to read it back)";
 const text = (t: string) => [{ type: "text", text: t }];

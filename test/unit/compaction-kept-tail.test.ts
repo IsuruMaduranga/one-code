@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { keptTailOf } from "../../extensions/compaction/index.ts";
-import { buildCompactionInstruction, keptTailNote } from "../../profile/compaction/index.ts";
+import { buildCompactionInstruction, keptTailNote } from "../../profile/text/compaction/index.ts";
 
 const user = (text: string) => ({ role: "user", content: text });
 const assistant = (text = "…") => ({ role: "assistant", content: [{ type: "text", text }] });

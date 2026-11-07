@@ -24,7 +24,7 @@ import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } f
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/reminders.ts";
 import { mcpFacts, type McpSnapshot } from "../../extensions/mcp/announce.ts";
 import type { McpFailure } from "../../extensions/mcp/text.ts";
-import { mcp as mcpText } from "../../profile/mcp/index.ts";
+import { mcp as mcpText } from "../../profile/text/mcp/index.ts";
 
 /** Render one request inside an epoch whose message 1 described `told`; the blocks MCP adds to its tail. */
 function renderInEpoch(events: { emit(channel: string, data: unknown): void }, told: McpSnapshot): string[] {

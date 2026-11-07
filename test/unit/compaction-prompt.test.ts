@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { extractSummary } from "../../extensions/compaction/prompt.ts";
-import { buildCompactionInstruction, COMPACTION_INSTRUCTION, continuationSummary } from "../../profile/compaction/index.ts";
+import { buildCompactionInstruction, COMPACTION_INSTRUCTION, continuationSummary } from "../../profile/text/compaction/index.ts";
 
 describe("COMPACTION_INSTRUCTION", () => {
 	it("carries the Claude Code prompt's load-bearing pieces", () => {

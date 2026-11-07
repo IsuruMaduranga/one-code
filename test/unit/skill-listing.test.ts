@@ -7,7 +7,7 @@ import {
 	skillListingText,
 	usageScore,
 } from "../../extensions/skill/listing.ts";
-import { skill } from "../../profile/skill/index.ts";
+import { skill } from "../../profile/text/skill/index.ts";
 
 describe("skillListingText (C4)", () => {
 	it("carries a multi-line description whole, so the 'Use when' trigger survives", () => {

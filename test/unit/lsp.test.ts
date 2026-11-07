@@ -21,7 +21,7 @@ import {
 	typescriptPreflight,
 	findTypescript,
 } from "../../extensions/lsp/servers.ts";
-import { lsp as lspText } from "../../profile/lsp/index.ts";
+import { lsp as lspText } from "../../profile/text/lsp/index.ts";
 
 /** The tool's result with One Code's words, as the extension passes them. */
 const formatDiagnostics = (path: string, list: LspDiagnostic[], limit?: number) => formatWith(path, list, lspText.diagnostics, limit);

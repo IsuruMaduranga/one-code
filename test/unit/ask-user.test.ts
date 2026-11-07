@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Answer, Question } from "../../extensions/ask-user/questions.ts";
-import { answerPairs, formatAnswers, formatDecline } from "../../profile/ask-user/index.ts";
+import { answerPairs, formatAnswers, formatDecline } from "../../profile/text/ask-user/index.ts";
 import {
 	applyWidgetKey,
 	collectAnswers,

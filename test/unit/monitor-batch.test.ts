@@ -9,7 +9,7 @@ import {
 	MonitorLineSplitter,
 	pushEvent,
 } from "../../extensions/background/monitor-batch.ts";
-import { monitor } from "../../profile/background/monitor.ts";
+import { monitor } from "../../profile/text/background/monitor.ts";
 
 describe("monitor batching", () => {
 	it("keeps at most MAX_LINES lines and counts the rest", () => {

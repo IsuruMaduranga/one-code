@@ -1,0 +1,42 @@
+/**
+ * One Code's tool-style text (the profile's `text.toolStyle`): Claude Code's
+ * Write description, short on frontier and workhorse, long on cheap and tiny
+ * (lib/tool-variants.ts), with One Code's tool names. "Overwriting an
+ * existing file you haven't read will fail" holds: the file tracker refuses
+ * it (file-tracker/tracker.ts). Read and edit keep pi's descriptions,
+ * because Claude Code's describe a different call shape (`file_path`,
+ * numbered lines, `old_string`); edit's gets the read rule appended.
+ */
+
+import type { ToolStyleText } from "../../../extensions/tool-style/text.ts";
+import { type ToolPassages, withoutOff } from "../../live-tools.ts";
+import type { LiveTools } from "../../../extensions/lib/live-tools.ts";
+
+export const WRITE_SHORT_DESCRIPTION = `Writes a file to the local filesystem, overwriting if one exists.
+
+When to use: creating a new file, or fully replacing one you've already read. Overwriting an existing file you haven't read will fail. For partial changes, use edit instead.`;
+
+export const WRITE_LONG_DESCRIPTION = `Writes a file to the local filesystem.
+
+Usage:
+- This tool will overwrite the existing file if there is one at the provided path.
+- If this is an existing file, you MUST use the read tool first to read the file's contents. This tool will fail if you did not read the file first.
+- Prefer the edit tool for modifying existing files — it only sends the diff. Only use this tool to create new files or for complete rewrites.
+- NEVER create documentation files (*.md) or README files unless explicitly requested by the User.
+- Only use emojis if the user explicitly requests it. Avoid writing emojis to files unless asked.`;
+
+const WRITE_PASSAGES: ToolPassages = {
+	edit: [" For partial changes, use edit instead.", "\n- Prefer the edit tool for modifying existing files — it only sends the diff. Only use this tool to create new files or for complete rewrites."],
+};
+
+/** The group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
+export const toolStyleText = (live: LiveTools): ToolStyleText => ({
+	writeDescription: (form) => withoutOff(form === "long" ? WRITE_LONG_DESCRIPTION : WRITE_SHORT_DESCRIPTION, live, WRITE_PASSAGES),
+	/**
+	 * pi's edit description plus the rule the file tracker enforces, which pi's
+	 * text does not state (write's does). Without it, GPT-6 models read with
+	 * `cat` and met the refusal first (2026-10-04 Codex self-test: 16 refused edits).
+	 */
+	editDescription: ({ base }) =>
+		`${base} The file must have been read in this conversation, with the read tool or a shell command that printed the whole file as it is on disk (such as cat), or the edit is refused; if it changed on disk since, read it again first.`,
+});

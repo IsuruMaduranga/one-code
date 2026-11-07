@@ -1,6 +1,6 @@
 /**
  * The questions ask_user_question asks and the answers it collects, as data
- * (pure). One Code's wording of the results is in profile/ask-user/.
+ * (pure). One Code's wording of the results is in profile/text/ask-user/.
  */
 
 export interface QuestionOption {

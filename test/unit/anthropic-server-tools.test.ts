@@ -6,7 +6,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runServerCall, serverCallUsage, tryNativeWeb } from "../../extensions/lib/anthropic-server-call.ts";
-import { nativeWeb } from "../../profile/native-web/index.ts";
+import { nativeWeb } from "../../profile/text/native-web/index.ts";
 import {
 	createServerCallAccumulator,
 	fetchOutcome,

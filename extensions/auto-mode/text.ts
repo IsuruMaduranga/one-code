@@ -62,7 +62,7 @@ export interface AutoModeText {
  * the insertion points the base fills: the `## Environment` slot lines after
  * `rulesetHead`, the user's hard-deny, soft-deny and allow rules after each
  * section, and the username in `sessionContext`. One Code's is Claude Code's
- * prompt, generated (profile/auto-mode/ruleset.ts).
+ * prompt, generated (profile/text/auto-mode/ruleset.ts).
  */
 export interface ClassifierRuleset {
 	rulesetHead: string;

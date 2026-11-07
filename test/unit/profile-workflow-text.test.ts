@@ -1,12 +1,12 @@
 /**
- * One Code's workflow wording (profile/workflow/) where the golden snapshot
+ * One Code's workflow wording (profile/text/workflow/) where the golden snapshot
  * cannot reach it: a background start, a stopped run's report with kept
  * worktrees, the stop reasons, and the script and call problems a one-shot
  * run does not hit. The golden snapshot pins the refusals, a determinism
  * failure and a completed run's report.
  */
 import { describe, expect, it } from "vitest";
-import { workflowText } from "../../profile/workflow/index.ts";
+import { workflowText } from "../../profile/text/workflow/index.ts";
 import { ALL_LIVE } from "./helpers/live.ts";
 
 const workflow = workflowText(ALL_LIVE);

@@ -3,7 +3,7 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import webFetchExtension from "../../extensions/web-fetch/index.ts";
 import { readerMessages } from "../../extensions/web-fetch/summarize.ts";
-import { webFetchText } from "../../profile/web-fetch/index.ts";
+import { webFetchText } from "../../profile/text/web-fetch/index.ts";
 import { logSideCallUsage } from "../../extensions/lib/side-call-usage.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { ALL_LIVE } from "./helpers/live.ts";

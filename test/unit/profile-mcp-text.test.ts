@@ -1,12 +1,12 @@
 /**
- * One Code's MCP wording (profile/mcp/) for the texts the golden snapshot
+ * One Code's MCP wording (profile/text/mcp/) for the texts the golden snapshot
  * cannot reach: the cut labels, the notices for a server that recovers,
  * connects late or drops, a failed refresh, and the failures and image
  * problems a stub server does not produce. The golden snapshot pins the bytes
  * of every other text.
  */
 import { describe, expect, it } from "vitest";
-import { mcp } from "../../profile/mcp/index.ts";
+import { mcp } from "../../profile/text/mcp/index.ts";
 
 describe("One Code's MCP text", () => {
 	it("labels a cut description with its full length, and cut instructions without", () => {

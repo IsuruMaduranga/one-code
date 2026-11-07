@@ -14,7 +14,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { DEFER_CHANNEL } from "../../extensions/lib/deferred.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { oneTurnHandbackSlot, subagentHandbackExtension, subagentHandbackTool } from "../../extensions/lib/subagent-handback.ts";
-import { handback } from "../../profile/handback/index.ts";
+import { handback } from "../../profile/text/handback/index.ts";
 import { childToolAllowlist } from "../../extensions/subagents/agents.ts";
 import { forkTaskMessage } from "../../extensions/subagents/outcome.ts";
 import { SubagentRuntime } from "../../extensions/subagents/runner.ts";

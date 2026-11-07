@@ -14,7 +14,7 @@ import { parseFrontmatterLoosely } from "../../extensions/lib/frontmatter.ts";
 import { productProjectSettingsPath, productSettingsPath, readWorkflowSettings } from "../../extensions/lib/product-settings.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { BUNDLED_SKILLS_DIR, scanSkills } from "../../extensions/lib/skill-scan.ts";
-import { WORKFLOW_DESCRIPTION_BODY, workflowDescription, workflowSizeLine } from "../../profile/workflow/description.ts";
+import { WORKFLOW_DESCRIPTION_BODY, workflowDescription, workflowSizeLine } from "../../profile/text/workflow/description.ts";
 import workflowExtension from "../../extensions/workflow/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 

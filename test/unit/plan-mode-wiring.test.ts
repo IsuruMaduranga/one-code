@@ -12,7 +12,7 @@ import { MODE_CHANNEL, PLAN_FILE_CHANNEL } from "../../extensions/lib/plan-mode-
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts";
 import planModeExtension from "../../extensions/plan-mode/index.ts";
-import { buildPlanModeReminder } from "../../profile/plan-mode/reminder.ts";
+import { buildPlanModeReminder } from "../../profile/text/plan-mode/reminder.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
 describe("plan-mode wiring", () => {

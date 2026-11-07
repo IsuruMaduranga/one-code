@@ -12,7 +12,7 @@ import {
 	typedSkillContent,
 	withoutDuplicateSkillCommands,
 } from "../../extensions/skill/invoke.ts";
-import { skill } from "../../profile/skill/index.ts";
+import { skill } from "../../profile/text/skill/index.ts";
 
 describe("parseSkillCommand", () => {
 	it("returns undefined for non-skill input", () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { RECENT_MESSAGE_WINDOW, recapLine, recentForRecap, REFERENCE_MARK } from "../../extensions/recap/prompt.ts";
-import { RECAP_PROMPT } from "../../profile/recap/index.ts";
+import { RECAP_PROMPT } from "../../profile/text/recap/index.ts";
 import { RecapScheduler, type TimerOps } from "../../extensions/recap/scheduler.ts";
 
 describe("recap prompt", () => {

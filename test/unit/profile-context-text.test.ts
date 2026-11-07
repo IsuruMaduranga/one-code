@@ -1,5 +1,5 @@
 /**
- * One Code's first-message context wording (profile/context/) where the
+ * One Code's first-message context wording (profile/text/context/) where the
  * golden snapshot cannot reach it: the date change, the notice that the
  * workspace moved on since the snapshot, a git status refreshed at a
  * compaction or cut at its cap, and the notes for an instruction file left
@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 import { compactionGitStatus, resumeFactsNotice } from "../../extensions/lib/context-facts.ts";
 import { clipGitStatus, formatGitStatus } from "../../extensions/lib/git-status.ts";
-import { context } from "../../profile/context/index.ts";
+import { context } from "../../profile/text/context/index.ts";
 
 describe("One Code's context text", () => {
 	it("tells a changed date without asking for an announcement", () => {

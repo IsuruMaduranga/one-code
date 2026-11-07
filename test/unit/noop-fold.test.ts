@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyNoopFolds, decideFold, type FoldEntry, foldSuffix } from "../../extensions/background/noop-fold.ts";
-import { loop } from "../../profile/background/loop.ts";
+import { loop } from "../../profile/text/background/loop.ts";
 
 const foldCompanion = (streak: number) => loop.foldNote({ streak });
 

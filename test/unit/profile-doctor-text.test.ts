@@ -1,10 +1,10 @@
 /**
- * One Code's `/doctor fix` prompt (profile/doctor/): the golden snapshot does
+ * One Code's `/doctor fix` prompt (profile/text/doctor/): the golden snapshot does
  * not run /doctor (its report names the machine's tool versions), so the
  * prompt's moving parts are checked here.
  */
 import { describe, expect, it } from "vitest";
-import { doctorText } from "../../profile/doctor/index.ts";
+import { doctorText } from "../../profile/text/doctor/index.ts";
 import type { FixPromptInput } from "../../extensions/doctor/text.ts";
 import { ALL_LIVE } from "./helpers/live.ts";
 

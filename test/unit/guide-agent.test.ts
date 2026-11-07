@@ -11,7 +11,7 @@ import { forwardSlashes } from "../../extensions/lib/paths.ts";
 import { decide } from "../../extensions/permissions/matcher.ts";
 import { discoverAgents } from "../../extensions/subagents/agents.ts";
 import { guideAgentDefinition as definition, guideSystemPrompt as systemPrompt, type GuideInput, listableName, settingsSetup } from "../../extensions/subagents/guide-agent.ts";
-import { GUIDE_AGENT } from "../../profile/subagents/guide-agent.ts";
+import { GUIDE_AGENT } from "../../profile/text/subagents/guide-agent.ts";
 
 /** One Code's profile always has a guide. */
 const guideAgentDefinition = (input: () => GuideInput) => definition(input)!;

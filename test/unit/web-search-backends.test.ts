@@ -19,7 +19,7 @@ import {
 	type FetchLike,
 	type SearchBackend,
 } from "../../extensions/web/backends.ts";
-import { webSearch } from "../../profile/web-search/index.ts";
+import { webSearch } from "../../profile/text/web-search/index.ts";
 
 /** The failure data a backend or the chain threw. */
 async function failureOf(work: Promise<unknown> | (() => unknown)): Promise<unknown> {

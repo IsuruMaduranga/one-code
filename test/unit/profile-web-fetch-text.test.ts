@@ -1,12 +1,12 @@
 /**
- * One Code's web_fetch wording (profile/web-fetch/) for the results the golden
+ * One Code's web_fetch wording (profile/text/web-fetch/) for the results the golden
  * snapshot cannot reach offline: a server-side answer, a reader that fails or
  * is cut short, a timeout, a network error, an oversized download. The golden
  * snapshot pins the bytes of every other result.
  */
 import { describe, expect, it } from "vitest";
 import type { ReaderFailure } from "../../extensions/web-fetch/text.ts";
-import { webFetchText } from "../../profile/web-fetch/index.ts";
+import { webFetchText } from "../../profile/text/web-fetch/index.ts";
 import { ALL_LIVE } from "./helpers/live.ts";
 
 const webFetch = webFetchText(ALL_LIVE);

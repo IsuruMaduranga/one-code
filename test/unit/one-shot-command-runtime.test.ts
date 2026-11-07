@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createUserMessageSender } from "../../extensions/lib/notifications.ts";
 import { ONE_SHOT_COMMAND_FAILED_CHANNEL } from "../../extensions/lib/interrupt.ts";
 import doctorExtension from "../../extensions/doctor/index.ts";
-import { INIT_PROMPT } from "../../profile/init/prompt.ts";
+import { INIT_PROMPT } from "../../profile/text/init/prompt.ts";
 import { promptCommandText } from "../../extensions/skill/invoke.ts";
 
 function deferred() {

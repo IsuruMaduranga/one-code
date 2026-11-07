@@ -4,9 +4,9 @@ import systemReminderExtension from "../../extensions/system-reminder/index.ts";
 import { deferredAddendumText } from "../../extensions/lib/deferred.ts";
 import { wrapReminder } from "../../extensions/lib/reminders.ts";
 import { subagentHandbackExtension } from "../../extensions/lib/subagent-handback.ts";
-import { handback } from "../../profile/handback/index.ts";
+import { handback } from "../../profile/text/handback/index.ts";
 import { withToolAdditions } from "../../extensions/lib/tool-additions.ts";
-import { toolSearchText } from "../../profile/tool-search/index.ts";
+import { toolSearchText } from "../../profile/text/tool-search/index.ts";
 
 const TOOLS_AVAILABLE = toolSearchText(ALL_LIVE).toolsAvailable;
 import { withTurnBudgetMessages } from "../../extensions/lib/turn-budget-layout.ts";

@@ -30,14 +30,14 @@ const PROTECTIVE: Record<string, string> = {
 
 /** The profile files that name one: One Code's provider, and words its callers fill in. */
 const PROFILE_FILES: Record<string, string> = {
-	"profile/auto-mode/ruleset.ts": "Claude Code's classifier ruleset verbatim, generated, never hand-edited",
+	"profile/text/auto-mode/ruleset.ts": "Claude Code's classifier ruleset verbatim, generated, never hand-edited",
 	"profile/claude-code/instructions.ts": "One Code's instruction view: sources.ts opens it only with the provider on",
 	"profile/claude-code/settings.ts": "Claude Code's settings paths and instructionFiles rule, for the provider",
 	"profile/claude-code/sources.ts": "One Code's source provider: switched off, its view only keeps Claude Code's locations out",
-	"profile/init/prompt.ts": "words only: the caller passes the target file (instructionTargets); INIT_PROMPT is the CLAUDE.md one",
-	"profile/doctor/fix-prompt.ts": "words only: names both modes' files, and says which the session reads",
-	"profile/subagents/agent-description.ts": "words only: the caller passes the config dir",
-	"profile/worktree/descriptions.ts": "words only: the caller passes the config dir",
+	"profile/text/init/prompt.ts": "words only: the caller passes the target file (instructionTargets); INIT_PROMPT is the CLAUDE.md one",
+	"profile/text/doctor/fix-prompt.ts": "words only: names both modes' files, and says which the session reads",
+	"profile/text/subagents/agent-description.ts": "words only: the caller passes the config dir",
+	"profile/text/worktree/descriptions.ts": "words only: the caller passes the config dir",
 };
 const CHECKED: Record<string, string> = { ...PROTECTIVE, ...PROFILE_FILES };
 

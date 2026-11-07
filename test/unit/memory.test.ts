@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { memoryDir, projectSlug } from "../../extensions/lib/memory.ts";
-import { memoryPromptSection } from "../../profile/system-prompt/memory.ts";
+import { memoryPromptSection } from "../../profile/text/system-prompt/memory.ts";
 import {
 	INDEX_MAX_CHARS,
 	INDEX_MAX_LINES,

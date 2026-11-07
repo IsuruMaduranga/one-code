@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { deferredAddendumText, stabilizeDeferredTools } from "../../extensions/lib/deferred.ts";
 import { wrapReminder } from "../../extensions/lib/reminders.ts";
 import { addendumNames, liftAddenda, supportsToolAdditions, withToolAdditions } from "../../extensions/lib/tool-additions.ts";
-import { toolSearchText } from "../../profile/tool-search/index.ts";
+import { toolSearchText } from "../../profile/text/tool-search/index.ts";
 import { ALL_LIVE } from "./helpers/live.ts";
 
 const toolSearch = toolSearchText(ALL_LIVE);

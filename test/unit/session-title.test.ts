@@ -8,7 +8,7 @@ import {
 	SESSION_TEXT_LIMIT,
 	sessionTitleInput as titleInput,
 } from "../../extensions/session-title/title.ts";
-import { SESSION_TITLE_LANGUAGE_NOTE, SESSION_TITLE_PROMPT, sessionTitle } from "../../profile/session-title/index.ts";
+import { SESSION_TITLE_LANGUAGE_NOTE, SESSION_TITLE_PROMPT, sessionTitle } from "../../profile/text/session-title/index.ts";
 
 /** The naming request's user message in One Code's words. */
 const sessionTitleInput = (text: string) => titleInput(sessionTitle, text);

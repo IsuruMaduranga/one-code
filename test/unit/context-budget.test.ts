@@ -9,7 +9,7 @@ import contextBudgetExtension from "../../extensions/context-budget/index.ts";
 import systemReminderExtension from "../../extensions/system-reminder/index.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
-import { contextBudget } from "../../profile/context-budget/index.ts";
+import { contextBudget } from "../../profile/text/context-budget/index.ts";
 
 describe("turnTokenBudget", () => {
 	it("is Claude Code's 15,000,000 unless CC_TOTAL_TOKENS_BUDGET names a positive number", () => {

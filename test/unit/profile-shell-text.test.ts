@@ -1,12 +1,12 @@
 /**
- * One Code's shell wording (profile/shell/) where the golden snapshot cannot
+ * One Code's shell wording (profile/text/shell/) where the golden snapshot cannot
  * reach it: the sleep and polling-loop blocks (the permission gate stops
  * those calls first in a one-shot run), PowerShell's blocks, a background
  * start, and a run ended by a signal. The golden snapshot pins the other
  * bash blocks and both one-shot background results.
  */
 import { describe, expect, it } from "vitest";
-import { shellText } from "../../profile/shell/index.ts";
+import { shellText } from "../../profile/text/shell/index.ts";
 import { ALL_LIVE } from "./helpers/live.ts";
 
 const shell = shellText(ALL_LIVE);

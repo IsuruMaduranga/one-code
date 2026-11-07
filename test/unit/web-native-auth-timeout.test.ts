@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { tryNativeWeb } from "../../extensions/lib/anthropic-server-call.ts";
 import { fetchOutcome, nativeFetchBody } from "../../extensions/lib/anthropic-server-tools.ts";
-import { nativeWeb } from "../../profile/native-web/index.ts";
+import { nativeWeb } from "../../profile/text/native-web/index.ts";
 
 const model = { provider: "anthropic", api: "anthropic-messages", id: "claude-sonnet-4-6", baseUrl: "https://api.anthropic.com", cost: { input: 3, output: 15 } } as any;
 

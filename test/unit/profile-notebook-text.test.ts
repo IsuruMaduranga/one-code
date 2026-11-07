@@ -1,10 +1,10 @@
 /**
- * One Code's notebook_edit wording (profile/notebook/): the hints a weak tier
+ * One Code's notebook_edit wording (profile/text/notebook/): the hints a weak tier
  * needs, in the right places (review M4, code-review F3). The exact bytes of
  * every result are pinned by the golden snapshot.
  */
 import { describe, expect, it } from "vitest";
-import { notebook } from "../../profile/notebook/index.ts";
+import { notebook } from "../../profile/text/notebook/index.ts";
 
 const cells = [
 	{ label: "aaa", type: "markdown" },

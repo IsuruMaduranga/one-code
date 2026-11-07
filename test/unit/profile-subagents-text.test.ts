@@ -1,5 +1,5 @@
 /**
- * One Code's subagent wording (profile/subagents/, profile/subagent-models/)
+ * One Code's subagent wording (profile/text/subagents/, profile/text/subagent-models/)
  * where the golden snapshot cannot reach it: the nested Agent tool, the
  * launch lines of a background run, a resident's SendMessage results, the
  * run failures and the catalog's tools clauses. The golden snapshot pins the
@@ -7,8 +7,8 @@
  * spawned-agents list, a missing run, an inline resume and a fork's framing.
  */
 import { describe, expect, it } from "vitest";
-import { subagentModelsText } from "../../profile/subagent-models/index.ts";
-import { subagentsText } from "../../profile/subagents/index.ts";
+import { subagentModelsText } from "../../profile/text/subagent-models/index.ts";
+import { subagentsText } from "../../profile/text/subagents/index.ts";
 import { ALL_LIVE } from "./helpers/live.ts";
 
 const subagentModels = subagentModelsText(ALL_LIVE);

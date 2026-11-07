@@ -1,5 +1,5 @@
 /**
- * One Code's permission-gate wording (profile/permissions/) where the golden
+ * One Code's permission-gate wording (profile/text/permissions/) where the golden
  * snapshot cannot reach it: the dontAsk and outside-read refusals, the
  * classifier's timeout, the stops and the in-process child gate. The golden
  * snapshot pins the non-interactive, plan-mode, deny-rule and conflicting-path
@@ -7,7 +7,7 @@
  * announcement and auto mode's standing note.
  */
 import { describe, expect, it } from "vitest";
-import { permissionsText } from "../../profile/permissions/index.ts";
+import { permissionsText } from "../../profile/text/permissions/index.ts";
 import { ALL_LIVE } from "./helpers/live.ts";
 
 const permissions = permissionsText(ALL_LIVE);

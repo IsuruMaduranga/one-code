@@ -19,7 +19,7 @@ import { settingsSources } from "../../extensions/lib/claude-settings.ts";
 import { instructionFileNames, instructionTargets, openInstructions } from "../../extensions/lib/instructions.ts";
 import { autoModeSettingsFiles } from "../../extensions/auto-mode/config.ts";
 import { isClaudeLocation } from "../../extensions/lib/paths.ts";
-import { INIT_PROMPT, initPrompt } from "../../profile/init/prompt.ts";
+import { INIT_PROMPT, initPrompt } from "../../profile/text/init/prompt.ts";
 import { profileModuleKey, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile.ts";
 import { shareModuleForTest } from "../../extensions/lib/shared-module.ts";
 import { configDirs, projectConfigDir, type SourceProvider, userConfigDir } from "../../extensions/lib/sources.ts";

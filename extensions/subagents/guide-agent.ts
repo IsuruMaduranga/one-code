@@ -1,6 +1,6 @@
 /**
  * The profile's built-in guide agent (One Code's `one-code-guide`,
- * profile/subagents/guide-agent.ts): a read-only agent the model spawns when
+ * profile/text/subagents/guide-agent.ts): a read-only agent the model spawns when
  * the user asks how the product works. The profile supplies its name,
  * description, tools and prompt (`SubagentsText.guideAgent`); a profile
  * without one has no guide. The base gathers what the prompt needs at spawn

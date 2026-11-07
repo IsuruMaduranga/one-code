@@ -5,53 +5,54 @@
  * (extensions/lib/profile-contract.ts).
  *
  * One Code runs every feature and keeps each tool's base switches. Its text
- * lives beside this file, one folder per text group; claude-code/ holds the
- * code that reads Claude Code's own files (the source provider).
+ * lives in text/, one folder per owning feature; agents/, skills/ and themes/
+ * are its bundled catalogs; claude-code/ holds the code that reads
+ * Claude Code's own files (the source provider).
  */
 
 import type { Profile } from "../extensions/lib/profile-contract.ts";
-import { artifactsText } from "./artifacts/index.ts";
-import { askUserText } from "./ask-user/index.ts";
-import { autoModeText } from "./auto-mode/index.ts";
-import { classifier } from "./auto-mode/classifier.ts";
-import { autoModeSetup } from "./auto-mode/setup.ts";
-import { background } from "./background/index.ts";
-import { btw } from "./btw/index.ts";
-import { compaction } from "./compaction/index.ts";
-import { context } from "./context/index.ts";
-import { contextBudget } from "./context-budget/index.ts";
-import { doctorText } from "./doctor/index.ts";
-import { effort } from "./effort/index.ts";
-import { fileTracker } from "./file-tracker/index.ts";
-import { handback } from "./handback/index.ts";
-import { hooks } from "./hooks/index.ts";
-import { init } from "./init/index.ts";
-import { lsp } from "./lsp/index.ts";
-import { mcp } from "./mcp/index.ts";
-import { memory } from "./memory/index.ts";
-import { nativeWeb } from "./native-web/index.ts";
-import { notebook } from "./notebook/index.ts";
-import { notificationsText } from "./notifications/index.ts";
-import { permissionsText } from "./permissions/index.ts";
-import { planModeText } from "./plan-mode/index.ts";
-import { plugins } from "./plugins/index.ts";
-import { recap } from "./recap/index.ts";
-import { sessionTitle } from "./session-title/index.ts";
-import { shellText } from "./shell/index.ts";
-import { skill } from "./skill/index.ts";
-import { subagentModelsText } from "./subagent-models/index.ts";
-import { subagentsText } from "./subagents/index.ts";
-import { systemPromptText } from "./system-prompt/index.ts";
-import { tasks } from "./tasks/index.ts";
-import { toolCallCorruption } from "./tool-call-corruption/index.ts";
-import { toolResults } from "./tool-results/index.ts";
-import { toolSearchText } from "./tool-search/index.ts";
-import { toolStyleText } from "./tool-style/index.ts";
-import { webFetchText } from "./web-fetch/index.ts";
-import { webSearch } from "./web-search/index.ts";
-import { workflowText } from "./workflow/index.ts";
-import { worktreeGuard } from "./worktree/guard.ts";
-import { worktree } from "./worktree/index.ts";
+import { artifactsText } from "./text/artifacts/index.ts";
+import { askUserText } from "./text/ask-user/index.ts";
+import { autoModeText } from "./text/auto-mode/index.ts";
+import { classifier } from "./text/auto-mode/classifier.ts";
+import { autoModeSetup } from "./text/auto-mode/setup.ts";
+import { background } from "./text/background/index.ts";
+import { btw } from "./text/btw/index.ts";
+import { compaction } from "./text/compaction/index.ts";
+import { context } from "./text/context/index.ts";
+import { contextBudget } from "./text/context-budget/index.ts";
+import { doctorText } from "./text/doctor/index.ts";
+import { effort } from "./text/effort/index.ts";
+import { fileTracker } from "./text/file-tracker/index.ts";
+import { handback } from "./text/handback/index.ts";
+import { hooks } from "./text/hooks/index.ts";
+import { init } from "./text/init/index.ts";
+import { lsp } from "./text/lsp/index.ts";
+import { mcp } from "./text/mcp/index.ts";
+import { memory } from "./text/memory/index.ts";
+import { nativeWeb } from "./text/native-web/index.ts";
+import { notebook } from "./text/notebook/index.ts";
+import { notificationsText } from "./text/notifications/index.ts";
+import { permissionsText } from "./text/permissions/index.ts";
+import { planModeText } from "./text/plan-mode/index.ts";
+import { plugins } from "./text/plugins/index.ts";
+import { recap } from "./text/recap/index.ts";
+import { sessionTitle } from "./text/session-title/index.ts";
+import { shellText } from "./text/shell/index.ts";
+import { skill } from "./text/skill/index.ts";
+import { subagentModelsText } from "./text/subagent-models/index.ts";
+import { subagentsText } from "./text/subagents/index.ts";
+import { systemPromptText } from "./text/system-prompt/index.ts";
+import { tasks } from "./text/tasks/index.ts";
+import { toolCallCorruption } from "./text/tool-call-corruption/index.ts";
+import { toolResults } from "./text/tool-results/index.ts";
+import { toolSearchText } from "./text/tool-search/index.ts";
+import { toolStyleText } from "./text/tool-style/index.ts";
+import { webFetchText } from "./text/web-fetch/index.ts";
+import { webSearch } from "./text/web-search/index.ts";
+import { workflowText } from "./text/workflow/index.ts";
+import { worktreeGuard } from "./text/worktree/guard.ts";
+import { worktree } from "./text/worktree/index.ts";
 
 export const profile: Profile = {
 	features: {},

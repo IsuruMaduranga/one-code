@@ -1,12 +1,12 @@
 /**
- * One Code's auto-mode wording (profile/auto-mode/) where the golden
+ * One Code's auto-mode wording (profile/text/auto-mode/) where the golden
  * snapshot cannot reach it: the firmer note, the retry note, the classifier
  * reasons a fixture cannot provoke, and the floor's pattern and catalog
  * wording. The golden snapshot pins the note, three classifier verdicts and
  * the floor's block of a settings write.
  */
 import { describe, expect, it } from "vitest";
-import { autoModeText } from "../../profile/auto-mode/index.ts";
+import { autoModeText } from "../../profile/text/auto-mode/index.ts";
 import { ALL_LIVE } from "./helpers/live.ts";
 
 const autoMode = autoModeText(ALL_LIVE);

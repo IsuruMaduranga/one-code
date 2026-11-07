@@ -1,11 +1,11 @@
 /**
- * One Code's artifact wording (profile/artifacts/) for what the golden
+ * One Code's artifact wording (profile/text/artifacts/) for what the golden
  * snapshot cannot reach: an opened browser, autoOpen off, a delete the user
  * answers, a long list, and the store's own failures. The golden snapshot
  * pins the bytes of every other artifact text.
  */
 import { describe, expect, it } from "vitest";
-import { artifactsText } from "../../profile/artifacts/index.ts";
+import { artifactsText } from "../../profile/text/artifacts/index.ts";
 import { ALL_LIVE } from "./helpers/live.ts";
 
 const artifacts = artifactsText(ALL_LIVE);

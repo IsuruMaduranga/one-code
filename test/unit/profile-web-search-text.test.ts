@@ -1,13 +1,13 @@
 /**
- * One Code's web_search and server-side web wording (profile/web-search/,
- * profile/native-web/) for the results the golden snapshot cannot reach
+ * One Code's web_search and server-side web wording (profile/text/web-search/,
+ * profile/text/native-web/) for the results the golden snapshot cannot reach
  * offline: the provider's own search answering, a cut-off server-side
  * answer, and the failures a canned backend does not produce. The golden
  * snapshot pins the bytes of every other result.
  */
 import { describe, expect, it } from "vitest";
-import { nativeWeb } from "../../profile/native-web/index.ts";
-import { webSearch } from "../../profile/web-search/index.ts";
+import { nativeWeb } from "../../profile/text/native-web/index.ts";
+import { webSearch } from "../../profile/text/web-search/index.ts";
 
 describe("One Code's web_search text", () => {
 	it("marks a server-side answer cut off at the output limit", () => {

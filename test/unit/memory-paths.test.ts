@@ -8,7 +8,7 @@ import { resolveThroughLinks } from "../../extensions/auto-mode/paths.ts";
 import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
 import { projectMemoryDir } from "../../extensions/lib/memory.ts";
 import { INDEX_MAX_CHARS, INDEX_MAX_LINES } from "../../extensions/lib/memory-content.ts";
-import { memory } from "../../profile/memory/index.ts";
+import { memory } from "../../profile/text/memory/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 

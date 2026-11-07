@@ -1,7 +1,7 @@
 /**
  * The auto-mode classifier's prompt, assembled from the profile's `classifier`
  * text (One Code's: Claude Code's classifier prompt, generated into
- * profile/auto-mode/ruleset.ts, never hand-edited). The base owns the
+ * profile/text/auto-mode/ruleset.ts, never hand-edited). The base owns the
  * insertion points: the `## Environment` slot lines (AutoModeConfig.environment),
  * the user's rules appended at the end of the hard-deny, soft-deny and allow
  * lists (exactly where Claude Code's own `/auto-mode-setup` config lands), the

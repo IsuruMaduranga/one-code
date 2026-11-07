@@ -1,11 +1,11 @@
 /**
- * One Code's hooks wording (profile/hooks/) for what the golden snapshot
+ * One Code's hooks wording (profile/text/hooks/) for what the golden snapshot
  * cannot reach: a hook cancelled with its turn. The golden snapshot pins the
  * bytes of every other text (golden-hook.mjs); this also keeps the formatter
  * notice's guidance, which a weak model needs to read before it acts.
  */
 import { describe, expect, it } from "vitest";
-import { hooks } from "../../profile/hooks/index.ts";
+import { hooks } from "../../profile/text/hooks/index.ts";
 
 describe("One Code's hooks text", () => {
 	it("words a cancelled hook and a stated reason as they come", () => {

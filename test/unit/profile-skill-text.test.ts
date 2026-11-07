@@ -1,11 +1,11 @@
 /**
- * One Code's skill wording (profile/skill/) for the results the golden
+ * One Code's skill wording (profile/text/skill/) for the results the golden
  * snapshot cannot reach: an ambiguous plugin skill name, an unreadable skill
  * and the listing for a session that reads skill files with the shell. The
  * golden snapshot pins the bytes of every other text.
  */
 import { describe, expect, it } from "vitest";
-import { skill } from "../../profile/skill/index.ts";
+import { skill } from "../../profile/text/skill/index.ts";
 
 describe("One Code's skill text", () => {
 	it("asks for the full name when plugins share a skill name", () => {

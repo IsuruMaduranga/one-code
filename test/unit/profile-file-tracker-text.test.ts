@@ -1,11 +1,11 @@
 /**
- * One Code's file-tracker wording (profile/file-tracker/) where the golden
+ * One Code's file-tracker wording (profile/text/file-tracker/) where the golden
  * snapshot cannot reach it: a notice after a resume or reload, an agent with
  * no name, and an excerpt with nothing left out. The golden snapshot pins
  * the bytes of everything a one-shot run and the session scenario reach.
  */
 import { describe, expect, it } from "vitest";
-import { fileTracker } from "../../profile/file-tracker/index.ts";
+import { fileTracker } from "../../profile/text/file-tracker/index.ts";
 
 const excerpt = { firstChangedLine: 1, numbered: "1\tnew", moreLines: 0 };
 

@@ -125,7 +125,7 @@ export const agentNote = (): string => notificationWords().agentNote;
  * the auto-mode variant (the warning sits above the report in that message).
  * "SubagentHandback" is CC's name for the call a subagent delivers its report
  * through; One Code has no tool by that name, and the reading model only needs
- * the correlation, so the wording stays CC's (profile/notifications/).
+ * the correlation, so the wording stays CC's (profile/text/notifications/).
  */
 export function handBackPointer(from: string, flagged: boolean): string {
 	return notificationWords().handBackPointer({ from, flagged });

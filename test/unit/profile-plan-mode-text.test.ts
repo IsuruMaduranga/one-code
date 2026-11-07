@@ -1,10 +1,10 @@
 /**
- * One Code's plan-mode wording (profile/plan-mode/) for the results the
+ * One Code's plan-mode wording (profile/text/plan-mode/) for the results the
  * golden session cannot reach: no user to approve, and a plan too large to
  * re-attach. The golden snapshot pins the bytes of every other text.
  */
 import { describe, expect, it } from "vitest";
-import { planModeText } from "../../profile/plan-mode/index.ts";
+import { planModeText } from "../../profile/text/plan-mode/index.ts";
 import { ALL_LIVE } from "./helpers/live.ts";
 
 const planMode = planModeText(ALL_LIVE);
