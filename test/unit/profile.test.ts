@@ -20,6 +20,7 @@ import { WITHHOLD_CHANNEL } from "../../extensions/lib/deferred.ts";
 import toolSearchExtension from "../../extensions/tool-search/index.ts";
 import { createFakePi } from "./helpers/fake-pi.ts";
 import { makeToolSearchFakePi } from "./helpers/tool-search-fake-pi.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 const empty: Profile = { features: {}, tools: {}, childExtensions: [], text: shippedProfile.text };
 const use = (profile: Partial<Profile>, env: NodeJS.ProcessEnv = {}) =>
@@ -38,7 +39,7 @@ describe("resolveProfile", () => {
 	});
 
 	it("ONECODE_TOOLS_OFF only turns tools off", () => {
-		const resolved = resolveProfile({ ...empty, tools: { web_fetch: { deferred: false } } }, { ONECODE_TOOLS_OFF: "web_fetch, notebook_edit" }, "/p");
+		const resolved = resolveProfile({ ...empty, tools: { web_fetch: { deferred: false } } }, { [envName("TOOLS_OFF")]: "web_fetch, notebook_edit" }, "/p");
 		expect(resolved.tools.get("web_fetch")).toEqual({ deferred: false, enabled: false });
 		expect(resolved.tools.get("notebook_edit")).toEqual({ enabled: false });
 	});
@@ -46,24 +47,24 @@ describe("resolveProfile", () => {
 	it("pins every tool a child cannot work without", () => {
 		for (const name of ALLOWLIST_ESSENTIALS) expect(PINNED_TOOLS.has(name), name).toBe(true);
 		expect(() => resolveProfile({ ...empty, tools: { SubagentHandback: { enabled: false } } }, {}, "/p")).toThrow(/"SubagentHandback" cannot be turned off/);
-		expect(() => resolveProfile(empty, { ONECODE_TOOLS_OFF: "structured_output" }, "/p")).toThrow(/"structured_output" cannot be turned off/);
+		expect(() => resolveProfile(empty, { [envName("TOOLS_OFF")]: "structured_output" }, "/p")).toThrow(/"structured_output" cannot be turned off/);
 	});
 
 	it("lets only a profile, never the environment, turn off a guard feature", () => {
 		expect(resolveProfile({ ...empty, features: { hooks: false } }, {}, "/p").features.has("hooks")).toBe(false);
-		expect(() => resolveProfile(empty, { ONECODE_FEATURES_OFF: "hooks" }, "/p")).toThrow(/cannot turn off "hooks": it guards tool calls/);
-		expect(() => resolveProfile(empty, { ONECODE_FEATURES_OFF: "file-tracker" }, "/p")).toThrow(/cannot turn off "file-tracker"/);
+		expect(() => resolveProfile(empty, { [envName("FEATURES_OFF")]: "hooks" }, "/p")).toThrow(/cannot turn off "hooks": it guards tool calls/);
+		expect(() => resolveProfile(empty, { [envName("FEATURES_OFF")]: "file-tracker" }, "/p")).toThrow(/cannot turn off "file-tracker"/);
 	});
 
 	it("refuses turning off or deferring tool_search", () => {
 		expect(() => resolveProfile({ ...empty, tools: { tool_search: { enabled: false } } }, {}, "/p")).toThrow(/"tool_search" cannot be turned off/);
 		expect(() => resolveProfile({ ...empty, tools: { tool_search: { deferred: true } } }, {}, "/p")).toThrow(/"tool_search" cannot be deferred/);
-		expect(() => resolveProfile(empty, { ONECODE_TOOLS_OFF: "tool_search" }, "/p")).toThrow(/cannot be turned off/);
+		expect(() => resolveProfile(empty, { [envName("TOOLS_OFF")]: "tool_search" }, "/p")).toThrow(/cannot be turned off/);
 	});
 
 	it("merges ONECODE_FEATURES_OFF and reports every problem at once", () => {
-		expect(resolveProfile(empty, { ONECODE_FEATURES_OFF: "mcp" }, "/p").features.has("mcp")).toBe(false);
-		expect(() => resolveProfile({ ...empty, tools: { tool_search: { enabled: false } } }, { ONECODE_FEATURES_OFF: "ledger,nope" }, "/p")).toThrow(
+		expect(resolveProfile(empty, { [envName("FEATURES_OFF")]: "mcp" }, "/p").features.has("mcp")).toBe(false);
+		expect(() => resolveProfile({ ...empty, tools: { tool_search: { enabled: false } } }, { [envName("FEATURES_OFF")]: "ledger,nope" }, "/p")).toThrow(
 			/unknown feature "nope".*"ledger" is part of the safety core.*"tool_search" cannot be turned off/,
 		);
 	});

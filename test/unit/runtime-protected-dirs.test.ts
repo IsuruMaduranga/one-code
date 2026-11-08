@@ -10,20 +10,21 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { claudeConfigDir, productStateDir } from "../../extensions/lib/paths.ts";
 import { runtimeProtectedDirs } from "../../extensions/lib/permission-gate.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 const savedClaude = process.env.CLAUDE_CONFIG_DIR;
-const savedState = process.env.ONECODE_STATE_DIR;
+const savedState = process.env[envName("STATE_DIR")];
 afterEach(() => {
 	if (savedClaude === undefined) delete process.env.CLAUDE_CONFIG_DIR;
 	else process.env.CLAUDE_CONFIG_DIR = savedClaude;
-	if (savedState === undefined) delete process.env.ONECODE_STATE_DIR;
-	else process.env.ONECODE_STATE_DIR = savedState;
+	if (savedState === undefined) delete process.env[envName("STATE_DIR")];
+	else process.env[envName("STATE_DIR")] = savedState;
 });
 
 describe("runtimeProtectedDirs", () => {
 	it("includes Claude Code's config dir and One Code's state dir", () => {
 		delete process.env.CLAUDE_CONFIG_DIR;
-		delete process.env.ONECODE_STATE_DIR;
+		delete process.env[envName("STATE_DIR")];
 		const dirs = runtimeProtectedDirs();
 		expect(dirs).toContain(claudeConfigDir());
 		expect(dirs).toContain(productStateDir());
@@ -31,7 +32,7 @@ describe("runtimeProtectedDirs", () => {
 
 	it("follows a relocated CLAUDE_CONFIG_DIR / ONECODE_STATE_DIR", () => {
 		process.env.CLAUDE_CONFIG_DIR = "/tmp/relocated-cc-config";
-		process.env.ONECODE_STATE_DIR = "/tmp/relocated-onecode-state";
+		process.env[envName("STATE_DIR")] = "/tmp/relocated-onecode-state";
 		const dirs = runtimeProtectedDirs();
 		expect(dirs).toContain("/tmp/relocated-cc-config");
 		expect(dirs).toContain("/tmp/relocated-onecode-state");

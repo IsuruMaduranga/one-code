@@ -7,6 +7,7 @@ import permissionsExtension from "../../extensions/permissions/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { pinCatalog } from "./catalog-fixture.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 /** pi's RPC dialogs only dismiss on abort when the extension supplies a signal. */
 function rpcDialog<T>(options: { signal?: AbortSignal } | undefined, cancelled: T): Promise<T> {
@@ -26,7 +27,7 @@ describe("RPC permission prompt cancellation", () => {
 		root = mkdtempSync(join(tmpdir(), "rpc-permissions-"));
 		stubHome(join(root, "home"));
 		vi.spyOn(os, "homedir").mockReturnValue(join(root, "home"));
-		vi.stubEnv("ONECODE_STATE_DIR", join(root, "state"));
+		vi.stubEnv(envName("STATE_DIR"), join(root, "state"));
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(root, "agent"));
 	});
 	afterEach(() => {

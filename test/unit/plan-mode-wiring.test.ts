@@ -14,6 +14,7 @@ import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts
 import planModeExtension from "../../extensions/plan-mode/index.ts";
 import { buildPlanModeReminder } from "../../profile/text/plan-mode/reminder.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 describe("plan-mode wiring", () => {
 	let fake: FakePi;
@@ -23,7 +24,7 @@ describe("plan-mode wiring", () => {
 
 	beforeEach(() => {
 		stateDir = mkdtempSync(join(tmpdir(), "plan-mode-wiring-"));
-		vi.stubEnv("ONECODE_STATE_DIR", stateDir);
+		vi.stubEnv(envName("STATE_DIR"), stateDir);
 		fake = createFakePi();
 		reminders.length = 0;
 		planFiles.length = 0;
@@ -190,7 +191,7 @@ describe("exit_plan_mode and the mode before planning (PERMISSIONS-REVIEW-2026-0
 
 	beforeEach(() => {
 		stateDir = mkdtempSync(join(tmpdir(), "plan-mode-exit-"));
-		vi.stubEnv("ONECODE_STATE_DIR", stateDir);
+		vi.stubEnv(envName("STATE_DIR"), stateDir);
 		fake = createFakePi();
 		modeRequests.length = 0;
 		fake.events.on(MODE_CHANNEL, (data) => modeRequests.push(data as never));

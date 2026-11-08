@@ -9,6 +9,7 @@ import { SUBAGENT_HOOK_CHANNEL, type HookBridge } from "../../extensions/hooks/s
 import { shellQuote } from "../../extensions/lib/shell-quote.ts";
 import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 const state = vi.hoisted(() => ({ home: `/nonexistent/one-code-hooks-worktree-${Math.random().toString(36).slice(2)}` }));
 vi.mock("node:os", async (importOriginal) => {
@@ -38,7 +39,7 @@ beforeEach(() => {
 	observations = join(root, "observations.jsonl");
 	for (const dir of [project, worktree, config]) mkdirSync(dir);
 	vi.stubEnv("CLAUDE_CONFIG_DIR", config);
-	vi.stubEnv("ONECODE_STATE_DIR", join(root, "state"));
+	vi.stubEnv(envName("STATE_DIR"), join(root, "state"));
 	resetHookSettingsCache();
 	const script = join(root, "hook.cjs");
 	writeFileSync(script, `const fs = require("node:fs");

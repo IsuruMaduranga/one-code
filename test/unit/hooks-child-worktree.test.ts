@@ -7,6 +7,7 @@ import { resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
 import { type HookBridge, SUBAGENT_HOOK_CHANNEL } from "../../extensions/hooks/subagent-bridge.ts";
 import { hashProjectHooks, persistApproval, resetTrustSessionState } from "../../extensions/hooks/trust.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 const state = vi.hoisted(() => ({ home: `/nonexistent/one-code-child-hooks-${Math.random().toString(36).slice(2)}` }));
 vi.mock("node:os", async (importOriginal) => {
@@ -28,7 +29,7 @@ describe("child hooks in a worktree", () => {
 		config = join(root, "config");
 		for (const dir of [parent, worktree, config]) mkdirSync(dir);
 		vi.stubEnv("CLAUDE_CONFIG_DIR", config);
-		vi.stubEnv("ONECODE_STATE_DIR", join(root, "state"));
+		vi.stubEnv(envName("STATE_DIR"), join(root, "state"));
 		resetHookSettingsCache();
 		resetTrustSessionState();
 	});

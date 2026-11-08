@@ -10,6 +10,7 @@ import { sessionResultsDir } from "../../extensions/lib/persisted-output.ts";
 import { persistProjectAllowApproval } from "../../extensions/permissions/project-trust.ts";
 import { buildGate as buildGateHarness } from "./helpers/permission-gate-harness.ts";
 import { POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 const buildGate = (...args: Parameters<typeof buildGateHarness>) => buildGateHarness(...args).handler;
 
@@ -170,7 +171,7 @@ describe("permissionGateFactory — mode, ask rules, project consent (P8/P10)", 
 
 	it("a repo's own allow rules count only with the user's stored consent", async () => {
 		const store = mkdtempSync(join(os.tmpdir(), "gate-state-"));
-		vi.stubEnv("ONECODE_STATE_DIR", store);
+		vi.stubEnv(envName("STATE_DIR"), store);
 		const project = { permissions: { allow: ["Bash(curl:*)"] } };
 		const untrusted = buildGateHarness({ permissions: {} }, undefined, project);
 		expect((await untrusted.handler({ toolName: "bash", input: { command: "curl https://example.com" } }))?.block).toBe(true);

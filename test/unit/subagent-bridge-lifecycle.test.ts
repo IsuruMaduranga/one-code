@@ -8,6 +8,7 @@ import permissionsExtension from "../../extensions/permissions/index.ts";
 import { type PermissionBridge, SUBAGENT_GATE_CHANNEL, watchPermissionBridge } from "../../extensions/permissions/subagent-gate.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { buildGate } from "./helpers/permission-gate-harness.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -39,7 +40,7 @@ describe("subagent permission bridge lifecycle", () => {
 		cwd = join(root, "project");
 		mkdirSync(cwd);
 		vi.stubEnv("CLAUDE_CONFIG_DIR", join(root, ".claude"));
-		vi.stubEnv("ONECODE_STATE_DIR", join(root, ".onecode"));
+		vi.stubEnv(envName("STATE_DIR"), join(root, ".onecode"));
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(root, "agent"));
 		fake = createFakePi();
 		fake.events.on(SUBAGENT_GATE_CHANNEL, (data) => {

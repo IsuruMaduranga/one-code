@@ -19,6 +19,7 @@ import { powershellInjectionSyntax } from "../../extensions/permissions/powershe
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { HAVE_POWERSHELL, psReadOnly, POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 let root: string;
 let cwd: string;
@@ -52,7 +53,7 @@ describe("H1: one target per file-tool call", () => {
 
 	it("blocks a write whose file_path is in-project and whose path is not, in the real auto-mode gate", async () => {
 		stubHome(home);
-		vi.stubEnv("ONECODE_STATE_DIR", join(root, "state"));
+		vi.stubEnv(envName("STATE_DIR"), join(root, "state"));
 		vi.stubEnv("CLAUDE_CONFIG_DIR", join(home, ".claude"));
 		const fake = createFakePi();
 		permissionsExtension(fake.pi as never);

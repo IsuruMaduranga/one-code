@@ -19,6 +19,7 @@ import {
 	subagentModelsReminder,
 	subagentStatusModel,
 } from "../../extensions/subagents/model-select.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 /** One Code's own settings file lives under <home>/.onecode, not ~/.claude. */
 const oneCodePath = (home: string) => join(home, ".onecode", "settings.json");
@@ -758,7 +759,7 @@ describe("applicableSubagentDefault", () => {
 	});
 
 	it("applies the product's own variable on any model", () => {
-		const own = { spec: "gpt-6-mini", source: "env", envVar: "ONECODE_SUBAGENT_MODEL", borrowed: false } as const;
+		const own = { spec: "gpt-6-mini", source: "env", envVar: envName("SUBAGENT_MODEL"), borrowed: false } as const;
 		expect(applicableSubagentDefault(own, openai[0])).toBe(own);
 		expect(applicableSubagentDefault(own, anthropic[0])).toBe(own);
 	});

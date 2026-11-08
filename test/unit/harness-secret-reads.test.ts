@@ -10,6 +10,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { runtimeSecretPaths } from "../../extensions/lib/permission-gate.ts";
 import { decide } from "../../extensions/permissions/matcher.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 const cwd = join(tmpdir(), "harness-secret-reads-project");
 const secretPaths = runtimeSecretPaths(homedir());
@@ -23,12 +24,12 @@ const capable = {
 	secretPaths,
 };
 
-const saved = { claude: process.env.CLAUDE_CONFIG_DIR, state: process.env.ONECODE_STATE_DIR };
+const saved = { claude: process.env.CLAUDE_CONFIG_DIR, state: process.env[envName("STATE_DIR")] };
 afterEach(() => {
 	if (saved.claude === undefined) delete process.env.CLAUDE_CONFIG_DIR;
 	else process.env.CLAUDE_CONFIG_DIR = saved.claude;
-	if (saved.state === undefined) delete process.env.ONECODE_STATE_DIR;
-	else process.env.ONECODE_STATE_DIR = saved.state;
+	if (saved.state === undefined) delete process.env[envName("STATE_DIR")];
+	else process.env[envName("STATE_DIR")] = saved.state;
 });
 
 describe("the harness's own secret stores", () => {
@@ -53,7 +54,7 @@ describe("the harness's own secret stores", () => {
 
 	it("follows a relocated CLAUDE_CONFIG_DIR and ONECODE_STATE_DIR", () => {
 		process.env.CLAUDE_CONFIG_DIR = "/tmp/relocated-cc";
-		process.env.ONECODE_STATE_DIR = "/tmp/relocated-oc";
+		process.env[envName("STATE_DIR")] = "/tmp/relocated-oc";
 		const relocated = runtimeSecretPaths(home);
 		for (const path of ["/tmp/relocated-cc/settings.json", "/tmp/relocated-cc/.claude.json", "/tmp/relocated-oc/settings.json", "/tmp/relocated-oc/mcp-auth/x.json"]) {
 			expect(decide({ ...capable, secretPaths: relocated, toolName: "read", subject: path }).decision, path).toBe("classify");

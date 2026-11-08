@@ -16,6 +16,7 @@ import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
 import type { HandBackVerdict } from "../../extensions/lib/notifications.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 vi.mock("../../extensions/auto-mode/classifier.ts", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../../extensions/auto-mode/classifier.ts")>()),
@@ -30,7 +31,7 @@ describe("hand-back review and the auto-mode pause", () => {
 
 	beforeEach(async () => {
 		stateDir = mkdtempSync(join(tmpdir(), "hand-back-count-"));
-		vi.stubEnv("ONECODE_STATE_DIR", join(stateDir, ".onecode"));
+		vi.stubEnv(envName("STATE_DIR"), join(stateDir, ".onecode"));
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(stateDir, "agent"));
 		fake = createFakePi();
 		permissionsExtension(fake.pi as never);

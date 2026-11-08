@@ -17,11 +17,12 @@ import { BUNDLED_SKILLS_DIR, scanSkills } from "../../extensions/lib/skill-scan.
 import { WORKFLOW_DESCRIPTION_BODY, workflowDescription, workflowSizeLine } from "../../profile/text/workflow/description.ts";
 import workflowExtension from "../../extensions/workflow/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 let state: string;
 let cwd: string;
 let home: string;
-const env = () => ({ ONECODE_STATE_DIR: state });
+const env = () => ({ [envName("STATE_DIR")]: state });
 const write = (path: string, value: unknown) => {
 	mkdirSync(dirname(path), { recursive: true });
 	writeFileSync(path, JSON.stringify(value));
@@ -93,7 +94,7 @@ describe("the size-guideline line", () => {
 
 describe("workflow wiring: settings at session start", () => {
 	const start = async (fake: ReturnType<typeof createFakePi>) => {
-		vi.stubEnv("ONECODE_STATE_DIR", state);
+		vi.stubEnv(envName("STATE_DIR"), state);
 		await fake.fire("session_start", { type: "session_start", reason: "startup" }, createFakeCtx({ cwd }));
 	};
 

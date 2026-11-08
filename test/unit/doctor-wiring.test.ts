@@ -13,6 +13,7 @@ import { captureUserTurns } from "./helpers/user-turn.ts";
 import { localCommandBlocks } from "../../extensions/lib/local-command.ts";
 import { REMINDER_CHANNEL, type ReminderPayload } from "../../extensions/lib/reminders.ts";
 import { commandDisplayLine, promptCommandText } from "../../extensions/skill/invoke.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 const model = (provider: string, id: string, input: number, api = "anthropic-messages") =>
 	({ provider, id, name: id, api, cost: { input, output: input * 5 }, contextWindow: 200_000 }) as any;
@@ -55,7 +56,7 @@ beforeEach(() => {
 	cwd = mkdtempSync(join(tmpdir(), "onecode-doctor-wiring-cwd-"));
 	stubHome(home);
 	vi.stubEnv("PI_CODING_AGENT_DIR", join(home, ".onecode", "agent"));
-	vi.stubEnv("ONECODE_NO_UPDATE_CHECK", "1");
+	vi.stubEnv(envName("NO_UPDATE_CHECK"), "1");
 	vi.stubEnv("CC_VERSION", "");
 	// A clean environment for the checks that read it.
 	for (const key of ["CLAUDE_CODE_SUBAGENT_MODEL", "CC_PROMPT_TIER", "CLAUDE_CONFIG_DIR"]) vi.stubEnv(key, "");
@@ -171,7 +172,7 @@ describe("/doctor wiring", () => {
 		expect(notified).toHaveLength(1);
 		expect(notified[0]).toContain("One Code doctor");
 		expect(notified[0]).toContain("Not ready: no model provider has credentials");
-		expect(notified[0]).toContain("Updates: check skipped (ONECODE_NO_UPDATE_CHECK=1)");
+		expect(notified[0]).toContain(`Updates: check skipped (${envName("NO_UPDATE_CHECK")}=1)`);
 		expect(ctx.waitForIdle).not.toHaveBeenCalled();
 	});
 

@@ -15,21 +15,22 @@ import { approvalStorePath as hooksStore } from "../../extensions/hooks/trust.ts
 import { lspTrustStorePath } from "../../extensions/lsp/trust.ts";
 import { approvalStorePath as mcpStore } from "../../extensions/mcp/trust.ts";
 import { projectAllowStorePath } from "../../extensions/permissions/project-trust.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 let home: string;
 let cwd: string;
-const savedState = process.env.ONECODE_STATE_DIR;
+const savedState = process.env[envName("STATE_DIR")];
 
 beforeEach(() => {
 	home = mkdtempSync(join(tmpdir(), "consent-floor-home-"));
 	cwd = mkdtempSync(join(tmpdir(), "consent-floor-cwd-"));
-	delete process.env.ONECODE_STATE_DIR;
+	delete process.env[envName("STATE_DIR")];
 });
 afterEach(() => {
 	rmSync(home, { recursive: true, force: true });
 	rmSync(cwd, { recursive: true, force: true });
-	if (savedState === undefined) delete process.env.ONECODE_STATE_DIR;
-	else process.env.ONECODE_STATE_DIR = savedState;
+	if (savedState === undefined) delete process.env[envName("STATE_DIR")];
+	else process.env[envName("STATE_DIR")] = savedState;
 });
 
 const check = (toolName: string, input: Record<string, unknown>) => {
@@ -58,7 +59,7 @@ describe("the consent stores", () => {
 
 	it("floor a store under any literal .onecode, and a relocated state dir", () => {
 		expect(check("write", { path: join(tmpdir(), "elsewhere", ".onecode", "mcp", "project-approvals.json") })).toBeDefined();
-		process.env.ONECODE_STATE_DIR = join(home, "relocated");
+		process.env[envName("STATE_DIR")] = join(home, "relocated");
 		expect(check("write", { path: join(home, "relocated", "lsp", "trusted-projects.json") })).toBeDefined();
 	});
 

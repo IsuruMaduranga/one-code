@@ -8,6 +8,7 @@ import { TURN_FAILED_CHANNEL } from "../../extensions/lib/interrupt.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 const seen: TranscriptEntry[][] = [];
 const seenUserMessages: string[][] = [];
@@ -35,7 +36,7 @@ describe("classifier history in the permissions gate", () => {
 		const cwd = join(home, "project");
 		mkdirSync(cwd);
 		stubHome(home);
-		vi.stubEnv("ONECODE_STATE_DIR", join(home, ".onecode"));
+		vi.stubEnv(envName("STATE_DIR"), join(home, ".onecode"));
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(home, "agent"));
 		mkdirSync(join(home, ".onecode"));
 		writeFileSync(join(home, ".onecode", "settings.json"), JSON.stringify({ autoMode: { logDecisions: true } }));

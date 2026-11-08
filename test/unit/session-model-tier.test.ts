@@ -13,6 +13,7 @@ import searchToolsExtension from "../../extensions/search-tools/index.ts";
 import systemPromptExtension from "../../extensions/system-prompt/index.ts";
 import { catalogSources } from "./catalog-fixture.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 const model = { provider: "openai", id: "gpt-5", cost: { input: 2 } } as Model<Api>;
 const otherModel = { ...model, id: "gpt-5.1" };
@@ -183,7 +184,7 @@ describe("the session's request-surface tier", () => {
 
 	it("sees another extension's disk refresh on the next model change within the stat throttle", async () => {
 		const stateDir = mkdtempSync(join(tmpdir(), "session-tier-"));
-		vi.stubEnv("ONECODE_STATE_DIR", stateDir);
+		vi.stubEnv(envName("STATE_DIR"), stateDir);
 		vi.spyOn(Date, "now").mockReturnValue(10_000);
 		const initial = catalog("workhorse");
 		const refreshed = catalog("tiny");

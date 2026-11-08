@@ -14,6 +14,7 @@ import {
 } from "../../extensions/lib/app-launch.mjs";
 import { piShellEnv, spawnShellCommand, withChildProcessEnv } from "../../extensions/lib/shell-spawn.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 const repoRoot = resolve(import.meta.dirname, "..", "..");
 const home = resolve("/home/alice");
@@ -58,7 +59,7 @@ describe("the app's agent directory", () => {
 			PI_CODING_AGENT_DIR: "/home/alice/.config/pi/agent",
 			PI_SKIP_VERSION_CHECK: null,
 			CC_VERSION: null,
-			ONECODE_INSTALL_METHOD: null,
+			[envName("INSTALL_METHOD")]: null,
 		});
 	});
 
@@ -80,7 +81,7 @@ describe("childProcessEnv", () => {
 	it("puts the user's values back and drops what the app added", () => {
 		const child = childProcessEnv(launched(), "linux");
 		expect(child.PI_CODING_AGENT_DIR).toBe("/user/pi");
-		for (const name of ["PI_SKIP_VERSION_CHECK", "CC_VERSION", "ONECODE_INSTALL_METHOD", LAUNCHER_ENV_VAR]) expect(child).not.toHaveProperty(name);
+		for (const name of ["PI_SKIP_VERSION_CHECK", "CC_VERSION", envName("INSTALL_METHOD"), LAUNCHER_ENV_VAR]) expect(child).not.toHaveProperty(name);
 		expect(child.KEEP).toBe("yes");
 		expect(child.PATH).toBe("/usr/bin");
 	});
@@ -102,7 +103,7 @@ describe("childProcessEnv", () => {
 	});
 
 	it("covers exactly the variables the launcher sets", () => {
-		expect([...LAUNCHER_VARS].sort()).toEqual(["CC_VERSION", "ONECODE_INSTALL_METHOD", "PI_CODING_AGENT_DIR", "PI_SKIP_VERSION_CHECK"]);
+		expect([...LAUNCHER_VARS].sort()).toEqual(["CC_VERSION", envName("INSTALL_METHOD"), "PI_CODING_AGENT_DIR", "PI_SKIP_VERSION_CHECK"]);
 	});
 });
 

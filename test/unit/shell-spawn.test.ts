@@ -21,6 +21,7 @@ import {
 	type ShellSpawn,
 	spawnShellCommand,
 } from "../../extensions/lib/shell-spawn.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 const gitBash: ShellSpawn = { shell: "C:\\Program Files\\Git\\bin\\bash.exe", args: ["-c"] };
 
@@ -45,10 +46,10 @@ describe("gitBashOverride", () => {
 	});
 
 	it("prefers the product's own spelling over the provider's alias", () => {
-		expect(gitBashOverride({ ONECODE_GIT_BASH_PATH: "C:\\own\\bash.exe", CLAUDE_CODE_GIT_BASH_PATH: "C:\\cc\\bash.exe" }, {})).toEqual({
+		expect(gitBashOverride({ [envName("GIT_BASH_PATH")]: "C:\\own\\bash.exe", CLAUDE_CODE_GIT_BASH_PATH: "C:\\cc\\bash.exe" }, {})).toEqual({
 			path: "C:\\own\\bash.exe",
 			source: "env",
-			name: "ONECODE_GIT_BASH_PATH",
+			name: envName("GIT_BASH_PATH"),
 		});
 	});
 });

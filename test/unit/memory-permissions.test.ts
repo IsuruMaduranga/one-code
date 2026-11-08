@@ -12,6 +12,7 @@ import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { decide, parseRules, type DecideInput } from "../../extensions/permissions/matcher.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 const modes = ["default", "auto", "dontAsk", "acceptEdits"] as const;
 const escapedDecisions = { default: "ask", auto: "classify", dontAsk: "deny", acceptEdits: "ask" } as const;
@@ -29,7 +30,7 @@ beforeEach(() => {
 	for (const dir of [home, cwd, outside]) mkdirSync(dir);
 	stubHome(home);
 	vi.stubEnv("CLAUDE_CONFIG_DIR", join(home, ".claude"));
-	vi.stubEnv("ONECODE_STATE_DIR", join(home, ".onecode"));
+	vi.stubEnv(envName("STATE_DIR"), join(home, ".onecode"));
 	memoryDirPath = projectMemoryDir(cwd, home);
 	mkdirSync(memoryDirPath, { recursive: true });
 });

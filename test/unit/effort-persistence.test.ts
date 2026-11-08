@@ -7,6 +7,7 @@ import effortExtension from "../../extensions/effort/index.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 let home: string;
 let agentDir: string;
@@ -20,7 +21,7 @@ beforeEach(() => {
 	settingsPath = join(agentDir, "settings.json");
 	stubHome(home);
 	vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
-	vi.stubEnv("ONECODE_STATE_DIR", join(home, ".onecode"));
+	vi.stubEnv(envName("STATE_DIR"), join(home, ".onecode"));
 });
 afterEach(() => {
 	vi.unstubAllEnvs();

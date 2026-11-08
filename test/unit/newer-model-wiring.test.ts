@@ -9,6 +9,7 @@ import { productSettingsPath, readSuggestNewerModels } from "../../extensions/li
 import newerModelExtension from "../../extensions/newer-model/index.ts";
 import { NOTICE_CHANNEL } from "../../extensions/lib/notices.ts";
 import { createFakeCtx, createFakePi, flushNotices } from "./helpers/fake-pi.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 const model = (id: string) => ({ provider: "openai", id, name: id, api: "openai-responses", cost: { input: 1, output: 3 } }) as Model<Api>;
 const old = model("gpt-5.6-luna");
@@ -19,7 +20,7 @@ let dir: string;
 
 beforeEach(() => {
 	dir = mkdtempSync(join(tmpdir(), "onecode-newer-model-"));
-	vi.stubEnv("ONECODE_STATE_DIR", dir);
+	vi.stubEnv(envName("STATE_DIR"), dir);
 	pinReleaseDates({
 		"openai/gpt-5.6-luna": { releaseDate: "2026-07-09" },
 		"openai/gpt-6-luna": { releaseDate: "2026-09-01" },
@@ -162,6 +163,6 @@ describe("readSuggestNewerModels", () => {
 		writeFileSync(path(), "{ bad json");
 		expect(readSuggestNewerModels(home(), {})).toBe(true);
 		writeFileSync(join(dir, "settings.json"), JSON.stringify({ suggestNewerModels: false }));
-		expect(readSuggestNewerModels(home(), { ONECODE_STATE_DIR: dir })).toBe(false);
+		expect(readSuggestNewerModels(home(), { [envName("STATE_DIR")]: dir })).toBe(false);
 	});
 });

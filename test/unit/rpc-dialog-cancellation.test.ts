@@ -9,6 +9,7 @@ import planModeExtension from "../../extensions/plan-mode/index.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts";
 import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 function rpcDialog(options?: { signal?: AbortSignal }): Promise<undefined> {
 	return new Promise((resolve) => {
@@ -25,7 +26,7 @@ describe("RPC tool dialog cancellation", () => {
 	let root: string;
 	beforeEach(() => {
 		root = mkdtempSync(join(tmpdir(), "rpc-dialog-"));
-		vi.stubEnv("ONECODE_STATE_DIR", join(root, "state"));
+		vi.stubEnv(envName("STATE_DIR"), join(root, "state"));
 	});
 	afterEach(() => {
 		vi.unstubAllEnvs();

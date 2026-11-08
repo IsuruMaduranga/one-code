@@ -16,6 +16,7 @@ import permissionsExtension from "../../extensions/permissions/index.ts";
 import { CYCLE_KEY } from "../../extensions/permissions/modes.ts";
 import planModeExtension from "../../extensions/plan-mode/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 describe("permission mode cycle with plan-mode mounted", () => {
 	let fake: FakePi;
@@ -31,7 +32,7 @@ describe("permission mode cycle with plan-mode mounted", () => {
 
 	beforeEach(() => {
 		stateDir = mkdtempSync(join(tmpdir(), "mode-cycle-"));
-		vi.stubEnv("ONECODE_STATE_DIR", stateDir);
+		vi.stubEnv(envName("STATE_DIR"), stateDir);
 		fake = createFakePi();
 		fake.flags.set("dangerously-skip-permissions", true);
 		traffic.length = 0;
@@ -155,7 +156,7 @@ describe("plan mode follows the branch across /tree (permissions' session_tree r
 
 	beforeEach(() => {
 		stateDir = mkdtempSync(join(tmpdir(), "plan-tree-"));
-		vi.stubEnv("ONECODE_STATE_DIR", stateDir);
+		vi.stubEnv(envName("STATE_DIR"), stateDir);
 		fake = createFakePi();
 		branch = [];
 		reminders.length = 0;

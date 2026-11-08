@@ -18,6 +18,7 @@ import { parseAddDirFlag, validateWorkspaceDirectory } from "../../extensions/pe
 import { environmentBlock } from "../../extensions/lib/environment-block.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 type GateResult = { block?: boolean; reason?: string } | undefined;
 
@@ -37,7 +38,7 @@ beforeEach(() => {
 	writeFileSync(join(shared, "notes.md"), "notes");
 	writeFileSync(join(shared, ".ssh", "id_rsa"), "key");
 	stubHome(home);
-	vi.stubEnv("ONECODE_STATE_DIR", join(home, ".onecode"));
+	vi.stubEnv(envName("STATE_DIR"), join(home, ".onecode"));
 	vi.stubEnv("PI_CODING_AGENT_DIR", join(home, "agent"));
 });
 afterEach(() => {

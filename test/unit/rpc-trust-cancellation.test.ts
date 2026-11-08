@@ -9,6 +9,7 @@ import lspExtension from "../../extensions/lsp/index.ts";
 import { lspTrustStorePath } from "../../extensions/lsp/trust.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 const state = vi.hoisted(() => ({ runHook: vi.fn(), startServer: vi.fn() }));
 vi.mock("../../extensions/hooks/executor.ts", () => ({ runHookCommand: state.runHook }));
@@ -31,8 +32,8 @@ beforeEach(() => {
 	mkdirSync(join(cwd, ".claude"), { recursive: true });
 	stubHome(root);
 	vi.stubEnv("CLAUDE_CONFIG_DIR", join(root, ".claude"));
-	vi.stubEnv("ONECODE_CONFIG_MODE", "claude-compatible");
-	vi.stubEnv("ONECODE_STATE_DIR", join(root, ".onecode"));
+	vi.stubEnv(envName("CONFIG_MODE"), "claude-compatible");
+	vi.stubEnv(envName("STATE_DIR"), join(root, ".onecode"));
 	vi.stubEnv("PI_CODING_AGENT_DIR", join(root, "agent"));
 	resetTrustSessionState();
 	resetHookSettingsCache();

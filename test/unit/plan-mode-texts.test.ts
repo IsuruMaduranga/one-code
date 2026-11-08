@@ -22,6 +22,7 @@ import {
 	exitedPlanModeText,
 } from "../../profile/text/plan-mode/texts.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 const OPUS = { provider: "anthropic", id: "claude-opus-4-8", api: "anthropic-messages" };
 const HAIKU = { provider: "anthropic", id: "claude-haiku-4-5", api: "anthropic-messages" };
@@ -101,7 +102,7 @@ describe("plan-mode wiring of the texts", () => {
 
 	beforeEach(() => {
 		stateDir = mkdtempSync(join(tmpdir(), "plan-mode-texts-"));
-		vi.stubEnv("ONECODE_STATE_DIR", stateDir);
+		vi.stubEnv(envName("STATE_DIR"), stateDir);
 		vi.stubEnv("CC_PROMPT_TIER", "");
 		fake = createFakePi();
 		reminders.length = 0;

@@ -19,6 +19,7 @@ import { MODE_ENV } from "../../extensions/lib/permission-gate.ts";
 import type { ToldFact } from "../../extensions/lib/ledger/records.ts";
 import { createFakeCtx, createFakePi, renderRequest } from "./helpers/fake-pi.ts";
 import { stateEntry } from "./helpers/state-entry.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 /** A request recorded on the branch: its model was told the mode in force. */
 const requestEntry = {
@@ -33,7 +34,7 @@ describe("the permission mode follows the branch (H4)", () => {
 	let dir: string;
 	beforeEach(() => {
 		dir = mkdtempSync(join(tmpdir(), "mode-follows-"));
-		vi.stubEnv("ONECODE_STATE_DIR", join(dir, ".onecode"));
+		vi.stubEnv(envName("STATE_DIR"), join(dir, ".onecode"));
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(dir, "agent"));
 		vi.stubEnv(MODE_ENV, "");
 	});
@@ -168,7 +169,7 @@ describe("ultracode follows the branch (H3)", () => {
 
 	it("says nothing about ultracode ending when the model never saw it on", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "ultracode-workflows-"));
-		vi.stubEnv("ONECODE_STATE_DIR", dir);
+		vi.stubEnv(envName("STATE_DIR"), dir);
 		writeFileSync(join(dir, "settings.json"), JSON.stringify({ disableWorkflows: true }));
 		try {
 			const run = await start([], "medium");
@@ -216,7 +217,7 @@ describe("ultracode follows the branch (H3)", () => {
 
 	it("leaves the standing block out while workflows are turned off (R3-M21)", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "ultracode-workflows-"));
-		vi.stubEnv("ONECODE_STATE_DIR", dir);
+		vi.stubEnv(envName("STATE_DIR"), dir);
 		writeFileSync(join(dir, "settings.json"), JSON.stringify({ disableWorkflows: true }));
 		try {
 			expect((await start([stateEntry("ultracode", { on: true, level: "xhigh" })])).standing()).toMatchObject({ remove: true });

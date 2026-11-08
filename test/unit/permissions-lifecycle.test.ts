@@ -28,6 +28,7 @@ import permissionsExtension from "../../extensions/permissions/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { stateEntry } from "./helpers/state-entry.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 vi.mock("../../extensions/auto-mode/classifier.ts", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../../extensions/auto-mode/classifier.ts")>()),
@@ -51,7 +52,7 @@ beforeEach(() => {
 	for (const dir of [home, cwd, shared]) mkdirSync(dir, { recursive: true });
 	writeFileSync(join(shared, "notes.md"), "notes");
 	stubHome(home);
-	vi.stubEnv("ONECODE_STATE_DIR", join(home, ".onecode"));
+	vi.stubEnv(envName("STATE_DIR"), join(home, ".onecode"));
 	vi.stubEnv("PI_CODING_AGENT_DIR", join(home, "agent"));
 	vi.stubEnv("CLAUDE_CONFIG_DIR", join(home, ".claude"));
 	vi.stubEnv(MODE_ENV, "");

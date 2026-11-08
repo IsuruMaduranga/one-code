@@ -8,6 +8,7 @@ import { resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 const seen: TranscriptEntry[][] = [];
 vi.mock("../../extensions/auto-mode/classifier.ts", async (importOriginal) => ({
@@ -31,7 +32,7 @@ describe("main hooks before permissions", () => {
 		mkdirSync(config);
 		stubHome(root);
 		vi.stubEnv("CLAUDE_CONFIG_DIR", config);
-		vi.stubEnv("ONECODE_STATE_DIR", join(root, ".onecode"));
+		vi.stubEnv(envName("STATE_DIR"), join(root, ".onecode"));
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(root, "agent"));
 		resetHookSettingsCache();
 		seen.length = 0;

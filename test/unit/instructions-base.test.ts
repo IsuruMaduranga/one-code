@@ -13,6 +13,7 @@ import { openInstructions } from "../../extensions/lib/instructions.ts";
 import { persistExternalIncludesApproval } from "../../extensions/lib/claude-external-includes.ts";
 import { resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile.ts";
 import { profile } from "../../profile/index.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 let root: string;
 let home: string;
@@ -85,7 +86,7 @@ describe("the base's instruction files without a provider", () => {
 	it("gives every reader nothing while the agent's instruction files are off", () => {
 		write(join(cwd, "AGENTS.md"), "agents\n");
 		write(join(cwd, "ONECODE.md"), "product\n");
-		setActiveProfileForTest(resolveProfile(profile, { ONECODE_FEATURES_OFF: "claude-context" }, "/profile"));
+		setActiveProfileForTest(resolveProfile(profile, { [envName("FEATURES_OFF")]: "claude-context" }, "/profile"));
 		const instructions = openInstructions(home, undefined);
 		expect(instructions.sections({ cwd, homeOneCodeDir: state })).toEqual({ contextFiles: [], oneCodeFiles: [] });
 		expect(instructions.paths({ cwd, homeOneCodeDir: state })).toEqual([]);

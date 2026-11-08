@@ -12,6 +12,7 @@ import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { productProjectSettingsPath } from "../../extensions/lib/product-settings.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 let home: string;
 let cwd: string;
@@ -21,7 +22,7 @@ beforeEach(() => {
 	mkdirSync(cwd);
 	stubHome(home);
 	vi.stubEnv("PI_CODING_AGENT_DIR", join(home, "agent"));
-	vi.stubEnv("ONECODE_STATE_DIR", join(home, ".onecode"));
+	vi.stubEnv(envName("STATE_DIR"), join(home, ".onecode"));
 	invalidatePluginsCache();
 });
 afterEach(() => {

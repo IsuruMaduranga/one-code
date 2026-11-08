@@ -7,6 +7,7 @@ import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../extensio
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { pinCatalog } from "./catalog-fixture.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 const model = (id: string, contextWindow: number, price: number) => ({ provider: "openai-codex", id, name: id, contextWindow, maxTokens: 8192, cost: { input: price, output: price * 4 } });
 // All frontier on OpenAI's own API, released together so none supersedes another; ids the
@@ -31,7 +32,7 @@ describe("automatic classifier selection wiring", () => {
 			{ id: "openai/gpt-7-sol", released: "2026-09-22", price: [1, 13] },
 			{ id: "openai/gpt-5.6-sol", released: "2026-07-09", price: [2.5, 30] },
 		]);
-		vi.stubEnv("ONECODE_STATE_DIR", join(home, ".onecode"));
+		vi.stubEnv(envName("STATE_DIR"), join(home, ".onecode"));
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(home, "agent"));
 		fake = createFakePi();
 		statuses = [];

@@ -17,6 +17,7 @@ import { shellQuote } from "../../extensions/lib/shell-quote.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 type Prompt = { title: string; options: string[] };
 type GateResult = { block?: boolean; reason?: string; terminate?: boolean } | undefined;
@@ -53,7 +54,7 @@ describe("permissions session state", () => {
 		stateDir = mkdtempSync(join(tmpdir(), "perm-state-"));
 		cwd = join(stateDir, "project");
 		agentDir = join(stateDir, "agent");
-		vi.stubEnv("ONECODE_STATE_DIR", join(stateDir, ".onecode"));
+		vi.stubEnv(envName("STATE_DIR"), join(stateDir, ".onecode"));
 		vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
 		fake = createFakePi();
 		prompts.length = 0;
