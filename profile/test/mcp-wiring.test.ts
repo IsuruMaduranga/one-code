@@ -24,15 +24,15 @@ import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } f
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/reminders.ts";
 import { mcpFacts, type McpSnapshot } from "../../extensions/mcp/announce.ts";
 import type { McpFailure } from "../../extensions/mcp/text.ts";
-import { mcp as mcpText } from "../../profile/text/mcp/index.ts";
+import { mcp as mcpText } from "../text/mcp/index.ts";
 
 /** Render one request inside an epoch whose message 1 described `told`; the blocks MCP adds to its tail. */
 function renderInEpoch(events: { emit(channel: string, data: unknown): void }, told: McpSnapshot): string[] {
 	return renderRequest(events, { facts: mcpFacts(told, mcpText) }).map((block) => block.text);
 }
-import { createFakeCtx, createFakePi, type FakePi, renderRequest } from "./helpers/fake-pi.ts";
+import { createFakeCtx, createFakePi, type FakePi, renderRequest } from "../../test/unit/helpers/fake-pi.ts";
 import { localCommandBlocks } from "../../extensions/lib/local-command.ts";
-import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
+import { resetConfigModeForTest } from "../claude-code/mode.ts";
 
 interface Fixture {
 	tools?: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }>;

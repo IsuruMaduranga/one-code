@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { sources } from "../../profile/claude-code/sources.ts";
+import { sources } from "../claude-code/sources.ts";
 import { describe, expect, it } from "vitest";
 import { claudeMdLimitWarning, combinedLimitWarning } from "../../extensions/lib/memory.ts";
 import type { MemoryEntry } from "../../extensions/memory/entries.ts";

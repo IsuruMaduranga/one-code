@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
+import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { knobAppliesTo, knobLimit, knobNames, knobValue, readKnob } from "../../extensions/lib/knobs.ts";
 
 afterEach(() => resetConfigModeForTest("claude-compatible"));

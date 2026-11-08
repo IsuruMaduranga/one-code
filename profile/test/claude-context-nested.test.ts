@@ -9,12 +9,12 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import claudeContextExtension from "../../extensions/claude-context/index.ts";
 import { nestedInstructionText } from "../../extensions/lib/claude-context.ts";
-import { nestedInstructionFiles } from "../../profile/claude-code/instructions.ts";
+import { nestedInstructionFiles } from "../claude-code/instructions.ts";
 import { openInstructions } from "../../extensions/lib/instructions.ts";
-import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
+import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
-import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { createFakeCtx, createFakePi } from "../../test/unit/helpers/fake-pi.ts";
 
 let root: string;
 beforeEach(() => {

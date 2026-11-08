@@ -10,12 +10,12 @@ import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import claudeContextExtension from "../../extensions/claude-context/index.ts";
 import { buildClaudeMdBlock, nestedInstructionText } from "../../extensions/lib/claude-context.ts";
-import { discoverContextFiles, nestedInstructionFiles } from "../../profile/claude-code/instructions.ts";
+import { discoverContextFiles, nestedInstructionFiles } from "../claude-code/instructions.ts";
 import { discoverRules, parseRule, readRuleInstructions, ruleMatches, splitRulePaths } from "../../extensions/lib/claude-rules.ts";
 import { claudeManagedDir, forwardSlashes, isPathAtOrUnder } from "../../extensions/lib/paths.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
-import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
-import { stubHome } from "./helpers/home.ts";
+import { createFakeCtx, createFakePi } from "../../test/unit/helpers/fake-pi.ts";
+import { stubHome } from "../../test/unit/helpers/home.ts";
 
 vi.mock("node:fs", async (load) => {
 	const actual = await load<typeof import("node:fs")>();

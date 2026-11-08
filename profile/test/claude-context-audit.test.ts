@@ -6,10 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import claudeContextExtension from "../../extensions/claude-context/index.ts";
 import systemReminderExtension from "../../extensions/system-reminder/index.ts";
 import { discoverOneCodeFiles, openInstructions } from "../../extensions/lib/instructions.ts";
-import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
+import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
-import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
-import { stubHome } from "./helpers/home.ts";
+import { createFakeCtx, createFakePi } from "../../test/unit/helpers/fake-pi.ts";
+import { stubHome } from "../../test/unit/helpers/home.ts";
 
 let root: string;
 beforeEach(() => {

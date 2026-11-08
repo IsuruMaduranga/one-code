@@ -6,7 +6,7 @@ import { collectCompat, importedConfigSection, mcpSection } from "../../extensio
 import { checkDependencies, projectLanguages, providerHasNativeSearch, webSearchRoute } from "../../extensions/doctor/dependencies.ts";
 import { whichOnPath } from "../../extensions/lib/which.ts";
 import { invalidatePluginsCache } from "../../extensions/lib/plugins.ts";
-import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
+import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
 
 let home: string;

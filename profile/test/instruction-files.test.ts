@@ -2,9 +2,9 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { sources } from "../../profile/claude-code/sources.ts";
-import { readInstructionFiles } from "../../profile/claude-code/settings.ts";
-import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
+import { sources } from "../claude-code/sources.ts";
+import { readInstructionFiles } from "../claude-code/settings.ts";
+import { resetConfigModeForTest } from "../claude-code/mode.ts";
 
 /** A temp home whose ~/.claude/settings.json holds `settings` (CLAUDE_CONFIG_DIR unset in tests). */
 function homeWith(settings: Record<string, unknown> | undefined): string {

@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
+import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { safetyControlWrite } from "../../extensions/auto-mode/safety-floor.ts";
 import { loadPermissionSettings } from "../../extensions/permissions/settings.ts";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
@@ -19,11 +19,11 @@ import { settingsSources } from "../../extensions/lib/claude-settings.ts";
 import { instructionFileNames, instructionTargets, openInstructions } from "../../extensions/lib/instructions.ts";
 import { autoModeSettingsFiles } from "../../extensions/auto-mode/config.ts";
 import { isClaudeLocation } from "../../extensions/lib/paths.ts";
-import { INIT_PROMPT, initPrompt } from "../../profile/text/init/prompt.ts";
+import { INIT_PROMPT, initPrompt } from "../text/init/prompt.ts";
 import { profileModuleKey, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile.ts";
 import { shareModuleForTest } from "../../extensions/lib/shared-module.ts";
 import { configDirs, projectConfigDir, type SourceProvider, userConfigDir } from "../../extensions/lib/sources.ts";
-import { profile } from "../../profile/index.ts";
+import { profile } from "../index.ts";
 
 let home: string;
 beforeEach(() => {

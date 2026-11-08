@@ -6,9 +6,9 @@ import { buildDoctorReport, summarizeProviders } from "../../extensions/doctor/b
 import { collectModelFacts, modelsSection } from "../../extensions/doctor/models.ts";
 import { type DoctorEnvironment, type Finding, type RegistryView, renderDoctorReport, renderDoctorText } from "../../extensions/doctor/report.ts";
 import { TESTED_PI_MAX_EXCLUSIVE } from "../../extensions/lib/pi-version.ts";
-import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
+import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { sourceSwitchStatus } from "../../extensions/lib/sources.ts";
-import { pinCatalog, pinReleaseDates } from "./catalog-fixture.ts";
+import { pinCatalog, pinReleaseDates } from "../../test/unit/catalog-fixture.ts";
 
 /** Minimal structural stand-in; the checks read provider/id/api/cost/contextWindow only. */
 const model = (provider: string, id: string, input?: number, api = "anthropic-messages") =>

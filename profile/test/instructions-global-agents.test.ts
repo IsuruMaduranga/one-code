@@ -9,10 +9,10 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
+import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { openInstructions, projectInstructionFiles } from "../../extensions/lib/instructions.ts";
 import { resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile.ts";
-import { profile } from "../../profile/index.ts";
+import { profile } from "../index.ts";
 import { buildMemoryEntries } from "../../extensions/memory/entries.ts";
 
 let root: string;

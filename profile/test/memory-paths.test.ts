@@ -5,12 +5,12 @@ import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import memoryExtension from "../../extensions/memory/index.ts";
 import { resolveThroughLinks } from "../../extensions/auto-mode/paths.ts";
-import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
+import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { projectMemoryDir } from "../../extensions/lib/memory.ts";
 import { INDEX_MAX_CHARS, INDEX_MAX_LINES } from "../../extensions/lib/memory-content.ts";
-import { memory } from "../../profile/text/memory/index.ts";
-import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
-import { stubHome } from "./helpers/home.ts";
+import { memory } from "../text/memory/index.ts";
+import { createFakeCtx, createFakePi } from "../../test/unit/helpers/fake-pi.ts";
+import { stubHome } from "../../test/unit/helpers/home.ts";
 
 let root: string;
 let cwd: string;

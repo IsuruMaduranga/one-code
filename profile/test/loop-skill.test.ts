@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
+import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import {
 	AUTONOMOUS_LOOP,
 	AUTONOMOUS_LOOP_DYNAMIC,
@@ -16,8 +16,8 @@ import {
 import { loopPersistent, loopSkillForm } from "../../extensions/background/loop-skill.ts";
 import { RECURRING_MAX_AGE_DAYS } from "../../extensions/background/cron.ts";
 import type { LoopFile } from "../../extensions/background/text.ts";
-import { loop } from "../../profile/text/background/loop.ts";
-import { AUTONOMOUS_PREAMBLE, AUTONOMOUS_PREAMBLE_PERSISTENT } from "../../profile/text/background/loop-preamble.ts";
+import { loop } from "../text/background/loop.ts";
+import { AUTONOMOUS_PREAMBLE, AUTONOMOUS_PREAMBLE_PERSISTENT } from "../text/background/loop-preamble.ts";
 
 /** The skill body One Code's profile words for `/loop <args>`. */
 const loopSkillPrompt = (args: string, loopFile: LoopFile | null) =>

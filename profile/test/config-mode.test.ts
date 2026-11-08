@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { claudeSourcesOn, configMode, readConfigMode, resetConfigModeForTest, savedConfigMode } from "../../profile/claude-code/mode.ts";
+import { claudeSourcesOn, configMode, readConfigMode, resetConfigModeForTest, savedConfigMode } from "../claude-code/mode.ts";
 import { memoryDir } from "../../extensions/lib/memory.ts";
 
 function homeWith(settings: string | undefined): string {

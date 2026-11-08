@@ -5,8 +5,8 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildClaudeMdBlock, buildContextBlock, dateBlock, buildOneCodeBlock } from "../../extensions/lib/claude-context.ts";
 import { AGENTS_DESCRIPTOR, discoverOneCodeFiles, expandImports, PRODUCT_DESCRIPTOR, PRODUCT_GLOBAL_DESCRIPTOR, openInstructions, PROJECT_DESCRIPTOR } from "../../extensions/lib/instructions.ts";
-import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
-import { discoverContextFilePaths, discoverContextFiles } from "../../profile/claude-code/instructions.ts";
+import { resetConfigModeForTest } from "../claude-code/mode.ts";
+import { discoverContextFilePaths, discoverContextFiles } from "../claude-code/instructions.ts";
 import { wrapReminder } from "../../extensions/lib/reminders.ts";
 import { truncateIndex } from "../../extensions/lib/memory-content.ts";
 

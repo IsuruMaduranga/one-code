@@ -6,10 +6,10 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import claudeContextExtension from "../../extensions/claude-context/index.ts";
 import systemReminderExtension from "../../extensions/system-reminder/index.ts";
-import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
+import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { projectMemoryDir } from "../../extensions/lib/memory.ts";
-import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
-import { stubHome } from "./helpers/home.ts";
+import { createFakeCtx, createFakePi } from "../../test/unit/helpers/fake-pi.ts";
+import { stubHome } from "../../test/unit/helpers/home.ts";
 
 // Intercept a FIFO read rather than opening it: an unguarded synchronous open
 // would hang the test worker and the harness event loop indefinitely.

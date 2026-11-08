@@ -12,12 +12,12 @@ import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fileTrackerExtension from "../../extensions/file-tracker/index.ts";
 import { CHILD_WROTE_CHANNEL } from "../../extensions/lib/child-writes.ts";
-import { discoverContextFiles } from "../../profile/claude-code/instructions.ts";
+import { discoverContextFiles } from "../claude-code/instructions.ts";
 import { persistExternalIncludesApproval } from "../../extensions/lib/claude-external-includes.ts";
-import { resetConfigModeForTest } from "../../profile/claude-code/mode.ts";
+import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
-import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
-import { stubHome } from "./helpers/home.ts";
+import { createFakeCtx, createFakePi, type FakePi } from "../../test/unit/helpers/fake-pi.ts";
+import { stubHome } from "../../test/unit/helpers/home.ts";
 
 describe("file-tracker wiring", () => {
 	let dir: string;
