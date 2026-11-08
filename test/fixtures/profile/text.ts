@@ -12,9 +12,18 @@
 
 import type { ProfileText } from "../extensions/lib/profile-contract.ts";
 
+/**
+ * An object argument as JSON, but with the NUL character left raw: the base
+ * finds where a value lands in a text by passing a NUL hole and searching for
+ * it (lib/template-probe.ts), which an escaped `\u0000` would hide.
+ */
+function shownObject(arg: object): string {
+	return JSON.stringify(arg).replaceAll("\\u0000", "\u0000");
+}
+
 /** A marker with the arguments the base passed, so a test can see them placed. */
 export function mark(path: string, ...args: unknown[]): string {
-	const shown = args.map((arg) => (typeof arg === "string" ? arg : Array.isArray(arg) ? arg.map(String).join(", ") : typeof arg === "object" && arg !== null ? JSON.stringify(arg) : String(arg)));
+	const shown = args.map((arg) => (typeof arg === "string" ? arg : Array.isArray(arg) ? arg.map(String).join(", ") : typeof arg === "object" && arg !== null ? shownObject(arg) : String(arg)));
 	return shown.length > 0 ? `[${path} ${shown.join(" | ")}]` : `[${path}]`;
 }
 
