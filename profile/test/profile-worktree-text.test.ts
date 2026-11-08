@@ -1,8 +1,10 @@
 /**
- * One Code's worktree-tool wording (profile/text/worktree/) for the results the
- * golden snapshot cannot reach offline: a failing git, a checkout filter, a
- * worktree deleted under the session. The golden snapshot pins the bytes of
- * every other result.
+ * One Code's worktree-tool wording (profile/text/worktree/): enter_worktree's
+ * result announcing the git-isolation guard (that the tool returns it is
+ * tested in test/unit/worktree-wiring.test.ts), and the results the golden
+ * snapshot cannot reach offline: a failing git, a checkout filter, a worktree
+ * deleted under the session. The golden snapshot pins the bytes of every
+ * other result.
  */
 import { describe, expect, it } from "vitest";
 import { worktree } from "../text/worktree/index.ts";
@@ -13,6 +15,12 @@ describe("One Code's worktree text", () => {
 	it("names the config folder the mode puts worktrees in", () => {
 		expect(worktree.descriptions.enter_worktree(".onecode")).toContain("inside `.onecode/worktrees/`");
 		expect(worktree.descriptions.enter_worktree(".claude")).toContain("inside `.claude/worktrees/`");
+	});
+
+	it("announces the git-isolation guard when it creates a worktree", () => {
+		expect(worktree.enter.created({ session: { path: "/repo/.claude/worktrees/feature", branch: "feature", originalCwd: "/repo" }, baseCommit: "abc123" })).toContain(
+			"Git commands aimed at the main checkout or another worktree of this repository are refused until you exit.",
+		);
 	});
 
 	it("words the enter failures the offline run cannot reach", () => {

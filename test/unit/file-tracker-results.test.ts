@@ -3,7 +3,7 @@
  * (file-tracker/results.ts) and wired through the file-tracker's tool_result
  * hook. The input strings are pi's exact wording; the expected texts are the
  * profile's, for the outcome the base picks (One Code's wording of them:
- * profile/test/file-tracker-results-wording.test.ts).
+ * profile/test/profile-file-tracker-text.test.ts).
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

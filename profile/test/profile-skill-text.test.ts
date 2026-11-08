@@ -1,10 +1,12 @@
 /**
  * One Code's skill wording (profile/text/skill/) for the results the golden
- * snapshot cannot reach: an ambiguous plugin skill name, an unreadable skill
- * and the listing for a session that reads skill files with the shell. The
- * golden snapshot pins the bytes of every other text.
+ * snapshot cannot reach: an ambiguous plugin skill name, an unreadable skill,
+ * the listing for a session that reads skill files with the shell, and the
+ * refusal of a user-only skill. The golden snapshot pins the bytes of every
+ * other text.
  */
 import { describe, expect, it } from "vitest";
+import { requireText } from "../../extensions/lib/profile.ts";
 import { skill } from "../text/skill/index.ts";
 
 describe("One Code's skill text", () => {
@@ -12,6 +14,10 @@ describe("One Code's skill text", () => {
 		expect(skill.ambiguous({ query: "review", wanted: "review", matches: ["a:review", "b:review"] })).toBe(
 			'"review" is ambiguous — it matches a:review, b:review. Use the full `<plugin>:review` name.',
 		);
+	});
+
+	it("tells the model a user-only skill is the user's to run", () => {
+		expect(requireText("skill").userOnly("beta")).toContain("only the user can run it, by typing /beta");
 	});
 
 	it("reports an unreadable skill with the system's reason", () => {

@@ -1,26 +1,30 @@
-import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+/**
+ * MCP project-server approval (mcp/trust.ts): which servers need consent, the
+ * dialog's answers and how they persist, the settings' own answers, and the
+ * dialog's preview. Claude Code's settings files as the source provider reads
+ * them: profile/test/mcp-trust-claude-settings.test.ts.
+ */
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { envName } from "../../extensions/lib/brand.mjs";
-import { primaryFamily, primarySettingsFile, settingsSources } from "../../extensions/lib/claude-settings.ts";
+import { primaryFamily, settingsSources } from "../../extensions/lib/claude-settings.ts";
 import type { McpServer, StdioServer } from "../../extensions/mcp/config.ts";
 import {
 	approveMcpServers,
 	CHOICE_ALL,
 	CHOICE_NO,
 	CHOICE_THESE,
-	CHOICE_THIS,
 	describeServers,
 	hashServerConfig,
 	isProjectScopedServer,
 	persistApproval,
 	promptTitle,
-	readClaudeMcpjsonPolicy,
 	readStoredApproval,
 	resetMcpTrustSessionState,
 } from "../../extensions/mcp/trust.ts";
+import { makeMcpTrustDirs, stdio, trustDeps } from "./helpers/mcp-trust.ts";
+import { writeUserSettings as writeUserSettingsIn } from "./helpers/settings-files.ts";
 
 let root: string;
 let cwd: string;
@@ -28,67 +32,26 @@ let home: string;
 let storePath: string;
 
 beforeEach(() => {
-	root = mkdtempSync(join(tmpdir(), "cc-mcp-trust-"));
-	cwd = join(root, "project");
-	home = join(root, "home");
-	mkdirSync(join(cwd, ".claude"), { recursive: true });
-	mkdirSync(join(home, ".claude"), { recursive: true });
-	storePath = join(root, "state", "mcp", "project-approvals.json");
+	({ root, cwd, home, storePath } = makeMcpTrustDirs());
 	// The product's own settings live under the temp root too.
 	vi.stubEnv(envName("STATE_DIR"), join(root, "product-state"));
-	resetMcpTrustSessionState();
 });
 afterEach(() => {
 	vi.unstubAllEnvs();
 	rmSync(root, { recursive: true, force: true });
 });
 
-/** The settings files approvals are read from, for the profile in force. */
-const settingsFiles = () => settingsSources(cwd, home);
-const writeSettings = (path: string, settings: Record<string, unknown>) => {
+/** Write the primary user settings file, whose answers approve project servers. */
+const writeUserSettings = (settings: Record<string, unknown>) => writeUserSettingsIn(cwd, home, settings);
+/** Write the local settings file of the primary file's family, whose disables tighten. */
+const writeLocalSettings = (settings: Record<string, unknown>) => {
+	const path = primaryFamily(settingsSources(cwd, home)).find((file) => file.scope === "local")!.path;
 	mkdirSync(dirname(path), { recursive: true });
 	writeFileSync(path, JSON.stringify(settings));
 };
-/** Write the primary user settings file, whose answers approve project servers. */
-const writeUserSettings = (settings: Record<string, unknown>) => writeSettings(primarySettingsFile(settingsFiles())!.path, settings);
-/** Write the local settings file of the primary file's family, whose disables tighten. */
-const writeLocalSettings = (settings: Record<string, unknown>) =>
-	writeSettings(primaryFamily(settingsFiles()).find((file) => file.scope === "local")!.path, settings);
 
-const stdio = (name: string, source: string, command = "npx", args = ["-y", `${name}-server`]): McpServer => ({
-	kind: "stdio",
-	name,
-	command,
-	args,
-	source,
-});
 const projectServer = (name: string, command?: string) => stdio(name, join(cwd, ".mcp.json"), command);
-
-function deps(opts: { choose?: string | undefined; hasUI?: boolean } = {}) {
-	const notices: string[] = [];
-	const disabled: string[] = [];
-	const selections: string[] = [];
-	const choose = "choose" in opts ? opts.choose : CHOICE_THIS;
-	return {
-		notices,
-		disabled,
-		selections,
-		deps: {
-			hasUI: opts.hasUI ?? true,
-			select: async (title: string) => {
-				selections.push(title);
-				return choose;
-			},
-			notify: (m: string) => {
-				notices.push(m);
-			},
-			disable: (s: McpServer) => {
-				disabled.push(s.name);
-			},
-			storePath,
-		},
-	};
-}
+const deps = (opts?: Parameters<typeof trustDeps>[1]) => trustDeps(storePath, opts);
 
 describe("isProjectScopedServer", () => {
 	it("gates a project .mcp.json and a checked-in settings.local.json, but not a plugin or the user file", () => {

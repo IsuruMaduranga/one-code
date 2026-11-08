@@ -13,7 +13,8 @@ import { captureUserTurns } from "./helpers/user-turn.ts";
 import { localCommandBlocks } from "../../extensions/lib/local-command.ts";
 import { REMINDER_CHANNEL, type ReminderPayload } from "../../extensions/lib/reminders.ts";
 import { commandDisplayLine, promptCommandText } from "../../extensions/skill/invoke.ts";
-import { brand, envName } from "../../extensions/lib/brand.mjs";
+import { brand, envName, productStateDir } from "../../extensions/lib/brand.mjs";
+import { productSettingsPath } from "../../extensions/lib/product-settings.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
 
 const model = (provider: string, id: string, input: number, api = "anthropic-messages") =>
@@ -242,8 +243,8 @@ describe("/doctor wiring", () => {
 	});
 
 	it("applies a preset and returns the classifier to the automatic choice", async () => {
-		mkdirSync(join(home, brand.stateDir), { recursive: true });
-		writeFileSync(join(home, brand.stateDir, "settings.json"), JSON.stringify({ autoMode: { classifierModel: "anthropic/claude-opus-5", environment: ["x"] }, other: 1 }));
+		mkdirSync(productStateDir(), { recursive: true });
+		writeFileSync(productSettingsPath(home), JSON.stringify({ autoMode: { classifierModel: "anthropic/claude-opus-5", environment: ["x"] }, other: 1 }));
 		const heard: string[] = [];
 		fake.events.on(SUBAGENT_DEFAULT_CHANGED_CHANNEL, () => heard.push("subagent"));
 		fake.events.on(CLASSIFIER_SETTING_CHANGED_CHANNEL, () => heard.push("classifier"));
@@ -251,7 +252,7 @@ describe("/doctor wiring", () => {
 		await run("preset quality", ctx);
 		expect(setModel).toHaveBeenCalledTimes(1);
 		expect(setModel.mock.calls[0][0].id).toBe("claude-opus-5");
-		const saved = JSON.parse(readFileSync(join(home, brand.stateDir, "settings.json"), "utf8"));
+		const saved = JSON.parse(readFileSync(productSettingsPath(home), "utf8"));
 		expect(saved.subagentModel).toBe("inherit");
 		expect(saved.autoMode).toEqual({ environment: ["x"] });
 		expect(saved.other).toBe(1);
@@ -265,7 +266,7 @@ describe("/doctor wiring", () => {
 		const { ctx, notified } = ctxFor(anthropic[1]);
 		await run("preset economical", ctx);
 		expect(notified[0]).toContain("nothing was changed");
-		expect(() => readFileSync(join(home, brand.stateDir, "settings.json"))).toThrow();
+		expect(() => readFileSync(productSettingsPath(home))).toThrow();
 	});
 
 	it("rejects an unknown preset and a bare `preset`", async () => {

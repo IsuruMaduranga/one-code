@@ -1,7 +1,8 @@
 /**
  * One Code's `/doctor fix` prompt (profile/text/doctor/): the golden snapshot does
  * not run /doctor (its report names the machine's tool versions), so the
- * prompt's moving parts are checked here.
+ * prompt's moving parts, and which files it lets the model write, are checked
+ * here. How the base sends the prompt: test/unit/doctor-wiring.test.ts.
  */
 import { describe, expect, it } from "vitest";
 import { doctorText } from "../text/doctor/index.ts";
@@ -31,6 +32,10 @@ describe("One Code's /doctor fix prompt", () => {
 		expect(text).toContain("`npm i -g pkg` (or `brew upgrade pkg` for a Homebrew install)");
 		expect(text).toContain("change the mode with shift+tab");
 		expect(doctor.fixPrompt({ ...input, install: "pi-package" })).toContain("`pi update`");
+	});
+
+	it("says One Code never writes Claude Code's files", () => {
+		expect(doctor.fixPrompt(input)).toContain("One Code never writes Claude Code's files");
 	});
 
 	it("maps Claude Code's paths to One Code's own only in independent mode", () => {

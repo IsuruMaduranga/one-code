@@ -11,7 +11,7 @@ const rule = (raw: string, editable = true, behavior: "allow" | "ask" | "deny" =
 	key: `src\0${raw}`,
 	behavior,
 	raw,
-	sourceLabel: editable ? "From One Code user settings (~/.onecode/settings.json)" : "From Claude Code user settings (~/.claude/settings.json)",
+	sourceLabel: editable ? `From One Code user settings (~/${brand.stateDir}/settings.json)` : "From Claude Code user settings (~/.claude/settings.json)",
 	editable,
 	...(editable ? {} : { readOnlyNote: "One Code does not edit Claude Code's files." }),
 });
@@ -20,7 +20,7 @@ const autoEntry = (section: AutoEntryRow["section"], text: string, editable = tr
 	key: `src\0${section}\0${text}`,
 	section,
 	text,
-	sourceLabel: editable ? "From One Code user settings (~/.onecode/settings.json)" : "From Claude Code user settings (~/.claude/settings.json)",
+	sourceLabel: editable ? `From One Code user settings (~/${brand.stateDir}/settings.json)` : "From Claude Code user settings (~/.claude/settings.json)",
 	editable,
 	...(editable ? {} : { readOnlyNote: "One Code does not edit Claude Code's files." }),
 });
@@ -45,8 +45,8 @@ const view = (overrides: Partial<PanelView> = {}): PanelView => ({
 	],
 	rules: { allow: [rule("Bash(npm test:*)"), rule("Read", false)], ask: [], deny: [rule("Bash(rm:*)", true, "deny")] },
 	destinations: [
-		{ id: "onecode-project", label: "One Code project settings", description: "Saved in ~/.onecode/projects/p/settings.json" },
-		{ id: "onecode-user", label: "One Code user settings", description: "Saved in ~/.onecode/settings.json" },
+		{ id: "onecode-project", label: "One Code project settings", description: `Saved in ~/${brand.stateDir}/projects/p/settings.json` },
+		{ id: "onecode-user", label: "One Code user settings", description: `Saved in ~/${brand.stateDir}/settings.json` },
 	],
 	ruleError: (raw) => (/^[A-Za-z_]+(\(.*\))?$/.test(raw) ? undefined : `Could not parse "${raw}".`),
 	...overrides,

@@ -5,13 +5,13 @@
  * folder last. With One Code's source provider (Claude Code's files):
  * profile/test/memory-entries-claude-code.test.ts.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { brand } from "../../extensions/lib/brand.mjs";
 import { instructionTargets } from "../../extensions/lib/instructions.ts";
-import { buildMemoryEntries } from "../../extensions/memory/entries.ts";
+import { memoryEntriesIn, writeUnder } from "./helpers/memory-entries.ts";
 
 describe("buildMemoryEntries", () => {
 	let root: string;
@@ -26,21 +26,8 @@ describe("buildMemoryEntries", () => {
 	/** The files a user writes, as the panel resolves them. */
 	const targets = () => instructionTargets(root, stateDir());
 
-	const write = (rel: string, content = "x") => {
-		const abs = join(root, rel);
-		mkdirSync(join(abs, ".."), { recursive: true });
-		writeFileSync(abs, content);
-		return abs;
-	};
-
-	function build(cwd: string) {
-		return buildMemoryEntries({ agentDir: undefined,
-			cwd,
-			home: root,
-			homeOneCodeDir: stateDir(),
-			memoryDir: join(root, "mem"),
-		});
-	}
+	const write = (rel: string) => writeUnder(root, rel);
+	const build = (cwd: string) => memoryEntriesIn(root, cwd);
 
 	it("always offers the user and project instruction files, even when absent", () => {
 		const cwd = join(root, "proj");

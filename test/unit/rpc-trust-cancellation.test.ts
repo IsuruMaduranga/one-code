@@ -9,14 +9,10 @@ import lspExtension from "../../extensions/lsp/index.ts";
 import { lspTrustStorePath } from "../../extensions/lsp/trust.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
+import { useRepositorySettings, writeRepositorySettings } from "./helpers/settings-files.ts";
 
 const state = vi.hoisted(() => ({ runHook: vi.fn(), startServer: vi.fn() }));
 vi.mock("../../extensions/hooks/executor.ts", () => ({ runHookCommand: state.runHook }));
-// The repository-trust prompt needs a repository settings file, which only a
-// profile with a source provider lists; the helper adds one for any profile.
-vi.mock("../../extensions/lib/claude-settings.ts", async (importOriginal) =>
-	(await import("./helpers/repository-settings.ts")).withRepositorySettings(await importOriginal()));
 vi.mock("../../extensions/lsp/client.ts", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../../extensions/lsp/client.ts")>();
 	return { ...actual, LspClient: class {
@@ -28,22 +24,23 @@ vi.mock("../../extensions/lsp/client.ts", async (importOriginal) => {
 	} };
 });
 
+// The repository-trust prompt needs a repository settings file, which only a
+// profile with a source provider lists; the helper lists one on any profile.
+useRepositorySettings();
+
 let root: string;
 let cwd: string;
 beforeEach(() => {
 	root = mkdtempSync(join(tmpdir(), "rpc-trust-"));
 	cwd = join(root, "project");
-	mkdirSync(join(cwd, ".claude"), { recursive: true });
+	mkdirSync(cwd, { recursive: true });
 	stubHome(root);
-	vi.stubEnv("CLAUDE_CONFIG_DIR", join(root, ".claude"));
-	vi.stubEnv(envName("CONFIG_MODE"), "claude-compatible");
-	vi.stubEnv(envName("STATE_DIR"), join(root, ".onecode"));
 	vi.stubEnv("PI_CODING_AGENT_DIR", join(root, "agent"));
 	resetTrustSessionState();
 	resetHookSettingsCache();
 	state.startServer.mockReset();
 	state.runHook.mockReset().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0, durationMs: 1 });
-	writeFileSync(join(cwd, ".claude", "settings.json"), JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "echo trusted" }] }] } }));
+	writeRepositorySettings(cwd, root, { hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "echo trusted" }] }] } });
 	writeFileSync(join(cwd, "Cargo.toml"), "[package]\nname = 'demo'\nversion = '0.1.0'\n");
 	writeFileSync(join(cwd, "main.rs"), "fn main() {}\n");
 });

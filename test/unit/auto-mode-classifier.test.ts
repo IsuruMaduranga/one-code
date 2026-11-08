@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { loadAutoModeConfig } from "../../extensions/auto-mode/config.ts";
 import {
 	CONSECUTIVE_BLOCK_LIMIT,
 	PauseTracker,
@@ -10,7 +9,6 @@ import {
 } from "../../extensions/auto-mode/pause.ts";
 import {
 	buildPayload,
-	type ClassifyRequest,
 	indexFor,
 	parseSeverity,
 	parseStage2,
@@ -21,10 +19,8 @@ import { buildCategoryIndex, groundCategory } from "../../extensions/auto-mode/r
 import { buildRuleset } from "../../extensions/auto-mode/classifier-prompt.ts";
 import { brand, envName } from "../../extensions/lib/brand.mjs";
 import { requireText } from "../../extensions/lib/profile.ts";
+import { CLEAN_UP_REQUEST, DEFAULT_ENVIRONMENT } from "./helpers/classify-request.ts";
 
-// No settings file at this path, so this is the built-in configuration (the
-// profile's ruleset with its default Environment).
-const config = loadAutoModeConfig("/nonexistent-home-for-tests");
 const words = requireText("classifier");
 
 // A ruleset in the shape the base parses: the section headings it bounds the
@@ -46,17 +42,6 @@ const RULESET = [
 	"- Local Operations: work inside the project",
 ].join("\n");
 const index = buildCategoryIndex(RULESET);
-
-const base: ClassifyRequest = {
-	toolName: "bash",
-	transcript: [
-		{ kind: "user", text: "clean up /tmp/x" },
-		{ kind: "tool", tool: "bash", input: { command: "rm -rf /tmp/x" } },
-	],
-	userMessages: ["clean up /tmp/x"],
-	username: "tester",
-	environment: config.environment,
-};
 
 describe("buildCategoryIndex / groundCategory", () => {
 	it("indexes Data Exfiltration as a HARD rule", () => {
@@ -91,17 +76,17 @@ describe("buildCategoryIndex / groundCategory", () => {
 			softDeny: ["Bash(git add *) in ~/ml/repo when staging internal-only paths — never these"],
 			hardDeny: ["Uploading anything to pastebin-like services"],
 		};
-		const withExtras = indexFor(config.environment, extras);
+		const withExtras = indexFor(DEFAULT_ENVIRONMENT, extras);
 		// Full text grounds at the right tier…
 		expect(groundCategory(withExtras, extras.softDeny[0])?.tier).toBe("soft_deny");
 		expect(groundCategory(withExtras, extras.hardDeny[0])?.tier).toBe("hard_deny");
 		// …and extra ALLOW entries are still not block categories.
-		const allowExtras = indexFor(config.environment, { allow: ["Bash(git-internal add:*) in ~/ml/repo"] });
+		const allowExtras = indexFor(DEFAULT_ENVIRONMENT, { allow: ["Bash(git-internal add:*) in ~/ml/repo"] });
 		expect(groundCategory(allowExtras, "Bash(git-internal add:*) in ~/ml/repo")).toBeUndefined();
 	});
 
 	it("keeps HARD's tier when a name would otherwise collide", () => {
-		const built = buildCategoryIndex(buildRuleset(config.environment));
+		const built = buildCategoryIndex(buildRuleset(DEFAULT_ENVIRONMENT));
 		for (const rule of built.rules) {
 			// Every indexed rule resolves to exactly one tier.
 			expect(built.byName.get(rule.name.toLowerCase().replace(/[.,:;]+$/, ""))?.tier).toBe(rule.tier);
@@ -277,8 +262,8 @@ describe("parseStage2", () => {
 
 describe("buildPayload / stage instructions", () => {
 	it("puts the profile's ruleset and the Session Context in the system prompt", () => {
-		const { system } = buildPayload(base);
-		const environment = config.environment.map((entry) => `- ${entry}`).join("\n");
+		const { system } = buildPayload(CLEAN_UP_REQUEST);
+		const environment = DEFAULT_ENVIRONMENT.map((entry) => `- ${entry}`).join("\n");
 		const ruleset = words.rulesetHead + environment + words.hardSection + words.softSection + words.allowSection + words.rulesetTail;
 		// The username is injected at the profile's placeholder.
 		expect(system).toBe(ruleset + words.sessionContext.split("__USERNAME__").join("tester"));
@@ -287,7 +272,7 @@ describe("buildPayload / stage instructions", () => {
 
 	it("keeps the transcript and CLAUDE.md framing in the user message", () => {
 		const claudeMd = "# CLAUDE.md\nNever force push.";
-		const { userPrefix } = buildPayload({ ...base, claudeMd });
+		const { userPrefix } = buildPayload({ ...CLEAN_UP_REQUEST, claudeMd });
 		expect(userPrefix).toContain("<transcript>");
 		expect(userPrefix).toContain('{"Bash":"rm -rf /tmp/x"}');
 		expect(userPrefix.startsWith(`${words.instructionsFraming.prefix}${claudeMd}${words.instructionsFraming.suffix}\n\n`)).toBe(true);
@@ -295,25 +280,25 @@ describe("buildPayload / stage instructions", () => {
 
 	it("keeps the system prompt byte-stable across calls that differ only per-turn", () => {
 		const other = buildPayload({
-			...base,
+			...CLEAN_UP_REQUEST,
 			transcript: [{ kind: "tool", tool: "bash", input: { command: "echo hi" } }],
 			claudeMd: "different",
 		});
-		expect(other.system).toBe(buildPayload(base).system);
+		expect(other.system).toBe(buildPayload(CLEAN_UP_REQUEST).system);
 	});
 
 	it("does not promote the untrusted CLAUDE.md into the system role", () => {
-		const { system } = buildPayload({ ...base, claudeMd: "MARKER-XYZ" });
+		const { system } = buildPayload({ ...CLEAN_UP_REQUEST, claudeMd: "MARKER-XYZ" });
 		expect(system).not.toContain("MARKER-XYZ");
 	});
 
 	it("injects a configured environment line into the ruleset", () => {
-		const { system } = buildPayload({ ...base, environment: ["- **Organization**: Acme Corp"] });
+		const { system } = buildPayload({ ...CLEAN_UP_REQUEST, environment: ["- **Organization**: Acme Corp"] });
 		expect(system).toContain("Acme Corp");
 	});
 
 	it("stage 1 asks for harm only; stage 2 asks for the full evaluation plus our intent quote", () => {
-		const { userPrefix } = buildPayload(base);
+		const { userPrefix } = buildPayload(CLEAN_UP_REQUEST);
 		const s1 = stage1User(userPrefix);
 		const s2 = stage2User(userPrefix);
 		expect(s1).toBe(`${userPrefix}\n\n${words.stage1Final.trimStart()}`);
@@ -323,7 +308,7 @@ describe("buildPayload / stage instructions", () => {
 	});
 
 	it("adds the circumvention instruction to stage 2 only after a rule denial", () => {
-		const { userPrefix } = buildPayload(base);
+		const { userPrefix } = buildPayload(CLEAN_UP_REQUEST);
 		expect(stage2User(userPrefix)).not.toContain(words.stage2DenialAddendum);
 		const after = stage2User(userPrefix, true);
 		expect(after).toBe(`${stage2User(userPrefix)}${words.stage2DenialAddendum}`);
@@ -432,7 +417,7 @@ describe("buildRuleset rule-extra injection (CC 2.1.233 injection points)", () =
 		softDeny: ["My soft extra rule"],
 		allow: ["My allow extra rule"],
 	};
-	const built = buildRuleset(config.environment, extras);
+	const built = buildRuleset(DEFAULT_ENVIRONMENT, extras);
 
 	it("appends each list's extras as its last bullet lines", () => {
 		// Each list's extras are its final content lines before the next boundary.
@@ -450,12 +435,12 @@ describe("buildRuleset rule-extra injection (CC 2.1.233 injection points)", () =
 			.split("\n")
 			.filter((line) => !line.startsWith("- My "))
 			.join("\n");
-		expect(stripped).toBe(buildRuleset(config.environment));
+		expect(stripped).toBe(buildRuleset(DEFAULT_ENVIRONMENT));
 	});
 
 	it("injects nothing for empty or missing lists", () => {
-		expect(buildRuleset(config.environment, {})).toBe(buildRuleset(config.environment));
-		expect(buildRuleset(config.environment, { allow: [] })).toBe(buildRuleset(config.environment));
+		expect(buildRuleset(DEFAULT_ENVIRONMENT, {})).toBe(buildRuleset(DEFAULT_ENVIRONMENT));
+		expect(buildRuleset(DEFAULT_ENVIRONMENT, { allow: [] })).toBe(buildRuleset(DEFAULT_ENVIRONMENT));
 	});
 });
 

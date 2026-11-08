@@ -5,7 +5,7 @@
  * the text is tested in test/unit/template.test.ts.
  */
 import { describe, expect, it } from "vitest";
-import type { PromptTier } from "../../extensions/lib/model-tier.ts";
+import { PROMPT_TIERS, type PromptTier } from "../../extensions/lib/model-tier.ts";
 import type { EnvironmentInfo } from "../../extensions/system-prompt/environment.ts";
 import { buildClaudeCodeSystemPrompt } from "../../extensions/system-prompt/template.ts";
 
@@ -19,7 +19,6 @@ const env: EnvironmentInfo = {
 };
 
 const baseOptions = { cwd: "/tmp/project" };
-const TIERS: PromptTier[] = ["frontier", "workhorse", "cheap", "tiny"];
 
 describe("One Code's system prompt", () => {
 	it("contains the adapted identity and core sections", () => {
@@ -62,7 +61,7 @@ describe("One Code's system prompt", () => {
 	});
 
 	it("leaves the environment, model line, scratchpad and git snapshot to the first-message context", () => {
-		for (const tier of TIERS) {
+		for (const tier of PROMPT_TIERS) {
 			const prompt = buildClaudeCodeSystemPrompt(baseOptions, env, tier);
 			expect(prompt, tier).not.toContain("Primary working directory");
 			expect(prompt, tier).not.toContain("You are powered by the model");
@@ -153,13 +152,13 @@ describe("One Code's system prompt", () => {
 	});
 
 	it("produces three distinct registers (frontier, verbose, tiny); workhorse and cheap share one", () => {
-		const outputs = TIERS.map((tier) => buildClaudeCodeSystemPrompt(baseOptions, env, tier));
+		const outputs = PROMPT_TIERS.map((tier) => buildClaudeCodeSystemPrompt(baseOptions, env, tier));
 		expect(new Set(outputs).size).toBe(3);
 	});
 
 	it("includes the memory section and the cwd line", () => {
 		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "frontier")).toContain("/home/u/.claude/projects/-tmp-project/memory/");
-		for (const tier of TIERS) {
+		for (const tier of PROMPT_TIERS) {
 			const prompt = buildClaudeCodeSystemPrompt(baseOptions, { ...env, memoryDir: undefined }, tier);
 			expect(prompt, tier).not.toMatch(/^# (auto memory|Memory)$/m);
 			expect(prompt, tier).toContain("Current working directory: /tmp/project");

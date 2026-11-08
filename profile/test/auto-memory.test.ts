@@ -22,7 +22,6 @@ beforeEach(() => {
 	cwd = join(root, "project");
 	mkdirSync(cwd, { recursive: true });
 	stubHome(home);
-	vi.stubEnv("ONECODE_STATE_DIR", join(home, ".onecode"));
 	vi.stubEnv("CLAUDE_CONFIG_DIR", join(home, ".claude"));
 	vi.stubEnv("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "");
 	resetConfigModeForTest("claude-compatible");

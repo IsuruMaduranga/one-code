@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { PromptTier } from "../../extensions/lib/model-tier.ts";
+import { PROMPT_TIERS, type PromptTier } from "../../extensions/lib/model-tier.ts";
 import type { EnvironmentInfo } from "../../extensions/system-prompt/environment.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
 import { buildClaudeCodeSystemPrompt } from "../../extensions/system-prompt/template.ts";
@@ -21,7 +21,6 @@ const env: EnvironmentInfo = {
 };
 
 const baseOptions = { cwd: "/tmp/project" };
-const TIERS: PromptTier[] = ["frontier", "workhorse", "cheap", "tiny"];
 const text = () => requireText("systemPrompt");
 /** The session the base builds for these options (no selected tools, task tools on). */
 const session = (tier: PromptTier) => ({ tier, taskTools: true, tools: undefined });
@@ -32,7 +31,7 @@ describe("buildClaudeCodeSystemPrompt", () => {
 		expect(prompt).toContain(`\n\n${text().memory(env.memoryDir!, session("frontier"))}\n\n`);
 	});
 
-	it.each(TIERS)("drops the memory section while auto-memory is off (%s)", (tier) => {
+	it.each(PROMPT_TIERS)("drops the memory section while auto-memory is off (%s)", (tier) => {
 		const on = buildClaudeCodeSystemPrompt(baseOptions, env, tier);
 		const prompt = buildClaudeCodeSystemPrompt(baseOptions, { ...env, memoryDir: undefined }, tier);
 		// Only the memory section goes; the rest stays.
@@ -78,7 +77,7 @@ describe("buildClaudeCodeSystemPrompt", () => {
 	});
 
 	it("is byte-stable across calls with identical inputs, for each tier", () => {
-		for (const tier of TIERS) {
+		for (const tier of PROMPT_TIERS) {
 			const a = buildClaudeCodeSystemPrompt(baseOptions, env, tier);
 			const b = buildClaudeCodeSystemPrompt({ ...baseOptions }, { ...env }, tier);
 			expect(a).toBe(b);

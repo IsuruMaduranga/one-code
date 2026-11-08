@@ -45,6 +45,9 @@ export type PromptTier = "frontier" | "workhorse" | "cheap" | "tiny";
 /** More-scaffolded = higher rank. */
 const TIER_RANK: Record<PromptTier, number> = { frontier: 0, workhorse: 1, cheap: 2, tiny: 3 };
 
+/** Every prompt tier, most capable first. */
+export const PROMPT_TIERS = Object.keys(TIER_RANK) as readonly PromptTier[];
+
 /** Whether `value` names one of the four tiers. */
 export function isPromptTier(value: unknown): value is PromptTier {
 	return typeof value === "string" && Object.hasOwn(TIER_RANK, value);

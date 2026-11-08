@@ -17,12 +17,12 @@ import { listWorkspaceDirectories } from "../../extensions/permissions/settings.
 import { parseAddDirFlag, validateWorkspaceDirectory } from "../../extensions/permissions/workspace.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
-import { brand, envName } from "../../extensions/lib/brand.mjs";
+import { useRepositorySettings, writeRepositorySettings } from "./helpers/settings-files.ts";
 
 // The repository-trust prompt needs a repository settings file, which only a
-// profile with a source provider lists; the helper adds one for any profile.
-vi.mock("../../extensions/lib/claude-settings.ts", async (importOriginal) =>
-	(await import("./helpers/repository-settings.ts")).withRepositorySettings(await importOriginal()));
+// profile with a source provider lists; the helper lists one on any profile.
+useRepositorySettings();
+
 
 type GateResult = { block?: boolean; reason?: string } | undefined;
 
@@ -42,7 +42,6 @@ beforeEach(() => {
 	writeFileSync(join(shared, "notes.md"), "notes");
 	writeFileSync(join(shared, ".ssh", "id_rsa"), "key");
 	stubHome(home);
-	vi.stubEnv(envName("STATE_DIR"), join(home, brand.stateDir));
 	vi.stubEnv("PI_CODING_AGENT_DIR", join(home, "agent"));
 });
 afterEach(() => {
@@ -168,8 +167,7 @@ describe("workspace directories in the gate", () => {
 	});
 
 	it("asks to trust the repository's directories before applying them", async () => {
-		mkdirSync(join(cwd, ".claude"), { recursive: true });
-		writeFileSync(join(cwd, ".claude", "settings.json"), JSON.stringify({ permissions: { additionalDirectories: [shared] } }));
+		writeRepositorySettings(cwd, home, { permissions: { additionalDirectories: [shared] } });
 		confirmAnswer = false;
 		await start();
 		expect(announced).toEqual([[]]);
@@ -187,8 +185,7 @@ describe("workspace directories in the gate", () => {
 	});
 
 	it("asks to trust the repository's directories for a plan-mode shell read there", async () => {
-		mkdirSync(join(cwd, ".claude"), { recursive: true });
-		writeFileSync(join(cwd, ".claude", "settings.json"), JSON.stringify({ permissions: { additionalDirectories: [shared] } }));
+		writeRepositorySettings(cwd, home, { permissions: { additionalDirectories: [shared] } });
 		await start();
 		fake.events.emit(MODE_CHANNEL, { mode: "plan" });
 		const command = `cat ${forwardSlashes(join(shared, "notes.md"))}`;

@@ -1,13 +1,13 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { collectCompat, importedConfigSection, mcpSection } from "../../extensions/doctor/compat.ts";
 import { checkDependencies, projectLanguages, providerHasNativeSearch, webSearchRoute } from "../../extensions/doctor/dependencies.ts";
 import { whichOnPath } from "../../extensions/lib/which.ts";
 import { invalidatePluginsCache } from "../../extensions/lib/plugins.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
+import { tempHome } from "../../test/unit/helpers/temp-home.ts";
 
 let home: string;
 let cwd: string;
@@ -17,14 +17,9 @@ const write = (path: string, data: unknown) => {
 };
 
 beforeEach(() => {
-	home = mkdtempSync(join(tmpdir(), "onecode-doctor-compat-home-"));
-	cwd = mkdtempSync(join(tmpdir(), "onecode-doctor-compat-cwd-"));
+	({ home, cwd } = tempHome("onecode-doctor-compat-"));
 	invalidatePluginsCache();
 	resetHookSettingsCache();
-});
-afterEach(() => {
-	rmSync(home, { recursive: true, force: true });
-	rmSync(cwd, { recursive: true, force: true });
 });
 
 const input = () => ({ cwd, home, agentDir: join(home, ".onecode", "agent"), env: { HOME: home, PATH: "" } as NodeJS.ProcessEnv });

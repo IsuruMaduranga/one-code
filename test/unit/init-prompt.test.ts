@@ -1,7 +1,7 @@
 /**
  * `/init` submits the profile's prompt for the project's instruction file as
  * a user turn, and waits for that turn only in the one-shot modes. One Code's
- * prompt itself: profile/test/init-prompt-wording.test.ts.
+ * prompt itself: profile/test/profile-init-text.test.ts.
  */
 import { describe, expect, it, vi } from "vitest";
 import initExtension from "../../extensions/init/index.ts";

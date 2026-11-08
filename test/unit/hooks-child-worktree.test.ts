@@ -1,15 +1,18 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+/**
+ * A child session's hooks in a worktree: they run in the child's cwd with the
+ * parent's project root, format the child's files, and never start for an
+ * aborted turn. A project hook approved in the parent (One Code's source
+ * provider reads Claude Code's project settings):
+ * profile/test/hooks-child-worktree-project.test.ts.
+ */
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import hooksExtension from "../../extensions/hooks/index.ts";
-import { resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
-import { type HookBridge, SUBAGENT_HOOK_CHANNEL } from "../../extensions/hooks/subagent-bridge.ts";
 import { resetTrustSessionState } from "../../extensions/hooks/trust.ts";
-import { primarySettingsFile, settingsSources } from "../../extensions/lib/claude-settings.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
-import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
+import { childHookBridge, makeHookWorktreeDirs, writeHookScript } from "./helpers/hook-worktree.ts";
+import { writeUserSettings } from "./helpers/settings-files.ts";
 
 const state = vi.hoisted(() => ({ home: `/nonexistent/one-code-child-hooks-${Math.random().toString(36).slice(2)}` }));
 vi.mock("node:os", async (importOriginal) => {
@@ -22,17 +25,9 @@ describe("child hooks in a worktree", () => {
 	let root: string;
 	let parent: string;
 	let worktree: string;
-	let config: string;
 
 	beforeEach(() => {
-		root = realpathSync(mkdtempSync(join(tmpdir(), "hooks-child-worktree-")));
-		parent = join(root, "parent");
-		worktree = join(root, "worktree");
-		config = join(root, "config");
-		for (const dir of [parent, worktree, config]) mkdirSync(dir);
-		vi.stubEnv("CLAUDE_CONFIG_DIR", config);
-		vi.stubEnv(envName("STATE_DIR"), join(root, "state"));
-		resetHookSettingsCache();
+		({ root, project: parent, worktree } = makeHookWorktreeDirs("hooks-child-worktree-"));
 		resetTrustSessionState();
 	});
 
@@ -42,29 +37,8 @@ describe("child hooks in a worktree", () => {
 		rmSync(root, { recursive: true, force: true });
 	});
 
-	/** Write the primary user settings file of the profile in force (user scope: no consent prompt). */
-	function writeUserSettings(settings: Record<string, unknown>): void {
-		const path = primarySettingsFile(settingsSources(parent, homedir()))!.path;
-		mkdirSync(dirname(path), { recursive: true });
-		writeFileSync(path, JSON.stringify(settings));
-	}
-
-	function script(name: string, body: string): string {
-		const path = join(root, `${name}.cjs`);
-		writeFileSync(path, body);
-		return `"${process.execPath}" "${path}"`;
-	}
-
-	async function bridge(): Promise<HookBridge> {
-		const fake = createFakePi();
-		let result: HookBridge | undefined;
-		fake.events.on(SUBAGENT_HOOK_CHANNEL, (data) => {
-			result = (data as { bridge: HookBridge }).bridge;
-		});
-		hooksExtension(fake.pi as never);
-		await fake.fireOne("session_start", { reason: "startup" }, createFakeCtx({ cwd: parent }));
-		return result!;
-	}
+	const script = (name: string, body: string) => writeHookScript(root, name, body);
+	const bridge = () => childHookBridge(parent);
 
 	it("runs PreToolUse in the child's cwd while preserving the project root and child transcript", async () => {
 		const record = join(root, "seen.json");
@@ -73,7 +47,7 @@ process.stdin.setEncoding("utf8");
 process.stdin.on("data", chunk => input += chunk);
 process.stdin.on("end", () => require("node:fs").writeFileSync(${JSON.stringify(record)}, JSON.stringify({ cwd: process.cwd(), project: process.env.CLAUDE_PROJECT_DIR, payload: JSON.parse(input) })));
 `);
-		writeUserSettings({ hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command }] }] } });
+		writeUserSettings(parent, homedir(), { hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command }] }] } });
 		const hooks = await bridge();
 		const transcript = join(root, "child.jsonl");
 		await hooks.preToolUse({ toolName: "bash", input: { command: "pwd" }, cwd: worktree, sessionId: "child", transcriptPath: transcript });
@@ -85,7 +59,7 @@ process.stdin.on("end", () => require("node:fs").writeFileSync(${JSON.stringify(
 		writeFileSync(join(parent, "file.txt"), "parent contents\n");
 		writeFileSync(join(worktree, "file.txt"), "child contents\n");
 		const command = script("format", `process.stdin.resume(); require("node:fs").writeFileSync("file.txt", "formatted child\\n");`);
-		writeUserSettings({ hooks: { PostToolUse: [{ matcher: "Write", hooks: [{ type: "command", command }] }] } });
+		writeUserSettings(parent, homedir(), { hooks: { PostToolUse: [{ matcher: "Write", hooks: [{ type: "command", command }] }] } });
 		const hooks = await bridge();
 		const outcome = await hooks.postToolUse({ toolName: "write", input: { path: "file.txt", content: "child contents\n" }, cwd: worktree, sessionId: "child", content: [], isError: false });
 		expect(readFileSync(join(parent, "file.txt"), "utf8")).toBe("parent contents\n");
@@ -96,12 +70,11 @@ process.stdin.on("end", () => require("node:fs").writeFileSync(${JSON.stringify(
 	it("does not start a hook for an already-aborted child turn", async () => {
 		const record = join(root, "aborted-hook-ran.txt");
 		const command = script("aborted", `process.stdin.resume(); require("node:fs").writeFileSync(${JSON.stringify(record)}, "ran");`);
-		writeUserSettings({ hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command }] }] } });
+		writeUserSettings(parent, homedir(), { hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command }] }] } });
 		const hooks = await bridge();
 		const controller = new AbortController();
 		controller.abort();
 		await hooks.preToolUse({ toolName: "bash", input: { command: "pwd" }, cwd: worktree, sessionId: "child", signal: controller.signal });
 		expect(existsSync(record)).toBe(false);
 	});
-
 });

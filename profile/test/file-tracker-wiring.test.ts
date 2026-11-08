@@ -454,7 +454,6 @@ describe("file-tracker wiring", () => {
 		const project = path("project");
 		mkdirSync(project);
 		stubHome(home);
-		vi.stubEnv("ONECODE_STATE_DIR", join(home, ".onecode"));
 		resetConfigModeForTest("claude-compatible");
 		try {
 			const imported = path("external.md");
@@ -480,7 +479,6 @@ describe("file-tracker wiring", () => {
 		const project = path("project-big");
 		mkdirSync(project);
 		stubHome(home);
-		vi.stubEnv("ONECODE_STATE_DIR", join(home, ".onecode"));
 		vi.stubEnv("CLAUDE_CONFIG_DIR", join(home, ".claude"));
 		resetConfigModeForTest("claude-compatible");
 		try {

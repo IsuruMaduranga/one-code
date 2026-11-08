@@ -16,18 +16,8 @@ import {
 	webSearchSettingsFrom,
 	withSiteOperators,
 	type FetchLike,
-	type SearchBackend,
 } from "../../extensions/web/backends.ts";
-
-/** The failure data a backend or the chain threw. */
-async function failureOf(work: Promise<unknown> | (() => unknown)): Promise<unknown> {
-	try {
-		await (typeof work === "function" ? work() : work);
-	} catch (error) {
-		return (error as { failure?: unknown }).failure;
-	}
-	throw new Error("expected a failure");
-}
+import { failureOf, fakeBackend, ONE_RESULT } from "./helpers/web-search.ts";
 
 const jsonResponse = (body: unknown, init: { status?: number; contentType?: string } = {}): Response =>
 	new Response(typeof body === "string" ? body : JSON.stringify(body), {
@@ -197,32 +187,24 @@ describe("backends over a fake fetch", () => {
 });
 
 describe("runChain", () => {
-	const backend = (name: SearchBackend["name"], keyless: boolean, impl: SearchBackend["search"]): SearchBackend => ({
-		name,
-		label: name,
-		keyless,
-		search: impl,
-	});
-	const ok = [{ title: "T", url: "https://a.com/", snippet: "S" }];
-
 	it("falls through a failing backend and records the failure", async () => {
-		const chain = [backend("brave", false, async () => { throw new Error("down"); }), backend("exa-free", true, async () => ok)];
+		const chain = [fakeBackend("brave", false, async () => { throw new Error("down"); }), fakeBackend("exa-free", true, async () => ONE_RESULT)];
 		const outcome = await runChain(chain, "q", {}, 10, undefined);
 		expect(outcome.backend.name).toBe("exa-free");
 		expect(outcome.attempts).toEqual([{ label: "brave", failure: { kind: "other", osMessage: "down" } }]);
 		expect(outcome.backend.keyless).toBe(true);
-		expect(outcome.results).toEqual(ok);
+		expect(outcome.results).toEqual(ONE_RESULT);
 	});
 
 	it("reports a keyed backend with no results as such", async () => {
-		const outcome = await runChain([backend("tavily", false, async () => [])], "q", {}, 10, undefined);
+		const outcome = await runChain([fakeBackend("tavily", false, async () => [])], "q", {}, 10, undefined);
 		expect(outcome.backend).toMatchObject({ name: "tavily", keyless: false });
 		expect(outcome.attempts).toEqual([]);
 		expect(outcome.results).toEqual([]);
 	});
 
 	it("names every backend when all fail", async () => {
-		const chain = [backend("brave", false, async () => { throw new Error("a"); }), backend("exa-free", true, async () => { throw new Error("b"); })];
+		const chain = [fakeBackend("brave", false, async () => { throw new Error("a"); }), fakeBackend("exa-free", true, async () => { throw new Error("b"); })];
 		const failure = await failureOf(runChain(chain, "q", {}, 10, undefined));
 		expect(failure).toEqual({
 			kind: "allFailed",
@@ -235,10 +217,10 @@ describe("runChain", () => {
 
 	it("stops on cancellation instead of trying the next backend", async () => {
 		const controller = new AbortController();
-		const second = vi.fn(async () => ok);
+		const second = vi.fn(async () => ONE_RESULT);
 		const chain = [
-			backend("brave", false, async () => { controller.abort(); throw new Error("aborted"); }),
-			backend("exa-free", true, second),
+			fakeBackend("brave", false, async () => { controller.abort(); throw new Error("aborted"); }),
+			fakeBackend("exa-free", true, second),
 		];
 		expect(await failureOf(runChain(chain, "q", {}, 10, controller.signal))).toEqual({ kind: "cancelled" });
 		expect(second).not.toHaveBeenCalled();

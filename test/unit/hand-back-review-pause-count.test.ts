@@ -13,14 +13,10 @@ import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../ext
 import { CONSECUTIVE_BLOCK_LIMIT } from "../../extensions/auto-mode/pause.ts";
 import { classify } from "../../extensions/auto-mode/classifier.ts";
 import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
-import type { HandBackVerdict } from "../../extensions/lib/notifications.ts";
+import { handBackWarning, type HandBackVerdict } from "../../extensions/lib/notifications.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
-import { requireText } from "../../extensions/lib/profile.ts";
-
-/** The warning the profile puts above a flagged or unreviewed report. */
-const warning = (kind: "blocked" | "unavailable", reason: string) => requireText("notifications").handBackWarning({ kind, reason, clipped: false });
+import { brand, envName } from "../../extensions/lib/brand.mjs";
 
 vi.mock("../../extensions/auto-mode/classifier.ts", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../../extensions/auto-mode/classifier.ts")>()),
@@ -35,7 +31,7 @@ describe("hand-back review and the auto-mode pause", () => {
 
 	beforeEach(async () => {
 		stateDir = mkdtempSync(join(tmpdir(), "hand-back-count-"));
-		vi.stubEnv(envName("STATE_DIR"), join(stateDir, ".onecode"));
+		vi.stubEnv(envName("STATE_DIR"), join(stateDir, brand.stateDir));
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(stateDir, "agent"));
 		fake = createFakePi();
 		permissionsExtension(fake.pi as never);
@@ -79,7 +75,7 @@ describe("hand-back review and the auto-mode pause", () => {
 
 	it("warns on flagged runs without pausing auto mode", async () => {
 		for (let i = 0; i < CONSECUTIVE_BLOCK_LIMIT; i++) {
-			expect(await foreground(`spawn-${i}`)).toContain(warning("blocked", "stub: sends a credential off the machine"));
+			expect(await foreground(`spawn-${i}`)).toContain(handBackWarning({ kind: "blocked", reason: "stub: sends a credential off the machine" }));
 			expect(await background(`agent-${i}`)).toEqual({ kind: "blocked", reason: "stub: sends a credential off the machine" });
 		}
 		expect(await paused("probe")).toBe(false);
@@ -90,7 +86,7 @@ describe("hand-back review and the auto-mode pause", () => {
 			vi.mocked(classify).mockResolvedValueOnce({ decision: "block", reason: "the classifier timed out", tier: "timeout" });
 			expect(await background(`agent-${i}`)).toEqual({ kind: "unavailable", reason: "the classifier timed out" });
 			vi.mocked(classify).mockResolvedValueOnce({ decision: "block", reason: "no severity", tier: "unmatched", noVerdict: true });
-			expect(await foreground(`spawn-${i}`)).toContain(warning("unavailable", "no severity"));
+			expect(await foreground(`spawn-${i}`)).toContain(handBackWarning({ kind: "unavailable", reason: "no severity" }));
 		}
 		expect(await paused("probe")).toBe(false);
 	});

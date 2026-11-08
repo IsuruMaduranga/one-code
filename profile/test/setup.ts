@@ -12,7 +12,8 @@ import { profile } from "../index.ts";
 // One Code's source provider loads on first use (lib/profile.ts sourceProvider).
 // Imported here once the test file is, so the lib/ modules it pulls in load
 // under the file's own vi.mock calls; set again for each file.
-const sourcesModule = join(PROFILE_DIR, profile.sources ?? "");
+if (!profile.sources) throw new Error("One Code's profile names its source provider");
+const sourcesModule = join(PROFILE_DIR, profile.sources);
 beforeAll(async () => shareModuleForTest(profileModuleKey(sourcesModule), await import("../claude-code/sources.ts")));
 
 // Claude-compatible mode regardless of the machine's ~/.onecode/settings.json;

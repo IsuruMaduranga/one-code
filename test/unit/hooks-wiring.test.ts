@@ -17,7 +17,7 @@
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import hooksExtension from "../../extensions/hooks/index.ts";
 import type { CcHookEvent } from "../../extensions/hooks/protocol.ts";
@@ -28,9 +28,9 @@ import { type HookBridge, SUBAGENT_HOOK_CHANNEL } from "../../extensions/hooks/s
 import { REMINDER_CHANNEL, wrapReminder } from "../../extensions/lib/reminders.ts";
 import { SKILL_INVOCATION_TYPE } from "../../extensions/skill/invoke.ts";
 import { brandedId, envName } from "../../extensions/lib/brand.mjs";
-import { primarySettingsFile, settingsSources } from "../../extensions/lib/claude-settings.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { writeUserSettings } from "./helpers/settings-files.ts";
 
 const hooks = requireText("hooks");
 
@@ -56,11 +56,7 @@ vi.mock("node:os", async (importOriginal) => {
 function userSettings(root: string): (settings: Record<string, unknown>) => void {
 	vi.stubEnv("CLAUDE_CONFIG_DIR", join(root, "claude-config"));
 	vi.stubEnv(envName("STATE_DIR"), join(root, "state"));
-	return (settings) => {
-		const path = primarySettingsFile(settingsSources(join(root, "project"), homedir()))!.path;
-		mkdirSync(dirname(path), { recursive: true });
-		writeFileSync(path, JSON.stringify(settings));
-	};
+	return (settings) => writeUserSettings(join(root, "project"), homedir(), settings);
 }
 
 /**

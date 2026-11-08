@@ -1,8 +1,8 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { beforeEach, describe, expect, it } from "vitest";
 import { pinCatalog } from "./catalog-fixture.ts";
+import { tempHome } from "./helpers/temp-home.ts";
 import {
 	applicableSubagentDefault,
 	loadSubagentDefault,
@@ -25,10 +25,9 @@ import { productSettingsPath } from "../../extensions/lib/product-settings.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
 
 /** The product's own settings file lives under its state dir, not ~/.claude. */
-const productPath = (home: string) => productSettingsPath(home);
 const writeProductSettings = (home: string, data: unknown) => {
-	mkdirSync(dirname(productPath(home)), { recursive: true });
-	writeFileSync(productPath(home), JSON.stringify(data));
+	mkdirSync(dirname(productSettingsPath(home)), { recursive: true });
+	writeFileSync(productSettingsPath(home), JSON.stringify(data));
 };
 
 /** The profile's subagent-model text. */
@@ -728,11 +727,7 @@ describe("loadSubagentDefault", () => {
 	let home: string;
 
 	beforeEach(() => {
-		home = mkdtempSync(join(tmpdir(), "cc-subagent-default-"));
-	});
-
-	afterEach(() => {
-		rmSync(home, { recursive: true, force: true });
+		home = tempHome("cc-subagent-default-").home;
 	});
 
 	it("reads the product's variable from its settings env block", () => {
@@ -825,20 +820,16 @@ describe("persistSubagentModel", () => {
 	let home: string;
 
 	beforeEach(() => {
-		home = mkdtempSync(join(tmpdir(), "cc-subagent-persist-"));
-		mkdirSync(dirname(productPath(home)), { recursive: true });
-	});
-
-	afterEach(() => {
-		rmSync(home, { recursive: true, force: true });
+		home = tempHome("cc-subagent-persist-").home;
+		mkdirSync(dirname(productSettingsPath(home)), { recursive: true });
 	});
 
 	// persistSubagentModel writes to the product's own file, never into ~/.claude.
-	const settingsPath = () => productPath(home);
+	const settingsPath = () => productSettingsPath(home);
 	const readSettings = () => JSON.parse(readFileSync(settingsPath(), "utf-8"));
 
 	it("creates the settings file when there is none", () => {
-		rmSync(dirname(productPath(home)), { recursive: true, force: true });
+		rmSync(dirname(productSettingsPath(home)), { recursive: true, force: true });
 		persistSubagentModel("openai/gpt-5-mini", home);
 		expect(readSettings()).toEqual({ subagentModel: "openai/gpt-5-mini" });
 	});

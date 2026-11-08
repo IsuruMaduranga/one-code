@@ -6,27 +6,20 @@
  * repository may not grant itself. The profile-independent cases are in
  * test/unit/settings.test.ts.
  */
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { projectSlug } from "../../extensions/lib/memory.ts";
 import { loadPermissionSettings } from "../../extensions/permissions/settings.ts";
+import { tempHome } from "../../test/unit/helpers/temp-home.ts";
 
-let dir: string;
 let home: string;
 let cwd: string;
 
 beforeEach(() => {
-	dir = mkdtempSync(join(tmpdir(), "cc-settings-"));
-	home = join(dir, "home");
-	cwd = join(dir, "project");
+	({ home, cwd } = tempHome("cc-settings-"));
 	mkdirSync(join(home, ".claude"), { recursive: true });
 	mkdirSync(join(cwd, ".claude"), { recursive: true });
-});
-
-afterEach(() => {
-	rmSync(dir, { recursive: true, force: true });
 });
 
 const write = (path: string, data: unknown) => writeFileSync(path, JSON.stringify(data));

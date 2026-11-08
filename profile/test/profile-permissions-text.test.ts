@@ -1,12 +1,14 @@
 /**
  * One Code's permission-gate wording (profile/text/permissions/) where the golden
  * snapshot cannot reach it: the dontAsk and outside-read refusals, the
- * classifier's timeout, the stops and the in-process child gate. The golden
- * snapshot pins the non-interactive, plan-mode, deny-rule and conflicting-path
- * refusals, the classifier's denial and no-verdict blocks, the mode-change
- * announcement and auto mode's standing note.
+ * classifier's timeout and headless overflow, the stops and the in-process
+ * child gate. The golden snapshot pins the non-interactive, plan-mode,
+ * deny-rule and conflicting-path refusals, the classifier's denial and
+ * no-verdict blocks, the mode-change announcement and auto mode's standing
+ * note.
  */
 import { describe, expect, it } from "vitest";
+import { requireText } from "../../extensions/lib/profile.ts";
 import { permissionsText } from "../text/permissions/index.ts";
 import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
 
@@ -23,6 +25,10 @@ describe("One Code's permission-gate text", () => {
 		expect(permissions.refused({ kind: "manualApprovalWithheld" })).toContain("Manual approval was not granted");
 		expect(permissions.refused({ kind: "stoppedWhileWaiting", who: "turn" })).toBe("The turn was stopped while waiting for the user's approval.");
 		expect(permissions.refused({ kind: "stoppedWhileWaiting", who: "agent" })).toBe("The agent was stopped while waiting for the user's approval.");
+	});
+
+	it("names the classifier's transcript overflow in a session with no user to ask, and the headless mode", () => {
+		expect(requireText("permissions").refused({ kind: "classifierOverflowHeadless" })).toBe("auto mode classifier transcript exceeded context window in headless mode");
 	});
 
 	it("tells a timeout apart from a denial", () => {

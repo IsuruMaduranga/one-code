@@ -4,11 +4,11 @@
  * when one imports it, and the product's ONECODE.md files. The base's rows:
  * test/unit/memory-entries.test.ts.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { buildMemoryEntries } from "../../extensions/memory/entries.ts";
+import { memoryEntriesIn, writeUnder } from "../../test/unit/helpers/memory-entries.ts";
 
 describe("buildMemoryEntries with Claude Code's files", () => {
 	let root: string;
@@ -19,21 +19,8 @@ describe("buildMemoryEntries with Claude Code's files", () => {
 		rmSync(root, { recursive: true, force: true });
 	});
 
-	const write = (rel: string, content = "x") => {
-		const abs = join(root, rel);
-		mkdirSync(join(abs, ".."), { recursive: true });
-		writeFileSync(abs, content);
-		return abs;
-	};
-
-	function build(cwd: string) {
-		return buildMemoryEntries({ agentDir: undefined,
-			cwd,
-			home: root,
-			homeOneCodeDir: join(root, ".onecode"),
-			memoryDir: join(root, "mem"),
-		});
-	}
+	const write = (rel: string, content?: string) => writeUnder(root, rel, content);
+	const build = (cwd: string) => memoryEntriesIn(root, cwd);
 
 	it("shows AGENTS.md only when a loaded file @-imports it; ONECODE.md always", () => {
 		const cwd = join(root, "proj");

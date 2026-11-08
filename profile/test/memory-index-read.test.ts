@@ -14,7 +14,6 @@ let index: string;
 beforeEach(() => {
 	root = mkdtempSync(join(tmpdir(), "memory-index-read-"));
 	stubHome(root);
-	vi.stubEnv("ONECODE_STATE_DIR", join(root, ".onecode"));
 	resetConfigModeForTest("independent");
 	cwd = join(root, "project");
 	mkdirSync(cwd);

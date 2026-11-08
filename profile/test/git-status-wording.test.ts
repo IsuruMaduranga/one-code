@@ -4,15 +4,8 @@
  * the base gathers and clips: test/unit/git-status.test.ts.
  */
 import { describe, expect, it } from "vitest";
-import { collectGitStatus, formatGitStatus, GIT_STATUS_MAX_CHARS, type GitRunner } from "../../extensions/lib/git-status.ts";
-
-/** A fake git runner keyed by the space-joined argv. */
-function fakeRunner(map: Record<string, string>): GitRunner {
-	return (args) => {
-		const key = args.join(" ");
-		return key in map ? map[key] : null;
-	};
-}
+import { collectGitStatus, formatGitStatus, GIT_STATUS_MAX_CHARS } from "../../extensions/lib/git-status.ts";
+import { fakeRunner, IN_WORK_TREE } from "../../test/unit/helpers/git-runner.ts";
 
 describe("formatGitStatus", () => {
 	it("assembles CC's block byte-for-byte", () => {
@@ -47,17 +40,7 @@ describe("formatGitStatus", () => {
 });
 
 describe("collectGitStatus", () => {
-	const base = {
-		"rev-parse --is-inside-work-tree": "true",
-		"branch --show-current": "feature/x",
-		"config user.name": "Ada",
-		"status --porcelain": "M a.ts",
-		"log -5 --format=%h %s": "abc First",
-	};
-
-	it("returns null outside a git work tree", () => {
-		expect(collectGitStatus("/x", fakeRunner({}))).toBeNull();
-	});
+	const base = IN_WORK_TREE;
 
 	it("derives the main branch from origin/HEAD, stripping the origin/ prefix", () => {
 		const block = collectGitStatus(
@@ -91,12 +74,6 @@ describe("collectGitStatus", () => {
 	it("says (clean) for a clean tree", () => {
 		const block = collectGitStatus("/x", fakeRunner({ ...base, "status --porcelain": "" }));
 		expect(block).toContain("\n\nStatus:\n(clean)\n\nRecent commits:\n");
-	});
-
-	it("drops the block when git status fails or times out, rather than claiming a clean tree", () => {
-		const noStatus = { ...base };
-		delete (noStatus as Record<string, string>)["status --porcelain"];
-		expect(collectGitStatus("/x", fakeRunner(noStatus))).toBeNull();
 	});
 
 	it("clips a long status at 2,000 characters with Claude Code's note", () => {

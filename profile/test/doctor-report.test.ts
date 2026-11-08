@@ -1,7 +1,6 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { buildDoctorReport, summarizeProviders } from "../../extensions/doctor/build.ts";
 import { collectModelFacts, modelsSection } from "../../extensions/doctor/models.ts";
 import { type DoctorEnvironment, type Finding, type RegistryView, renderDoctorReport, renderDoctorText } from "../../extensions/doctor/report.ts";
@@ -9,6 +8,7 @@ import { TESTED_PI_MAX_EXCLUSIVE } from "../../extensions/lib/pi-version.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { sourceSwitchStatus } from "../../extensions/lib/sources.ts";
 import { pinCatalog, pinReleaseDates } from "../../test/unit/catalog-fixture.ts";
+import { tempHome } from "../../test/unit/helpers/temp-home.ts";
 
 /** Minimal structural stand-in; the checks read provider/id/api/cost/contextWindow only. */
 const model = (provider: string, id: string, input?: number, api = "anthropic-messages") =>
@@ -43,12 +43,7 @@ let cwd: string;
 
 beforeEach(() => {
 	pinCatalog(CATALOG);
-	home = mkdtempSync(join(tmpdir(), "onecode-doctor-home-"));
-	cwd = mkdtempSync(join(tmpdir(), "onecode-doctor-cwd-"));
-});
-afterEach(() => {
-	rmSync(home, { recursive: true, force: true });
-	rmSync(cwd, { recursive: true, force: true });
+	({ home, cwd } = tempHome("onecode-doctor-"));
 });
 
 function environment(overrides: Partial<DoctorEnvironment> = {}): DoctorEnvironment {

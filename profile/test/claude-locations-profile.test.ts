@@ -7,7 +7,7 @@
  */
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { filesNamingClaudeLocations } from "../../test/unit/helpers/claude-locations.ts";
+import { compareWithAllowlist, filesNamingClaudeLocations } from "../../test/unit/helpers/claude-locations.ts";
 
 const PROFILE = join(import.meta.dirname, "..");
 
@@ -26,9 +26,8 @@ const PROFILE_FILES: Record<string, string> = {
 describe("Claude Code locations in One Code's profile", () => {
 	it("are named only by the provider and the words its callers fill in", () => {
 		const naming = filesNamingClaudeLocations(PROFILE, [join(PROFILE, "test")]);
-		const unchecked = naming.filter((file) => !(file in PROFILE_FILES));
-		expect(unchecked, "move the reader into the source provider (claude-code/), or list it in PROFILE_FILES with its reason").toEqual([]);
-		const stale = Object.keys(PROFILE_FILES).filter((file) => !naming.includes(file));
+		const { unlisted, stale } = compareWithAllowlist(naming, PROFILE_FILES);
+		expect(unlisted, "move the reader into the source provider (claude-code/), or list it in PROFILE_FILES with its reason").toEqual([]);
 		expect(stale, "these no longer name a Claude Code location; drop them from PROFILE_FILES").toEqual([]);
 	});
 });

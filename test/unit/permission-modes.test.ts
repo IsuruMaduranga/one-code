@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import permissionsExtension from "../../extensions/permissions/index.ts";
-import { brandedId } from "../../extensions/lib/brand.mjs";
+import { brand, brandedId } from "../../extensions/lib/brand.mjs";
 import { requireText } from "../../extensions/lib/profile.ts";
 import type { PermissionMode } from "../../extensions/permissions/matcher.ts";
 import { modeCycleKey, pauseGlyph } from "../../extensions/lib/keys.ts";
@@ -349,7 +349,7 @@ describe("permissionsExtension model_select updates classifier", () => {
 			order.push(`status:${status.mode}`);
 			if (status.mode === "plan") {
 				// What plan-mode's refresh does inside the broadcast.
-				fake.pi.events.emit(brandedId("plan-file-path"), { path: "/home/u/.onecode/plans/brisk-otter-map.md" });
+				fake.pi.events.emit(brandedId("plan-file-path"), { path: `/home/u/${brand.stateDir}/plans/brisk-otter-map.md` });
 				fake.pi.events.emit(brandedId("system-reminder"), { text: "plan block", key: "permission-mode", placement: "sticky-append" });
 			}
 		});
@@ -372,7 +372,7 @@ describe("permissionsExtension model_select updates classifier", () => {
 		expect(order).toEqual(["remove", "status:plan", "add"]);
 		const reminders = (fake.emitted[brandedId("system-reminder")] ?? []) as Array<{ key?: string; text?: string }>;
 		const announce = reminders.filter((r) => r.key === "permission-mode-change").pop();
-		expect(announce?.text).toBe(requireText("permissions").modeChanged({ mode: "plan", planFile: "/home/u/.onecode/plans/brisk-otter-map.md" }));
+		expect(announce?.text).toBe(requireText("permissions").modeChanged({ mode: "plan", planFile: `/home/u/${brand.stateDir}/plans/brisk-otter-map.md` }));
 	});
 });
 

@@ -14,13 +14,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
 
 import { completeSimple } from "@earendil-works/pi-ai/compat";
-import { productProjectSettingsPath } from "../../extensions/lib/product-settings.ts";
+import { productProjectSettingsPath, productSettingsPath } from "../../extensions/lib/product-settings.ts";
 import { forwardSlashes } from "../../extensions/lib/paths.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
-import { brand, brandedId, envName } from "../../extensions/lib/brand.mjs";
+import { brand, brandedId, productStateDir } from "../../extensions/lib/brand.mjs";
 import { requireText } from "../../extensions/lib/profile.ts";
 import { defaultEnvironment } from "../../extensions/auto-mode/classifier-prompt.ts";
 import { indexFor } from "../../extensions/auto-mode/prompt.ts";
@@ -65,7 +65,6 @@ describe("/permissions wiring", () => {
 		cwd = join(home, "project");
 		mkdirSync(cwd, { recursive: true });
 		stubHome(home);
-		vi.stubEnv(envName("STATE_DIR"), join(home, brand.stateDir));
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(home, "agent"));
 		screens = [];
 		keys = [];
@@ -252,7 +251,7 @@ describe("/permissions wiring", () => {
 		// Rows now: Add a new rule…, Bash(npm test:*).
 		await openPanel(DOWN, ENTER, ENTER);
 		expect(JSON.parse(readFileSync(target, "utf-8")).permissions.allow).toEqual([]);
-		expect(existsSync(join(home, brand.stateDir, "settings.json"))).toBe(false);
+		expect(existsSync(productSettingsPath(home))).toBe(false);
 	});
 
 	it("opens on Recently denied when something was denied, and lists the ask and deny tabs", async () => {
@@ -265,7 +264,7 @@ describe("/permissions wiring", () => {
 	});
 
 	describe("Auto mode tab", () => {
-		const settings = () => JSON.parse(readFileSync(join(home, brand.stateDir, "settings.json"), "utf-8"));
+		const settings = () => JSON.parse(readFileSync(productSettingsPath(home), "utf-8"));
 
 		it("adds a rule to the product's user settings, and the next classifier call is sent it", async () => {
 			// Allow → Auto mode is three tabs left; Add a new rule…, Soft deny, type, save.
@@ -280,8 +279,8 @@ describe("/permissions wiring", () => {
 		});
 
 		it("edits and deletes the user's own rules", async () => {
-			mkdirSync(join(home, brand.stateDir), { recursive: true });
-			writeFileSync(join(home, brand.stateDir, "settings.json"), JSON.stringify({ autoMode: { allow: ["Mine: my rule"] }, other: 1 }));
+			mkdirSync(productStateDir(), { recursive: true });
+			writeFileSync(productSettingsPath(home), JSON.stringify({ autoMode: { allow: ["Mine: my rule"] }, other: 1 }));
 			// Rows: add, allow built-ins, Mine, …
 			await openPanel(LEFT, LEFT, LEFT, DOWN, DOWN, ENTER, ENTER, "!", ENTER);
 			expect(settings().autoMode.allow).toEqual(["Mine: my rule!"]);
@@ -290,8 +289,8 @@ describe("/permissions wiring", () => {
 		});
 
 		it("keeps $defaults when the environment it extends is edited", async () => {
-			mkdirSync(join(home, brand.stateDir), { recursive: true });
-			writeFileSync(join(home, brand.stateDir, "settings.json"), JSON.stringify({ autoMode: { environment: ["$defaults", "- Trusted host: x"] } }));
+			mkdirSync(productStateDir(), { recursive: true });
+			writeFileSync(productSettingsPath(home), JSON.stringify({ autoMode: { environment: ["$defaults", "- Trusted host: x"] } }));
 			let prefilled = "";
 			editorReply = (prefill) => {
 				prefilled = prefill;
@@ -315,7 +314,7 @@ describe("/permissions wiring", () => {
 			// Saving it empty restores the default.
 			editorReply = () => "";
 			await openPanel(LEFT, LEFT, LEFT, PAGE_DOWN, PAGE_DOWN, ENTER);
-			expect(existsSync(join(home, brand.stateDir, "settings.json")) ? settings().autoMode?.environment : undefined).toBeUndefined();
+			expect(existsSync(productSettingsPath(home)) ? settings().autoMode?.environment : undefined).toBeUndefined();
 		});
 	});
 });

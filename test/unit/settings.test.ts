@@ -1,9 +1,6 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { brand } from "../../extensions/lib/brand.mjs";
-import { primarySettingsFile, settingsSources } from "../../extensions/lib/claude-settings.ts";
+import { beforeEach, describe, expect, it } from "vitest";
 import { productProjectSettingsPath, productSettingsPath } from "../../extensions/lib/product-settings.ts";
 import {
 	loadPermissionSettings,
@@ -13,21 +10,15 @@ import {
 	persistBlockOutsideReads,
 	resolveStartupMode,
 } from "../../extensions/permissions/settings.ts";
+import { userSettingsPath, writeUserSettings } from "./helpers/settings-files.ts";
+import { tempHome } from "./helpers/temp-home.ts";
 
-let dir: string;
 let home: string;
 let cwd: string;
 
 beforeEach(() => {
-	dir = mkdtempSync(join(tmpdir(), "cc-settings-"));
-	home = join(dir, "home");
-	cwd = join(dir, "project");
-	mkdirSync(join(home, ".claude"), { recursive: true });
+	({ home, cwd } = tempHome("cc-settings-"));
 	mkdirSync(join(cwd, ".claude"), { recursive: true });
-});
-
-afterEach(() => {
-	rmSync(dir, { recursive: true, force: true });
 });
 
 const write = (path: string, data: unknown) => writeFileSync(path, JSON.stringify(data));
@@ -37,8 +28,6 @@ describe("loadPermissionSettings", () => {
 	// user file is Claude Code's with a provider that reads it, the product's
 	// own without one. The repository's files, which only a source provider
 	// supplies, are covered with that provider's tests.
-	const sources = () => settingsSources(cwd, home);
-	const primaryFile = () => primarySettingsFile(sources())!.path;
 	const writeFile = (path: string, data: unknown) => {
 		mkdirSync(dirname(path), { recursive: true });
 		write(path, data);
@@ -46,27 +35,28 @@ describe("loadPermissionSettings", () => {
 
 	it("takes defaultMode from the primary user file, auto and bypassPermissions included", () => {
 		for (const mode of ["auto", "bypassPermissions", "acceptEdits", "plan"]) {
-			writeFile(primaryFile(), { permissions: { defaultMode: mode } });
+			writeUserSettings(cwd, home, { permissions: { defaultMode: mode } });
 			expect(loadPermissionSettings(cwd, home).defaultMode, mode).toBe(mode);
 		}
 	});
 
 	it("accepts Claude Code's manual alias and dontAsk for defaultMode", () => {
-		writeFile(primaryFile(), { permissions: { defaultMode: "manual" } });
+		writeUserSettings(cwd, home, { permissions: { defaultMode: "manual" } });
 		expect(loadPermissionSettings(cwd, home).defaultMode).toBe("default");
-		writeFile(primaryFile(), { permissions: { defaultMode: "dontAsk" } });
+		writeUserSettings(cwd, home, { permissions: { defaultMode: "dontAsk" } });
 		expect(loadPermissionSettings(cwd, home).defaultMode).toBe("dontAsk");
 	});
 
 	it("ignores unknown defaultMode values", () => {
-		writeFile(primaryFile(), { permissions: { defaultMode: "turbo" } });
+		writeUserSettings(cwd, home, { permissions: { defaultMode: "turbo" } });
 		expect(loadPermissionSettings(cwd, home).defaultMode).toBeUndefined();
 	});
 
 	it("tolerates missing and malformed files", () => {
 		expect(loadPermissionSettings(cwd, home)).toEqual({ allow: [], projectAllow: [], deny: [], ask: [] });
-		mkdirSync(dirname(primaryFile()), { recursive: true });
-		writeFileSync(primaryFile(), "{not json");
+		const file = userSettingsPath(cwd, home);
+		mkdirSync(dirname(file), { recursive: true });
+		writeFileSync(file, "{not json");
 		expect(loadPermissionSettings(cwd, home)).toEqual({ allow: [], projectAllow: [], deny: [], ask: [] });
 	});
 
@@ -143,8 +133,8 @@ describe("resolveStartupMode", () => {
 
 describe("blockReadsOutsideWorkingDirectories and the first outside-read prompt", () => {
 	it("persists Block into the given product file, keeping its other keys", () => {
-		const file = join(home, brand.stateDir, "settings.json");
-		mkdirSync(join(home, brand.stateDir), { recursive: true });
+		const file = productSettingsPath(home);
+		mkdirSync(dirname(file), { recursive: true });
 		write(file, { permissions: { allow: ["Read"] }, theme: "x" });
 		persistBlockOutsideReads(file);
 		const saved = JSON.parse(readFileSync(file, "utf-8"));
@@ -152,7 +142,7 @@ describe("blockReadsOutsideWorkingDirectories and the first outside-read prompt"
 	});
 
 	it("counts the prompt as answered from the product's flag or Claude Code's ~/.claude.json", () => {
-		const oneCode = join(home, brand.stateDir, "settings.json");
+		const oneCode = productSettingsPath(home);
 		const claudeJson = join(home, ".claude.json");
 		expect(outsideReadPromptSeen(oneCode, [claudeJson])).toBe(false);
 		write(claudeJson, { hasSeenAutoModeOutsideReadPrompt: true });

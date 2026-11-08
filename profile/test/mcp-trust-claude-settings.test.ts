@@ -6,12 +6,11 @@
  * git says about it. The base's approval flow: test/unit/mcp-trust.test.ts.
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { McpServer } from "../../extensions/mcp/config.ts";
-import { approveMcpServers, CHOICE_THIS, readClaudeMcpjsonPolicy, resetMcpTrustSessionState } from "../../extensions/mcp/trust.ts";
+import { approveMcpServers, readClaudeMcpjsonPolicy } from "../../extensions/mcp/trust.ts";
+import { makeMcpTrustDirs, stdio, trustDeps } from "../../test/unit/helpers/mcp-trust.ts";
 
 let root: string;
 let cwd: string;
@@ -19,50 +18,13 @@ let home: string;
 let storePath: string;
 
 beforeEach(() => {
-	root = mkdtempSync(join(tmpdir(), "cc-mcp-trust-"));
-	cwd = join(root, "project");
-	home = join(root, "home");
-	mkdirSync(join(cwd, ".claude"), { recursive: true });
-	mkdirSync(join(home, ".claude"), { recursive: true });
-	storePath = join(root, "state", "mcp", "project-approvals.json");
-	resetMcpTrustSessionState();
+	({ root, cwd, home, storePath } = makeMcpTrustDirs());
+	for (const dir of [cwd, home]) mkdirSync(join(dir, ".claude"));
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-const stdio = (name: string, source: string, command = "npx", args = ["-y", `${name}-server`]): McpServer => ({
-	kind: "stdio",
-	name,
-	command,
-	args,
-	source,
-});
 const projectServer = (name: string, command?: string) => stdio(name, join(cwd, ".mcp.json"), command);
-
-function deps(opts: { choose?: string | undefined; hasUI?: boolean } = {}) {
-	const notices: string[] = [];
-	const disabled: string[] = [];
-	const selections: string[] = [];
-	const choose = "choose" in opts ? opts.choose : CHOICE_THIS;
-	return {
-		notices,
-		disabled,
-		selections,
-		deps: {
-			hasUI: opts.hasUI ?? true,
-			select: async (title: string) => {
-				selections.push(title);
-				return choose;
-			},
-			notify: (m: string) => {
-				notices.push(m);
-			},
-			disable: (s: McpServer) => {
-				disabled.push(s.name);
-			},
-			storePath,
-		},
-	};
-}
+const deps = (opts?: Parameters<typeof trustDeps>[1]) => trustDeps(storePath, opts);
 
 describe("readClaudeMcpjsonPolicy", () => {
 	it("reads approvals from the user scope, disables from local too, never the checked-in project settings.json", async () => {

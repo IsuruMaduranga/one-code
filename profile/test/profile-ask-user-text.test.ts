@@ -1,5 +1,5 @@
 /**
- * One Code's words for the ask_user_question tool's results: the answers in
+ * One Code's ask_user_question wording (profile/text/ask-user/): the answers in
  * Claude Code's phrasing, the careful-reading note for typed answers and
  * notes, and the decline that lists the questions back.
  */

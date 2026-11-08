@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { brand } from "../../extensions/lib/brand.mjs";
 import { buildDoctorReport } from "../../extensions/doctor/build.ts";
 import { renderDoctorText } from "../../extensions/doctor/report.ts";
 import { compactionKeepView, keepWindowFix, withCompactionKeepBackfilled } from "../../extensions/lib/compaction-keep.mjs";
@@ -43,7 +44,7 @@ describe("/doctor's keep-window line", () => {
 						cwd: home,
 						home,
 						agentDir: join(home, ".pi", "agent"),
-						stateDir: join(home, ".onecode"),
+						stateDir: join(home, brand.stateDir),
 						env: { PATH: join(home, "empty-bin"), HOME: home },
 						platform: "darwin",
 						arch: "arm64",

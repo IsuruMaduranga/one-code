@@ -13,7 +13,7 @@ const floor = (command: string) => {
 describe("powershellPathTokens", () => {
 	it("extracts path-shaped tokens, expanding $env:USERPROFILE, $HOME and ~, forward-slashed", () => {
 		expect(powershellPathTokens(`Set-Content -Path "$env:USERPROFILE\\.claude\\settings.json" '{}'`, home)).toEqual(["/home/u/.claude/settings.json"]);
-		expect(powershellPathTokens("Get-Content ~/.onecode/settings.json | Out-Null", home)).toEqual(["/home/u/.onecode/settings.json"]);
+		expect(powershellPathTokens(`Get-Content ~/${brand.stateDir}/settings.json | Out-Null`, home)).toEqual([`/home/u/${brand.stateDir}/settings.json`]);
 		expect(powershellPathTokens("Set-Content -Path:.claude\\settings.local.json x", home)).toEqual([".claude/settings.local.json"]);
 		expect(powershellPathTokens("git status; npm test", home)).toEqual([]);
 	});

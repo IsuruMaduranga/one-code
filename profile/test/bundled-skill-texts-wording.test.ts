@@ -4,16 +4,15 @@
  * reporting through the JSON array), SKILL.md's own body, and the simplify,
  * security-review and loop wording.
  */
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseFrontmatterLoosely } from "../../extensions/lib/frontmatter.ts";
 import { BUNDLED_SKILLS_DIR } from "../../extensions/lib/skill-scan.ts";
+import { sha } from "./helpers/sha.ts";
 
 const read = (...path: string[]) => readFileSync(join(BUNDLED_SKILLS_DIR, ...path), "utf-8").replace(/\r\n/g, "\n");
 const cell = (name: string) => read("code-review", "cells", `${name}.md`);
-const sha = (text: string) => createHash("sha256").update(text).digest("hex").slice(0, 16);
 const skill = (name: string) => parseFrontmatterLoosely(read(name, "SKILL.md")) as { frontmatter: Record<string, string>; body: string };
 
 describe("code-review cells", () => {

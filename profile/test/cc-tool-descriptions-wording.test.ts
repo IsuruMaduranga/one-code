@@ -4,7 +4,6 @@
  * One Code's tool names in place of Claude Code's. How the base picks a form
  * is test/unit/cc-tool-descriptions.test.ts.
  */
-import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { ASK_LONG_DESCRIPTION, ASK_SHORT_DESCRIPTION } from "../text/ask-user/description.ts";
 import { BASH_AVOID_SHELL_READS_LINE, BASH_LONG_DESCRIPTION, BASH_LONG_SEARCH_TOOLS_DESCRIPTION, BASH_SHORT_DESCRIPTION, bashDescription } from "../text/shell/bash-description.ts";
@@ -15,8 +14,7 @@ import { WRITE_LONG_DESCRIPTION, WRITE_SHORT_DESCRIPTION } from "../text/tool-st
 import { WEB_SEARCH_LONG_DESCRIPTION } from "../text/web-search/description.ts";
 import { WEB_FETCH_LONG_DESCRIPTION } from "../text/web-fetch/description.ts";
 import { ENTER_WORKTREE_DESCRIPTION, EXIT_WORKTREE_DESCRIPTION } from "../text/worktree/descriptions.ts";
-
-const sha = (text: string) => createHash("sha256").update(text).digest("hex").slice(0, 16);
+import { sha } from "./helpers/sha.ts";
 
 describe("the shipped texts", () => {
 	it.each([

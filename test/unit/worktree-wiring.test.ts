@@ -61,7 +61,7 @@ beforeEach(async () => {
 	};
 	expect(entered.isError).toBeUndefined();
 	session = entered.details.worktreeState;
-	// One Code's wording announces the git-isolation guard here: profile/test/worktree-wiring-wording.test.ts.
+	// One Code's wording announces the git-isolation guard here: profile/test/profile-worktree-text.test.ts.
 	expect(entered.content[0]?.text).toBe(words().enter.created({ session, baseCommit: session.baseCommit }));
 	worktree = join(projectConfigDir(repo), "worktrees", "feature");
 	expect(location).toEqual({ path: worktree, branch: "feature", sharedRoot: repo });

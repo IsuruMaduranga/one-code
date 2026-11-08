@@ -34,7 +34,6 @@ beforeEach(() => {
 	mkdirSync(home);
 	mkdirSync(cwd);
 	stubHome(home);
-	vi.stubEnv("ONECODE_STATE_DIR", join(home, ".onecode"));
 	vi.stubEnv("CLAUDE_CONFIG_DIR", join(home, ".claude"));
 	resetConfigModeForTest("independent");
 	index = join(projectMemoryDir(cwd, home), "MEMORY.md");

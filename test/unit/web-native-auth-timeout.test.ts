@@ -37,7 +37,7 @@ describe("native web authentication deadline", () => {
 		expect(settledBeforeAuth).toBe(true);
 		expect(result.kind).toBe(ending === "cancel" ? "cancelled" : "fell-back");
 		if (result.kind === "fell-back") {
-			// One Code's wording of it: profile/test/web-native-auth-timeout-wording.test.ts.
+			// One Code's wording of it: profile/test/profile-web-search-text.test.ts.
 			expect(result.fallback).toEqual({ kind: "authTimeout", seconds: 120 });
 		}
 		expect(fetch).not.toHaveBeenCalled();

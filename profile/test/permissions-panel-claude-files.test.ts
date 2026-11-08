@@ -17,7 +17,6 @@ import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "../../test/unit/helpers/fake-pi.ts";
 import { stubHome } from "../../test/unit/helpers/home.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
 
 const completeMock = vi.mocked(completeSimple);
 
@@ -44,7 +43,6 @@ describe("/permissions and Claude Code's settings files", () => {
 		cwd = join(home, "project");
 		mkdirSync(cwd, { recursive: true });
 		stubHome(home);
-		vi.stubEnv(envName("STATE_DIR"), join(home, ".onecode"));
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(home, "agent"));
 		screens = [];
 		keys = [];

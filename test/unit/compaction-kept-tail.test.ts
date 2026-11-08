@@ -1,7 +1,7 @@
 /**
  * The kept tail a compaction leaves in context: how many messages stay after
  * pi's cut point and how the first one opens. One Code's wording of it in the
- * instruction is profile/test/compaction-kept-tail-wording.test.ts.
+ * instruction is profile/test/profile-compaction-text.test.ts.
  */
 import { describe, expect, it } from "vitest";
 import { keptTailOf } from "../../extensions/compaction/index.ts";

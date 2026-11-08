@@ -9,7 +9,7 @@ import permissionsExtension from "../../extensions/permissions/index.ts";
 import { pinCatalog } from "./catalog-fixture.ts";
 import { createFakeCtx, createFakePi, flushNotices } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
+import { productStateDir } from "../../extensions/lib/brand.mjs";
 
 const uiCtx = (hasUI = true) => {
 	const notify = vi.fn();
@@ -90,9 +90,8 @@ describe("lifecycle notices across extensions", () => {
 	beforeEach(() => {
 		home = mkdtempSync(join(tmpdir(), "onecode-notices-"));
 		mkdirSync(join(home, "project"));
-		mkdirSync(join(home, ".onecode"));
 		stubHome(home);
-		vi.stubEnv(envName("STATE_DIR"), join(home, ".onecode"));
+		mkdirSync(productStateDir());
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(home, "agent"));
 		pinCatalog([
 			{ id: "openai/gpt-6-sol", released: "2026-09-22", price: [1, 13] },

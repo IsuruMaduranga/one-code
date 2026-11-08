@@ -12,7 +12,6 @@ import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { decide, parseRules, type DecideInput } from "../../extensions/permissions/matcher.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
-import { brand, envName } from "../../extensions/lib/brand.mjs";
 import { describeChanges } from "../../extensions/file-tracker/tracker.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
 
@@ -32,7 +31,6 @@ beforeEach(() => {
 	for (const dir of [home, cwd, outside]) mkdirSync(dir);
 	stubHome(home);
 	vi.stubEnv("CLAUDE_CONFIG_DIR", join(home, ".claude"));
-	vi.stubEnv(envName("STATE_DIR"), join(home, brand.stateDir));
 	memoryDirPath = projectMemoryDir(cwd, home);
 	mkdirSync(memoryDirPath, { recursive: true });
 });

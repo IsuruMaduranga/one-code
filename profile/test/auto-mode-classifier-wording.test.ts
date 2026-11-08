@@ -5,24 +5,13 @@
  */
 import { describe, expect, it } from "vitest";
 import { buildRuleset } from "../../extensions/auto-mode/classifier-prompt.ts";
-import { loadAutoModeConfig } from "../../extensions/auto-mode/config.ts";
 import { unattendedPromptTimeoutMs, UNATTENDED_PROMPT_TIMEOUT_MS } from "../../extensions/auto-mode/pause.ts";
-import { buildPayload, type ClassifyRequest, indexFor, parseStage2, stage1User, stage2User } from "../../extensions/auto-mode/prompt.ts";
+import { buildPayload, indexFor, parseStage2, stage1User, stage2User } from "../../extensions/auto-mode/prompt.ts";
 import { groundCategory } from "../../extensions/auto-mode/rules.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
+import { CLEAN_UP_REQUEST, DEFAULT_ENVIRONMENT } from "../../test/unit/helpers/classify-request.ts";
 
-const config = loadAutoModeConfig("/nonexistent-home-for-tests");
-const index = indexFor(config.environment);
-const base: ClassifyRequest = {
-	toolName: "bash",
-	transcript: [
-		{ kind: "user", text: "clean up /tmp/x" },
-		{ kind: "tool", tool: "bash", input: { command: "rm -rf /tmp/x" } },
-	],
-	userMessages: ["clean up /tmp/x"],
-	username: "tester",
-	environment: config.environment,
-};
+const index = indexFor(DEFAULT_ENVIRONMENT);
 
 describe("One Code's ruleset", () => {
 	it("indexes Data Exfiltration as a HARD rule and the destructive/publish rules as SOFT", () => {
@@ -51,7 +40,7 @@ describe("One Code's ruleset", () => {
 	});
 
 	it("closes the ALLOW list inside Claude Code's permissions block", () => {
-		const built = buildRuleset(config.environment, { allow: ["My allow extra rule"] });
+		const built = buildRuleset(DEFAULT_ENVIRONMENT, { allow: ["My allow extra rule"] });
 		const beforeClose = built.slice(0, built.indexOf("</cc_automode_permissions>"));
 		expect(beforeClose.trimEnd().endsWith("- My allow extra rule")).toBe(true);
 	});
@@ -59,7 +48,7 @@ describe("One Code's ruleset", () => {
 
 describe("One Code's classifier prompt", () => {
 	it("puts the ruleset and the Session Context in the system prompt", () => {
-		const { system } = buildPayload(base);
+		const { system } = buildPayload(CLEAN_UP_REQUEST);
 		expect(system).toContain("security monitor");
 		expect(system).toContain("## HARD BLOCK");
 		expect(system).toContain("## Session Context");
@@ -67,13 +56,13 @@ describe("One Code's classifier prompt", () => {
 	});
 
 	it("frames the instruction file as Claude Code does", () => {
-		const { userPrefix } = buildPayload({ ...base, claudeMd: "# CLAUDE.md\nNever force push." });
+		const { userPrefix } = buildPayload({ ...CLEAN_UP_REQUEST, claudeMd: "# CLAUDE.md\nNever force push." });
 		expect(userPrefix).toContain("<user_claude_md>");
 		expect(userPrefix).toContain("Never force push.");
 	});
 
 	it("asks stage 1 for harm only, stage 2 for the full evaluation plus the intent quote", () => {
-		const { userPrefix } = buildPayload(base);
+		const { userPrefix } = buildPayload(CLEAN_UP_REQUEST);
 		const s1 = stage1User(userPrefix);
 		const s2 = stage2User(userPrefix);
 		expect(s1).toContain("Grade HARM ONLY");
@@ -83,7 +72,7 @@ describe("One Code's classifier prompt", () => {
 	});
 
 	it("words the circumvention instruction after a rule denial", () => {
-		const after = stage2User(buildPayload(base).userPrefix, true);
+		const after = stage2User(buildPayload(CLEAN_UP_REQUEST).userPrefix, true);
 		expect(after).toContain("denied_by_permission_rule");
 		expect(after).toContain("BLOCK it");
 	});

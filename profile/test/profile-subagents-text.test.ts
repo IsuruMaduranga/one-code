@@ -2,11 +2,13 @@
  * One Code's subagent wording (profile/text/subagents/, profile/text/subagent-models/)
  * where the golden snapshot cannot reach it: the nested Agent tool, the
  * launch lines of a background run, a resident's SendMessage results, the
- * run failures and the catalog's tools clauses. The golden snapshot pins the
- * Agent tool and its catalog, the model menu, an unknown agent and model, the
- * spawned-agents list, a missing run, an inline resume and a fork's framing.
+ * run failures, an empty reply, and the catalog's heading and tools clauses.
+ * The golden snapshot pins the Agent tool and its catalog, the model menu, an
+ * unknown agent and model, the spawned-agents list, a missing run, an inline
+ * resume and a fork's framing.
  */
 import { describe, expect, it } from "vitest";
+import { requireText } from "../../extensions/lib/profile.ts";
 import { subagentModelsText } from "../text/subagent-models/index.ts";
 import { subagentsText } from "../text/subagents/index.ts";
 import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
@@ -37,11 +39,22 @@ describe("One Code's subagent text", () => {
 		expect(subagents.sentToResident({ name: "x", taskId: "t" })).toContain("You know nothing about the agent's result");
 	});
 
+	it("heads the agent catalog as Claude Code does and words each row", () => {
+		const words = requireText("subagents");
+		const row = words.catalogRow({ name: "editor", description: "Edits prose", tools: { kind: "all", builtIn: false } });
+		expect(row.startsWith("- editor: Edits prose")).toBe(true);
+		expect(words.catalogBlock({ rows: [row] })).toMatch(/^Available agent types for the Agent tool:\n- editor: Edits prose/);
+	});
+
 	it("words a run cut short", () => {
 		expect(subagents.failure({ kind: "aborted", why: "wallClock", output: "half" })).toBe("half\n\n[terminated: turn hit the wall-clock cap]");
 		expect(subagents.failure({ kind: "aborted", why: "stopped", output: " " })).toBe("Subagent terminated before the turn finished.");
 		expect(subagents.failure({ kind: "providerError", error: "401", output: "" })).toContain("not a task failure): 401");
 		expect(subagents.stats({ toolCalls: 2 })).toBe("2 tools");
+	});
+
+	it("says a subagent returned no output", () => {
+		expect(subagents.noOutput).toBe("(Subagent completed but returned no output.)");
 	});
 
 	it("names the plan file's restriction only in plan mode", () => {

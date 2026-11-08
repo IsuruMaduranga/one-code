@@ -7,19 +7,11 @@
 import { describe, expect, it } from "vitest";
 import { guideAgentDefinition as definition, guideSystemPrompt as systemPrompt, type GuideInput } from "../../extensions/subagents/guide-agent.ts";
 import { GUIDE_AGENT } from "../text/subagents/guide-agent.ts";
+import { emptySetup, guideInput as input } from "../../test/unit/helpers/guide-input.ts";
 
 /** One Code's profile always has a guide. */
 const guideAgentDefinition = (input: () => GuideInput) => definition(input)!;
 const guideSystemPrompt = (input: GuideInput) => systemPrompt(input) ?? "";
-
-const emptySetup = { skills: [], agents: [], plugins: [], mcpServers: [], packages: [], extensions: [], settingsKeys: [] };
-const input = (over: Partial<GuideInput> = {}): GuideInput => ({
-	docs: { guide: "/pkg/docs/guide", piDocs: "/pi/docs", piExamples: "/pi/examples" },
-	install: { shape: "app", method: "npm", agentDir: "/home/u/.onecode/agent", version: "0.4.1" },
-	setup: emptySetup,
-	config: { instructionFiles: ["CLAUDE.md"], configDir: ".claude" },
-	...over,
-});
 
 describe("guideAgentDefinition", () => {
 	it("is a read-only agent on the session's subagent model", () => {

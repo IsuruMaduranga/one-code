@@ -3,19 +3,17 @@
  * Consent for project hooks (One Code's source provider reads Claude Code's
  * project settings): profile/test/hooks-worktree-project.test.ts.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import hooksExtension from "../../extensions/hooks/index.ts";
-import { resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
 import { SUBAGENT_HOOK_CHANNEL, type HookBridge } from "../../extensions/hooks/subagent-bridge.ts";
-import { shellQuote } from "../../extensions/lib/shell-quote.ts";
 import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
-import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
-import { primarySettingsFile, settingsSources } from "../../extensions/lib/claude-settings.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
+import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { makeHookWorktreeDirs, readObservations, writeObserverHook } from "./helpers/hook-worktree.ts";
+import { writeUserSettings } from "./helpers/settings-files.ts";
 
 const state = vi.hoisted(() => ({ home: `/nonexistent/one-code-hooks-worktree-${Math.random().toString(36).slice(2)}` }));
 vi.mock("node:os", async (importOriginal) => {
@@ -23,37 +21,16 @@ vi.mock("node:os", async (importOriginal) => {
 	return { ...actual, homedir: () => state.home, default: { ...actual, homedir: () => state.home } };
 });
 
-interface HookObservation {
-	cwd: string;
-	projectDir: string;
-	payload: { cwd: string; hook_event_name: string; agent_id?: string };
-}
-
 let root: string;
 let project: string;
 let worktree: string;
-let config: string;
 let observations: string;
 let command: string;
 let fake: FakePi;
 
 beforeEach(() => {
-	root = realpathSync.native(mkdtempSync(join(tmpdir(), "hooks-worktree-")));
-	project = join(root, "project");
-	worktree = join(root, "worktree");
-	config = join(root, "config");
-	observations = join(root, "observations.jsonl");
-	for (const dir of [project, worktree, config]) mkdirSync(dir);
-	vi.stubEnv("CLAUDE_CONFIG_DIR", config);
-	vi.stubEnv(envName("STATE_DIR"), join(root, "state"));
-	resetHookSettingsCache();
-	const script = join(root, "hook.cjs");
-	writeFileSync(script, `const fs = require("node:fs");
-const payload = JSON.parse(fs.readFileSync(0, "utf8"));
-fs.appendFileSync(${JSON.stringify(observations)}, JSON.stringify({cwd: process.cwd(), projectDir: process.env.CLAUDE_PROJECT_DIR, payload}) + "\\n");
-if (payload.hook_event_name === "PostToolUse") fs.writeFileSync("formatted.txt", "formatted by hook\\n");
-`);
-	command = `${shellQuote(process.execPath)} ${shellQuote(script)}`;
+	({ root, project, worktree } = makeHookWorktreeDirs("hooks-worktree-"));
+	({ command, observations } = writeObserverHook(root));
 	fake = createFakePi();
 });
 afterEach(() => {
@@ -62,14 +39,11 @@ afterEach(() => {
 });
 
 /** Hooks in the primary user settings file of the profile in force (user scope: no consent prompt). */
-const writeHooks = (events: string[]) => {
-	const path = primarySettingsFile(settingsSources(project, homedir()))!.path;
-	mkdirSync(dirname(path), { recursive: true });
-	writeFileSync(path, JSON.stringify({ hooks: Object.fromEntries(events.map((event) => [event, [{ hooks: [{ type: "command", command }] }]])) }));
-};
+const writeHooks = (events: string[]) =>
+	writeUserSettings(project, homedir(), { hooks: Object.fromEntries(events.map((event) => [event, [{ hooks: [{ type: "command", command }] }]])) });
 /** The reminder after a PostToolUse hook changed the file a call wrote. */
 const changedByHook = (path: string) => requireText("hooks").fileChangedByHook({ path });
-const seen = (): HookObservation[] => readFileSync(observations, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+const seen = () => readObservations(observations);
 const enter = () => fake.events.emit(WORKTREE_CHANNEL, { path: worktree, sharedRoot: project });
 const toolCall = (id: string) => fake.fire("tool_call", { toolName: "bash", toolCallId: id, input: { command: "pwd" } }, createFakeCtx({ cwd: project }));
 

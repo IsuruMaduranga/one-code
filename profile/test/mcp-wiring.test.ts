@@ -7,14 +7,14 @@
  * `close` / `callTool` / `isUnauthorized` are replaced at the `./client.ts`
  * module boundary with controllable fakes; the rest of that module (schema
  * conversion, reminder formatting) is kept real via `importOriginal`.
- * `os.homedir()` is redirected to a private temp dir that holds this test's
- * own `.claude.json`, so results don't depend on the real developer machine's
- * MCP config or installed plugins.
+ * `os.homedir()` and One Code's state folder are redirected to a private temp
+ * dir that holds this test's own `.claude.json` and MCP approvals, so results
+ * don't depend on the real developer machine's MCP config or installed
+ * plugins.
  */
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { type Tool, validateToolArguments } from "@earendil-works/pi-ai";
 import * as mcpClient from "../../extensions/mcp/client.ts";
 import mcpExtension from "../../extensions/mcp/index.ts";
@@ -33,6 +33,7 @@ function renderInEpoch(events: { emit(channel: string, data: unknown): void }, t
 import { createFakeCtx, createFakePi, type FakePi, renderRequest } from "../../test/unit/helpers/fake-pi.ts";
 import { localCommandBlocks } from "../../extensions/lib/local-command.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
+import { tempHome } from "../../test/unit/helpers/temp-home.ts";
 
 interface Fixture {
 	tools?: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }>;
@@ -95,18 +96,13 @@ describe("mcp wiring", () => {
 	let fake: FakePi;
 
 	beforeEach(() => {
-		home = mkdtempSync(join(tmpdir(), "mcp-wiring-home-"));
-		cwd = mkdtempSync(join(tmpdir(), "mcp-wiring-cwd-"));
+		({ home, cwd } = tempHome("mcp-wiring-"));
 		state.fakeHome = home;
 		state.connectCalls = [];
 		state.closeCalls = [];
 		state.fixtures = new Map();
 		state.callToolResult = undefined;
 		fake = createFakePi();
-	});
-	afterEach(() => {
-		rmSync(home, { recursive: true, force: true });
-		rmSync(cwd, { recursive: true, force: true });
 	});
 
 	const writeUserServers = (servers: Record<string, unknown>) => {

@@ -12,7 +12,8 @@ import pluginsExtension from "../../extensions/plugins/index.ts";
 import skillExtension from "../../extensions/skill/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
-import { brand, envName } from "../../extensions/lib/brand.mjs";
+import { brand } from "../../extensions/lib/brand.mjs";
+import { productSettingsPath } from "../../extensions/lib/product-settings.ts";
 
 vi.mock("../../extensions/auto-mode/classifier.ts", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../../extensions/auto-mode/classifier.ts")>()),
@@ -50,7 +51,6 @@ describe("skill and plugin permission provenance", () => {
 			plugins: { "fixture@local": [{ installPath: pluginDir, enabled: true }] },
 		}));
 		stubHome(home);
-		vi.stubEnv(envName("STATE_DIR"), join(home, brand.stateDir));
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(home, "agent"));
 		invalidatePluginsCache();
 		vi.mocked(classify).mockClear();
@@ -74,7 +74,7 @@ describe("skill and plugin permission provenance", () => {
 	});
 
 	async function mount(deny = false) {
-		if (deny) writeFileSync(join(home, brand.stateDir, "settings.json"), JSON.stringify({ permissions: { deny: ["Bash(git push:*)"] } }));
+		if (deny) writeFileSync(productSettingsPath(home), JSON.stringify({ permissions: { deny: ["Bash(git push:*)"] } }));
 		pluginsExtension(fake.pi as never);
 		permissionsExtension(fake.pi as never);
 		skillExtension(fake.pi as never);
@@ -116,7 +116,7 @@ describe("skill and plugin permission provenance", () => {
 		const script = join(home, "marker.sh");
 		writeFileSync(script, `printf marker > ${shellQuote(marker)}\n`);
 		writeFileSync(join(home, "fixture-plugin", "commands", "demo.md"), `${FRONTMATTER}!\`bash ${shellQuote(script)}\``);
-		if (mode === "deny") writeFileSync(join(home, brand.stateDir, "settings.json"), JSON.stringify({ permissions: { deny: ["Bash(bash:*)"] } }));
+		if (mode === "deny") writeFileSync(productSettingsPath(home), JSON.stringify({ permissions: { deny: ["Bash(bash:*)"] } }));
 		await mount();
 		ctx.mode = "tui";
 		vi.spyOn(console, "error").mockImplementation(() => {});

@@ -8,7 +8,8 @@ import { TURN_FAILED_CHANNEL } from "../../extensions/lib/interrupt.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
+import { productStateDir } from "../../extensions/lib/brand.mjs";
+import { productSettingsPath } from "../../extensions/lib/product-settings.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
 
 const seen: TranscriptEntry[][] = [];
@@ -37,10 +38,9 @@ describe("classifier history in the permissions gate", () => {
 		const cwd = join(home, "project");
 		mkdirSync(cwd);
 		stubHome(home);
-		vi.stubEnv(envName("STATE_DIR"), join(home, ".onecode"));
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(home, "agent"));
-		mkdirSync(join(home, ".onecode"));
-		writeFileSync(join(home, ".onecode", "settings.json"), JSON.stringify({ autoMode: { logDecisions: true } }));
+		mkdirSync(productStateDir());
+		writeFileSync(productSettingsPath(home), JSON.stringify({ autoMode: { logDecisions: true } }));
 		overflow = false;
 		seen.length = 0;
 		seenUserMessages.length = 0;

@@ -5,29 +5,18 @@
  * base decides (which failure, which diagnostics, the caps):
  * test/unit/lsp.test.ts and test/unit/lsp-watcher.test.ts.
  */
-import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { formatDiagnostics as formatWith, type LspDiagnostic, shownDiagnostic } from "../../extensions/lsp/format.ts";
 import { describeStartFailure } from "../../extensions/lsp/install-hints.ts";
 import { formatNewDiagnostics as formatNewWith, MAX_CHARS } from "../../extensions/lsp/watcher.ts";
+import { diag, PROJECT, uri } from "../../test/unit/helpers/lsp-diagnostics.ts";
 import { lsp as lspText } from "../text/lsp/index.ts";
 
 /** The tool's result with One Code's words, as the extension passes them. */
 const formatDiagnostics = (path: string, list: LspDiagnostic[], limit?: number) => formatWith(path, list, lspText.diagnostics, limit);
 /** The new-diagnostics block with One Code's words, as the extension passes them. */
 const formatNewDiagnostics = (delta: Map<string, LspDiagnostic[]>, cwd: string) => formatNewWith(delta, cwd, lspText.newDiagnostics);
-
-const diag = (message: string, severity?: number, line = 0, character = 0, extra?: Partial<LspDiagnostic>): LspDiagnostic => ({
-	message,
-	severity,
-	range: { start: { line, character } },
-	...extra,
-});
-
-// A file URI for `/project/<name>` as this platform spells it (`D:\project\…` on Windows).
-const PROJECT = resolve("/project");
-const uri = (name: string) => pathToFileURL(join(PROJECT, name)).href;
 
 describe("start-failure messages", () => {
 	const enoent = (command: string) => ({ kind: "spawnFailed" as const, command, osMessage: `spawn ${command} ENOENT` });

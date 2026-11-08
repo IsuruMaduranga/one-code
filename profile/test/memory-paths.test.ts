@@ -19,7 +19,6 @@ const fact = "---\nname: fact\nmetadata:\n  type: project\n---\nA fact.\n";
 beforeEach(() => {
 	root = mkdtempSync(join(tmpdir(), "memory-paths-"));
 	stubHome(root);
-	vi.stubEnv("ONECODE_STATE_DIR", join(root, ".onecode"));
 	resetConfigModeForTest("claude-compatible");
 	cwd = join(root, "project");
 	mkdirSync(cwd);

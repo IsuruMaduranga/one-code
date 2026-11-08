@@ -3,12 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readJsonFile, writeJsonAtomic } from "../../extensions/lib/atomic-write.ts";
+import { brand } from "../../extensions/lib/brand.mjs";
 import { readFavorites, toggleFavorite } from "../../extensions/lib/favorites.ts";
 import { readOverrides, setOverride } from "../../extensions/lib/plugin-overrides.ts";
 import { pluginRoot } from "../../extensions/lib/plugin-root.ts";
 import { isSkillEnabled, readSkillStates, setSkillOverride, skillOverrideKey } from "../../extensions/lib/skill-overrides.ts";
 import { estimateSkillTokens, scanSkills } from "../../extensions/lib/skill-scan.ts";
 import { formatRecency, readUsage, recordUsage } from "../../extensions/lib/usage-tracker.ts";
+import { skillScanDirs, writeSkill } from "./helpers/skill-dirs.ts";
 
 let root: string;
 
@@ -19,7 +21,8 @@ afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 describe("plugin root", () => {
 	it("derives from the agent dir", () => {
-		expect(pluginRoot("/home/u/.onecode/agent")).toBe(join("/home/u/.onecode/agent", "plugins"));
+		const agentDir = `/home/u/${brand.stateDir}/agent`;
+		expect(pluginRoot(agentDir)).toBe(join(agentDir, "plugins"));
 	});
 });
 
@@ -83,20 +86,12 @@ describe("favorites", () => {
 
 describe("skill scan", () => {
 	it("loads a name once and a linked file once, as pi does", () => {
-		const cwd = join(root, "proj");
-		const home = join(root, "home");
-		const agentDir = join(root, "agent");
-		const bundled = join(root, "bundled-skills");
-		const make = (base: string, name: string) => {
-			mkdirSync(join(base, name), { recursive: true });
-			writeFileSync(join(base, name, "SKILL.md"), `---\nname: ${name}\ndescription: d\n---\nbody`);
-		};
-		make(join(home, ".agents", "skills"), "simplify");
-		make(bundled, "simplify");
-		make(bundled, "loop");
+		const { cwd, home, agentDir, bundled } = skillScanDirs(root);
+		writeSkill(join(home, ".agents", "skills"), "simplify");
+		writeSkill(bundled, "simplify");
+		writeSkill(bundled, "loop");
 		// No declared name: the folder names it, so only the real path ties the link to it.
-		mkdirSync(join(agentDir, "skills", "shared"), { recursive: true });
-		writeFileSync(join(agentDir, "skills", "shared", "SKILL.md"), "---\ndescription: d\n---\nbody");
+		writeSkill(join(agentDir, "skills"), "shared", "description: d");
 		mkdirSync(join(cwd, ".agents", "skills"), { recursive: true });
 		symlinkSync(join(agentDir, "skills", "shared"), join(cwd, ".agents", "skills", "linked"), "junction");
 		const skills = scanSkills(cwd, home, agentDir, [], bundled);
@@ -106,18 +101,14 @@ describe("skill scan", () => {
 	});
 
 	it("scans project/user/agent dirs and merges plugin skills", () => {
-		const cwd = join(root, "proj");
-		const home = join(root, "home");
-		const agentDir = join(root, "agent");
-		const bundled = join(root, "bundled-skills");
+		const { cwd, home, agentDir, bundled } = skillScanDirs(root);
 		for (const [base, name] of [
 			[join(cwd, ".agents", "skills"), "proj-agents-skill"],
 			[join(home, ".agents", "skills"), "user-agents-skill"],
 			[join(agentDir, "skills"), "agent-skill"],
 			[bundled, "bundled-skill"],
 		] as const) {
-			mkdirSync(join(base, name), { recursive: true });
-			writeFileSync(join(base, name, "SKILL.md"), `---\nname: ${name}\n---\nbody text here`);
+			writeSkill(base, name, `name: ${name}`, "body text here");
 		}
 		const skills = scanSkills(cwd, home, agentDir, [{ name: "demo:helper", plugin: "demo", path: "/p/SKILL.md" }], bundled);
 		expect(skills.map((s) => `${s.scope}:${s.name}`).sort()).toEqual([

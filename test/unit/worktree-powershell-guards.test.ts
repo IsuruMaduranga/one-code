@@ -3,7 +3,7 @@
  * (extensions/worktree/powershell-guards.ts): which lines a worktree-isolated
  * session refuses, and why, as the refusal data the profile words. One Code's
  * wording of each refusal is tested in
- * profile/test/worktree-powershell-guards-wording.test.ts.
+ * profile/test/worktree-guards-wording.test.ts.
  */
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";

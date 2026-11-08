@@ -1,4 +1,8 @@
-import { beforeEach } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, beforeEach } from "vitest";
+import { envName } from "../extensions/lib/brand.mjs";
 import { emptyCatalogSources, setCatalogSourcesForTest } from "../extensions/lib/model-catalog-data.ts";
 import { setModelTierOverridesForTest } from "../extensions/lib/model-tier.ts";
 import { bashParserReady } from "../extensions/lib/bash-parser.ts";
@@ -27,6 +31,14 @@ beforeEach(() => setModelTierOverridesForTest({}));
 // from the environment (a probe harness, a user's own setup) moved every
 // ~/.claude path and failed 71 tests. A test that wants it stubs it.
 delete process.env.CLAUDE_CONFIG_DIR;
+
+// The product's state folder is a fresh one per test file, whatever the shell
+// says: a test that forgot to point it elsewhere wrote into the user's real
+// one (and one hung retrying ids already taken there). `stubHome` moves it with
+// the home folder; a test that wants it elsewhere stubs it.
+const stateDir = mkdtempSync(join(tmpdir(), "state-"));
+process.env[envName("STATE_DIR")] = stateDir;
+afterAll(() => rmSync(stateDir, { recursive: true, force: true }));
 
 // Likewise the live permission mode One Code publishes to child processes:
 // run from a One Code shell, the suite inherited CC_PERMISSION_MODE=auto and

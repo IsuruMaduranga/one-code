@@ -1,10 +1,12 @@
 /**
  * One Code's artifact wording (profile/text/artifacts/) for what the golden
  * snapshot cannot reach: an opened browser, autoOpen off, a delete the user
- * answers, a long list, and the store's own failures. The golden snapshot
- * pins the bytes of every other artifact text.
+ * answers, a long list, and the store's own failures, its size refusal and a
+ * listed artifact's line. The golden snapshot pins the bytes of every other
+ * artifact text.
  */
 import { describe, expect, it } from "vitest";
+import { requireText } from "../../extensions/lib/profile.ts";
 import { artifactsText } from "../text/artifacts/index.ts";
 import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
 
@@ -38,5 +40,19 @@ describe("One Code's artifact text", () => {
 		expect(artifacts.list({ total: 3, shown, galleryUrl: "file:///g" })).toBe(
 			'3 artifacts, newest first:\n- a-1: "A" (v2, updated 2026-11-05 10:00 UTC)\n  file:///a\n(2 more not shown; raise `limit` to see them.)\nGallery: file:///g',
 		);
+	});
+});
+
+describe("artifact store wording", () => {
+	const words = () => requireText("artifacts");
+
+	it("names the size of a page too large to publish", () => {
+		const text = words().publishProblem({ kind: "tooLarge", path: "/tmp/p.html", bytes: 16 * 1024 * 1024 + 1, maxBytes: 16 * 1024 * 1024 });
+		expect(text).toMatch(/is 16\.0 MB; an artifact is at most 16 MB\./);
+	});
+
+	it("lists one artifact as its id, title, version, project and viewer link", () => {
+		const line = words().listLine({ id: "a-1", title: "Listed", version: 1, updated: "2026-09-27 10:00", project: "~/repo", url: "file:///store/a-1/view.html" });
+		expect(line).toBe('- a-1: "Listed" (v1, updated 2026-09-27 10:00 UTC) [~/repo]\n  file:///store/a-1/view.html');
 	});
 });

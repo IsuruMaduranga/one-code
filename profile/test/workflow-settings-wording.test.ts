@@ -5,7 +5,6 @@
  * settings behind the guideline are tested in
  * test/unit/workflow-settings.test.ts.
  */
-import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import { parseFrontmatterLoosely } from "../../extensions/lib/frontmatter.ts";
 import { BUNDLED_SKILLS_DIR, scanSkills } from "../../extensions/lib/skill-scan.ts";
 import { WORKFLOW_DESCRIPTION_BODY, workflowDescription, workflowSizeLine } from "../text/workflow/description.ts";
+import { sha } from "./helpers/sha.ts";
 
 describe("the size-guideline line", () => {
 	it("is Claude Code's default line for an unset guideline", () => {
@@ -32,7 +32,7 @@ describe("the size-guideline line", () => {
 
 	it("carries Claude Code's Workflow text before the line, locked by length and hash", () => {
 		expect(WORKFLOW_DESCRIPTION_BODY.length).toBe(3207);
-		expect(createHash("sha256").update(WORKFLOW_DESCRIPTION_BODY).digest("hex").slice(0, 16)).toBe("885d9a65c4fdae78");
+		expect(sha(WORKFLOW_DESCRIPTION_BODY)).toBe("885d9a65c4fdae78");
 	});
 
 	it("points to the workflow-authoring skill", () => {

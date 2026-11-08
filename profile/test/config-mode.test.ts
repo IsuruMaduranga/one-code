@@ -1,9 +1,10 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { claudeSourcesOn, configMode, readConfigMode, resetConfigModeForTest, savedConfigMode } from "../claude-code/mode.ts";
 import { memoryDir } from "../../extensions/lib/memory.ts";
+import { stubHome } from "../../test/unit/helpers/home.ts";
 
 function homeWith(settings: string | undefined): string {
 	const home = mkdtempSync(join(tmpdir(), "config-mode-"));
@@ -54,8 +55,11 @@ describe("configMode", () => {
 });
 
 describe("memoryDir by mode", () => {
+	afterEach(() => vi.unstubAllEnvs());
+
 	it("moves auto-memory under ~/.onecode in independent mode", () => {
 		const home = join("/", "Users", "u");
+		stubHome(home);
 		expect(memoryDir(home, "/tmp/project")).toBe(join(home, ".claude", "projects", "-tmp-project", "memory"));
 		resetConfigModeForTest("independent");
 		expect(memoryDir(home, "/tmp/project")).toBe(join(home, ".onecode", "projects", "-tmp-project", "memory"));

@@ -4,20 +4,13 @@
  * in the profile's words. One Code's block: profile/test/git-status-wording.test.ts.
  */
 import { describe, expect, it } from "vitest";
-import { collectGitStatus, formatGitStatus, GIT_STATUS_MAX_CHARS, type GitRunner, type GitSnapshot } from "../../extensions/lib/git-status.ts";
+import { collectGitStatus, formatGitStatus, GIT_STATUS_MAX_CHARS, type GitSnapshot } from "../../extensions/lib/git-status.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
+import { fakeRunner, IN_WORK_TREE } from "./helpers/git-runner.ts";
 
 const context = requireText("context");
 /** The profile's block for a snapshot taken at the start of a conversation. */
 const block = (snapshot: GitSnapshot) => context.gitStatus({ snapshot, at: "start" });
-
-/** A fake git runner keyed by the space-joined argv. */
-function fakeRunner(map: Record<string, string>): GitRunner {
-	return (args) => {
-		const key = args.join(" ");
-		return key in map ? map[key] : null;
-	};
-}
 
 describe("formatGitStatus", () => {
 	it("is the profile's block for the snapshot", () => {
@@ -27,13 +20,7 @@ describe("formatGitStatus", () => {
 });
 
 describe("collectGitStatus", () => {
-	const base = {
-		"rev-parse --is-inside-work-tree": "true",
-		"branch --show-current": "feature/x",
-		"config user.name": "Ada",
-		"status --porcelain": "M a.ts",
-		"log -5 --format=%h %s": "abc First",
-	};
+	const base = IN_WORK_TREE;
 	const snapshot = { branch: "feature/x", mainBranch: "feature/x", user: "Ada", status: "M a.ts", commits: "abc First" };
 
 	it("returns null outside a git work tree", () => {

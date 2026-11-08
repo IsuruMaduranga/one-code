@@ -2,10 +2,10 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { requireText } from "../../extensions/lib/profile.ts";
 import webExtension from "../../extensions/web/index.ts";
 import type { ProviderSearchFailure } from "../../extensions/web/text.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { fellBack } from "./helpers/web-search-fallback.ts";
 
 const mocks = vi.hoisted(() => ({ callApiStream: vi.fn() }));
 vi.mock("pi-web-search/src/api.ts", async (importOriginal) => ({
@@ -20,13 +20,6 @@ vi.mock("../../extensions/lib/anthropic-server-call.ts", () => ({ tryNativeWeb: 
 
 type Result = { content: Array<{ type: string; text: string }>; details: { backend?: string; error?: unknown }; isError?: boolean };
 const braveResult = { title: "Brave result", url: "https://example.com", snippet: "Result snippet" };
-
-/** The fallback's result as the base builds it: Brave's results, then why the provider's own search did not answer. */
-function fellBack(failure: ProviderSearchFailure, results = [braveResult]): string {
-	const words = requireText("webSearch");
-	const chain = words.chainResults({ query: "test search", label: "Brave Search", attempts: [], keyless: false, results });
-	return `${chain}\n\n${words.providerFailed({ backend: "google/gemini-test", failure })}`;
-}
 let dir: string;
 
 beforeEach(() => {
@@ -112,7 +105,7 @@ describe("provider-native search results", () => {
 		vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ web: { results: [{ title: "Brave result", url: "https://example.com", description: "Result snippet" }] } }), { headers: { "content-type": "application/json" } })));
 		const result = await execute();
 		expect(result.details.backend).toBe("brave");
-		expect(result.content.map((block) => block.text).join("\n")).toBe(fellBack(failure));
+		expect(result.content.map((block) => block.text).join("\n")).toBe(fellBack(failure, [braveResult]));
 	});
 
 	it("bounds a stalled native transport and reports the timeout before fallback", async () => {

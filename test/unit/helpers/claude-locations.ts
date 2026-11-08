@@ -31,3 +31,15 @@ export function filesNamingClaudeLocations(dir: string, skip: string[] = []): st
 		.filter((path) => CLAUDE_LOCATION.test(withoutComments(readFileSync(path, "utf8"))))
 		.map((path) => relative(dir, path).split("\\").join("/"));
 }
+
+/**
+ * Compares the files that name a Claude Code location with an allowlist:
+ * `unlisted` name one without a listed reason, `stale` are listed but no
+ * longer name one.
+ */
+export function compareWithAllowlist(naming: string[], allowed: Record<string, string>): { unlisted: string[]; stale: string[] } {
+	return {
+		unlisted: naming.filter((file) => !(file in allowed)),
+		stale: Object.keys(allowed).filter((file) => !naming.includes(file)),
+	};
+}

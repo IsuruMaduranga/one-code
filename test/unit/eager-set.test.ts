@@ -4,7 +4,7 @@
  * artifact stays deferred. An eager tool needs no promptSnippet: the prompt
  * lists only the tools that bring one. The Agent tool's description comes
  * from the profile in force, in the form the model's tier calls for (One
- * Code's own forms: profile/test/eager-set-wording.test.ts).
+ * Code's own forms: profile/test/cc-tool-descriptions-wording.test.ts).
  */
 import { describe, expect, it, vi } from "vitest";
 import artifactsExtension from "../../extensions/artifacts/index.ts";

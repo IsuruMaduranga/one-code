@@ -12,9 +12,8 @@ import { BUNDLED_SKILLS_DIR } from "../../extensions/lib/skill-scan.ts";
 import { ARGUMENTS_AND_FLAGS, codeReviewCell, REVIEW_EFFORTS } from "../../extensions/skill/code-review.ts";
 import { BUNDLED_AGENTS_DIR } from "../../extensions/subagents/agents.ts";
 import { DEFAULT_AGENT } from "../../extensions/subagents/runs.ts";
-import type { PromptTier } from "../../extensions/lib/model-tier.ts";
+import { PROMPT_TIERS } from "../../extensions/lib/model-tier.ts";
 
-const TIERS: PromptTier[] = ["frontier", "workhorse", "cheap", "tiny"];
 
 describe("the profile's catalogs", () => {
 	it("ship the default agent type", () => {
@@ -27,7 +26,7 @@ describe("the profile's catalogs", () => {
 	});
 
 	it("ship every code-review cell a tier and effort can pick", () => {
-		const cells = new Set([ARGUMENTS_AND_FLAGS, ...TIERS.flatMap((tier) => REVIEW_EFFORTS.map((effort) => codeReviewCell(tier, effort)))]);
+		const cells = new Set([ARGUMENTS_AND_FLAGS, ...PROMPT_TIERS.flatMap((tier) => REVIEW_EFFORTS.map((effort) => codeReviewCell(tier, effort)))]);
 		const missing = [...cells].filter((cell) => !existsSync(join(BUNDLED_SKILLS_DIR, "code-review", "cells", `${cell}.md`)));
 		expect(missing).toEqual([]);
 	});

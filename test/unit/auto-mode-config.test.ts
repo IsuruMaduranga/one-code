@@ -3,10 +3,9 @@
  * settings file. Reading Claude Code's settings alongside it is One Code's
  * source provider's business (profile/test/auto-mode-config-claude.test.ts).
  */
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
 	autoModeSettingsPaths,
 	borrowedUserPermissionAllow,
@@ -18,16 +17,13 @@ import {
 } from "../../extensions/auto-mode/config.ts";
 import { defaultEnvironment } from "../../extensions/auto-mode/classifier-prompt.ts";
 import { productSettingsPath } from "../../extensions/lib/product-settings.ts";
+import { tempHome } from "./helpers/temp-home.ts";
 
 let home: string;
 
 beforeEach(() => {
-	home = mkdtempSync(join(tmpdir(), "cc-automode-"));
+	home = tempHome("cc-automode-").home;
 	mkdirSync(dirname(productSettingsPath(home)), { recursive: true });
-});
-
-afterEach(() => {
-	rmSync(home, { recursive: true, force: true });
 });
 
 /** The product's own user settings (`~/<state dir>/settings.json`). */

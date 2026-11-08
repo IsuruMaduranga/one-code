@@ -8,7 +8,7 @@ import { projectMemoryDir } from "../../extensions/lib/memory.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
+import { brand } from "../../extensions/lib/brand.mjs";
 
 describe("auto-memory off", () => {
 	let root: string;
@@ -19,11 +19,10 @@ describe("auto-memory off", () => {
 		root = realpathSync.native(mkdtempSync(join(tmpdir(), "auto-memory-off-")));
 		home = join(root, "home");
 		cwd = join(root, "project");
-		mkdirSync(join(home, ".onecode"), { recursive: true });
+		mkdirSync(join(home, brand.stateDir), { recursive: true });
 		mkdirSync(cwd);
 		stubHome(home);
 		vi.stubEnv("CLAUDE_CONFIG_DIR", join(home, ".claude"));
-		vi.stubEnv(envName("STATE_DIR"), join(home, ".onecode"));
 		mkdirSync(projectMemoryDir(cwd, home), { recursive: true });
 	});
 	afterEach(() => {

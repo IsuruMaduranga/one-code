@@ -10,7 +10,7 @@
  */
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { filesNamingClaudeLocations } from "./helpers/claude-locations.ts";
+import { compareWithAllowlist, filesNamingClaudeLocations } from "./helpers/claude-locations.ts";
 
 const ROOT = join(import.meta.dirname, "..", "..", "extensions");
 
@@ -26,9 +26,8 @@ const PROTECTIVE: Record<string, string> = {
 describe("Claude Code locations", () => {
 	it("are named in the base only by the protective lists", () => {
 		const naming = filesNamingClaudeLocations(ROOT);
-		const unchecked = naming.filter((file) => !(file in PROTECTIVE));
-		expect(unchecked, "move the reader behind the source provider (profile/claude-code/), or add a protective file to PROTECTIVE with its reason").toEqual([]);
-		const stale = Object.keys(PROTECTIVE).filter((file) => !naming.includes(file));
+		const { unlisted, stale } = compareWithAllowlist(naming, PROTECTIVE);
+		expect(unlisted, "move the reader behind the source provider (profile/claude-code/), or add a protective file to PROTECTIVE with its reason").toEqual([]);
 		expect(stale, "these no longer name a Claude Code location; drop them from PROTECTIVE").toEqual([]);
 	});
 });

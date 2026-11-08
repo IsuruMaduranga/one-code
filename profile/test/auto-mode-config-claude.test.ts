@@ -4,10 +4,9 @@
  * (`~/.claude/settings.json`), while One Code's own keys (`classifierModel`
  * and its stamp) come only from `~/.onecode`.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
 	borrowedUserPermissionAllow,
 	loadAutoModeConfig,
@@ -15,16 +14,13 @@ import {
 	oneCodePermissionAllow,
 } from "../../extensions/auto-mode/config.ts";
 import { defaultEnvironment } from "../../extensions/auto-mode/classifier-prompt.ts";
+import { tempHome } from "../../test/unit/helpers/temp-home.ts";
 
 let home: string;
 
 beforeEach(() => {
-	home = mkdtempSync(join(tmpdir(), "cc-automode-"));
+	home = tempHome("cc-automode-").home;
 	mkdirSync(join(home, ".claude"), { recursive: true });
-});
-
-afterEach(() => {
-	rmSync(home, { recursive: true, force: true });
 });
 
 const writeClaudeSettings = (data: unknown) => writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify(data));

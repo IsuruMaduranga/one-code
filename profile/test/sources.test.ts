@@ -6,15 +6,13 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { safetyControlWrite } from "../../extensions/auto-mode/safety-floor.ts";
 import { loadPermissionSettings } from "../../extensions/permissions/settings.ts";
-import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { settingsSources } from "../../extensions/lib/claude-settings.ts";
 import { instructionFileNames, instructionTargets, openInstructions } from "../../extensions/lib/instructions.ts";
 import { autoModeSettingsFiles } from "../../extensions/auto-mode/config.ts";
@@ -24,14 +22,14 @@ import { profileModuleKey, resolveProfile, setActiveProfileForTest } from "../..
 import { shareModuleForTest } from "../../extensions/lib/shared-module.ts";
 import { configDirs, projectConfigDir, type SourceProvider, userConfigDir } from "../../extensions/lib/sources.ts";
 import { profile } from "../index.ts";
+import { tempHome } from "../../test/unit/helpers/temp-home.ts";
 
 let home: string;
 beforeEach(() => {
-	home = mkdtempSync(join(tmpdir(), "sources-"));
+	home = tempHome("sources-").home;
 });
 afterEach(() => {
 	setActiveProfileForTest(undefined);
-	rmSync(home, { recursive: true, force: true });
 });
 
 describe("configDirs", () => {

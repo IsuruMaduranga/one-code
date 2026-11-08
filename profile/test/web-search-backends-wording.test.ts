@@ -5,18 +5,10 @@
  * does is tested in test/unit/web-search-backends.test.ts.
  */
 import { describe, expect, it } from "vitest";
-import { BRAVE_KEY_ENV, type ChainOutcome, runChain, type SearchBackend } from "../../extensions/web/backends.ts";
+import { BRAVE_KEY_ENV, type ChainOutcome, runChain } from "../../extensions/web/backends.ts";
+import { failureOf, fakeBackend, ONE_RESULT } from "../../test/unit/helpers/web-search.ts";
 import { webSearch } from "../text/web-search/index.ts";
 
-/** The failure data a backend or the chain threw. */
-async function failureOf(work: Promise<unknown>): Promise<unknown> {
-	try {
-		await work;
-	} catch (error) {
-		return (error as { failure?: unknown }).failure;
-	}
-	throw new Error("expected a failure");
-}
 
 /** The chain's result in One Code's words. */
 const formatSearchResults = (query: string, outcome: ChainOutcome) =>
@@ -35,16 +27,8 @@ describe("a backend's failure in One Code's words", () => {
 });
 
 describe("runChain + formatSearchResults", () => {
-	const backend = (name: SearchBackend["name"], keyless: boolean, impl: SearchBackend["search"]): SearchBackend => ({
-		name,
-		label: name,
-		keyless,
-		search: impl,
-	});
-	const ok = [{ title: "T", url: "https://a.com/", snippet: "S" }];
-
 	it("falls through a failing backend and records the failure", async () => {
-		const chain = [backend("brave", false, async () => { throw new Error("down"); }), backend("exa-free", true, async () => ok)];
+		const chain = [fakeBackend("brave", false, async () => { throw new Error("down"); }), fakeBackend("exa-free", true, async () => ONE_RESULT)];
 		const text = formatSearchResults("q", await runChain(chain, "q", {}, 10, undefined));
 		expect(text).toContain('Search results for "q" (via exa-free)');
 		expect(text).toContain("Fell back after: brave: down");
@@ -55,8 +39,8 @@ describe("runChain + formatSearchResults", () => {
 
 	it("does not claim a key is missing after a configured backend failed", async () => {
 		const outcome = await runChain([
-			backend("brave", false, async () => { throw new Error("HTTP 503"); }),
-			backend("exa-free", true, async () => ok),
+			fakeBackend("brave", false, async () => { throw new Error("HTTP 503"); }),
+			fakeBackend("exa-free", true, async () => ONE_RESULT),
 		], "q", {}, 10, undefined);
 		const text = formatSearchResults("q", outcome);
 		expect(text).toContain("free keyless endpoint");
@@ -64,14 +48,14 @@ describe("runChain + formatSearchResults", () => {
 	});
 
 	it("does not add the keyless note for a keyed backend and reports no results", async () => {
-		const outcome = await runChain([backend("tavily", false, async () => [])], "q", {}, 10, undefined);
+		const outcome = await runChain([fakeBackend("tavily", false, async () => [])], "q", {}, 10, undefined);
 		const text = formatSearchResults("q", outcome);
 		expect(text).not.toContain(KEYLESS_NOTE_START);
 		expect(text).toContain("No results.");
 	});
 
 	it("names every backend when all fail", async () => {
-		const chain = [backend("brave", false, async () => { throw new Error("a"); }), backend("exa-free", true, async () => { throw new Error("b"); })];
+		const chain = [fakeBackend("brave", false, async () => { throw new Error("a"); }), fakeBackend("exa-free", true, async () => { throw new Error("b"); })];
 		const failure = await failureOf(runChain(chain, "q", {}, 10, undefined));
 		expect(webSearch.failed({ model: "p/m", failure: failure as never })).toBe("web_search failed on p/m.\nEvery search backend failed:\n- brave: a\n- exa-free: b");
 	});

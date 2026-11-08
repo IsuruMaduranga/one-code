@@ -2,11 +2,10 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { requireText } from "../../extensions/lib/profile.ts";
 import webExtension from "../../extensions/web/index.ts";
-import type { ProviderSearchFailure } from "../../extensions/web/text.ts";
 import { NATIVE_SEARCH_TIMEOUT_MS } from "../../extensions/web/native-call.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { fellBack } from "./helpers/web-search-fallback.ts";
 
 let dir: string;
 const model = { provider: "google", api: "google-generative-ai", id: "gemini-test", baseUrl: "https://google.example.test/v1", maxTokens: 8192 };
@@ -34,13 +33,8 @@ async function execute(selectedModel = model): Promise<Result> {
 	})) as Result;
 }
 
-/** The fallback's result as the base builds it: Brave's results, then why the provider's own search did not answer. */
-function fellBack(failure: ProviderSearchFailure): string {
-	const words = requireText("webSearch");
-	const results = [{ title: "Brave result", url: "https://example.com/source", snippet: "Fresh result" }];
-	const chain = words.chainResults({ query: "test search", label: "Brave Search", attempts: [], keyless: false, results });
-	return `${chain}\n\n${words.providerFailed({ backend: "google/gemini-test", failure })}`;
-}
+/** Brave's one result, as `braveReply` serves it. */
+const braveResults = [{ title: "Brave result", url: "https://example.com/source", snippet: "Fresh result" }];
 const braveReply = () => new Response(JSON.stringify({ web: { results: [{ title: "Brave result", url: "https://example.com/source", description: "Fresh result" }] } }), { headers: { "content-type": "application/json" } });
 
 describe("web_search through the real pi-web-search transport", () => {
@@ -107,7 +101,7 @@ describe("web_search through the real pi-web-search transport", () => {
 		vi.stubGlobal("fetch", fetch);
 		const result = await execute();
 		expect(result.details.backend).toBe("brave");
-		expect(result.content[0].text).toBe(fellBack({ kind: "noSearch" }));
+		expect(result.content[0].text).toBe(fellBack({ kind: "noSearch" }, braveResults));
 		expect(result.content[0].text).not.toContain("No answer available.");
 		expect(fetch).toHaveBeenCalledTimes(2);
 	});
@@ -198,7 +192,7 @@ describe("web_search through the real pi-web-search transport", () => {
 		expect(nativeSignal?.aborted).toBe(true);
 		const result = await pending;
 		expect(result.details.backend).toBe("brave");
-		expect(result.content[0].text).toBe(fellBack({ kind: "timedOut", seconds: 120 }));
+		expect(result.content[0].text).toBe(fellBack({ kind: "timedOut", seconds: 120 }, braveResults));
 		expect(fetch).toHaveBeenCalledTimes(2);
 	});
 });

@@ -1,5 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { expandEnv, loadServers, missingEnvVars, parseServer, referencedEnvVars } from "../../extensions/mcp/config.ts";
@@ -16,6 +15,7 @@ import {
 } from "../../extensions/mcp/schema.ts";
 import { createTailBuffer, mcpInstructionsReminder as instructionsWith } from "../../extensions/mcp/client.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
+import { makeMcpConfigDirs, piMcpConfigs, writeMcpServers as write } from "./helpers/mcp-config.ts";
 import { TINY_GIF, TINY_JPEG, TINY_PNG, TINY_WEBP } from "./helpers/tiny-images.ts";
 
 const mcpText = requireText("mcp");
@@ -76,30 +76,17 @@ describe("loadServers", () => {
 	let project: string;
 
 	beforeEach(() => {
-		root = mkdtempSync(join(tmpdir(), "cc-mcp-"));
-		home = join(root, "home");
-		project = join(root, "project");
-		mkdirSync(home, { recursive: true });
-		mkdirSync(join(project, ".claude"), { recursive: true });
-		// Mark the project root so the .mcp.json walk stops here.
-		mkdirSync(join(project, ".git"), { recursive: true });
+		({ root, home, project } = makeMcpConfigDirs());
 	});
 	afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-	const write = (path: string, servers: Record<string, unknown>) =>
-		writeFileSync(path, JSON.stringify({ mcpServers: servers }));
-
 	describe("pi's own mcp.json files", () => {
-		const piConfigs = () => ({ user: join(home, ".pi", "agent", "mcp.json"), project: join(project, ".pi", "mcp.json") });
-		const writePi = (path: string, servers: Record<string, unknown>) => {
-			mkdirSync(join(path, ".."), { recursive: true });
-			write(path, servers);
-		};
+		const piConfigs = () => piMcpConfigs(home, project);
 
 		it("reads both in pi's format: ~/ and a relative cwd resolved, enabled: false skipped, project over user", () => {
 			const { user, project: projectFile } = piConfigs();
-			writePi(user, { tools: { command: "~/bin/tools", args: ["~/data"], cwd: "work" }, off: { command: "x", enabled: false }, shared: { url: "https://user.example/mcp" } });
-			writePi(projectFile, { shared: { url: "https://project.example/mcp" } });
+			write(user, { tools: { command: "~/bin/tools", args: ["~/data"], cwd: "work" }, off: { command: "x", enabled: false }, shared: { url: "https://user.example/mcp" } });
+			write(projectFile, { shared: { url: "https://project.example/mcp" } });
 			const servers = loadServers(project, home, {}, [], { piConfigs: piConfigs() });
 			expect(servers.map((s) => s.name)).toEqual(["shared", "tools"]);
 			expect(servers.find((s) => s.name === "tools")).toMatchObject({ command: join(home, "bin", "tools"), args: [join(home, "data")], cwd: join(project, "work"), source: user, piOrigin: "user" });
@@ -108,7 +95,7 @@ describe("loadServers", () => {
 
 		it("skips a server with a !command value, with a note", () => {
 			const { user } = piConfigs();
-			writePi(user, { gh: { url: "https://api.example/mcp", headers: { Authorization: "!echo Bearer $(gh auth token)" } } });
+			write(user, { gh: { url: "https://api.example/mcp", headers: { Authorization: "!echo Bearer $(gh auth token)" } } });
 			const notes: string[] = [];
 			const servers = loadServers(project, home, {}, [], { piConfigs: piConfigs(), onNote: (m) => notes.push(m) });
 			expect(servers).toEqual([]);
@@ -117,7 +104,7 @@ describe("loadServers", () => {
 
 		it("reads servers other extensions registered, below every file, with the extension as the source", () => {
 			const { user } = piConfigs();
-			writePi(user, { shared: { command: "from-pi" } });
+			write(user, { shared: { command: "from-pi" } });
 			const registered = [
 				{ name: "jira", config: { url: "https://mcp.example.com/jira" }, extensionPath: "/ext/jira.ts" },
 				{ name: "shared", config: { command: "from-extension" }, extensionPath: "/ext/other.ts" },
@@ -134,7 +121,7 @@ describe("loadServers", () => {
 		});
 
 		it("reads neither file unless asked", () => {
-			writePi(piConfigs().user, { tools: { command: "x" } });
+			write(piConfigs().user, { tools: { command: "x" } });
 			expect(loadServers(project, home, {})).toEqual([]);
 		});
 	});

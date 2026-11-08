@@ -14,7 +14,7 @@ import type { TranscriptEntry } from "../../extensions/auto-mode/transcript.ts";
 import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
+import { stubHome } from "./helpers/home.ts";
 
 const seen: TranscriptEntry[][] = [];
 vi.mock("../../extensions/auto-mode/classifier.ts", async (importOriginal) => ({
@@ -43,8 +43,7 @@ describe("the resolvedPaths line in the classifier's transcript", () => {
 		// The user's real settings may list a workspace directory that holds the
 		// temp dir (an additionalDirectories entry under /private/tmp), which
 		// would put the link's target inside the workspace.
-		vi.stubEnv("HOME", stateDir);
-		vi.stubEnv(envName("STATE_DIR"), join(stateDir, ".onecode"));
+		stubHome(stateDir);
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(stateDir, "agent"));
 		seen.length = 0;
 		branch = [];

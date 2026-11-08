@@ -18,6 +18,7 @@ import { activeProfile, setActiveProfileForTest } from "../../extensions/lib/pro
 import { decide } from "../../extensions/permissions/matcher.ts";
 import { discoverAgents } from "../../extensions/subagents/agents.ts";
 import { guideAgentDefinition as definition, guideSystemPrompt as systemPrompt, type GuideInput, listableName, settingsSetup } from "../../extensions/subagents/guide-agent.ts";
+import { emptySetup, guideInput as input } from "./helpers/guide-input.ts";
 
 /** The inputs the stand-in guide's prompt was built from, in order. */
 const prompted: GuideInput[] = [];
@@ -46,15 +47,6 @@ const setupSeen = (input: GuideInput) => {
 	expect(prompted).toHaveLength(1);
 	return prompted[0].setup;
 };
-
-const emptySetup = { skills: [], agents: [], plugins: [], mcpServers: [], packages: [], extensions: [], settingsKeys: [] };
-const input = (over: Partial<GuideInput> = {}): GuideInput => ({
-	docs: { guide: "/pkg/docs/guide", piDocs: "/pi/docs", piExamples: "/pi/examples" },
-	install: { shape: "app", method: "npm", agentDir: "/home/u/.state/agent", version: "0.4.1" },
-	setup: emptySetup,
-	config: { instructionFiles: ["CLAUDE.md"], configDir: ".claude" },
-	...over,
-});
 
 describe("guideAgentDefinition", () => {
 	it("is the profile's guide, on the session's subagent model", () => {

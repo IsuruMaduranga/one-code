@@ -17,7 +17,7 @@ function sources(dir: string, out: string[] = []): string[] {
 	for (const name of readdirSync(dir)) {
 		const path = join(dir, name);
 		if (statSync(path).isDirectory()) sources(path, out);
-		else if (/\.(ts|mts|mjs)$/.test(name) && !name.endsWith(".d.ts")) out.push(path);
+		else if (/\.(ts|mts|mjs)$/.test(name) && !/\.(d|test)\.ts$/.test(name)) out.push(path);
 	}
 	return out;
 }

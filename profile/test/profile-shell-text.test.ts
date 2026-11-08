@@ -2,10 +2,12 @@
  * One Code's shell wording (profile/text/shell/) where the golden snapshot cannot
  * reach it: the sleep and polling-loop blocks (the permission gate stops
  * those calls first in a one-shot run), PowerShell's blocks, a background
- * start, and a run ended by a signal. The golden snapshot pins the other
- * bash blocks and both one-shot background results.
+ * start, a run ended by a signal or a timeout, and the marker for output cut
+ * to its tail. The golden snapshot pins the other bash blocks and both
+ * one-shot background results.
  */
 import { describe, expect, it } from "vitest";
+import { requireText } from "../../extensions/lib/profile.ts";
 import { shellText } from "../text/shell/index.ts";
 import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
 
@@ -35,5 +37,22 @@ describe("One Code's shell text", () => {
 		expect(shell.finish({ kind: "signal", signal: "SIGKILL" })).toBe("failed (terminated by SIGKILL)");
 		expect(shell.failureDetail({ kind: "completed" })).toBeUndefined();
 		expect(shell.exitCode({ code: 3, output: "" })).toBe("Exit code 3");
+	});
+
+	it("says a timed-out background run failed, naming the timeout", () => {
+		const text = requireText("shell").ranToEnd({
+			label: "Bash",
+			id: "b1",
+			description: "sleep",
+			end: { kind: "timedOut", seconds: 0.2 },
+			note: "",
+			logPath: "/tmp/out.log",
+			output: "",
+		} as never);
+		expect(text).toContain("failed (timed out after 0.2s)");
+	});
+
+	it("says a background shell's earlier output was truncated when its output is cut to the tail", () => {
+		expect(requireText("shell").earlierTruncated).toContain("earlier output truncated");
 	});
 });

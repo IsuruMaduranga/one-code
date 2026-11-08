@@ -22,17 +22,12 @@ import {
 	findTypescript,
 } from "../../extensions/lsp/servers.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
+import { diag } from "./helpers/lsp-diagnostics.ts";
 
 const lspText = requireText("lsp");
 
 /** The tool's result with the profile's words, as the extension passes them. */
 const formatDiagnostics = (path: string, list: LspDiagnostic[], limit?: number) => formatWith(path, list, lspText.diagnostics, limit);
-
-const diag = (message: string, severity = 1, line = 0, character = 0): LspDiagnostic => ({
-	range: { start: { line, character } },
-	severity,
-	message,
-});
 
 describe("protocol framing", () => {
 	it("round-trips a message", () => {

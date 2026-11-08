@@ -5,14 +5,14 @@
  * notices the base hands it. The base's selection is in
  * test/unit/subagent-model-select.test.ts.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { applicableSubagentDefault, loadSubagentDefault } from "../../extensions/subagents/default-model.ts";
 import { productSettingsPath } from "../../extensions/lib/product-settings.ts";
 import { subagentModelsText } from "../text/subagent-models/index.ts";
 import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
+import { tempHome } from "../../test/unit/helpers/temp-home.ts";
 
 const words = subagentModelsText(ALL_LIVE);
 
@@ -24,12 +24,8 @@ describe("loadSubagentDefault: Claude Code's knob", () => {
 	let home: string;
 
 	beforeEach(() => {
-		home = mkdtempSync(join(tmpdir(), "cc-subagent-default-"));
+		home = tempHome("cc-subagent-default-").home;
 		mkdirSync(join(home, ".claude"), { recursive: true });
-	});
-
-	afterEach(() => {
-		rmSync(home, { recursive: true, force: true });
 	});
 
 	it("reads CLAUDE_CODE_SUBAGENT_MODEL from the settings env block, Claude Code style", () => {

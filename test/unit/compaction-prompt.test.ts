@@ -1,7 +1,7 @@
 /**
  * Reading the summary out of a compaction reply: the `<summary>` block, with
  * the analysis dropped. One Code's instruction text itself is
- * profile/test/compaction-prompt-wording.test.ts.
+ * profile/test/profile-compaction-text.test.ts.
  */
 import { describe, expect, it } from "vitest";
 import { extractSummary } from "../../extensions/compaction/prompt.ts";

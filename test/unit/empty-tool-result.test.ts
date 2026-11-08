@@ -12,7 +12,7 @@ import { requireText } from "../../extensions/lib/profile.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 const text = (value: string) => ({ type: "text", text: value });
-/** The profile's text for a tool that returned nothing (One Code's: profile/test/empty-tool-result-wording.test.ts). */
+/** The profile's text for a tool that returned nothing (One Code's: profile/test/profile-tool-results-text.test.ts). */
 const marker = (name: string) => requireText("toolResults").empty({ tool: name });
 
 // Apply returned changes in registration order, as pi's emitToolResult does.

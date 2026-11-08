@@ -1,16 +1,17 @@
 /**
- * One Code's `/init` prompt: Claude Code's classic prompt, with the CLAUDE.md
- * wording named for any compatible agent and AGENTS.md among the rules to
- * fold in. How the base submits it: test/unit/init-prompt.test.ts.
+ * One Code's `/init` prompt (profile/text/init/): Claude Code's classic
+ * prompt, with the CLAUDE.md wording named for any compatible agent and
+ * AGENTS.md among the rules to fold in. How the base submits it:
+ * test/unit/init-prompt.test.ts.
  */
-import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { INIT_PROMPT } from "../text/init/prompt.ts";
+import { sha } from "./helpers/sha.ts";
 
 describe("One Code's /init prompt", () => {
 	it("keeps the text", () => {
 		expect(INIT_PROMPT.length).toBe(1638);
-		expect(createHash("sha256").update(INIT_PROMPT).digest("hex").slice(0, 16)).toBe("d87cf400124e8044");
+		expect(sha(INIT_PROMPT)).toBe("d87cf400124e8044");
 	});
 
 	it("is Claude Code's classic prompt, adapted only where the file is shared with other agents", () => {

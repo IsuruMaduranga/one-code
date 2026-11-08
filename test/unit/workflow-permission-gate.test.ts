@@ -8,6 +8,7 @@ import { localGateMode } from "../../extensions/lib/permission-gate.ts";
 import { powerShellSpawn } from "../../extensions/lib/shell-spawn.ts";
 import { sessionResultsDir } from "../../extensions/lib/persisted-output.ts";
 import { buildGate as buildGateHarness } from "./helpers/permission-gate-harness.ts";
+import { stubHome } from "./helpers/home.ts";
 import { POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
 import type { PermissionRefusal } from "../../extensions/permissions/text.ts";
@@ -50,6 +51,7 @@ describe("permissionGateFactory", () => {
 				// Real paths: the gate compares the resolved subject with the folder.
 				const cwd = realpathSync.native(mkdtempSync(join(os.tmpdir(), "gate-cwd-")));
 				const home = realpathSync.native(mkdtempSync(join(os.tmpdir(), "gate-home-")));
+				stubHome(home);
 				const dir = memoryDir(home, cwd);
 				mkdirSync(dir, { recursive: true });
 				const handler = buildGateHarness.rebuild(cwd, home);
@@ -57,6 +59,7 @@ describe("permissionGateFactory", () => {
 				expect(result?.block ?? false, result?.reason).toBe(!enabled);
 			}
 		} finally {
+			vi.unstubAllEnvs();
 			resetAutoMemoryForTest();
 		}
 	});
