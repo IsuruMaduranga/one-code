@@ -87,6 +87,7 @@
 	"files": [
 		"extensions/",
 		"profile/",
+		"!profile/test/",
 		"types/",
 		"README.md",
 		"LICENSE",

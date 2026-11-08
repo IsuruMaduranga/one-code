@@ -1,0 +1,32 @@
+{
+	"name": "Fixture Agent",
+	"idPrefix": "fixture-agent",
+	"bin": "fixagent",
+	"envPrefix": "FIXAGENT",
+	"stateDir": ".fixagent",
+	"productFile": "FIXAGENT.md",
+	"theme": "fixture",
+	"homepage": "https://example.com/fixture-agent",
+	"subtitle": "a test product on the base harness",
+	"wordmark": [
+		"FIXTURE AGENT"
+	],
+	"packages": {
+		"app": "@example/fixture-agent",
+		"extension": "fixture-agent-extension"
+	},
+	"packageInfo": {
+		"app": {
+			"description": "Fixture Agent, the app package of the base harness's test product.",
+			"keywords": [
+				"fixture"
+			]
+		},
+		"extension": {
+			"description": "Fixture Agent, the extension package of the base harness's test product.",
+			"keywords": [
+				"fixture"
+			]
+		}
+	}
+}

@@ -1,21 +1,16 @@
-import { join } from "node:path";
-import { beforeAll, beforeEach } from "vitest";
+import { beforeEach } from "vitest";
 import { emptyCatalogSources, setCatalogSourcesForTest } from "../extensions/lib/model-catalog-data.ts";
 import { setModelTierOverridesForTest } from "../extensions/lib/model-tier.ts";
 import { bashParserReady } from "../extensions/lib/bash-parser.ts";
-import { resetConfigModeForTest } from "../profile/claude-code/mode.ts";
-import { PROFILE_DIR, profileModuleKey, shareShippedProfileForTest } from "../extensions/lib/profile.ts";
+import { shareShippedProfileForTest } from "../extensions/lib/profile.ts";
 import { profile } from "../profile/index.ts";
-import { shareModuleForTest } from "../extensions/lib/shared-module.ts";
 
 // The shipped profile through the test run's own module graph (lib/profile.ts
 // loads it on demand under jiti, where vitest's import is not the one used).
 shareShippedProfileForTest(profile);
-// One Code's source provider loads on first use (lib/profile.ts sourceProvider).
-// Imported here once the test file is, so the lib/ modules it pulls in load
-// under the file's own vi.mock calls; set again for each file.
-const sourcesModule = join(PROFILE_DIR, profile.sources ?? "");
-beforeAll(async () => shareModuleForTest(profileModuleKey(sourcesModule), await import("../profile/claude-code/sources.ts")));
+// What the profile in force needs besides this (One Code's source provider and
+// config mode) is in its own profile/test/setup.ts, which vitest.config.ts adds
+// when the profile has one.
 
 // Hermetic by default: an empty model catalog (see vitest.config.ts), so every
 // model takes the no-catalog rules unless a test pins sources with
@@ -27,11 +22,6 @@ beforeEach(() => setCatalogSourcesForTest(emptyCatalogSources()));
 // Likewise no `modelTiers` from the machine's ~/.onecode/settings.json.
 setModelTierOverridesForTest({});
 beforeEach(() => setModelTierOverridesForTest({}));
-
-// Claude-compatible mode regardless of the machine's ~/.onecode/settings.json;
-// a test of independent mode pins it with resetConfigModeForTest("independent").
-resetConfigModeForTest("claude-compatible");
-beforeEach(() => resetConfigModeForTest("claude-compatible"));
 
 // ~/.claude paths follow each test's own home, whatever the shell says: CLAUDE_CONFIG_DIR inherited
 // from the environment (a probe harness, a user's own setup) moved every

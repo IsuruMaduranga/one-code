@@ -39,6 +39,21 @@ jobs:
           # Log taskkill's verdicts (lib/process-tree.ts) so a kill that misses shows why.
           ONECODE_DEBUG_KILL: ${{ runner.os == 'Windows' && '1' || '' }}
 
+  # A product replaces profile/ with its own, so the base must typecheck and
+  # pass its tests on any profile that fills the contract. This runs them on
+  # a copy of the repository with the fixture profile (test/fixtures/profile/)
+  # in place of One Code's.
+  base-suite:
+    name: base on the fixture profile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: scripts/test-base.sh
 
   # The extension package rides on the user's own pi, so the oldest pi in the
   # tested range (TESTED_PI_MIN, extensions/lib/pi-version.ts) must load the
