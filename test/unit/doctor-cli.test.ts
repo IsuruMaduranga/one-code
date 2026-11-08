@@ -4,12 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { collectDoctorCliReport, runDoctorCli } from "../../extensions/doctor/cli.ts";
+import { brand } from "../../extensions/lib/brand.mjs";
 import { piRoot, repoRoot } from "./helpers/pi-install.ts";
 
 let home: string;
 
 beforeEach(() => {
-	home = mkdtempSync(join(tmpdir(), "onecode-doctor-cli-"));
+	home = mkdtempSync(join(tmpdir(), "doctor-cli-"));
 });
 afterEach(() => rmSync(home, { recursive: true, force: true }));
 
@@ -35,7 +36,7 @@ describe("onecode doctor (headless)", () => {
 		expect(report.ready).toBe(false);
 		expect(report.findings.some((f) => f.level === "error" && f.text.includes("No model provider is configured"))).toBe(true);
 		const text = report.sections.flatMap((s) => s.lines.map((l) => l.text));
-		expect(text.some((t) => t.startsWith("Running: the bundled onecode app 0.2.1 · pi 0.85.1"))).toBe(true);
+		expect(text.some((t) => t.startsWith(`Running: the bundled ${brand.bin} app 0.2.1 · pi 0.85.1`))).toBe(true);
 		expect(text.some((t) => t.includes("known providers"))).toBe(true);
 	});
 
@@ -45,8 +46,8 @@ describe("onecode doctor (headless)", () => {
 		const code = await runDoctorCli(options(), (text) => chunks.push(text));
 		const out = chunks.join("");
 		expect(code).toBe(1);
-		expect(out.startsWith("One Code doctor\n")).toBe(true);
-		expect(out).toContain("For a full setup checkup that can also fix issues, run /doctor inside onecode.");
+		expect(out.startsWith(`${brand.name} doctor\n`)).toBe(true);
+		expect(out).toContain(`For a full setup checkup that can also fix issues, run /doctor inside ${brand.bin}.`);
 		expect(out).toContain("/doctor report shows this report alone");
 		expect(out.split("\n").every((line) => line.length <= 100)).toBe(true);
 	});

@@ -7,8 +7,8 @@
  * announcement and auto mode's standing note.
  */
 import { describe, expect, it } from "vitest";
-import { permissionsText } from "../../profile/text/permissions/index.ts";
-import { ALL_LIVE } from "./helpers/live.ts";
+import { permissionsText } from "../text/permissions/index.ts";
+import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
 
 const permissions = permissionsText(ALL_LIVE);
 

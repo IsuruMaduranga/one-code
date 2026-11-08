@@ -9,6 +9,8 @@ import { join, resolve } from "node:path";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import fileTrackerExtension from "../../extensions/file-tracker/index.ts";
 import { expandCandidate, shellReadCandidates, shellReadPaths, shownInFull } from "../../extensions/file-tracker/shell-reads.ts";
+import { describeChanges } from "../../extensions/file-tracker/tracker.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
 import { CHILD_WROTE_CHANNEL } from "../../extensions/lib/child-writes.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
@@ -23,6 +25,8 @@ vi.mock("node:fs", async (load) => {
 beforeAll(async () => {
 	await bashParserReady();
 });
+
+const trackerText = requireText("fileTracker");
 
 const CWD = resolve("/work");
 const HOME = resolve("/home/me");
@@ -203,14 +207,15 @@ describe("file-tracker: a bash result counts as a read", () => {
 		const file = join(dir, "notes.md");
 		const emitted: string[] = [];
 		fake.events.on(REMINDER_CHANNEL, (data) => emitted.push((data as { text: string }).text));
-		writeFileSync(file, "child line one\nchild line two\n");
+		const before = "child line one\nchild line two\n";
+		const after = `${before}user line\n`;
+		writeFileSync(file, before);
 		fake.events.emit(CHILD_WROTE_CHANNEL, { path: file, agent: "sweep" });
 		await bash("cat notes.md", "child line one\nchild line two");
-		writeFileSync(file, "child line one\nchild line two\nuser line\n");
+		writeFileSync(file, after);
 		await fake.fireOne("tool_execution_end", { toolName: "bash", toolCallId: "later", isError: false }, ctx());
-		expect(emitted).toHaveLength(1);
-		expect(emitted[0]).toContain("That's usually deliberate");
-		expect(emitted[0]).not.toContain("sweep");
+		// An outside change, not the subagent's: the notice names no agent.
+		expect(emitted).toEqual([trackerText.changedOnDisk({ path: file, excerpt: describeChanges(before, after)! })]);
 	});
 
 	it("allows an edit after a cat that printed the whole file", async () => {
@@ -266,12 +271,12 @@ describe("file-tracker: a bash result counts as a read", () => {
 		expect(true).toBe(true);
 	});
 
-	it("still refuses after a partial read, and says why", async () => {
+	it("still refuses after a partial read, as unread", async () => {
 		writeFileSync(join(dir, "big.py"), "alpha = 1\nbeta = 2\ngamma = 3\n");
 		await bash("cat big.py | head -1", "alpha = 1");
 		const result = await edit("big.py");
 		expect(result?.block).toBe(true);
-		expect(result?.reason).toContain("A shell read counts only when it printed the whole file as it is on disk");
+		expect(result?.reason).toBe(trackerText.unread({ path: join(dir, "big.py"), tool: "edit" }));
 	});
 
 	it("keeps the stale guard: a change after the shell read blocks the edit", async () => {
@@ -279,7 +284,7 @@ describe("file-tracker: a bash result counts as a read", () => {
 		writeFileSync(file, "first version of the notes file\nline two\n");
 		await bash("cat x.txt", "first version of the notes file\nline two");
 		writeFileSync(file, "second\n");
-		expect((await edit("x.txt"))?.reason).toContain("has changed on disk");
+		expect((await edit("x.txt"))?.reason).toBe(trackerText.stale({ path: file }));
 	});
 
 	it("rebuilds shell reads from the transcript on resume", async () => {
@@ -385,7 +390,7 @@ describe("file-tracker: a bash result counts as a read", () => {
 			await bash("cat kept.txt", KEPT.trimEnd());
 			const branch = [...shellTurn("1", "cat kept.txt", KEPT.trimEnd()), ...shellTurn("2", "ls", "kept.txt"), { type: "compaction", id: "c", firstKeptEntryId: "a2" }];
 			await compact(branch);
-			expect((await edit("kept.txt"))?.reason).toContain("has not been read");
+			expect((await edit("kept.txt"))?.reason).toBe(trackerText.unread({ path: join(dir, "kept.txt"), tool: "edit" }));
 		});
 
 		it("forgets a file whose kept shell output showed only part of it", async () => {
@@ -394,7 +399,7 @@ describe("file-tracker: a bash result counts as a read", () => {
 			await bash("cat kept.txt", KEPT.trimEnd());
 			const branch = [...shellTurn("1", "cat kept.txt", KEPT.trimEnd()), ...shellTurn("2", "head -1 kept.txt", "unique kept shell content"), { type: "compaction", id: "c", firstKeptEntryId: "a2" }];
 			await compact(branch);
-			expect((await edit("kept.txt"))?.reason).toContain("has not been read");
+			expect((await edit("kept.txt"))?.reason).toBe(trackerText.unread({ path: join(dir, "kept.txt"), tool: "edit" }));
 		});
 
 		it("keeps the stale guard: a kept shell read of a file changed since is stale, not unread", async () => {
@@ -402,7 +407,7 @@ describe("file-tracker: a bash result counts as a read", () => {
 			await bash("cat kept.txt", KEPT.trimEnd());
 			writeFileSync(join(dir, "kept.txt"), `${KEPT}a line someone else added\n`);
 			await compact([...shellTurn(lastCall(), "cat kept.txt", KEPT.trimEnd()), { type: "compaction", id: "c", firstKeptEntryId: `a${lastCall()}` }]);
-			expect((await edit("kept.txt"))?.reason).toContain("has changed on disk");
+			expect((await edit("kept.txt"))?.reason).toBe(trackerText.stale({ path: join(dir, "kept.txt") }));
 		});
 	});
 });

@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ULTRACODE_MODE_CHANNEL } from "../../extensions/effort/slider.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 import workflowExtension from "../../extensions/workflow/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
@@ -28,7 +29,7 @@ describe("workflow wiring: the ultracode keyword", () => {
 		await fake.fire("input", { text: "ultracode: audit every extension", source: "interactive" });
 		expect(reminders).toHaveLength(1);
 		expect(reminders[0].placement).toBeUndefined();
-		expect(reminders[0].text).toContain('keyword "ultracode"');
+		expect(reminders[0].text).toBe(requireText("workflow").ultracodeReminder);
 
 		reminders.length = 0;
 		await fake.fire("input", { text: "no keyword here", source: "interactive" });
@@ -54,7 +55,7 @@ describe("workflow wiring: the ultracode keyword", () => {
 		await delivered("an earlier queued message");
 		expect(reminders).toHaveLength(0);
 		await delivered("ultracode: audit it");
-		expect(reminders).toEqual([{ text: expect.stringContaining('keyword "ultracode"'), placement: "last-append" }]);
+		expect(reminders).toEqual([{ text: requireText("workflow").ultracodeReminder, placement: "last-append" }]);
 		await delivered("ultracode: audit it");
 		expect(reminders).toHaveLength(1);
 	});
@@ -123,16 +124,28 @@ describe("workflow wiring: one-shot modes (LIFECYCLE-REVIEW-2026-09-06 M1)", () 
 		workflowExtension(fake.pi as never);
 		const result = (await fake.tools.get("workflow")!.execute("c1", { script }, undefined, undefined, ctxFor("json"))) as {
 			content: Array<{ text: string }>;
-			details: { background?: boolean; status?: string; scriptPath?: string };
+			details: { background?: boolean; runId: string; status?: string; scriptPath: string };
 			isError?: boolean;
 		};
 		expect(result.details.background).toBeUndefined();
 		expect(result.details.status).toBe("completed");
-		// The tool promises the persisted script's path in every result, for a scriptPath re-run.
-		expect(result.content[0].text).toContain(`script: ${result.details.scriptPath}`);
 		expect(result.isError).toBe(false);
-		expect(result.content[0].text).toContain("This is a one-shot session, so the workflow ran to completion instead of in the background.");
-		expect(result.content[0].text).toContain("42");
+		// The run's report with the one-shot note, and the persisted script's path the
+		// tool promises in every result, for a scriptPath re-run.
+		const words = requireText("workflow");
+		const report = words.report({
+			name: "one-shot-probe",
+			runId: result.details.runId,
+			status: "completed",
+			stats: { agents: 0, outputTokens: 0, cost: 0 },
+			seconds: 0,
+			result: JSON.stringify({ answer: 42 }, null, 2),
+			progress: [],
+			keptWorktrees: [],
+		});
+		expect(result.content[0].text).toBe(
+			words.ranToEnd({ note: requireText("notifications").oneShotNote("workflow"), report, scriptPath: result.details.scriptPath }),
+		);
 		// Nothing left to deliver later: no follow-up message is ever queued.
 		await new Promise((r) => setTimeout(r, 50));
 		expect(fake.sentMessages).toHaveLength(0);
@@ -153,8 +166,11 @@ describe("workflow wiring: one-shot modes (LIFECYCLE-REVIEW-2026-09-06 M1)", () 
 		await vi.waitFor(() => expect(delivered()).toHaveLength(1), { timeout: 5_000 });
 		const second = (await workflow.execute("c2", { resumeFromRunId: first.details.runId, args: "SECOND" }, undefined, undefined, ctx)) as {
 			content: Array<{ text: string }>;
+			details: { scriptPath: string };
 		};
-		expect(second.content[0].text).toContain("resumed in the background");
+		expect(second.content[0].text).toBe(
+			requireText("workflow").started({ name: "resume-probe", resumed: true, runId: first.details.runId, scriptPath: second.details.scriptPath }),
+		);
 		await vi.waitFor(() => expect(delivered()).toHaveLength(2), { timeout: 5_000 });
 		expect(delivered()[1]).toContain("SECOND");
 		expect(delivered()[1]).toContain("c2");
@@ -165,10 +181,12 @@ describe("workflow wiring: one-shot modes (LIFECYCLE-REVIEW-2026-09-06 M1)", () 
 		workflowExtension(fake.pi as never);
 		const result = (await fake.tools.get("workflow")!.execute("c1", { script }, undefined, undefined, ctxFor(mode))) as {
 			content: Array<{ text: string }>;
-			details: { background?: boolean; runId: string };
+			details: { background?: boolean; runId: string; scriptPath: string };
 		};
 		expect(result.details.background).toBe(true);
-		expect(result.content[0].text).toContain("started in the background");
+		expect(result.content[0].text).toBe(
+			requireText("workflow").started({ name: "one-shot-probe", resumed: false, runId: result.details.runId, scriptPath: result.details.scriptPath }),
+		);
 		// Let the run finish so nothing leaks into the next test.
 		await new Promise((r) => setTimeout(r, 200));
 	});

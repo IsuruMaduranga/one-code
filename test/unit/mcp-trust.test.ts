@@ -1,8 +1,10 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { envName } from "../../extensions/lib/brand.mjs";
+import { primaryFamily, primarySettingsFile, settingsSources } from "../../extensions/lib/claude-settings.ts";
 import type { McpServer, StdioServer } from "../../extensions/mcp/config.ts";
 import {
 	approveMcpServers,
@@ -32,9 +34,26 @@ beforeEach(() => {
 	mkdirSync(join(cwd, ".claude"), { recursive: true });
 	mkdirSync(join(home, ".claude"), { recursive: true });
 	storePath = join(root, "state", "mcp", "project-approvals.json");
+	// The product's own settings live under the temp root too.
+	vi.stubEnv(envName("STATE_DIR"), join(root, "product-state"));
 	resetMcpTrustSessionState();
 });
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+afterEach(() => {
+	vi.unstubAllEnvs();
+	rmSync(root, { recursive: true, force: true });
+});
+
+/** The settings files approvals are read from, for the profile in force. */
+const settingsFiles = () => settingsSources(cwd, home);
+const writeSettings = (path: string, settings: Record<string, unknown>) => {
+	mkdirSync(dirname(path), { recursive: true });
+	writeFileSync(path, JSON.stringify(settings));
+};
+/** Write the primary user settings file, whose answers approve project servers. */
+const writeUserSettings = (settings: Record<string, unknown>) => writeSettings(primarySettingsFile(settingsFiles())!.path, settings);
+/** Write the local settings file of the primary file's family, whose disables tighten. */
+const writeLocalSettings = (settings: Record<string, unknown>) =>
+	writeSettings(primaryFamily(settingsFiles()).find((file) => file.scope === "local")!.path, settings);
 
 const stdio = (name: string, source: string, command = "npx", args = ["-y", `${name}-server`]): McpServer => ({
 	kind: "stdio",
@@ -92,47 +111,6 @@ describe("hashServerConfig", () => {
 	});
 });
 
-describe("readClaudeMcpjsonPolicy", () => {
-	it("reads approvals from the user scope, disables from local too, never the checked-in project settings.json", async () => {
-		execFileSync("git", ["init", "-q"], { cwd });
-		writeFileSync(join(cwd, ".claude", "settings.json"), JSON.stringify({ enableAllProjectMcpServers: true }));
-		expect((await readClaudeMcpjsonPolicy(cwd, home)).enableAll).toBe(false);
-		writeFileSync(
-			join(cwd, ".claude", "settings.local.json"),
-			JSON.stringify({ enabledMcpjsonServers: ["local"], disabledMcpjsonServers: ["nope"] }),
-		);
-		writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ enableAllProjectMcpServers: false, enabledMcpjsonServers: ["ok"] }));
-		const policy = await readClaudeMcpjsonPolicy(cwd, home);
-		expect([...policy.enabled]).toEqual(["ok"]);
-		expect([...policy.disabled]).toEqual(["nope"]);
-	});
-
-	it("ignores an untracked settings.local.json in a directory that carries its own .git (a copied checkout)", async () => {
-		// A tarball of someone's working copy: `.git`, a `.mcp.json`, and their
-		// untracked settings.local.json approving everything.
-		execFileSync("git", ["init", "-q"], { cwd });
-		writeFileSync(join(cwd, ".claude", "settings.local.json"), JSON.stringify({ enableAllProjectMcpServers: true, enabledMcpjsonServers: ["s"] }));
-		const policy = await readClaudeMcpjsonPolicy(cwd, home);
-		expect(policy.enableAll).toBe(false);
-		expect([...policy.enabled]).toEqual([]);
-		const d = deps({ hasUI: false });
-		const out = await approveMcpServers([projectServer("s")], new Set(), cwd, home, d.deps);
-		expect(out.approved).toEqual([]);
-		expect(out.withheld[0].reason).toBe("not-approved");
-	});
-
-	it("ignores a git-tracked settings.local.json (a repo cannot approve its own servers)", async () => {
-		execFileSync("git", ["init", "-q"], { cwd });
-		execFileSync("git", ["config", "user.email", "t@t"], { cwd });
-		execFileSync("git", ["config", "user.name", "t"], { cwd });
-		const local = join(cwd, ".claude", "settings.local.json");
-		writeFileSync(local, JSON.stringify({ enableAllProjectMcpServers: true }));
-		// -f: a global gitignore may ignore settings.local.json; the point is that it is tracked.
-		execFileSync("git", ["add", "-f", "--", local], { cwd });
-		expect((await readClaudeMcpjsonPolicy(cwd, home)).enableAll).toBe(false);
-	});
-});
-
 describe("approveMcpServers", () => {
 	it("lets non-project servers through without asking", async () => {
 		const d = deps();
@@ -157,8 +135,8 @@ describe("approveMcpServers", () => {
 		expect(d.selections).toHaveLength(1);
 	});
 
-	it("asks for pi's project servers by their file, and Claude Code's answers do not approve them", async () => {
-		writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ enableAllProjectMcpServers: true }));
+	it("asks for pi's project servers by their file, and the settings' answers do not approve them", async () => {
+		writeUserSettings({ enableAllProjectMcpServers: true });
 		const d = deps();
 		const pi: McpServer = { ...stdio("pp", join(cwd, ".pi", "mcp.json")), piOrigin: "project" };
 		const out = await approveMcpServers([pi, projectServer("a")], new Set(), cwd, home, d.deps);
@@ -237,9 +215,9 @@ describe("approveMcpServers", () => {
 		expect(d.notices[0]).not.toMatch(/enabledMcpjsonServers/);
 	});
 
-	it("honours Claude Code's own answers read-only", async () => {
-		writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ enabledMcpjsonServers: ["yes"] }));
-		writeFileSync(join(cwd, ".claude", "settings.local.json"), JSON.stringify({ disabledMcpjsonServers: ["no"] }));
+	it("honours the settings' own answers read-only: the user file approves, the local file of its family disables", async () => {
+		writeUserSettings({ enabledMcpjsonServers: ["yes"] });
+		writeLocalSettings({ disabledMcpjsonServers: ["no"] });
 		const d = deps();
 		const out = await approveMcpServers([projectServer("yes"), projectServer("no")], new Set(), cwd, home, d.deps);
 		expect(out.approved.map((s) => s.name)).toEqual(["yes"]);
@@ -247,38 +225,8 @@ describe("approveMcpServers", () => {
 		expect(d.selections).toEqual([]);
 	});
 
-	it("does not trust a settings.local.json outside any git repository (SECURITY-REVIEW-2026-09-23 H4)", async () => {
-		// An extracted archive or copied folder: no provenance, so its approving
-		// keys are ignored — but its disable list still tightens.
-		writeFileSync(
-			join(cwd, ".claude", "settings.local.json"),
-			JSON.stringify({ enableAllProjectMcpServers: true, enabledMcpjsonServers: ["a"], disabledMcpjsonServers: ["b"] }),
-		);
-		const policy = await readClaudeMcpjsonPolicy(cwd, home);
-		expect(policy.enableAll).toBe(false);
-		expect([...policy.enabled]).toEqual([]);
-		expect([...policy.disabled]).toEqual(["b"]);
-		const d = deps();
-		const out = await approveMcpServers([projectServer("a")], new Set(), cwd, home, { ...d.deps, hasUI: false });
-		expect(out.approved).toEqual([]);
-		expect(out.withheld[0].reason).toBe("not-approved");
-	});
-
-	it("never lets settings.local.json approve servers, its own or .mcp.json's (SECURITY-REVIEW-2026-09-23 H4)", async () => {
-		execFileSync("git", ["init", "-q"], { cwd });
-		const local = join(cwd, ".claude", "settings.local.json");
-		writeFileSync(local, JSON.stringify({ enableAllProjectMcpServers: true }));
-		const d = deps();
-		const out = await approveMcpServers([stdio("own", local), projectServer("shipped")], new Set(), cwd, home, { ...d.deps, hasUI: false });
-		expect(out.approved).toEqual([]);
-		expect(out.withheld).toMatchObject([
-			{ server: { name: "own" }, reason: "not-approved" },
-			{ server: { name: "shipped" }, reason: "not-approved" },
-		]);
-	});
-
 	it("still lets the user's own settings approve every .mcp.json server", async () => {
-		writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ enableAllProjectMcpServers: true }));
+		writeUserSettings({ enableAllProjectMcpServers: true });
 		const d = deps({ hasUI: false });
 		const out = await approveMcpServers([projectServer("shipped")], new Set(), cwd, home, d.deps);
 		expect(out.approved.map((s) => s.name)).toEqual(["shipped"]);

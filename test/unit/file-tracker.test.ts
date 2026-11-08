@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { describeChanges, FileTracker, RACY_STAMP_MS } from "../../extensions/file-tracker/tracker.ts";
-import { fileTracker } from "../../profile/text/file-tracker/index.ts";
 import { looksLikeAnthropicRequest, withClearThinking } from "../../extensions/context-management/index.ts";
 
 describe("FileTracker.status", () => {
@@ -66,16 +65,6 @@ describe("FileTracker.status", () => {
 
 // The change scan runs after every tool call; the stamp is what lets it skip
 // the full read for every tracked file whose mtime and size have not moved.
-describe("the unread refusal", () => {
-	it("tells the model a cut-off shell output does not count as a read", () => {
-		const text = fileTracker.unread({ path: "/p/a.ts", tool: "edit" });
-		expect(text).toContain("a plain `cat`");
-		expect(text).toContain("output cut off at the size limit");
-		// A committed version printed by git is not the file on disk.
-		expect(text).toContain("git show HEAD:<file>");
-	});
-});
-
 describe("FileTracker disk stamps", () => {
 	const stamp = { mtimeMs: 1000, size: 5 };
 

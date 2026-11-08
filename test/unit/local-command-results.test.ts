@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,6 +13,7 @@ vi.mock("../../extensions/memory/open-external.ts", async (importOriginal) => ({
 	openPath: vi.fn(async () => ({ ok: true })),
 }));
 import { localCommandBlocks } from "../../extensions/lib/local-command.ts";
+import { BUNDLED_SKILLS_DIR } from "../../extensions/lib/skill-scan.ts";
 import { REMINDER_CHANNEL, type ReminderPayload } from "../../extensions/lib/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
@@ -87,8 +88,10 @@ describe("Claude Code 2.1.296 local-command results", () => {
 		});
 		await fake.commands.get("skills")!.handler("", ctx);
 		const strip = (line: string) => line.replace(/\x1b\[[0-9;]*m/g, "");
-		const simplify = lines.map(strip).find((line) => /\bsimplify\b/.test(line));
-		expect(simplify).toContain("· bundled ·");
+		// A skill the profile in force ships in its catalog.
+		const name = readdirSync(BUNDLED_SKILLS_DIR, { withFileTypes: true }).find((entry) => entry.isDirectory())!.name;
+		const row = lines.map(strip).find((line) => new RegExp(`(^|[^\\w-])${name}([^\\w-]|$)`).test(line));
+		expect(row).toContain("· bundled ·");
 		expect(lines.map(strip).some((line) => line.includes("· project ·"))).toBe(false);
 	});
 

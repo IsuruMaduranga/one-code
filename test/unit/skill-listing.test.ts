@@ -7,7 +7,6 @@ import {
 	skillListingText,
 	usageScore,
 } from "../../extensions/skill/listing.ts";
-import { skill } from "../../profile/text/skill/index.ts";
 
 describe("skillListingText (C4)", () => {
 	it("carries a multi-line description whole, so the 'Use when' trigger survives", () => {
@@ -27,10 +26,9 @@ describe("skillListingText (C4)", () => {
 		expect(text).toBe("- a: A does things\n- b");
 	});
 
-	it("lists nothing when nothing is available, which the profile words", () => {
+	it("lists nothing when nothing is available, so the profile words the empty listing", () => {
 		expect(skillListingText([])).toBeUndefined();
 		expect(skillListingText([{ name: "x", state: "off" }])).toBeUndefined();
-		expect(skill.available(undefined)).toBe("Available skills:\n(no skills available)");
 	});
 });
 

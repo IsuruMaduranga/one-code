@@ -4,7 +4,7 @@
  * every result are pinned by the golden snapshot.
  */
 import { describe, expect, it } from "vitest";
-import { notebook } from "../../profile/text/notebook/index.ts";
+import { notebook } from "../text/notebook/index.ts";
 
 const cells = [
 	{ label: "aaa", type: "markdown" },

@@ -109,7 +109,8 @@ describe("RPC commands never silently mount unsupported custom UI", () => {
 	});
 
 	it("/skills lists skill states and explains that management needs the TUI", async () => {
-		const path = join(cwd, ".claude", "skills", "demo");
+		// The base's own project skill folder, which every profile reads.
+		const path = join(cwd, ".agents", "skills", "demo");
 		mkdirSync(path, { recursive: true });
 		writeFileSync(join(path, "SKILL.md"), "---\nname: demo\ndescription: Demonstration\n---\nDemo body.\n");
 		const { fake, ctx, custom, notices } = mount(skillExtension);

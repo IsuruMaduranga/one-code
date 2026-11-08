@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import bashExtension from "../../extensions/bash/index.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 import { createFakePi } from "./helpers/fake-pi.ts";
 
 /**
@@ -8,7 +9,9 @@ import { createFakePi } from "./helpers/fake-pi.ts";
  * description ends "Optionally provide a timeout in seconds." — a contradiction
  * a model that trusts the description acts on by sending `timeout: 120` and
  * getting a 120 ms deadline (TOOL-FIDELITY-REVIEW-2026-09-07 H3). The extension
- * swaps that sentence for CC's; this locks it so pi's wording can't reappear.
+ * replaces pi's description with the profile's whole; this locks it so pi's
+ * wording can't reappear (One Code's own unit sentence:
+ * profile/test/bash-description-wording.test.ts).
  */
 describe("bash tool description states milliseconds, not seconds", () => {
 	it("composed description agrees with the timeout parameter's unit", () => {
@@ -18,6 +21,6 @@ describe("bash tool description states milliseconds, not seconds", () => {
 		expect(bash).toBeDefined();
 		const description = bash?.description ?? "";
 		expect(description).not.toMatch(/timeout in seconds/i);
-		expect(description).toContain("`timeout` is in milliseconds");
+		expect(description).toBe(requireText("shell").bashDescription({ form: "short", autoMode: false, searchTools: false }));
 	});
 });

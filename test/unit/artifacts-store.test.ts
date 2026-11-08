@@ -29,10 +29,6 @@ import {
 } from "../../extensions/artifacts/store.ts";
 import { renderViewer } from "../../extensions/artifacts/viewer.ts";
 import { noDisplayReason, openerPlan } from "../../extensions/lib/open-browser.ts";
-import { artifactsText } from "../../profile/text/artifacts/index.ts";
-import { ALL_LIVE } from "./helpers/live.ts";
-
-const artifacts = artifactsText(ALL_LIVE);
 
 let base: string;
 let root: string;
@@ -270,8 +266,7 @@ describe("publishProblem", () => {
 		expect(publishProblem(root, join(root, "x-1", "index.html"), 100)?.kind).toBe("insideStore");
 		expect(publishProblem(root, join(base, "p.html"), 0)?.kind).toBe("empty");
 		const tooLarge = publishProblem(root, join(base, "p.html"), MAX_ARTIFACT_BYTES + 1)!;
-		expect(tooLarge).toMatchObject({ kind: "tooLarge", maxBytes: MAX_ARTIFACT_BYTES });
-		expect(artifacts.publishProblem(tooLarge)).toMatch(/is 16\.0 MB; an artifact is at most 16 MB\./);
+		expect(tooLarge).toEqual({ kind: "tooLarge", path: join(base, "p.html"), bytes: MAX_ARTIFACT_BYTES + 1, maxBytes: MAX_ARTIFACT_BYTES });
 	});
 });
 
@@ -308,9 +303,14 @@ describe("listing, resolving and deleting", () => {
 
 	it("lists one artifact as its id, title, version, project and viewer link", () => {
 		const { meta } = publish("a.html", page("Listed"), { project: join(base, "repo") });
-		const line = artifacts.listLine(shownArtifact(root, meta, base));
-		expect(line).toContain(`- ${meta.id}: "Listed" (v1, updated 2026-09-27 10:00 UTC) [~/repo]`);
-		expect(line).toContain(fileUrl(viewerPath(root, meta.id)));
+		expect(shownArtifact(root, meta, base)).toEqual({
+			id: meta.id,
+			title: "Listed",
+			version: 1,
+			updated: "2026-09-27 10:00",
+			project: "~/repo",
+			url: fileUrl(viewerPath(root, meta.id)),
+		});
 	});
 
 	it("exports to Downloads without overwriting, or to home when there is no Downloads", () => {

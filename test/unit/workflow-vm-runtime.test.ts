@@ -4,6 +4,13 @@ import { parseWorkflowScript } from "../../extensions/workflow/script-source.ts"
 import { runWorkflowScript, type WorkflowRuntimeOptions } from "../../extensions/workflow/vm-runtime.ts";
 import { WorkflowScriptError } from "../../extensions/workflow/types.ts";
 import { makeGlobals, type GlobalsOverrides } from "./workflow-test-helpers.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
+import type { RunStop } from "../../extensions/workflow/text.ts";
+
+/** Why a run stopped, as the profile words it: what the runtime rejects with. */
+const runStop = (stop: RunStop) => requireText("workflow").runStop(stop);
+/** An error the script threw (or that was thrown into it), as the runtime reports it. */
+const scriptFailed = (message: string) => runStop({ kind: "scriptFailed", message });
 
 const agentCall: GlobalsOverrides["agentCall"] = async (prompt) => ({
 	value: `agent(${prompt})`,
@@ -29,7 +36,7 @@ describe("runWorkflowScript", () => {
 		let ticks = 0;
 		const timer = setInterval(() => { ticks++; }, 10);
 		try {
-			await expect(run(META + body, undefined, { timeoutMs: 200 }).result).rejects.toThrow(/timed out/);
+			await expect(run(META + body, undefined, { timeoutMs: 200 }).result).rejects.toThrow(runStop({ kind: "timedOut", ms: 200 }));
 			expect(ticks).toBeGreaterThan(1);
 			await expect(run(META + "return 'still usable'").result).resolves.toBe("still usable");
 		} finally {
@@ -42,7 +49,7 @@ describe("runWorkflowScript", () => {
 			const controller = new AbortController();
 			const { result } = run(META + body, undefined, { signal: controller.signal });
 			const timer = setTimeout(() => controller.abort(), 100);
-			try { await expect(result).rejects.toThrow(/aborted/); }
+			try { await expect(result).rejects.toThrow(runStop({ kind: "aborted" })); }
 			finally { clearTimeout(timer); }
 		},
 	);
@@ -74,7 +81,7 @@ describe("runWorkflowScript", () => {
 			});
 			const result = runWorkflowScript(body, globals);
 			await expect(result).rejects.toBeInstanceOf(WorkflowScriptError);
-			await expect(result).rejects.toThrow(/budget exhausted/);
+			await expect(result).rejects.toThrow(scriptFailed(runStop({ kind: "budgetExhausted", total: 10 })));
 			expect(calls).toBe(1);
 		}
 	});
@@ -143,9 +150,15 @@ return { one, both }
 	});
 
 	it("blocks Math.random, Date.now, and argless new Date inside the vm only", async () => {
-		for (const expr of ["Math.random()", "Date.now()", "new Date()", "Date()"]) {
+		const determinism = requireText("workflow").determinism;
+		for (const [expr, message] of [
+			["Math.random()", determinism.random],
+			["Date.now()", determinism.dateNow],
+			["new Date()", determinism.dateNoArgs],
+			["Date()", determinism.dateCall],
+		]) {
 			const { result } = run(`${META}return ${expr}`);
-			await expect(result).rejects.toThrow(/unavailable in a workflow/);
+			await expect(result).rejects.toThrow(scriptFailed(message));
 		}
 		// new Date(ms) stays usable, and the host realm is untouched.
 		const { result } = run(`${META}return new Date(0).getTime()`);
@@ -156,8 +169,8 @@ return { one, both }
 
 	it("surfaces script errors as WorkflowScriptError", async () => {
 		const { result } = run(`${META}throw new Error('script blew up')`);
-		await expect(result).rejects.toThrow(/script blew up/);
-		expect(() => run(`${META}syntax error here(`)).toThrow(/does not parse/);
+		await expect(result).rejects.toThrow(scriptFailed("script blew up"));
+		expect(() => run(`${META}syntax error here(`)).toThrow(requireText("workflow").scriptProblem({ kind: "parse", osMessage: "Unexpected token (2:7)" }));
 	});
 
 	it("does not leak host globals into the vm", async () => {

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import skillExtension from "../../extensions/skill/index.ts";
 import { pluginRoot } from "../../extensions/lib/plugin-root.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 import { setSkillState } from "../../extensions/lib/skill-overrides.ts";
 import { scopeForPath } from "../../extensions/lib/skill-scan.ts";
 import { SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../../extensions/lib/skill-body.ts";
@@ -28,6 +29,7 @@ afterEach(() => {
 	rmSync(root, { recursive: true, force: true });
 });
 
+// Project skills sit in the base's own folder, `.agents/skills`, which every profile reads.
 function skill(dir: string, frontmatter = "description: Demo", body = "Run the demo."): string {
 	mkdirSync(dir, { recursive: true });
 	const file = join(dir, "SKILL.md");
@@ -56,7 +58,7 @@ describe("skill runtime boundaries", () => {
 		await fake.fire("before_agent_start", { systemPromptOptions: { skills: [{ name: "demo", filePath: file }] } }, ctx);
 		const result = await call("demo");
 		expect(result.isError).toBe(true);
-		expect(result.content[0].text).toContain("turned off");
+		expect(result.content[0].text).toBe(requireText("skill").off({ name: "demo", manager: "/skills" }));
 	});
 
 	it("classifies only descendants of user skill directories as user scope", () => {
@@ -70,7 +72,7 @@ describe("skill runtime boundaries", () => {
 	});
 
 	it("uses the declared name and its off override before the first turn", async () => {
-		skill(join(cwd, ".claude", "skills", "folder"), "name: actual\ndescription: Demo");
+		skill(join(cwd, ".agents", "skills", "folder"), "name: actual\ndescription: Demo");
 		setSkillState(pluginRoot(agentDir), "project:actual", "off");
 		const { fake, ctx } = await mount();
 		const input = (text: string) => fake.fireOne<{ action: string; text?: string }>("input", { text, source: "interactive" }, ctx);
@@ -79,7 +81,7 @@ describe("skill runtime boundaries", () => {
 	});
 
 	it("enforces disable-model-invocation added between tool calls in the same turn", async () => {
-		const dir = join(cwd, ".claude", "skills", "demo");
+		const dir = join(cwd, ".agents", "skills", "demo");
 		const file = skill(dir);
 		const { fake, ctx, call } = await mount();
 		await fake.fire("before_agent_start", { systemPromptOptions: { skills: [{ name: "demo", filePath: file }] } }, ctx);
@@ -89,23 +91,24 @@ describe("skill runtime boundaries", () => {
 		utimesSync(file, later, later);
 		const result = await call("demo");
 		expect(result.isError).toBe(true);
-		expect(result.content[0].text).toContain("disable-model-invocation");
+		expect(result.content[0].text).toBe(requireText("skill").manualOnly("demo"));
 	});
 
 	it("preserves large bodies and leaves outside-file references as text", async () => {
 		const outside = join(root, "outside.txt");
 		writeFileSync(outside, "PRIVATE_OUTSIDE_SENTINEL");
 		const body = `@${outside}\n[reference](${outside})\n${"large body ".repeat(30_000)}END_OF_SKILL`;
-		const file = skill(join(cwd, ".claude", "skills", "demo"), "description: Demo", body);
+		const dir = join(cwd, ".agents", "skills", "demo");
+		const file = skill(dir, "description: Demo", body);
 		const { fake, ctx, call } = await mount();
 		await fake.fire("before_agent_start", { systemPromptOptions: { skills: [{ name: "demo", filePath: file }] } }, ctx);
 		const result = await call("demo");
-		expect(result.content[1].text).toContain(body);
+		expect(result.content[1].text).toBe(requireText("skill").withBaseDir({ dir, text: body }));
 		expect(result.content[1].text).not.toContain("PRIVATE_OUTSIDE_SENTINEL");
 	});
 
 	it("loads recoverable broken frontmatter for typed and scheduled skills as well as the tool", async () => {
-		skill(join(cwd, ".claude", "skills", "demo"), "description: Demo: unquoted colon");
+		skill(join(cwd, ".agents", "skills", "demo"), "description: Demo: unquoted colon");
 		const { fake, ctx, call } = await mount();
 		const typed = await fake.fireOne<{ action: string; text?: string }>("input", { text: "/skill:demo", source: "interactive" }, ctx);
 		expect(typed?.action).toBe("transform");

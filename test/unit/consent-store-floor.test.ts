@@ -15,7 +15,8 @@ import { approvalStorePath as hooksStore } from "../../extensions/hooks/trust.ts
 import { lspTrustStorePath } from "../../extensions/lsp/trust.ts";
 import { approvalStorePath as mcpStore } from "../../extensions/mcp/trust.ts";
 import { projectAllowStorePath } from "../../extensions/permissions/project-trust.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
+import { brand, envName } from "../../extensions/lib/brand.mjs";
+import { requireText } from "../../extensions/lib/profile.ts";
 
 let home: string;
 let cwd: string;
@@ -45,7 +46,7 @@ describe("the consent stores", () => {
 
 	it("floor a write through the file tools", () => {
 		for (const store of consentStorePaths(home)) {
-			expect(check("write", { path: store }), store).toContain("permission rules");
+			expect(check("write", { path: store }), store).toBe(requireText("autoMode").floorReason({ kind: "control", token: store }));
 			expect(check("edit", { file_path: store }), store).toBeDefined();
 		}
 	});
@@ -57,14 +58,14 @@ describe("the consent stores", () => {
 		expect(check("powershell", { command: `Set-Content -Path ${store} -Value x` })).toBeDefined();
 	});
 
-	it("floor a store under any literal .onecode, and a relocated state dir", () => {
-		expect(check("write", { path: join(tmpdir(), "elsewhere", ".onecode", "mcp", "project-approvals.json") })).toBeDefined();
+	it("floor a store under any literal state-dir name, and a relocated state dir", () => {
+		expect(check("write", { path: join(tmpdir(), "elsewhere", brand.stateDir, "mcp", "project-approvals.json") })).toBeDefined();
 		process.env[envName("STATE_DIR")] = join(home, "relocated");
 		expect(check("write", { path: join(home, "relocated", "lsp", "trusted-projects.json") })).toBeDefined();
 	});
 
 	it("leave the rest of the state dir alone", () => {
-		expect(check("write", { path: join(home, ".onecode", "plans", "brave-new-plan.md") })).toBeUndefined();
-		expect(check("write", { path: join(home, ".onecode", "hooks", "hooks-decisions.jsonl") })).toBeUndefined();
+		expect(check("write", { path: join(home, brand.stateDir, "plans", "brave-new-plan.md") })).toBeUndefined();
+		expect(check("write", { path: join(home, brand.stateDir, "hooks", "hooks-decisions.jsonl") })).toBeUndefined();
 	});
 });

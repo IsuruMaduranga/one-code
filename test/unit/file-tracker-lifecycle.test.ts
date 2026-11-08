@@ -11,11 +11,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import fileTrackerExtension from "../../extensions/file-tracker/index.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import systemReminderExtension from "../../extensions/system-reminder/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
 type Entry = FakePi["branch"][number];
+
+const words = requireText("fileTracker");
 
 describe("file-tracker read state follows the branch", () => {
 	let dir: string;
@@ -80,7 +83,7 @@ describe("file-tracker read state follows the branch", () => {
 			expect(await edit(inWorktree)).toBeUndefined();
 			const twin = await edit(main);
 			expect(twin?.block).toBe(true);
-			expect(twin?.reason).toContain("has not been read");
+			expect(twin?.reason).toBe(words.unread({ path: main, tool: "edit" }));
 		});
 
 		it("never takes the disk as seen for a read that recorded no observation: an edit needs a fresh read", async () => {
@@ -111,7 +114,7 @@ describe("file-tracker read state follows the branch", () => {
 			writeFileSync(file, "one\ntwo\n");
 			await toolCall("read", { path: file });
 			await compact();
-			expect(notices.some((text) => text.startsWith("Result of calling the read tool:\none\ntwo"))).toBe(true);
+			expect(notices).toContain(words.restoredResult({ text: "one\ntwo\n" }));
 			expect(await edit(file)).toBeUndefined();
 
 			await load("reload");
@@ -129,7 +132,7 @@ describe("file-tracker read state follows the branch", () => {
 			await load("reload");
 			const blocked = await edit(file);
 			expect(blocked?.block).toBe(true);
-			expect(blocked?.reason).toContain("has changed on disk");
+			expect(blocked?.reason).toBe(words.stale({ path: file }));
 			expect(notices.filter((text) => text.includes(file))).toHaveLength(1);
 		});
 
@@ -157,7 +160,7 @@ describe("file-tracker read state follows the branch", () => {
 			// The second compaction keeps nothing: the restore's text is gone from context.
 			push({ type: "compaction", firstKeptEntryId: null, timestamp: new Date().toISOString() } as never);
 			await load("reload");
-			expect((await edit(file))?.reason).toContain("has not been read");
+			expect((await edit(file))?.reason).toBe(words.unread({ path: file, tool: "edit" }));
 		});
 	});
 
@@ -172,7 +175,7 @@ describe("file-tracker read state follows the branch", () => {
 
 			await load("reload");
 			expect(notices.filter((text) => text.includes(file))).toEqual([]);
-			expect((await edit(file))?.reason).toContain("has changed on disk");
+			expect((await edit(file))?.reason).toBe(words.stale({ path: file }));
 		});
 
 		it("reports a change found at a resume once, however many reloads follow", async () => {

@@ -1,11 +1,13 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TURN_FAILED_CHANNEL } from "../../extensions/lib/interrupt.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 import toolCallCorruptionExtension from "../../extensions/tool-call-corruption/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
 const model = { provider: "openrouter", id: "z-ai/glm-5.3", baseUrl: "https://openrouter.ai/api/v1" };
 const corrupt = '{"command":"grep -rn \\\"","run_in_background":false}';
+const words = () => requireText("toolCallCorruption");
 
 describe("OpenRouter tool-call corruption wiring", () => {
 	let fake: FakePi;
@@ -51,7 +53,7 @@ describe("OpenRouter tool-call corruption wiring", () => {
 
 	it("blocks corrupted arguments, aborts after the blocked result, and names the provider once", async () => {
 		await stream();
-		expect(await call()).toMatchObject({ block: true, reason: expect.stringMatching(/OpenRouter.*double quote/) });
+		expect(await call()).toMatchObject({ block: true, reason: words().corruptBlock({ reason: words().damage({ kind: "unbalancedQuote" }), repeat: false }) });
 		expect(ctx.abort).not.toHaveBeenCalled();
 		await end();
 		expect(ctx.abort).toHaveBeenCalledTimes(1);
@@ -92,7 +94,7 @@ describe("OpenRouter tool-call corruption wiring", () => {
 
 	it("detects concatenated raw JSON even when pi has parsed it as an empty object", async () => {
 		await stream('{"action":"run"}{"prompt":"hello"}', "Agent");
-		expect(await call("bad", "Agent")).toMatchObject({ block: true, reason: expect.stringMatching(/JSON/) });
+		expect(await call("bad", "Agent")).toMatchObject({ block: true, reason: words().corruptBlock({ reason: words().damage({ kind: "notOneJson" }), repeat: false }) });
 		await end("bad", "Agent");
 		expect(ctx.abort).toHaveBeenCalledTimes(1);
 	});
@@ -397,7 +399,7 @@ describe("OpenRouter tool-call corruption wiring", () => {
 	it("hands a command that looks cut off back to the model without stopping the turn", async () => {
 		await stream(cut);
 		const result = await call();
-		expect(result).toMatchObject({ block: true, reason: expect.stringMatching(/"-rn".*not run/) });
+		expect(result).toMatchObject({ block: true, reason: words().suspectBlock({ reason: words().damage({ kind: "cutAfterOption", option: "-rn" }) }) });
 		expect(result).not.toHaveProperty("terminate");
 		await end();
 		await flush();
@@ -411,7 +413,7 @@ describe("OpenRouter tool-call corruption wiring", () => {
 		await call("first");
 		await end("first");
 		await stream('{ "command": "python3 -c "\t}', "bash", "second", 1);
-		expect(await call("second")).toMatchObject({ block: true, terminate: true, reason: expect.stringMatching(/OpenRouter tool-call corruption.*python3 -c|"-c"/) });
+		expect(await call("second")).toMatchObject({ block: true, terminate: true, reason: words().corruptBlock({ reason: words().damage({ kind: "cutAfterOption", option: "-c" }), repeat: true }) });
 		await end("second");
 		await flush();
 		expect(ctx.abort).toHaveBeenCalledTimes(1);

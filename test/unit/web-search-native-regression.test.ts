@@ -2,7 +2,9 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { requireText } from "../../extensions/lib/profile.ts";
 import webExtension from "../../extensions/web/index.ts";
+import type { ProviderSearchFailure } from "../../extensions/web/text.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 const mocks = vi.hoisted(() => ({ callApiStream: vi.fn() }));
@@ -17,6 +19,14 @@ vi.mock("pi-web-search/src/utils.ts", async (importOriginal) => ({
 vi.mock("../../extensions/lib/anthropic-server-call.ts", () => ({ tryNativeWeb: async () => ({ kind: "unavailable" }) }));
 
 type Result = { content: Array<{ type: string; text: string }>; details: { backend?: string; error?: unknown }; isError?: boolean };
+const braveResult = { title: "Brave result", url: "https://example.com", snippet: "Result snippet" };
+
+/** The fallback's result as the base builds it: Brave's results, then why the provider's own search did not answer. */
+function fellBack(failure: ProviderSearchFailure, results = [braveResult]): string {
+	const words = requireText("webSearch");
+	const chain = words.chainResults({ query: "test search", label: "Brave Search", attempts: [], keyless: false, results });
+	return `${chain}\n\n${words.providerFailed({ backend: "google/gemini-test", failure })}`;
+}
 let dir: string;
 
 beforeEach(() => {
@@ -86,20 +96,23 @@ describe("provider-native search results", () => {
 	});
 
 	it.each([
-		{ text: "Plausible answer from memory", nativeSearchUsed: false },
-		{ text: "No answer available.", nativeSearchUsed: false },
-		{ text: "", nativeSearchUsed: true },
-		{ text: "No answer available.", nativeSearchUsed: true },
-		{ text: "Search unavailable; here's what I remember.", nativeSearchUsed: true, searchResults: [{ type: "web_search_tool_result_error", status: "rate_limit_error" }] },
-		{ text: "", nativeSearchUsed: true, sources: [{ title: "Example", url: "https://example.com" }] },
-		{ text: "No answer available.", nativeSearchUsed: true, sources: [{ title: "Example", url: "https://example.com" }] },
-	])("does not pass an unsearched or empty response off as a search result: $text", async (response) => {
+		{ response: { text: "Plausible answer from memory", nativeSearchUsed: false }, failure: { kind: "noSearch" } },
+		{ response: { text: "No answer available.", nativeSearchUsed: false }, failure: { kind: "noSearch" } },
+		{ response: { text: "", nativeSearchUsed: true }, failure: { kind: "emptyAnswer" } },
+		{ response: { text: "No answer available.", nativeSearchUsed: true }, failure: { kind: "emptyAnswer" } },
+		{
+			response: { text: "Search unavailable; here's what I remember.", nativeSearchUsed: true, searchResults: [{ type: "web_search_tool_result_error", status: "rate_limit_error" }] },
+			failure: { kind: "searchError", status: "rate_limit_error" },
+		},
+		{ response: { text: "", nativeSearchUsed: true, sources: [{ title: "Example", url: "https://example.com" }] }, failure: { kind: "emptyAnswer" } },
+		{ response: { text: "No answer available.", nativeSearchUsed: true, sources: [{ title: "Example", url: "https://example.com" }] }, failure: { kind: "emptyAnswer" } },
+	] satisfies { response: object; failure: ProviderSearchFailure }[])("does not pass an unsearched or empty response off as a search result: $response.text", async ({ response, failure }) => {
 		mocks.callApiStream.mockResolvedValue(response);
 		vi.stubEnv("BRAVE_SEARCH_API_KEY", "test-key");
 		vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ web: { results: [{ title: "Brave result", url: "https://example.com", description: "Result snippet" }] } }), { headers: { "content-type": "application/json" } })));
 		const result = await execute();
 		expect(result.details.backend).toBe("brave");
-		expect(result.content.map((block) => block.text).join("\n")).toContain("Provider-native search");
+		expect(result.content.map((block) => block.text).join("\n")).toBe(fellBack(failure));
 	});
 
 	it("bounds a stalled native transport and reports the timeout before fallback", async () => {
@@ -118,7 +131,7 @@ describe("provider-native search results", () => {
 		expect(fetch).toHaveBeenCalledOnce();
 		const result = await pending;
 		expect(result.details.backend).toBe("brave");
-		expect(result.content.map((block) => block.text).join("\n")).toContain("within 120 seconds");
+		expect(result.content.map((block) => block.text).join("\n")).toBe(fellBack({ kind: "timedOut", seconds: 120 }, []));
 	});
 
 	it("does not fall back after native search cancellation", async () => {

@@ -6,8 +6,8 @@
  * bash blocks and both one-shot background results.
  */
 import { describe, expect, it } from "vitest";
-import { shellText } from "../../profile/text/shell/index.ts";
-import { ALL_LIVE } from "./helpers/live.ts";
+import { shellText } from "../text/shell/index.ts";
+import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
 
 const shell = shellText(ALL_LIVE);
 

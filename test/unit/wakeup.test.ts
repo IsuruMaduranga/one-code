@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { envName } from "../../extensions/lib/brand.mjs";
 import { CronStore } from "../../extensions/background/cron.ts";
 import { DynamicLoop, KEEPALIVE_DELAY_SECONDS, keepaliveEnabled, scheduledText } from "../../extensions/background/wakeup.ts";
 
@@ -114,10 +115,11 @@ describe("schedule_wakeup's result as data", () => {
 		expect(scheduledText({ scheduledFor: at(14, 1, 9), clampedDelaySeconds: 60, wasClamped: true, startedAt: at(14, 0, 9) }, at(14, 0, 9))).toEqual({ clock: "14:01:09", inSeconds: 60, clampedTo: 60 });
 	});
 
-	it("turns keepalive off only for a false-like CLAUDE_CODE_LOOP_KEEPALIVE", () => {
+	it("turns keepalive off only for a false-like LOOP_KEEPALIVE knob", () => {
+		const knob = envName("LOOP_KEEPALIVE");
 		expect(keepaliveEnabled({})).toBe(true);
-		expect(keepaliveEnabled({ CLAUDE_CODE_LOOP_KEEPALIVE: "0" })).toBe(false);
-		expect(keepaliveEnabled({ CLAUDE_CODE_LOOP_KEEPALIVE: "false" })).toBe(false);
-		expect(keepaliveEnabled({ CLAUDE_CODE_LOOP_KEEPALIVE: "1" })).toBe(true);
+		expect(keepaliveEnabled({ [knob]: "0" })).toBe(false);
+		expect(keepaliveEnabled({ [knob]: "false" })).toBe(false);
+		expect(keepaliveEnabled({ [knob]: "1" })).toBe(true);
 	});
 });

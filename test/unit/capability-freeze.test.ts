@@ -12,16 +12,17 @@ import { toolsInUse } from "../../extensions/lib/deferred.ts";
 import type { ToldFact } from "../../extensions/lib/ledger/records.ts";
 import { pluginRoot } from "../../extensions/lib/plugin-root.ts";
 import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/reminders.ts";
+import { projectConfigDir } from "../../extensions/lib/sources.ts";
 import { setSkillState } from "../../extensions/lib/skill-overrides.ts";
 import { listableSkillNames } from "../../extensions/skill/announce.ts";
-import { skill } from "../../profile/text/skill/index.ts";
-
-const SKILL_LISTING_HEADER = skill.listingHeader;
+import { requireText } from "../../extensions/lib/profile.ts";
 import skillExtension from "../../extensions/skill/index.ts";
 import subagentsExtension from "../../extensions/subagents/index.ts";
 import { createFakeCtx, createFakePi, type FakePi, renderRequest } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import type { Reminder } from "./helpers/tool-search-fake-pi.ts";
+
+const SKILL_LISTING_HEADER = requireText("skill").listingHeader;
 
 /** Render one request inside an epoch that told `facts`; the blocks owners add. */
 const render = (fake: FakePi, facts: readonly ToldFact[], model?: RenderRequest["model"]) => renderRequest(fake.events, { facts, model });
@@ -101,7 +102,7 @@ describe("skills listing", () => {
 		try {
 			const result = (await fake.tools.get("skill")!.execute("call", { skill: "beta" }, undefined, undefined, ctx)) as { isError?: boolean; content: Array<{ text: string }> };
 			expect(result.isError).toBe(true);
-			expect(result.content[0].text).toContain("only the user can run it, by typing /beta");
+			expect(result.content[0].text).toBe(requireText("skill").userOnly("beta"));
 		} finally {
 			setSkillState(pluginRoot(join(root, "agent")), "project:beta", "on");
 		}
@@ -139,11 +140,14 @@ describe("subagent blocks", () => {
 		expect(render(fake, [...told, ...(blocks[0].facts ?? [])])).toEqual([]);
 	});
 
-	it("keeps the three blocks as live first-prepend state, the catalog by Claude Code's heading", async () => {
+	it("keeps the three blocks as live first-prepend state, the catalog in the profile's block", async () => {
+		const catalogBlock = vi.spyOn(requireText("subagents"), "catalogBlock");
 		const { reminders } = await mount();
 		const live = (key: string) => reminders.filter((r) => r.key === key && r.placement === "first-prepend").at(-1);
 		expect(live("subagent-models")?.text).toContain("main");
-		expect(live("subagent-agents")?.text).toMatch(/^Available agent types for the Agent tool:/);
+		expect(catalogBlock).toHaveBeenCalled();
+		expect(live("subagent-agents")?.text).toBe(catalogBlock.mock.results.at(-1)?.value);
+		catalogBlock.mockRestore();
 		expect(reminders.filter((r) => r.key === "subagent-delegation").at(-1)).toMatchObject({ remove: true });
 	});
 });
@@ -151,11 +155,13 @@ describe("subagent blocks", () => {
 describe("agent catalog read at each run's start (R3-M28)", () => {
 	const root = mkdtempSync(join(tmpdir(), "capability-agents-"));
 	const cwd = join(root, "project");
+	/** The project's agent folder in the profile's config layout. */
+	const agentsDir = () => join(projectConfigDir(cwd), "agents");
 	beforeAll(() => {
-		mkdirSync(join(cwd, ".claude", "agents"), { recursive: true });
 		mkdirSync(join(root, "agent"), { recursive: true });
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(root, "agent"));
 		stubHome(root);
+		mkdirSync(agentsDir(), { recursive: true });
 	});
 	afterAll(() => {
 		vi.unstubAllEnvs();
@@ -171,7 +177,7 @@ describe("agent catalog read at each run's start (R3-M28)", () => {
 		const ctx = createFakeCtx({ cwd, model: main, modelRegistry: { getAvailable: () => [main] }, sessionManager: { getSessionId: () => "s", getBranch: () => fake.branch } });
 		await fake.fire("session_start", {}, ctx);
 		const told = [...liveFacts(reminders, "subagent-models"), ...liveFacts(reminders, "subagent-agents")];
-		writeFileSync(join(cwd, ".claude", "agents", "reviewer.md"), "---\nname: reviewer\ndescription: Reviews a diff\n---\nReview it.\n");
+		writeFileSync(join(agentsDir(), "reviewer.md"), "---\nname: reviewer\ndescription: Reviews a diff\n---\nReview it.\n");
 		await fake.fire("before_agent_start", { prompt: "go", systemPromptOptions: {} }, ctx);
 		const blocks = render(fake, told);
 		expect(blocks).toHaveLength(1);
@@ -185,20 +191,29 @@ describe("agent catalog read at each run's start (R3-M28)", () => {
 		fake.events.on(REMINDER_CHANNEL, (r) => reminders.push(r as Reminder));
 		subagentsExtension(fake.pi as never);
 		const ctx = createFakeCtx({ cwd, model: main, modelRegistry: { getAvailable: () => [main] }, sessionManager: { getSessionId: () => "s", getBranch: () => fake.branch } });
-		const file = join(cwd, ".claude", "agents", "editor.md");
+		const file = join(agentsDir(), "editor.md");
 		writeFileSync(file, "---\nname: editor\ndescription: Edits prose\n---\nEdit it.\n");
+		const words = requireText("subagents");
+		const catalogBlock = vi.spyOn(words, "catalogBlock");
 		await fake.fire("session_start", {}, ctx);
 		const catalog = () => reminders.filter((r) => r.key === "subagent-agents" && r.placement === "first-prepend").at(-1)?.text ?? "";
-		expect(catalog()).toContain("- editor: Edits prose");
+		/** The rows of the block the catalog text was rendered from. */
+		const rows = () => {
+			expect(catalog()).toBe(catalogBlock.mock.results.at(-1)?.value);
+			return catalogBlock.mock.calls.at(-1)?.[0].rows ?? [];
+		};
+		const editor = (description: string) => words.catalogRow({ name: "editor", description, tools: { kind: "all", builtIn: false } });
+		expect(rows()).toContain(editor("Edits prose"));
 		const before = catalog();
 		await fake.fire("before_agent_start", { prompt: "go", systemPromptOptions: {} }, ctx);
 		expect(catalog()).toBe(before);
 		writeFileSync(file, "---\nname: editor\ndescription: Edits code, at more length\n---\nEdit it.\n");
 		await fake.fire("before_agent_start", { prompt: "go", systemPromptOptions: {} }, ctx);
-		expect(catalog()).toContain("- editor: Edits code, at more length");
+		expect(rows()).toContain(editor("Edits code, at more length"));
 		rmSync(file);
 		await fake.fire("before_agent_start", { prompt: "go", systemPromptOptions: {} }, ctx);
-		expect(catalog()).not.toContain("editor");
+		expect(rows().some((row) => row.includes("editor"))).toBe(false);
+		catalogBlock.mockRestore();
 	});
 });
 

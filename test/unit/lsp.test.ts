@@ -21,9 +21,11 @@ import {
 	typescriptPreflight,
 	findTypescript,
 } from "../../extensions/lsp/servers.ts";
-import { lsp as lspText } from "../../profile/text/lsp/index.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 
-/** The tool's result with One Code's words, as the extension passes them. */
+const lspText = requireText("lsp");
+
+/** The tool's result with the profile's words, as the extension passes them. */
 const formatDiagnostics = (path: string, list: LspDiagnostic[], limit?: number) => formatWith(path, list, lspText.diagnostics, limit);
 
 const diag = (message: string, severity = 1, line = 0, character = 0): LspDiagnostic => ({
@@ -140,7 +142,6 @@ describe("project root and preflight", () => {
 
 describe("start-failure install hints", () => {
 	const enoent = (command: string) => ({ kind: "spawnFailed" as const, command, osMessage: `spawn ${command} ENOENT` });
-	const worded = (...args: Parameters<typeof describeStartFailure>) => lspText.failure(describeStartFailure(...args));
 
 	it("rewrites a missing built-in server into its install command", () => {
 		expect(describeStartFailure(enoent("pyright-langserver"), "pyright-langserver")).toEqual({
@@ -148,28 +149,24 @@ describe("start-failure install hints", () => {
 			command: "pyright-langserver",
 			installHint: "npm install -g pyright",
 		});
-		expect(worded(enoent("pyright-langserver"), "pyright-langserver")).toBe("pyright-langserver is not installed. Install it with: npm install -g pyright");
 	});
 
 	it("names the plugin when a plugin configured a known command", () => {
-		expect(worded(enoent("pyright-langserver"), "pyright-langserver", "pyright")).toBe(
-			"pyright-langserver is not installed (configured by the pyright plugin). Install it with: npm install -g pyright",
-		);
+		expect(describeStartFailure(enoent("pyright-langserver"), "pyright-langserver", "pyright")).toEqual({
+			kind: "notInstalled",
+			command: "pyright-langserver",
+			plugin: "pyright",
+			installHint: "npm install -g pyright",
+		});
 	});
 
-	it("gives PATH guidance for a plugin command it has no hint for", () => {
+	it("gives no install hint for a plugin command it has no hint for", () => {
 		expect(describeStartFailure(enoent("mi-lemminx"), "mi-lemminx", "mi-ls")).toEqual({ kind: "notInstalled", command: "mi-lemminx", plugin: "mi-ls" });
-		expect(worded(enoent("mi-lemminx"), "mi-lemminx", "mi-ls")).toBe(
-			"mi-lemminx is not installed (configured by the mi-ls plugin). Install it and make sure it is on your PATH (the plugin's documentation should say how).",
-		);
 	});
 
 	it("reports a vendored absolute path as missing, not uninstalled", () => {
 		const command = "/plugins/mi-ls/bin/server";
 		expect(describeStartFailure(enoent(command), command, "mi-ls")).toEqual({ kind: "missingPath", command, plugin: "mi-ls" });
-		expect(worded(enoent(command), command, "mi-ls")).toBe(
-			"/plugins/mi-ls/bin/server does not exist (configured by the mi-ls plugin). Check the plugin's installation.",
-		);
 	});
 
 	it("covers every built-in table server with a hint", () => {
@@ -212,27 +209,32 @@ describe("diagnostic formatting", () => {
 			source: "typescript",
 			message: "Argument of type 'number' is not assignable to parameter of type 'string'.",
 		};
-		expect(lspText.diagnostics.line({ path: "src/index.ts", diagnostic: shownDiagnostic(d) })).toBe(
-			"src/index.ts:5:30 error: Argument of type 'number' is not assignable to parameter of type 'string'. (2345) [typescript]",
-		);
+		expect(shownDiagnostic(d)).toEqual({
+			line: 5,
+			column: 30,
+			severity: "error",
+			code: 2345,
+			source: "typescript",
+			message: "Argument of type 'number' is not assignable to parameter of type 'string'.",
+		});
 	});
 
 	it("summarises counts and truncates long lists", () => {
 		const many = Array.from({ length: 25 }, (_, i) => diag(`e${i}`, 1, i));
-		const out = formatDiagnostics("a.ts", many, 10);
-		expect(out).toContain("25 errors");
-		expect(out).toContain("… 15 more");
-		expect(out.split("\n").filter((l) => l.startsWith("a.ts:"))).toHaveLength(10);
+		const words = lspText.diagnostics;
+		const lines = many.slice(0, 10).map((d) => words.line({ path: "a.ts", diagnostic: shownDiagnostic(d) }));
+		expect(formatDiagnostics("a.ts", many, 10)).toBe(`${words.summary({ errors: 25, warnings: 0, total: 25 })}\n\n${[...lines, words.more(15)].join("\n")}`);
 	});
 
 	it("reports a clean file", () => {
-		expect(formatDiagnostics("a.ts", [])).toBe("No diagnostics.");
+		expect(formatDiagnostics("a.ts", [])).toBe(lspText.diagnostics.none);
 	});
 
 	it("counts errors and warnings separately", () => {
-		expect(formatDiagnostics("a.ts", [diag("e", 1), diag("w", 2), diag("w2", 2)])).toContain(
-			"1 error, 2 warnings",
-		);
+		const list = [diag("e", 1), diag("w", 2), diag("w2", 2)];
+		const words = lspText.diagnostics;
+		const lines = list.map((d) => words.line({ path: "a.ts", diagnostic: shownDiagnostic(d) }));
+		expect(formatDiagnostics("a.ts", list)).toBe(`${words.summary({ errors: 1, warnings: 2, total: 3 })}\n\n${lines.join("\n")}`);
 	});
 });
 

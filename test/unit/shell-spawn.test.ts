@@ -34,22 +34,24 @@ describe("isBashBinaryName", () => {
 	});
 });
 
+const GIT_BASH = envName("GIT_BASH_PATH");
+
 describe("gitBashOverride", () => {
 	it("prefers the process environment over the settings env block", () => {
-		expect(gitBashOverride({ CLAUDE_CODE_GIT_BASH_PATH: "C:\\a\\bash.exe" }, { CLAUDE_CODE_GIT_BASH_PATH: "C:\\b\\bash.exe" })).toEqual({
+		expect(gitBashOverride({ [GIT_BASH]: "C:\\a\\bash.exe" }, { [GIT_BASH]: "C:\\b\\bash.exe" })).toEqual({
 			path: "C:\\a\\bash.exe",
 			source: "env",
-			name: "CLAUDE_CODE_GIT_BASH_PATH",
+			name: GIT_BASH,
 		});
-		expect(gitBashOverride({}, { CLAUDE_CODE_GIT_BASH_PATH: "C:\\b\\bash.exe" })).toEqual({ path: "C:\\b\\bash.exe", source: "settings", name: "CLAUDE_CODE_GIT_BASH_PATH" });
-		expect(gitBashOverride({ CLAUDE_CODE_GIT_BASH_PATH: "  " }, {})).toBeUndefined();
+		expect(gitBashOverride({}, { [GIT_BASH]: "C:\\b\\bash.exe" })).toEqual({ path: "C:\\b\\bash.exe", source: "settings", name: GIT_BASH });
+		expect(gitBashOverride({ [GIT_BASH]: "  " }, {})).toBeUndefined();
 	});
 
 	it("prefers the product's own spelling over the provider's alias", () => {
-		expect(gitBashOverride({ [envName("GIT_BASH_PATH")]: "C:\\own\\bash.exe", CLAUDE_CODE_GIT_BASH_PATH: "C:\\cc\\bash.exe" }, {})).toEqual({
+		expect(gitBashOverride({ [GIT_BASH]: "C:\\own\\bash.exe", CLAUDE_CODE_GIT_BASH_PATH: "C:\\cc\\bash.exe" }, {})).toEqual({
 			path: "C:\\own\\bash.exe",
 			source: "env",
-			name: envName("GIT_BASH_PATH"),
+			name: GIT_BASH,
 		});
 	});
 });
@@ -58,7 +60,7 @@ describe("resolveBashSpawn", () => {
 	it("uses a valid override through pi's resolver", () => {
 		const seen: Array<string | undefined> = [];
 		const result = resolveBashSpawn({
-			env: { CLAUDE_CODE_GIT_BASH_PATH: "C:\\Git\\bin\\bash.exe" },
+			env: { [GIT_BASH]: "C:\\Git\\bin\\bash.exe" },
 			exists: () => true,
 			fallback: (custom) => {
 				seen.push(custom);
@@ -72,7 +74,7 @@ describe("resolveBashSpawn", () => {
 
 	it("ignores a non-bash override with a warning and falls back", () => {
 		const result = resolveBashSpawn({
-			env: { CLAUDE_CODE_GIT_BASH_PATH: "C:\\Windows\\System32\\cmd.exe" },
+			env: { [GIT_BASH]: "C:\\Windows\\System32\\cmd.exe" },
 			exists: () => true,
 			fallback: (custom) => {
 				expect(custom).toBeUndefined();
@@ -80,18 +82,18 @@ describe("resolveBashSpawn", () => {
 			},
 		});
 		expect(result.spawn).toEqual(gitBash);
-		expect(result.warning).toMatch(/not a bash or sh binary/);
+		expect(result.warning).toBe(`${GIT_BASH} ignored: "C:\\Windows\\System32\\cmd.exe" is not a bash or sh binary.`);
 	});
 
 	it("ignores a missing override with a warning", () => {
 		const result = resolveBashSpawn({
 			env: {},
-			settingsEnv: { CLAUDE_CODE_GIT_BASH_PATH: "C:\\nope\\bash.exe" },
+			settingsEnv: { [GIT_BASH]: "C:\\nope\\bash.exe" },
 			exists: () => false,
 			fallback: () => gitBash,
 		});
 		expect(result.spawn).toEqual(gitBash);
-		expect(result.warning).toMatch(/settings\.json env.*does not exist/);
+		expect(result.warning).toBe(`${GIT_BASH} (settings.json env) ignored: "C:\\nope\\bash.exe" does not exist.`);
 	});
 
 	it("reports pi's error when no bash exists (Windows without Git for Windows)", () => {

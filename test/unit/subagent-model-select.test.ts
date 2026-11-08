@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { pinCatalog } from "./catalog-fixture.ts";
 import {
@@ -19,14 +19,22 @@ import {
 	subagentModelsReminder,
 	subagentStatusModel,
 } from "../../extensions/subagents/model-select.ts";
+import type { SubagentModelNotice } from "../../extensions/subagents/model-text.ts";
 import { envName } from "../../extensions/lib/brand.mjs";
+import { productSettingsPath } from "../../extensions/lib/product-settings.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 
-/** One Code's own settings file lives under <home>/.onecode, not ~/.claude. */
-const oneCodePath = (home: string) => join(home, ".onecode", "settings.json");
-const writeOneCodeSettings = (home: string, data: unknown) => {
-	mkdirSync(join(home, ".onecode"), { recursive: true });
-	writeFileSync(oneCodePath(home), JSON.stringify(data));
+/** The product's own settings file lives under its state dir, not ~/.claude. */
+const productPath = (home: string) => productSettingsPath(home);
+const writeProductSettings = (home: string, data: unknown) => {
+	mkdirSync(dirname(productPath(home)), { recursive: true });
+	writeFileSync(productPath(home), JSON.stringify(data));
 };
+
+/** The profile's subagent-model text. */
+const words = () => requireText("subagentModels");
+/** A resolution notice in the profile's words. */
+const notice = (n: SubagentModelNotice) => words().notice(n);
 
 /** Minimal structural stand-in; only provider/id/cost are consulted. */
 const model = (provider: string, id: string, input?: number) =>
@@ -118,8 +126,7 @@ describe("resolveSubagentModel: aliases", () => {
 		expect(resolution.model?.provider).toBe("openai");
 		expect(resolution.model?.id).toBe("gpt-5.1");
 		expect(resolution.source).toBe("call");
-		expect(resolution.notices[0]).toContain('No "sonnet" model');
-		expect(resolution.notices[0]).toContain("read as its Claude Code tier");
+		expect(resolution.notices[0]).toBe(notice({ kind: "aliasAsTier", alias: "sonnet", session: "openai/gpt-5.1", resolved: "openai/gpt-5.1" }));
 	});
 
 	it("reads an alias as its tier: sonnet → the cheapest workhorse-class model, haiku → the cheapest capable one", () => {
@@ -185,7 +192,7 @@ describe("resolveSubagentModel: precedence and exact references", () => {
 			available: [...anthropic, ...openai],
 		});
 		expect(resolution.model?.provider).toBe("openai");
-		expect(resolution.notices[0]).toContain("different provider");
+		expect(resolution.notices[0]).toBe(notice({ kind: "otherProviderHonored", model: "openai/gpt-5-mini", session: "anthropic/claude-opus-4-8", source: "call" }));
 	});
 
 	it("fails a bad per-call request with no fallback so the model that wrote it can retry", () => {
@@ -247,7 +254,7 @@ describe("resolveSubagentModel: precedence and exact references", () => {
 		const resolution = resolveSubagentModel({ requested: "sonnet", sessionModel: cheapOnly[0], available: cheapOnly });
 		expect(resolution.model?.id).toBe("gpt-5-mini");
 		expect(resolution.source).toBe("automatic");
-		expect(resolution.notices[0]).toBe('No "sonnet" model in this session\'s provider family (openai/gpt-5.4-mini).');
+		expect(resolution.notices[0]).toBe(notice({ kind: "aliasMissing", alias: "sonnet", session: "openai/gpt-5.4-mini" }));
 		expect(resolution.unresolved).toBeUndefined();
 	});
 
@@ -278,7 +285,7 @@ describe("resolveSubagentModel: precedence and exact references", () => {
 		});
 		expect(resolution.model?.id).toBe("claude-sonnet-5-5");
 		expect(resolution.source).toBe("automatic");
-		expect(resolution.notices[0]).toContain("not available");
+		expect(resolution.notices[0]).toBe(notice({ kind: "unavailable", wanted: "some/withdrawn-model", source: "default" }));
 	});
 
 	it("falls through a bad agent-frontmatter model to the configured default", () => {
@@ -373,7 +380,7 @@ describe("resolveSubagentModel: precedence and exact references", () => {
 		});
 		expect(resolution.model?.id).toBe("claude-sonnet-5-5");
 		expect(resolution.source).toBe("automatic");
-		expect(resolution.notices[0]).toContain("falling back");
+		expect(resolution.notices[0]).toBe(notice({ kind: "unavailable", wanted: "some/withdrawn-model", source: "agent" }));
 	});
 });
 
@@ -409,7 +416,7 @@ describe("resolveSubagentModel: agent-file provider containment", () => {
 		expect(resolution.model?.provider).toBe("openai");
 		expect(resolution.model?.id).toBe("gpt-5.1-codex");
 		expect(resolution.source).toBe("automatic");
-		expect(resolution.notices[0]).toContain("stay on this provider");
+		expect(resolution.notices[0]).toBe(notice({ kind: "agentOtherProvider", model: "anthropic/claude-haiku-4-5", session: "openai/gpt-5.1" }));
 	});
 
 	it("honors a cross-provider agent-file model on a Claude session", () => {
@@ -422,8 +429,7 @@ describe("resolveSubagentModel: agent-file provider containment", () => {
 		});
 		expect(resolution.model?.provider).toBe("openai");
 		expect(resolution.source).toBe("agent");
-		expect(resolution.notices[0]).toContain("different provider/family");
-		expect(resolution.notices[0]).toContain("honored");
+		expect(resolution.notices[0]).toBe(notice({ kind: "otherProviderHonored", model: "openai/gpt-5-mini", session: "anthropic/claude-opus-4-8", source: "agent" }));
 	});
 
 	it("honors a cross-provider setting deliberately set on this session (stamp matches)", () => {
@@ -435,8 +441,7 @@ describe("resolveSubagentModel: agent-file provider containment", () => {
 		});
 		expect(resolution.model?.provider).toBe("anthropic");
 		expect(resolution.source).toBe("default");
-		expect(resolution.notices[0]).toContain("different provider/family");
-		expect(resolution.notices[0]).toContain("honored");
+		expect(resolution.notices[0]).toBe(notice({ kind: "otherProviderHonored", model: "anthropic/claude-haiku-4-5", session: "openai/gpt-5.1", source: "default" }));
 	});
 
 	it("overrides a stale cross-provider setting (stamped for a provider since left)", () => {
@@ -447,7 +452,7 @@ describe("resolveSubagentModel: agent-file provider containment", () => {
 		});
 		expect(resolution.model?.provider).toBe("openai");
 		expect(resolution.source).toBe("automatic");
-		expect(resolution.notices[0]).toContain("was set for a different provider");
+		expect(resolution.notices[0]).toBe(notice({ kind: "staleDefault", model: "anthropic/claude-haiku-4-5", session: "openai/gpt-5.1" }));
 	});
 
 	it("treats a hand-edited (unstamped) cross-provider setting as stale", () => {
@@ -458,7 +463,7 @@ describe("resolveSubagentModel: agent-file provider containment", () => {
 		});
 		expect(resolution.model?.provider).toBe("openai");
 		expect(resolution.source).toBe("automatic");
-		expect(resolution.notices[0]).toContain("was set for a different provider");
+		expect(resolution.notices[0]).toBe(notice({ kind: "staleDefault", model: "anthropic/claude-haiku-4-5", session: "openai/gpt-5.1" }));
 	});
 
 	it("honors a same-provider setting regardless of stamp (no crossing to override)", () => {
@@ -489,7 +494,7 @@ describe("resolveSubagentModel: agent-file provider containment", () => {
 		});
 		expect(resolution.model?.id).toBe("z-ai/glm-4.6"); // same-vendor, not the anthropic setting
 		expect(resolution.source).not.toBe("default");
-		expect(resolution.notices[0]).toContain("was set for a different provider");
+		expect(resolution.notices[0]).toBe(notice({ kind: "staleDefault", model: "openrouter/anthropic/claude-haiku-4.5", session: "openrouter/z-ai/glm-4.6" }));
 	});
 });
 
@@ -504,9 +509,16 @@ describe("subagentModelsReminder: setting override notice", () => {
 			defaultSource: "default",
 			configured: { spec: "anthropic/claude-haiku-4-5", source: "subagentModel setting" },
 		});
-		expect(reminder).toContain("pinned the subagent default to anthropic/claude-haiku-4-5");
-		expect(reminder).toContain("different provider than this session");
-		expect(reminder).toContain("same-provider model to keep it here");
+		expect(reminder).toBe(
+			words().menu({
+				lines: [
+					words().menuLine({ model: "anthropic/claude-haiku-4-5", price: 1, label: "configuredDefault" }),
+					words().menuLine({ model: "openai/gpt-5.1", price: 1.25, label: "session" }),
+					words().menuLine({ model: "openai/gpt-5-mini", price: 0.25, label: "cheaper" }),
+				],
+				notes: [words().settingPinned({ model: "anthropic/claude-haiku-4-5", otherProvider: "openai/gpt-5.1" })],
+			}),
+		);
 	});
 
 	it("informs without a cross-provider note when the pinned default is same-provider", () => {
@@ -517,8 +529,15 @@ describe("subagentModelsReminder: setting override notice", () => {
 			defaultSource: "default",
 			configured: { spec: "openai/gpt-5-mini", source: "subagentModel setting" },
 		});
-		expect(reminder).toContain("pinned the subagent default to openai/gpt-5-mini");
-		expect(reminder).not.toContain("different provider than this session");
+		expect(reminder).toBe(
+			words().menu({
+				lines: [
+					words().menuLine({ model: "openai/gpt-5-mini", price: 0.25, label: "configuredDefault" }),
+					words().menuLine({ model: "openai/gpt-5.1", price: 1.25, label: "session" }),
+				],
+				notes: [words().settingPinned({ model: "openai/gpt-5-mini" })],
+			}),
+		);
 	});
 
 	it("stays silent when a stale setting was overridden (default is not the setting)", () => {
@@ -555,8 +574,7 @@ describe("expensiveModelGate", () => {
 
 	it("gates a per-call model that outprices the session model", () => {
 		const gate = expensiveModelGate(resolveCall("anthropic/claude-opus-4-8"), session, undefined);
-		expect(gate).toContain("costs more per input token");
-		expect(gate).toContain("claude-opus-4-8 ($5/M in)");
+		expect(gate).toBe(words().costsMore({ model: "anthropic/claude-opus-4-8", price: 5, session: "anthropic/claude-haiku-4-5", sessionPrice: 1 }));
 	});
 
 	it("opens for allow_expensive, equal or cheaper prices, and unpriced models", () => {
@@ -609,9 +627,8 @@ describe("subagentModelMenu", () => {
 			defaultModel: anthropic[0],
 		});
 		const text = menu.join("\n");
-		expect(menu[0]).toContain("anthropic/claude-opus-4-8");
-		expect(menu[0]).toContain("default");
-		expect(text).toContain("claude-haiku-4-5 ($1/M in)");
+		expect(menu[0]).toBe(words().menuLine({ model: "anthropic/claude-opus-4-8", price: 5, label: "sessionDefault" }));
+		expect(menu).toContain(words().menuLine({ model: "anthropic/claude-haiku-4-5", price: 1, label: "cheaper" }));
 		// Contained: no cross-provider entries, and the dated haiku duplicate is collapsed.
 		expect(text).not.toContain("openai/");
 		expect(text).not.toContain("20251001");
@@ -652,10 +669,18 @@ describe("subagentModelMenu", () => {
 		expect(text).not.toContain("openai/model-");
 	});
 
-	it("says the menu is not a whitelist in the reminder", () => {
+	it("frames the menu lines in the profile's reminder", () => {
 		const reminder = subagentModelsReminder({ available: anthropic, sessionModel: anthropic[0] });
-		expect(reminder).toContain("not a whitelist");
-		expect(reminder).toContain("sonnet|opus|haiku|fable");
+		expect(reminder).toBe(
+			words().menu({
+				lines: [
+					words().menuLine({ model: "anthropic/claude-opus-4-8", price: 5, label: "session" }),
+					words().menuLine({ model: "anthropic/claude-haiku-4-5", price: 1, label: "cheaper" }),
+					words().menuLine({ model: "anthropic/claude-sonnet-5-5", price: 3, label: "cheaper" }),
+				],
+				notes: [],
+			}),
+		);
 	});
 
 	it("warns when the configured default costs more than the session model", () => {
@@ -667,8 +692,15 @@ describe("subagentModelMenu", () => {
 			defaultModel: anthropic[0],
 			defaultSource: "default",
 		});
-		expect(reminder).toContain("costs more per input token");
-		expect(reminder).toContain("($5/M in)");
+		expect(reminder).toBe(
+			words().menu({
+				lines: [
+					words().menuLine({ model: "anthropic/claude-opus-4-8", price: 5, label: "configuredDefault" }),
+					words().menuLine({ model: "anthropic/claude-haiku-4-5", price: 1, label: "session" }),
+				],
+				notes: [words().defaultCostsMore({ price: 5, sessionPrice: 1 })],
+			}),
+		);
 	});
 
 	it("does not warn when the default is cheaper, equal, or unpriced", () => {
@@ -690,50 +722,34 @@ describe("subagentModelMenu", () => {
 });
 
 describe("loadSubagentDefault", () => {
+	// Claude Code's spelling of the knob, read from its own settings file, is
+	// One Code's provider's: its tests are in profile/test/.
+	const OWN = envName("SUBAGENT_MODEL");
 	let home: string;
 
 	beforeEach(() => {
 		home = mkdtempSync(join(tmpdir(), "cc-subagent-default-"));
-		mkdirSync(join(home, ".claude"), { recursive: true });
 	});
 
 	afterEach(() => {
 		rmSync(home, { recursive: true, force: true });
 	});
 
-	it("reads CLAUDE_CODE_SUBAGENT_MODEL from the settings env block, Claude Code style", () => {
-		writeFileSync(
-			join(home, ".claude", "settings.json"),
-			JSON.stringify({ env: { CLAUDE_CODE_SUBAGENT_MODEL: "sonnet" } }),
-		);
-		expect(loadSubagentDefault(home, {})).toEqual({ spec: "sonnet", source: "env", envVar: "CLAUDE_CODE_SUBAGENT_MODEL", borrowed: true });
+	it("reads the product's variable from its settings env block", () => {
+		writeProductSettings(home, { env: { [OWN]: "sonnet" } });
+		expect(loadSubagentDefault(home, {})).toEqual({ spec: "sonnet", source: "env", envVar: OWN, borrowed: false });
 	});
 
 	it("lets the real environment override the settings env block", () => {
-		writeFileSync(
-			join(home, ".claude", "settings.json"),
-			JSON.stringify({ env: { CLAUDE_CODE_SUBAGENT_MODEL: "sonnet" } }),
-		);
-		expect(loadSubagentDefault(home, { CLAUDE_CODE_SUBAGENT_MODEL: "haiku" })?.spec).toBe("haiku");
+		writeProductSettings(home, { env: { [OWN]: "sonnet" } });
+		expect(loadSubagentDefault(home, { [OWN]: "haiku" })?.spec).toBe("haiku");
 	});
 
 	it("prefers the explicit subagentModel setting over the env var", () => {
-		// subagentModel is One Code's key: written to and read from ~/.onecode, while
-		// the CLAUDE_CODE_SUBAGENT_MODEL env block stays a borrowed ~/.claude read.
-		writeOneCodeSettings(home, { subagentModel: "anthropic/claude-haiku-4-5" });
-		writeFileSync(
-			join(home, ".claude", "settings.json"),
-			JSON.stringify({ env: { CLAUDE_CODE_SUBAGENT_MODEL: "sonnet" } }),
-		);
-		const result = loadSubagentDefault(home, {});
+		writeProductSettings(home, { subagentModel: "anthropic/claude-haiku-4-5", env: { [OWN]: "sonnet" } });
+		const result = loadSubagentDefault(home, { [OWN]: "opus" });
 		expect(result?.spec).toBe("anthropic/claude-haiku-4-5");
 		expect(result?.source).toBe("subagentModel setting");
-	});
-
-	it("ignores a stale subagentModel left in ~/.claude by an older build", () => {
-		// One Code used to write here; that value must not keep choosing subagents.
-		writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ subagentModel: "opencode/gemini-3.7-flash" }));
-		expect(loadSubagentDefault(home, {})).toBeUndefined();
 	});
 
 	it("returns undefined when nothing is configured", () => {
@@ -748,14 +764,6 @@ describe("applicableSubagentDefault", () => {
 	it("applies One Code's own setting on any provider", () => {
 		expect(applicableSubagentDefault(setting, openai[0])).toBe(setting);
 		expect(applicableSubagentDefault(setting, anthropic[0])).toBe(setting);
-	});
-
-	it("applies the Claude Code env var only to Claude-family sessions", () => {
-		expect(applicableSubagentDefault(envVar, anthropic[0])).toBe(envVar);
-		// A Claude model on another provider still speaks the alias vocabulary.
-		expect(applicableSubagentDefault(envVar, model("opencode", "claude-sonnet-5", 3))).toBe(envVar);
-		// Claude Code's knob must not move an openai session's subagents.
-		expect(applicableSubagentDefault(envVar, openai[0])).toBeUndefined();
 	});
 
 	it("applies the product's own variable on any model", () => {
@@ -818,19 +826,19 @@ describe("persistSubagentModel", () => {
 
 	beforeEach(() => {
 		home = mkdtempSync(join(tmpdir(), "cc-subagent-persist-"));
-		mkdirSync(join(home, ".onecode"), { recursive: true });
+		mkdirSync(dirname(productPath(home)), { recursive: true });
 	});
 
 	afterEach(() => {
 		rmSync(home, { recursive: true, force: true });
 	});
 
-	// persistSubagentModel writes to One Code's own file, never into ~/.claude.
-	const settingsPath = () => oneCodePath(home);
+	// persistSubagentModel writes to the product's own file, never into ~/.claude.
+	const settingsPath = () => productPath(home);
 	const readSettings = () => JSON.parse(readFileSync(settingsPath(), "utf-8"));
 
 	it("creates the settings file when there is none", () => {
-		rmSync(join(home, ".onecode"), { recursive: true, force: true });
+		rmSync(dirname(productPath(home)), { recursive: true, force: true });
 		persistSubagentModel("openai/gpt-5-mini", home);
 		expect(readSettings()).toEqual({ subagentModel: "openai/gpt-5-mini" });
 	});
@@ -893,20 +901,15 @@ describe("persistSubagentModel", () => {
 describe("resolveSubagentModel: the alias notice scopes its claim", () => {
 	const catalog = [...anthropic, ...openai];
 
-	it("blames the containment, not the model's existence", () => {
-		// "No sonnet model exists" is false whenever Anthropic is also
-		// authenticated, and a model relaying it tells the user Sonnet is
-		// unavailable. What is true is that the alias cannot leave this session's
-		// containment.
+	// The wording of these claims is One Code's, checked in profile/test/.
+	it("hands the profile the session's model and what the alias resolved to", () => {
 		const resolution = resolveSubagentModel({ requested: "sonnet", sessionModel: openai[0], available: catalog });
-		expect(resolution.notices[0]).toBe(
-			'No "sonnet" model in this session\'s provider family (openai/gpt-5.1); read as its Claude Code tier, "sonnet" resolves to openai/gpt-5.1 here.',
-		);
+		expect(resolution.notices[0]).toBe(notice({ kind: "aliasAsTier", alias: "sonnet", session: "openai/gpt-5.1", resolved: "openai/gpt-5.1" }));
 	});
 
-	it("names no provider family when there is no session model", () => {
+	it("hands it no session when there is no session model", () => {
 		const resolution = resolveSubagentModel({ requested: "sonnet", available: [] });
-		expect(resolution.notices[0]).toBe('No "sonnet" model in this session\'s provider family.');
+		expect(resolution.notices[0]).toBe(notice({ kind: "aliasMissing", alias: "sonnet" }));
 	});
 
 	it("no longer narrates the fallback chain, whatever asked", () => {
@@ -944,8 +947,8 @@ describe("subagentModelNotes: the model is told what its child actually runs on"
 		const resolution = resolveSubagentModel({ requested: "sonnet", sessionModel: openai[0], available: catalog });
 		const notes = subagentModelNotes(resolution);
 		expect(notes).toHaveLength(2);
-		expect(notes[0]).toContain('No "sonnet" model');
-		expect(notes[1]).toBe("This subagent runs on openai/gpt-5.1 (the model this call named).");
+		expect(notes[0]).toBe(notice({ kind: "aliasAsTier", alias: "sonnet", session: "openai/gpt-5.1", resolved: "openai/gpt-5.1" }));
+		expect(notes[1]).toBe(words().runsOn({ model: "openai/gpt-5.1", source: "call" }));
 	});
 
 	it("names the agent's own model when that is what served", () => {
@@ -957,7 +960,7 @@ describe("subagentModelNotes: the model is told what its child actually runs on"
 			sessionModel: openai[0],
 			available: catalog,
 		});
-		expect(subagentModelNotes(resolution).at(-1)).toBe("This subagent runs on openai/gpt-5-mini (the agent's own model).");
+		expect(subagentModelNotes(resolution).at(-1)).toBe(words().runsOn({ model: "openai/gpt-5-mini", source: "agent" }));
 	});
 
 	it("states the model even when a notice already mentions that spec", () => {
@@ -970,9 +973,7 @@ describe("subagentModelNotes: the model is told what its child actually runs on"
 			available: catalog,
 		});
 		expect(resolution.model?.id).toBe("claude-sonnet-5-5");
-		expect(subagentModelNotes(resolution).at(-1)).toBe(
-			"This subagent runs on anthropic/claude-sonnet-5-5 (the model this call named).",
-		);
+		expect(subagentModelNotes(resolution).at(-1)).toBe(words().runsOn({ model: "anthropic/claude-sonnet-5-5", source: "call" }));
 	});
 
 	it("adds no claim when nothing resolved at all", () => {
@@ -1007,8 +1008,8 @@ describe("resolveSubagentModel — image modality gate", () => {
 	it("hard-blocks a per-call text-only model, naming the reason for the retry", () => {
 		const r = resolveSubagentModel({ requested: "openai/gpt-5-flash-text", sessionModel: session, available, requireImageInput: true });
 		expect(r.unresolved).toBe("openai/gpt-5-flash-text");
-		expect(r.unresolvedReason).toContain("text-only");
-		expect(r.notices.join(" ")).toContain("image-capable");
+		expect(r.unresolvedReason).toBe(notice({ kind: "textOnlyCall", model: "openai/gpt-5-flash-text" }));
+		expect(r.notices).toContain(r.unresolvedReason);
 	});
 
 	it("does NOT gate when requireImageInput is unset (no regression, text session)", () => {
@@ -1021,7 +1022,7 @@ describe("resolveSubagentModel — image modality gate", () => {
 		const r = resolveSubagentModel({ agentModel: "openai/gpt-5-flash-text", sessionModel: session, available, requireImageInput: true });
 		expect(r.source).not.toBe("agent");
 		expect(r.model && supportsImageInput(r.model)).toBe(true);
-		expect(r.notices.join(" ")).toContain("text-only");
+		expect(r.notices).toContain(notice({ kind: "textOnly", model: "openai/gpt-5-flash-text", source: "agent" }));
 	});
 
 	it("upgrades a text-only configured default to an image-capable model with a notice", () => {
@@ -1033,7 +1034,7 @@ describe("resolveSubagentModel — image modality gate", () => {
 		});
 		expect(r.source).not.toBe("default");
 		expect(r.model && supportsImageInput(r.model)).toBe(true);
-		expect(r.notices.join(" ")).toContain("text-only");
+		expect(r.notices).toContain(notice({ kind: "textOnly", model: "openai/gpt-5-flash-text", source: "default" }));
 	});
 
 	it("resolves an alias to an image-capable model, skipping the cheaper text-only one", () => {
@@ -1045,10 +1046,10 @@ describe("resolveSubagentModel — image modality gate", () => {
 });
 
 describe("refusedModelNote", () => {
-	it("names the refused model and the default it leaves", () => {
+	it("hands the profile the refused model and the default it leaves", () => {
 		expect(refusedModelNote("openai/gpt-5-chat-latest", model("openai", "gpt-5.2", 1.75))).toBe(
-			"Model openai/gpt-5-chat-latest is not usable on this account, so automatic selection skips it and the subagent/workflow `model` field should not name it. The subagent default is now openai/gpt-5.2.",
+			words().refused({ model: "openai/gpt-5-chat-latest", newDefault: "openai/gpt-5.2" }),
 		);
-		expect(refusedModelNote("openai/gpt-5-chat-latest", undefined)).toContain("The subagent default is now this session's model.");
+		expect(refusedModelNote("openai/gpt-5-chat-latest", undefined)).toBe(words().refused({ model: "openai/gpt-5-chat-latest" }));
 	});
 });

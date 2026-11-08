@@ -5,7 +5,7 @@
  * golden snapshot pins the bytes of every other text.
  */
 import { describe, expect, it } from "vitest";
-import { skill } from "../../profile/text/skill/index.ts";
+import { skill } from "../text/skill/index.ts";
 
 describe("One Code's skill text", () => {
 	it("asks for the full name when plugins share a skill name", () => {

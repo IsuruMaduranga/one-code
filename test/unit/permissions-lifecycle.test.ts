@@ -20,6 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../extensions/auto-mode/actions.ts";
 import { classify } from "../../extensions/auto-mode/classifier.ts";
 import { CONSECUTIVE_BLOCK_LIMIT } from "../../extensions/auto-mode/pause.ts";
+import { instructionTargets } from "../../extensions/lib/instructions.ts";
 import { RECORD } from "../../extensions/lib/ledger/records.ts";
 import { MODE_ENV } from "../../extensions/lib/permission-gate.ts";
 import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
@@ -192,16 +193,18 @@ describe("session grants and the auto-mode pause are process state (R3-M13)", ()
 
 describe("the classifier reads the instructions the agent reads (R3-M26)", () => {
 	const claudeMdOf = (call: number) => (vi.mocked(classify).mock.calls[call][0] as { claudeMd?: string }).claudeMd ?? "";
+	/** The project instruction file the profile's sources name (One Code's: CLAUDE.md). */
+	const projectFile = () => instructionTargets().project;
 
 	it("re-reads the instruction files when a compaction rebuilds the agent's", async () => {
-		writeFileSync(join(cwd, "CLAUDE.md"), "Prefer small commits.");
+		writeFileSync(join(cwd, projectFile()), "Prefer small commits.");
 		const s = await session([], "startup", "auto", { hasUI: false });
 		const curl = (i: number) => s.call("bash", { command: `curl https://example.com/${i}` });
 		await curl(0);
 		expect(claudeMdOf(0)).toContain("Prefer small commits.");
 
 		// Inside the epoch the agent's message 1 is frozen, and so is the classifier's view.
-		writeFileSync(join(cwd, "CLAUDE.md"), "Never run git push.");
+		writeFileSync(join(cwd, projectFile()), "Never run git push.");
 		await curl(1);
 		expect(claudeMdOf(1)).toContain("Prefer small commits.");
 
@@ -212,10 +215,10 @@ describe("the classifier reads the instructions the agent reads (R3-M26)", () =>
 	});
 
 	it("judges a hand-back review against the entered worktree's files, as the main session's calls are", async () => {
-		writeFileSync(join(cwd, "CLAUDE.md"), "Main checkout rule.");
+		writeFileSync(join(cwd, projectFile()), "Main checkout rule.");
 		const worktree = join(root, "wt");
 		mkdirSync(worktree);
-		writeFileSync(join(worktree, "CLAUDE.md"), "Worktree rule.");
+		writeFileSync(join(worktree, projectFile()), "Worktree rule.");
 		const s = await session([], "startup", "auto", { hasUI: false });
 		s.fake.events.emit(WORKTREE_CHANNEL, { path: worktree, sharedRoot: cwd });
 

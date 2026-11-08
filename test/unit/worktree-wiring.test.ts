@@ -9,17 +9,27 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ORIGINAL_COMMAND_CHANNEL, type OriginalCommandRecord } from "../../extensions/lib/original-command.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 import { REMINDER_CHANNEL, type ReminderPayload } from "../../extensions/lib/reminders.ts";
+import { projectConfigDir, projectConfigDirName } from "../../extensions/lib/sources.ts";
 import { shellQuote } from "../../extensions/lib/shell-quote.ts";
 import { WORKTREE_CHANNEL, type WorktreeLocation } from "../../extensions/lib/worktree-channel.ts";
 import worktreeExtension from "../../extensions/worktree/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
 type GateResult = { block?: boolean; reason?: string } | undefined;
+/** The worktree session a tool recorded (the state its texts name). */
+type Session = Parameters<ReturnType<typeof words>["reminder"]>[0];
+
+const words = () => requireText("worktree");
+/** A guard's refusal of git aimed at `target`, in the profile's words. */
+const sharedTarget = (target: string) =>
+	requireText("worktreeGuard").refusal({ kind: "gitTarget", worktreePath: worktree, problem: { kind: "sharedTarget", target } });
 
 let repo: string;
 let fake: FakePi;
 let worktree: string;
+let session: Session & { baseCommit: string };
 const originals: OriginalCommandRecord[] = [];
 const stateReminders: ReminderPayload[] = [];
 
@@ -44,11 +54,16 @@ beforeEach(async () => {
 	worktreeExtension(fake.pi as never);
 	const ctx = createFakeCtx({ cwd: repo, sessionManager: { getBranch: () => [] } });
 	await fake.fire("session_start", {}, ctx);
-	const entered = (await fake.tools.get("enter_worktree")!.execute("e1", { name: "feature" }, undefined, undefined, ctx)) as { isError?: boolean; content: { text: string }[] };
+	const entered = (await fake.tools.get("enter_worktree")!.execute("e1", { name: "feature" }, undefined, undefined, ctx)) as {
+		isError?: boolean;
+		content: { text: string }[];
+		details: { worktreeState: typeof session };
+	};
 	expect(entered.isError).toBeUndefined();
-	// The git-isolation guard is announced on entry, not first met as a refusal.
-	expect(entered.content[0]?.text).toContain("Git commands aimed at the main checkout or another worktree of this repository are refused until you exit.");
-	worktree = join(repo, ".claude", "worktrees", "feature");
+	session = entered.details.worktreeState;
+	// One Code's wording announces the git-isolation guard here: profile/test/worktree-wiring-wording.test.ts.
+	expect(entered.content[0]?.text).toBe(words().enter.created({ session, baseCommit: session.baseCommit }));
+	worktree = join(projectConfigDir(repo), "worktrees", "feature");
 	expect(location).toEqual({ path: worktree, branch: "feature", sharedRoot: repo });
 });
 afterEach(() => rmSync(repo, { recursive: true, force: true }));
@@ -58,18 +73,25 @@ const toolCall = async (toolName: string, input: Record<string, unknown>, toolCa
 
 describe("worktree state announcements", () => {
 	it("binds created and existing-worktree activation to the entering tool result", async () => {
-		expect(stateReminders.find((entry) => entry.text?.startsWith("Worktree session active"))).toMatchObject({ toolCallId: "e1" });
+		expect(stateReminders.find((entry) => entry.text === words().reminder(session))).toMatchObject({ toolCallId: "e1" });
 		stateReminders.length = 0;
-		await fake.tools.get("enter_worktree")!.execute("e2", { path: worktree }, undefined, undefined, createFakeCtx({ cwd: repo }));
-		expect(stateReminders.find((entry) => entry.text?.startsWith("Worktree session active"))).toMatchObject({ toolCallId: "e2" });
+		const switched = (await fake.tools.get("enter_worktree")!.execute("e2", { path: worktree }, undefined, undefined, createFakeCtx({ cwd: repo }))) as {
+			details: { worktreeState: Session };
+		};
+		expect(stateReminders.find((entry) => entry.text === words().reminder(switched.details.worktreeState))).toMatchObject({ toolCallId: "e2" });
 	});
 
 	it("enters a listed worktree whatever its spelling (git lists C:/… on Windows)", async () => {
-		const spellings = [`${worktree}/`, join(".claude", "worktrees", "feature"), worktree.replace(/\\/g, "/")];
+		const spellings = [`${worktree}/`, join(projectConfigDirName(), "worktrees", "feature"), worktree.replace(/\\/g, "/")];
 		for (const [i, path] of spellings.entries()) {
-			const result = (await fake.tools.get("enter_worktree")!.execute(`p${i}`, { path }, undefined, undefined, createFakeCtx({ cwd: repo }))) as { isError?: boolean; content: { text: string }[] };
+			const result = (await fake.tools.get("enter_worktree")!.execute(`p${i}`, { path }, undefined, undefined, createFakeCtx({ cwd: repo }))) as {
+				isError?: boolean;
+				content: { text: string }[];
+				details: { worktreeState: Session };
+			};
 			expect(result.isError, path).toBeUndefined();
-			expect(result.content[0]?.text).toContain(`Switched into existing worktree ${worktree}`);
+			expect(result.details.worktreeState.path).toBe(worktree);
+			expect(result.content[0]?.text).toBe(words().enter.switched({ session: result.details.worktreeState }));
 		}
 	});
 
@@ -79,9 +101,10 @@ describe("worktree state announcements", () => {
 		resumed.events.on(REMINDER_CHANNEL, (data) => reminders.push(data as ReminderPayload));
 		worktreeExtension(resumed.pi as never);
 		const missingPath = join(repo, "missing-worktree");
+		const missing = { path: missingPath, originalCwd: repo, sharedRoot: repo, createdByUs: false };
 		const entered = { type: "message", message: {
 			role: "toolResult", toolName: "enter_worktree", toolCallId: "old", content: [], timestamp: 1,
-			details: { worktreeState: { path: missingPath, originalCwd: repo, sharedRoot: repo, createdByUs: false } },
+			details: { worktreeState: missing },
 		} };
 		// The session's branch: the entering result, then every entry either instance appends.
 		let reloaded: ReturnType<typeof createFakePi> | undefined;
@@ -92,13 +115,11 @@ describe("worktree state announcements", () => {
 		await resumed.fire("session_start", {}, ctx);
 		expect(reminders).toContainEqual({ key: "cc-worktree-session", remove: true });
 		const notice = reminders.find((entry) => entry.text && entry.placement === undefined);
-		expect(notice?.text).toContain(`back in ${repo}`);
-		expect(notice?.text).toContain(missingPath);
-		expect(notice?.text).toContain("no longer exists");
+		expect(notice?.text).toBe(words().missingOnRestore(missing));
 
 		// Said once per branch, recorded on it: a reload (a new instance), a
 		// re-start and a tree navigation of the same branch do not repeat it.
-		const notices = () => reminders.filter((entry) => entry.text?.startsWith("Left worktree session")).length;
+		const notices = () => reminders.filter((entry) => entry.text === words().missingOnRestore(missing)).length;
 		await resumed.fire("session_tree", {}, ctx);
 		await resumed.fire("session_start", { reason: "reload" }, ctx);
 		reloaded = createFakePi();
@@ -114,7 +135,7 @@ describe("worktree state announcements", () => {
 		};
 		expect(result.isError).toBeUndefined();
 		expect(result.details.worktreeState).toBeNull();
-		expect(result.content[0].text).toContain(`back in ${repo}`);
+		expect(result.content[0].text).toBe(action === "keep" ? words().exit.kept({ session, exists: true }) : words().exit.removed(session));
 	});
 });
 
@@ -130,7 +151,7 @@ describe("monitor in a worktree session", () => {
 		// Quoted: bash reads a Windows path's backslashes as escapes otherwise.
 		const result = await toolCall("monitor", { command: `git -C ${shellQuote(repo)} log -1`, description: "watch" });
 		expect(result?.block).toBe(true);
-		expect(result?.reason).toContain(`isolated in the worktree ${worktree}`);
+		expect(result?.reason).toBe(sharedTarget(repo));
 	});
 
 	it("refuses git aimed at a linked worktree outside the shared checkout", async () => {
@@ -139,7 +160,7 @@ describe("monitor in a worktree session", () => {
 		try {
 			const result = await toolCall("bash", { command: `git -C ${shellQuote(outside)} status` });
 			expect(result?.block).toBe(true);
-			expect(result?.reason).toContain("another worktree of the same repository");
+			expect(result?.reason).toBe(sharedTarget(outside));
 		} finally {
 			rmSync(outside, { recursive: true, force: true });
 		}
@@ -157,7 +178,7 @@ describe("powershell in a worktree session", () => {
 		const input = { command: `Set-Location ${repo}; git reset --hard` };
 		const result = await toolCall("powershell", input);
 		expect(result?.block).toBe(true);
-		expect(result?.reason).toContain("shared checkout");
+		expect(result?.reason).toBe(sharedTarget(repo));
 		expect(input.command).toBe(`Set-Location ${repo}; git reset --hard`);
 	});
 

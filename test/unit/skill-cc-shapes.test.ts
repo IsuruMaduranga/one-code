@@ -2,7 +2,7 @@
  * skill/index.ts against Claude Code's shapes: the listing's order (project
  * skills, plugin commands, plugin skills, then the bundled catalog) with
  * `when_to_use`; a typed `/<plugin>:<skill>` expanded in the harness; a model
- * call answered "Launching skill" with the text beside it; and code-review's
+ * call answered with the profile's launch line and the text beside it; and code-review's
  * body chosen by tier and effort.
  */
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -13,13 +13,16 @@ import skillExtension from "../../extensions/skill/index.ts";
 import { invalidatePluginsCache } from "../../extensions/lib/plugins.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { BUNDLED_SKILLS_DIR } from "../../extensions/lib/skill-scan.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 
 const root = mkdtempSync(join(tmpdir(), "skill-cc-shapes-"));
 const cwd = join(root, "project");
 const demoDir = join(cwd, ".claude", "skills", "demo");
-const pluginDir = join(root, ".claude", "plugins", "cache", "market", "kit", "1.0.0");
+// The harness's own plugin root (`<agentDir>/plugins`), which every profile reads.
+const pluginsRoot = join(root, "agent", "plugins");
+const pluginDir = join(pluginsRoot, "cache", "market", "kit", "1.0.0");
 const codeReviewFile = join(BUNDLED_SKILLS_DIR, "code-review", "SKILL.md");
 // A Windows checkout may carry CRLF; the selector reads the cells with LF, as Claude Code's text is.
 const cell = (name: string) => readFileSync(join(BUNDLED_SKILLS_DIR, "code-review", "cells", `${name}.md`), "utf-8").replace(/\r\n/g, "\n").trimEnd();
@@ -36,7 +39,7 @@ beforeAll(() => {
 	write(join(pluginDir, "commands", "go.md"), "---\ndescription: Go command\n---\n\nRun go for $ARGUMENTS.\n");
 	write(join(pluginDir, "commands", "silent.md"), "Run silently.\n");
 	write(
-		join(root, ".claude", "plugins", "installed_plugins.json"),
+		join(pluginsRoot, "installed_plugins.json"),
 		JSON.stringify({ version: 2, plugins: { "kit@market": [{ scope: "user", installPath: pluginDir }] } }),
 	);
 	mkdirSync(join(root, "agent"), { recursive: true });
@@ -101,7 +104,7 @@ describe("typed skills expand in the harness", () => {
 		expect(outcome.action).toBe("transform");
 		expect(outcome.text).toBe(
 			"<command-message>kit:tip</command-message>\n<command-name>/kit:tip</command-name>\n<command-args>do it</command-args>\n\n" +
-				`Base directory for this skill: ${join(pluginDir, "skills", "tip")}\n\nTip body.\n\nARGUMENTS: do it\n`,
+				`${requireText("skill").withBaseDir({ dir: join(pluginDir, "skills", "tip"), text: "Tip body.\n\nARGUMENTS: do it" })}\n`,
 		);
 		expect(fake.sentUserMessages).toHaveLength(0);
 	});
@@ -122,14 +125,14 @@ describe("skill tool: Claude Code's result", () => {
 		const { turn, call } = await mount();
 		await turn();
 		const result = await call({ skill: "kit:go", args: "prod" });
-		expect(result.content.map((block) => block.text)).toEqual(["Launching skill: kit:go", "Run go for prod."]);
+		expect(result.content.map((block) => block.text)).toEqual([requireText("skill").launching("kit:go"), "Run go for prod."]);
 	});
 
 	it("gives a frontier session at medium effort the minimal prompt, with no folder named", async () => {
 		const { turn, call } = await mount(frontier, "medium");
 		await turn();
 		const result = await call({ skill: "code-review", args: "123" });
-		expect(result.content[0].text).toBe("Launching skill: code-review");
+		expect(result.content[0].text).toBe(requireText("skill").launching("code-review"));
 		expect(result.content[1].text).toBe(`${cell("minimal-prompt")}\n\n${cell("arguments-and-flags")}\n\nARGUMENTS: 123`);
 	});
 

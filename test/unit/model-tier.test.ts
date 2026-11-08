@@ -14,6 +14,7 @@ import {
 	usesClaudeCodeFastPaths,
 } from "../../extensions/lib/model-tier.ts";
 import { type FixtureModel, pinCatalog } from "./catalog-fixture.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 
 /** Minimal fake — the tier code reads only id/provider/cost. */
 function model(id: string, provider: string, inputCost?: number): Model<Api> {
@@ -338,12 +339,13 @@ describe("taskToolsEnabled (Claude Code's model gate for the task tools)", () =>
 		expect(taskToolsEnabled(undefined, noEnv)).toBe(true);
 	});
 
-	it("turns them back on with CLAUDE_CODE_ENABLE_TODO_TOOLS", () => {
+	it("turns them back on with the product's ENABLE_TODO_TOOLS knob", () => {
 		const opus = model("claude-opus-5-5", "anthropic");
+		const knob = envName("ENABLE_TODO_TOOLS");
 		for (const value of ["1", "true", "YES", "on"]) {
-			expect(taskToolsEnabled(opus, { CLAUDE_CODE_ENABLE_TODO_TOOLS: value } as NodeJS.ProcessEnv)).toBe(true);
+			expect(taskToolsEnabled(opus, { [knob]: value } as NodeJS.ProcessEnv)).toBe(true);
 		}
-		expect(taskToolsEnabled(opus, { CLAUDE_CODE_ENABLE_TODO_TOOLS: "0" } as NodeJS.ProcessEnv)).toBe(false);
+		expect(taskToolsEnabled(opus, { [knob]: "0" } as NodeJS.ProcessEnv)).toBe(false);
 	});
 
 	it("follows a forced tier", () => {

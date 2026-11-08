@@ -1,7 +1,8 @@
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { dirname, join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { envName } from "../../extensions/lib/brand.mjs";
 import { ccToolName, matcherApplies, toolMatchCandidates, ccToolInput, nativeToolInput } from "../../extensions/hooks/matcher.ts";
 import { loadPluginHooks } from "../../extensions/hooks/plugin-hooks.ts";
 import { applyPostToolUseOutcome, type FinishedRun, interpretHookResult, parseEnvelope } from "../../extensions/hooks/protocol.ts";
@@ -176,26 +177,29 @@ describe("settings", () => {
 		cwd = join(root, "project");
 		mkdirSync(claudeDir, { recursive: true });
 		mkdirSync(join(cwd, ".claude"), { recursive: true });
+		vi.stubEnv(envName("STATE_DIR"), join(root, "state"));
 	});
-	afterEach(() => rmSync(root, { recursive: true, force: true }));
+	afterEach(() => {
+		vi.unstubAllEnvs();
+		rmSync(root, { recursive: true, force: true });
+	});
+
+	/** The settings files hooks are read from for the profile in force, managed policy aside, in collection order. */
+	const writable = () => hookSettingsPaths(cwd, join(claudeDir, "..")).filter((path) => path.scope !== "managed").map((path) => path.path);
+	const write = (path: string, text: string) => {
+		mkdirSync(dirname(path), { recursive: true });
+		writeFileSync(path, text);
+	};
 
 	const hooksJson = (command: string) => ({
 		hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command }] }] },
 	});
 
-	it("loads user, project, and local scopes in order", () => {
-		writeFileSync(join(claudeDir, "settings.json"), JSON.stringify(hooksJson("user-hook")));
-		writeFileSync(join(cwd, ".claude", "settings.json"), JSON.stringify(hooksJson("project-hook")));
-		writeFileSync(join(cwd, ".claude", "settings.local.json"), JSON.stringify(hooksJson("local-hook")));
-		const loaded = loadHookSettings(cwd, join(claudeDir, ".."));
-		expect(loaded.sources.map((s) => s.scope)).toEqual(["user", "project", "local"]);
-		expect(loaded.diagnostics).toEqual([]);
-	});
-
 	it("skips malformed files and unsupported hook types with diagnostics", () => {
-		writeFileSync(join(claudeDir, "settings.json"), "{ broken");
-		writeFileSync(
-			join(cwd, ".claude", "settings.json"),
+		const [first, second] = writable();
+		write(first, "{ broken");
+		write(
+			second,
 			JSON.stringify({
 				hooks: {
 					PreToolUse: [{ matcher: "*", hooks: [{ type: "prompt", prompt: "judge this" }] }],
@@ -211,8 +215,8 @@ describe("settings", () => {
 	});
 
 	it("re-reads a file only when its mtime changes", () => {
-		const path = join(claudeDir, "settings.json");
-		writeFileSync(path, JSON.stringify(hooksJson("v1")));
+		const [path] = writable();
+		write(path, JSON.stringify(hooksJson("v1")));
 		utimesSync(path, new Date(1000000), new Date(1000000));
 		expect(loadHookSettings(cwd, join(claudeDir, "..")).sources[0]?.config.PreToolUse?.[0]?.hooks[0]?.command).toBe("v1");
 		writeFileSync(path, JSON.stringify(hooksJson("v2")));
@@ -230,10 +234,6 @@ describe("settings", () => {
 		expect(config.PreToolUse?.[0]?.hooks[0]?.timeout).toBeUndefined();
 	});
 
-	it("names all four candidate paths", () => {
-		const paths = hookSettingsPaths("/p", "/h");
-		expect(paths.map((p) => p.scope)).toEqual(["user", "managed", "project", "local"]);
-	});
 });
 
 describe("plugin hooks", () => {

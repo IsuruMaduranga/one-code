@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { ToldFact } from "../../extensions/lib/ledger/records.ts";
 import { mcpChangeNotices as changeNotices, mcpDelta as delta, mcpFacts as facts, type McpDelta, type McpSnapshot, mcpStartupNotices } from "../../extensions/mcp/announce.ts";
-import { mcp as mcpText } from "../../profile/text/mcp/index.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 
-/** The pure functions with One Code's text, as the extension passes it. */
+const mcpText = requireText("mcp");
+
+/** The pure functions with the profile's text, as the extension passes it. */
 const mcpFacts = (snapshot: McpSnapshot) => facts(snapshot, mcpText);
 const mcpDelta = (told: ReadonlyMap<string, string>, snapshot: McpSnapshot, settling?: boolean, connecting?: ReadonlySet<string>) =>
 	delta(told, snapshot, mcpText, settling, connecting);
@@ -110,7 +112,7 @@ describe("mcpChangeNotices", () => {
 		expect(mcpChangeNotices({ ...nothing, facts: [] })).toEqual([]);
 	});
 
-	it("renders one notice per kind of change, instructions in Claude Code's frame", () => {
+	it("renders one notice per kind of change, in order: recovered, connected with instructions, failed, dropped", () => {
 		const texts = mcpChangeNotices({
 			newInstructions: [{ name: "deepwiki", instructions: "Use ask_question." }],
 			newFailures: [{ name: "gh", error: "401 bad token" }],
@@ -118,15 +120,12 @@ describe("mcpChangeNotices", () => {
 			dropped: ["old"],
 			facts: [],
 		});
-		expect(texts).toHaveLength(4);
-		expect(texts[0]).toContain("ctx7");
-		expect(texts[0]).toContain("connected after this conversation started");
-		expect(texts[1]).toContain("# MCP Server Instructions");
-		expect(texts[1]).toContain("## deepwiki\nUse ask_question.");
-		expect(texts[2]).toContain("- gh: 401 bad token");
-		expect(texts[2]).toContain("failed to connect");
-		expect(texts[3]).toContain("old");
-		expect(texts[3]).toContain("disconnected");
+		expect(texts).toEqual([
+			mcpText.notices.recovered(["ctx7"]),
+			mcpText.notices.connected([{ name: "deepwiki", text: "Use ask_question." }]),
+			mcpText.failed([{ name: "gh", error: "401 bad token" }]),
+			mcpText.notices.dropped(["old"]),
+		]);
 	});
 });
 

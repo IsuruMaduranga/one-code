@@ -1,4 +1,10 @@
+/**
+ * The reminder after a turn that ended with a background run still pending:
+ * nothing when no run is pending, else the profile's text for every pending
+ * run, in order. One Code's wording is checked in profile/test/.
+ */
 import { describe, expect, it } from "vitest";
+import { requireText } from "../../extensions/lib/profile.ts";
 import { pendingClaimReminder } from "../../extensions/subagents/pending-claim.ts";
 
 describe("pendingClaimReminder", () => {
@@ -6,31 +12,13 @@ describe("pendingClaimReminder", () => {
 		expect(pendingClaimReminder([])).toBeUndefined();
 	});
 
-	it("names the run and offers both sanctioned ways to get the result", () => {
-		const text = pendingClaimReminder([{ name: "count-src-python-files", taskId: "b1f7f47e" }]);
-		expect(text).toContain("count-src-python-files (task b1f7f47e)");
-		expect(text).toContain("task_output with block=true");
-		expect(text).toMatch(/wait for the notification/i);
-	});
-
-	it("is conditional, never an accusation — the trigger fires on correct turns too", () => {
-		const text = pendingClaimReminder([{ name: "explore-1", taskId: "aaa" }]) ?? "";
-		// "if you gave the user a result" — a model that merely said "still running"
-		// must be able to read this and do nothing.
-		expect(text).toMatch(/if you gave the user a result/i);
-		expect(text).not.toMatch(/you (fabricated|invented|lied)/i);
-	});
-
-	it("names every pending run and agrees in number", () => {
-		const one = pendingClaimReminder([{ name: "a", taskId: "1" }]) ?? "";
-		expect(one).toContain("was still running");
-		expect(one).toContain("It has not reported");
-		const two = pendingClaimReminder([
+	it("hands the profile every pending run, in order", () => {
+		const one = [{ name: "count-src-python-files", taskId: "b1f7f47e" }];
+		expect(pendingClaimReminder(one)).toBe(requireText("subagents").pendingClaim({ runs: one }));
+		const two = [
 			{ name: "a", taskId: "1" },
 			{ name: "b", taskId: "2" },
-		]) ?? "";
-		expect(two).toContain("a (task 1), b (task 2)");
-		expect(two).toContain("were still running");
-		expect(two).toContain("They have not reported");
+		];
+		expect(pendingClaimReminder(two)).toBe(requireText("subagents").pendingClaim({ runs: two }));
 	});
 });

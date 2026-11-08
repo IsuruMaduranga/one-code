@@ -1,18 +1,13 @@
-import { spawnSync } from "node:child_process";
-import { join } from "node:path";
+/**
+ * Stamping package.json files from the profile's brand. That the committed
+ * files match the shipped brand is the product's own check
+ * (profile/test/apply-brand-committed.test.ts).
+ */
 import { describe, expect, it } from "vitest";
 import { brand } from "../../extensions/lib/brand.mjs";
 import { stampApp, stampExtension } from "../../scripts/apply-brand.mjs";
 
-const ROOT = join(import.meta.dirname, "..", "..");
-
 describe("apply-brand", () => {
-	it("leaves the committed package.json files as they are: they match the brand", () => {
-		const run = spawnSync(process.execPath, [join(ROOT, "scripts", "apply-brand.mjs"), "--check"], { encoding: "utf8" });
-		expect(run.stderr).toBe("");
-		expect(run.status).toBe(0);
-	});
-
 	it("renames another product's packages, command and extension dependency in place", () => {
 		const app = stampApp({
 			name: "@other/app",

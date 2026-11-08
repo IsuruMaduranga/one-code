@@ -6,8 +6,8 @@
  * snapshot pins the bytes of every other result.
  */
 import { describe, expect, it } from "vitest";
-import { nativeWeb } from "../../profile/text/native-web/index.ts";
-import { webSearch } from "../../profile/text/web-search/index.ts";
+import { nativeWeb } from "../text/native-web/index.ts";
+import { webSearch } from "../text/web-search/index.ts";
 
 describe("One Code's web_search text", () => {
 	it("marks a server-side answer cut off at the output limit", () => {

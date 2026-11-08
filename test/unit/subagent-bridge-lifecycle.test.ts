@@ -1,14 +1,15 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { classify } from "../../extensions/auto-mode/classifier.ts";
 import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
+import { productSettingsPath } from "../../extensions/lib/product-settings.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { type PermissionBridge, SUBAGENT_GATE_CHANNEL, watchPermissionBridge } from "../../extensions/permissions/subagent-gate.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { buildGate } from "./helpers/permission-gate-harness.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
+import { brand, envName } from "../../extensions/lib/brand.mjs";
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -40,7 +41,7 @@ describe("subagent permission bridge lifecycle", () => {
 		cwd = join(root, "project");
 		mkdirSync(cwd);
 		vi.stubEnv("CLAUDE_CONFIG_DIR", join(root, ".claude"));
-		vi.stubEnv(envName("STATE_DIR"), join(root, ".onecode"));
+		vi.stubEnv(envName("STATE_DIR"), join(root, brand.stateDir));
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(root, "agent"));
 		fake = createFakePi();
 		fake.events.on(SUBAGENT_GATE_CHANNEL, (data) => {
@@ -65,8 +66,10 @@ describe("subagent permission bridge lifecycle", () => {
 	const writeCall = () => ({ toolName: "write", input: { path: "output.txt", content: "child" }, cwd });
 
 	it("applies Agent(type) deny rules to both main and bridged delegations before classification", async () => {
-		mkdirSync(join(cwd, ".claude"));
-		writeFileSync(join(cwd, ".claude", "settings.json"), JSON.stringify({ permissions: { deny: ["Agent(explore)"] } }));
+		// The product's own settings file, which every profile reads.
+		const settings = productSettingsPath(homedir());
+		mkdirSync(dirname(settings), { recursive: true });
+		writeFileSync(settings, JSON.stringify({ permissions: { deny: ["Agent(explore)"] } }));
 		await fake.fire("session_start", { reason: "reload" }, ctx);
 		fake.events.emit(MODE_CHANNEL, { mode: "auto" });
 		const call = { toolName: "Agent", input: { subagent_type: "Explore", prompt: "Inspect the repository" }, cwd };

@@ -1,9 +1,15 @@
+/**
+ * One Code's wording of the worktree guards' refusals (its profile's
+ * `worktreeGuard` group): each case checks the decision and the text the
+ * model reads. The decisions alone, on any profile, are tested in
+ * test/unit/worktree-guards.test.ts.
+ */
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { namesGit, worktreeBashGuardReason as refusalFor, type WorktreeGuardContext } from "../../extensions/worktree/guards.ts";
-import { worktreeGuard } from "../../profile/text/worktree/guard.ts";
+import { worktreeGuard } from "../text/worktree/guard.ts";
 
 /** The guard's refusal in One Code's words, so each case checks the decision and the text the model reads. */
 const worktreeBashGuardReason = (context: WorktreeGuardContext) => {

@@ -35,9 +35,12 @@ vi.mock("../../extensions/lib/pi-version.ts", async (importOriginal) => {
 	return { ...actual, piFiresBeforeAgentStartForCustomRuns: (version: string | undefined) => piModel.customRunsFireBeforeAgentStart ?? actual.piFiresBeforeAgentStartForCustomRuns(version) };
 });
 import backgroundExtension from "../../extensions/background/index.ts";
+import { RECURRING_MAX_AGE_DAYS } from "../../extensions/background/cron.ts";
+import { STORED_OUTPUT_CAP } from "../../extensions/bash/background.ts";
 import { MONITOR_BATCH_MAX_LINES } from "../../extensions/background/monitor-batch.ts";
 import { TASK_REGISTER_CHANNEL } from "../../extensions/background/registry.ts";
-import { DEFAULT_COALESCE_MS, NOTIFICATION_ID_KEY } from "../../extensions/lib/notifications.ts";
+import { DEFAULT_COALESCE_MS, escapeTaskText, monitorEndedSummary, monitorEventSummary, NOTIFICATION_ID_KEY, oneShotNote } from "../../extensions/lib/notifications.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 import { SESSION_WORK_CHANNEL, type SessionWorkQuery } from "../../extensions/lib/session-work.ts";
 import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, agentOwnsCronJobs } from "../../extensions/lib/agent-cron.ts";
 import { SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../../extensions/lib/skill-body.ts";
@@ -48,6 +51,22 @@ import { join } from "node:path";
 import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
 import { createFakeCtx, createFakePi, type FakePi, flushNotices } from "./helpers/fake-pi.ts";
 import { resetProcessStateForTest } from "../../extensions/lib/process-state.ts";
+
+// The profile's words: each test checks that the base hands them the right
+// facts and places what they return (One Code's wording is
+// profile/test/background-wiring-wording.test.ts).
+const words = requireText("background");
+const toolResultWords = requireText("toolResults");
+const maxAgeDays = RECURRING_MAX_AGE_DAYS;
+/** A `<summary>` line of a task notification, as the base frames the profile's summary. */
+const summaryTag = (summary: string) => `<summary>${escapeTaskText(summary)}</summary>`;
+/** The first fire of an autonomous /loop (the instructions, then the tick), and every later one. */
+const fullLoopFire = () => words.loop.withPreamble({ persistent: false, tick: words.loop.tick("autonomous") });
+const shortLoopFire = () => words.loop.tick("autonomous");
+
+afterEach(() => {
+	vi.restoreAllMocks();
+});
 
 function mount(): FakePi {
 	const fake = createFakePi();
@@ -90,20 +109,21 @@ describe("background wiring: monitor batching", () => {
 		}
 		await new Promise((resolve) => setTimeout(resolve, DEFAULT_COALESCE_MS + 50));
 
-		// CC's mid-run monitor batch: `Monitor event: "…"` with the lines in <event>.
+		// CC's mid-run monitor batch: the event summary, with the lines in <event>.
+		const eventSummary = summaryTag(monitorEventSummary("many lines"));
 		const batchMessage = fake.sentMessages.find((m) => {
 			const text = (m.message.content as Array<{ text?: string }>)[0]?.text ?? "";
-			return text.includes('<summary>Monitor event: "many lines"</summary>');
+			return text.includes(eventSummary);
 		});
 		expect(batchMessage).toBeDefined();
 		const batchText = (batchMessage!.message.content as Array<{ text: string }>)[0].text;
-		expect(batchText).toContain(`+10 more line(s) not shown — task_output ${taskId} has the full stream`);
-		expect(batchText).toContain(`<task-id>${taskId}</task-id>\n<summary>Monitor event`); // no <status> on a batch
+		expect(batchText).toContain(escapeTaskText(words.monitor.moreLines({ hidden: 10, taskId })));
+		expect(batchText).toContain(`<task-id>${taskId}</task-id>\n${eventSummary}`); // no <status> on a batch
 
 		// CC's monitor end: status + the ended summary, the recent tail in <event>.
 		const completion = fake.sentMessages.find((m) => {
 			const text = (m.message.content as Array<{ text?: string }>)[0]?.text ?? "";
-			return text.includes("<status>completed</status>") && text.includes('<summary>Monitor "many lines" stream ended</summary>');
+			return text.includes("<status>completed</status>") && text.includes(summaryTag(monitorEndedSummary("many lines", "completed", true)));
 		});
 		expect(completion).toBeDefined();
 		// Coalesced (STEERING-REVIEW-2026-09-05 M1): one custom message carries both.
@@ -146,7 +166,7 @@ describe("background wiring: monitor batching", () => {
 		const stopResult = (await taskStop.execute("c2", { task_id: taskId }, undefined, undefined, ctx)) as {
 			content: Array<{ text: string }>;
 		};
-		expect(stopResult.content[0].text).toContain("Stop requested");
+		expect(stopResult.content[0].text).toBe(words.tasks.stopRequested({ id: taskId, description: "long runner" }));
 
 		const taskOutput = fake.tools.get("task_output")!;
 		const outputResult = (await taskOutput.execute("c3", { task_id: taskId, block: true, timeout: 5000 }, undefined, undefined, ctx)) as {
@@ -163,7 +183,7 @@ describe("background wiring: monitor batching", () => {
 			content: Array<{ text: string }>;
 		};
 		expect(result.isError).toBe(true);
-		expect(result.content[0].text).toContain('No background task "nope"');
+		expect(result.content[0].text).toBe(words.tasks.unknownTask({ id: "nope", known: [] }));
 	});
 });
 
@@ -182,11 +202,11 @@ describe("background wiring: schedule_wakeup (Claude Code's dynamic loop)", () =
 		const fake = mount();
 		const ctx = liveSessionCtx();
 		const scheduled = await wake(fake, { delaySeconds: 5, prompt: "check the build", reason: "quick poll", noop: false }, ctx);
-		expect(scheduled.content[0].text).toMatch(
-			/^Next wakeup scheduled for 12:01:00 \(in 60s\) \(clamped to 60s from your requested value\)\. Nothing more to do this turn — the harness re-invokes you when the wakeup fires or a task-notification arrives\.$/,
-		);
+		expect(scheduled.content[0].text).toBe(words.wakeup.scheduled({ clock: "12:01:00", inSeconds: 60, clampedTo: 60 }));
+		const list = vi.spyOn(words.cron, "list");
 		const listed = await fake.tools.get("cron_list")!.execute("c", {}, undefined, undefined, ctx) as { content: Array<{ text: string }> };
-		expect(listed.content[0].text).toMatch(/^[0-9a-f]{8} — Every day at 12:01 PM \(one-shot\) \[session-only\]: check the build$/);
+		expect(list.mock.calls).toEqual([[{ jobs: [{ id: expect.stringMatching(/^[0-9a-f]{8}$/), cadence: "Every day at 12:01 PM", recurring: false, prompt: "check the build" }] }]]);
+		expect(listed.content[0].text).toBe(list.mock.results[0].value);
 
 		await vi.advanceTimersByTimeAsync(60_000 + DEFAULT_COALESCE_MS);
 		expect(wakeups(fake)).toHaveLength(1);
@@ -199,27 +219,25 @@ describe("background wiring: schedule_wakeup (Claude Code's dynamic loop)", () =
 		const ctx = liveSessionCtx();
 		await wake(fake, { delaySeconds: 120, prompt: "task", reason: "r", noop: true }, ctx);
 		const noReason = await wake(fake, { delaySeconds: 60, prompt: "p", noop: true }, ctx);
-		expect(noReason).toMatchObject({ isError: true, content: [{ text: "`delaySeconds` and `reason` are required when `stop` is not true." }] });
+		expect(noReason).toMatchObject({ isError: true, content: [{ text: words.wakeup.missing("delayAndReason") }] });
 		const noPrompt = await wake(fake, { delaySeconds: 60, reason: "r", noop: true }, ctx);
-		expect(noPrompt.content[0].text).toBe("`prompt` is required when `stop` is not true.");
+		expect(noPrompt.content[0].text).toBe(words.wakeup.missing("prompt"));
 		const noNoop = await wake(fake, { delaySeconds: 60, reason: "r", prompt: "p" }, ctx);
-		expect(noNoop.content[0].text).toBe("`noop` is required when `stop` is not true.");
+		expect(noNoop.content[0].text).toBe(words.wakeup.missing("noop"));
 		await vi.advanceTimersByTimeAsync(120_000 + DEFAULT_COALESCE_MS);
 		expect(wakeups(fake)).toHaveLength(1);
 	});
 
-	it("keeps one wakeup pending (a new one supersedes it) and stop cancels it with Claude Code's text", async () => {
+	it("keeps one wakeup pending (a new one supersedes it) and stop cancels it, saying how many it cancelled", async () => {
 		vi.useFakeTimers();
 		const fake = mount();
 		const ctx = liveSessionCtx();
 		await wake(fake, { delaySeconds: 60, prompt: "first", reason: "r", noop: false }, ctx);
 		await wake(fake, { delaySeconds: 120, prompt: "second", reason: "r", noop: false }, ctx);
 		const stopped = await wake(fake, { stop: true }, ctx);
-		expect(stopped.content[0].text).toBe(
-			"Loop stopped — cancelled 1 pending wakeup(s); no further dynamic-loop wakeups scheduled. If you armed a monitor for this loop, task_stop it now; otherwise nothing more to do this turn.",
-		);
+		expect(stopped.content[0].text).toBe(words.wakeup.stopped({ cancelled: 1 }));
 		const again = await wake(fake, { stop: true }, ctx);
-		expect(again.content[0].text).toContain("there was no pending wakeup to cancel. If you are running a fixed-interval /loop (a recurring cron), it is NOT stopped by this call — cancel it with cron_delete.");
+		expect(again.content[0].text).toBe(words.wakeup.stopped({ cancelled: 0 }));
 		await vi.advanceTimersByTimeAsync(300_000);
 		expect(wakeups(fake)).toHaveLength(0);
 	});
@@ -248,7 +266,7 @@ describe("background wiring: schedule_wakeup (Claude Code's dynamic loop)", () =
 		];
 		const [answer] = await fake.fire<{ messages: Array<{ role: string; content: unknown }> }>("context", { messages: context });
 		expect(answer.messages.map((m) => m.role)).toEqual(["user", "user", "custom"]);
-		expect(answer.messages[1].content).toEqual([{ type: "text", text: "[1 prior /loop wakeup found nothing actionable; loop is healthy.]" }]);
+		expect(answer.messages[1].content).toEqual([{ type: "text", text: words.loop.foldNote({ streak: 1 }) }]);
 	});
 
 	it("keepalive: a wakeup's turn that schedules nothing gets one 1200 s fallback; a second miss ends the loop", async () => {
@@ -306,8 +324,9 @@ describe("background wiring: cron tools", () => {
 		const fake = mount();
 		const ctx = liveSessionCtx();
 		const created = await cronCall(fake, "cron_create", { cron: "30 14 25 9 *", prompt: "check the deploy", recurring: false }, ctx);
-		expect(created.content[0].text).toMatch(
-			/^Scheduled one-shot task [0-9a-f]{8} \(30 14 25 9 \*\)\. Session-only \(not written to disk, dies when this session ends\)\. It will fire once then auto-delete\.$/,
+		expect(created.details.jobId).toMatch(/^[0-9a-f]{8}$/);
+		expect(created.content[0].text).toBe(
+			words.cron.created({ job: { id: created.details.jobId as string, cadence: "30 14 25 9 *", recurring: false, prompt: "check the deploy" }, maxAgeDays }),
 		);
 
 		await vi.advanceTimersByTimeAsync(60_000);
@@ -318,7 +337,7 @@ describe("background wiring: cron tools", () => {
 		expect((fire.message.content as Array<{ text: string }>)[0].text).toBe("check the deploy");
 		expect(fire.message.details).toMatchObject({ jobId: created.details.jobId, final: true, source: "model" });
 
-		expect((await cronCall(fake, "cron_list", {}, ctx)).content[0].text).toBe("No scheduled jobs.");
+		expect((await cronCall(fake, "cron_list", {}, ctx)).content[0].text).toBe(words.cron.list({ jobs: [] }));
 	});
 
 	it("a recurring job due during a turn fires once at settle, and re-arms for its next match", async () => {
@@ -328,8 +347,9 @@ describe("background wiring: cron tools", () => {
 		const ctx = liveSessionCtx();
 		const confirmPending = confirmer(fake);
 		const created = await cronCall(fake, "cron_create", { cron: "*/10 * * * *", prompt: "poll ci" }, ctx);
-		expect(created.content[0].text).toContain("(Every 10 minutes). Session-only");
-		expect(created.content[0].text).toContain("Auto-expires after 7 days. Use cron_delete to cancel sooner.");
+		expect(created.content[0].text).toBe(
+			words.cron.created({ job: { id: created.details.jobId as string, cadence: "Every 10 minutes", recurring: true, prompt: "poll ci" }, maxAgeDays }),
+		);
 
 		await fake.fireOne("agent_start", {});
 		await vi.advanceTimersByTimeAsync(16 * 60_000);
@@ -369,33 +389,36 @@ describe("background wiring: cron tools", () => {
 		const ctx = liveSessionCtx();
 		const bad = await cronCall(fake, "cron_create", { cron: "every 5 minutes", prompt: "x" }, ctx);
 		expect(bad.isError).toBe(true);
-		expect(bad.content[0].text).toBe("Invalid cron expression 'every 5 minutes'. Expected 5 fields: M H DoM Mon DoW.");
+		expect(bad.content[0].text).toBe(words.cron.createFailed({ kind: "invalid", cron: "every 5 minutes" }));
 		const unknown = await cronCall(fake, "cron_delete", { id: "deadbeef" }, ctx);
 		expect(unknown.isError).toBe(true);
-		expect(unknown.content[0].text).toBe("No scheduled job with id 'deadbeef'");
+		expect(unknown.content[0].text).toBe(words.cron.unknownJob({ id: "deadbeef" }));
 	});
 
 	it("in a one-shot mode the job is created but the result says it can never fire", async () => {
 		const fake = mount();
 		const created = await cronCall(fake, "cron_create", { cron: "*/5 * * * *", prompt: "x" }, createFakeCtx({ mode: "print" }));
 		expect(created.isError).toBeFalsy();
-		expect(created.content[0].text).toContain("This is a one-shot session: it ends when this turn does, so the job will never fire.");
+		const job = { id: created.details.jobId as string, cadence: "Every 5 minutes", recurring: true, prompt: "x" };
+		expect(created.content[0].text).toBe(`${words.cron.created({ job, maxAgeDays })} ${words.cron.neverFires}`);
 	});
 
 	it("accepts `durable` and ignores it, as Claude Code does with its durable mode off", async () => {
 		const fake = mount();
 		const schema = fake.tools.get("cron_create")!.parameters as { properties: Record<string, { description?: string }> };
-		expect(schema.properties.durable.description).toBe("Has no effect — durable persistence is not available. All jobs are session-only (in-memory, gone when this session ends).");
+		expect(schema.properties.durable.description).toBe(words.cron.createParams({ maxAgeDays }).durable);
 		const created = await cronCall(fake, "cron_create", { cron: "*/10 * * * *", prompt: "x", durable: true }, liveSessionCtx());
-		expect(created.content[0].text).toContain("Session-only (not written to disk, dies when this session ends)");
+		expect(created.isError).toBeFalsy();
+		expect(created.content[0].text).toBe(
+			words.cron.created({ job: { id: created.details.jobId as string, cadence: "Every 10 minutes", recurring: true, prompt: "x" }, maxAgeDays }),
+		);
 	});
 
-	it("builds /loop's body for our bundled SKILL.md only", () => {
+	it("builds /loop's body for the bundled SKILL.md only", () => {
 		const fake = mount();
 		const ours: SkillBodyQuery = { skill: "loop", path: join(BUNDLED_SKILLS_DIR, "loop", "SKILL.md"), args: "5m check CI", cwd: "/nowhere" };
 		fake.events.emit(SKILL_BODY_CHANNEL, ours);
-		expect(ours.body).toContain("# /loop — schedule a recurring or self-paced prompt");
-		expect(ours.body?.endsWith("## Input\n\n5m check CI")).toBe(true);
+		expect(ours.body).toBe(words.loop.skillBody({ form: { kind: "prompt", input: "5m check CI" }, loopFile: null, persistent: false, maxAgeDays }));
 		const theirs: SkillBodyQuery = { skill: "loop", path: "/project/.claude/skills/loop/SKILL.md", args: "x", cwd: "/nowhere" };
 		fake.events.emit(SKILL_BODY_CHANNEL, theirs);
 		expect(theirs.body).toBeUndefined();
@@ -418,8 +441,7 @@ describe("background wiring: cron tools", () => {
 		await vi.advanceTimersByTimeAsync(60_000 + DEFAULT_COALESCE_MS);
 		const texts = cronFires(fake).map((m) => (m.message.content as Array<{ text: string }>)[0].text);
 		expect(texts[0]).toBe('<skill name="babysit-prs">…</skill>');
-		expect(texts[1].startsWith("# Autonomous loop check")).toBe(true);
-		expect(texts[1]).toContain("\n\n---\n\n# Autonomous loop tick");
+		expect(texts[1]).toBe(fullLoopFire());
 	});
 
 	it("keeps a subagent's jobs its own: tagged, listed and deletable only by it, fired to it or dropped", async () => {
@@ -432,18 +454,21 @@ describe("background wiring: cron tools", () => {
 			return request.result!;
 		};
 		const created = ask({ op: "create", agentId: "a1", cwd: "/project", cron: "1 12 * * *", prompt: "agent check", recurring: false });
-		expect(created.text).toMatch(/^Scheduled one-shot task [0-9a-f]{8} /);
 		const jobId = created.details!.jobId as string;
+		expect(jobId).toMatch(/^[0-9a-f]{8}$/);
+		expect(created.text).toBe(words.cron.created({ job: { id: jobId, cadence: "Every day at 12:01 PM", recurring: false, prompt: "agent check" }, maxAgeDays }));
 		await cronCall(fake, "cron_create", { cron: "*/10 * * * *", prompt: "main job" }, ctx);
 
-		expect(ask({ op: "list", agentId: "a1" }).text).toBe(`${jobId} — Every day at 12:01 PM (one-shot) [session-only]: agent check`);
-		expect(ask({ op: "list", agentId: "a2" }).text).toBe("No scheduled jobs.");
+		expect(ask({ op: "list", agentId: "a1" }).text).toBe(words.cron.list({ jobs: [{ id: jobId, cadence: "Every day at 12:01 PM", recurring: false, prompt: "agent check" }] }));
+		expect(ask({ op: "list", agentId: "a2" }).text).toBe(words.cron.list({ jobs: [] }));
 		// What keeps the agent resident (subagents' reaper).
 		expect(agentOwnsCronJobs(fake.events, "a1")).toBe(true);
 		expect(agentOwnsCronJobs(fake.events, "a2")).toBe(false);
 		// The main session sees every job.
-		expect((await cronCall(fake, "cron_list", {}, ctx)).content[0].text.split("\n")).toHaveLength(2);
-		expect(ask({ op: "delete", agentId: "a2", id: jobId })).toEqual({ text: `Cannot delete cron job '${jobId}': owned by another agent`, isError: true });
+		const list = vi.spyOn(words.cron, "list");
+		await cronCall(fake, "cron_list", {}, ctx);
+		expect(list.mock.calls[0][0].jobs.map((job) => job.prompt).sort()).toEqual(["agent check", "main job"]);
+		expect(ask({ op: "delete", agentId: "a2", id: jobId })).toEqual({ text: words.cron.notOwner({ id: jobId }), isError: true });
 
 		const fires: AgentCronFire[] = [];
 		fake.events.on(AGENT_CRON_FIRE_CHANNEL, (data) => fires.push(data as AgentCronFire));
@@ -481,10 +506,8 @@ describe("background wiring: cron tools", () => {
 		await confirmPending();
 		await vi.advanceTimersByTimeAsync(2 * 60_000);
 		const mainText = (cronFires(fake)[0].message.content as Array<{ text: string }>)[0].text;
-		expect(mainText.startsWith("# Autonomous loop check")).toBe(true);
-		expect(agentTexts).toHaveLength(2);
-		expect(agentTexts[0].startsWith("# Autonomous loop check")).toBe(true);
-		expect(agentTexts[1].startsWith("# Autonomous loop tick")).toBe(true);
+		expect(mainText).toBe(fullLoopFire());
+		expect(agentTexts).toEqual([fullLoopFire(), shortLoopFire()]);
 	});
 
 	it("resolves a fired prompt in its owner's directory: the agent's, the main worktree, or the session's", async () => {
@@ -526,7 +549,7 @@ describe("background wiring: cron tools", () => {
 		await vi.advanceTimersByTimeAsync(10 * 60_000 + DEFAULT_COALESCE_MS);
 		const list: AgentCronRequest = { op: "list", agentId: "gone" };
 		fake.events.emit(AGENT_CRON_CHANNEL, list);
-		expect(list.result!.text).toBe("No scheduled jobs.");
+		expect(list.result!.text).toBe(words.cron.list({ jobs: [] }));
 	});
 
 	it("answers the Stop hook's query with its pending jobs", async () => {
@@ -602,6 +625,7 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 	it("A3-H1: after an Esc a monitor keeps one bounded batch while held, and sends it once the next turn starts", async () => {
 		const fake = mount();
 		const ctx = liveSessionCtx();
+		const moreLines = vi.spyOn(words.monitor, "moreLines");
 		await fake.fire("agent_start", {}, ctx);
 		const start = (await fake.tools.get("monitor")!.execute(
 			"c1",
@@ -624,9 +648,12 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 			await new Promise((resolve) => setTimeout(resolve, 50));
 		}
 		await fake.tools.get("task_stop")!.execute("c2", { task_id: start.details.taskId }, undefined, undefined, ctx);
-		const batches = fake.sentMessages.filter((m) => ((m.message.content as Array<{ text: string }>)[0]?.text ?? "").includes("Monitor event"));
+		const batches = fake.sentMessages.filter((m) => ((m.message.content as Array<{ text: string }>)[0]?.text ?? "").includes(summaryTag(monitorEventSummary("ticker"))));
 		expect(batches).toHaveLength(1);
-		expect((batches[0].message.content as Array<{ text: string }>)[0].text).toMatch(/\+\d+ more line\(s\) not shown/);
+		// The one batch is bounded: it names the lines it left out.
+		expect(moreLines).toHaveBeenCalledOnce();
+		expect(moreLines.mock.calls[0][0]).toMatchObject({ hidden: expect.any(Number), taskId: start.details.taskId });
+		expect((batches[0].message.content as Array<{ text: string }>)[0].text).toContain(escapeTaskText(moreLines.mock.results[0].value));
 	}, 10_000);
 
 	it("M2: task_stop ends the monitored command itself (a `cmd; echo` sequence), so the task finishes at once", async () => {
@@ -657,6 +684,7 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 	it("M3: in a one-shot mode the monitor runs to its end and returns the events in the result, registering nothing", async () => {
 		const fake = mount();
 		const ctx = createFakeCtx({ mode: "print" });
+		const ranToEnd = vi.spyOn(words.monitor, "ranToEnd");
 		const result = (await fake.tools.get("monitor")!.execute(
 			"c1",
 			{ command: "echo ev1; echo ev2; echo ev3", description: "one-shot" },
@@ -664,23 +692,30 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 			undefined,
 			ctx,
 		)) as { content: Array<{ text: string }>; details: Record<string, unknown>; isError?: boolean };
-		const text = result.content[0].text;
-		expect(text).toContain("completed after 3 event(s)");
-		expect(text).toContain("This is a one-shot session, so the monitor ran to completion instead of in the background.");
-		expect(text).toContain("ev1\nev2\nev3");
+		expect(ranToEnd).toHaveBeenCalledOnce();
+		expect(ranToEnd.mock.calls[0][0]).toEqual({
+			id: expect.any(String),
+			description: "one-shot",
+			end: { kind: "completed" },
+			events: 3,
+			note: oneShotNote("monitor"),
+			output: "ev1\nev2\nev3",
+		});
+		expect(result.content[0].text).toBe(ranToEnd.mock.results[0].value);
 		expect(result.isError).toBeFalsy();
 		expect(result.details.taskId).toBeUndefined();
 		// Nothing addressable afterwards, and no notification ever queued.
 		const lookup = (await fake.tools.get("task_output")!.execute("c2", { task_id: "anything" }, undefined, undefined, ctx)) as {
 			content: Array<{ text: string }>;
 		};
-		expect(lookup.content[0].text).toContain("Known tasks: (none)");
+		expect(lookup.content[0].text).toBe(words.tasks.unknownTask({ id: "anything", known: [] }));
 		await new Promise((resolve) => setTimeout(resolve, DEFAULT_COALESCE_MS + 50));
 		expect(fake.sentMessages).toHaveLength(0);
 	});
 
 	it("A3-M2: a last line without a newline is an event, one-shot and interactive; a silent monitor says it saw nothing", async () => {
 		const fake = mount();
+		const ranToEnd = vi.spyOn(words.monitor, "ranToEnd");
 		const oneShot = (await fake.tools.get("monitor")!.execute(
 			"c1",
 			{ command: "printf 'first\\nREADY'", description: "health" },
@@ -688,8 +723,8 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 			undefined,
 			createFakeCtx({ mode: "print" }),
 		)) as { content: Array<{ text: string }> };
-		expect(oneShot.content[0].text).toContain("completed after 2 event(s)");
-		expect(oneShot.content[0].text).toContain("first\nREADY");
+		expect(ranToEnd.mock.calls[0][0]).toMatchObject({ end: { kind: "completed" }, events: 2, output: "first\nREADY" });
+		expect(oneShot.content[0].text).toBe(ranToEnd.mock.results[0].value);
 
 		const ctx = liveSessionCtx();
 		const output = async (command: string) => {
@@ -703,8 +738,8 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 		};
 		expect(await output("printf 'READY'")).toContain("READY");
 		const silent = await output("true");
-		expect(silent).toContain("(no output — the monitor received no events and nothing on stderr)");
-		expect(silent).not.toContain("(no output yet)");
+		expect(silent).toContain(words.monitor.noOutput);
+		expect(silent).not.toContain(words.tasks.noOutputYet);
 	});
 
 	it("A6-L2: a monitor keeps a UTF-8 character split across two reads whole", async () => {
@@ -739,7 +774,7 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 			const logPath = join(dir, "monitor", start.details.taskId, "output.log");
 			expect(out.details.logPath).toBe(logPath);
 			const body = out.content[0].text.split("\n\n").slice(1).join("\n\n");
-			expect(body.startsWith(`[Truncated. Full output: ${logPath}]`)).toBe(true);
+			expect(body.startsWith(words.tasks.clippedHeader({ path: logPath }))).toBe(true);
 			expect(body.length).toBeLessThanOrEqual(32_000);
 			expect(body).toContain("line-4000-");
 			// Whole the moment the blocking task_output returns: the task finishes after the spool closes.
@@ -757,6 +792,8 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 		try {
 			const fake = mount();
 			const ctx = liveSessionCtx({ sessionManager: { getSessionDir: () => dir } });
+			const clippedHeader = vi.spyOn(words.tasks, "clippedHeader");
+			const persisted = vi.spyOn(toolResultWords, "persisted");
 			const start = (await fake.tools.get("monitor")!.execute(
 				"c1",
 				{ command: "for i in $(seq 1 4000); do echo line-$i-padding-padding; done", description: "long" },
@@ -770,10 +807,12 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 			};
 			expect(out.details.logPath).toBeUndefined();
 			const text = out.content[0].text;
-			expect(text).not.toContain("Full output: ");
-			const file = text.match(/Full output saved to: (\S+)/)?.[1];
-			expect(file).toBeDefined();
-			const saved = readFileSync(file!, "utf8");
+			// No spool file is named; the persisted copy is.
+			expect(clippedHeader).not.toHaveBeenCalled();
+			expect(persisted).toHaveBeenCalledOnce();
+			const { file } = persisted.mock.calls[0][0];
+			expect(text).toContain(persisted.mock.results[0].value);
+			const saved = readFileSync(file, "utf8");
 			expect(saved.startsWith("line-1-padding-padding\n")).toBe(true);
 			expect(saved).toContain("line-4000-padding-padding");
 		} finally {
@@ -786,6 +825,8 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 		const dir = mkdtempSync(join(tmpdir(), "monitor-oneshot-spool-"));
 		try {
 			const fake = mount();
+			const ranToEnd = vi.spyOn(words.monitor, "ranToEnd");
+			const persisted = vi.spyOn(toolResultWords, "persisted");
 			const result = (await fake.tools.get("monitor")!.execute(
 				"c1",
 				{ command: "for i in $(seq 1 12000); do echo line-$i-padding-padding-padding; done", description: "long" },
@@ -793,18 +834,21 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 				undefined,
 				createFakeCtx({ mode: "print", sessionManager: { getSessionDir: () => dir } }),
 			)) as { content: Array<{ text: string }> };
-			const text = result.content[0].text;
-			expect(text).toContain("completed after 12000 event(s)");
-			expect(text).toContain("Preview (first 2KB):\nline-1-padding-padding-padding\n");
+			expect(ranToEnd.mock.calls[0][0]).toMatchObject({ end: { kind: "completed" }, events: 12000 });
+			expect(result.content[0].text).toBe(ranToEnd.mock.results[0].value);
+			const { output } = ranToEnd.mock.calls[0][0];
+			expect(output).toContain(`${toolResultWords.previewHeading({ kb: 2 })}\nline-1-padding-padding-padding\n`);
 			// The spool itself is named: nothing reads it whole or copies it.
-			const file = text.match(/Full output saved to: (\S+)/)?.[1];
-			expect(file?.startsWith(join(dir, "monitor"))).toBe(true);
-			expect(file?.endsWith("output.log")).toBe(true);
+			expect(persisted).toHaveBeenCalledOnce();
+			const { file } = persisted.mock.calls[0][0];
+			expect(output).toContain(persisted.mock.results[0].value);
+			expect(file.startsWith(join(dir, "monitor"))).toBe(true);
+			expect(file.endsWith("output.log")).toBe(true);
 			expect(existsSync(join(dir, "tool-results"))).toBe(false);
-			const saved = readFileSync(file!, "utf8");
+			const saved = readFileSync(file, "utf8");
 			expect(saved.startsWith("line-1-padding-padding-padding\n")).toBe(true);
 			expect(saved).toContain("line-12000-padding-padding-padding");
-			expect(saved).not.toContain("earlier output truncated");
+			expect(saved).not.toContain(words.monitor.earlierTruncated);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -812,14 +856,16 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 
 	it("a session-less one-shot monitor past the in-memory cap still spools every line", async () => {
 		const fake = mount();
-		const result = (await fake.tools.get("monitor")!.execute(
+		const persisted = vi.spyOn(toolResultWords, "persisted");
+		await fake.tools.get("monitor")!.execute(
 			"c1",
 			{ command: "for i in $(seq 1 12000); do echo line-$i-padding-padding-padding; done", description: "long" },
 			undefined,
 			undefined,
 			createFakeCtx({ mode: "print", sessionManager: { getSessionDir: () => undefined, getSessionId: () => "monitor-sessionless-test" } }),
-		)) as { content: Array<{ text: string }> };
-		const file = result.content[0].text.match(/Full output saved to: (\S+)/)?.[1];
+		);
+		expect(persisted).toHaveBeenCalledOnce();
+		const file: string | undefined = persisted.mock.calls[0][0].file;
 		expect(file).toBeDefined();
 		try {
 			expect(file!).toContain(join("monitor-sessionless-test", "monitor"));
@@ -836,18 +882,20 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 		spool.fail = true;
 		try {
 			const fake = mount();
-			const result = (await fake.tools.get("monitor")!.execute(
+			const ranToEnd = vi.spyOn(words.monitor, "ranToEnd");
+			const persisted = vi.spyOn(toolResultWords, "persisted");
+			await fake.tools.get("monitor")!.execute(
 				"c1",
 				{ command: "for i in $(seq 1 12000); do echo line-$i-padding-padding-padding; done", description: "long" },
 				undefined,
 				undefined,
 				createFakeCtx({ mode: "print", sessionManager: { getSessionDir: () => dir } }),
-			)) as { content: Array<{ text: string }> };
-			const text = result.content[0].text;
-			expect(text).toContain("<persisted-output>");
-			expect(text).toContain("[The monitor's spool file could not be written, so only the last 200,000 characters of its output were kept.]");
-			const file = text.match(/Full output saved to: (\S+)/)?.[1];
-			expect(readFileSync(file!, "utf8")).toContain("line-12000-padding-padding-padding");
+			);
+			const { output } = ranToEnd.mock.calls[0][0];
+			expect(output).toContain("<persisted-output>");
+			expect(output).toContain(words.monitor.spoolLost({ keptChars: STORED_OUTPUT_CAP }));
+			const { file } = persisted.mock.calls[0][0];
+			expect(readFileSync(file, "utf8")).toContain("line-12000-padding-padding-padding");
 		} finally {
 			spool.fail = false;
 			rmSync(dir, { recursive: true, force: true });
@@ -870,12 +918,13 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 				stop: () => {},
 				finished: Promise.resolve(),
 			});
+			const persisted = vi.spyOn(toolResultWords, "persisted");
 			const out = (await fake.tools.get("task_output")!.execute("c1", { task_id: "bagent01" }, undefined, undefined, ctx)) as { content: Array<{ text: string }> };
 			const text = out.content[0].text;
 			expect(text).toContain("<persisted-output>");
-			const file = text.match(/Full output saved to: (\S+)/)?.[1];
-			expect(file).toBeDefined();
-			expect(readFileSync(file!, "utf8")).toBe(report);
+			expect(persisted).toHaveBeenCalledOnce();
+			expect(text).toContain(persisted.mock.results[0].value);
+			expect(readFileSync(persisted.mock.calls[0][0].file, "utf8")).toBe(report);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -883,6 +932,7 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 
 	it("M3: a one-shot monitor stops when the tool call is aborted and says so", async () => {
 		const fake = mount();
+		const ranToEnd = vi.spyOn(words.monitor, "ranToEnd");
 		const controller = new AbortController();
 		setTimeout(() => controller.abort(), 150);
 		const result = (await fake.tools.get("monitor")!.execute(
@@ -892,7 +942,8 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 			undefined,
 			createFakeCtx({ mode: "json" }),
 		)) as { content: Array<{ text: string }> };
-		expect(result.content[0].text).toContain("stopped (tool call aborted) after 0 event(s)");
+		expect(ranToEnd.mock.calls[0][0]).toMatchObject({ end: { kind: "aborted" }, events: 0, output: words.monitor.noEvents });
+		expect(result.content[0].text).toBe(ranToEnd.mock.results[0].value);
 	});
 
 	it("L3: /clear reports the tasks it stopped in the NEXT session, not the one being torn down", async () => {
@@ -948,8 +999,8 @@ describe("background wiring: state across /reload, /tree and compaction", () => 
 		await fake.fireOne("message_end", { message: { role: "custom", customType: sent?.customType, details: sent?.details } });
 		return firedTexts(fake).at(-1)!;
 	};
-	const isFull = (text: string) => text.startsWith("# Autonomous loop check");
-	const isShort = (text: string) => text.startsWith("# Autonomous loop tick");
+	const isFull = (text: string) => text === fullLoopFire();
+	const isShort = (text: string) => text === shortLoopFire();
 
 	it("R3-M17: after /reload a re-armed wakeup goes out as a wakeup message carrying its fold, not as a user message", async () => {
 		vi.useFakeTimers();

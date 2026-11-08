@@ -12,7 +12,7 @@ import {
 	typedSkillContent,
 	withoutDuplicateSkillCommands,
 } from "../../extensions/skill/invoke.ts";
-import { skill } from "../../profile/text/skill/index.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 
 describe("parseSkillCommand", () => {
 	it("returns undefined for non-skill input", () => {
@@ -82,20 +82,18 @@ describe("Claude Code's skill message", () => {
 		);
 	});
 
-	it("names the skill's folder before its text, and nothing for One Code's own catalog", () => {
-		expect(skillPromptText("Body of skill 02.", "", "/p/skills/kit-skill-02")).toBe("Base directory for this skill: /p/skills/kit-skill-02\n\nBody of skill 02.");
+	it("names the skill's folder before its text in the profile's words, and nothing for the bundled catalog", () => {
+		expect(skillPromptText("Body of skill 02.", "", "/p/skills/kit-skill-02")).toBe(
+			requireText("skill").withBaseDir({ dir: "/p/skills/kit-skill-02", text: "Body of skill 02." }),
+		);
 		expect(skillPromptText("Review it.", "", undefined)).toBe("Review it.");
 	});
 
 	it("builds the typed message as two blocks, each ending in a newline", () => {
 		const [breadcrumb, text] = typedSkillContent("kit-skill-02", "", skillPromptText("Body of skill 02.", "", "/d"));
 		expect(breadcrumb).toBe("<command-message>kit-skill-02</command-message>\n<command-name>/kit-skill-02</command-name>\n");
-		expect(text).toBe("Base directory for this skill: /d\n\nBody of skill 02.\n");
+		expect(text).toBe(`${requireText("skill").withBaseDir({ dir: "/d", text: "Body of skill 02." })}\n`);
 		expect(typedSkillContent("x", "", "ends\n")[1]).toBe("ends\n");
-	});
-
-	it("answers a model's call with Claude Code's launch line", () => {
-		expect(skill.launching("workflow-authoring")).toBe("Launching skill: workflow-authoring");
 	});
 });
 

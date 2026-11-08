@@ -30,6 +30,10 @@ import {
 	stripHarnessText,
 	stripReminderBlocks,
 } from "../../extensions/lib/tui-render.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
+
+/** `text` without whitespace: compares text a renderer may have wrapped. */
+const squash = (text: string) => text.replace(/\s+/g, "");
 
 /** Theme stub that tags text with the color name so assertions can see it. */
 const theme: ThemeLike = {
@@ -280,13 +284,15 @@ describe("notificationComponent: agent messages, Claude Code's transcript look",
 		const lines = notificationComponent(theme, wire, true).render(400);
 		expect(lines[0]).toContain("› Message from a94a90cbdda8038c4");
 		expect(lines[0]).not.toContain("@");
-		expect(lines[1]).toContain("<muted>  [Subagent hand-back] The text below");
+		const words = requireText("notifications").agentMessage;
+		expect(lines[1].startsWith(`<muted>  ${words.handBackPreamble.split("\n")[0].slice(0, 40)}`)).toBe(true);
 		// The long preamble wraps at this width; the report lines keep their own two-space indent under the body indent.
 		expect(lines.some((l) => l.includes("<muted>    ALTITUDE review — 3 findings."))).toBe(true);
 		expect(lines.at(-1)).toContain("<muted>    1. first");
-		expect(lines.join("\n")).not.toContain("permission laundering");
-		expect(lines.join("\n")).not.toContain("SubagentHandback");
-		expect(lines.join("\n")).not.toContain("SYSTEM NOTIFICATION");
+		// The guard, the pointer and the delivery preamble stay hidden (compared without the wrap's whitespace).
+		const shown = squash(lines.join(""));
+		const notifications = requireText("notifications");
+		for (const hidden of [words.guard, handBackPointer("a94a90cbdda8038c4", false), notifications.preamble.alone]) expect(shown).not.toContain(squash(hidden));
 	});
 
 	it("a coalesced message collapses to one line per frame, each with its own hint", () => {
@@ -340,10 +346,13 @@ describe("notificationComponent wraps long body lines instead of cutting them", 
 		// A plain theme: the tagging stub's `<muted>` markers would count as columns.
 		const plain: ThemeLike = { fg: (_c, t) => t, bold: (t) => t, italic: (t) => t };
 		const report = agentMessage({ from: "a1", body: "r", handBack: true });
-		const lines = notificationComponent(plain, report, true).render(60);
-		expect(lines.length).toBeGreaterThan(4);
-		expect(lines.every((l) => l.length <= 60)).toBe(true);
-		expect(lines.join("")).toContain("The report follows:");
+		const lines = notificationComponent(plain, report, true).render(30);
+		// The header, the preamble over at least two lines, the report.
+		expect(lines.length).toBeGreaterThan(3);
+		expect(lines.every((l) => l.length <= 30)).toBe(true);
+		expect(lines[2].startsWith(" ")).toBe(false);
+		// Every character of the preamble is kept, only the line breaks differ.
+		expect(squash(lines.slice(1, -1).join(""))).toBe(squash(requireText("notifications").agentMessage.handBackPreamble));
 		expect(lines.some((l) => l.endsWith("…"))).toBe(false);
 		expect(lines.at(-1)).toBe("    r");
 	});

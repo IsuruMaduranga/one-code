@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatHiddenTaskWidget, formatTaskWidget, TaskStore, taskView } from "../../extensions/tasks/store.ts";
-import { tasks as text } from "../../profile/text/tasks/index.ts";
+import { formatHiddenTaskWidget, formatTaskWidget, TaskStore } from "../../extensions/tasks/store.ts";
 
 describe("TaskStore", () => {
 	it("creates tasks with incrementing ids and pending status", () => {
@@ -100,7 +99,6 @@ describe("TaskStore", () => {
 			{ kind: "selfReference", id: a.id },
 			{ kind: "unknownDependencies", ids: ["7"] },
 		]);
-		expect(text.updated({ id: a.id, fields: [], problems: [{ kind: "selfReference", id: a.id }] })).toContain("cannot block or be blocked by itself");
 	});
 
 	it("round-trips through snapshot/restore preserving the id counter", () => {
@@ -136,36 +134,6 @@ describe("TaskStore", () => {
 		const lines = formatTaskWidget(store, 3);
 		expect(lines).toHaveLength(5); // summary + 3 tasks + overflow
 		expect(lines.at(-1)).toBe("  … +2 more");
-	});
-
-	it("emits Claude Code's task_reminder with the current list appended", () => {
-		const store = new TaskStore();
-		// Empty list → the generic nudge, no appended task list.
-		const empty = text.reminder(store.list());
-		expect(empty).toContain("The task tools haven't been used recently");
-		expect(empty).toContain("cleaning up the task list if it has become stale");
-		expect(empty).toContain("NEVER mention this reminder to the user");
-		expect(empty).not.toContain("Here are the existing tasks");
-
-		const a = store.create({ subject: "A", description: "" });
-		const b = store.create({ subject: "B", description: "" });
-		store.update(a.id, { status: "in_progress" });
-		store.update(b.id, { status: "completed" });
-		// Same text regardless of state — the appended list carries the state.
-		const withTasks = text.reminder(store.list());
-		expect(withTasks).toContain("The task tools haven't been used recently");
-		expect(withTasks).toContain("Here are the existing tasks:");
-		expect(withTasks).toContain(`#${a.id}. [in_progress] A`);
-		expect(withTasks).toContain(`#${b.id}. [completed] B`);
-	});
-
-	it("formats list and details", () => {
-		const store = new TaskStore();
-		const a = store.create({ subject: "Build", description: "the thing" });
-		store.update(a.id, { status: "in_progress" });
-		expect(text.list(store.list().map((task) => taskView(store, task)))).toContain("#1 [▸] Build");
-		expect(text.details(taskView(store, store.get(a.id)!))).toContain("Description: the thing");
-		expect(text.list([])).toBe("No tasks.");
 	});
 
 	it("is finished only when non-empty and every task is completed", () => {

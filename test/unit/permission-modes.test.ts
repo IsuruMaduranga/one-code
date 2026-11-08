@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import permissionsExtension from "../../extensions/permissions/index.ts";
+import { brandedId } from "../../extensions/lib/brand.mjs";
+import { requireText } from "../../extensions/lib/profile.ts";
 import type { PermissionMode } from "../../extensions/permissions/matcher.ts";
 import { modeCycleKey, pauseGlyph } from "../../extensions/lib/keys.ts";
 
@@ -242,7 +244,7 @@ describe("permissionsExtension model_select updates classifier", () => {
 		const fake = makeFakePi();
 		permissionsExtension(fake.pi as any);
 		const answers: Array<unknown> = [];
-		fake.pi.events.emit("one-code:subagent-actions", {
+		fake.pi.events.emit(brandedId("subagent-actions"), {
 			toolCallId: "t1",
 			actions: [{ toolName: "bash", subject: "ls" }],
 			background: true,
@@ -263,7 +265,7 @@ describe("permissionsExtension model_select updates classifier", () => {
 		permissionsExtension(fake.pi as any);
 
 		// Switch to auto mode via bus
-		fake.pi.events.emit("one-code:set-permission-mode", { mode: "auto" });
+		fake.pi.events.emit(brandedId("set-permission-mode"), { mode: "auto" });
 
 		function makeCtx(currentModel: unknown) {
 			return {
@@ -323,9 +325,9 @@ describe("permissionsExtension model_select updates classifier", () => {
 				hasUI: false,
 			},
 		);
-		const reminders = (fake.emitted["one-code:system-reminder"] ?? []) as Array<{ key?: string; text?: string; placement?: string }>;
+		const reminders = (fake.emitted[brandedId("system-reminder")] ?? []) as Array<{ key?: string; text?: string; placement?: string }>;
 		const standing = reminders.find((r) => r.key === "permission-mode" && typeof r.text === "string");
-		expect(standing?.text).toContain("Auto mode is active");
+		expect(standing?.text).toBe(requireText("permissions").autoModeActive);
 		// No switch happened, so no "is now" announcement beside the standing block.
 		expect(reminders.some((r) => r.key === "permission-mode-change")).toBe(false);
 		expect(standing?.placement).toBe("sticky-append");
@@ -338,7 +340,7 @@ describe("permissionsExtension model_select updates classifier", () => {
 		// rest of a turn entered mid-stream (STEERING-REVIEW-2026-09-05 M3).
 		const fake = makeFakePi();
 		const order: string[] = [];
-		fake.pi.events.on("one-code:system-reminder", (data) => {
+		fake.pi.events.on(brandedId("system-reminder"), (data) => {
 			const r = data as { key?: string; remove?: boolean; text?: string };
 			if (r.key === "permission-mode") order.push(r.remove ? "remove" : "add");
 		});
@@ -347,8 +349,8 @@ describe("permissionsExtension model_select updates classifier", () => {
 			order.push(`status:${status.mode}`);
 			if (status.mode === "plan") {
 				// What plan-mode's refresh does inside the broadcast.
-				fake.pi.events.emit("one-code:plan-file-path", { path: "/home/u/.onecode/plans/brisk-otter-map.md" });
-				fake.pi.events.emit("one-code:system-reminder", { text: "plan block", key: "permission-mode", placement: "sticky-append" });
+				fake.pi.events.emit(brandedId("plan-file-path"), { path: "/home/u/.onecode/plans/brisk-otter-map.md" });
+				fake.pi.events.emit(brandedId("system-reminder"), { text: "plan block", key: "permission-mode", placement: "sticky-append" });
 			}
 		});
 		permissionsExtension(fake.pi as any);
@@ -365,14 +367,12 @@ describe("permissionsExtension model_select updates classifier", () => {
 			},
 		);
 		order.length = 0;
-		fake.pi.events.emit("one-code:set-permission-mode", { mode: "plan" });
+		fake.pi.events.emit(brandedId("set-permission-mode"), { mode: "plan" });
 
 		expect(order).toEqual(["remove", "status:plan", "add"]);
-		const reminders = (fake.emitted["one-code:system-reminder"] ?? []) as Array<{ key?: string; text?: string }>;
+		const reminders = (fake.emitted[brandedId("system-reminder")] ?? []) as Array<{ key?: string; text?: string }>;
 		const announce = reminders.filter((r) => r.key === "permission-mode-change").pop();
-		expect(announce?.text).toContain('The user\'s permission mode is now "plan".');
-		expect(announce?.text).toContain("/home/u/.onecode/plans/brisk-otter-map.md");
-		expect(announce?.text).toContain("exit_plan_mode");
+		expect(announce?.text).toBe(requireText("permissions").modeChanged({ mode: "plan", planFile: "/home/u/.onecode/plans/brisk-otter-map.md" }));
 	});
 });
 

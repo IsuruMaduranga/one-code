@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { requireText } from "../../extensions/lib/profile.ts";
 import subagentsExtension from "../../extensions/subagents/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
@@ -23,7 +24,6 @@ describe("Agent: a failed spawn leaves no addressable name", () => {
 			content: { text?: string }[];
 		};
 		const text = result.content.map((c) => c.text ?? "").join("");
-		expect(text).toContain('No run named "ghost-run"');
-		expect(text).toContain("Known runs: (none).");
+		expect(text).toBe(requireText("subagents").refused({ kind: "noRun", to: "ghost-run", known: [] }));
 	});
 });

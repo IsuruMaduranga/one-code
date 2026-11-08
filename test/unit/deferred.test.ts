@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { requireText } from "../../extensions/lib/profile.ts";
 import {
 	deferredMissReminderText,
 	DeferredRegistry,
@@ -160,24 +161,20 @@ describe("resultText", () => {
 });
 
 describe("deferredMissReminderText", () => {
-	it("names the tool and the exact select: query to load it", () => {
-		const text = deferredMissReminderText("web_fetch");
-		expect(text).toContain("web_fetch");
-		expect(text).toContain("tool_search");
-		expect(text).toContain("select:web_fetch");
+	it("passes the missed tool's name to the profile's reminder", () => {
+		expect(deferredMissReminderText("web_fetch")).toBe(requireText("toolSearch").missReminder({ name: "web_fetch" }));
 	});
 });
 
 describe("deferredReminderText", () => {
-	it("lists bare names one per line under CC's fixed sentence (no descriptions)", () => {
+	it("lists bare names one per line under the profile's fixed heading (no descriptions)", () => {
 		const text = deferredReminderText([
 			{ name: "web_fetch", description: "Fetch a URL.\nSecond line detail." },
 			{ name: "monitor", description: "Watch a command." },
 		]);
 		const lines = text.split("\n");
-		expect(lines[0]).toMatch(/^The following deferred tools are available via tool_search\./);
-		expect(lines[0]).toContain('"select:<name>[,<name>...]"');
-		expect(lines.slice(1)).toEqual(["web_fetch", "monitor"]);
+		expect(text).toBe([requireText("toolSearch").listingHead, "web_fetch", "monitor"].join("\n"));
+		expect(lines.slice(-2)).toEqual(["web_fetch", "monitor"]);
 		expect(text).not.toContain("Fetch a URL");
 	});
 

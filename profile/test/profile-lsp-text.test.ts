@@ -6,7 +6,7 @@
  * the not-installed failures.
  */
 import { describe, expect, it } from "vitest";
-import { lsp } from "../../profile/text/lsp/index.ts";
+import { lsp } from "../text/lsp/index.ts";
 
 describe("One Code's language-server text", () => {
 	it("words a server that fails after it started", () => {

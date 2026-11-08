@@ -1,15 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { RECENT_MESSAGE_WINDOW, recapLine, recentForRecap, REFERENCE_MARK } from "../../extensions/recap/prompt.ts";
-import { RECAP_PROMPT } from "../../profile/text/recap/index.ts";
 import { RecapScheduler, type TimerOps } from "../../extensions/recap/scheduler.ts";
 
 describe("recap prompt", () => {
-	it("uses Claude Code 2.1.261's verbatim away-summary instruction", () => {
-		expect(RECAP_PROMPT).toBe(
-			"The user stepped away and is coming back. Recap in under 40 words, 1-2 plain sentences, no markdown. Lead with the overall goal and current task, then the one next action. Skip root-cause narrative, fix internals, secondary to-dos, and em-dash tangents.",
-		);
-	});
-
 	it("keeps CC's 30-message recent window and ※ mark", () => {
 		expect(RECENT_MESSAGE_WINDOW).toBe(30);
 		expect(REFERENCE_MARK).toBe("※");

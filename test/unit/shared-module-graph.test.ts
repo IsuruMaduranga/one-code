@@ -47,8 +47,8 @@ describe("modules loaded through sharedModule", () => {
 		expect(piValueImports(join(ROOT, "profile", "index.ts"))).toEqual([]);
 	});
 
-	it("import no pi package as a value: the profile's source provider", () => {
-		expect(profile.sources).toBeDefined();
-		expect(piValueImports(join(ROOT, "profile", profile.sources!))).toEqual([]);
+	it("import no pi package as a value: the profile's source provider, when it has one", () => {
+		// A source provider is optional (lib/sources.ts); a profile without one has no graph here.
+		expect(profile.sources === undefined ? [] : piValueImports(join(ROOT, "profile", profile.sources))).toEqual([]);
 	});
 });

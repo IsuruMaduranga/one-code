@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { toolStyleText } from "../../profile/text/tool-style/index.ts";
-import { ALL_LIVE } from "./helpers/live.ts";
+import { toolStyleText } from "../text/tool-style/index.ts";
+import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
 
 const toolStyle = toolStyleText(ALL_LIVE);
 

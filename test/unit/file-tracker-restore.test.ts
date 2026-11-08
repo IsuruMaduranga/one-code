@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { RESTORE_FILE_MAX_TOKENS, restoreBlocks, restoreCandidates } from "../../extensions/file-tracker/restore.ts";
-import { fileTracker } from "../../profile/text/file-tracker/index.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
+
+const fileTracker = requireText("fileTracker");
 
 const tokens = (text: string) => Math.ceil(text.length / 4);
 
@@ -12,7 +14,7 @@ describe("restoreCandidates", () => {
 });
 
 describe("restoreBlocks", () => {
-	it("restores a small file as Claude Code's read call and result, and names a large one in a note", () => {
+	it("restores a small file as a read call and result, and names a large one in a note", () => {
 		const big = "x".repeat(RESTORE_FILE_MAX_TOKENS * 4 + 4);
 		const { blocks, restored } = restoreBlocks(
 			[
@@ -26,11 +28,11 @@ describe("restoreBlocks", () => {
 		// The result block is the one that puts the file back in context.
 		expect(blocks.map((block) => block.restores)).toEqual([undefined, undefined, "/w/small.txt"]);
 		expect(restored).toEqual(["/w/small.txt"]);
-		expect(blocks[0].text).toBe(
-			"Note: /w/big.txt was read before the last conversation was summarized, but the contents are too large to include. Use read tool if you need to access it.",
-		);
-		expect(blocks[1].text).toBe('Called the read tool with the following input: {"path":"/w/small.txt"}');
-		expect(blocks[2].text).toBe("Result of calling the read tool:\none\ntwo");
+		expect(blocks.map((block) => block.text)).toEqual([
+			fileTracker.tooLargeToRestore({ path: "/w/big.txt" }),
+			fileTracker.restoredCall({ path: "/w/small.txt" }),
+			fileTracker.restoredResult({ text: "one\ntwo" }),
+		]);
 	});
 
 	it("skips a file whose blocks would take the total past 50,000 tokens and keeps going", () => {

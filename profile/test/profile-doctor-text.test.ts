@@ -4,9 +4,9 @@
  * prompt's moving parts are checked here.
  */
 import { describe, expect, it } from "vitest";
-import { doctorText } from "../../profile/text/doctor/index.ts";
+import { doctorText } from "../text/doctor/index.ts";
 import type { FixPromptInput } from "../../extensions/doctor/text.ts";
-import { ALL_LIVE } from "./helpers/live.ts";
+import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
 
 const doctor = doctorText(ALL_LIVE);
 

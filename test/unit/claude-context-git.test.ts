@@ -1,4 +1,4 @@
-/** Only the main session takes Claude Code's git snapshot; a child session's context block has none. */
+/** Only the main session takes the git snapshot; a child session's context block has none. */
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import claudeContextExtension from "../../extensions/claude-context/index.ts";
 import { GIT_SNAPSHOT_OWNER_CHANNEL } from "../../extensions/lib/git-status.ts";
 import { makeRecord, RECORD } from "../../extensions/lib/ledger/records.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
@@ -22,6 +23,7 @@ describe("claude-context's git snapshot", () => {
 		writeFileSync(join(dir, "f.txt"), "x");
 	});
 	afterEach(() => {
+		vi.restoreAllMocks();
 		vi.unstubAllEnvs();
 		rmSync(dir, { recursive: true, force: true });
 	});
@@ -38,14 +40,33 @@ describe("claude-context's git snapshot", () => {
 		return texts.find((t) => t.key === "claude-context-context")?.text;
 	}
 
+	/** The context block, the snapshot the base rendered into it, and the email spy. */
+	async function snapshotIn(owner: boolean, branch: unknown[] = []) {
+		const words = requireText("context");
+		const gitStatus = vi.spyOn(words, "gitStatus");
+		const email = vi.spyOn(words, "email");
+		const block = await contextBlock(owner, branch);
+		// The snapshot the session took (the base renders it at "start", and a
+		// refreshed block swaps the profile's start heading for its compaction one).
+		const taken = gitStatus.mock.calls.map((call) => call[0].snapshot).find((snapshot) => snapshot.status === "?? f.txt");
+		gitStatus.mockRestore();
+		/** Whether the block carries the snapshot rendered `at`. */
+		const carries = (at: "start" | "compaction") => taken !== undefined && block !== undefined && block.includes(words.gitStatus({ snapshot: taken, at }));
+		return { block, taken, email, carries };
+	}
+
 	it("is in the main session's context block", async () => {
-		expect(await contextBlock(true)).toContain("# gitStatus\nThis is the git status at the start of the conversation.");
+		const { carries } = await snapshotIn(true);
+		expect(carries("start")).toBe(true);
+		expect(carries("compaction")).toBe(false);
 	});
 
 	it("is left out in a session nobody claimed it for (a child), which keeps the email", async () => {
-		const block = await contextBlock(false);
-		expect(block).not.toContain("# gitStatus");
-		expect(block).toContain("# userEmail");
+		const { block, taken, email } = await snapshotIn(false);
+		// No snapshot of this repository was rendered at all.
+		expect(taken).toBeUndefined();
+		expect(email).toHaveBeenCalledWith({ email: "a@b.com" });
+		expect(block).toContain(email.mock.results.at(-1)!.value);
 	});
 
 	it("is the compaction's, not the conversation start's, when a process starts before the compaction's epoch opened (R3-L11)", async () => {
@@ -55,7 +76,9 @@ describe("claude-context's git snapshot", () => {
 			{ type: "message", id: "a1", parentId: "r1", message: { role: "assistant" } },
 			{ type: "compaction", id: "c1", parentId: "a1" },
 		];
-		expect(await contextBlock(true, branch)).toContain("This is the git status at the latest compaction.");
+		const { carries } = await snapshotIn(true, branch);
+		expect(carries("compaction")).toBe(true);
+		expect(carries("start")).toBe(false);
 	});
 
 	it("is the compaction's after a reload when no request settled before the compaction", async () => {
@@ -64,6 +87,8 @@ describe("claude-context's git snapshot", () => {
 			{ type: "message", id: "a1", parentId: "u1", message: { role: "assistant", stopReason: "error" } },
 			{ type: "compaction", id: "c1", parentId: "a1" },
 		];
-		expect(await contextBlock(true, branch)).toContain("This is the git status at the latest compaction.");
+		const { carries } = await snapshotIn(true, branch);
+		expect(carries("compaction")).toBe(true);
+		expect(carries("start")).toBe(false);
 	});
 });

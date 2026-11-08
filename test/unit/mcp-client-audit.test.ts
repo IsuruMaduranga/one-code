@@ -11,6 +11,7 @@ import { beginInteractiveAuth, callTool, connect, finishInteractiveAuth, isUnaut
 import { failureOf } from "../../extensions/mcp/failure.ts";
 import { silentProvider } from "../../extensions/mcp/oauth/flow.ts";
 import { McpOAuthProvider } from "../../extensions/mcp/oauth/provider.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 
 let home: string;
 const server = { name: "oauth-audit", kind: "http" as const, url: "https://mcp.example.test/mcp", source: "test" };
@@ -216,7 +217,7 @@ describe("MCP OAuth runtime regressions", () => {
 		const fetchFn = vi.fn(async () => Response.json({ error: "invalid_grant" }, { status: 400 }));
 		const error = await auth(provider, { serverUrl: server.url, fetchFn }).catch((error: unknown) => error);
 		expect(isUnauthorized(error)).toBe(true);
-		expect((error as Error).message).toContain("/mcp");
+		expect((error as Error).message).toBe(requireText("mcp").needsAuthentication({ server: server.name }));
 		expect(provider.tokens()).toBeUndefined();
 	});
 

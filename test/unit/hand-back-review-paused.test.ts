@@ -22,6 +22,10 @@ import permissionsExtension from "../../extensions/permissions/index.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../extensions/permissions/modes.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { envName } from "../../extensions/lib/brand.mjs";
+import { requireText } from "../../extensions/lib/profile.ts";
+
+/** The warning the profile puts above a flagged or unreviewed report. */
+const warning = (kind: "blocked" | "unavailable", reason: string) => requireText("notifications").handBackWarning({ kind, reason, clipped: false });
 
 vi.mock("../../extensions/auto-mode/classifier.ts", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../../extensions/auto-mode/classifier.ts")>()),
@@ -88,7 +92,7 @@ describe("hand-back review while auto mode is paused", () => {
 			{ toolCallId: "spawn-1", toolName: "Agent", content: [{ type: "text", text: "report" }] },
 			ctx,
 		);
-		expect(result?.content[0].text).toContain("SECURITY WARNING: auto mode blocked this subagent's report. Reason: stub: sends a credential off the machine.");
+		expect(result?.content[0].text).toContain(warning("blocked", "stub: sends a credential off the machine"));
 	});
 
 	// Battery round 7: an unreadable classifier reply was announced as "flagged a
@@ -102,7 +106,8 @@ describe("hand-back review while auto mode is paused", () => {
 			{ toolCallId: "spawn-2", toolName: "Agent", content: [{ type: "text", text: "report" }] },
 			ctx,
 		);
-		expect(result?.content[0].text).toContain("This subagent's report is UNREVIEWED - The approval classifier's reply carried no severity, so the verdict could not be read");
-		expect(result?.content[0].text).not.toContain("blocked this subagent");
+		const reason = "The approval classifier's reply carried no severity, so the verdict could not be read";
+		expect(result?.content[0].text).toContain(warning("unavailable", reason));
+		expect(result?.content[0].text).not.toContain(warning("blocked", reason));
 	});
 });

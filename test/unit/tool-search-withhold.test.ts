@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFER_CHANNEL, deferredAddendumText, WITHHOLD_CHANNEL } from "../../extensions/lib/deferred.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 import toolSearchExtension from "../../extensions/tool-search/index.ts";
 import { makeToolSearchFakePi, type Reminder } from "./helpers/tool-search-fake-pi.ts";
 
@@ -64,39 +65,33 @@ describe("tool-search withhold", () => {
 			isError: true,
 			result: { content: [{ type: "text", text: "Tool task_create not found" }] },
 		});
+		const words = requireText("toolSearch");
 		const withheldMiss = fake.reminders.find((r) => r.key === "deferred-miss-task_create");
-		expect(withheldMiss?.text).toContain("withdrawn");
-		// Must not repeat the ordinary "load it with tool_search" advice — retrying
-		// through tool_search would fail again, since the name is gone from the registry.
-		expect(withheldMiss?.text).not.toContain("select:task_create");
+		// Not the ordinary "load it with tool_search" advice: retrying through
+		// tool_search would fail again, since the name is gone from the registry.
+		expect(withheldMiss?.text).toBe(words.withheldMiss({ name: "task_create" }));
 
 		fake.pi.fire("tool_execution_end", {
 			isError: true,
 			result: { content: [{ type: "text", text: "Tool web_fetch not found" }] },
 		});
 		const ordinaryMiss = fake.reminders.find((r) => r.key === "deferred-miss-web_fetch");
-		expect(ordinaryMiss?.text).toContain("select:web_fetch");
+		expect(ordinaryMiss?.text).toBe(words.missReminder({ name: "web_fetch" }));
 	});
 
 	it("answers a select: of an already-callable tool as already loaded, not missing", async () => {
 		fake.setActive([...fake.pi.getActiveTools(), "ask_user_question"]);
 		const eager = await fake.runTool("tool_search", { query: "select:ask_user_question" });
 		expect((eager as { isError?: boolean }).isError).toBeUndefined();
-		expect(eager.content[0]?.text).toBe("Already loaded: ask_user_question.");
+		const words = requireText("toolSearch");
+		expect(eager.content[0]?.text).toBe(words.result({ added: [], already: ["ask_user_question"], refused: [], missing: [], withdrawn: [] }));
 		const mixed = await fake.runTool("tool_search", { query: "select:ask_user_question,web_fetch,web_fecth" });
-		const text = mixed.content[0]?.text ?? "";
-		expect(text).toContain("web_fetch");
-		expect(text).toContain("ask_user_question");
-		expect(text).toContain("check spelling, or search by keyword instead of `select:`): web_fecth.");
-		expect(text).not.toMatch(/check spelling[^.]*ask_user_question/);
+		expect(mixed.content[0]?.text).toBe(words.result({ added: ["web_fetch"], already: ["ask_user_question"], refused: [], missing: ["web_fecth"], withdrawn: [] }));
 	});
 
 	it("reports a withheld name in a select: query as withdrawn, not misspelled", async () => {
 		fake.pi.events.emit(WITHHOLD_CHANNEL, { name: "task_create" });
 		const result = await fake.runTool("tool_search", { query: "select:task_create,web_fetch,task_craete" });
-		const text = result.content[0]?.text ?? "";
-		expect(text).toContain("Withdrawn for the current model (do not retry): task_create.");
-		expect(text).toContain("check spelling, or search by keyword instead of `select:`): task_craete.");
-		expect(text).not.toMatch(/check spelling[^.]*task_create/);
+		expect(result.content[0]?.text).toBe(requireText("toolSearch").result({ added: ["web_fetch"], already: [], refused: [], missing: ["task_craete"], withdrawn: ["task_create"] }));
 	});
 });

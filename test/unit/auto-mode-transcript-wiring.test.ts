@@ -9,6 +9,7 @@ import permissionsExtension from "../../extensions/permissions/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { envName } from "../../extensions/lib/brand.mjs";
+import { requireText } from "../../extensions/lib/profile.ts";
 
 const seen: TranscriptEntry[][] = [];
 const seenUserMessages: string[][] = [];
@@ -136,14 +137,12 @@ describe("classifier history in the permissions gate", () => {
 		fake.events.on(TURN_FAILED_CHANNEL, (data) => order.push(`failed:${(data as { reason: string }).reason}`));
 		(ctx.abort as ReturnType<typeof vi.fn>).mockImplementation(() => order.push("abort"));
 		const result = await call("bash", { command: "rm probe.*" }) as { block?: boolean; reason?: string };
+		const reason = requireText("permissions").refused({ kind: "classifierOverflowHeadless" });
 		// The exit extension turns the stop into a failed one-shot run.
-		expect(order).toEqual(["failed:auto mode classifier transcript exceeded context window in headless mode", "abort"]);
+		expect(order).toEqual([`failed:${reason}`, "abort"]);
 		expect(result.block).toBe(true);
-		expect(result.reason).toContain("auto mode classifier transcript exceeded context window in headless mode");
-		expect((ctx.ui as { notify: unknown }).notify).toHaveBeenCalledWith(
-			"auto mode classifier transcript exceeded context window in headless mode. Compact the session (/compact) and continue.",
-			"error",
-		);
+		expect(result.reason).toBe(reason);
+		expect((ctx.ui as { notify: unknown }).notify).toHaveBeenCalledWith(`${reason}. Compact the session (/compact) and continue.`, "error");
 		expect(ctx.abort).toHaveBeenCalledOnce();
 		expect((ctx.ui as { select: unknown }).select).not.toHaveBeenCalled();
 		const decisions = readFileSync(join(home, "sessions", "auto-mode-decisions.jsonl"), "utf8");

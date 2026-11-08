@@ -9,7 +9,9 @@ import {
 	MonitorLineSplitter,
 	pushEvent,
 } from "../../extensions/background/monitor-batch.ts";
-import { monitor } from "../../profile/text/background/monitor.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
+
+const monitor = requireText("background").monitor;
 
 describe("monitor batching", () => {
 	it("keeps at most MAX_LINES lines and counts the rest", () => {
@@ -19,16 +21,18 @@ describe("monitor batching", () => {
 		expect(batch.overflow).toBe(25);
 		expect(batchSize(batch)).toBe(MONITOR_BATCH_MAX_LINES + 25);
 		const text = formatMonitorEvents("m1", batch, monitor.moreLines);
-		expect(text).toContain("+25 more line(s) not shown — task_output m1 has the full stream");
-		expect(text.split("\n")).toHaveLength(MONITOR_BATCH_MAX_LINES + 1);
+		const shown = Array.from({ length: MONITOR_BATCH_MAX_LINES }, (_, i) => `line ${i}`).join("\n");
+		expect(text).toBe(`${shown}${monitor.moreLines({ hidden: 25, taskId: "m1" })}`);
 	});
 
 	it("caps the characters shown and reports the lines it dropped", () => {
 		const batch = emptyBatch();
 		for (let i = 0; i < 10; i++) pushEvent(batch, "x".repeat(1_000));
 		const text = formatMonitorEvents("m2", batch, monitor.moreLines);
-		expect(text.length).toBeLessThan(MONITOR_BATCH_MAX_CHARS + 300);
-		expect(text).toMatch(/\+\d+ more line\(s\) not shown/);
+		// Each line costs its 1,000 characters plus a newline: three fit under the cap.
+		const fits = Math.floor(MONITOR_BATCH_MAX_CHARS / 1_001);
+		expect(fits).toBe(3);
+		expect(text).toBe(`${Array.from({ length: fits }, () => "x".repeat(1_000)).join("\n")}${monitor.moreLines({ hidden: 10 - fits, taskId: "m2" })}`);
 	});
 
 	it("shows a small batch in full with no overflow note", () => {

@@ -1,6 +1,10 @@
+/**
+ * The kept tail a compaction leaves in context: how many messages stay after
+ * pi's cut point and how the first one opens. One Code's wording of it in the
+ * instruction is profile/test/compaction-kept-tail-wording.test.ts.
+ */
 import { describe, expect, it } from "vitest";
 import { keptTailOf } from "../../extensions/compaction/index.ts";
-import { buildCompactionInstruction, keptTailNote } from "../../profile/text/compaction/index.ts";
 
 const user = (text: string) => ({ role: "user", content: text });
 const assistant = (text = "…") => ({ role: "assistant", content: [{ type: "text", text }] });
@@ -80,24 +84,5 @@ describe("keptTailOf (C6)", () => {
 			messagesToSummarize: doomed.slice(0, 2) as never,
 		}, "anthropic-messages");
 		expect(fromResult).toEqual({ count: 1, landmark: { kind: "toolResult", tool: "read" } });
-	});
-});
-
-describe("buildCompactionInstruction with a kept tail", () => {
-	it("scopes the summary to the discarded part inside the same system-reminder", () => {
-		const text = buildCompactionInstruction({ reason: "threshold", keptTail: { count: 7, landmark: { kind: "opens", text: "Run the tests" } } });
-		expect(text).toContain(keptTailNote({ count: 7, landmark: { kind: "opens", text: "Run the tests" } }));
-		expect(text).toContain('the final 7 messages, beginning with the message that opens "Run the tests", stay in context verbatim');
-		expect(text.indexOf("stay in context verbatim")).toBeLessThan(text.indexOf("CRITICAL: Respond"));
-		expect(text.match(/<system-reminder>/g)).toHaveLength(1);
-	});
-
-	it("says nothing about a tail when there is none (the reconstruction path, or a cut at the very end)", () => {
-		expect(buildCompactionInstruction({ reason: "manual", keptTail: { count: 0 } })).toBe(buildCompactionInstruction({ reason: "manual" }));
-		expect(buildCompactionInstruction({ reason: "manual", keptTail: undefined })).not.toContain("stay in context verbatim");
-	});
-
-	it("uses the singular for one kept message", () => {
-		expect(keptTailNote({ count: 1 })).toContain("the final 1 message, stay");
 	});
 });

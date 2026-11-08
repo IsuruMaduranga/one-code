@@ -3,6 +3,7 @@ import { modeCycleKey } from "../../extensions/lib/keys.ts";
 import { WORDMARK, WORDMARK_WIDTH, bannerLines, bannerModeLabel, sectionSummary, truncateLine } from "../../extensions/branding/index.ts";
 import { shouldDefaultFlushOutputPad, shouldDefaultHideThinking, thinkingLabel } from "../../extensions/branding/startup.ts";
 import { boundKey } from "../../extensions/lib/tui-render.ts";
+import { brand } from "../../extensions/lib/brand.mjs";
 
 // Identity paint keeps assertions about layout free of colour codes.
 const plain = (_color: string, text: string) => text;
@@ -15,8 +16,7 @@ describe("bannerLines", () => {
 		const lines = bannerLines({ version: "0.1.0", cwd: "/p", mode: "default" }, plain);
 		expect(lines.slice(0, WORDMARK.length)).toEqual(WORDMARK);
 		const tagline = lines[WORDMARK.length];
-		expect(tagline).toContain("the Claude Code experience, on any model");
-		expect(tagline).toContain("v0.1.0");
+		expect(tagline).toBe(` ${brand.subtitle} · v0.1.0`);
 	});
 
 	it("all wordmark rows share one width, so the block is a clean rectangle", () => {
@@ -65,9 +65,9 @@ describe("bannerLines", () => {
 
 	it("falls back to a text title below the wordmark width", () => {
 		const narrow = bannerLines({ version: "0.1.0", cwd: "/p", mode: "default" }, plain, WORDMARK_WIDTH - 1);
-		// No wordmark row survives; the head is the plain brand name.
+		// No wordmark row survives; the head is the plain brand name, cut to the width.
 		expect(narrow.some((l) => WORDMARK.includes(l))).toBe(false);
-		expect(narrow[0]).toContain("One Code");
+		expect(narrow[0]).toBe(truncateLine(brand.name, WORDMARK_WIDTH - 1));
 	});
 
 	it("summarizes long sections to counts and keeps short ones by name", () => {

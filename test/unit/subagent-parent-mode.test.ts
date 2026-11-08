@@ -3,6 +3,7 @@
  * fork's history shows (lifecycle-grid-hunt round 3, R3-L15).
  */
 import { describe, expect, it } from "vitest";
+import { requireText } from "../../extensions/lib/profile.ts";
 import { PERMISSION_MODE_STATE } from "../../extensions/permissions/modes.ts";
 import { parentModeExtension } from "../../extensions/subagents/parent-mode.ts";
 import { createFakeCtx, createFakePi, renderRequest } from "./helpers/fake-pi.ts";
@@ -18,7 +19,7 @@ describe("a fork's parent mode", () => {
 		mode = "plan";
 		const blocks = renderRequest(fake.events);
 		expect(blocks).toHaveLength(1);
-		expect(blocks[0].text).toContain('permission mode is now "plan"');
+		expect(blocks[0].text).toBe(requireText("subagents").parentMode({ mode: "plan" }));
 		expect(renderRequest(fake.events, { facts: blocks[0].facts })).toEqual([]);
 	});
 
@@ -33,7 +34,7 @@ describe("a fork's parent mode", () => {
 		mode = "auto";
 		const blocks = renderRequest(fake.events, { epoch: true });
 		expect(blocks).toHaveLength(1);
-		expect(blocks[0].text).toContain('permission mode is now "auto"');
+		expect(blocks[0].text).toBe(requireText("subagents").parentMode({ mode: "auto" }));
 		expect(renderRequest(fake.events, { facts: blocks[0].facts })).toEqual([]);
 	});
 });

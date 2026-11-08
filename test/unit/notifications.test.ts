@@ -619,7 +619,7 @@ describe("mergeNotificationTexts / notificationBody", () => {
 
 	it("reduces a task notification to its summary and unescaped body for display", () => {
 		const text = taskNotification({ kind: "shell", taskId: "b1", status: "completed", summary: shellSummary("run <tests>", "completed", 0), result: "a < b && c" });
-		expect(notificationBody(text)).toBe('Background command "run <tests>" completed (exit code 0)\na < b && c');
+		expect(notificationBody(text)).toBe(`${shellSummary("run <tests>", "completed", 0)}\na < b && c`);
 		const batch = taskNotification({ kind: "monitor", taskId: "m1", summary: 'Monitor event: "log"', result: "l1\nl2" });
 		expect(notificationBody(batch)).toBe('Monitor event: "log"\nl1\nl2');
 		expect(notificationBody("plain text\n")).toBe("plain text");

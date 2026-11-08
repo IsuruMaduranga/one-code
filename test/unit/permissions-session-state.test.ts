@@ -6,11 +6,13 @@
  * and the plan-mode pre-gate (L3).
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ORIGINAL_COMMAND_CHANNEL } from "../../extensions/lib/original-command.ts";
 import { PANEL_FOCUS_CHANNEL } from "../../extensions/lib/panel-focus.ts";
+import { productSettingsPath } from "../../extensions/lib/product-settings.ts";
+import { userDenialText } from "../../extensions/lib/user-denial.ts";
 import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
 import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
 import { shellQuote } from "../../extensions/lib/shell-quote.ts";
@@ -97,7 +99,7 @@ describe("permissions session state", () => {
 			rejectWith("esc");
 			const result = await rejected("esc-1");
 			expect(result?.block).toBe(true);
-			expect(result?.reason).toContain("STOP what you are doing");
+			expect(result?.reason).toBe(userDenialText());
 			expect(ui().input).not.toHaveBeenCalled();
 			expect(ctx.abort).toHaveBeenCalledTimes(1);
 			// pi ends the loop after the batch instead of sending one more request
@@ -333,9 +335,10 @@ describe("permissions session state", () => {
 		});
 
 		it("matches rules against trusted original commands without retaining the old resolved root", async () => {
-			const config = join(stateDir, "empty-config");
-			mkdirSync(config);
-			writeFileSync(join(config, "settings.json"), JSON.stringify({ permissions: {
+			// The product's own user settings: every profile reads them.
+			const settings = productSettingsPath(homedir());
+			mkdirSync(dirname(settings), { recursive: true });
+			writeFileSync(settings, JSON.stringify({ permissions: {
 				allow: ["Bash(npm test)", "Bash(echo:*)"],
 				deny: ["Bash(npm run publish:*)"],
 			} }));

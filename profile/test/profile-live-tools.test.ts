@@ -12,7 +12,7 @@ import type { LiveTools } from "../../extensions/lib/live-tools.ts";
 import type { DescriptionForm } from "../../extensions/lib/tool-variants.ts";
 import type { ShellBlock } from "../../extensions/lib/shell-text.ts";
 import type { FixPromptInput } from "../../extensions/doctor/text.ts";
-import { profile } from "../../profile/index.ts";
+import { profile } from "../index.ts";
 
 /** Phrases where a tool's name is an English word, not the tool. */
 const ENGLISH: Readonly<Record<string, readonly RegExp[]>> = {

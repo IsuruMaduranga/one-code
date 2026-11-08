@@ -5,13 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { classify } from "../../extensions/auto-mode/classifier.ts";
 import { classifierHistory, messageText } from "../../extensions/auto-mode/history.ts";
 import { invalidatePluginsCache } from "../../extensions/lib/plugins.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 import { shellQuote } from "../../extensions/lib/shell-quote.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import pluginsExtension from "../../extensions/plugins/index.ts";
 import skillExtension from "../../extensions/skill/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
+import { brand, envName } from "../../extensions/lib/brand.mjs";
 
 vi.mock("../../extensions/auto-mode/classifier.ts", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../../extensions/auto-mode/classifier.ts")>()),
@@ -25,6 +26,7 @@ const FRONTMATTER = '---\ndescription: A provenance fixture\nallowed-tools: ["Ba
 describe("skill and plugin permission provenance", () => {
 	let home: string;
 	let cwd: string;
+	let skillDir: string;
 	let skillPath: string;
 	let fake: FakePi;
 	let ctx: ReturnType<typeof createFakeCtx>;
@@ -34,12 +36,13 @@ describe("skill and plugin permission provenance", () => {
 	beforeEach(() => {
 		home = mkdtempSync(join(tmpdir(), "skill-permission-provenance-"));
 		cwd = join(home, "project");
-		const skillDir = join(cwd, ".claude", "skills", "demo");
+		// The base's own project skill folder, which every profile reads.
+		skillDir = join(cwd, ".agents", "skills", "demo");
 		const pluginDir = join(home, "fixture-plugin");
 		mkdirSync(skillDir, { recursive: true });
 		mkdirSync(join(pluginDir, "commands"), { recursive: true });
 		mkdirSync(join(home, "agent", "plugins"), { recursive: true });
-		mkdirSync(join(home, ".onecode"));
+		mkdirSync(join(home, brand.stateDir));
 		skillPath = join(skillDir, "SKILL.md");
 		writeFileSync(skillPath, FRONTMATTER + BODY);
 		writeFileSync(join(pluginDir, "commands", "demo.md"), FRONTMATTER + BODY);
@@ -47,7 +50,7 @@ describe("skill and plugin permission provenance", () => {
 			plugins: { "fixture@local": [{ installPath: pluginDir, enabled: true }] },
 		}));
 		stubHome(home);
-		vi.stubEnv(envName("STATE_DIR"), join(home, ".onecode"));
+		vi.stubEnv(envName("STATE_DIR"), join(home, brand.stateDir));
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(home, "agent"));
 		invalidatePluginsCache();
 		vi.mocked(classify).mockClear();
@@ -71,7 +74,7 @@ describe("skill and plugin permission provenance", () => {
 	});
 
 	async function mount(deny = false) {
-		if (deny) writeFileSync(join(home, ".onecode", "settings.json"), JSON.stringify({ permissions: { deny: ["Bash(git push:*)"] } }));
+		if (deny) writeFileSync(join(home, brand.stateDir, "settings.json"), JSON.stringify({ permissions: { deny: ["Bash(git push:*)"] } }));
 		pluginsExtension(fake.pi as never);
 		permissionsExtension(fake.pi as never);
 		skillExtension(fake.pi as never);
@@ -97,7 +100,7 @@ describe("skill and plugin permission provenance", () => {
 		await mount(deny);
 		await fake.fire("before_agent_start", { systemPromptOptions: { skills: [{ name: "demo", filePath: skillPath }] } }, ctx);
 		const result = await fake.tools.get("skill")!.execute("load-skill", { skill: "demo" }, undefined, undefined, ctx) as { content: unknown };
-		expect(messageText(result.content)).toContain(BODY);
+		expect(messageText(result.content)).toContain(requireText("skill").withBaseDir({ dir: skillDir, text: BODY }));
 		branch.push({ type: "message", id: "skill-result", message: { role: "toolResult", toolCallId: "load-skill", content: result.content } });
 		expect((await pushAttempt())?.block).toBe(true);
 		if (deny) expect(classify).not.toHaveBeenCalled();
@@ -113,7 +116,7 @@ describe("skill and plugin permission provenance", () => {
 		const script = join(home, "marker.sh");
 		writeFileSync(script, `printf marker > ${shellQuote(marker)}\n`);
 		writeFileSync(join(home, "fixture-plugin", "commands", "demo.md"), `${FRONTMATTER}!\`bash ${shellQuote(script)}\``);
-		if (mode === "deny") writeFileSync(join(home, ".onecode", "settings.json"), JSON.stringify({ permissions: { deny: ["Bash(bash:*)"] } }));
+		if (mode === "deny") writeFileSync(join(home, brand.stateDir, "settings.json"), JSON.stringify({ permissions: { deny: ["Bash(bash:*)"] } }));
 		await mount();
 		ctx.mode = "tui";
 		vi.spyOn(console, "error").mockImplementation(() => {});
@@ -128,7 +131,7 @@ describe("skill and plugin permission provenance", () => {
 		await mount();
 		const results = await fake.fire<{ action?: string; text?: string } | undefined>("input", { text: "/skill:demo staging", source: "interactive" }, ctx);
 		const transformed = results.find((result) => result?.action === "transform");
-		expect(transformed?.text).toContain(BODY);
+		expect(transformed?.text).toContain(requireText("skill").withBaseDir({ dir: skillDir, text: `${BODY}\n\nARGUMENTS: staging` }));
 		await persistUser(transformed!.text);
 		expect(classifierHistory(branch).userMessages).toEqual([]);
 		await fake.fire("session_start", { reason: "resume" }, ctx);
@@ -141,7 +144,7 @@ describe("skill and plugin permission provenance", () => {
 		await fake.fire("before_agent_start", { systemPromptOptions: { skills: [{ name: "demo", filePath: skillPath }] } }, ctx);
 		await fake.fire("input", { text: "/skill:demo staging", source: "interactive" }, ctx);
 		const delivered = fake.sentMessages.at(-1)!.message;
-		expect(messageText(delivered.content)).toContain(BODY);
+		expect(messageText(delivered.content)).toContain(requireText("skill").withBaseDir({ dir: skillDir, text: `${BODY}\n\nARGUMENTS: staging` }));
 		branch.push({ type: "message", id: "skill-custom", message: { role: "custom", ...delivered } });
 		expect((await pushAttempt())?.block).toBe(true);
 		expect(vi.mocked(classify).mock.calls.at(-1)![0].userMessages).toEqual([]);

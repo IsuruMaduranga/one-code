@@ -12,6 +12,7 @@ import { Type } from "typebox";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { openChildSession } from "../../extensions/lib/agent-loader.ts";
 import { CHILD_EXTENSION_PATHS } from "../../extensions/lib/child-extensions.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "oc-child-corruption-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -94,7 +95,9 @@ describe("OpenRouter corruption guard in a child session", () => {
 			expect(execute).not.toHaveBeenCalled();
 			expect(requests).toHaveBeenCalledTimes(1);
 			const result = session.messages.find((message) => message.role === "toolResult");
-			expect(JSON.stringify(result)).toContain("OpenRouter tool-call corruption");
+			const words = requireText("toolCallCorruption");
+			const text = (result as { content: Array<{ text?: string }> }).content.map((part) => part.text ?? "").join("");
+			expect(text).toBe(words.corruptBlock({ reason: words.damage({ kind: "unbalancedQuote" }), repeat: false }));
 			// Stopped after the blocked result: no second request, nothing after it.
 			expect(session.messages.at(-1)).toBe(result);
 			// No notice and no provider lookup: a child has no terminal of its own.

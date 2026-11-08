@@ -17,6 +17,10 @@ import type { HandBackVerdict } from "../../extensions/lib/notifications.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { envName } from "../../extensions/lib/brand.mjs";
+import { requireText } from "../../extensions/lib/profile.ts";
+
+/** The warning the profile puts above a flagged or unreviewed report. */
+const warning = (kind: "blocked" | "unavailable", reason: string) => requireText("notifications").handBackWarning({ kind, reason, clipped: false });
 
 vi.mock("../../extensions/auto-mode/classifier.ts", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../../extensions/auto-mode/classifier.ts")>()),
@@ -75,7 +79,7 @@ describe("hand-back review and the auto-mode pause", () => {
 
 	it("warns on flagged runs without pausing auto mode", async () => {
 		for (let i = 0; i < CONSECUTIVE_BLOCK_LIMIT; i++) {
-			expect(await foreground(`spawn-${i}`)).toContain("SECURITY WARNING");
+			expect(await foreground(`spawn-${i}`)).toContain(warning("blocked", "stub: sends a credential off the machine"));
 			expect(await background(`agent-${i}`)).toEqual({ kind: "blocked", reason: "stub: sends a credential off the machine" });
 		}
 		expect(await paused("probe")).toBe(false);
@@ -86,7 +90,7 @@ describe("hand-back review and the auto-mode pause", () => {
 			vi.mocked(classify).mockResolvedValueOnce({ decision: "block", reason: "the classifier timed out", tier: "timeout" });
 			expect(await background(`agent-${i}`)).toEqual({ kind: "unavailable", reason: "the classifier timed out" });
 			vi.mocked(classify).mockResolvedValueOnce({ decision: "block", reason: "no severity", tier: "unmatched", noVerdict: true });
-			expect(await foreground(`spawn-${i}`)).toContain("UNREVIEWED");
+			expect(await foreground(`spawn-${i}`)).toContain(warning("unavailable", "no severity"));
 		}
 		expect(await paused("probe")).toBe(false);
 	});

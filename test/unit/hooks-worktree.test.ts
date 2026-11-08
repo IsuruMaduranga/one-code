@@ -1,7 +1,11 @@
-/** Hook execution follows the calling worktree without moving config or consent to it. */
+/**
+ * Hook execution follows the calling worktree without moving config to it.
+ * Consent for project hooks (One Code's source provider reads Claude Code's
+ * project settings): profile/test/hooks-worktree-project.test.ts.
+ */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import hooksExtension from "../../extensions/hooks/index.ts";
 import { resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
@@ -10,6 +14,8 @@ import { shellQuote } from "../../extensions/lib/shell-quote.ts";
 import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { envName } from "../../extensions/lib/brand.mjs";
+import { primarySettingsFile, settingsSources } from "../../extensions/lib/claude-settings.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 
 const state = vi.hoisted(() => ({ home: `/nonexistent/one-code-hooks-worktree-${Math.random().toString(36).slice(2)}` }));
 vi.mock("node:os", async (importOriginal) => {
@@ -55,7 +61,14 @@ afterEach(() => {
 	rmSync(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 });
 });
 
-const writeHooks = (events: string[]) => writeFileSync(join(config, "settings.json"), JSON.stringify({ hooks: Object.fromEntries(events.map((event) => [event, [{ hooks: [{ type: "command", command }] }]])) }));
+/** Hooks in the primary user settings file of the profile in force (user scope: no consent prompt). */
+const writeHooks = (events: string[]) => {
+	const path = primarySettingsFile(settingsSources(project, homedir()))!.path;
+	mkdirSync(dirname(path), { recursive: true });
+	writeFileSync(path, JSON.stringify({ hooks: Object.fromEntries(events.map((event) => [event, [{ hooks: [{ type: "command", command }] }]])) }));
+};
+/** The reminder after a PostToolUse hook changed the file a call wrote. */
+const changedByHook = (path: string) => requireText("hooks").fileChangedByHook({ path });
 const seen = (): HookObservation[] => readFileSync(observations, "utf8").trim().split("\n").map((line) => JSON.parse(line));
 const enter = () => fake.events.emit(WORKTREE_CHANNEL, { path: worktree, sharedRoot: project });
 const toolCall = (id: string) => fake.fire("tool_call", { toolName: "bash", toolCallId: id, input: { command: "pwd" } }, createFakeCtx({ cwd: project }));
@@ -69,7 +82,7 @@ describe("worktree hook cwd", () => {
 		enter();
 		await toolCall("entered");
 		const [post] = await fake.fire<{ content: Array<{ text: string }> }>("tool_result", { toolName: "write", toolCallId: "written", input: { path: "formatted.txt" }, content: [], isError: false }, createFakeCtx({ cwd: project }));
-		expect(post.content[0].text).toContain(join(worktree, "formatted.txt"));
+		expect(post.content[0].text).toContain(changedByHook(join(worktree, "formatted.txt")));
 		fake.events.emit(WORKTREE_CHANNEL, null);
 		await toolCall("exited");
 		expect(seen().map(({ cwd, projectDir, payload }) => [cwd, projectDir, payload.cwd])).toEqual([
@@ -101,28 +114,13 @@ describe("worktree hook cwd", () => {
 		const call = { toolName: "write", input: { path: "formatted.txt" }, cwd: worktree, sessionId: "child" };
 		await bridge!.preToolUse(call);
 		const post = await bridge!.postToolUse({ ...call, content: [], isError: false });
-		expect(post.additionalContext).toContain(join(worktree, "formatted.txt"));
+		expect(post.additionalContext).toContain(changedByHook(join(worktree, "formatted.txt")));
 		expect(seen().map(({ cwd, projectDir, payload }) => [cwd, projectDir, payload.cwd, payload.agent_id])).toEqual([
 			[worktree, project, worktree, "child"],
 			[worktree, project, worktree, "child"],
 		]);
 		expect(readFileSync(join(project, "formatted.txt"), "utf8")).toBe("original checkout\n");
 		expect(readFileSync(join(worktree, "formatted.txt"), "utf8")).toBe("formatted by hook\n");
-	});
-
-	it("keeps project hook discovery and consent at the parent even when the worktree has different settings", async () => {
-		for (const dir of [project, worktree]) mkdirSync(join(dir, ".claude"));
-		writeFileSync(join(project, ".claude", "settings.json"), JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ type: "command", command }] }] } }));
-		writeFileSync(join(worktree, ".claude", "settings.json"), JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ type: "command", command: "exit 2" }] }] } }));
-		const confirm = vi.fn(async () => true);
-		const ctx = createFakeCtx({ cwd: project, hasUI: true, ui: { confirm } });
-		hooksExtension(fake.pi as never);
-		enter();
-		const [result] = await fake.fire("tool_call", { toolName: "bash", toolCallId: "project-hook", input: { command: "pwd" } }, ctx);
-		expect(result).toBeUndefined();
-		expect(confirm).toHaveBeenCalledOnce();
-		expect(seen()).toHaveLength(1);
-		expect(seen()[0]).toMatchObject({ cwd: worktree, projectDir: project, payload: { cwd: worktree } });
 	});
 
 	it("does not start a queued SessionStart hook after the session shuts down", async () => {
@@ -133,21 +131,6 @@ describe("worktree hook cwd", () => {
 		await fake.fire("session_shutdown", { reason: "reload" }, ctx);
 		await fake.fire("before_agent_start", { prompt: "unused" }, ctx);
 		expect(existsSync(observations)).toBe(false);
-	});
-
-	it("reserves startup hook consent before yielding but captures cwd after worktree restoration", async () => {
-		mkdirSync(join(project, ".claude"));
-		writeFileSync(join(project, ".claude", "settings.json"), JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: "command", command }] }] } }));
-		const confirm = vi.fn(async () => true);
-		const ctx = createFakeCtx({ cwd: project, hasUI: true, ui: { confirm } });
-		hooksExtension(fake.pi as never);
-		(fake.pi.on as (event: string, handler: () => void) => void)("session_start", enter);
-		const starting = fake.fire("session_start", { reason: "resume" }, ctx);
-		expect(confirm).toHaveBeenCalledOnce();
-		await starting;
-		await fake.fire("before_agent_start", { prompt: "continue" }, ctx);
-		expect(seen()).toHaveLength(1);
-		expect(seen()[0]).toMatchObject({ cwd: worktree, projectDir: project, payload: { cwd: worktree } });
 	});
 
 	it("uses the resumed worktree for SessionStart after later lifecycle handlers restore it", async () => {

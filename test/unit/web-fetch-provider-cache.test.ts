@@ -3,10 +3,9 @@ import type { Model } from "@earendil-works/pi-ai";
 import { stream } from "@earendil-works/pi-ai/api/anthropic-messages";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import { readerMessages } from "../../extensions/web-fetch/summarize.ts";
-import { webFetchText } from "../../profile/text/web-fetch/index.ts";
-import { ALL_LIVE } from "./helpers/live.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 
-const webFetch = webFetchText(ALL_LIVE);
+const webFetch = requireText("webFetch");
 
 const model: Model<"anthropic-messages"> = {
 	id: "claude-sonnet-5", name: "Offline reader", api: "anthropic-messages", provider: "anthropic",

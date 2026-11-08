@@ -1,8 +1,15 @@
+/**
+ * The skill and prompt-template folders the base hands pi: the cross-tool
+ * `.agents/skills` folders and the product's config folder's `commands`, plus
+ * the bundled catalog last. The folders a source provider adds (One Code's:
+ * Claude Code's `.claude`) are its own (profile/test/claude-compat-claude.test.ts).
+ */
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { claudeResourcePaths } from "../../extensions/claude-compat/index.ts";
+import { userConfigDir } from "../../extensions/lib/sources.ts";
 
 describe("claudeResourcePaths", () => {
 	let home: string;
@@ -22,26 +29,15 @@ describe("claudeResourcePaths", () => {
 		expect(claudeResourcePaths(cwd, home)).toEqual({ skillPaths: [], promptPaths: [] });
 	});
 
-	it("discovers .claude and .agents skill dirs, user and project scope", () => {
+	it("discovers .agents skill dirs, user and project scope, and the user's commands", () => {
 		// ~/.agents/skills is the cross-tool Agent Skills directory, which
 		// Claude Code also reads — a skill installed there must work here too.
-		for (const dir of [
-			join(home, ".claude", "skills"),
-			join(home, ".agents", "skills"),
-			join(cwd, ".claude", "skills"),
-			join(cwd, ".agents", "skills"),
-			join(home, ".claude", "commands"),
-		]) {
+		for (const dir of [join(home, ".agents", "skills"), join(cwd, ".agents", "skills"), join(userConfigDir(home), "commands")]) {
 			mkdirSync(dir, { recursive: true });
 		}
 		expect(claudeResourcePaths(cwd, home)).toEqual({
-			skillPaths: [
-				join(home, ".claude", "skills"),
-				join(home, ".agents", "skills"),
-				join(cwd, ".claude", "skills"),
-				join(cwd, ".agents", "skills"),
-			],
-			promptPaths: [join(home, ".claude", "commands")],
+			skillPaths: [join(home, ".agents", "skills"), join(cwd, ".agents", "skills")],
+			promptPaths: [join(userConfigDir(home), "commands")],
 		});
 	});
 
@@ -49,10 +45,10 @@ describe("claudeResourcePaths", () => {
 		// pi keeps the FIRST-loaded skill on a name collision, so the bundled
 		// catalog must come last to be the fallback rather than the override.
 		const bundled = join(cwd, "bundled-skills");
-		mkdirSync(join(home, ".claude", "skills"), { recursive: true });
+		mkdirSync(join(home, ".agents", "skills"), { recursive: true });
 		mkdirSync(bundled, { recursive: true });
 		const { skillPaths } = claudeResourcePaths(cwd, home, bundled);
-		expect(skillPaths).toEqual([join(home, ".claude", "skills"), bundled]);
+		expect(skillPaths).toEqual([join(home, ".agents", "skills"), bundled]);
 		expect(skillPaths[skillPaths.length - 1]).toBe(bundled);
 	});
 

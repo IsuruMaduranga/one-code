@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { HOMEBREW_MIN_RELEASE_AGE_MS } from "../../extensions/lib/update-check.mjs";
 import { APP_REGISTRY_URL, PACKAGE_REGISTRY_URL, lookupLatestVersion } from "../../extensions/doctor/update-lookup.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
+import { brand, envName } from "../../extensions/lib/brand.mjs";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -16,8 +16,9 @@ const fetching = (body: unknown) => async () => ({ ok: true, status: 200, json: 
 
 describe("doctor update lookup shares the app's newest-installable-version rule", () => {
 	it("reads the full packument of the right package", () => {
-		expect(APP_REGISTRY_URL).toBe("https://registry.npmjs.org/@one-ai%2Fone-code");
-		expect(PACKAGE_REGISTRY_URL).toBe("https://registry.npmjs.org/one-code-extension");
+		// A scoped name keeps its `@` and escapes the slash, as the registry expects.
+		expect(APP_REGISTRY_URL).toBe(`https://registry.npmjs.org/${brand.packages.app.replace("/", "%2F")}`);
+		expect(PACKAGE_REGISTRY_URL).toBe(`https://registry.npmjs.org/${brand.packages.extension}`);
 	});
 
 	it("reports an hour-old release as behind for npm and current for Homebrew", async () => {

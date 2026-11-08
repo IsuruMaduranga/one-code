@@ -6,6 +6,7 @@ import { Type } from "typebox";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HookBridge } from "../../extensions/hooks/subagent-bridge.ts";
 import { openChildSession } from "../../extensions/lib/agent-loader.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 import { SubagentRuntime } from "../../extensions/subagents/runner.ts";
 import { registerWorktreeIsolation, releaseWorktreeIsolation } from "../../extensions/lib/worktree-isolation.ts";
 
@@ -92,7 +93,16 @@ describe("child hook and permission order", () => {
 		try {
 			const outcome = await session.extensionRunner!.emitToolCall({ type: "tool_call", toolCallId: "child-3", toolName: "write", input: { path: "own.txt", content: "text" } });
 			expect(outcome?.block).toBe(true);
-			expect(outcome?.reason).toContain("Refusing the write");
+			expect(outcome?.reason).toBe(
+				requireText("worktreeGuard").refusal({
+					kind: "sharedCheckoutWrite",
+					worktreePath: worktree,
+					sharedRoot: cwd,
+					target: join(cwd, "shared.txt"),
+					inCommand: false,
+					mapped: join(worktree, "shared.txt"),
+				}),
+			);
 			expect(permission).not.toHaveBeenCalled();
 		} finally {
 			session.dispose();

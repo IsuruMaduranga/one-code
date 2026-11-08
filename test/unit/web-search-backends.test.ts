@@ -4,7 +4,6 @@ import {
 	EXA_MCP_URL,
 	TAVILY_KEY_ENV,
 	braveBackend,
-	type ChainOutcome,
 	exaFreeBackend,
 	filterByDomains,
 	parseBrave,
@@ -19,7 +18,6 @@ import {
 	type FetchLike,
 	type SearchBackend,
 } from "../../extensions/web/backends.ts";
-import { webSearch } from "../../profile/text/web-search/index.ts";
 
 /** The failure data a backend or the chain threw. */
 async function failureOf(work: Promise<unknown> | (() => unknown)): Promise<unknown> {
@@ -30,11 +28,6 @@ async function failureOf(work: Promise<unknown> | (() => unknown)): Promise<unkn
 	}
 	throw new Error("expected a failure");
 }
-
-/** The chain's result in One Code's words. */
-const formatSearchResults = (query: string, outcome: ChainOutcome) =>
-	webSearch.chainResults({ query, label: outcome.backend.label, attempts: outcome.attempts, keyless: outcome.backend.keyless, results: outcome.results });
-const KEYLESS_NOTE_START = "Note: these results came from Exa's free keyless endpoint";
 
 const jsonResponse = (body: unknown, init: { status?: number; contentType?: string } = {}): Response =>
 	new Response(typeof body === "string" ? body : JSON.stringify(body), {
@@ -170,7 +163,6 @@ describe("backends over a fake fetch", () => {
 		const fetchImpl: FetchLike = async () => jsonResponse("Unauthorized", { status: 401, contentType: "text/plain" });
 		const failure = await failureOf(braveBackend("bad", fetchImpl).search("q", {}, 5, undefined));
 		expect(failure).toEqual({ kind: "http", api: "Brave Search API", status: 401, keyEnv: BRAVE_KEY_ENV, body: "Unauthorized" });
-		expect(webSearch.attempt({ label: "Brave Search", failure: failure as never })).toBe(`Brave Search: Brave Search API HTTP 401 (check ${BRAVE_KEY_ENV}): Unauthorized`);
 	});
 
 	it("tavily posts a bearer token with include/exclude domains", async () => {
@@ -201,11 +193,10 @@ describe("backends over a fake fetch", () => {
 		expect(await failureOf(exaFreeBackend(async () => jsonResponse("", { status: 429 })).search("q", {}, 4, undefined))).toEqual({ kind: "rateLimited", api: "Exa free endpoint" });
 		const rpc = await failureOf(exaFreeBackend(async () => jsonResponse({ jsonrpc: "2.0", id: 1, error: { code: -1, message: "boom" } })).search("q", {}, 4, undefined));
 		expect(rpc).toEqual({ kind: "rpcError", api: "Exa MCP", message: "boom" });
-		expect(webSearch.attempt({ label: "Exa", failure: rpc as never })).toBe("Exa: Exa MCP error: boom");
 	});
 });
 
-describe("runChain + formatSearchResults", () => {
+describe("runChain", () => {
 	const backend = (name: SearchBackend["name"], keyless: boolean, impl: SearchBackend["search"]): SearchBackend => ({
 		name,
 		label: name,
@@ -219,35 +210,27 @@ describe("runChain + formatSearchResults", () => {
 		const outcome = await runChain(chain, "q", {}, 10, undefined);
 		expect(outcome.backend.name).toBe("exa-free");
 		expect(outcome.attempts).toEqual([{ label: "brave", failure: { kind: "other", osMessage: "down" } }]);
-		const text = formatSearchResults("q", outcome);
-		expect(text).toContain('Search results for "q" (via exa-free)');
-		expect(text).toContain("Fell back after: brave: down");
-		expect(text).toContain(KEYLESS_NOTE_START);
-		expect(text).toContain("1. T\n   https://a.com/\n   S");
-		expect(text).toContain("Sources:");
+		expect(outcome.backend.keyless).toBe(true);
+		expect(outcome.results).toEqual(ok);
 	});
 
-	it("does not claim a key is missing after a configured backend failed", async () => {
-		const outcome = await runChain([
-			backend("brave", false, async () => { throw new Error("HTTP 503"); }),
-			backend("exa-free", true, async () => ok),
-		], "q", {}, 10, undefined);
-		const text = formatSearchResults("q", outcome);
-		expect(text).toContain("free keyless endpoint");
-		expect(text).not.toContain("no search API key is configured");
-	});
-
-	it("does not add the keyless note for a keyed backend and reports no results", async () => {
+	it("reports a keyed backend with no results as such", async () => {
 		const outcome = await runChain([backend("tavily", false, async () => [])], "q", {}, 10, undefined);
-		const text = formatSearchResults("q", outcome);
-		expect(text).not.toContain(KEYLESS_NOTE_START);
-		expect(text).toContain("No results.");
+		expect(outcome.backend).toMatchObject({ name: "tavily", keyless: false });
+		expect(outcome.attempts).toEqual([]);
+		expect(outcome.results).toEqual([]);
 	});
 
 	it("names every backend when all fail", async () => {
 		const chain = [backend("brave", false, async () => { throw new Error("a"); }), backend("exa-free", true, async () => { throw new Error("b"); })];
 		const failure = await failureOf(runChain(chain, "q", {}, 10, undefined));
-		expect(webSearch.failed({ model: "p/m", failure: failure as never })).toBe("web_search failed on p/m.\nEvery search backend failed:\n- brave: a\n- exa-free: b");
+		expect(failure).toEqual({
+			kind: "allFailed",
+			attempts: [
+				{ label: "brave", failure: { kind: "other", osMessage: "a" } },
+				{ label: "exa-free", failure: { kind: "other", osMessage: "b" } },
+			],
+		});
 	});
 
 	it("stops on cancellation instead of trying the next backend", async () => {

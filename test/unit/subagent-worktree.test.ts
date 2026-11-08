@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanupWorktree, createWorktree, keptWorktreeNote, type Worktree } from "../../extensions/subagents/worktree.ts";
 import { releaseWorktreeIsolation, worktreeIsolationFor } from "../../extensions/lib/worktree-isolation.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 
 // Every repository here lives in a temp directory, never in a real checkout.
 const git = (cwd: string, ...args: string[]) =>
@@ -137,6 +138,6 @@ describe("isolation worktree cleanup", () => {
 	});
 
 	it("names the branch in the kept-worktree note", () => {
-		expect(keptWorktreeNote("/tmp/wt", "cc-subagent/x")).toContain("/tmp/wt on branch cc-subagent/x");
+		expect(keptWorktreeNote("/tmp/wt", "cc-subagent/x")).toBe(requireText("subagents").worktreeKept({ path: "/tmp/wt", branch: "cc-subagent/x" }));
 	});
 });

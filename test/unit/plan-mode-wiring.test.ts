@@ -12,9 +12,13 @@ import { MODE_CHANNEL, PLAN_FILE_CHANNEL } from "../../extensions/lib/plan-mode-
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts";
 import planModeExtension from "../../extensions/plan-mode/index.ts";
-import { buildPlanModeReminder } from "../../profile/text/plan-mode/reminder.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
+import { userDenialText } from "../../extensions/lib/user-denial.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { envName } from "../../extensions/lib/brand.mjs";
+
+const planMode = requireText("planMode");
+const buildPlanModeReminder = (planFile: string, planExists: boolean) => planMode.reminder({ planFile, planExists });
 
 describe("plan-mode wiring", () => {
 	let fake: FakePi;
@@ -136,8 +140,8 @@ describe("plan-mode wiring", () => {
 		await fake.fireOne("session_compact", {}, ctx);
 		const standing = reminders.filter((r) => r.key === "permission-mode" && !r.remove).at(-1)?.text;
 		expect(standing).not.toBe(atEntry);
-		const restore = reminders.find((r) => r.text?.startsWith("A plan file exists from plan mode at:"));
-		expect(restore?.text).toContain("1. Step one.");
+		const plan = "# the plan\n1. Step one.\n";
+		const restore = reminders.find((r) => r.text === planMode.reattached({ planFile: planFiles[0].path, content: plan, chars: plan.length }));
 		expect(restore?.placement).toBe("user-prepend");
 	});
 
@@ -150,7 +154,7 @@ describe("plan-mode wiring", () => {
 		await expect(fake.fireOne("session_compact", {}, ctx)).resolves.toBeUndefined();
 		// The mode block still follows the compaction; only the restore is skipped.
 		expect(reminders.filter((r) => r.key === "permission-mode" && !r.remove).at(-1)?.text).not.toBe(atEntry);
-		expect(reminders.find((r) => r.text?.startsWith("A plan file exists from plan mode at:"))).toBeUndefined();
+		expect(reminders.find((r) => r.placement === "user-prepend")).toBeUndefined();
 	});
 
 	it("re-installs the sticky plan block and announces the plan file synchronously when the mode becomes plan mid-turn", async () => {
@@ -237,8 +241,7 @@ describe("exit_plan_mode and the mode before planning (PERMISSIONS-REVIEW-2026-0
 		};
 		expect(result.isError).toBe(true);
 		expect(result.details.approved).toBe(false);
-		expect(result.content[0].text).toContain("interactive session");
-		expect(result.content[0].text).toContain(planFile);
+		expect(result.content[0].text).toBe(planMode.noApprover(planFile));
 		// No mode change was requested: the session stays in plan mode.
 		expect(modeRequests).toHaveLength(0);
 	});
@@ -255,14 +258,14 @@ describe("exit_plan_mode and the mode before planning (PERMISSIONS-REVIEW-2026-0
 		await fake.fireOne("session_start", {}, ctx);
 		// The session was in acceptEdits, then entered plan mode.
 		fake.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "acceptEdits", paused: false });
-		await enterPlanWithPlanText(ctx);
+		const planFile = await enterPlanWithPlanText(ctx);
 		modeRequests.length = 0;
 
 		const exitReminders: Array<{ text?: string }> = [];
 		fake.events.on(REMINDER_CHANNEL, (data) => exitReminders.push(data as { text?: string }));
 		const result = (await fake.tools.get("exit_plan_mode")!.execute("t3", {}, undefined, undefined, ctx)) as { details: { approved?: boolean } };
 		expect(result.details.approved).toBe(true);
-		expect(exitReminders.some((entry) => entry.text?.includes("You have exited plan mode."))).toBe(true);
+		expect(exitReminders.some((entry) => entry.text === planMode.exited(planFile))).toBe(true);
 		expect(modeRequests).toEqual([{ mode: "acceptEdits", toolCallId: "t3" }]);
 		const text = offered[0].join("\n");
 		expect(text).toContain("back to auto-accept edits (the mode before planning)");
@@ -331,7 +334,7 @@ describe("exit_plan_mode and the mode before planning (PERMISSIONS-REVIEW-2026-0
 		expect(input).toHaveBeenCalledWith("Tell the agent what to change", undefined, expect.anything());
 		expect(result.isError).toBe(true);
 		expect(result.details).toMatchObject({ approved: false, feedback: "name it greet.txt instead" });
-		expect(result.content[0].text).toContain("To tell you how to proceed, the user said:\nname it greet.txt instead");
+		expect(result.content[0].text).toBe(userDenialText("name it greet.txt instead"));
 		expect(result.terminate).toBeUndefined();
 		expect(ctx.abort).not.toHaveBeenCalled();
 		expect(modeRequests).toHaveLength(0);
@@ -345,7 +348,7 @@ describe("exit_plan_mode and the mode before planning (PERMISSIONS-REVIEW-2026-0
 		modeRequests.length = 0;
 		const result = (await fake.tools.get("exit_plan_mode")!.execute("t7", {}, undefined, undefined, ctx)) as ExitResult;
 		expect(input).not.toHaveBeenCalled();
-		expect(result.content[0].text).toContain("STOP what you are doing");
+		expect(result.content[0].text).toBe(userDenialText());
 		expect(result.terminate).toBe(true);
 		expect(ctx.abort).not.toHaveBeenCalled(); // not before pi records the result
 		await fake.fire("tool_execution_end", { toolCallId: "t7" }, ctx);

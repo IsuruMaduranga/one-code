@@ -1,21 +1,28 @@
 /**
- * Foreground shell results in Claude Code's words (lib/shell-result.ts): a
- * failure starts with `Exit code N`, output loses its trailing newline, an
- * empty success names the tool. The inputs are pi's exact texts.
+ * Foreground shell results in Claude Code's shape (lib/shell-result.ts): a
+ * failure is the profile's exit-code text over the output without pi's
+ * trailer, a success loses its blank edges, an empty success is the profile's
+ * empty-result text naming the tool. The inputs are pi's exact texts.
  */
 import { describe, expect, it, vi } from "vitest";
 import { Type } from "typebox";
 import { claudeCodeShellText } from "../../extensions/lib/shell-result.ts";
 import { registerShellTool } from "../../extensions/lib/shell-tool.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+
+/** The profile's failure text for exit `code`, given the output the base passes (pi's, without its trailer). */
+const exitText = (code: number, output = "") => requireText("shell").exitCode({ code, output });
+/** The profile's text for an empty result of the tool Claude Code calls `tool`. */
+const emptyText = (tool: "Bash" | "PowerShell") => requireText("toolResults").empty({ tool });
 
 describe("claudeCodeShellText", () => {
 	it("puts the exit code first on a failure, without pi's trailer", () => {
 		expect(claudeCodeShellText("ls: /nonexistent-dir: No such file or directory\n\n\nCommand exited with code 1", 1, "bash")).toBe(
-			"Exit code 1\nls: /nonexistent-dir: No such file or directory",
+			exitText(1, "ls: /nonexistent-dir: No such file or directory\n"),
 		);
-		expect(claudeCodeShellText("(no output)\n\nCommand exited with code 3", 3, "bash")).toBe("Exit code 3");
-		expect(claudeCodeShellText("\nx\n\n\nCommand exited with code 4", 4, "bash")).toBe("Exit code 4\n\nx");
+		expect(claudeCodeShellText("(no output)\n\nCommand exited with code 3", 3, "bash")).toBe(exitText(3));
+		expect(claudeCodeShellText("\nx\n\n\nCommand exited with code 4", 4, "bash")).toBe(exitText(4, "\nx\n"));
 	});
 
 	it("trims a success's leading blank lines and trailing whitespace", () => {
@@ -24,12 +31,12 @@ describe("claudeCodeShellText", () => {
 	});
 
 	it("names the tool for an empty success", () => {
-		expect(claudeCodeShellText("(no output)", 0, "bash")).toBe("(Bash completed with no output)");
-		expect(claudeCodeShellText("(no output)", 0, "powershell")).toBe("(PowerShell completed with no output)");
+		expect(claudeCodeShellText("(no output)", 0, "bash")).toBe(emptyText("Bash"));
+		expect(claudeCodeShellText("(no output)", 0, "powershell")).toBe(emptyText("PowerShell"));
 	});
 
 	it("marks a success whose output becomes empty after Claude Code's trimming", () => {
-		expect(claudeCodeShellText(" \n\t\n", 0, "bash")).toBe("(Bash completed with no output)");
+		expect(claudeCodeShellText(" \n\t\n", 0, "bash")).toBe(emptyText("Bash"));
 	});
 
 	it("keeps pi's text when the shape is not pi's", () => {
@@ -62,7 +69,7 @@ describe("registerShellTool: the foreground result reads as Claude Code's", () =
 		const structuredContent = { output: "boom\n", truncated: false, exit_code: 2, wall_time_seconds: 0.1 };
 		const run = mount({ content: [{ type: "text", text: "boom\n\n\nCommand exited with code 2" }], details: {}, structuredContent, isError: true });
 		const result = await run("false");
-		expect(result.content[0].text).toBe("Exit code 2\nboom");
+		expect(result.content[0].text).toBe(exitText(2, "boom\n"));
 		expect(result.isError).toBe(true);
 		expect(result.structuredContent).toBe(structuredContent);
 	});
@@ -71,8 +78,9 @@ describe("registerShellTool: the foreground result reads as Claude Code's", () =
 		const output = Array.from({ length: 4_000 }, (_, i) => `line ${i + 1}`).join("\n");
 		const run = mount({ content: [{ type: "text", text: output }], details: {}, structuredContent: { output, truncated: false, exit_code: 0, wall_time_seconds: 0 } });
 		const text = (await run("cat big")).content[0].text;
-		expect(text.startsWith("<persisted-output>\nOutput too large (")).toBe(true);
-		expect(text).toContain("Preview (first 2KB):\nline 1\nline 2\n");
+		expect(text.startsWith("<persisted-output>\n")).toBe(true);
+		expect(text.endsWith("</persisted-output>")).toBe(true);
+		expect(text).toContain(`\n\n${requireText("toolResults").previewHeading({ kb: 2 })}\nline 1\nline 2\n`);
 	});
 
 	it("trims a success", async () => {
@@ -83,7 +91,7 @@ describe("registerShellTool: the foreground result reads as Claude Code's", () =
 	it.each(["grep absent file", "rg absent file", "egrep absent file", "fgrep absent file", "find file", "diff a b", "test -e file", "[ -e file ]", "git grep absent", "git -C root diff --quiet", "git --git-dir .git --work-tree . diff --quiet", "echo one | rg absent", "echo one; rg absent", "echo one || rg absent"])("marks a blank semantic-success exit 1 for %s", async (command) => {
 		const run = mount({ content: [{ type: "text", text: "(no output)\n\nCommand exited with code 1" }], structuredContent: { output: "", exit_code: 1 }, isError: true });
 		const result = await run(command);
-		expect(result.content[0].text).toBe("(Bash completed with no output)");
+		expect(result.content[0].text).toBe(emptyText("Bash"));
 		expect(result.isError).toBe(false);
 		expect(result.structuredContent).toEqual({ output: "", exit_code: 1 });
 	});
@@ -91,7 +99,7 @@ describe("registerShellTool: the foreground result reads as Claude Code's", () =
 	it.each(["false", "false && rg absent", "env rg absent", "/usr/bin/grep absent file", "git status", `rg ${"x".repeat(10_000)}`])("keeps an ordinary blank failure for %s", async (command) => {
 		const run = mount({ content: [{ type: "text", text: "(no output)\n\nCommand exited with code 1" }], structuredContent: { output: "", exit_code: 1 }, isError: true });
 		const result = await run(command);
-		expect(result.content[0].text).toBe("Exit code 1");
+		expect(result.content[0].text).toBe(exitText(1));
 		expect(result.isError).toBe(true);
 	});
 
@@ -115,10 +123,13 @@ describe("registerShellTool: the foreground result reads as Claude Code's", () =
 	])("keeps a failure with output for %s exiting %i", async (command, code) => {
 		const run = mount({ content: [{ type: "text", text: `boom\n\n\nCommand exited with code ${code}` }], structuredContent: { output: "boom\n", exit_code: code }, isError: true });
 		const result = await run(command);
-		expect(result.content[0].text).toBe(`Exit code ${code}\nboom`);
+		expect(result.content[0].text).toBe(exitText(code, "boom\n"));
 		expect(result.isError).toBe(true);
 	});
 });
+
+/** Stands for the profile's empty-result text in a table of expected results. */
+const EMPTY = Symbol("empty result");
 
 describe("registerShellTool: PowerShell's semantic exit codes, as Claude Code's", () => {
 	const mount = (text: string, code: number) => {
@@ -137,19 +148,19 @@ describe("registerShellTool: PowerShell's semantic exit codes, as Claude Code's"
 	};
 
 	it.each([
-		["findstr absent notes.txt", "", 1, "(PowerShell completed with no output)"],
-		["rg absent", "", 1, "(PowerShell completed with no output)"],
-		["& 'C:\\Tools\\rg.exe' absent", "", 1, "(PowerShell completed with no output)"],
+		["findstr absent notes.txt", "", 1, EMPTY],
+		["rg absent", "", 1, EMPTY],
+		["& 'C:\\Tools\\rg.exe' absent", "", 1, EMPTY],
 		["robocopy src dst /E", "  Files : 3", 3, "  Files : 3"],
 		["robocopy src dst /E", "  Files : 3", 7, "  Files : 3"],
 		["where.exe node", "INFO: Could not find files for the given pattern(s).", 1, "INFO: Could not find files for the given pattern(s)."],
 		["fc.exe a.txt b.txt", "***** a.txt", 1, "***** a.txt"],
-		["git -C repo diff --quiet", "", 1, "(PowerShell completed with no output)"],
-		["git --git-dir .git --work-tree . diff --quiet", "", 1, "(PowerShell completed with no output)"],
+		["git -C repo diff --quiet", "", 1, EMPTY],
+		["git --git-dir .git --work-tree . diff --quiet", "", 1, EMPTY],
 		["Get-ChildItem; grep absent notes.txt", "a.txt", 1, "a.txt"],
 	])("reads %s (output %j, exit %i) as a success", async (command, output, code, expected) => {
 		const result = await mount(output, code)(command);
-		expect(result.content[0].text).toBe(expected);
+		expect(result.content[0].text).toBe(expected === EMPTY ? emptyText("PowerShell") : expected);
 		expect(result.isError).toBe(false);
 	});
 
@@ -165,7 +176,7 @@ describe("registerShellTool: PowerShell's semantic exit codes, as Claude Code's"
 		["Remove-Item x", "", 1],
 	])("keeps %s (output %j, exit %i) an error", async (command, output, code) => {
 		const result = await mount(output, code)(command);
-		expect(result.content[0].text.startsWith(`Exit code ${code}`)).toBe(true);
+		expect(result.content[0].text).toBe(exitText(code, output ? `${output}\n` : ""));
 		expect(result.isError).toBe(true);
 	});
 });

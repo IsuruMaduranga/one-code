@@ -12,9 +12,9 @@ import { join } from "node:path";
 import { AgentSession } from "@earendil-works/pi-coding-agent";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { DEFER_CHANNEL } from "../../extensions/lib/deferred.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { oneTurnHandbackSlot, subagentHandbackExtension, subagentHandbackTool } from "../../extensions/lib/subagent-handback.ts";
-import { handback } from "../../profile/text/handback/index.ts";
 import { childToolAllowlist } from "../../extensions/subagents/agents.ts";
 import { forkTaskMessage } from "../../extensions/subagents/outcome.ts";
 import { SubagentRuntime } from "../../extensions/subagents/runner.ts";
@@ -24,19 +24,15 @@ import { createFakePi } from "./helpers/fake-pi.ts";
 
 type ToolResult = { content: Array<{ text: string }>; isError?: boolean; terminate?: boolean };
 
+const handback = requireText("handback");
+
 describe("the SubagentHandback tool", () => {
-	it("carries Claude Code's description, reminder and schema", () => {
+	it("carries the profile's description and parameter text, and a strict one-field schema", () => {
 		const tool = subagentHandbackTool(oneTurnHandbackSlot());
 		expect(tool.name).toBe("SubagentHandback");
-		expect(tool.description).toBe(
-			"Deliver your final report to the agent that spawned you (your caller). Use it once, for that hand-off only: when your work is complete, call SubagentHandback({message: <your full report>}). The call ends your run, so do everything else first and put everything your caller needs in that one report. It is not a messaging channel: do not use it for progress updates or questions.\n\nOnly a report delivered through SubagentHandback reaches your caller; plain text you write at the end of your run is NOT delivered. There is no recipient parameter: the report can only go to your caller.",
-		);
 		expect(tool.description).toBe(handback.description);
-		expect(handback.reminder).toBe(
-			"Your final report is delivered through SubagentHandback: when your work is complete, call SubagentHandback({message: <your full report>}). The call ends your run, so make it your last step. Only a SubagentHandback call reaches your caller as your result; plain text you write at the end is not delivered.",
-		);
 		const schema = tool.parameters as unknown as { type: string; properties: Record<string, { type: string; description: string }>; required: string[]; additionalProperties: boolean };
-		expect(schema.properties).toEqual({ message: expect.objectContaining({ type: "string", description: "Your full report for your caller" }) });
+		expect(schema.properties).toEqual({ message: expect.objectContaining({ type: "string", description: handback.messageParam }) });
 		expect(schema.required).toEqual(["message"]);
 		expect(schema.additionalProperties).toBe(false);
 	});
@@ -46,9 +42,7 @@ describe("the SubagentHandback tool", () => {
 		const tool = subagentHandbackTool(slot, true);
 		await tool.execute("c1", { message: "Report." }, undefined, undefined, undefined as never);
 		const again = (await tool.execute("c2", { message: "More." }, undefined, undefined, undefined as never)) as { content: { text: string }[] };
-		expect(again.content[0].text).toBe(
-			"Nothing was sent: your report was already delivered (SubagentHandback delivers one report). Use SendMessage for anything further, then stop.",
-		);
+		expect(again.content[0].text).toBe(handback.alreadyDelivered({ sendMessage: true }));
 	});
 
 	it("records the report once and ends the run", async () => {
@@ -58,7 +52,6 @@ describe("the SubagentHandback tool", () => {
 
 		const delivered = await run("The file is app.py.");
 		expect(delivered.content[0].text).toBe(handback.delivered);
-		expect(delivered.content[0].text).toBe("Report delivered to your caller.");
 		expect(delivered.terminate).toBe(true);
 		expect(delivered.isError).toBeUndefined();
 		expect(slot.report).toBe("The file is app.py.");
@@ -66,7 +59,6 @@ describe("the SubagentHandback tool", () => {
 		const again = await run("a second report");
 		expect(again).toMatchObject({ isError: true });
 		expect(again.content[0].text).toBe(handback.alreadyDelivered({ sendMessage: false }));
-		expect(again.content[0].text).not.toContain("SendMessage");
 		expect(slot.report).toBe("The file is app.py.");
 	});
 
@@ -104,7 +96,7 @@ describe("the hand-back extension a child loads", () => {
 
 	it("an agent file's tools allowlist keeps it, and a fork's framing points at it", () => {
 		expect(childToolAllowlist(["Read"])).toContain("SubagentHandback");
-		expect(forkTaskMessage("do it")).toContain("the report you hand back through SubagentHandback is returned to the parent conversation verbatim");
+		expect(forkTaskMessage("do it")).toBe(requireText("subagents").forkTask({ task: "do it", isolation: undefined }));
 	});
 });
 
@@ -132,7 +124,7 @@ describe("SessionTurnTracker: the handed-back report is the turn's result", () =
 		const tracker = new SessionTurnTracker();
 		tracker.recordHandback("Partial.");
 		tracker.markAborted();
-		expect(tracker.turnOutcome()).toMatchObject({ failed: true, output: "Partial.\n\n[terminated before the turn finished]" });
+		expect(tracker.turnOutcome()).toMatchObject({ failed: true, output: requireText("subagents").failure({ kind: "aborted", why: "stopped", output: "Partial." }) });
 	});
 });
 

@@ -14,23 +14,28 @@ import {
 } from "../../extensions/lib/app-launch.mjs";
 import { piShellEnv, spawnShellCommand, withChildProcessEnv } from "../../extensions/lib/shell-spawn.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
+import { brand, envName } from "../../extensions/lib/brand.mjs";
 
 const repoRoot = resolve(import.meta.dirname, "..", "..");
 const home = resolve("/home/alice");
 
 describe("installMethodFor (where the app's bin lives)", () => {
 	// The real layouts: `npm root -g` under Homebrew's Node is <prefix>/lib/node_modules,
-	// a formula install lives in <prefix>/Cellar/onecode/<version>/libexec.
+	// a formula install lives in <prefix>/Cellar/<formula>/<version>/libexec. A brand
+	// with no Homebrew formula is always an npm install.
+	const formula = brand.packages.homebrewFormula;
+	const cellar = formula ?? brand.bin;
+	const app = brand.packages.app;
+	const brew = formula ? "brew" : "npm";
 	const layouts: Array<[string, string, "brew" | "npm"]> = [
-		["Homebrew formula (Apple silicon)", "/opt/homebrew/Cellar/onecode/0.4.1/libexec/lib/node_modules/@one-ai/one-code/bin.mjs", "brew"],
-		["Homebrew formula (Intel)", "/usr/local/Cellar/onecode/0.4.1/libexec/lib/node_modules/@one-ai/one-code/bin.mjs", "brew"],
-		["Linuxbrew formula", "/home/linuxbrew/.linuxbrew/Cellar/onecode/0.4.1/libexec/lib/node_modules/@one-ai/one-code/bin.mjs", "brew"],
-		["npm -g under Homebrew's node (Apple silicon)", "/opt/homebrew/lib/node_modules/@one-ai/one-code/bin.mjs", "npm"],
-		["npm -g under Homebrew's node (Intel)", "/usr/local/lib/node_modules/@one-ai/one-code/bin.mjs", "npm"],
-		["npm -g under Linuxbrew's node", "/home/linuxbrew/.linuxbrew/lib/node_modules/@one-ai/one-code/bin.mjs", "npm"],
-		["npm -g under nvm", "/Users/alice/.nvm/versions/node/v24.1.0/lib/node_modules/@one-ai/one-code/bin.mjs", "npm"],
-		["npm -g on Windows", "C:\\Users\\alice\\AppData\\Roaming\\npm\\node_modules\\@one-ai\\one-code\\bin.mjs", "npm"],
+		["Homebrew formula (Apple silicon)", `/opt/homebrew/Cellar/${cellar}/0.4.1/libexec/lib/node_modules/${app}/bin.mjs`, brew],
+		["Homebrew formula (Intel)", `/usr/local/Cellar/${cellar}/0.4.1/libexec/lib/node_modules/${app}/bin.mjs`, brew],
+		["Linuxbrew formula", `/home/linuxbrew/.linuxbrew/Cellar/${cellar}/0.4.1/libexec/lib/node_modules/${app}/bin.mjs`, brew],
+		["npm -g under Homebrew's node (Apple silicon)", `/opt/homebrew/lib/node_modules/${app}/bin.mjs`, "npm"],
+		["npm -g under Homebrew's node (Intel)", `/usr/local/lib/node_modules/${app}/bin.mjs`, "npm"],
+		["npm -g under Linuxbrew's node", `/home/linuxbrew/.linuxbrew/lib/node_modules/${app}/bin.mjs`, "npm"],
+		["npm -g under nvm", `/Users/alice/.nvm/versions/node/v24.1.0/lib/node_modules/${app}/bin.mjs`, "npm"],
+		["npm -g on Windows", `C:\\Users\\alice\\AppData\\Roaming\\npm\\node_modules\\${app.replace("/", "\\")}\\bin.mjs`, "npm"],
 	];
 	for (const [label, path, method] of layouts) {
 		it(`${label} is ${method}`, () => expect(installMethodFor(path)).toBe(method));
@@ -40,7 +45,7 @@ describe("installMethodFor (where the app's bin lives)", () => {
 
 describe("the app's agent directory", () => {
 	it("never adopts a user-exported PI_CODING_AGENT_DIR", () => {
-		expect(appAgentDir({ PI_CODING_AGENT_DIR: "/home/alice/.config/pi/agent" }, home)).toBe(join(home, ".onecode", "agent"));
+		expect(appAgentDir({ PI_CODING_AGENT_DIR: "/home/alice/.config/pi/agent" }, home)).toBe(join(home, brand.stateDir, "agent"));
 	});
 
 	it("moves only with the app's own knob", () => {
@@ -50,11 +55,11 @@ describe("the app's agent directory", () => {
 	it("sets PI_CODING_AGENT_DIR over a user value and records the user's values", () => {
 		const env: Record<string, string | undefined> = { PI_CODING_AGENT_DIR: "/home/alice/.config/pi/agent", HOME: home };
 		const agentDir = applyLauncherEnv(env, { home, appVersion: "0.4.2", installMethod: "npm" });
-		expect(agentDir).toBe(join(home, ".onecode", "agent"));
+		expect(agentDir).toBe(join(home, brand.stateDir, "agent"));
 		expect(env.PI_CODING_AGENT_DIR).toBe(agentDir);
 		expect(env.PI_SKIP_VERSION_CHECK).toBe("1");
 		expect(env.CC_VERSION).toBe("0.4.2");
-		expect(env.ONECODE_INSTALL_METHOD).toBe("npm");
+		expect(env[envName("INSTALL_METHOD")]).toBe("npm");
 		expect(JSON.parse(env[LAUNCHER_ENV_VAR] ?? "")).toEqual({
 			PI_CODING_AGENT_DIR: "/home/alice/.config/pi/agent",
 			PI_SKIP_VERSION_CHECK: null,
@@ -157,7 +162,7 @@ describe("spawned commands under the app get the user's environment", { timeout:
 		if (!bash) throw new Error("bash tool not registered");
 		const result = (await bash.execute(
 			"call-1",
-			{ command: 'printf "%s|%s|%s" "${PI_CODING_AGENT_DIR-unset}" "${CC_VERSION-unset}" "${ONECODE_LAUNCHER_ENV-unset}"' },
+			{ command: `printf "%s|%s|%s" "\${PI_CODING_AGENT_DIR-unset}" "\${CC_VERSION-unset}" "\${${LAUNCHER_ENV_VAR}-unset}"` },
 			undefined,
 			undefined,
 			createFakeCtx({ mode: "print", cwd: process.cwd() }),
@@ -182,7 +187,7 @@ describe("the app launcher (lib/create-app.mjs) applies the launcher environment
 	it("sets it through app-launch.mjs, never inheriting PI_CODING_AGENT_DIR", () => {
 		expect(source).toContain("applyLauncherEnv(process.env,");
 		expect(source).not.toMatch(/PI_CODING_AGENT_DIR\s*\|\|=/);
-		expect(source).not.toMatch(/process\.env\.(CC_VERSION|ONECODE_INSTALL_METHOD|PI_SKIP_VERSION_CHECK)\s*\|?\|?=/);
+		expect(source).not.toMatch(new RegExp(`process\\.env\\.(CC_VERSION|${envName("INSTALL_METHOD")}|PI_SKIP_VERSION_CHECK)\\s*\\|?\\|?=`));
 	});
 
 	it("before the doctor fast path exits and before pi is imported", () => {

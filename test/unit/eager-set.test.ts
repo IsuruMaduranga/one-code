@@ -1,15 +1,18 @@
 /**
  * The eager set follows Claude Code's: schedule_wakeup and list_agents are
  * declared from the first request (never announced on the deferral channel),
- * artifact stays deferred (its text is One Code's own). An eager tool needs no
- * promptSnippet: One Code's prompt lists only the tools that bring one.
+ * artifact stays deferred. An eager tool needs no promptSnippet: the prompt
+ * lists only the tools that bring one. The Agent tool's description comes
+ * from the profile in force, in the form the model's tier calls for (One
+ * Code's own forms: profile/test/eager-set-wording.test.ts).
  */
 import { describe, expect, it, vi } from "vitest";
 import artifactsExtension from "../../extensions/artifacts/index.ts";
 import backgroundExtension from "../../extensions/background/index.ts";
 import { DEFER_CHANNEL } from "../../extensions/lib/deferred.ts";
 import subagentsExtension from "../../extensions/subagents/index.ts";
-import { AGENT_LONG_DESCRIPTION, AGENT_SHORT_DESCRIPTION, agentDescription } from "../../profile/text/subagents/agent-description.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
+import { projectConfigDirName } from "../../extensions/lib/sources.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 function deferredBy(...extensions: Array<(pi: never) => void>) {
@@ -18,6 +21,11 @@ function deferredBy(...extensions: Array<(pi: never) => void>) {
 	fake.events.on(DEFER_CHANNEL, (data) => deferred.push((data as { name: string }).name));
 	for (const extension of extensions) extension(fake.pi as never);
 	return { fake, deferred };
+}
+
+/** The Agent tool's description in `form`, as the profile renders it for the base. */
+function agentDescription(form: "short" | "long"): string {
+	return requireText("subagents").agentDescription({ form, configDir: projectConfigDirName() });
 }
 
 describe("eager and deferred tools", () => {
@@ -38,7 +46,7 @@ describe("eager and deferred tools", () => {
 	it("the Agent tool switches to the long form on a cheap model", async () => {
 		const { fake } = deferredBy(backgroundExtension as never, subagentsExtension as never);
 		expect(fake.tools.get("Agent")!.description).toBe(agentDescription("short"));
-		expect(agentDescription("short").startsWith(AGENT_SHORT_DESCRIPTION)).toBe(true);
+		expect(agentDescription("long")).not.toBe(agentDescription("short"));
 		vi.stubEnv("CC_PROMPT_TIER", "cheap");
 		try {
 			const model = { provider: "openai", id: "gpt-test", input: ["text"], cost: { input: 1, output: 4 } };
@@ -47,6 +55,5 @@ describe("eager and deferred tools", () => {
 			vi.unstubAllEnvs();
 		}
 		expect(fake.tools.get("Agent")!.description).toBe(agentDescription("long"));
-		expect(agentDescription("long").startsWith(AGENT_LONG_DESCRIPTION.trimEnd())).toBe(true);
 	});
 });

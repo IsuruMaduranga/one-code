@@ -10,7 +10,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { runtimeSecretPaths } from "../../extensions/lib/permission-gate.ts";
 import { decide } from "../../extensions/permissions/matcher.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
+import { brand, envName } from "../../extensions/lib/brand.mjs";
 
 const cwd = join(tmpdir(), "harness-secret-reads-project");
 const secretPaths = runtimeSecretPaths(homedir());
@@ -35,8 +35,8 @@ afterEach(() => {
 describe("the harness's own secret stores", () => {
 	const home = homedir();
 	const stores = [
-		join(home, ".onecode", "settings.json"),
-		join(home, ".onecode", "mcp-auth", "github-0badc0de.json"),
+		join(home, brand.stateDir, "settings.json"),
+		join(home, brand.stateDir, "mcp-auth", "github-0badc0de.json"),
 		join(getAgentDir(), "models.json"),
 		join(getAgentDir(), "auth.json"),
 		join(home, ".claude", "settings.json"),
@@ -52,7 +52,7 @@ describe("the harness's own secret stores", () => {
 		expect(decide({ ...capable, toolName: "read", subject: join(home, ".claude", "CLAUDE.md") })).toMatchObject({ decision: "allow", cause: "outside-read" });
 	});
 
-	it("follows a relocated CLAUDE_CONFIG_DIR and ONECODE_STATE_DIR", () => {
+	it("follows a relocated CLAUDE_CONFIG_DIR and product state directory", () => {
 		process.env.CLAUDE_CONFIG_DIR = "/tmp/relocated-cc";
 		process.env[envName("STATE_DIR")] = "/tmp/relocated-oc";
 		const relocated = runtimeSecretPaths(home);
@@ -62,7 +62,7 @@ describe("the harness's own secret stores", () => {
 	});
 
 	it("are not working space inside a workspace directory", () => {
-		const stateDir = join(home, ".onecode");
+		const stateDir = join(home, brand.stateDir);
 		expect(decide({ ...capable, mode: "default", toolName: "read", subject: join(stateDir, "settings.json"), workspaceDirs: [stateDir] }).decision).toBe("ask");
 		expect(decide({ ...capable, mode: "default", toolName: "read", subject: join(stateDir, "plans", "p.md"), workspaceDirs: [stateDir] }).decision).toBe("allow");
 	});

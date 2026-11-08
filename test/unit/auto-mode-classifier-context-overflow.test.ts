@@ -6,6 +6,7 @@ import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { classify, createClassifierState } from "../../extensions/auto-mode/classifier.ts";
 import { loadAutoModeConfig } from "../../extensions/auto-mode/config.ts";
 import { buildPayload, type ClassifyRequest } from "../../extensions/auto-mode/prompt.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 import { pinCatalog } from "./catalog-fixture.ts";
 
 const completeMock = vi.mocked(completeSimple);
@@ -54,12 +55,14 @@ describe("classifier provider context overflow", () => {
 		"The input token count (280000) exceeds the maximum number of tokens allowed (272000)",
 	])("returns a distinct no-verdict result without retrying for %s", async (error) => {
 		completeMock.mockResolvedValue(errorReply(error));
+		const words = requireText("autoMode");
+		const blockSpy = vi.spyOn(words, "classifierBlock");
 		const state = deps();
 		const verdict = await classify(base, state);
 		expect(verdict).toMatchObject({ decision: "block", noVerdict: true, transcriptTooLong: true });
-		expect(verdict.reason).toContain("Classifier transcript exceeded context window");
-		expect(verdict.reason).toContain("Compact the session (/compact) and continue.");
-		expect(verdict.reason).not.toContain("choose a classifier");
+		expect(blockSpy.mock.calls).toEqual([[{ kind: "transcriptTooLong", model: `${main.provider}/${main.id}` }]]);
+		expect(verdict.reason).toBe(blockSpy.mock.results[0].value);
+		blockSpy.mockRestore();
 		expect(completeMock).toHaveBeenCalledTimes(1);
 		expect(state.state.rejected.size).toBe(0);
 	});

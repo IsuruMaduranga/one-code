@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DenialStore, MAX_DENIALS, denialInputKey, permissionGrantedMessage } from "../../extensions/auto-mode/denials.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 
 const denial = (inputKey: string, display = inputKey) => ({
 	toolName: "bash",
@@ -82,10 +83,9 @@ describe("DenialStore", () => {
 });
 
 describe("permissionGrantedMessage", () => {
-	it("uses Claude Code's wording", () => {
-		expect(permissionGrantedMessage(["bash(rm -rf dist)"])).toBe(
-			"Permission granted for: bash(rm -rf dist). You may now retry this command if you would like.",
-		);
-		expect(permissionGrantedMessage(["a", "b"])).toBe("Permission granted for: a, b. You may now retry these commands if you would like.");
+	it("passes every granted display to the profile's wording", () => {
+		const { permissionGranted } = requireText("autoMode");
+		expect(permissionGrantedMessage(["bash(rm -rf dist)"])).toBe(permissionGranted({ displays: ["bash(rm -rf dist)"] }));
+		expect(permissionGrantedMessage(["a", "b"])).toBe(permissionGranted({ displays: ["a", "b"] }));
 	});
 });

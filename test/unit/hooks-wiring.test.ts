@@ -8,27 +8,35 @@
  * Hooks are real shell commands run through the real executor (by design —
  * see executor.ts's own header), so this uses actual (trivial, instant)
  * `/bin/sh` scripts under a temp dir rather than mocking the executor. User
- * scope only, so no project-hook consent prompt is involved (that flow is
- * hooks-trust.test.ts's job). `os.homedir()` is redirected to a nonexistent
+ * scope only (the primary user settings file of the profile in force, under
+ * temp config and state directories), so no project-hook consent prompt is
+ * involved (that flow is hooks-trust.test.ts's job). `os.homedir()` is redirected to a nonexistent
  * path so plugin-hook discovery — which is not routed through the temp
  * CLAUDE_CONFIG_DIR — can never pick up whatever hook plugins happen to be
  * installed on the machine running this test.
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import hooksExtension from "../../extensions/hooks/index.ts";
 import type { CcHookEvent } from "../../extensions/hooks/protocol.ts";
 import { PRECOMPACT_INSTRUCTIONS_CHANNEL, type PreCompactInstructions } from "../../extensions/hooks/compaction.ts";
+import { MAX_HOOK_OUTPUT_BYTES } from "../../extensions/hooks/executor.ts";
 import { resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
 import { type HookBridge, SUBAGENT_HOOK_CHANNEL } from "../../extensions/hooks/subagent-bridge.ts";
 import { REMINDER_CHANNEL, wrapReminder } from "../../extensions/lib/reminders.ts";
 import { SKILL_INVOCATION_TYPE } from "../../extensions/skill/invoke.ts";
-import { hooks } from "../../profile/text/hooks/index.ts";
+import { brandedId, envName } from "../../extensions/lib/brand.mjs";
+import { primarySettingsFile, settingsSources } from "../../extensions/lib/claude-settings.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
+const hooks = requireText("hooks");
+
 const hookContextText = (event: CcHookEvent, text: string) => hooks.additionalContext({ event, text });
+/** A PreToolUse hook's refusal of a call, for the reason it stated. */
+const preToolUseRefusal = (reason: string) => hooks.preToolUseBlocked({ reason: hooks.blockReason({ kind: "stated", reason }) });
 
 const state = vi.hoisted(() => ({
 	fakeHome: `/nonexistent/one-code-test-hooks-wiring-fake-home-${Math.random().toString(36).slice(2)}`,
@@ -38,6 +46,22 @@ vi.mock("node:os", async (importOriginal) => {
 	const actualDefault = (actual as unknown as { default?: Record<string, unknown> }).default;
 	return { ...actual, homedir: () => state.fakeHome, default: { ...actualDefault, homedir: () => state.fakeHome } };
 });
+
+/**
+ * Point the user settings at temp directories under `root` (Claude Code's
+ * config dir and the product's state dir, whichever the profile reads) and
+ * return a writer for the primary user settings file: hooks written there are
+ * user scope.
+ */
+function userSettings(root: string): (settings: Record<string, unknown>) => void {
+	vi.stubEnv("CLAUDE_CONFIG_DIR", join(root, "claude-config"));
+	vi.stubEnv(envName("STATE_DIR"), join(root, "state"));
+	return (settings) => {
+		const path = primarySettingsFile(settingsSources(join(root, "project"), homedir()))!.path;
+		mkdirSync(dirname(path), { recursive: true });
+		writeFileSync(path, JSON.stringify(settings));
+	};
+}
 
 /**
  * A fire-and-forget SessionEnd hook may still be running with its cwd in the
@@ -58,6 +82,7 @@ describe("hooks wiring", () => {
 	let claudeDir: string;
 	let projectDir: string;
 	let fake: FakePi;
+	let writeSettings: (settings: Record<string, unknown>) => void;
 
 	const script = (name: string, body: string) => {
 		const path = join(root, name);
@@ -71,7 +96,7 @@ describe("hooks wiring", () => {
 		projectDir = join(root, "project");
 		mkdirSync(claudeDir, { recursive: true });
 		mkdirSync(projectDir, { recursive: true });
-		vi.stubEnv("CLAUDE_CONFIG_DIR", claudeDir);
+		writeSettings = userSettings(root);
 		resetHookSettingsCache();
 		fake = createFakePi();
 	});
@@ -81,7 +106,7 @@ describe("hooks wiring", () => {
 	});
 
 	const writeUserHooks = (hooks: Record<string, unknown>) => {
-		writeFileSync(join(claudeDir, "settings.json"), JSON.stringify({ hooks }));
+		writeSettings({ hooks });
 	};
 
 	const mount = () => hooksExtension(fake.pi as never);
@@ -96,7 +121,7 @@ describe("hooks wiring", () => {
 		const marker = join(root, "disabled-plugin-ran");
 		const command = script("plugin-hook.sh", `cat >/dev/null\ntouch "${marker}"\necho 'disabled plugin' >&2\nexit 2\n`);
 		writeFileSync(join(installPath, "hooks", "hooks.json"), JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command }] }] } }));
-		writeFileSync(join(claudeDir, "settings.json"), JSON.stringify({ disableAllHooks: true, enabledPlugins: { "fixture@market": true } }));
+		writeSettings({ disableAllHooks: true, enabledPlugins: { "fixture@market": true } });
 		mount();
 		const result = await fake.fireOne("tool_call", { toolName: "bash", toolCallId: "disabled", input: { command: "echo test" } }, ctx());
 		expect(existsSync(marker)).toBe(false);
@@ -322,7 +347,7 @@ describe("hooks wiring", () => {
 			sessionId: "child-1",
 			agentType: "explore",
 		});
-		expect(outcome.refusal).toBe("PreToolUse hook: no rm in children");
+		expect(outcome.refusal).toBe(preToolUseRefusal("no rm in children"));
 		// The hook read a Claude Code payload naming the child (agent_id present,
 		// agent_type = the agent), with the child's cwd and session id.
 		const stdin = JSON.parse(readFileSync(seen, "utf-8"));
@@ -351,7 +376,7 @@ describe("hooks wiring", () => {
 		parentRun.abort();
 		await fake.fireOne("session_start", { reason: "startup" }, createFakeCtx({ cwd: projectDir, signal: parentRun.signal }));
 		const outcome = await bridge!.preToolUse({ toolName: "bash", input: { command: "rm -rf build" }, cwd: projectDir, sessionId: "bg" });
-		expect(outcome.refusal).toBe("PreToolUse hook: denied");
+		expect(outcome.refusal).toBe(preToolUseRefusal("denied"));
 
 		// The parent's own call on its aborted run is cancelled before its hooks run,
 		// and a cancelled PreToolUse blocks rather than letting the call through.
@@ -399,7 +424,7 @@ describe("hooks wiring", () => {
 			{ toolName: "edit", toolCallId: "t2", input: { path: "/x.ts" } },
 			ctx(),
 		);
-		expect(result).toEqual({ block: true, reason: "PreToolUse hook: blocked by policy" });
+		expect(result).toEqual({ block: true, reason: preToolUseRefusal("blocked by policy") });
 	});
 
 	it.each([
@@ -411,7 +436,7 @@ describe("hooks wiring", () => {
 		writeUserHooks({ PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: broken }, { type: "command", command: deny }] }] });
 		mount();
 		const result = await fake.fireOne("tool_call", { toolName: "bash", toolCallId: "bad-output", input: { command: "echo test" } }, ctx());
-		expect(result).toEqual({ block: true, reason: "PreToolUse hook: denied by policy" });
+		expect(result).toEqual({ block: true, reason: preToolUseRefusal("denied by policy") });
 	});
 
 	it("fails closed when an oversized stdout envelope would otherwise lose its denial", async () => {
@@ -422,7 +447,7 @@ describe("hooks wiring", () => {
 		mount();
 		const result = await fake.fireOne<{ block?: boolean; reason?: string }>("tool_call", { toolName: "bash", toolCallId: "large", input: { command: "echo test" } }, ctx());
 		expect(result?.block).toBe(true);
-		expect(result?.reason).toContain("output limit");
+		expect(result?.reason).toBe(hooks.preToolUseBlocked({ reason: hooks.blockReason({ kind: "outputLimit", maxBytes: MAX_HOOK_OUTPUT_BYTES }) }));
 	});
 
 	it("does not present truncated SessionStart stdout as complete context", async () => {
@@ -510,7 +535,7 @@ describe("hooks wiring", () => {
 		await fake.fireOne("input", { source: "interactive", text: "also this", streamingBehavior: "steer" }, ctx());
 		await settle(); // the queued message joined that continuation
 		// pi 1.2.0 fires before_agent_start for the continuation run itself, as a custom run.
-		await fake.fireOne("before_agent_start", { messageType: "custom", message: { role: "custom", customType: "one-code:hook-stop" } }, ctx());
+		await fake.fireOne("before_agent_start", { messageType: "custom", message: { role: "custom", customType: brandedId("hook-stop") } }, ctx());
 		await settle(); // still the continuation chain
 		await fake.fireOne("before_agent_start", { prompt: "a new prompt" }, ctx());
 		await settle(); // a new turn
@@ -742,17 +767,15 @@ describe("hooks wiring", () => {
 
 describe("hooks wiring: SessionEnd (LIFECYCLE-REVIEW-2026-09-06 M4)", () => {
 	let root: string;
-	let claudeDir: string;
 	let projectDir: string;
 	let fake: FakePi;
+	let writeSettings: (settings: Record<string, unknown>) => void;
 
 	beforeEach(() => {
 		root = mkdtempSync(join(tmpdir(), "hooks-wiring-end-"));
-		claudeDir = join(root, "claude-config");
 		projectDir = join(root, "project");
-		mkdirSync(claudeDir, { recursive: true });
 		mkdirSync(projectDir, { recursive: true });
-		vi.stubEnv("CLAUDE_CONFIG_DIR", claudeDir);
+		writeSettings = userSettings(root);
 		resetHookSettingsCache();
 		fake = createFakePi();
 	});
@@ -777,7 +800,7 @@ describe("hooks wiring: SessionEnd (LIFECYCLE-REVIEW-2026-09-06 M4)", () => {
 		const seen = join(root, "end-stdin.jsonl");
 		const hook = `sh "${join(root, "hook-end.sh")}"`;
 		writeFileSync(join(root, "hook-end.sh"), `#!/bin/sh\ncat >> "${seen}"\necho >> "${seen}"\n`);
-		writeFileSync(join(claudeDir, "settings.json"), JSON.stringify({ hooks: { SessionEnd: [{ hooks: [{ type: "command", command: hook }] }] } }));
+		writeSettings({ hooks: { SessionEnd: [{ hooks: [{ type: "command", command: hook }] }] } });
 		hooksExtension(fake.pi as never);
 		const ctx = (hasUI: boolean) => createFakeCtx({ cwd: projectDir, hasUI, sessionManager: { getSessionId: () => "sess-42", getSessionFile: () => undefined, getSessionDir: () => undefined, getBranch: () => [] } });
 
@@ -800,10 +823,7 @@ describe("hooks wiring: SessionEnd (LIFECYCLE-REVIEW-2026-09-06 M4)", () => {
 	it("runs the hook off a frozen ctx: the real ctx throwing after dispose does not stop the hook", async () => {
 		const seen = join(root, "end-frozen.jsonl");
 		writeFileSync(join(root, "hook-frozen.sh"), `#!/bin/sh\ncat >> "${seen}"\necho >> "${seen}"\n`);
-		writeFileSync(
-			join(claudeDir, "settings.json"),
-			JSON.stringify({ hooks: { SessionEnd: [{ hooks: [{ type: "command", command: `sh "${join(root, "hook-frozen.sh")}"` }] }] } }),
-		);
+		writeSettings({ hooks: { SessionEnd: [{ hooks: [{ type: "command", command: `sh "${join(root, "hook-frozen.sh")}"` }] }] } });
 		hooksExtension(fake.pi as never);
 		const ctx = createFakeCtx({ cwd: projectDir, hasUI: true });
 		const handled = fake.fireOne("session_shutdown", { reason: "quit" }, ctx);

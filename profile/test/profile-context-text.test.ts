@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 import { compactionGitStatus, resumeFactsNotice } from "../../extensions/lib/context-facts.ts";
 import { clipGitStatus, formatGitStatus } from "../../extensions/lib/git-status.ts";
-import { context } from "../../profile/text/context/index.ts";
+import { context } from "../text/context/index.ts";
 
 describe("One Code's context text", () => {
 	it("tells a changed date without asking for an announcement", () => {

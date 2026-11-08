@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { brand } from "../../extensions/lib/brand.mjs";
 import { visibleWidth } from "../../extensions/lib/text-width.ts";
 import { decodePanelKey, type PanelKey } from "../../extensions/permissions/panel/keys.ts";
 import { describeRule, type PanelPaint, renderPanel } from "../../extensions/permissions/panel/render.ts";
@@ -212,7 +213,7 @@ describe("/permissions panel Auto mode tab", () => {
 		press(state, v, DOWN, ENTER);
 		expect(state.dialog).toEqual({ kind: "builtinsInfo", section: "allow" });
 		const text = renderPanel({ state, view: v, width: 100, height: 30 }, paint).join("\n");
-		expect(text).toContain("always in effect in One Code");
+		expect(text).toContain(`always in effect in ${brand.name}.`);
 		expect(text).not.toMatch(/Disable built-in/);
 		expect(press(state, v, ENTER)).toEqual([]);
 		expect(state.dialog).toBeUndefined();
@@ -307,7 +308,7 @@ describe("/permissions panel Workspace tab", () => {
 	it("shows the working directory first, then the directories and where they come from", () => {
 		const v = view();
 		const text = renderPanel({ state: onWorkspace(v), view: v, width: 120, height: 30 }, paint).join("\n");
-		expect(text).toContain("One Code can read files in the workspace, and make edits when auto-accept edits is on.");
+		expect(text).toContain(`${brand.name} can read files in the workspace, and make edits when auto-accept edits is on.`);
 		expect(text).toContain("   -  /work/project  (Original working directory)");
 		expect(text).toContain("❯ /work/shared");
 		expect(text).toContain("  /work/libs  · Claude Code user settings (~/.claude/settings.json)");
@@ -333,7 +334,7 @@ describe("/permissions panel rendering", () => {
 
 	it("says so when nothing was denied", () => {
 		const text = render(initialPanelState(false), view({ denials: [] }), 100).join("\n");
-		expect(text).toContain("One Code won't ask before using allowed tools.");
+		expect(text).toContain(`${brand.name} won't ask before using allowed tools.`);
 		const state = initialPanelState(false);
 		press(state, view({ denials: [] }), LEFT);
 		expect(render(state, view({ denials: [] })).join("\n")).toContain("No recent denials.");

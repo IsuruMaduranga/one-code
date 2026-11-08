@@ -21,7 +21,9 @@ import {
 	withoutUsage,
 } from "../../extensions/compaction/fit.ts";
 import { standaloneRequest } from "../../extensions/compaction/index.ts";
-import { compaction } from "../../profile/text/compaction/index.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
+
+const compaction = requireText("compaction");
 
 const model = (contextWindow: number, maxTokens = 8000) => ({ contextWindow, maxTokens }) as Model<Api>;
 const user = (text: string): Message => ({ role: "user", content: text, timestamp: 1 });
@@ -89,9 +91,7 @@ describe("fitToBudget", () => {
 		expect(cleared).toBe(1);
 		expect(clampMaxTokensToContext(model(40_000), out, 32_000)).toBeGreaterThanOrEqual(STANDALONE_SUMMARY_TOKENS);
 		const clearedText = (out.messages[2].content as { text: string }[])[0].text;
-		expect(clearedText.startsWith("B".repeat(CLEARED_RESULT_HEAD_CHARS))).toBe(true);
-		expect(clearedText).toContain(`${4 * 20_000 - CLEARED_RESULT_HEAD_CHARS} more characters omitted`);
-		expect(clearedText).toContain("session transcript");
+		expect(clearedText).toBe(`${"B".repeat(CLEARED_RESULT_HEAD_CHARS)}\n${compaction.clearedResult({ omittedChars: 4 * 20_000 - CLEARED_RESULT_HEAD_CHARS, images: 0 })}`);
 		// The others are the very same objects; the input array is not mutated.
 		expect(out.messages[4]).toBe(medium);
 		expect(out.messages[6]).toBe(small);
@@ -120,7 +120,7 @@ describe("clearToolResult", () => {
 		expect(out.toolName).toBe("read");
 		expect(out.details).toEqual({ n: 1 });
 		expect(out.content).toHaveLength(1);
-		expect(out.content[0].text).toContain("and 1 image omitted");
+		expect(out.content[0].text).toBe(`text\n${compaction.clearedResult({ omittedChars: 0, images: 1 })}`);
 	});
 
 	it("leaves non-tool-result messages alone", () => {
@@ -180,6 +180,9 @@ describe("standaloneRequest", () => {
 		const doomed = [user("read all six"), assistant(), toolResult(tokensOf(30_000)), assistant(), toolResult(tokensOf(20_000)), assistant()];
 		const req = standaloneRequest(model(40_000), preparation(doomed), "instruction", 32_000, compaction);
 		expect(clampMaxTokensToContext(model(40_000), req, 32_000)).toBeGreaterThanOrEqual(STANDALONE_SUMMARY_TOKENS);
-		expect((req.messages[2].content as { text: string }[])[0].text).toContain("cleared to fit the compaction request");
+		const original = tokensOf(30_000);
+		expect((req.messages[2].content as { text: string }[])[0].text).toBe(
+			`${original.slice(0, CLEARED_RESULT_HEAD_CHARS)}\n${compaction.clearedResult({ omittedChars: original.length - CLEARED_RESULT_HEAD_CHARS, images: 0 })}`,
+		);
 	});
 });

@@ -8,7 +8,7 @@ import { ARGUMENT_HINT_CHANNEL } from "../../extensions/lib/argument-hints.ts";
 import { KEEP_DECLINED_KEY } from "../../extensions/branding/compaction-keep.ts";
 import { KEEP_NO, KEEP_YES } from "../../extensions/lib/compaction-keep.mjs";
 import { TURN_OFF_YES } from "../../extensions/lib/replaced-builtins.mjs";
-import { envName } from "../../extensions/lib/brand.mjs";
+import { brand, envName } from "../../extensions/lib/brand.mjs";
 
 function fakePi() {
 	const handlers = new Map<string, ((event: unknown, ctx: unknown) => void)[]>();
@@ -85,7 +85,7 @@ describe("branding: merged quietStartup settings", () => {
 		vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
 		vi.stubEnv("HOME", root);
 		vi.stubEnv("CLAUDE_CONFIG_DIR", join(root, ".claude"));
-		vi.stubEnv(envName("STATE_DIR"), join(root, ".onecode"));
+		vi.stubEnv(envName("STATE_DIR"), join(root, brand.stateDir));
 		vi.stubEnv("CC_NO_BANNER", "0");
 
 		// Back the extension API with the same merged settings pi uses.
@@ -108,7 +108,7 @@ describe("branding: merged quietStartup settings", () => {
 		fire("session_start", ctx, { reason: "new" });
 		fire("session_shutdown", ctx);
 		expect(getSettings).toHaveBeenCalledTimes(1);
-		expect(lines.join("\n")).toContain("the Claude Code experience");
+		expect(lines.join("\n")).toContain(brand.subtitle);
 		expect(lines.some((line) => line.includes("themes"))).toBe(sections);
 	});
 });
@@ -182,7 +182,7 @@ describe("branding: pi's compaction keep window at startup", () => {
 		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ extensions: ["-builtin:tool-search", "-builtin:mcp"], ...userSettings }));
 		vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
 		vi.stubEnv("HOME", root);
-		vi.stubEnv(envName("STATE_DIR"), join(root, ".onecode"));
+		vi.stubEnv(envName("STATE_DIR"), join(root, brand.stateDir));
 		vi.stubEnv("CC_VERSION", "");
 		vi.stubEnv("CC_NO_BANNER", "1");
 		const select = vi.fn(async () => answer);
@@ -208,7 +208,7 @@ describe("branding: pi's compaction keep window at startup", () => {
 		const { root, ctx, fire, select } = setup(KEEP_NO);
 		fire("session_start", ctx, { reason: "startup" });
 		await settled();
-		expect(readJson(join(root, ".onecode", "settings.json"))[KEEP_DECLINED_KEY]).toBe(true);
+		expect(readJson(join(root, brand.stateDir, "settings.json"))[KEEP_DECLINED_KEY]).toBe(true);
 		fire("session_start", ctx, { reason: "startup" });
 		await settled();
 		expect(select).toHaveBeenCalledTimes(1);

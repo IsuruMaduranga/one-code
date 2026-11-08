@@ -1,14 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { NO_SHELL_NOTICE, powerShellSwitch, shellToolPolicy, withShellTools } from "../../extensions/powershell/policy.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
+import { NO_SHELL_NOTICE, POWERSHELL_KNOB, powerShellSwitch, shellToolPolicy, withShellTools } from "../../extensions/powershell/policy.ts";
+
+/** The product's own spelling of the switch (One Code: ONECODE_USE_POWERSHELL_TOOL). */
+const KNOB = envName(POWERSHELL_KNOB);
 
 describe("powerShellSwitch", () => {
-	it("reads CLAUDE_CODE_USE_POWERSHELL_TOOL like Claude Code", () => {
+	it("reads the product's USE_POWERSHELL_TOOL switch the way Claude Code reads its own", () => {
 		expect(powerShellSwitch({})).toBe("unset");
-		expect(powerShellSwitch({ CLAUDE_CODE_USE_POWERSHELL_TOOL: "" })).toBe("unset");
-		expect(powerShellSwitch({ CLAUDE_CODE_USE_POWERSHELL_TOOL: "1" })).toBe("on");
-		expect(powerShellSwitch({ CLAUDE_CODE_USE_POWERSHELL_TOOL: "true" })).toBe("on");
-		expect(powerShellSwitch({ CLAUDE_CODE_USE_POWERSHELL_TOOL: "0" })).toBe("off");
-		expect(powerShellSwitch({ CLAUDE_CODE_USE_POWERSHELL_TOOL: "False" })).toBe("off");
+		expect(powerShellSwitch({ [KNOB]: "" })).toBe("unset");
+		expect(powerShellSwitch({ [KNOB]: "1" })).toBe("on");
+		expect(powerShellSwitch({ [KNOB]: "true" })).toBe("on");
+		expect(powerShellSwitch({ [KNOB]: "0" })).toBe("off");
+		expect(powerShellSwitch({ [KNOB]: "False" })).toBe("off");
 	});
 });
 
@@ -25,7 +29,7 @@ describe("shellToolPolicy", () => {
 		expect(win({ bash: false })).toMatchObject({ powershell: true, bash: false, primary: "powershell" });
 	});
 	it("Windows with the switch off: bash primary", () => {
-		expect(win({ env: { CLAUDE_CODE_USE_POWERSHELL_TOOL: "0" } })).toMatchObject({ powershell: false, bash: true, primary: "bash" });
+		expect(win({ env: { [KNOB]: "0" } })).toMatchObject({ powershell: false, bash: true, primary: "bash" });
 	});
 	it("Windows with neither shell fails loud in Claude Code's words", () => {
 		const p = win({ bash: false, powershell: false });
@@ -34,10 +38,10 @@ describe("shellToolPolicy", () => {
 	});
 	it("off Windows: the env var is the whole gate", () => {
 		expect(mac({})).toMatchObject({ powershell: false, bash: true, primary: "bash", notices: [] });
-		expect(mac({ env: { CLAUDE_CODE_USE_POWERSHELL_TOOL: "1" } })).toMatchObject({ powershell: true, primary: "powershell" });
+		expect(mac({ env: { [KNOB]: "1" } })).toMatchObject({ powershell: true, primary: "powershell" });
 	});
 	it("a set switch with no PowerShell installed is reported, and the tool stays off", () => {
-		const p = mac({ env: { CLAUDE_CODE_USE_POWERSHELL_TOOL: "1" }, powershell: false });
+		const p = mac({ env: { [KNOB]: "1" }, powershell: false });
 		expect(p.powershell).toBe(false);
 		expect(p.notices[0]).toMatch(/no `pwsh` was found/);
 	});

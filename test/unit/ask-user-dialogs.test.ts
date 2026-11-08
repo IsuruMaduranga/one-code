@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { askThroughDialogs, CHAT, DONE, type DialogUI, optionRow, TYPE_OWN } from "../../extensions/ask-user/dialogs.ts";
 import type { Question } from "../../extensions/ask-user/questions.ts";
-import { formatAnswers } from "../../profile/text/ask-user/index.ts";
 
 /** A scripted RPC client: answers each select/input in order and records what it was shown. */
 function scripted(replies: Array<string | undefined>) {
@@ -72,7 +71,6 @@ describe("askThroughDialogs", () => {
 		const result = await askThroughDialogs([layout], ui);
 		expect(shown).toEqual([{ kind: "select", title: "Layout: Which layout?\n\nGrid — Cards in rows:\n[A][B]", options: ["Grid — Cards in rows", "List", TYPE_OWN, CHAT] }]);
 		expect(result).toEqual({ kind: "submit", answers: [{ question: "Which layout?", header: "Layout", selected: ["Grid"], freeform: false, preview: "[A][B]" }] });
-		if (result.kind === "submit") expect(formatAnswers(result.answers)).toBe('Your questions have been answered: "Which layout?"="Grid" selected preview:\n[A][B]. You can now continue with these answers in mind.');
 	});
 
 	it("collects several picks for a multi-select question until Done", async () => {

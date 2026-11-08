@@ -5,7 +5,7 @@
  * the bytes of everything a one-shot run and the session scenario reach.
  */
 import { describe, expect, it } from "vitest";
-import { fileTracker } from "../../profile/text/file-tracker/index.ts";
+import { fileTracker } from "../text/file-tracker/index.ts";
 
 const excerpt = { firstChangedLine: 1, numbered: "1\tnew", moreLines: 0 };
 

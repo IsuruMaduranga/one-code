@@ -6,8 +6,8 @@
  */
 import { describe, expect, it } from "vitest";
 import type { ReaderFailure } from "../../extensions/web-fetch/text.ts";
-import { webFetchText } from "../../profile/text/web-fetch/index.ts";
-import { ALL_LIVE } from "./helpers/live.ts";
+import { webFetchText } from "../text/web-fetch/index.ts";
+import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
 
 const webFetch = webFetchText(ALL_LIVE);
 

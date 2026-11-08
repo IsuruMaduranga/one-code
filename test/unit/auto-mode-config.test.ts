@@ -1,6 +1,11 @@
+/**
+ * Auto mode's configuration as the base reads it from the product's own
+ * settings file. Reading Claude Code's settings alongside it is One Code's
+ * source provider's business (profile/test/auto-mode-config-claude.test.ts).
+ */
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	autoModeSettingsPaths,
@@ -12,23 +17,21 @@ import {
 	spliceDefaults,
 } from "../../extensions/auto-mode/config.ts";
 import { defaultEnvironment } from "../../extensions/auto-mode/classifier-prompt.ts";
+import { productSettingsPath } from "../../extensions/lib/product-settings.ts";
 
 let home: string;
 
 beforeEach(() => {
 	home = mkdtempSync(join(tmpdir(), "cc-automode-"));
-	mkdirSync(join(home, ".claude"), { recursive: true });
+	mkdirSync(dirname(productSettingsPath(home)), { recursive: true });
 });
 
 afterEach(() => {
 	rmSync(home, { recursive: true, force: true });
 });
 
-const writeUserSettings = (data: unknown) => writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify(data));
-const writeOneCodeSettings = (data: unknown) => {
-	mkdirSync(join(home, ".onecode"), { recursive: true });
-	writeFileSync(join(home, ".onecode", "settings.json"), JSON.stringify(data));
-};
+/** The product's own user settings (`~/<state dir>/settings.json`). */
+const writeUserSettings = (data: unknown) => writeFileSync(productSettingsPath(home), JSON.stringify(data));
 
 describe("spliceDefaults", () => {
 	it("substitutes $defaults in place, preserving surrounding order", () => {
@@ -61,40 +64,32 @@ describe("loadAutoModeConfig", () => {
 		expect(config.environment.length).toBe(defaultEnvironment().length + 1);
 	});
 
-	it("reads classifierModel and its stamp from One Code's settings", () => {
-		writeUserSettings({ autoMode: { classifyAllShell: true } });
-		writeOneCodeSettings({ autoMode: { classifierModel: "anthropic/claude-haiku-4-5", classifierModelSetFor: "anthropic" } });
+	it("reads classifierModel and its stamp from the product's settings", () => {
+		writeUserSettings({ autoMode: { classifyAllShell: true, classifierModel: "anthropic/claude-haiku-4-5", classifierModelSetFor: "anthropic" } });
 		const config = loadAutoModeConfig(home);
 		expect(config.classifyAllShell).toBe(true);
 		expect(config.classifierModel).toBe("anthropic/claude-haiku-4-5");
 		expect(config.classifierModelSetFor).toBe("anthropic");
 	});
 
-	it("never reads classifierModel from Claude Code's settings, and says so", () => {
-		writeUserSettings({ autoMode: { classifierModel: "opencode/gemini-3.7-flash" } });
-		const { config, diagnostics } = loadAutoModeConfigWithDiagnostics(home);
-		expect(config.classifierModel).toBeUndefined();
-		expect(diagnostics.some((line) => line.includes("classifierModel is ignored here") && line.includes("/auto-mode model"))).toBe(true);
-	});
-
 	it("persists and clears classifierModel without touching other keys", () => {
-		writeOneCodeSettings({ autoMode: { environment: ["x"] }, other: 1 });
+		writeUserSettings({ autoMode: { environment: ["x"] }, other: 1 });
 		persistClassifierModel("openai/gpt-6-sol", home, "openai");
 		expect(loadAutoModeConfig(home)).toMatchObject({ classifierModel: "openai/gpt-6-sol", classifierModelSetFor: "openai" });
 		persistClassifierModel(undefined, home);
-		const saved = JSON.parse(readFileSync(join(home, ".onecode", "settings.json"), "utf8"));
+		const saved = JSON.parse(readFileSync(productSettingsPath(home), "utf8"));
 		expect(saved).toEqual({ autoMode: { environment: ["x"] }, other: 1 });
 	});
 
 	it("flags a classifierModel that is not a model spec", () => {
-		writeOneCodeSettings({ autoMode: { classifierModel: 42 } });
+		writeUserSettings({ autoMode: { classifierModel: 42 } });
 		const { config, diagnostics } = loadAutoModeConfigWithDiagnostics(home);
 		expect(config.classifierModel).toBeUndefined();
 		expect(diagnostics.some((line) => line.includes("autoMode.classifierModel must be"))).toBe(true);
 	});
 
 	it("ignores malformed files rather than failing open", () => {
-		writeFileSync(join(home, ".claude", "settings.json"), "{not json");
+		writeFileSync(productSettingsPath(home), "{not json");
 		expect(loadAutoModeConfig(home).environment).toEqual(defaultEnvironment());
 	});
 
@@ -104,7 +99,7 @@ describe("loadAutoModeConfig", () => {
 	});
 
 	it("reports a skipped malformed file instead of staying silent about it", () => {
-		writeFileSync(join(home, ".claude", "settings.json"), "{not json");
+		writeFileSync(productSettingsPath(home), "{not json");
 		const { diagnostics } = loadAutoModeConfigWithDiagnostics(home);
 		expect(diagnostics.some((line) => line.includes("invalid JSON"))).toBe(true);
 	});
@@ -185,21 +180,17 @@ describe("loadAutoModeConfig", () => {
 		expect(loadAutoModeConfigWithDiagnostics(home).diagnostics).toEqual([]);
 	});
 
-	it("reads permissions.allow from each side for the setup audit split", () => {
-		// The audit warns about the .claude side and offers to remove the one-code
-		// side; a rule in BOTH must be seen by both readers so the still-live
-		// .claude copy is never silently left behind.
-		writeUserSettings({ permissions: { allow: ["Bash(git status)", "Bash(*)"] } });
-		writeOneCodeSettings({ permissions: { allow: ["Bash(*)", "Read"] } });
-		expect(borrowedUserPermissionAllow(home)).toEqual(["Bash(git status)", "Bash(*)"]);
+	it("reads permissions.allow from the product's settings for the setup audit", () => {
+		// The product's side is the removable set; a borrowed user file (none here)
+		// is the warn set, read separately.
+		writeUserSettings({ permissions: { allow: ["Bash(*)", "Read"] } });
 		expect(oneCodePermissionAllow(home)).toEqual(["Bash(*)", "Read"]);
-		// "Bash(*)" is in both — it lands in the removable set AND the warn set.
 	});
 
 	it("returns an empty allow list when a settings file is absent or malformed", () => {
 		expect(borrowedUserPermissionAllow(home)).toEqual([]);
-		mkdirSync(join(home, ".onecode"), { recursive: true });
-		writeFileSync(join(home, ".onecode", "settings.json"), "{not json");
+		expect(oneCodePermissionAllow(home)).toEqual([]);
+		writeFileSync(productSettingsPath(home), "{not json");
 		expect(oneCodePermissionAllow(home)).toEqual([]);
 	});
 

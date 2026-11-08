@@ -2,13 +2,14 @@
  * One Code's background wording (profile/text/background/) for what the golden
  * snapshot cannot reach: a full job store, a subagent's refusals, a wakeup
  * whose loop aged out or that had nothing to cancel, and what a background
- * monitor and task_stop say outside a one-shot run. The golden snapshot pins
+ * monitor and task_stop say outside a one-shot run, a monitor batch's
+ * overflow line, and the no-op loop fold's note. The golden snapshot pins
  * the bytes of every other text; background-wiring.test.ts covers the
  * monitor's empty output, its batches and task_output's clip.
  */
 import { describe, expect, it } from "vitest";
 import { shownJob } from "../../extensions/background/cron.ts";
-import { background } from "../../profile/text/background/index.ts";
+import { background } from "../text/background/index.ts";
 
 const { cron, wakeup, monitor, tasks } = background;
 
@@ -53,6 +54,10 @@ describe("One Code's monitor and task tool text", () => {
 		expect(monitor.startFailed({ kind: "noShell" })).toBe("Cannot start the monitor: no bash shell was found");
 	});
 
+	it("counts the lines a batch left out on a line of their own", () => {
+		expect(monitor.moreLines({ hidden: 25, taskId: "m1" })).toBe("\n… +25 more line(s) not shown — task_output m1 has the full stream");
+	});
+
 	it("words task_stop's outcomes and the task line", () => {
 		expect(tasks.alreadyEnded({ id: "b1", status: "completed" })).toBe("Task b1 is already completed.");
 		expect(tasks.stopRequested({ id: "b1", description: "logs" })).toBe("Stop requested for b1 (logs).");
@@ -60,5 +65,12 @@ describe("One Code's monitor and task tool text", () => {
 		const line = { id: "b1", kind: "monitor", status: "running", description: "logs", seconds: 5, finished: false };
 		expect(tasks.taskLine(line)).toBe("b1 [monitor] running · logs · started 5s ago");
 		expect(tasks.taskLine({ ...line, status: "completed", finished: true })).toBe("b1 [monitor] completed · logs · started 5s");
+	});
+});
+
+describe("One Code's loop text", () => {
+	it("words the no-op fold's note the way Claude Code does", () => {
+		expect(background.loop.foldNote({ streak: 1 })).toBe("[1 prior /loop wakeup found nothing actionable; loop is healthy.]");
+		expect(background.loop.foldNote({ streak: 3 })).toBe("[3 prior /loop wakeups found nothing actionable; loop is healthy.]");
 	});
 });

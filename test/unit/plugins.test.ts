@@ -211,37 +211,6 @@ describe("discoverPlugins two-root merge", () => {
 		rmSync(root, { recursive: true, force: true });
 	});
 
-	it("claude-origin: enabledPlugins from settings, default true when absent", () => {
-		const a = writePlugin(roots.claudePluginsDir, "alpha");
-		const b = writePlugin(roots.claudePluginsDir, "beta");
-		writeRegistry(roots.claudePluginsDir, {
-			"alpha@market": [{ scope: "user", installPath: a }],
-			"beta@market": [{ scope: "user", installPath: b }],
-		});
-		mkdirSync(join(root, ".claude"), { recursive: true });
-		writeFileSync(join(root, ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { "beta@market": false } }));
-
-		const discovered = discoverPlugins(roots);
-		expect(discovered.plugins.find((p) => p.id === "alpha@market")).toMatchObject({
-			originRoot: "claude",
-			enabled: true,
-			overridden: false,
-		});
-		expect(discovered.plugins.find((p) => p.id === "beta@market")?.enabled).toBe(false);
-		expect(discovered.enabledPlugins.map((p) => p.id)).toEqual(["alpha@market"]);
-	});
-
-	it("project/local settings win over user settings per key", () => {
-		const a = writePlugin(roots.claudePluginsDir, "alpha");
-		writeRegistry(roots.claudePluginsDir, { "alpha@market": [{ scope: "user", installPath: a }] });
-		mkdirSync(join(root, ".claude"), { recursive: true });
-		writeFileSync(join(root, ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { "alpha@market": false } }));
-		mkdirSync(join(roots.cwd, ".claude"), { recursive: true });
-		writeFileSync(join(roots.cwd, ".claude", "settings.local.json"), JSON.stringify({ enabledPlugins: { "alpha@market": true } }));
-
-		expect(discoverPlugins(roots).plugins[0]?.enabled).toBe(true);
-	});
-
 	it("overrides.json wins over Claude Code settings and marks the plugin overridden", () => {
 		const a = writePlugin(roots.claudePluginsDir, "alpha");
 		writeRegistry(roots.claudePluginsDir, { "alpha@market": [{ scope: "user", installPath: a }] });
@@ -274,10 +243,8 @@ describe("discoverPlugins two-root merge", () => {
 	});
 
 	it("disabled plugins contribute no resources but still appear in plugins/byPlugin", () => {
-		const a = writePlugin(roots.claudePluginsDir, "alpha", { skill: "helper" });
-		writeRegistry(roots.claudePluginsDir, { "alpha@market": [{ scope: "user", installPath: a }] });
-		mkdirSync(join(root, ".claude"), { recursive: true });
-		writeFileSync(join(root, ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { "alpha@market": false } }));
+		const a = writePlugin(roots.oneCodeRoot, "alpha", { skill: "helper" });
+		writeRegistry(roots.oneCodeRoot, { "alpha@market": [{ scope: "user", installPath: a, enabled: false }] });
 
 		const discovered = discoverPlugins(roots);
 		expect(discovered.plugins).toHaveLength(1);

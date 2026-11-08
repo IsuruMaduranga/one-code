@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { pinCatalog } from "./catalog-fixture.ts";
 import { resolveWorkflowAgentModel } from "../../extensions/workflow/agent-session.ts";
+import { supportsImageInput } from "../../extensions/lib/model-policy.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
+import { resolveSubagentModel, subagentModelMenu } from "../../extensions/subagents/model-select.ts";
 
 const model = (id: string, input: number) =>
 	({
@@ -22,6 +25,20 @@ const catalog = [
 	model("gpt-5.4-mini", 0.75),
 	model("gpt-5.6-luna", 0.2),
 ];
+
+/**
+ * The refusal of a model the resolver could not resolve, in the profile's
+ * words: the resolver's reason and the retry menu around the session's
+ * default, as the base builds them.
+ */
+function unavailable(requested: string, sessionModel: ReturnType<typeof model>, available: ReturnType<typeof model>[]) {
+	const requireImageInput = supportsImageInput(sessionModel);
+	const { unresolvedReason: reason } = resolveSubagentModel({ requested, sessionModel, available, requireImageInput });
+	const fallback = resolveSubagentModel({ sessionModel, available, requireImageInput });
+	const menu = subagentModelMenu({ available, sessionModel, defaultModel: fallback.model, defaultSource: fallback.source, requireImageInput });
+	const message = requireText("workflow").callProblem({ kind: "modelUnavailable", model: requested, ...(reason ? { reason } : {}), menu });
+	return { message, menu, reason };
+}
 
 const resolve = (overrides: Partial<Parameters<typeof resolveWorkflowAgentModel>[0]> = {}) =>
 	resolveWorkflowAgentModel({
@@ -80,7 +97,9 @@ describe("workflow model defaults", () => {
 	});
 
 	it("fails an unavailable explicit model with the curated menu", () => {
-		expect(() => resolve({ opts: { model: "openai-codex/not-real" } })).toThrow(/not available/);
+		const { message, menu } = unavailable("openai-codex/not-real", catalog[0], catalog);
+		expect(menu.length).toBeGreaterThan(0);
+		expect(() => resolve({ opts: { model: "openai-codex/not-real" } })).toThrow(message);
 	});
 
 	it("recommends only an image-capable default on an image-capable session, even in the retry menu", () => {
@@ -97,15 +116,15 @@ describe("workflow model defaults", () => {
 		} catch (error) {
 			message = (error as Error).message;
 		}
-		expect(message).toMatch(/image/i);
-		const defaultLine = message.split("\n").find((line) => /default/i.test(line)) ?? "";
-		expect(defaultLine).not.toMatch(/terra|luna/);
-		// Every menu entry (the "- model — label" lines) must be image-capable:
-		// a text-only suggestion would only be refused again on retry.
-		const menuLines = message.split("\n").filter((line) => line.startsWith("- "));
-		expect(menuLines.length).toBeGreaterThan(0);
-		expect(menuLines.some((line) => line.includes("gpt-5.4-mini"))).toBe(true);
-		for (const line of menuLines) expect(line).not.toMatch(/terra|luna/);
+		const expected = unavailable("openai-codex/gpt-5.6-luna", imageSession, available);
+		// The resolver says why (the model cannot see images), and the message carries it.
+		expect(expected.reason).toBeDefined();
+		expect(message).toBe(expected.message);
+		// Every menu entry, the default line first, must be image-capable: a
+		// text-only suggestion would only be refused again on retry.
+		expect(expected.menu.length).toBeGreaterThan(0);
+		expect(expected.menu.some((line) => line.includes("gpt-5.4-mini"))).toBe(true);
+		for (const line of expected.menu) expect(line).not.toMatch(/terra|luna/);
 	});
 
 	it("rejects a per-call model pricier than the session unless allowExpensive", () => {
@@ -116,7 +135,12 @@ describe("workflow model defaults", () => {
 				sessionModel: catalog[3],
 				available: catalog,
 			}),
-		).toThrow(/allowExpensive/);
+		).toThrow(
+			requireText("workflow").callProblem({
+				kind: "expensiveModel",
+				gate: requireText("subagentModels").costsMore({ model: "openai-codex/gpt-5.6-sol", price: 5, session: "openai-codex/gpt-5.6-luna", sessionPrice: 0.2 }),
+			}),
+		);
 		expect(
 			resolveWorkflowAgentModel({
 				opts: { model: "openai-codex/gpt-5.6-sol", allowExpensive: true },

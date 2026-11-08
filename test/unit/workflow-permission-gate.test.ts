@@ -7,10 +7,13 @@ import { memoryDir } from "../../extensions/lib/memory.ts";
 import { localGateMode } from "../../extensions/lib/permission-gate.ts";
 import { powerShellSpawn } from "../../extensions/lib/shell-spawn.ts";
 import { sessionResultsDir } from "../../extensions/lib/persisted-output.ts";
-import { persistProjectAllowApproval } from "../../extensions/permissions/project-trust.ts";
 import { buildGate as buildGateHarness } from "./helpers/permission-gate-harness.ts";
 import { POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
+import { requireText } from "../../extensions/lib/profile.ts";
+import type { PermissionRefusal } from "../../extensions/permissions/text.ts";
+
+/** Why the child gate refused a call, in the profile's words. */
+const refused = (refusal: PermissionRefusal) => requireText("permissions").refused(refusal);
 
 const buildGate = (...args: Parameters<typeof buildGateHarness>) => buildGateHarness(...args).handler;
 
@@ -19,7 +22,7 @@ describe("permissionGateFactory", () => {
 		const handler = buildGate({ permissions: { deny: ["Bash(rm -rf:*)"] } });
 		const result = await handler({ toolName: "bash", input: { command: "rm -rf /tmp/x" } });
 		expect(result?.block).toBe(true);
-		expect(result?.reason).toMatch(/Denied by permission rules/);
+		expect(result?.reason).toBe(refused({ kind: "childDenied", rule: "Bash(rm -rf:*)" }));
 	});
 
 	it("allows explicitly allowed commands and in-project reads; a read outside the cwd fails closed (2026-09-05 H2)", async () => {
@@ -34,7 +37,7 @@ describe("permissionGateFactory", () => {
 			process.platform === "win32" ? ["C:\\Windows\\System32\\drivers\\etc\\hosts", "Read(//c/Windows/**)"] : ["/etc/hosts", "Read(//etc/**)"];
 		const outside = await handler({ toolName: "read", input: { path: outsideFile } });
 		expect(outside?.block).toBe(true);
-		expect(outside?.reason).toMatch(/outside the working directory/);
+		expect(outside?.reason).toBe(refused({ kind: "childNeedsApproval", outsideWorkingDir: true }));
 		// A Read allow rule covering the path still clears it.
 		const allowed = buildGate({ permissions: { allow: [outsideRule] } });
 		expect(await allowed({ toolName: "read", input: { path: outsideFile } })).toBeUndefined();
@@ -73,7 +76,7 @@ describe("permissionGateFactory", () => {
 		expect(await handler({ toolName: "write", input: { path: join(cwd, "out.txt"), content: "x" } })).toBeUndefined();
 		const outside = await handler({ toolName: "write", input: { path: join(os.tmpdir(), "gate-probe-outside.txt"), content: "x" } });
 		expect(outside?.block).toBe(true);
-		expect(outside?.reason).toMatch(/outside the working directory/);
+		expect(outside?.reason).toBe(refused({ kind: "childNeedsApproval", outsideWorkingDir: true }));
 	});
 
 	it("auto-allows edits (acceptEdits parity) but blocks unmatched bash fail-closed", async () => {
@@ -81,7 +84,7 @@ describe("permissionGateFactory", () => {
 		expect(await handler({ toolName: "edit", input: { path: "src/a.ts" } })).toBeUndefined();
 		const result = await handler({ toolName: "bash", input: { command: "curl https://example.com" } });
 		expect(result?.block).toBe(true);
-		expect(result?.reason).toMatch(/interactive approval/);
+		expect(result?.reason).toBe(refused({ kind: "childNeedsApproval", outsideWorkingDir: false }));
 	});
 
 	it("never gates the workflow's own structured_output tool", async () => {
@@ -117,7 +120,7 @@ describe("permissionGateFactory", () => {
 		});
 		const result = await handler({ toolName: "edit", input: { path: "src/a.ts" } });
 		expect(result?.block).toBe(true);
-		expect(result?.reason).toMatch(/fail safe/);
+		expect(result?.reason).toBe(refused({ kind: "bridgeFailed", osMessage: "boom" }));
 	});
 
 	it("never routes the runtime's own tools through the bridge", async () => {
@@ -131,7 +134,7 @@ describe("permissionGateFactory", () => {
 	});
 });
 
-describe("permissionGateFactory — mode, ask rules, project consent (P8/P10)", () => {
+describe("permissionGateFactory — mode and ask rules (P8; project consent: profile/test/workflow-permission-gate-provider.test.ts)", () => {
 	afterEach(() => {
 		vi.unstubAllEnvs();
 	});
@@ -148,7 +151,7 @@ describe("permissionGateFactory — mode, ask rules, project consent (P8/P10)", 
 		const handler = buildGate({ permissions: {} });
 		const result = await handler({ toolName: "edit", input: { path: "src/a.ts" } });
 		expect(result?.block).toBe(true);
-		expect(result?.reason).toMatch(/interactive approval/);
+		expect(result?.reason).toBe(refused({ kind: "childNeedsApproval", outsideWorkingDir: false }));
 	});
 
 	it("auto mode without a bridge: edits inside the cwd pass, anything else fails closed", async () => {
@@ -157,10 +160,10 @@ describe("permissionGateFactory — mode, ask rules, project consent (P8/P10)", 
 		expect(await handler({ toolName: "edit", input: { path: join(cwd, "src", "a.ts") } })).toBeUndefined();
 		const outside = await handler({ toolName: "write", input: { path: join(os.tmpdir(), "elsewhere.txt"), content: "x" } });
 		expect(outside?.block).toBe(true);
-		expect(outside?.reason).toMatch(/outside the working directory/);
+		expect(outside?.reason).toBe(refused({ kind: "childNoClassifier", outsideWorkingDir: true }));
 		const shell = await handler({ toolName: "bash", input: { command: "npm test" } });
 		expect(shell?.block).toBe(true);
-		expect(shell?.reason).toMatch(/classifier is only reachable/);
+		expect(shell?.reason).toBe(refused({ kind: "childNoClassifier", outsideWorkingDir: false }));
 	});
 
 	it("an ask rule is honoured (denied, since nothing here can ask)", async () => {
@@ -168,25 +171,7 @@ describe("permissionGateFactory — mode, ask rules, project consent (P8/P10)", 
 		expect((await handler({ toolName: "edit", input: { path: "src/a.ts" } }))?.block).toBe(true);
 		expect(await handler({ toolName: "edit", input: { path: "lib/b.ts" } })).toBeUndefined();
 	});
-
-	it("a repo's own allow rules count only with the user's stored consent", async () => {
-		const store = mkdtempSync(join(os.tmpdir(), "gate-state-"));
-		vi.stubEnv(envName("STATE_DIR"), store);
-		const project = { permissions: { allow: ["Bash(curl:*)"] } };
-		const untrusted = buildGateHarness({ permissions: {} }, undefined, project);
-		expect((await untrusted.handler({ toolName: "bash", input: { command: "curl https://example.com" } }))?.block).toBe(true);
-
-		const trusted = buildGateHarness({ permissions: {} }, undefined, project);
-		persistProjectAllowApproval(trusted.cwd, ["Bash(curl:*)"]);
-		const handler = captureAfterConsent(trusted.cwd, trusted.home);
-		expect(await handler({ toolName: "bash", input: { command: "curl https://example.com" } })).toBeUndefined();
-	});
 });
-
-/** The gate reads consent when it is built, so rebuild it over the same dirs after persisting. */
-function captureAfterConsent(cwd: string, home: string) {
-	return buildGateHarness.rebuild(cwd, home);
-}
 
 describe.skipIf(!powerShellSpawn())("permissionGateFactory without a bridge judges PowerShell from its parse (PR-24-POWERSHELL-REVIEW-2026-09-28 M2)", { timeout: POWERSHELL_TEST_TIMEOUT }, () => {
 	afterEach(() => vi.unstubAllEnvs());
@@ -227,6 +212,6 @@ describe("runtime protected dirs (PERMISSIONS-REVIEW-2026-09-05 M7)", () => {
 		const { handler } = buildGateHarness({ permissions: {} });
 		const result = await handler({ toolName: "write", input: { path: join(agentDir, "extensions", "evil.ts") } });
 		expect(result?.block).toBe(true);
-		expect(result?.reason).toMatch(/needs interactive approval/);
+		expect(result?.reason).toBe(refused({ kind: "childNeedsApproval", outsideWorkingDir: false }));
 	});
 });

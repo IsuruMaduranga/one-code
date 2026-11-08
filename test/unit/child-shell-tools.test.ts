@@ -11,6 +11,7 @@ import { type AgentSession, ModelRuntime, SessionManager } from "@earendil-works
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { openChildSession } from "../../extensions/lib/agent-loader.ts";
 import { CHILD_EXTENSION_PATHS } from "../../extensions/lib/child-extensions.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "oc-child-shell-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -44,13 +45,13 @@ describe("shell tools in a child session", () => {
 		expect(names.indexOf("bash/child.ts")).toBeGreaterThan(names.indexOf("skill/index.ts"));
 	});
 
-	it("registers One Code's bash, with Claude Code's millisecond timeout and run_in_background", async () => {
+	it("registers the harness's bash, with the profile's timeout parameter and run_in_background", async () => {
 		const session = await openChild();
 		try {
 			const bash = session.getAllTools().find((tool) => tool.name === "bash");
 			const schema = bash?.parameters as Schema | undefined;
 			expect(Object.keys(schema?.properties ?? {})).toEqual(["command", "timeout", "description", "run_in_background"]);
-			expect(schema?.properties?.timeout?.description).toMatch(/millisecond/i);
+			expect(schema?.properties?.timeout?.description).toBe(requireText("shell").bashParams.timeout);
 			expect(session.getAllTools().some((tool) => tool.name === "powershell")).toBe(true);
 		} finally {
 			session.dispose();

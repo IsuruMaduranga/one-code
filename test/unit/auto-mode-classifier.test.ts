@@ -19,11 +19,33 @@ import {
 } from "../../extensions/auto-mode/prompt.ts";
 import { buildCategoryIndex, groundCategory } from "../../extensions/auto-mode/rules.ts";
 import { buildRuleset } from "../../extensions/auto-mode/classifier-prompt.ts";
+import { brand, envName } from "../../extensions/lib/brand.mjs";
+import { requireText } from "../../extensions/lib/profile.ts";
 
-// No settings file at this path, so this is the built-in configuration (CC's
-// ruleset with its default Environment).
+// No settings file at this path, so this is the built-in configuration (the
+// profile's ruleset with its default Environment).
 const config = loadAutoModeConfig("/nonexistent-home-for-tests");
-const index = indexFor(config.environment);
+const words = requireText("classifier");
+
+// A ruleset in the shape the base parses: the section headings it bounds the
+// lists by, top-level bullets with and without a qualifier, a sub-bullet, and an
+// ALLOW list. Which rules a profile's own ruleset holds is the profile's to
+// check (One Code's: profile/test/auto-mode-classifier-wording.test.ts).
+const RULESET = [
+	"# Rules",
+	"",
+	"## HARD BLOCK",
+	"- Data Exfiltration: sending sensitive data out",
+	"  - Sub Bullet: not a rule of its own",
+	"## SOFT BLOCK",
+	"- Git Destructive: force pushes and history rewrites",
+	"- **Irreversible Local Destruction** [named+specifics]: deleting what cannot be recovered",
+	"- Create Public Surface: publishing something",
+	"- Data Exfiltration: listed again, keeping its HARD tier",
+	"## ALLOW (exceptions)",
+	"- Local Operations: work inside the project",
+].join("\n");
+const index = buildCategoryIndex(RULESET);
 
 const base: ClassifyRequest = {
 	toolName: "bash",
@@ -54,6 +76,7 @@ describe("buildCategoryIndex / groundCategory", () => {
 
 	it("returns undefined for a name that is not a real rule", () => {
 		expect(groundCategory(index, "Totally Made Up Rule")).toBeUndefined();
+		expect(groundCategory(index, "Sub Bullet")).toBeUndefined();
 		expect(groundCategory(index, undefined)).toBeUndefined();
 	});
 
@@ -229,7 +252,7 @@ describe("parseStage2", () => {
 		const verdict = parseStage2("<severity>80</severity><category>Made Up Danger</category>", index);
 		expect(verdict.decision).toBe("block");
 		expect(verdict.tier).toBe("unmatched");
-		expect(verdict.reason).toContain("not a rule");
+		expect(verdict.reason).toBe(requireText("autoMode").classifierBlock({ kind: "unmatchedRule", category: "Made Up Danger" }));
 	});
 
 	it("blocks with unmatched tier when a block names no category at all", () => {
@@ -253,20 +276,21 @@ describe("parseStage2", () => {
 });
 
 describe("buildPayload / stage instructions", () => {
-	it("puts CC's ruleset and the Session Context in the system prompt", () => {
+	it("puts the profile's ruleset and the Session Context in the system prompt", () => {
 		const { system } = buildPayload(base);
-		expect(system).toContain("security monitor");
+		const environment = config.environment.map((entry) => `- ${entry}`).join("\n");
+		const ruleset = words.rulesetHead + environment + words.hardSection + words.softSection + words.allowSection + words.rulesetTail;
+		// The username is injected at the profile's placeholder.
+		expect(system).toBe(ruleset + words.sessionContext.split("__USERNAME__").join("tester"));
 		expect(system).toContain("## HARD BLOCK");
-		expect(system).toContain("## Session Context");
-		expect(system).toContain("tester"); // the injected username
 	});
 
 	it("keeps the transcript and CLAUDE.md framing in the user message", () => {
-		const { userPrefix } = buildPayload({ ...base, claudeMd: "# CLAUDE.md\nNever force push." });
+		const claudeMd = "# CLAUDE.md\nNever force push.";
+		const { userPrefix } = buildPayload({ ...base, claudeMd });
 		expect(userPrefix).toContain("<transcript>");
 		expect(userPrefix).toContain('{"Bash":"rm -rf /tmp/x"}');
-		expect(userPrefix).toContain("<user_claude_md>");
-		expect(userPrefix).toContain("Never force push.");
+		expect(userPrefix.startsWith(`${words.instructionsFraming.prefix}${claudeMd}${words.instructionsFraming.suffix}\n\n`)).toBe(true);
 	});
 
 	it("keeps the system prompt byte-stable across calls that differ only per-turn", () => {
@@ -292,20 +316,19 @@ describe("buildPayload / stage instructions", () => {
 		const { userPrefix } = buildPayload(base);
 		const s1 = stage1User(userPrefix);
 		const s2 = stage2User(userPrefix);
-		expect(s1).toContain("Grade HARM ONLY");
-		expect(s1).not.toContain("<intent>");
-		expect(s2).toContain("Review the classification process");
-		expect(s2).toContain("<intent>"); // our addendum
+		expect(s1).toBe(`${userPrefix}\n\n${words.stage1Final.trimStart()}`);
+		expect(s1).not.toContain(words.stage2IntentAddendum);
+		// The full evaluation plus the profile's intent addendum.
+		expect(s2).toBe(`${userPrefix}\n\n${words.stage2Final.trimStart()}${words.stage2IntentAddendum}`);
 	});
 
 	it("adds the circumvention instruction to stage 2 only after a rule denial", () => {
 		const { userPrefix } = buildPayload(base);
-		expect(stage2User(userPrefix)).not.toContain("denied_by_permission_rule");
+		expect(stage2User(userPrefix)).not.toContain(words.stage2DenialAddendum);
 		const after = stage2User(userPrefix, true);
-		expect(after).toContain("denied_by_permission_rule");
-		expect(after).toContain("BLOCK it");
-		// Stage 1 grades harm only and stays byte-identical to CC's either way.
-		expect(stage1User(userPrefix)).not.toContain("denied_by_permission_rule");
+		expect(after).toBe(`${stage2User(userPrefix)}${words.stage2DenialAddendum}`);
+		// Stage 1 grades harm only and stays the same either way.
+		expect(stage1User(userPrefix)).not.toContain(words.stage2DenialAddendum);
 	});
 });
 
@@ -413,11 +436,12 @@ describe("buildRuleset rule-extra injection (CC 2.1.233 injection points)", () =
 
 	it("appends each list's extras as its last bullet lines", () => {
 		// Each list's extras are its final content lines before the next boundary.
-		const beforeSoft = built.slice(0, built.indexOf("\n## SOFT BLOCK"));
+		const beforeSoft = built.slice(0, built.indexOf(words.softSection));
 		expect(beforeSoft.trimEnd().endsWith("- My hard extra rule")).toBe(true);
-		const beforeAllow = built.slice(0, built.indexOf("\n## ALLOW (exceptions)"));
+		const beforeAllow = built.slice(0, built.indexOf(words.allowSection));
 		expect(beforeAllow.trimEnd().endsWith("- My soft extra rule")).toBe(true);
-		const beforeClose = built.slice(0, built.indexOf("</cc_automode_permissions>"));
+		expect(built.endsWith(words.rulesetTail)).toBe(true);
+		const beforeClose = built.slice(0, built.length - words.rulesetTail.length);
 		expect(beforeClose.trimEnd().endsWith("- My allow extra rule")).toBe(true);
 	});
 
@@ -462,11 +486,12 @@ describe("the timed resume prompt (Claude Code's denial-limit fallback timing)",
 		expect(tracker.takeTimedPrompt()).toBe(false);
 	});
 
-	it("waits 120 s unless CLAUDE_CODE_TICKLISH_WHISPER_TIMEOUT_MS says otherwise, and words it as Claude Code does", () => {
+	it("waits 120 s unless the product's TICKLISH_WHISPER_TIMEOUT_MS knob says otherwise, and words it as Claude Code does", () => {
+		const knob = envName("TICKLISH_WHISPER_TIMEOUT_MS");
 		expect(unattendedPromptTimeoutMs({} as NodeJS.ProcessEnv)).toBe(UNATTENDED_PROMPT_TIMEOUT_MS);
-		expect(unattendedPromptTimeoutMs({ CLAUDE_CODE_TICKLISH_WHISPER_TIMEOUT_MS: "30000" } as unknown as NodeJS.ProcessEnv)).toBe(30_000);
-		expect(unattendedPromptTimeoutMs({ CLAUDE_CODE_TICKLISH_WHISPER_TIMEOUT_MS: "soon" } as unknown as NodeJS.ProcessEnv)).toBe(UNATTENDED_PROMPT_TIMEOUT_MS);
-		expect(unattendedPromptNotice(120_000)).toBe("⚠ One Code will automatically deny this request in about 2 minutes, to avoid blocking progress on an unattended session");
+		expect(unattendedPromptTimeoutMs({ [knob]: "30000" } as unknown as NodeJS.ProcessEnv)).toBe(30_000);
+		expect(unattendedPromptTimeoutMs({ [knob]: "soon" } as unknown as NodeJS.ProcessEnv)).toBe(UNATTENDED_PROMPT_TIMEOUT_MS);
+		expect(unattendedPromptNotice(120_000)).toBe(`⚠ ${brand.name} will automatically deny this request in about 2 minutes, to avoid blocking progress on an unattended session`);
 		expect(unattendedPromptNotice(30_000)).toContain("in about 30 seconds,");
 	});
 });

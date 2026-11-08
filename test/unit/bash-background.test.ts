@@ -11,10 +11,9 @@ import {
 } from "../../extensions/bash/background.ts";
 import type { BackgroundTask } from "../../extensions/background/registry.ts";
 import { localPwsh } from "./helpers/local-pwsh.ts";
-import { shellText } from "../../profile/text/shell/index.ts";
-import { ALL_LIVE } from "./helpers/live.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 
-const text = shellText(ALL_LIVE);
+const text = requireText("shell");
 
 function start(command: string, extra?: { timeoutSeconds?: number; logPath?: string }) {
 	let summary: BashFinishSummary | undefined;
@@ -121,8 +120,7 @@ describe("tailCap", () => {
 	it("keeps short text and truncates long text with a marker", () => {
 		expect(tailCap("short", 100, text.earlierTruncated)).toBe("short");
 		const capped = tailCap("x".repeat(500), 100, text.earlierTruncated);
-		expect(capped).toContain("earlier output truncated");
-		expect(capped.endsWith("x".repeat(100))).toBe(true);
+		expect(capped).toBe(`${text.earlierTruncated}${"x".repeat(100)}`);
 	});
 });
 

@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TranscriptEntry } from "../../extensions/auto-mode/transcript.ts";
 import hooksExtension from "../../extensions/hooks/index.ts";
@@ -8,7 +8,8 @@ import { resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
+import { brand, envName } from "../../extensions/lib/brand.mjs";
+import { primarySettingsFile, settingsSources } from "../../extensions/lib/claude-settings.ts";
 
 const seen: TranscriptEntry[][] = [];
 vi.mock("../../extensions/auto-mode/classifier.ts", async (importOriginal) => ({
@@ -32,7 +33,7 @@ describe("main hooks before permissions", () => {
 		mkdirSync(config);
 		stubHome(root);
 		vi.stubEnv("CLAUDE_CONFIG_DIR", config);
-		vi.stubEnv(envName("STATE_DIR"), join(root, ".onecode"));
+		vi.stubEnv(envName("STATE_DIR"), join(root, brand.stateDir));
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(root, "agent"));
 		resetHookSettingsCache();
 		seen.length = 0;
@@ -46,7 +47,10 @@ describe("main hooks before permissions", () => {
 	async function call(rewritten: string, deny: string[] = []) {
 		const hook = join(root, "rewrite.cjs");
 		writeFileSync(hook, `process.stdin.resume(); console.log(${JSON.stringify(JSON.stringify({ hookSpecificOutput: { permissionDecision: "allow", updatedInput: { command: rewritten } } }))});`);
-		writeFileSync(join(config, "settings.json"), JSON.stringify({
+		// The primary user settings file of the profile in force: its hooks are user scope.
+		const settings = primarySettingsFile(settingsSources(cwd, root))!.path;
+		mkdirSync(dirname(settings), { recursive: true });
+		writeFileSync(settings, JSON.stringify({
 			permissions: { deny },
 			hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: `"${process.execPath}" "${hook}"` }] }] },
 		}));

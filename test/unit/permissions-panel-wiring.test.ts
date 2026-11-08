@@ -1,8 +1,10 @@
 /**
  * /permissions wiring: a classifier denial is recorded, approving it in the
  * panel lets that exact call run once without the classifier, a retry starts a
- * turn with Claude Code's grant message, and rules added or deleted in the
- * panel land in One Code's own files. The provider call is mocked.
+ * turn with the profile's grant message, and rules added or deleted in the
+ * panel land in the product's own files. The provider call is mocked. How the
+ * panel treats another tool's settings files a source provider adds is the
+ * provider's to test (One Code's: profile/test/permissions-panel-claude-files.test.ts).
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -18,14 +20,20 @@ import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
+import { brand, brandedId, envName } from "../../extensions/lib/brand.mjs";
+import { requireText } from "../../extensions/lib/profile.ts";
+import { defaultEnvironment } from "../../extensions/auto-mode/classifier-prompt.ts";
+import { indexFor } from "../../extensions/auto-mode/prompt.ts";
 
 const completeMock = vi.mocked(completeSimple);
+const granted = (display: string) => requireText("autoMode").permissionGranted({ displays: [display] });
+/** A real block rule of the profile's ruleset, so the classifier's verdict grounds to it. */
+const RULE = indexFor(defaultEnvironment()).rules.find((rule) => rule.tier === "soft_deny")!.name;
 const reply = (text: string) => ({ stopReason: "stop", content: [{ type: "text", text }], usage: {} }) as never;
 /** Stage 1 flags the call, stage 2 blocks it under a real rule. */
 const blockOnce = () => {
 	completeMock.mockResolvedValueOnce(reply("<severity>90</severity>"));
-	completeMock.mockResolvedValueOnce(reply("<thinking>deletes outside the project</thinking><severity>90</severity><category>Irreversible Local Destruction</category>"));
+	completeMock.mockResolvedValueOnce(reply(`<thinking>deletes outside the project</thinking><severity>90</severity><category>${RULE}</category>`));
 };
 
 const ENTER = "\r";
@@ -57,7 +65,7 @@ describe("/permissions wiring", () => {
 		cwd = join(home, "project");
 		mkdirSync(cwd, { recursive: true });
 		stubHome(home);
-		vi.stubEnv(envName("STATE_DIR"), join(home, ".onecode"));
+		vi.stubEnv(envName("STATE_DIR"), join(home, brand.stateDir));
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(home, "agent"));
 		screens = [];
 		keys = [];
@@ -136,13 +144,13 @@ describe("/permissions wiring", () => {
 		blockOnce();
 		const denied = await bash(`rm -rf ${outside()}`);
 		expect(denied?.block).toBe(true);
-		expect(notices().some((n) => n.startsWith("bash denied by auto mode · Irreversible Local Destruction · /permissions"))).toBe(true);
+		expect(notices().some((n) => n.startsWith(`bash denied by auto mode · ${RULE.length > 80 ? `${RULE.slice(0, 79)}…` : RULE} · /permissions`))).toBe(true);
 
 		await openPanel(ENTER);
-		expect(screens[0]).toContain(`✔ bash(rm -rf ${outside()})  [Irreversible Local Destruction]`);
+		expect(screens[0]).toContain(`✔ bash(rm -rf ${outside()})  [${RULE}]`);
 		// The breadcrumb names what was approved; the grant message rides with it.
 		expect(reminders.some((r) => r.includes(`<local-command-stdout>Approved bash(rm -rf ${outside()})</local-command-stdout>`))).toBe(true);
-		expect(reminders.some((r) => r.startsWith(`Permission granted for: bash(rm -rf ${outside()}). You may now retry this command`))).toBe(true);
+		expect(reminders).toContain(`${granted(`bash(rm -rf ${outside()})`)}\n`);
 		expect(fake.sentMessages).toHaveLength(0);
 
 		completeMock.mockClear();
@@ -198,7 +206,7 @@ describe("/permissions wiring", () => {
 		await bash(long);
 		await openPanel("r");
 		expect(screens[0]).toContain("…");
-		expect(fake.sentMessages[0]?.message.content).toBe(`Permission granted for: bash(${long}). You may now retry this command if you would like.`);
+		expect(fake.sentMessages[0]?.message.content).toBe(granted(`bash(${long})`));
 		expect(await bash(long)).toBeUndefined();
 	});
 
@@ -210,8 +218,8 @@ describe("/permissions wiring", () => {
 		expect(fake.sentMessages).toEqual([
 			{
 				message: {
-					customType: "one-code:permission-retry",
-					content: `Permission granted for: bash(rm -rf ${outside()}). You may now retry this command if you would like.`,
+					customType: brandedId("permission-retry"),
+					content: granted(`bash(rm -rf ${outside()})`),
 					display: false,
 				},
 				options: { triggerTurn: true },
@@ -230,9 +238,7 @@ describe("/permissions wiring", () => {
 		expect(screens[0]).toContain("No recent denials.");
 	});
 
-	it("adds and deletes a rule in One Code's project file, and leaves Claude Code's files alone", async () => {
-		mkdirSync(join(home, ".claude"), { recursive: true });
-		writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ permissions: { allow: ["Read"] } }));
+	it("adds and deletes a rule in the product's project file", async () => {
 		// Allow tab (opened first: no denials): Add a new rule…, type, save to the project file.
 		await openPanel(ENTER, ..."Bash(npm test:*)".split(""), ENTER, ENTER);
 		const target = productProjectSettingsPath(cwd, home);
@@ -243,28 +249,25 @@ describe("/permissions wiring", () => {
 		expect(screens.join("\n")).toContain("That allow rule is already in ");
 		expect(JSON.parse(readFileSync(target, "utf-8")).permissions.allow).toEqual(["Bash(npm test:*)"]);
 
-		// Rows now: Add a new rule…, Bash(npm test:*), Read (read-only).
-		await openPanel(DOWN, DOWN, ENTER);
-		expect(screens[2]).toContain("One Code does not edit Claude Code user settings.");
+		// Rows now: Add a new rule…, Bash(npm test:*).
 		await openPanel(DOWN, ENTER, ENTER);
 		expect(JSON.parse(readFileSync(target, "utf-8")).permissions.allow).toEqual([]);
-		expect(JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf-8")).permissions.allow).toEqual(["Read"]);
-		expect(existsSync(join(home, ".onecode", "settings.json"))).toBe(false);
+		expect(existsSync(join(home, brand.stateDir, "settings.json"))).toBe(false);
 	});
 
 	it("opens on Recently denied when something was denied, and lists the ask and deny tabs", async () => {
 		blockOnce();
 		await bash(`rm -rf ${outside()}`);
 		await openPanel(RIGHT, RIGHT, RIGHT);
-		expect(screens[0]).toContain("One Code won't ask before using allowed tools.");
-		expect(screens[1]).toContain("One Code will always ask for confirmation before using these tools.");
-		expect(screens[2]).toContain("One Code will always reject requests to use denied tools.");
+		expect(screens[0]).toContain(`${brand.name} won't ask before using allowed tools.`);
+		expect(screens[1]).toContain(`${brand.name} will always ask for confirmation before using these tools.`);
+		expect(screens[2]).toContain(`${brand.name} will always reject requests to use denied tools.`);
 	});
 
 	describe("Auto mode tab", () => {
-		const settings = () => JSON.parse(readFileSync(join(home, ".onecode", "settings.json"), "utf-8"));
+		const settings = () => JSON.parse(readFileSync(join(home, brand.stateDir, "settings.json"), "utf-8"));
 
-		it("adds a rule to One Code's user settings, and the next classifier call is sent it", async () => {
+		it("adds a rule to the product's user settings, and the next classifier call is sent it", async () => {
 			// Allow → Auto mode is three tabs left; Add a new rule…, Soft deny, type, save.
 			await openPanel(LEFT, LEFT, LEFT, ENTER, DOWN, ENTER, ..."Build Cache: deleting ~/.cache/build is fine".split(""), ENTER);
 			expect(settings().autoMode.soft_deny).toEqual(["Build Cache: deleting ~/.cache/build is fine"]);
@@ -276,24 +279,19 @@ describe("/permissions wiring", () => {
 			expect(system).toContain("Build Cache: deleting ~/.cache/build is fine");
 		});
 
-		it("edits and deletes One Code's rules, and leaves Claude Code's read-only", async () => {
-			mkdirSync(join(home, ".claude"), { recursive: true });
-			writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ autoMode: { allow: ["$defaults", "CC Rule: from Claude Code"] } }));
-			mkdirSync(join(home, ".onecode"), { recursive: true });
-			writeFileSync(join(home, ".onecode", "settings.json"), JSON.stringify({ autoMode: { allow: ["Mine: my rule"] }, other: 1 }));
-			// Rows: add, allow built-ins, CC Rule (read-only), Mine, …
-			await openPanel(LEFT, LEFT, LEFT, DOWN, DOWN, ENTER);
-			expect(screens[5]).toContain("One Code does not edit Claude Code user settings.");
-			await openPanel(LEFT, LEFT, LEFT, DOWN, DOWN, DOWN, ENTER, ENTER, "!", ENTER);
+		it("edits and deletes the user's own rules", async () => {
+			mkdirSync(join(home, brand.stateDir), { recursive: true });
+			writeFileSync(join(home, brand.stateDir, "settings.json"), JSON.stringify({ autoMode: { allow: ["Mine: my rule"] }, other: 1 }));
+			// Rows: add, allow built-ins, Mine, …
+			await openPanel(LEFT, LEFT, LEFT, DOWN, DOWN, ENTER, ENTER, "!", ENTER);
 			expect(settings().autoMode.allow).toEqual(["Mine: my rule!"]);
-			await openPanel(LEFT, LEFT, LEFT, DOWN, DOWN, DOWN, ENTER, "d", ENTER, "y", ENTER);
+			await openPanel(LEFT, LEFT, LEFT, DOWN, DOWN, ENTER, "d", ENTER, "y", ENTER);
 			expect(settings()).toEqual({ other: 1 });
-			expect(JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf-8")).autoMode.allow).toEqual(["$defaults", "CC Rule: from Claude Code"]);
 		});
 
 		it("keeps $defaults when the environment it extends is edited", async () => {
-			mkdirSync(join(home, ".onecode"), { recursive: true });
-			writeFileSync(join(home, ".onecode", "settings.json"), JSON.stringify({ autoMode: { environment: ["$defaults", "- Trusted host: x"] } }));
+			mkdirSync(join(home, brand.stateDir), { recursive: true });
+			writeFileSync(join(home, brand.stateDir, "settings.json"), JSON.stringify({ autoMode: { environment: ["$defaults", "- Trusted host: x"] } }));
 			let prefilled = "";
 			editorReply = (prefill) => {
 				prefilled = prefill;
@@ -309,8 +307,7 @@ describe("/permissions wiring", () => {
 			// Environment is the last row; confirm replacing the default, then the editor runs.
 			await openPanel(LEFT, LEFT, LEFT, PAGE_DOWN, PAGE_DOWN, ENTER, ENTER);
 			const env = settings().autoMode.environment as string[];
-			expect(env.at(-1)).toBe("- Trusted host: build.internal.example");
-			expect(env.length).toBeGreaterThan(10);
+			expect(env).toEqual([...requireText("classifier").defaultEnvironment, "- Trusted host: build.internal.example"]);
 			expect(reminders.some((r) => r.includes("Saved your auto mode environment"))).toBe(true);
 			// The panel reopened after the editor, on the same tab.
 			expect(vi.mocked((ctx.ui as { custom: () => unknown }).custom)).toHaveBeenCalledTimes(2);
@@ -318,7 +315,7 @@ describe("/permissions wiring", () => {
 			// Saving it empty restores the default.
 			editorReply = () => "";
 			await openPanel(LEFT, LEFT, LEFT, PAGE_DOWN, PAGE_DOWN, ENTER);
-			expect(existsSync(join(home, ".onecode", "settings.json")) ? settings().autoMode?.environment : undefined).toBeUndefined();
+			expect(existsSync(join(home, brand.stateDir, "settings.json")) ? settings().autoMode?.environment : undefined).toBeUndefined();
 		});
 	});
 });

@@ -4,8 +4,8 @@
  * re-attach. The golden snapshot pins the bytes of every other text.
  */
 import { describe, expect, it } from "vitest";
-import { planModeText } from "../../profile/text/plan-mode/index.ts";
-import { ALL_LIVE } from "./helpers/live.ts";
+import { planModeText } from "../text/plan-mode/index.ts";
+import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
 
 const planMode = planModeText(ALL_LIVE);
 

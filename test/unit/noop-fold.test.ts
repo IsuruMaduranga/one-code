@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { applyNoopFolds, decideFold, type FoldEntry, foldSuffix } from "../../extensions/background/noop-fold.ts";
-import { loop } from "../../profile/text/background/loop.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
+
+const loop = requireText("background").loop;
 
 const foldCompanion = (streak: number) => loop.foldNote({ streak });
 
@@ -34,9 +36,7 @@ describe("decideFold (Claude Code's no-op fold rules)", () => {
 		expect(decideFold([{ kind: "compaction" }, wakeup(), noopCall(), result(), wakeup(2000), noopCall("c2"), result("c2")])).toMatchObject({ kind: "fold" });
 	});
 
-	it("says it the way Claude Code does", () => {
-		expect(foldCompanion(1)).toBe("[1 prior /loop wakeup found nothing actionable; loop is healthy.]");
-		expect(foldCompanion(3)).toBe("[3 prior /loop wakeups found nothing actionable; loop is healthy.]");
+	it("words the fold's display suffix the way Claude Code does", () => {
 		expect(foldSuffix(2, "Sep 25 1:30pm")).toBe(" · 2 no-op ticks since Sep 25 1:30pm");
 	});
 });

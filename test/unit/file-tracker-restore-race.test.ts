@@ -34,6 +34,10 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
 const { default: fileTrackerExtension } = await import("../../extensions/file-tracker/index.ts");
 const { REMINDER_CHANNEL } = await import("../../extensions/lib/reminders.ts");
 const { createFakeCtx, createFakePi } = await import("./helpers/fake-pi.ts");
+const { requireText } = await import("../../extensions/lib/profile.ts");
+
+/** The restore's result block for a file that read back as `text`. */
+const restoredResult = (text: string) => requireText("fileTracker").restoredResult({ text });
 
 describe("file-tracker post-compaction restore race", () => {
 	let dir: string;
@@ -65,8 +69,8 @@ describe("file-tracker post-compaction restore race", () => {
 			createFakeCtx({ cwd: dir, sessionManager: { getSessionId: () => "s", getBranch: () => branch } }),
 		);
 
-		const shown = emitted.find((r) => r.text.startsWith("Result of calling the read tool:"));
-		expect(shown?.text).toContain("version B");
+		const shown = emitted.find((r) => r.text === restoredResult("version B\n"));
+		expect(shown).toBeDefined();
 		expect(shown?.observations).toBeUndefined();
 		const edit = await fake.fireOne<{ block?: boolean }>("tool_call", { toolName: "edit", input: { path: file } }, ctx);
 		expect(edit?.block).toBe(true);
@@ -89,7 +93,7 @@ describe("file-tracker post-compaction restore race", () => {
 			createFakeCtx({ cwd: dir, sessionManager: { getSessionId: () => "s", getBranch: () => branch } }),
 		);
 
-		const shown = emitted.find((r) => r.text.startsWith("Result of calling the read tool:"));
+		const shown = emitted.find((r) => r.text === restoredResult("version A\n"));
 		expect(shown?.observations).toHaveLength(1);
 		expect(await fake.fireOne("tool_call", { toolName: "edit", input: { path: file } }, ctx)).toBeUndefined();
 	});

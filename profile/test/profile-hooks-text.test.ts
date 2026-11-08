@@ -5,7 +5,7 @@
  * notice's guidance, which a weak model needs to read before it acts.
  */
 import { describe, expect, it } from "vitest";
-import { hooks } from "../../profile/text/hooks/index.ts";
+import { hooks } from "../text/hooks/index.ts";
 
 describe("One Code's hooks text", () => {
 	it("words a cancelled hook and a stated reason as they come", () => {

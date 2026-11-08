@@ -10,13 +10,17 @@
  * the tools each agent would have had on its first request are recorded and no
  * request is sent.
  */
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentSession, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { AgentRunner } from "../../extensions/workflow/agent-session.ts";
+import { persistedFileBlock, PREVIEW_BYTES } from "../../extensions/lib/persisted-output.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
+import { projectConfigDirName } from "../../extensions/lib/sources.ts";
+import { BUNDLED_AGENTS_DIR } from "../../extensions/subagents/agents.ts";
 
 let agentDir: string;
 let cwd: string;
@@ -24,7 +28,7 @@ let cwd: string;
 beforeAll(() => {
 	agentDir = mkdtempSync(join(tmpdir(), "wf-agent-session-agent-"));
 	cwd = mkdtempSync(join(tmpdir(), "wf-agent-session-cwd-"));
-	const agents = join(cwd, ".claude", "agents");
+	const agents = join(cwd, projectConfigDirName(), "agents");
 	mkdirSync(agents, { recursive: true });
 	writeFileSync(join(agents, "b4-reader.md"), "---\nname: b4-reader\ntools: Read, Grep, Glob, Bash\n---\nYou read.");
 	writeFileSync(join(agents, "b4-reviewer.md"), "---\nname: b4-reviewer\ndisallowedTools: Edit, Write\n---\nYou review.");
@@ -75,11 +79,12 @@ describe("workflow agent() answers past the cap", () => {
 		try {
 			const runner = await AgentRunner.create({ cwd, defaultModel: undefined, resultsDir });
 			const { value } = await runner.run("tabulate", {}, new AbortController().signal);
-			expect(value).toContain("<persisted-output>");
+			const saved = readdirSync(join(resultsDir, "tool-results"));
+			expect(saved).toHaveLength(1);
+			const path = join(resultsDir, "tool-results", saved[0]);
+			expect(readFileSync(path, "utf-8")).toBe(answer);
+			expect(value).toBe(persistedFileBlock(path, Buffer.byteLength(answer), answer.slice(0, PREVIEW_BYTES)));
 			expect(value).not.toContain("Verdict:");
-			const path = /Full output saved to: (\S+\.txt)/.exec(value as string)?.[1];
-			expect(path?.startsWith(join(resultsDir, "tool-results"))).toBe(true);
-			expect(readFileSync(path!, "utf-8")).toBe(answer);
 		} finally {
 			rmSync(resultsDir, { recursive: true, force: true });
 		}
@@ -98,13 +103,14 @@ describe("workflow agent() sessions", () => {
 				return [mcpTool];
 			},
 		});
-		await expect(runner.run("do it", {}, controller.signal)).rejects.toThrow("aborted");
+		await expect(runner.run("do it", {}, controller.signal)).rejects.toThrow(requireText("workflow").runStop({ kind: "agentAborted" }));
 		expect(prompt).not.toHaveBeenCalled();
 	});
 
 	// Battery round 7: the workflow reference says agent types resolve from the
 	// Agent tool's registry, but only user and project agent files were loaded.
-	it.each(["general-purpose", "explore"])("resolves the bundled %s agent as the Agent tool does", async (agentType) => {
+	const bundled = readdirSync(BUNDLED_AGENTS_DIR).filter((file) => file.endsWith(".md")).map((file) => file.slice(0, -".md".length));
+	it.each(bundled)("resolves the bundled %s agent as the Agent tool does", async (agentType) => {
 		const { first, error } = await toolsOf({ agentType });
 		expect(error ?? "").not.toContain("is not defined");
 		expect(first).toBeDefined();
@@ -127,7 +133,7 @@ describe("workflow agent() sessions", () => {
 	it("fails loud when the agent file's allowlist matches no tool", async () => {
 		const { first, error } = await toolsOf({ agentType: "b4-broken" });
 		expect(first).toBeUndefined();
-		expect(error).toMatch(/lists tools \(nonsense\) that match no available tool/);
+		expect(error).toBe(requireText("subagents").unusableTools({ name: "b4-broken", tools: ["nonsense"] }));
 	});
 
 	it("loads the curated child extensions and the parent's MCP tools, as a subagent does (M6)", async () => {

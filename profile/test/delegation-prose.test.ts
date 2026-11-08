@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { subagentsText } from "../../profile/text/subagents/index.ts";
+import { subagentsText } from "../text/subagents/index.ts";
 
 const DELEGATION_STEER = subagentsText(ALL_LIVE).delegationSteer;
-import { DELEGATE_STRICT } from "../../profile/text/system-prompt/low.ts";
-import { DELEGATING_WORK } from "../../profile/text/system-prompt/mid.ts";
-import { ALL_LIVE } from "./helpers/live.ts";
+import { DELEGATE_STRICT } from "../text/system-prompt/low.ts";
+import { DELEGATING_WORK } from "../text/system-prompt/mid.ts";
+import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
 
 
 /**

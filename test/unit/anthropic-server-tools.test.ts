@@ -6,7 +6,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runServerCall, serverCallUsage, tryNativeWeb } from "../../extensions/lib/anthropic-server-call.ts";
-import { nativeWeb } from "../../profile/text/native-web/index.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 import {
 	createServerCallAccumulator,
 	fetchOutcome,
@@ -27,6 +27,8 @@ import {
 	WEB_FETCH_TOOL_TYPE,
 	WEB_SEARCH_TOOL_TYPE,
 } from "../../extensions/lib/anthropic-server-tools.ts";
+
+const nativeWeb = requireText("nativeWeb");
 
 const claude = (id: string, input: number, extra: Record<string, unknown> = {}) =>
 	({
@@ -157,10 +159,10 @@ describe("thinking off", () => {
 describe("request bodies", () => {
 	it("puts the URL and the question in the user message, where web_fetch may fetch from", () => {
 		const body = nativeFetchBody(nativeWeb.fetch, { model: "claude-sonnet-5", url: "https://a.example/x", prompt: "What version?" });
-		expect(body.messages).toEqual([{ role: "user", content: "Page: https://a.example/x\n\nQuestion: What version?" }]);
+		expect(body.messages).toEqual([{ role: "user", content: nativeWeb.fetch.user({ url: "https://a.example/x", prompt: "What version?" }) }]);
 		// Held to the URL's host: the permission gate judged that one URL.
 		expect(body.tools).toEqual([{ type: WEB_FETCH_TOOL_TYPE, name: "web_fetch", max_uses: 3, allowed_domains: ["a.example"] }]);
-		expect(body.system).toContain("untrusted data");
+		expect(body.system).toBe(nativeWeb.fetch.system);
 		expect(body).toMatchObject({ stream: true });
 		expect(body.thinking).toBeUndefined();
 	});

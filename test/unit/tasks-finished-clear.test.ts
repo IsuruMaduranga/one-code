@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import tasksExtension from "../../extensions/tasks/index.ts";
 import { FINISHED_LIST_CLEAR_MS } from "../../extensions/tasks/store.ts";
 import { taskToggleKey } from "../../extensions/lib/keys.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 /**
@@ -23,8 +24,10 @@ describe("tasks: the finished list clears after 5 s", () => {
 			return (params: Record<string, unknown>) => t.execute("call", params, undefined, undefined, ctx);
 		};
 		const list = async () => ((await tool("task_list")({})) as { content: Array<{ text: string }> }).content[0]?.text;
+		// Whether the store still holds a task: task_get fails on an unknown id.
+		const has = async (taskId: string) => !((await tool("task_get")({ taskId })) as { isError?: boolean }).isError;
 		const setWidget = (ctx.ui as { setWidget: ReturnType<typeof vi.fn> }).setWidget;
-		return { fake, ctx, create: tool("task_create"), update: tool("task_update"), list, setWidget };
+		return { fake, ctx, create: tool("task_create"), update: tool("task_update"), list, has, setWidget };
 	}
 
 	it("clears the list and hides the widget 5 s after the last task completes", async () => {
@@ -34,13 +37,14 @@ describe("tasks: the finished list clears after 5 s", () => {
 		await t.update({ taskId: "1", status: "completed" });
 		await t.update({ taskId: "2", status: "completed" });
 		vi.advanceTimersByTime(FINISHED_LIST_CLEAR_MS - 1);
-		expect(await t.list()).toContain("#2");
+		expect(await t.has("2")).toBe(true);
 		vi.advanceTimersByTime(1);
-		expect(await t.list()).toBe("No tasks.");
+		expect(await t.list()).toBe(requireText("tasks").list([]));
+		expect(await t.has("1")).toBe(false);
 		expect(t.setWidget).toHaveBeenLastCalledWith("cc-tasks", undefined);
 		// Ids continue after the clear.
-		const created = (await t.create({ subject: "C", description: "" })) as { content: Array<{ text: string }> };
-		expect(created.content[0]?.text).toContain("#3");
+		await t.create({ subject: "C", description: "" });
+		expect(await t.has("3")).toBe(true);
 	});
 
 	it("cancels the clear when a new task arrives first", async () => {
@@ -50,8 +54,8 @@ describe("tasks: the finished list clears after 5 s", () => {
 		vi.advanceTimersByTime(FINISHED_LIST_CLEAR_MS / 2);
 		await t.create({ subject: "B", description: "" });
 		vi.advanceTimersByTime(FINISHED_LIST_CLEAR_MS * 2);
-		expect(await t.list()).toContain("#1");
-		expect(await t.list()).toContain("#2");
+		expect(await t.has("1")).toBe(true);
+		expect(await t.has("2")).toBe(true);
 	});
 
 	it("cancels the clear when a task is reopened first", async () => {
@@ -60,7 +64,7 @@ describe("tasks: the finished list clears after 5 s", () => {
 		await t.update({ taskId: "1", status: "completed" });
 		await t.update({ taskId: "1", status: "in_progress" });
 		vi.advanceTimersByTime(FINISHED_LIST_CLEAR_MS * 2);
-		expect(await t.list()).toContain("#1");
+		expect(await t.has("1")).toBe(true);
 	});
 
 	it("sends RPC task progress as lines rather than an ignored component factory", async () => {
@@ -82,7 +86,7 @@ describe("tasks: the finished list clears after 5 s", () => {
 		await t.create({ subject: "A", description: "" });
 		await t.update({ taskId: "1", status: "completed" });
 		vi.advanceTimersByTime(FINISHED_LIST_CLEAR_MS * 2);
-		expect(await t.list()).toContain("#1");
+		expect(await t.has("1")).toBe(true);
 	});
 
 	it("does nothing after session_shutdown", async () => {

@@ -9,7 +9,11 @@ import contextBudgetExtension from "../../extensions/context-budget/index.ts";
 import systemReminderExtension from "../../extensions/system-reminder/index.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
-import { contextBudget } from "../../profile/text/context-budget/index.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
+
+const contextBudget = requireText("contextBudget");
+/** The budget line for `left` tokens, as the base frames the profile's words. */
+const budget = (left: number) => totalTokensBlock(contextBudget, left);
 
 describe("turnTokenBudget", () => {
 	it("is Claude Code's 15,000,000 unless CC_TOTAL_TOKENS_BUDGET names a positive number", () => {
@@ -73,7 +77,7 @@ describe("TurnBudget", () => {
 
 describe("totalTokensBlock", () => {
 	it("frames the profile's words as Claude Code's bare block, byte for byte", () => {
-		expect(totalTokensBlock(contextBudget, 14_832_967)).toBe("<total_tokens>14832967 tokens left</total_tokens>");
+		expect(totalTokensBlock(contextBudget, 14_832_967)).toBe(`<total_tokens>${contextBudget.tokensLeft({ left: 14_832_967 })}</total_tokens>`);
 	});
 });
 
@@ -96,13 +100,13 @@ describe("context-budget wiring", () => {
 		await fake.fireOne("session_start", {}, createFakeCtx());
 		expect(reminders).toEqual([
 			{
-				text: "<total_tokens>15000000 tokens left</total_tokens>",
+				text: budget(15_000_000),
 				key: "total-tokens-first",
 				placement: "first-prepend",
 				order: 46,
 			},
 			{
-				text: "<total_tokens>15000000 tokens left</total_tokens>",
+				text: budget(15_000_000),
 				key: "total-tokens",
 				placement: "sticky-append",
 				raw: true,
@@ -128,10 +132,10 @@ describe("context-budget wiring", () => {
 
 		const texts = reminders.map((r) => r.text);
 		expect(texts).toEqual([
-			"<total_tokens>14997500 tokens left</total_tokens>",
-			"<total_tokens>14996800 tokens left</total_tokens>",
-			"<total_tokens>14996000 tokens left</total_tokens>",
-			"<total_tokens>14999900 tokens left</total_tokens>",
+			budget(14_997_500),
+			budget(14_996_800),
+			budget(14_996_000),
+			budget(14_999_900),
 		]);
 		for (const r of reminders) expect(r).toMatchObject({ placement: "last-append", raw: true });
 	});
@@ -148,12 +152,12 @@ describe("context-budget wiring", () => {
 		await fake.fireOne("tool_result", {}, createFakeCtx(usage(12_000)));
 
 		expect(reminders.map((r) => r.text)).toEqual([
-			"<total_tokens>14960000 tokens left</total_tokens>",
-			"<total_tokens>14960000 tokens left</total_tokens>",
+			budget(14_960_000),
+			budget(14_960_000),
 			// The first size after the compaction is the new baseline.
-			"<total_tokens>14960000 tokens left</total_tokens>",
-			"<total_tokens>14958500 tokens left</total_tokens>",
-			"<total_tokens>14956000 tokens left</total_tokens>",
+			budget(14_960_000),
+			budget(14_958_500),
+			budget(14_956_000),
 		]);
 	});
 
@@ -172,8 +176,8 @@ describe("context-budget wiring", () => {
 		// The next request places each on its own result (system-reminder renders the pending entries).
 		const results = ["call-a", "call-b"].map((toolCallId) => ({ role: "toolResult", toolCallId, toolName: "bash", content: [{ type: "text", text: `ran ${toolCallId}` }], timestamp: 1 }));
 		const [rendered] = await fake.fire<{ messages: Array<{ content: Array<{ text: string }> }> }>("context", { messages: [{ role: "user", content: "go", timestamp: 0 }, ...results] }, session());
-		expect(rendered.messages[1].content.map((c) => c.text)).toEqual(["ran call-a", "<total_tokens>14999900 tokens left</total_tokens>"]);
-		expect(rendered.messages[2].content.map((c) => c.text)).toEqual(["ran call-b", "<total_tokens>14999800 tokens left</total_tokens>"]);
+		expect(rendered.messages[1].content.map((c) => c.text)).toEqual(["ran call-a", budget(14_999_900)]);
+		expect(rendered.messages[2].content.map((c) => c.text)).toEqual(["ran call-b", budget(14_999_800)]);
 	});
 
 	it("is off entirely under CC_TOTAL_TOKENS=0", async () => {

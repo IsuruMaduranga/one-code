@@ -7,6 +7,7 @@ import { writeJsonAtomic } from "../../extensions/lib/atomic-write.ts";
 import { type CatalogSources, catalogCacheDir, setCatalogSourcesForTest } from "../../extensions/lib/model-catalog-data.ts";
 import { resolveModelTier } from "../../extensions/lib/model-tier.ts";
 import { requestSystemPrompt } from "../../extensions/lib/prompt-options.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 import { registerFormTool } from "../../extensions/lib/tool-variants.ts";
 import { sessionModelTier } from "../../extensions/lib/session-model-tier.ts";
 import searchToolsExtension from "../../extensions/search-tools/index.ts";
@@ -136,7 +137,8 @@ describe("the session's request-surface tier", () => {
 		const t = setup();
 		await t.fake.fire("session_start", { reason: "startup" }, t.ctx);
 		const before = await t.request();
-		expect(before.prompt).toContain("You are One Code");
+		// The profile's prompt, built by the system-prompt extension (not pi's default).
+		expect(before.prompt).toContain(requireText("systemPrompt").cwdLine((t.ctx.cwd as string).replace(/\\/g, "/")));
 		expect(before.description).toBe(form);
 		expect(before.tools).toEqual(beforeTier === "tiny" ? [...baseTools, ...searchTools] : baseTools);
 

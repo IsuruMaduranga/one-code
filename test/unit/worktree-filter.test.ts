@@ -6,6 +6,7 @@ import { expect, it, vi } from "vitest";
 import { createWorktree, type Worktree } from "../../extensions/subagents/worktree.ts";
 import { releaseWorktreeIsolation } from "../../extensions/lib/worktree-isolation.ts";
 import { envName } from "../../extensions/lib/brand.mjs";
+import { requireText } from "../../extensions/lib/profile.ts";
 
 it("refuses isolation before a repository checkout filter can execute", async () => {
 	const repo = mkdtempSync(join(tmpdir(), "worktree-filter-"));
@@ -25,7 +26,7 @@ it("refuses isolation before a repository checkout filter can execute", async ()
 		await expect(createWorktree(repo, "filter-probe").then((created) => {
 			worktree = created;
 			return created;
-		})).rejects.toThrow(/git config sets filter.smudge/);
+		})).rejects.toThrow(requireText("subagents").worktreeRefused({ program: { kind: "configSetsProgram", key: "filter.smudge" } }));
 		expect(existsSync(marker)).toBe(false);
 		expect(git("branch", "--list", "cc-subagent/*")).toBe("");
 		expect(git("worktree", "list", "--porcelain").match(/^worktree /gm)).toHaveLength(1);

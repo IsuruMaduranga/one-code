@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { powershellPathTokens, safetyControlWrite, safetyFloorReason } from "../../extensions/auto-mode/safety-floor.ts";
+import { brand } from "../../extensions/lib/brand.mjs";
+import { requireText } from "../../extensions/lib/profile.ts";
 
 const home = "/home/u";
 const cwd = "/home/u/proj";
@@ -19,9 +21,11 @@ describe("powershellPathTokens", () => {
 
 describe("safetyControlWrite for powershell", () => {
 	it("stops any command line that names a gate-control file, read or write", () => {
-		expect(floor(`Set-Content -Path "$env:USERPROFILE\\.claude\\settings.json" -Value '{}'`)).toMatch(/permission rules and auto-mode configuration/);
+		expect(floor(`Set-Content -Path "$env:USERPROFILE\\.claude\\settings.json" -Value '{}'`)).toBe(
+			requireText("autoMode").floorReason({ kind: "control", token: "/home/u/.claude/settings.json" }),
+		);
 		expect(floor("Add-Content .claude/settings.local.json '{}'")).toBeDefined();
-		expect(floor("Get-Content ~/.onecode/settings.json")).toBeDefined();
+		expect(floor(`Get-Content ~/${brand.stateDir}/settings.json`)).toBeDefined();
 		expect(floor("Remove-Item ~/.claude.json")).toBeDefined();
 	});
 	it("lets ordinary work through", () => {

@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	loadAutoModeConfig,
@@ -18,6 +18,8 @@ import {
 	type SetupFacts,
 	settingsPatch,
 } from "../../extensions/auto-mode/setup.ts";
+import { productSettingsPath } from "../../extensions/lib/product-settings.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 
 const facts: SetupFacts = {
 	cwd: "/home/u/proj",
@@ -65,11 +67,11 @@ describe("redactSecrets", () => {
 });
 
 describe("buildSetupPrompt", () => {
-	it("carries the default slots and the facts, and demands strict JSON", () => {
+	it("carries the profile's instructions, the default slots and the facts", () => {
+		const text = requireText("autoModeSetup");
 		const { system, user } = buildSetupPrompt(facts, ["**Organization**: None configured"]);
-		expect(system).toContain("ONLY a JSON object");
-		expect(system).toContain("append-only");
-		expect(user).toContain("- **Organization**: None configured");
+		expect(system).toBe(text.system);
+		expect(user).toBe([text.defaultsHeading, "- **Organization**: None configured", "", text.factsHeading, JSON.stringify(facts, null, 1)].join("\n"));
 		expect(user).toContain("acme/proj");
 		expect(user).toContain("gh was not available");
 	});
@@ -185,11 +187,11 @@ describe("auditPermissionAllow", () => {
 describe("persistAutoModeSetup / removeOneCodePermissionAllow", () => {
 	let home: string;
 	// Both writers persist to One Code's own file, never into ~/.claude.
-	const settingsPath = () => join(home, ".onecode", "settings.json");
+	const settingsPath = () => productSettingsPath(home);
 
 	beforeEach(() => {
 		home = mkdtempSync(join(tmpdir(), "cc-automode-setup-"));
-		mkdirSync(join(home, ".onecode"), { recursive: true });
+		mkdirSync(dirname(settingsPath()), { recursive: true });
 	});
 
 	afterEach(() => {

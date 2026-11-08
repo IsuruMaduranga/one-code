@@ -2,12 +2,9 @@ import { describe, expect, it } from "vitest";
 import { deferredAddendumText, stabilizeDeferredTools } from "../../extensions/lib/deferred.ts";
 import { wrapReminder } from "../../extensions/lib/reminders.ts";
 import { addendumNames, liftAddenda, supportsToolAdditions, withToolAdditions } from "../../extensions/lib/tool-additions.ts";
-import { toolSearchText } from "../../profile/text/tool-search/index.ts";
-import { ALL_LIVE } from "./helpers/live.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 
-const toolSearch = toolSearchText(ALL_LIVE);
-
-const TOOLS_AVAILABLE = toolSearch.toolsAvailable;
+const TOOLS_AVAILABLE = requireText("toolSearch").toolsAvailable;
 
 const framed = wrapReminder(deferredAddendumText(["mcp__s__a", "mcp__s__b"]));
 

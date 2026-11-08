@@ -6,8 +6,8 @@
  * failure and a completed run's report.
  */
 import { describe, expect, it } from "vitest";
-import { workflowText } from "../../profile/text/workflow/index.ts";
-import { ALL_LIVE } from "./helpers/live.ts";
+import { workflowText } from "../text/workflow/index.ts";
+import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
 
 const workflow = workflowText(ALL_LIVE);
 

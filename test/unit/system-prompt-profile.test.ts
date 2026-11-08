@@ -6,7 +6,7 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import type { Profile } from "../../extensions/lib/profile-contract.ts";
-import { resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile.ts";
+import { requireText, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile.ts";
 import { buildClaudeCodeSystemPrompt } from "../../extensions/system-prompt/template.ts";
 import { profile as shipped } from "../../profile/index.ts";
 import type { SystemPromptSection, SystemPromptText } from "../../extensions/system-prompt/text.ts";
@@ -67,10 +67,11 @@ describe("system prompt from the profile", () => {
 		expect(prompt).toBe(["LEAD workhorse tasks=true", "DOMAIN workhorse", "TOOLS  | ", "TAIL", "CLOSING"].join("\n\n") + "\nCWD /r");
 	});
 
-	it("One Code's shipped profile renders the same prompt twice (byte-stable)", () => {
+	it("the shipped profile renders the same prompt twice (byte-stable), opening with its lead", () => {
 		const a = buildClaudeCodeSystemPrompt(options, { cwd: "/r", memoryDir: "/m" }, "frontier");
 		const b = buildClaudeCodeSystemPrompt(options, { cwd: "/r", memoryDir: "/m" }, "frontier");
 		expect(a).toBe(b);
-		expect(a.startsWith("You are One Code")).toBe(true);
+		const lead = requireText("systemPrompt").lead({ tier: "frontier", taskTools: true, tools: ["bash", "read", "skill"] });
+		expect(a.startsWith(`${lead.join("\n\n")}\n\n`)).toBe(true);
 	});
 });

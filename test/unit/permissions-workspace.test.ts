@@ -5,9 +5,9 @@
  */
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { productProjectSettingsPath } from "../../extensions/lib/product-settings.ts";
+import { productProjectSettingsPath, productSettingsPath } from "../../extensions/lib/product-settings.ts";
 import { forwardSlashes } from "../../extensions/lib/paths.ts";
 import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
 import { WORKSPACE_CHANNEL } from "../../extensions/lib/workspace-channel.ts";
@@ -15,10 +15,14 @@ import { decide } from "../../extensions/permissions/matcher.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { listWorkspaceDirectories } from "../../extensions/permissions/settings.ts";
 import { parseAddDirFlag, validateWorkspaceDirectory } from "../../extensions/permissions/workspace.ts";
-import { environmentBlock } from "../../extensions/lib/environment-block.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
+import { brand, envName } from "../../extensions/lib/brand.mjs";
+
+// The repository-trust prompt needs a repository settings file, which only a
+// profile with a source provider lists; the helper adds one for any profile.
+vi.mock("../../extensions/lib/claude-settings.ts", async (importOriginal) =>
+	(await import("./helpers/repository-settings.ts")).withRepositorySettings(await importOriginal()));
 
 type GateResult = { block?: boolean; reason?: string } | undefined;
 
@@ -38,7 +42,7 @@ beforeEach(() => {
 	writeFileSync(join(shared, "notes.md"), "notes");
 	writeFileSync(join(shared, ".ssh", "id_rsa"), "key");
 	stubHome(home);
-	vi.stubEnv(envName("STATE_DIR"), join(home, ".onecode"));
+	vi.stubEnv(envName("STATE_DIR"), join(home, brand.stateDir));
 	vi.stubEnv("PI_CODING_AGENT_DIR", join(home, "agent"));
 });
 afterEach(() => {
@@ -123,6 +127,12 @@ describe("workspace directories in the gate", () => {
 	};
 	const read = (path: string) => fake.fireOne<GateResult>("tool_call", { toolName: "read", input: { path }, toolCallId: `r-${Math.random()}` }, ctx);
 	const prompted = () => vi.mocked((ctx.ui as { select: () => unknown }).select).mock.calls.length;
+	/** The product's own user settings file: every profile reads it. */
+	const writeUserSettings = (settings: unknown) => {
+		const path = productSettingsPath(home);
+		mkdirSync(dirname(path), { recursive: true });
+		writeFileSync(path, JSON.stringify(settings));
+	};
 
 	beforeEach(() => {
 		announced.length = 0;
@@ -131,8 +141,7 @@ describe("workspace directories in the gate", () => {
 	});
 
 	it("applies permissions.additionalDirectories from the user's settings and announces them", async () => {
-		mkdirSync(join(home, ".claude"), { recursive: true });
-		writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ permissions: { additionalDirectories: ["../shared"] } }));
+		writeUserSettings({ permissions: { additionalDirectories: ["../shared"] } });
 		await start();
 		expect(listWorkspaceDirectories(cwd, home).map((d) => d.path)).toEqual([shared]);
 		expect(await read(join(shared, "notes.md"))).toBeUndefined();
@@ -149,8 +158,7 @@ describe("workspace directories in the gate", () => {
 	});
 
 	it("ignores the filesystem root and the home directory in settings, and says so", async () => {
-		mkdirSync(join(home, ".claude"), { recursive: true });
-		writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ permissions: { additionalDirectories: ["/", "~", "../shared"] } }));
+		writeUserSettings({ permissions: { additionalDirectories: ["/", "~", "../shared"] } });
 		await start();
 		expect(announced).toEqual([[shared]]);
 		expect((await read(join(home, "notes.md")))?.block).toBe(true);
@@ -197,7 +205,7 @@ describe("workspace directories in the gate", () => {
 		expect((ctx._notified as Array<{ message: string }>).some((n) => n.message.startsWith(`--add-dir ${join(root, "missing")}:`))).toBe(true);
 	});
 
-	it("adds a directory with /add-dir, for the session or remembered in One Code's project settings", async () => {
+	it("adds a directory with /add-dir, for the session or remembered in the product's project settings", async () => {
 		await start();
 		selectAnswer = "Yes, for this session";
 		await fake.commands.get("add-dir")!.handler(shared, ctx);
@@ -211,14 +219,5 @@ describe("workspace directories in the gate", () => {
 		expect(saved.permissions.additionalDirectories).toEqual([shared]);
 		await fake.fire("session_start", { reason: "new" }, ctx);
 		expect(await read(join(shared, "notes.md"))).toBeUndefined();
-	});
-});
-
-describe("the environment block", () => {
-	const env = { cwd: "/p", isGitRepo: true, platform: "darwin", osVersion: "x", shell: "zsh" };
-	it("lists workspace directories the way Claude Code's environment block does, and nothing when there are none", () => {
-		const withDirs = environmentBlock({ ...env, workspaceDirs: ["/a", "/b"] });
-		expect(withDirs).toContain(" - Primary working directory: /p\n - Is a git repository: true\n - Additional working directories:\n  - /a\n  - /b\n - Platform: darwin");
-		expect(environmentBlock(env)).toContain(" - Is a git repository: true\n - Platform: darwin");
 	});
 });

@@ -5,7 +5,7 @@
  * golden snapshot pins the manual and overflow requests and the stored summary.
  */
 import { describe, expect, it } from "vitest";
-import { compaction, keptTailNote } from "../../profile/text/compaction/index.ts";
+import { compaction, keptTailNote } from "../text/compaction/index.ts";
 
 describe("One Code's compaction text", () => {
 	it("names each kind of first kept message", () => {

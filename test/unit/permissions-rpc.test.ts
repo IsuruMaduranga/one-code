@@ -9,6 +9,11 @@ import { stubHome } from "./helpers/home.ts";
 import { pinCatalog } from "./catalog-fixture.ts";
 import { envName } from "../../extensions/lib/brand.mjs";
 
+// The repository-trust prompt needs a repository settings file, which only a
+// profile with a source provider lists; the helper adds one for any profile.
+vi.mock("../../extensions/lib/claude-settings.ts", async (importOriginal) =>
+	(await import("./helpers/repository-settings.ts")).withRepositorySettings(await importOriginal()));
+
 /** pi's RPC dialogs only dismiss on abort when the extension supplies a signal. */
 function rpcDialog<T>(options: { signal?: AbortSignal } | undefined, cancelled: T): Promise<T> {
 	return new Promise((resolve) => {

@@ -3,12 +3,11 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import webFetchExtension from "../../extensions/web-fetch/index.ts";
 import { readerMessages } from "../../extensions/web-fetch/summarize.ts";
-import { webFetchText } from "../../profile/text/web-fetch/index.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 import { logSideCallUsage } from "../../extensions/lib/side-call-usage.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
-import { ALL_LIVE } from "./helpers/live.ts";
 
-const webFetch = webFetchText(ALL_LIVE);
+const webFetch = requireText("webFetch");
 
 vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
 vi.mock("../../extensions/lib/side-call-usage.ts", () => ({ logSideCallUsage: vi.fn(), SIDE_CALL_KINDS: ["reader", "btw", "recap"] }));

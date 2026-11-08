@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readJsonFile, writeJsonAtomic } from "../../extensions/lib/atomic-write.ts";
-import { readEnabledPlugins } from "../../extensions/lib/claude-settings.ts";
 import { readFavorites, toggleFavorite } from "../../extensions/lib/favorites.ts";
 import { readOverrides, setOverride } from "../../extensions/lib/plugin-overrides.ts";
 import { pluginRoot } from "../../extensions/lib/plugin-root.ts";
@@ -36,19 +35,6 @@ describe("atomic-write", () => {
 		expect(readJsonFile(join(root, "missing.json"))).toBeUndefined();
 		writeFileSync(join(root, "bad.json"), "{ nope");
 		expect(readJsonFile(join(root, "bad.json"))).toBeUndefined();
-	});
-});
-
-describe("claude-settings readEnabledPlugins", () => {
-	it("merges user → project → local, later wins; malformed files are ignored", () => {
-		const home = join(root, "home");
-		const cwd = join(root, "proj");
-		mkdirSync(join(home, ".claude"), { recursive: true });
-		mkdirSync(join(cwd, ".claude"), { recursive: true });
-		writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { "a@m": true, "b@m": true } }));
-		writeFileSync(join(cwd, ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { "b@m": false, "c@m": "yes" } }));
-		writeFileSync(join(cwd, ".claude", "settings.local.json"), "{ broken");
-		expect(readEnabledPlugins(cwd, home)).toEqual({ "a@m": true, "b@m": false });
 	});
 });
 
@@ -109,10 +95,10 @@ describe("skill scan", () => {
 		make(bundled, "simplify");
 		make(bundled, "loop");
 		// No declared name: the folder names it, so only the real path ties the link to it.
-		mkdirSync(join(home, ".claude", "skills", "shared"), { recursive: true });
-		writeFileSync(join(home, ".claude", "skills", "shared", "SKILL.md"), "---\ndescription: d\n---\nbody");
+		mkdirSync(join(agentDir, "skills", "shared"), { recursive: true });
+		writeFileSync(join(agentDir, "skills", "shared", "SKILL.md"), "---\ndescription: d\n---\nbody");
 		mkdirSync(join(cwd, ".agents", "skills"), { recursive: true });
-		symlinkSync(join(home, ".claude", "skills", "shared"), join(cwd, ".agents", "skills", "linked"), "junction");
+		symlinkSync(join(agentDir, "skills", "shared"), join(cwd, ".agents", "skills", "linked"), "junction");
 		const skills = scanSkills(cwd, home, agentDir, [], bundled);
 		expect(skills.map((s) => s.name)).toEqual(["loop", "shared", "simplify"]);
 		// The user's simplify wins over the bundled one, as pi's first-wins load does.
@@ -125,9 +111,7 @@ describe("skill scan", () => {
 		const agentDir = join(root, "agent");
 		const bundled = join(root, "bundled-skills");
 		for (const [base, name] of [
-			[join(cwd, ".claude", "skills"), "proj-skill"],
 			[join(cwd, ".agents", "skills"), "proj-agents-skill"],
-			[join(home, ".claude", "skills"), "user-skill"],
 			[join(home, ".agents", "skills"), "user-agents-skill"],
 			[join(agentDir, "skills"), "agent-skill"],
 			[bundled, "bundled-skill"],
@@ -140,14 +124,12 @@ describe("skill scan", () => {
 			"plugin:demo:helper",
 			"project:bundled-skill",
 			"project:proj-agents-skill",
-			"project:proj-skill",
 			"user:agent-skill",
 			"user:user-agents-skill",
-			"user:user-skill",
 		]);
 		// Without the bundled root (the /plugins tab's call) the catalog is not scanned.
 		expect(scanSkills(cwd, home, agentDir, []).some((s) => s.name === "bundled-skill")).toBe(false);
-		expect(estimateSkillTokens(skills.find((s) => s.name === "proj-skill")!.path)).toBeGreaterThan(0);
+		expect(estimateSkillTokens(skills.find((s) => s.name === "proj-agents-skill")!.path)).toBeGreaterThan(0);
 		expect(estimateSkillTokens("/nope/SKILL.md")).toBe(0);
 	});
 });

@@ -13,6 +13,10 @@ import { envName } from "../../extensions/lib/brand.mjs";
 
 const state = vi.hoisted(() => ({ runHook: vi.fn(), startServer: vi.fn() }));
 vi.mock("../../extensions/hooks/executor.ts", () => ({ runHookCommand: state.runHook }));
+// The repository-trust prompt needs a repository settings file, which only a
+// profile with a source provider lists; the helper adds one for any profile.
+vi.mock("../../extensions/lib/claude-settings.ts", async (importOriginal) =>
+	(await import("./helpers/repository-settings.ts")).withRepositorySettings(await importOriginal()));
 vi.mock("../../extensions/lsp/client.ts", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../../extensions/lsp/client.ts")>();
 	return { ...actual, LspClient: class {

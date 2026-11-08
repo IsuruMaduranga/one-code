@@ -1,7 +1,16 @@
+/**
+ * The /memory panel's rows (memory/entries.ts): the instruction files a user
+ * writes, for the profile in force (lib/instructions.ts instructionTargets),
+ * always offered; ancestors by path before the project's own; the auto-memory
+ * folder last. With One Code's source provider (Claude Code's files):
+ * profile/test/memory-entries-claude-code.test.ts.
+ */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { brand } from "../../extensions/lib/brand.mjs";
+import { instructionTargets } from "../../extensions/lib/instructions.ts";
 import { buildMemoryEntries } from "../../extensions/memory/entries.ts";
 
 describe("buildMemoryEntries", () => {
@@ -12,6 +21,10 @@ describe("buildMemoryEntries", () => {
 	afterEach(() => {
 		rmSync(root, { recursive: true, force: true });
 	});
+
+	const stateDir = () => join(root, brand.stateDir);
+	/** The files a user writes, as the panel resolves them. */
+	const targets = () => instructionTargets(root, stateDir());
 
 	const write = (rel: string, content = "x") => {
 		const abs = join(root, rel);
@@ -24,19 +37,19 @@ describe("buildMemoryEntries", () => {
 		return buildMemoryEntries({ agentDir: undefined,
 			cwd,
 			home: root,
-			homeOneCodeDir: join(root, ".onecode"),
+			homeOneCodeDir: stateDir(),
 			memoryDir: join(root, "mem"),
 		});
 	}
 
-	it("always offers the global user CLAUDE.md and project CLAUDE.md, even when absent", () => {
+	it("always offers the user and project instruction files, even when absent", () => {
 		const cwd = join(root, "proj");
 		mkdirSync(cwd, { recursive: true });
 		const entries = build(cwd);
 		const user = entries.find((e) => e.title === "User instructions");
 		const project = entries.find((e) => e.title === "Project instructions");
-		expect(user).toMatchObject({ path: join(root, ".claude", "CLAUDE.md"), exists: false });
-		expect(project).toMatchObject({ path: join(cwd, "CLAUDE.md"), exists: false });
+		expect(user).toMatchObject({ path: targets().user, exists: false });
+		expect(project).toMatchObject({ path: join(cwd, targets().project), exists: false });
 	});
 
 	it("describes cwd files as ./name (CC's relative form), not the absolute path", () => {
@@ -44,65 +57,29 @@ describe("buildMemoryEntries", () => {
 		mkdirSync(cwd, { recursive: true });
 		const entries = build(cwd);
 		const project = entries.find((e) => e.title === "Project instructions");
-		expect(project?.description).toBe("Checked in at ./CLAUDE.md");
+		expect(project?.description).toBe(`Checked in at ./${targets().project}`);
 	});
 
-	it("shows AGENTS.md only when a loaded file @-imports it; ONECODE.md always", () => {
+	it("marks the project file present once it exists, and ends with the auto-memory folder", () => {
 		const cwd = join(root, "proj");
 		mkdirSync(cwd, { recursive: true });
-		write("proj/CLAUDE.md", "@AGENTS.md\n"); // references AGENTS.md
-		write("proj/AGENTS.md");
-		write("proj/ONECODE.md");
+		write(join("proj", targets().project));
 		const entries = build(cwd);
-		expect(entries).toContainEqual(
-			expect.objectContaining({ title: "Agent instructions", path: join(cwd, "AGENTS.md") }),
-		);
-		expect(entries).toContainEqual(
-			expect.objectContaining({ title: "One Code instructions", path: join(cwd, "ONECODE.md") }),
-		);
-	});
-
-	it("omits AGENTS.md when a CLAUDE.md exists and does not import it (CLAUDE.md wins)", () => {
-		const cwd = join(root, "proj");
-		mkdirSync(cwd, { recursive: true });
-		write("proj/CLAUDE.md", "# Project\n"); // no @AGENTS.md import
-		write("proj/AGENTS.md");
-		const entries = build(cwd);
-		expect(entries.some((e) => e.path === join(cwd, "AGENTS.md"))).toBe(false);
-	});
-
-	it("shows AGENTS.md as the fallback when the directory has no CLAUDE.md", () => {
-		const cwd = join(root, "proj");
-		mkdirSync(cwd, { recursive: true });
-		write("proj/AGENTS.md"); // no CLAUDE.md here
-		const entries = build(cwd);
-		expect(entries).toContainEqual(
-			expect.objectContaining({ title: "Agent instructions", path: join(cwd, "AGENTS.md") }),
-		);
-	});
-
-	it("includes a global ONECODE.md and ends with the auto-memory folder", () => {
-		const cwd = join(root, "proj");
-		mkdirSync(cwd, { recursive: true });
-		const globalOneCode = write(".onecode/ONECODE.md");
-		const entries = build(cwd);
-		expect(entries).toContainEqual(
-			expect.objectContaining({ title: "One Code user instructions", path: globalOneCode }),
-		);
+		expect(entries.find((e) => e.title === "Project instructions")).toMatchObject({ path: join(cwd, targets().project), exists: true });
 		const last = entries[entries.length - 1];
 		expect(last).toMatchObject({ title: "Open auto-memory folder", kind: "folder", path: join(root, "mem") });
 	});
 
-	it("shows ancestor CLAUDE.md files by path, farthest first, before the project one", () => {
+	it("shows ancestor project files by path, farthest first, before the project one", () => {
 		const cwd = join(root, "a", "b");
 		mkdirSync(cwd, { recursive: true });
-		write("a/CLAUDE.md");
+		write(join("a", targets().project));
 		const entries = build(cwd);
-		const ancestorIdx = entries.findIndex((e) => e.path === join(root, "a", "CLAUDE.md"));
+		const ancestorIdx = entries.findIndex((e) => e.path === join(root, "a", targets().project));
 		const projectIdx = entries.findIndex((e) => e.title === "Project instructions");
 		expect(ancestorIdx).toBeGreaterThanOrEqual(0);
 		expect(ancestorIdx).toBeLessThan(projectIdx);
 		// Ancestor entries are labelled by their (tildified) path, not a friendly name.
-		expect(entries[ancestorIdx].title).toBe("~/a/CLAUDE.md");
+		expect(entries[ancestorIdx].title).toBe(`~/a/${targets().project}`);
 	});
 });

@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { conflictingPathArguments } from "../../extensions/auto-mode/paths.ts";
 import { analyzeShellCommand } from "../../extensions/auto-mode/shell-analysis.ts";
 import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { powershellInjectionSyntax } from "../../extensions/permissions/powershell-rules.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
@@ -70,7 +71,7 @@ describe("H1: one target per file-tool call", () => {
 
 		const conflicting = await call({ path: join(root, "outside.txt"), file_path: "ordinary.txt", content: "x" });
 		expect(conflicting?.block).toBe(true);
-		expect(conflicting?.reason).toMatch(/`path` and `file_path`/);
+		expect(conflicting?.reason).toBe(requireText("permissions").refused({ kind: "conflictingPaths", fields: ["path", "file_path"] }));
 		// The ordinary in-project write still takes the fast path.
 		expect(await call({ path: "ordinary.txt", content: "x" })).toBeUndefined();
 	});

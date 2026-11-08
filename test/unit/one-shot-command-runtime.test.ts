@@ -10,7 +10,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createUserMessageSender } from "../../extensions/lib/notifications.ts";
 import { ONE_SHOT_COMMAND_FAILED_CHANNEL } from "../../extensions/lib/interrupt.ts";
 import doctorExtension from "../../extensions/doctor/index.ts";
-import { INIT_PROMPT } from "../../profile/text/init/prompt.ts";
+import { brand } from "../../extensions/lib/brand.mjs";
+import { instructionTargets } from "../../extensions/lib/instructions.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 import { promptCommandText } from "../../extensions/skill/invoke.ts";
 
 function deferred() {
@@ -94,7 +96,7 @@ describe("one-shot commands against pi's runtime", () => {
 		expect(h.requests).toEqual([]);
 		expect(h.errors).toEqual([]);
 		expect(output.mock.calls.flat().join("\n")).toContain("No model is available");
-		expect(output.mock.calls.flat().join("\n")).toContain("One Code doctor");
+		expect(output.mock.calls.flat().join("\n")).toContain(`${brand.name} doctor`);
 	});
 
 	it.each(["print", "json"] as const)("waits for a command submitted during another run in %s", async (mode) => {
@@ -141,7 +143,7 @@ describe("one-shot commands against pi's runtime", () => {
 		const h = await setup(undefined, mode, [path]);
 		await h.session.prompt("/init");
 		await h.session.prompt("/init");
-		const sent = promptCommandText("init", "", INIT_PROMPT);
+		const sent = promptCommandText("init", "", requireText("init").prompt(instructionTargets().project));
 		expect(h.requests).toEqual([sent, sent]);
 		expect(h.errors).toEqual([]);
 	});

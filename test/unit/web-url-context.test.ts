@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFER_CHANNEL, deferredAddendumText, WITHHOLD_CHANNEL } from "../../extensions/lib/deferred.ts";
 import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/mcp-share.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/reminders.ts";
 import toolSearchExtension from "../../extensions/tool-search/index.ts";
 import webExtension from "../../extensions/web/index.ts";
@@ -76,7 +77,7 @@ describe("url_context model-scoped deferral", () => {
 			const result = await fake.search();
 			expect(result.isError).toBe(true);
 			expect(result.details.matches).toEqual([]);
-			expect(result.content[0].text).toContain("Withdrawn for the current model (do not retry): url_context.");
+			expect(result.content[0].text).toBe(requireText("toolSearch").noMatch({ query: "select:url_context", missing: [], withdrawn: ["url_context"], loadable: ["web_search"] }));
 			expect((await fake.search("gemini")).details.matches).not.toContain("url_context");
 			expect(fake.getActiveTools()).not.toContain("url_context");
 			expect(fake.render(told, other)).toEqual([]);
@@ -112,8 +113,8 @@ describe("url_context model-scoped deferral", () => {
 				result: { content: [{ type: "text", text: "Tool url_context not found" }] },
 			});
 			const miss = fake.reminders.find((r) => r.key === "deferred-miss-url_context");
-			expect(miss?.text).toContain("withdrawn for the current model");
-			expect(miss?.text).not.toContain("select:url_context");
+			// Not the ordinary "load it with tool_search" advice.
+			expect(miss?.text).toBe(requireText("toolSearch").withheldMiss({ name: "url_context" }));
 			expect((await fake.search()).isError).toBe(true);
 			expect(fake.getActiveTools()).not.toContain("url_context");
 		});

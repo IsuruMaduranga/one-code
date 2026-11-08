@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import sessionTitleExtension from "../../extensions/session-title/index.ts";
 import {
@@ -8,33 +7,20 @@ import {
 	SESSION_TEXT_LIMIT,
 	sessionTitleInput as titleInput,
 } from "../../extensions/session-title/title.ts";
-import { SESSION_TITLE_LANGUAGE_NOTE, SESSION_TITLE_PROMPT, sessionTitle } from "../../profile/text/session-title/index.ts";
-
-/** The naming request's user message in One Code's words. */
-const sessionTitleInput = (text: string) => titleInput(sessionTitle, text);
+import { requireText } from "../../extensions/lib/profile.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
-describe("session title prompt (CC 2.1.278 capture)", () => {
-	it("matches the captured naming request verbatim when the capture is present", () => {
-		let capture: { system: Array<{ text: string }>; messages: Array<{ content: Array<{ text: string }> }> } | undefined;
-		try {
-			capture = JSON.parse(readFileSync(new URL("../../captures/session_name.json", import.meta.url), "utf8"));
-		} catch {
-			return; // the capture is an internal file; the literal below is the locked copy
-		}
-		expect(SESSION_TITLE_PROMPT).toBe(capture!.system[2].text);
-		expect(sessionTitleInput("what do you think of one code. pincer-agent project in ~/ml/")).toBe(capture!.messages[0].content[0].text);
-	});
+/** The naming request's user message in the active profile's words. */
+const sessionTitleInput = (text: string) => titleInput(requireText("sessionTitle"), text);
 
-	it("frames the text in <session> tags followed by the language note", () => {
-		expect(sessionTitleInput("  fix the footer  ")).toBe(`<session>\nfix the footer\n</session>\n\n${SESSION_TITLE_LANGUAGE_NOTE}`);
+describe("session title input", () => {
+	it("trims the text and hands it to the profile's frame", () => {
+		expect(sessionTitleInput("  fix the footer  ")).toBe(requireText("sessionTitle").user("fix the footer"));
 	});
 
 	it("keeps the TAIL of an over-long first message (CC's MAX_CONVERSATION_TEXT)", () => {
 		const text = "x".repeat(SESSION_TEXT_LIMIT) + "END";
-		const input = sessionTitleInput(text);
-		expect(input).toContain("END\n</session>");
-		expect(input).not.toContain("x".repeat(SESSION_TEXT_LIMIT));
+		expect(sessionTitleInput(text)).toBe(requireText("sessionTitle").user("x".repeat(SESSION_TEXT_LIMIT - 3) + "END"));
 	});
 });
 

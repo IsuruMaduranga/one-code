@@ -5,8 +5,8 @@
  * pins the bytes of every other artifact text.
  */
 import { describe, expect, it } from "vitest";
-import { artifactsText } from "../../profile/text/artifacts/index.ts";
-import { ALL_LIVE } from "./helpers/live.ts";
+import { artifactsText } from "../text/artifacts/index.ts";
+import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
 
 const artifacts = artifactsText(ALL_LIVE);
 

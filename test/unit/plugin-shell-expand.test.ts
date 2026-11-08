@@ -7,7 +7,10 @@ import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { requireText } from "../../extensions/lib/profile.ts";
 import { expandTemplate, runPlaceholderCommand } from "../../extensions/plugins/shell-expand.ts";
+
+const words = requireText("plugins");
 
 const cwd = mkdtempSync(join(tmpdir(), "plugin-expand-"));
 afterAll(() => rmSync(cwd, { recursive: true, force: true }));
@@ -45,13 +48,14 @@ describe("runPlaceholderCommand", () => {
 	});
 
 	it("says when an output was cut at the collection cap", async () => {
-		expect(await runPlaceholderCommand("printf 'abcdefghij'", cwd, { maxOutputChars: 4 })).toBe("abcd\n[output cut after 4 characters]");
+		expect(await runPlaceholderCommand("printf 'abcdefghij'", cwd, { maxOutputChars: 4 })).toBe(`abcd\n${words.outputCut({ chars: 4 })}`);
 		expect(await runPlaceholderCommand("printf 'abcd'", cwd, { maxOutputChars: 4 })).toBe("abcd");
 	});
 
 	it("returns the error text for a failing command and stops at the timeout", async () => {
 		if (process.platform === "win32") return;
 		expect(await runPlaceholderCommand("echo oops >&2; exit 3", cwd)).toBe("oops");
-		expect(await runPlaceholderCommand("sleep 5", cwd, { timeoutMs: 200 })).toContain("timed out");
+		// Nothing printed before the timeout: the result is the timeout notice alone.
+		expect(await runPlaceholderCommand("sleep 5", cwd, { timeoutMs: 200 })).toBe(words.placeholderTimedOut({ seconds: 0 }));
 	});
 });

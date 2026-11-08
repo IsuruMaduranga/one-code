@@ -2,6 +2,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { LspDiagnostic } from "../../extensions/lsp/format.ts";
+import type { ShownDiagnostic } from "../../extensions/lsp/text.ts";
 import {
 	computeDelta,
 	DeliveredTracker,
@@ -10,7 +11,9 @@ import {
 	markDelivered,
 	MAX_CHARS,
 } from "../../extensions/lsp/watcher.ts";
-import { lsp as lspText } from "../../profile/text/lsp/index.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
+
+const lspText = requireText("lsp");
 
 const diag = (message: string, severity?: number, line = 0, character = 0, extra?: Partial<LspDiagnostic>): LspDiagnostic => ({
 	message,
@@ -24,7 +27,7 @@ const PROJECT = resolve("/project");
 const uri = (name: string) => pathToFileURL(join(PROJECT, name)).href;
 
 
-/** The block with One Code's words, as the extension passes them. */
+/** The block with the profile's words, as the extension passes them (One Code's: profile/test/lsp-wording.test.ts). */
 const formatNewDiagnostics = (delta: Map<string, LspDiagnostic[]>, cwd: string) => formatWith(delta, cwd, lspText.newDiagnostics);
 
 describe("fingerprintDiagnostic", () => {
@@ -85,35 +88,38 @@ describe("delta and tracker", () => {
 });
 
 describe("formatNewDiagnostics", () => {
-	it("matches the exact block layout: tag into preamble, blank lines between files, two-space indent", () => {
+	const words = lspText.newDiagnostics;
+	/** One shown entry: 1-indexed position, the severity's name. */
+	const entry = (message: string, severity: ShownDiagnostic["severity"], line = 1, column = 1, extra: Partial<ShownDiagnostic> = {}) =>
+		words.entry({ line, column, severity, message, ...extra });
+	/** The block for these sections (and remainder note), as the base joins them. */
+	const block = (...parts: string[]) => words.block(parts.join("\n\n"));
+
+	it("puts each file's section in the block, separated by blank lines, entries 1-indexed", () => {
 		const delta = new Map([
 			[uri("guards.ts"), [diag("Cannot find name 'Token'.", 1, 50, 28, { code: 2304, source: "typescript" })]],
 			[uri("index.ts"), [diag("'ctx' is declared but its value is never read.", 4, 203, 57, { code: 6133, source: "typescript" })]],
 		]);
 		expect(formatNewDiagnostics(delta, PROJECT)).toBe(
-			"<new-diagnostics>The following new diagnostic issues were detected:\n\n" +
-				"guards.ts:\n" +
-				"  ✘ [Line 51:29] Cannot find name 'Token'. [2304] (typescript)\n" +
-				"\n" +
-				"index.ts:\n" +
-				"  ★ [Line 204:58] 'ctx' is declared but its value is never read. [6133] (typescript)\n" +
-				"</new-diagnostics>",
+			block(
+				words.section({ path: "guards.ts", entries: [entry("Cannot find name 'Token'.", "error", 51, 29, { code: 2304, source: "typescript" })] }),
+				words.section({ path: "index.ts", entries: [entry("'ctx' is declared but its value is never read.", "hint", 204, 58, { code: 6133, source: "typescript" })] }),
+			),
 		);
 	});
 
 	it("uses cwd-relative headers, not basenames (deliberate divergence)", () => {
 		const delta = new Map([[uri("src/deep/index.ts"), [diag("x", 1)]]]);
-		expect(formatNewDiagnostics(delta, PROJECT)).toContain(`\n${join("src", "deep", "index.ts")}:\n`);
+		expect(formatNewDiagnostics(delta, PROJECT)).toBe(block(words.section({ path: join("src", "deep", "index.ts"), entries: [entry("x", "error")] })));
 	});
 
-	it("maps severities to ✘ ⚠ ℹ ★ and treats missing severity as error", () => {
+	it("names each severity, treats a missing severity as an error, and lists the worst first", () => {
 		const delta = new Map([
 			[uri("a.ts"), [diag("e", 1), diag("w", 2), diag("i", 3), diag("h", 4), diag("u", undefined)]],
 		]);
-		const text = formatNewDiagnostics(delta, PROJECT)!;
-		for (const sym of ["✘ [Line 1:1] e", "⚠ [Line 1:1] w", "ℹ [Line 1:1] i", "★ [Line 1:1] h", "✘ [Line 1:1] u"]) {
-			expect(text).toContain(sym);
-		}
+		expect(formatNewDiagnostics(delta, PROJECT)).toBe(
+			block(words.section({ path: "a.ts", entries: [entry("e", "error"), entry("u", "error"), entry("w", "warning"), entry("i", "info"), entry("h", "hint")] })),
+		);
 	});
 
 	it("caps at 10 per file, errors surviving first", () => {
@@ -121,12 +127,8 @@ describe("formatNewDiagnostics", () => {
 			...Array.from({ length: 8 }, (_, i) => diag(`warn-${i}`, 2, i)),
 			...Array.from({ length: 8 }, (_, i) => diag(`err-${i}`, 1, i)),
 		];
-		const text = formatNewDiagnostics(new Map([[uri("a.ts"), list]]), PROJECT)!;
-		for (let i = 0; i < 8; i++) expect(text).toContain(`err-${i}`);
-		expect(text).toContain("warn-0");
-		expect(text).toContain("warn-1");
-		expect(text).not.toContain("warn-2");
-		expect(text).toContain("… 6 more");
+		const kept = [...Array.from({ length: 8 }, (_, i) => entry(`err-${i}`, "error", i + 1)), entry("warn-0", "warning", 1), entry("warn-1", "warning", 2)];
+		expect(formatNewDiagnostics(new Map([[uri("a.ts"), list]]), PROJECT)).toBe(block(words.section({ path: "a.ts", entries: kept }), words.more(6)));
 	});
 
 	it("caps at 30 total across files, worst-severity files first, with a remainder note", () => {
@@ -136,21 +138,17 @@ describe("formatNewDiagnostics", () => {
 				Array.from({ length: 10 }, (_, i) => diag(`f${f}-d${i}`, f === 4 ? 1 : 2, i)),
 			] as const),
 		);
-		const text = formatNewDiagnostics(delta, PROJECT)!;
+		const section = (f: number) =>
+			words.section({ path: `f${f}.ts`, entries: Array.from({ length: 10 }, (_, i) => entry(`f${f}-d${i}`, f === 4 ? "error" : "warning", i + 1)) });
 		// f4 is all errors → sorted first; then f0, f1 fill the 30-cap.
-		expect(text).toContain("f4.ts:");
-		expect(text).toContain("f0.ts:");
-		expect(text).toContain("f1.ts:");
-		expect(text).not.toContain("f2.ts:");
-		expect(text).toContain("… 20 more");
+		expect(formatNewDiagnostics(delta, PROJECT)).toBe(block(section(4), section(0), section(1), words.more(20)));
 	});
 
-	it("caps the body at 4000 chars with a truncation marker", () => {
+	it("caps the body at MAX_CHARS, handing the kept head to the cut", () => {
 		const delta = new Map([[uri("a.ts"), Array.from({ length: 10 }, (_, i) => diag("x".repeat(600), 1, i))]]);
-		const text = formatNewDiagnostics(delta, PROJECT)!;
-		expect(text.length).toBeLessThan(MAX_CHARS + 200);
-		expect(text).toContain("…[truncated]");
-		expect(text.endsWith("</new-diagnostics>")).toBe(true);
+		const body = words.section({ path: "a.ts", entries: Array.from({ length: 10 }, (_, i) => entry("x".repeat(600), "error", i + 1)) });
+		expect(body.length).toBeGreaterThan(MAX_CHARS);
+		expect(formatNewDiagnostics(delta, PROJECT)).toBe(words.block(words.cut(body.slice(0, MAX_CHARS))));
 	});
 
 	it("returns undefined for an empty delta", () => {

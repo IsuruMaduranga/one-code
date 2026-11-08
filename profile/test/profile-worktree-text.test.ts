@@ -5,7 +5,7 @@
  * every other result.
  */
 import { describe, expect, it } from "vitest";
-import { worktree } from "../../profile/text/worktree/index.ts";
+import { worktree } from "../text/worktree/index.ts";
 
 const session = { path: "/repo/.claude/worktrees/wt", branch: "wt", originalCwd: "/repo" };
 

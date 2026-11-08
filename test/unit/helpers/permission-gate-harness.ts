@@ -9,6 +9,7 @@ import os from "node:os";
 import { join } from "node:path";
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import { permissionGateFactory } from "../../../extensions/lib/permission-gate.ts";
+import { projectConfigDir, userConfigDir } from "../../../extensions/lib/sources.ts";
 
 export type ToolCallHandler = (event: {
 	toolName: string;
@@ -33,9 +34,10 @@ export function captureToolCallHandler(ext: InlineExtension): ToolCallHandler {
 
 /**
  * A permission gate over a fresh temp cwd/home. `settings` is the USER file
- * (`<home>/.claude/settings.json` — allow rules there apply directly);
- * `projectSettings` is the repo's `<cwd>/.claude/settings.json`, whose allow
- * rules need consent.
+ * (`settings.json` in the profile's user config dir; allow rules there apply
+ * directly); `projectSettings` is `settings.json` in the repo's project config
+ * dir, whose allow rules need consent when the profile reads it as a
+ * repository file.
  */
 export function buildGate(
 	settings: object,
@@ -44,11 +46,11 @@ export function buildGate(
 ): { handler: ToolCallHandler; cwd: string; home: string } {
 	const cwd = mkdtempSync(join(os.tmpdir(), "gate-cwd-"));
 	const home = mkdtempSync(join(os.tmpdir(), "gate-home-"));
-	mkdirSync(join(home, ".claude"), { recursive: true });
-	writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify(settings));
+	mkdirSync(userConfigDir(home), { recursive: true });
+	writeFileSync(join(userConfigDir(home), "settings.json"), JSON.stringify(settings));
 	if (projectSettings) {
-		mkdirSync(join(cwd, ".claude"), { recursive: true });
-		writeFileSync(join(cwd, ".claude", "settings.json"), JSON.stringify(projectSettings));
+		mkdirSync(projectConfigDir(cwd), { recursive: true });
+		writeFileSync(join(projectConfigDir(cwd), "settings.json"), JSON.stringify(projectSettings));
 	}
 	return { handler: captureToolCallHandler(permissionGateFactory(cwd, home, undefined, getBridge)), cwd, home };
 }

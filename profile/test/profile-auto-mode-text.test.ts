@@ -6,8 +6,8 @@
  * the floor's block of a settings write.
  */
 import { describe, expect, it } from "vitest";
-import { autoModeText } from "../../profile/text/auto-mode/index.ts";
-import { ALL_LIVE } from "./helpers/live.ts";
+import { autoModeText } from "../text/auto-mode/index.ts";
+import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
 
 const autoMode = autoModeText(ALL_LIVE);
 

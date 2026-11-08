@@ -8,10 +8,12 @@ import toolStyleExtension from "../../extensions/tool-style/index.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { SessionTurnTracker } from "../../extensions/subagents/session-turns.ts";
 import { applyPostToolUseOutcome } from "../../extensions/hooks/protocol.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 const text = (value: string) => ({ type: "text", text: value });
-const marker = (name: string) => `(${name} completed with no output)`;
+/** The profile's text for a tool that returned nothing (One Code's: profile/test/empty-tool-result-wording.test.ts). */
+const marker = (name: string) => requireText("toolResults").empty({ tool: name });
 
 // Apply returned changes in registration order, as pi's emitToolResult does.
 async function resultFor(content: unknown, name = "mcp__demo__silent", reminders = false, structuredContent?: unknown) {
@@ -29,7 +31,7 @@ async function resultFor(content: unknown, name = "mcp__demo__silent", reminders
 	return event;
 }
 
-describe("Claude Code's empty tool-result marker", () => {
+describe("the empty tool-result marker", () => {
 	it.each([undefined, null, "", " \t\n", [], [text("")], [text("\n"), text(" \t")]].map((content) => ({ content })))("replaces empty content $content", async ({ content }) => {
 		expect((await resultFor(content)).content).toEqual([text(marker("mcp__demo__silent"))]);
 	});
@@ -60,12 +62,12 @@ describe("Claude Code's empty tool-result marker", () => {
 });
 
 describe("completed subagents without a reply", () => {
-	it("returns Claude Code's completed-empty text without declaring a task failure", () => {
+	it("returns the profile's completed-empty text without declaring a task failure", () => {
 		const tracker = new SessionTurnTracker();
 		tracker.beginTurn();
 		tracker.process({ type: "message_end", message: { role: "assistant", content: [], stopReason: "stop" } });
 		tracker.process({ type: "agent_settled" });
-		expect(tracker.turnOutcome().output).toBe("(Subagent completed but returned no output.)");
+		expect(tracker.turnOutcome().output).toBe(requireText("subagents").noOutput);
 		expect(tracker.turnOutcome().failed).toBeUndefined();
 	});
 });
@@ -90,7 +92,7 @@ describe("built-in empty results", () => {
 			const change = await handler(event, ctx);
 			if (change) event = { ...event, ...change };
 		}
-		expect(event.content[0].text).toBe("<system-reminder>Warning: the file exists but the contents are empty.</system-reminder>");
+		expect(event.content[0].text).toBe(requireText("fileTracker").toolResult({ kind: "empty" }));
 		expect(event.content).toHaveLength(1);
 	});
 
@@ -116,12 +118,12 @@ describe("built-in empty results", () => {
 		expect(event.content).toEqual([text(expected)]);
 	});
 
-	it("uses Claude Code's Glob no-files text for pi find", async () => {
+	it("uses the profile's no-files text for pi find", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "empty-result-find-"));
 		dirs.push(dir);
 		const fake = createFakePi();
 		toolStyleExtension(fake.pi as never);
 		const result = await fake.tools.get("find")!.execute("f1", { pattern: "*.absent" }, undefined, undefined, createFakeCtx({ cwd: dir })) as any;
-		expect((await resultFor(result.content, "find")).content).toEqual([text("No files found")]);
+		expect((await resultFor(result.content, "find")).content).toEqual([text(requireText("toolResults").noFilesFound)]);
 	});
 });

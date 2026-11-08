@@ -6,7 +6,7 @@
  * of every other text.
  */
 import { describe, expect, it } from "vitest";
-import { mcp } from "../../profile/text/mcp/index.ts";
+import { mcp } from "../text/mcp/index.ts";
 
 describe("One Code's MCP text", () => {
 	it("labels a cut description with its full length, and cut instructions without", () => {

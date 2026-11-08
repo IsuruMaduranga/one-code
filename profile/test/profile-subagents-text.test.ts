@@ -7,9 +7,9 @@
  * spawned-agents list, a missing run, an inline resume and a fork's framing.
  */
 import { describe, expect, it } from "vitest";
-import { subagentModelsText } from "../../profile/text/subagent-models/index.ts";
-import { subagentsText } from "../../profile/text/subagents/index.ts";
-import { ALL_LIVE } from "./helpers/live.ts";
+import { subagentModelsText } from "../text/subagent-models/index.ts";
+import { subagentsText } from "../text/subagents/index.ts";
+import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
 
 const subagentModels = subagentModelsText(ALL_LIVE);
 const subagents = subagentsText(ALL_LIVE);

@@ -12,7 +12,9 @@ import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { decide, parseRules, type DecideInput } from "../../extensions/permissions/matcher.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
+import { brand, envName } from "../../extensions/lib/brand.mjs";
+import { describeChanges } from "../../extensions/file-tracker/tracker.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 
 const modes = ["default", "auto", "dontAsk", "acceptEdits"] as const;
 const escapedDecisions = { default: "ask", auto: "classify", dontAsk: "deny", acceptEdits: "ask" } as const;
@@ -30,7 +32,7 @@ beforeEach(() => {
 	for (const dir of [home, cwd, outside]) mkdirSync(dir);
 	stubHome(home);
 	vi.stubEnv("CLAUDE_CONFIG_DIR", join(home, ".claude"));
-	vi.stubEnv(envName("STATE_DIR"), join(home, ".onecode"));
+	vi.stubEnv(envName("STATE_DIR"), join(home, brand.stateDir));
 	memoryDirPath = projectMemoryDir(cwd, home);
 	mkdirSync(memoryDirPath, { recursive: true });
 });
@@ -187,11 +189,11 @@ describe("memory freshness across sessions", () => {
 			parent.fake.events.on(REMINDER_CHANNEL, (data) => reminders.push((data as { text: string }).text));
 			parent.fake.events.emit(CHILD_WROTE_CHANNEL, { path, agent: "memory child" });
 			await parent.fake.fire("tool_execution_end", { toolName: "Agent", toolCallId: "child-run", isError: false }, parent.ctx);
-			expect(reminders.join("\n")).toContain('was changed by the agent "memory child"');
+			expect(reminders).toContain(requireText("fileTracker").changedByAgent({ path, agent: "memory child", excerpt: describeChanges("user: v1\n", "user: v2\n")! }));
 		}
 		const stale = await parent.fake.fireOne<{ block?: boolean; reason?: string }>("tool_call", write("parent"), parent.ctx);
 		expect(stale?.block).toBe(true);
-		expect(stale?.reason).toContain("has changed on disk");
+		expect(stale?.reason).toBe(requireText("fileTracker").stale({ path }));
 		expect(readFileSync(path, "utf8")).toBe("user: v2\n");
 		await parent.fake.fire("tool_result", { toolName: "read", toolCallId: "parent-reread", input: { path }, isError: false }, parent.ctx);
 		expect(await parent.fake.fireOne("tool_call", write("parent-retry"), parent.ctx)).toBeUndefined();

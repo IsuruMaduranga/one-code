@@ -11,6 +11,7 @@ import claudeContextExtension from "../../extensions/claude-context/index.ts";
 import { dateChangeReminder, localDate } from "../../extensions/lib/claude-context.ts";
 import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/reminders.ts";
 import { dateFingerprint, FACT_KEYS } from "../../extensions/lib/context-facts.ts";
+import { requireText } from "../../extensions/lib/profile.ts";
 import { createFakeCtx, createFakePi, type FakePi, renderRequest } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 
@@ -43,7 +44,7 @@ describe("claude-context date wiring", () => {
 		dir = mkdtempSync(join(tmpdir(), "claude-context-date-"));
 		stubHome(dir);
 		vi.stubEnv("CLAUDE_CONFIG_DIR", join(dir, ".claude"));
-		writeFileSync(join(dir, "CLAUDE.md"), "Project rules.\n");
+		writeFileSync(join(dir, "AGENTS.md"), "Project rules.\n");
 		vi.useFakeTimers({ toFake: ["Date"] });
 		vi.setSystemTime(new Date(2026, 8, 26, 23, 50));
 		fake = createFakePi();
@@ -66,7 +67,7 @@ describe("claude-context date wiring", () => {
 	it("stamps the local date, with the date it tells as a fact", async () => {
 		await fake.fireOne("session_start", {}, createFakeCtx({ cwd: dir }));
 		expect(block()).toHaveLength(1);
-		expect(block()[0]).toMatchObject({ text: "Today's date is 2026-09-26.", facts: [{ kind: "block", key: FACT_KEYS.date, hash: dateFingerprint("2026-09-26") }] });
+		expect(block()[0]).toMatchObject({ text: requireText("context").date({ date: "2026-09-26" }), facts: [{ kind: "block", key: FACT_KEYS.date, hash: dateFingerprint("2026-09-26") }] });
 		expect(reminders.find((r) => r.key === "claude-context")?.text).toContain("Project rules.");
 	});
 
@@ -78,17 +79,17 @@ describe("claude-context date wiring", () => {
 		vi.setSystemTime(new Date(2026, 8, 27, 0, 10));
 		const blocks = render("2026-09-26");
 		expect(blocks).toEqual([{ text: dateChangeReminder("2026-09-27"), facts: [{ kind: "block", key: FACT_KEYS.date, hash: dateFingerprint("2026-09-27") }] }]);
-		expect(blocks[0].text).toBe("The date has changed. Today's date is now 2026-09-27. No need to announce the new date — the user's own clock shows it.");
+		expect(blocks[0].text).toBe(requireText("context").dateChanged({ date: "2026-09-27" }));
 		// Once told, not again; and the live block now says the new date, for a later epoch's message 1.
 		expect(render("2026-09-27")).toEqual([]);
 		expect(block()).toHaveLength(2);
-		expect(block().at(-1)?.text).toContain("2026-09-27");
+		expect(block().at(-1)?.text).toBe(requireText("context").date({ date: "2026-09-27" }));
 	});
 
 	it("refreshes the live date block at a compaction, for the epoch it opens", async () => {
 		await fake.fireOne("session_start", {}, createFakeCtx({ cwd: dir }));
 		vi.setSystemTime(new Date(2026, 8, 27, 0, 10));
 		await fake.fireOne("session_compact", {}, createFakeCtx({ cwd: dir, sessionManager: { getBranch: () => [] } }));
-		expect(block().at(-1)?.text).toBe("Today's date is 2026-09-27.");
+		expect(block().at(-1)?.text).toBe(requireText("context").date({ date: "2026-09-27" }));
 	});
 });
