@@ -3,11 +3,11 @@ import {
 	announceLocalCommand,
 	commandInputBlock,
 	commandStdoutBlock,
-	escapeXml,
 	localCommandCaveat,
 	localCommandBlocks,
 	registerLocalCommand,
 } from "../../extensions/lib/local-command.ts";
+import { escapeXml } from "../../extensions/lib/xml.ts";
 import { modelSwitchStdout } from "../../extensions/model-default/index.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { ARGUMENT_HINT_CHANNEL } from "../../extensions/lib/argument-hints.ts";

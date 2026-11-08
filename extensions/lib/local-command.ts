@@ -37,6 +37,7 @@
 import { announceArgumentHint, type HintEmitter, withoutExactMatch } from "./argument-hints.ts";
 import { REMINDER_CHANNEL, type ReminderPayload } from "./reminders.ts";
 import { notificationWords } from "./notification-words.ts";
+import { escapeXml } from "./xml.ts";
 
 /** The slice of pi's ExtensionAPI the announcer needs (its event bus). */
 export interface ReminderEmitter {
@@ -53,11 +54,6 @@ export const LOCAL_COMMAND_TAG_PREFIXES = ["<local-command-caveat>", "<command-n
 /** Claude Code's caveat frame around the profile's words. */
 export function localCommandCaveat(): string {
 	return `<local-command-caveat>${notificationWords().localCommandCaveat}</local-command-caveat>\n`;
-}
-
-/** CC's `escapeXml` (utils/xml.ts): `& < >` only. */
-export function escapeXml(s: string): string {
-	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 export interface LocalCommand {
