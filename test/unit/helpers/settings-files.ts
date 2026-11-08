@@ -45,12 +45,17 @@ export function writeRepositorySettings(cwd: string, home: string, settings: obj
 
 const TEST_PROVIDER = join(import.meta.dirname, "repository-settings-provider");
 
-/** A source provider that adds `settings.json` in the project config folder as a repository file, and nothing else. */
+/**
+ * A source provider in the shape of One Code's: it borrows another tool's
+ * files, a user file (the primary one) and the repository's `settings.json`
+ * in the project config folder, both of the borrowed family.
+ */
 const repositorySettingsProvider: SourceProvider = {
-	open: () => ({
+	open: ({ home }) => ({
 		settings: (base, { cwd }) => [
 			...base,
-			{ path: join(projectConfigDir(cwd), "settings.json"), scope: "project", owner: "product", repo: true, label: "project settings" },
+			{ path: join(home, ".borrowed", "settings.json"), scope: "user", owner: "borrowed", primary: true, label: "borrowed user settings" },
+			{ path: join(projectConfigDir(cwd), "settings.json"), scope: "project", owner: "borrowed", repo: true, label: "project settings" },
 		],
 	}),
 };
@@ -60,14 +65,19 @@ const repositorySettingsProvider: SourceProvider = {
  * settings file. The base reads one only when the profile's source provider
  * lists it (One Code's lists `<cwd>/.claude/settings.json`). On a profile
  * without a provider, this installs one through the profile's own seam for
- * each test of the calling file, listing `settings.json` in the project config
- * folder. Write the file with `writeRepositorySettings`.
+ * each test of the calling file (call it at the top of a file or `describe`).
+ * Write the files with `writeUserSettings` and `writeRepositorySettings`.
  */
 export function useRepositorySettings(): void {
+	let installed = false;
 	beforeEach(() => {
 		if (activeProfile().sourcesModule) return;
 		shareModuleForTest(profileModuleKey(TEST_PROVIDER), { sources: repositorySettingsProvider });
 		setActiveProfileForTest({ ...activeProfile(), sourcesModule: TEST_PROVIDER });
+		installed = true;
 	});
-	afterEach(() => setActiveProfileForTest(undefined));
+	afterEach(() => {
+		if (installed) setActiveProfileForTest(undefined);
+		installed = false;
+	});
 }

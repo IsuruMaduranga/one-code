@@ -8,6 +8,9 @@ import { localGateMode } from "../../extensions/lib/permission-gate.ts";
 import { powerShellSpawn } from "../../extensions/lib/shell-spawn.ts";
 import { sessionResultsDir } from "../../extensions/lib/persisted-output.ts";
 import { buildGate as buildGateHarness } from "./helpers/permission-gate-harness.ts";
+import { useRepositorySettings } from "./helpers/settings-files.ts";
+import { persistProjectAllowApproval } from "../../extensions/permissions/project-trust.ts";
+import { envName } from "../../extensions/lib/brand.mjs";
 import { stubHome } from "./helpers/home.ts";
 import { POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
@@ -137,7 +140,7 @@ describe("permissionGateFactory", () => {
 	});
 });
 
-describe("permissionGateFactory — mode and ask rules (P8; project consent: profile/test/workflow-permission-gate-provider.test.ts)", () => {
+describe("permissionGateFactory — mode and ask rules (P8)", () => {
 	afterEach(() => {
 		vi.unstubAllEnvs();
 	});
@@ -216,5 +219,27 @@ describe("runtime protected dirs (PERMISSIONS-REVIEW-2026-09-05 M7)", () => {
 		const result = await handler({ toolName: "write", input: { path: join(agentDir, "extensions", "evil.ts") } });
 		expect(result?.block).toBe(true);
 		expect(result?.reason).toBe(refused({ kind: "childNeedsApproval", outsideWorkingDir: false }));
+	});
+});
+
+describe("permissionGateFactory — project consent (P10)", () => {
+	// Only a source provider lists a repository settings file; the helper
+	// lists one on any profile.
+	useRepositorySettings();
+	afterEach(() => {
+		vi.unstubAllEnvs();
+	});
+
+	it("a repo's own allow rules count only with the user's stored consent", async () => {
+		vi.stubEnv(envName("STATE_DIR"), mkdtempSync(join(os.tmpdir(), "gate-state-")));
+		const project = { permissions: { allow: ["Bash(curl:*)"] } };
+		const untrusted = buildGateHarness({ permissions: {} }, undefined, project);
+		expect((await untrusted.handler({ toolName: "bash", input: { command: "curl https://example.com" } }))?.block).toBe(true);
+
+		const trusted = buildGateHarness({ permissions: {} }, undefined, project);
+		persistProjectAllowApproval(trusted.cwd, ["Bash(curl:*)"]);
+		// The gate reads consent when it is built, so rebuild it over the same dirs.
+		const handler = buildGateHarness.rebuild(trusted.cwd, trusted.home);
+		expect(await handler({ toolName: "bash", input: { command: "curl https://example.com" } })).toBeUndefined();
 	});
 });

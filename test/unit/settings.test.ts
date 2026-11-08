@@ -10,7 +10,7 @@ import {
 	persistBlockOutsideReads,
 	resolveStartupMode,
 } from "../../extensions/permissions/settings.ts";
-import { userSettingsPath, writeUserSettings } from "./helpers/settings-files.ts";
+import { userSettingsPath, useRepositorySettings, writeRepositorySettings, writeUserSettings } from "./helpers/settings-files.ts";
 import { tempHome } from "./helpers/temp-home.ts";
 
 let home: string;
@@ -26,8 +26,7 @@ const write = (path: string, data: unknown) => writeFileSync(path, JSON.stringif
 describe("loadPermissionSettings", () => {
 	// The files are found by role, so these hold for any profile: the primary
 	// user file is Claude Code's with a provider that reads it, the product's
-	// own without one. The repository's files, which only a source provider
-	// supplies, are covered with that provider's tests.
+	// own without one. The repository's file is in the next block.
 	const writeFile = (path: string, data: unknown) => {
 		mkdirSync(dirname(path), { recursive: true });
 		write(path, data);
@@ -85,6 +84,51 @@ describe("loadPermissionSettings", () => {
 		writeFile(productProjectSettingsPath(cwd, home), { permissions: { disableBypassPermissionsMode: "disable", blockReadsOutsideWorkingDirectories: true } });
 		expect(loadPermissionSettings(cwd, home).disableBypassPermissionsMode).toBe(true);
 		expect(loadPermissionSettings(cwd, home).blockReadsOutsideWorkingDirectories).toBe(true);
+	});
+});
+
+describe("loadPermissionSettings with a repository settings file", () => {
+	// A repository's file is the one a cloned repo controls: its allow rules
+	// wait for consent, and it may not pick a mode that approves more than
+	// default. Only a source provider lists one; the helper lists one on any
+	// profile.
+	useRepositorySettings();
+
+	it("holds the repository's allow rules apart for consent, and loads its deny and ask rules", () => {
+		writeUserSettings(cwd, home, { permissions: { allow: ["Bash(ls:*)"] } });
+		writeRepositorySettings(cwd, home, { permissions: { allow: ["Read"], deny: ["Bash(rm -rf:*)"], ask: ["Bash(git push:*)"] } });
+		const s = loadPermissionSettings(cwd, home);
+		expect(s.allow).toEqual(["Bash(ls:*)"]);
+		expect(s.projectAllow).toEqual(["Read"]);
+		expect(s.deny).toEqual(["Bash(rm -rf:*)"]);
+		expect(s.ask).toEqual(["Bash(git push:*)"]);
+	});
+
+	it("ignores defaultMode auto and bypassPermissions from the repository's file", () => {
+		for (const mode of ["auto", "bypassPermissions"]) {
+			writeRepositorySettings(cwd, home, { permissions: { defaultMode: mode } });
+			expect(loadPermissionSettings(cwd, home).defaultMode, mode).toBeUndefined();
+		}
+	});
+
+	it("keeps the user's own bypassPermissions or auto when the repository's file names a mode it may not pick", () => {
+		for (const mode of ["auto", "bypassPermissions"]) {
+			writeUserSettings(cwd, home, { permissions: { defaultMode: mode } });
+			writeRepositorySettings(cwd, home, { permissions: { defaultMode: "bypassPermissions" } });
+			expect(loadPermissionSettings(cwd, home).defaultMode, mode).toBe(mode);
+		}
+	});
+
+	it("still honours dontAsk, acceptEdits and plan from the repository's file (none approves more than default)", () => {
+		for (const mode of ["dontAsk", "acceptEdits", "plan"]) {
+			writeRepositorySettings(cwd, home, { permissions: { defaultMode: mode } });
+			expect(loadPermissionSettings(cwd, home).defaultMode, mode).toBe(mode);
+		}
+	});
+
+	it("reads disableBypassPermissionsMode from the repository's file, as a restriction", () => {
+		writeRepositorySettings(cwd, home, { permissions: { disableBypassPermissionsMode: "disable" } });
+		expect(loadPermissionSettings(cwd, home).disableBypassPermissionsMode).toBe(true);
 	});
 });
 

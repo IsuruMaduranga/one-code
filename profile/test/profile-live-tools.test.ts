@@ -13,6 +13,7 @@ import type { DescriptionForm } from "../../extensions/lib/tool-variants.ts";
 import type { ShellBlock } from "../../extensions/lib/shell-text.ts";
 import type { FixPromptInput } from "../../extensions/doctor/text.ts";
 import { profile } from "../index.ts";
+import { PROMPT_TIERS } from "../../extensions/lib/model-tier.ts";
 
 /** Phrases where a tool's name is an English word, not the tool. */
 const ENGLISH: Readonly<Record<string, readonly RegExp[]>> = {
@@ -43,7 +44,7 @@ function texts(live: LiveTools): [string, string | undefined, string][] {
 	const { systemPrompt, planMode, askUser, subagents, toolStyle, shell, notifications, workflow, artifacts, toolSearch, subagentModels, autoMode, permissions, webFetch } = t as Required<typeof t>;
 	const out: [string, string | undefined, string][] = [];
 	const push = (label: string, owner: string | undefined, text: string) => out.push([label, owner, text]);
-	for (const tier of ["frontier", "workhorse", "cheap", "tiny"] as const) {
+	for (const tier of PROMPT_TIERS) {
 		for (const taskTools of [true, false]) {
 			push(`systemPrompt ${tier}${taskTools ? "" : " no task tools"}`, undefined, systemPrompt.lead({ tier, taskTools: taskTools && live.has("task_create"), tools: undefined }).join("\n\n"));
 		}

@@ -16,10 +16,11 @@ import {
 	EXIT_PLAN_MODE_DESCRIPTION,
 	exitedPlanModeText,
 } from "../text/plan-mode/texts.ts";
+import { PROMPT_TIERS } from "../../extensions/lib/model-tier.ts";
 
 describe("plan-mode tool descriptions", () => {
 	it("enter_plan_mode carries Claude Code's description on frontier and workhorse, One Code's on cheap and tiny", () => {
-		for (const tier of ["frontier", "workhorse", "cheap", "tiny"] as const) {
+		for (const tier of PROMPT_TIERS) {
 			expect(enterPlanModeDescription(descriptionForm(tier)), tier).toBe(tier === "cheap" || tier === "tiny" ? ENTER_PLAN_MODE_DESCRIPTION_WEAK : ENTER_PLAN_MODE_DESCRIPTION);
 		}
 	});

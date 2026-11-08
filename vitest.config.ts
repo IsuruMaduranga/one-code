@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
@@ -9,6 +10,6 @@ export default defineConfig({
 		// catalog-wide snapshot test opts back into the bundled copy itself.
 		// The profile in force adds its own setup (One Code's: the source
 		// provider and its config mode); the base suite runs without it.
-		setupFiles: ["test/setup.ts", ...(existsSync("profile/test/setup.ts") ? ["profile/test/setup.ts"] : [])],
+		setupFiles: ["test/setup.ts", ...(existsSync(join(import.meta.dirname, "profile/test/setup.ts")) ? ["profile/test/setup.ts"] : [])],
 	},
 });
