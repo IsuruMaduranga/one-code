@@ -946,6 +946,21 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 		expect(result.content[0].text).toBe(ranToEnd.mock.results[0].value);
 	});
 
+	it("M3: keeps no stderr the shell writes while an aborted one-shot monitor stops", async () => {
+		const fake = mount();
+		const ranToEnd = vi.spyOn(words.monitor, "ranToEnd");
+		const controller = new AbortController();
+		setTimeout(() => controller.abort(), 150);
+		await fake.tools.get("monitor")!.execute(
+			"c1",
+			{ command: "trap 'echo torn down >&2; exit 0' TERM; sleep 30 & wait", description: "aborted" },
+			controller.signal,
+			undefined,
+			createFakeCtx({ mode: "json" }),
+		);
+		expect(ranToEnd.mock.calls[0][0]).toMatchObject({ end: { kind: "aborted" }, events: 0, output: words.monitor.noEvents });
+	});
+
 	it("L3: /clear reports the tasks it stopped in the NEXT session, not the one being torn down", async () => {
 		const fake = mount();
 		const ctx = liveSessionCtx();

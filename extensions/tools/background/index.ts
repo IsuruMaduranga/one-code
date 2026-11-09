@@ -584,14 +584,19 @@ function backgroundExtension(pi: ExtensionAPI) {
 				child.stdout?.on("data", (chunk: Buffer) => {
 					for (const line of lines.push(stdoutText.write(chunk))) onEvent(line);
 				});
+				// Stderr after a stop is the shell reporting its own teardown (bash's
+				// "Terminated: 15  sleep 30" when the group signal reaches the command
+				// first), not output of the run being watched, so it is not kept.
 				child.stderr?.on("data", (chunk: Buffer) => {
-					record(stderrText.write(chunk));
+					const text = stderrText.write(chunk);
+					if (!stopRequested) record(text);
 				});
 				// Exit plus a short stdio grace, not `close` (lib/shell-run/process-tree.ts).
 				// The last line may have no newline; it is an event all the same.
 				const drain = () => {
 					for (const line of [...lines.push(stdoutText.end()), ...lines.end()]) onEvent(line);
-					record(stderrText.end());
+					const tail = stderrText.end();
+					if (!stopRequested) record(tail);
 				};
 				waitForChildExit(child).then(
 					({ code }) => {
