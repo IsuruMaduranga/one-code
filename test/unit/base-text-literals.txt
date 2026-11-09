@@ -754,7 +754,6 @@ permissions/index.ts
 	"Optional — press Esc to skip"
 	"This repository's allow rules and workspace directories stay off for this session (its deny/ask rules still apply)."
 	"Auto mode paused after ${…} blocked call${…} — approving a prompt resumes it."
-	"Auto mode never auto-approves this — ${…} ${…}.\n\n  ${…}\n\n  Allow it this once?"
 	"What should the agent do instead?"
 	"Optional — press Esc to skip"
 	"What should the agent do instead?"

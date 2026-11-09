@@ -1447,10 +1447,11 @@ function permissionsExtension(pi: ExtensionAPI) {
 		 * Auto mode's deterministic floor: a write to the files the gate is made
 		 * of (permission settings, autoMode config) is never auto-approved — not
 		 * by an allow rule, not by the classifier, whose hard-deny rules are only
-		 * as strong as the model enforcing them. Interactive sessions always
-		 * prompt; non-interactive runs block. Runs even when a rule would allow,
-		 * because a session allow rule ("write", approved once) must not cover
-		 * the write that disables every check after it.
+		 * as strong as the model enforcing them. It blocks and goes back to the
+		 * model, interactive or not. Runs even when a rule would allow, because a
+		 * session allow rule ("write", approved once) must not cover the write
+		 * that disables every check after it. Outside auto mode the same files
+		 * are protected paths (protected-paths.ts), which ask.
 		 */
 		const floorReason =
 			mode === "auto"
@@ -1485,15 +1486,12 @@ function permissionsExtension(pi: ExtensionAPI) {
 		if (floorReason) {
 			// The floor never reaches the classifier. Auto mode is unattended, so a
 			// block goes back to the model rather than a per-action prompt (a prompt
-			// would hang the session); a non-auto interactive session still prompts,
-			// since editing your own settings by hand is legitimate.
+			// would hang the session). logDecision reads the auto-mode config.
 			autoConfig ??= loadAutoModeConfig(os.homedir());
-			if (mode === "auto" || !ctx.hasUI) {
-				logDecision(ctx, { tool: event.toolName, subject, outcome: "block", source: "floor", reason: safetyFloorReason(floorReason) });
-				return { block: true, reason: safetyFloorBlockText(floorReason) };
-			}
-			logDecision(ctx, { tool: event.toolName, subject, outcome: "prompt", source: "floor", reason: safetyFloorReason(floorReason) });
-		} else if (result.decision === "classify") {
+			logDecision(ctx, { tool: event.toolName, subject, outcome: "block", source: "floor", reason: safetyFloorReason(floorReason) });
+			return { block: true, reason: safetyFloorBlockText(floorReason) };
+		}
+		if (result.decision === "classify") {
 			// The exact call the user approved in /permissions after the classifier
 			// denied it runs once without the classifier (auto-mode/denials.ts). Deny
 			// rules and the safety floor were checked above, so no grant reaches them.
@@ -1590,16 +1588,13 @@ function permissionsExtension(pi: ExtensionAPI) {
 		// Reaching a prompt from the classify branch only happens when auto mode is
 		// paused — this is the resume prompt, not a per-action approval.
 		const pausedResume = mode === "auto" && result.decision === "classify";
-		const title = floorReason
-			? `Auto mode never auto-approves this — ${event.toolName} ${safetyFloorReason(floorReason)}.\n\n  ${preview}\n\n  Allow it this once?`
-			: askTitle(event.toolName, preview, result.cause, pausedResume);
+		const title = askTitle(event.toolName, preview, result.cause, pausedResume);
 		const grant = sessionGrant({
 			toolName: normalizedTool,
 			subject: matchSubject,
 			cwd: callCwd,
 			mode,
 			cause: result.cause,
-			floor: floorReason !== undefined,
 			home: os.homedir(),
 		});
 		const { choice, unanswered } = await askMaybeTimed(pausedResume, title, (show) => serializePrompt(show, ctx.signal), (text, timeout) =>
@@ -1613,13 +1608,13 @@ function permissionsExtension(pi: ExtensionAPI) {
 
 		// The user's answer is itself a gate decision worth recording — it is the
 		// ground truth a drifting classifier gets calibrated against.
-		if (mode === "auto" && (floorReason || pausedResume)) {
+		if (pausedResume) {
 			logDecision(ctx, {
 				tool: event.toolName,
 				subject: matchSubject,
 				outcome: approved(choice, grant) ? "allow" : "block",
 				source: "user",
-				reason: floorReason ? safetyFloorReason(floorReason) : "resume after pause",
+				reason: "resume after pause",
 			});
 		}
 

@@ -6,8 +6,9 @@
  * but a rule the classifier enforces is only as strong as the classifier — a
  * weak model, or one talked around, could approve the one write that disables
  * every check after it. So writes to the files the gate is *made of* never
- * reach the classifier at all: interactively they always prompt the user, and
- * non-interactively they block.
+ * reach the classifier at all: they block and go back to the model, which
+ * keeps an unattended session from hanging on a prompt. Outside auto mode the
+ * same files are protected paths (permissions/protected-paths.ts), which ask.
  *
  * This is the deny-direction complement of the shell pre-gate, and the same
  * asymmetry applies inverted: the pre-gate may only ever say "safe" because a

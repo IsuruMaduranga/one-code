@@ -10,9 +10,9 @@
  * grants a domain — and the option names what it grants. So does this: the
  * grant is scoped by the subject's kind (permissions/matcher.ts `subjectKind`),
  * the label says exactly what it covers, and there is no grant at all where a
- * rule could not matter (a protected path, the auto-mode safety floor — both are
- * checked before allow rules) or where the classifier is the boundary (auto
- * mode: session allows are never applied there).
+ * rule could not matter (a protected path, checked before allow rules) or
+ * where the classifier is the boundary (auto mode: session allows are never
+ * applied there, and its safety floor blocks rather than prompts).
  */
 
 import { dirname, resolve } from "node:path";
@@ -36,8 +36,6 @@ export interface SessionGrantInput {
 	mode: PermissionMode;
 	/** The `decide()` cause behind the prompt. */
 	cause: string;
-	/** The auto-mode safety floor raised this prompt — no rule can cover it. */
-	floor?: boolean;
 	home: string;
 }
 
@@ -53,10 +51,10 @@ function absoluteDirPattern(dir: string): string {
 export function sessionGrant(input: SessionGrantInput): SessionGrant | undefined {
 	const { subject, cwd, mode, cause, home } = input;
 	// Auto mode never applies session allows (the classifier is the boundary and
-	// its prompts are resume/floor prompts, not per-action approvals); protected
-	// paths and the safety floor are judged before allow rules, so a rule minted
-	// here could never cover them.
-	if (mode === "auto" || input.floor || cause === "protected-path") return undefined;
+	// its only prompt is the resume prompt, not a per-action approval); protected
+	// paths are judged before allow rules, so a rule minted here could never
+	// cover them.
+	if (mode === "auto" || cause === "protected-path") return undefined;
 
 	const tool = normalizeToolName(input.toolName);
 	const mint = (raw: string, label: string): SessionGrant | undefined => {
