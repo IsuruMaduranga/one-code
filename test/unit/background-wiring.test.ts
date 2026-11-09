@@ -35,6 +35,7 @@ vi.mock("../../extensions/lib/app/pi-version.ts", async (importOriginal) => {
 	return { ...actual, piFiresBeforeAgentStartForCustomRuns: (version: string | undefined) => piModel.customRunsFireBeforeAgentStart ?? actual.piFiresBeforeAgentStartForCustomRuns(version) };
 });
 import backgroundExtension from "../../extensions/tools/background/index.ts";
+import { withoutJobReport } from "../../extensions/tools/background/monitor-batch.ts";
 import { RECURRING_MAX_AGE_DAYS } from "../../extensions/lib/agents/cron.ts";
 import { STORED_OUTPUT_CAP } from "../../extensions/lib/shell-run/bash-background.ts";
 import { MONITOR_BATCH_MAX_LINES } from "../../extensions/tools/background/monitor-batch.ts";
@@ -946,19 +947,41 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 		expect(result.content[0].text).toBe(ranToEnd.mock.results[0].value);
 	});
 
-	it("M3: keeps no stderr the command writes while an aborted one-shot monitor stops", async () => {
+	it("M3: drops bash's report of the job a stop killed, and keeps the command's own stderr", async () => {
 		const fake = mount();
 		const ranToEnd = vi.spyOn(words.monitor, "ranToEnd");
 		const controller = new AbortController();
-		setTimeout(() => controller.abort(), 150);
-		await fake.tools.get("monitor")!.execute(
-			"c1",
-			{ command: "trap 'echo torn down >&2; exit 0' TERM; sleep 30 & wait", description: "aborted" },
-			controller.signal,
-			undefined,
-			createFakeCtx({ mode: "json" }),
-		);
-		expect(ranToEnd.mock.calls[0][0]).toMatchObject({ end: { kind: "aborted" }, events: 0, output: words.monitor.noEvents });
+		// Abort only once the trap is set and the early stderr is written.
+		const dir = mkdtempSync(join(tmpdir(), "monitor-report-"));
+		const ready = join(dir, "ready");
+		const poll = setInterval(() => {
+			if (existsSync(ready)) {
+				clearInterval(poll);
+				controller.abort();
+			}
+		}, 10);
+		// The trap stands in for bash's report, which comes only when the group
+		// signal reaches the command first.
+		const report = "/bin/bash: line 1: 4242 Terminated: 15          sleep 30";
+		try {
+			await fake.tools.get("monitor")!.execute(
+				"c1",
+				{ command: `trap 'echo "${report}" >&2; echo torn down >&2; exit 0' TERM; echo failed early >&2; touch '${ready}'; sleep 30 & wait`, description: "aborted" },
+				controller.signal,
+				undefined,
+				createFakeCtx({ mode: "json" }),
+			);
+		} finally {
+			clearInterval(poll);
+			rmSync(dir, { recursive: true, force: true });
+		}
+		expect(ranToEnd.mock.calls[0][0]).toMatchObject({ end: { kind: "aborted" }, events: 0, output: "failed early\ntorn down" });
+	});
+
+	it("withoutJobReport removes only bash's job report lines", () => {
+		expect(withoutJobReport("a\n/bin/bash: line 1: 41676 Terminated: 15          sleep 30\nb\n")).toBe("a\nb\n");
+		expect(withoutJobReport("bash: line 3:  12 Killed: 9  yes\n")).toBe("");
+		expect(withoutJobReport("Terminated by the user\n")).toBe("Terminated by the user\n");
 	});
 
 	it("L3: /clear reports the tasks it stopped in the NEXT session, not the one being torn down", async () => {

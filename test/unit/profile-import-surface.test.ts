@@ -31,7 +31,7 @@ describe("the profile's imports from the base", () => {
 	});
 
 	it("sees type-only imports and re-exports", () => {
-		const source = 'import type { A } from "./a.ts";\nexport type { B } from "./b.ts";\nimport { type C } from "./c.ts";\nexport * from "./d.ts";';
-		expect(specifiers(source)).toEqual(["./a.ts", "./b.ts", "./c.ts", "./d.ts"]);
+		const source = 'import type { A } from "./a.ts";\nexport type { B } from "./b.ts";\nimport { type C } from "./c.ts";\nexport * from "./d.ts";\ntype E = import("./e.ts").E;\ntype F = typeof import("./f.ts");\nimport g = require("./g.ts");';
+		expect(specifiers(source)).toEqual(["./a.ts", "./b.ts", "./c.ts", "./d.ts", "./e.ts", "./f.ts", "./g.ts"]);
 	});
 });

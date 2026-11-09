@@ -25,8 +25,10 @@
  */
 
 import os from "node:os";
-import { join } from "node:path";
-import { envName, productStateDir, readJsonFile } from "../../extensions/sdk/source-provider.ts";
+import { envName, productSettingsPath, readJsonFile } from "../../extensions/sdk/source-provider.ts";
+import { pinConfigMode, pinnedConfigMode } from "./mode-slot.ts";
+
+export { resetConfigModeForTest } from "./mode-slot.ts";
 
 export type ConfigMode = "claude-compatible" | "independent";
 
@@ -55,31 +57,18 @@ export function configModeFromEnv(env: Record<string, string | undefined> = proc
 	return isConfigMode(value) ? value : undefined;
 }
 
-/**
- * `configMode` in `~/.onecode/settings.json` alone, ignoring the env override.
- * The path is spelled out: importing `productSettingsPath` would cycle through
- * `product-settings.ts` and `memory.ts`.
- */
+/** `configMode` in `~/.onecode/settings.json` alone, ignoring the env override. */
 export function savedConfigMode(home: string = os.homedir(), env: Record<string, string | undefined> = process.env): ConfigMode {
-	const value = readJsonFile<Record<string, unknown>>(join(productStateDir(env, home), "settings.json"))?.[CONFIG_MODE_KEY];
+	const value = readJsonFile<Record<string, unknown>>(productSettingsPath(home, env))?.[CONFIG_MODE_KEY];
 	return isConfigMode(value) ? value : DEFAULT_CONFIG_MODE;
 }
 
-const MODE_SLOT = Symbol.for("one-code:config-mode");
-
 /**
- * The mode this process runs in: read once, then pinned for every extension.
- * Tests that need a different mode call `resetConfigModeForTest` first.
+ * The mode this process runs in: read once, then pinned for every extension
+ * (mode-slot.ts). Tests that need a different mode call `resetConfigModeForTest` first.
  */
 export function configMode(): ConfigMode {
-	const slot = globalThis as { [MODE_SLOT]?: ConfigMode };
-	return (slot[MODE_SLOT] ??= readConfigMode());
-}
-
-export function resetConfigModeForTest(mode?: ConfigMode): void {
-	const slot = globalThis as { [MODE_SLOT]?: ConfigMode };
-	if (mode) slot[MODE_SLOT] = mode;
-	else delete slot[MODE_SLOT];
+	return pinnedConfigMode() ?? pinConfigMode(readConfigMode());
 }
 
 /** Whether Claude Code's own locations are read: `~/.claude`, `.claude/`, `CLAUDE.md`, `~/.claude.json`. */

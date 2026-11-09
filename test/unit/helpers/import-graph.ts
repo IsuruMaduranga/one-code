@@ -15,7 +15,7 @@ export interface FoundImport {
 	dynamic: boolean;
 }
 
-/** Every module `source` names: imports and re-exports (type-only ones flagged), `import()` and `require()` of a literal. */
+/** Every module `source` names: imports and re-exports (type-only ones flagged, type positions such as `typeof import("…")` included), `import x = require()`, and `import()` and `require()` of a literal. */
 export function imports(source: string, path: string): FoundImport[] {
 	const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
 	const found: FoundImport[] = [];
@@ -31,6 +31,11 @@ export function imports(source: string, path: string): FoundImport[] {
 			const clause = node.exportClause;
 			const typeOnly = node.isTypeOnly || (clause !== undefined && ts.isNamedExports(clause) && clause.elements.length > 0 && clause.elements.every((e) => e.isTypeOnly));
 			found.push({ specifier: node.moduleSpecifier.text, typeOnly, dynamic: false });
+		} else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument) && ts.isStringLiteral(node.argument.literal)) {
+			// `typeof import("…")`, `import("…").T`: a type, erased like `import type`.
+			found.push({ specifier: node.argument.literal.text, typeOnly: true, dynamic: false });
+		} else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference) && ts.isStringLiteral(node.moduleReference.expression)) {
+			found.push({ specifier: node.moduleReference.expression.text, typeOnly: node.isTypeOnly, dynamic: false });
 		} else if (ts.isCallExpression(node) && node.arguments.length > 0 && ts.isStringLiteralLike(node.arguments[0])) {
 			const callee = node.expression;
 			if (callee.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(callee) && callee.text === "require")) {

@@ -602,7 +602,8 @@ function permissionsExtension(pi: ExtensionAPI) {
 	 * the UI by design, so the log is the only complete record of them.
 	 */
 	const logDecision = (ctx: ExtensionContext, entry: Omit<DecisionEntry, "ts">) => {
-		if (!autoConfig?.logDecisions) return;
+		autoConfig ??= loadAutoModeConfig(os.homedir());
+		if (!autoConfig.logDecisions) return;
 		try {
 			const file = join(ctx.sessionManager.getSessionDir(), "auto-mode-decisions.jsonl");
 			appendDecision(file, decisionEntry({ sessionId: ctx.sessionManager.getSessionId?.(), ...entry }));
@@ -618,7 +619,6 @@ function permissionsExtension(pi: ExtensionAPI) {
 	 * defeat the one control the classifier itself can't be trusted to enforce.
 	 */
 	const floorBlock = (ctx: ExtensionContext | undefined, tool: string, subject: string, target: FloorTarget) => {
-		autoConfig ??= loadAutoModeConfig(os.homedir());
 		if (ctx) logDecision(ctx, { tool, subject, outcome: "block", source: "floor", reason: safetyFloorReason(target) });
 		return { block: true as const, reason: safetyFloorBlockText(target) };
 	};

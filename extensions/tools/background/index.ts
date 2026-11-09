@@ -81,6 +81,7 @@ import {
 	MONITOR_BATCH_IDLE_MS,
 	type MonitorBatch,
 	MonitorLineSplitter,
+	withoutJobReport,
 	pushEvent,
 } from "./monitor-batch.ts";
 import { registerLocalCommand } from "../../lib/ui/local-command.ts";
@@ -450,14 +451,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 			let log: WriteStream | undefined;
 			let spoolFailed = false;
 			let overflowed = false;
-			// Set by stop(): nothing the command prints while it is torn down is kept,
-			// on stdout or stderr (a shell running the rest of `sleep 30; echo done`
-			// before the SIGKILL grace ends, a TERM trap's goodbye, bash reporting
-			// "Terminated: 15 sleep 30" when the group signal reaches the command
-			// first), so the output and the count say what happened before the stop.
-			let stopRequested = false;
 			const record = (chunk: string) => {
-				if (stopRequested) return;
 				if (stored.length + chunk.length > STORED_OUTPUT_CAP) overflowed = true;
 				stored = tailCap(`${stored}${chunk}`, STORED_OUTPUT_CAP, text.monitor.earlierTruncated);
 				if (!chunk || spoolFailed) return;
@@ -504,6 +498,12 @@ function backgroundExtension(pi: ExtensionAPI) {
 				);
 			};
 
+			// Set by stop(): what the command prints on stdout while it is torn down (a
+			// shell running the rest of `sleep 30; echo done` before the SIGKILL grace
+			// ends) is not an event, so the count says what happened before the stop.
+			// Stderr is kept, since an error written just before the stop can still be
+			// in the pipe; only bash's report of the job the stop killed is dropped.
+			let stopRequested = false;
 			const onEvent = (line: string) => {
 				if (stopRequested) return;
 				eventCount++;
@@ -587,14 +587,15 @@ function backgroundExtension(pi: ExtensionAPI) {
 				child.stdout?.on("data", (chunk: Buffer) => {
 					for (const line of lines.push(stdoutText.write(chunk))) onEvent(line);
 				});
+				const stderrRecord = (text: string) => record(stopRequested ? withoutJobReport(text) : text);
 				child.stderr?.on("data", (chunk: Buffer) => {
-					record(stderrText.write(chunk));
+					stderrRecord(stderrText.write(chunk));
 				});
 				// Exit plus a short stdio grace, not `close` (lib/shell-run/process-tree.ts).
 				// The last line may have no newline; it is an event all the same.
 				const drain = () => {
 					for (const line of [...lines.push(stdoutText.end()), ...lines.end()]) onEvent(line);
-					record(stderrText.end());
+					stderrRecord(stderrText.end());
 				};
 				waitForChildExit(child).then(
 					({ code }) => {

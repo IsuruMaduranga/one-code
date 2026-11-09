@@ -19,10 +19,9 @@ on:
     paths:
       - "extensions/tools/bash/**"
       - "extensions/tools/powershell/**"
-      - "extensions/lib/shell-*.ts"
-      - "extensions/lib/shell-run/process-tree.ts"
+      - "extensions/lib/shell/**"
+      - "extensions/lib/shell-run/**"
       - "extensions/lib/profile/paths.ts"
-      - "extensions/auto-mode/**"
       - "extensions/safety/permissions/**"
       - "test/e2e/live-smoke.mjs"
       - ".github/workflows/live-smoke.yml"

@@ -19,7 +19,7 @@ const home = join(sandbox, "home");
 mkdirSync(join(cwd, ".pi"), { recursive: true });
 mkdirSync(home);
 writeFileSync(join(cwd, ".pi", "mcp.json"), JSON.stringify({ mcpServers: { fixture: { command: "rpc-panel-fixture-not-a-command" } } }));
-const extensions = ["memory", "permissions", "plugins", "skill", "effort", "mcp", "doctor"];
+const extensions = ["context/memory", "safety/permissions", "tools/plugins", "tools/skill", "ui/effort", "tools/mcp", "commands/doctor"];
 const child = spawn("pi", ["--mode", "rpc", "--no-session", "--no-extensions", ...extensions.flatMap((name) => ["-e", join(root, "extensions", name, "index.ts")]), "--permission-mode", "default"], {
 	cwd,
 	env: { ...process.env, HOME: home, USERPROFILE: home, PI_CODING_AGENT_DIR: join(home, "agent"), ONECODE_STATE_DIR: join(home, ".onecode"), ONECODE_CONFIG_MODE: "independent", ONECODE_NO_UPDATE_CHECK: "1", CLAUDE_CONFIG_DIR: "" },

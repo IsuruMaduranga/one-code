@@ -112,3 +112,12 @@ export class MonitorLineSplitter {
 		return line ? [line] : [];
 	}
 }
+
+/**
+ * `text` without bash's report of a job a signal ended
+ * ("/bin/bash: line 1: 41676 Terminated: 15  sleep 30"), which a stop's group
+ * signal produces when it reaches the command before its shell.
+ */
+export function withoutJobReport(text: string): string {
+	return text.replace(/^[^\n]*: line \d+: +\d+ (?:Terminated|Killed|Hangup)\b[^\n]*(?:\n|$)/gm, "");
+}
