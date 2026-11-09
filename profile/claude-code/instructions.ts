@@ -19,35 +19,7 @@
 
 import { basename, dirname, join } from "node:path";
 import { type InstructionFiles, readInstructionFiles } from "./settings.ts";
-import { claudeManagedDir, claudeUserDir, isPathAtOrUnder, tryRealpath, absoluteFrom } from "../../extensions/lib/paths.ts";
-import { discoverRules, readRuleInstructions, type RuleFile, type RuleOptions } from "../../extensions/lib/claude-rules.ts";
-import { readExternalIncludesApproval } from "../../extensions/lib/claude-external-includes.ts";
-import type { InstructionSource } from "../../extensions/lib/context-text.ts";
-import {
-	AGENTS_DESCRIPTOR,
-	AGENTS_GLOBAL_DESCRIPTOR,
-	AGENTS_SOURCES,
-	ancestorDirs,
-	basePaths,
-	type ClassifierFile,
-	type ContextFile,
-	type ContextFilePath,
-	expandWithImports,
-	firstProductFile,
-	importReaders,
-	GLOBAL_DESCRIPTOR,
-	GLOBAL_SOURCES,
-	type InstructionView,
-	isPresentFile,
-	LOCAL_DESCRIPTOR,
-	MANAGED_DESCRIPTOR,
-	type NestedFile,
-	nestedDirs,
-	PRODUCT_DESCRIPTOR,
-	PRODUCT_GLOBAL_DESCRIPTOR,
-	PROJECT_DESCRIPTOR,
-	readFileIfPresent,
-} from "../../extensions/lib/instructions.ts";
+import { AGENTS_DESCRIPTOR, AGENTS_GLOBAL_DESCRIPTOR, AGENTS_SOURCES, GLOBAL_DESCRIPTOR, GLOBAL_SOURCES, LOCAL_DESCRIPTOR, MANAGED_DESCRIPTOR, PRODUCT_DESCRIPTOR, PRODUCT_GLOBAL_DESCRIPTOR, PROJECT_DESCRIPTOR, absoluteFrom, ancestorDirs, basePaths, claudeManagedDir, claudeUserDir, discoverRules, expandWithImports, firstProductFile, importReaders, isPathAtOrUnder, isPresentFile, nestedDirs, readExternalIncludesApproval, readFileIfPresent, readRuleInstructions, tryRealpath, type ClassifierFile, type ContextFile, type ContextFilePath, type InstructionSource, type InstructionView, type NestedFile, type RuleFile, type RuleOptions } from "../../extensions/sdk/source-provider.ts";
 
 
 /**

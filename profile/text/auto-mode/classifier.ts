@@ -5,7 +5,7 @@
  * (working-docs/decisions/auto-mode.md).
  */
 
-import type { ClassifierText } from "../../../extensions/auto-mode/text.ts";
+import type { ClassifierText } from "../../../extensions/sdk/profile.ts";
 import { ruleset } from "./ruleset.ts";
 
 export const classifier: ClassifierText = {

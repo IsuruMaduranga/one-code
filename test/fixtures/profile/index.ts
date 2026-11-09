@@ -8,7 +8,7 @@
  * second product can fill the contract.
  */
 
-import type { Profile, ProfileText } from "../extensions/lib/profile-contract.ts";
+import type { Profile, ProfileText } from "../extensions/sdk/profile.ts";
 import * as text from "./text.ts";
 
 // Every group the contract names, optional ones too: a group the contract

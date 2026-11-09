@@ -5,7 +5,7 @@
  * list): the frozen deferred listing it inherits does not name it.
  */
 
-import type { HandbackText } from "../../../extensions/lib/handback-text.ts";
+import type { HandbackText } from "../../../extensions/sdk/profile.ts";
 
 export const handback: HandbackText = {
 	description:

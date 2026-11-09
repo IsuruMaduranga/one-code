@@ -3,7 +3,7 @@
  * when a write leaves the MEMORY.md index near or past its load limits.
  */
 
-import type { IndexLimits, MemoryText } from "../../../extensions/memory/text.ts";
+import type { IndexLimits, MemoryText } from "../../../extensions/sdk/profile.ts";
 
 const kb = (chars: number) => `${Math.round(chars / 1000)}KB`;
 

@@ -10,7 +10,7 @@
  * (scripts/test-base.sh).
  */
 
-import type { ProfileText } from "../extensions/lib/profile-contract.ts";
+import type { ProfileText } from "../extensions/sdk/profile.ts";
 
 /**
  * An object argument as JSON, but with the NUL character left raw: the base

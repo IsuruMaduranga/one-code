@@ -3,8 +3,7 @@
  * prompt (fix-prompt.ts).
  */
 
-import type { DoctorText } from "../../../extensions/doctor/text.ts";
-import type { LiveTools } from "../../../extensions/lib/live-tools.ts";
+import type { DoctorText, LiveTools } from "../../../extensions/sdk/profile.ts";
 import { type ToolPassages, withoutOff } from "../../live-tools.ts";
 import { doctorFixPrompt } from "./fix-prompt.ts";
 

@@ -2,7 +2,8 @@
  * One Code's profile: everything that makes the base harness One Code
  * (working-docs/decisions/bi-fork.md). A product built on the base replaces
  * this folder with its own implementation of `Profile`
- * (extensions/lib/profile-contract.ts).
+ * (extensions/lib/profile-contract.ts), importing the base only through
+ * extensions/sdk/.
  *
  * One Code runs every feature and keeps each tool's base switches. Its text
  * lives in text/, one folder per owning feature; agents/, skills/ and themes/
@@ -10,7 +11,7 @@
  * Claude Code's own files (the source provider).
  */
 
-import type { Profile } from "../extensions/lib/profile-contract.ts";
+import type { Profile } from "../extensions/sdk/profile.ts";
 import { artifactsText } from "./text/artifacts/index.ts";
 import { askUserText } from "./text/ask-user/index.ts";
 import { autoModeText } from "./text/auto-mode/index.ts";

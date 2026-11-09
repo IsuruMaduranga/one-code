@@ -4,10 +4,9 @@
  * run's results, refusals and script errors.
  */
 
-import type { AgentFailure, AgentNotice, RunReport, RunStop, ScriptCallProblem, ScriptProblem, WorkflowRefusal, WorkflowText } from "../../../extensions/workflow/text.ts";
+import type { AgentFailure, AgentNotice, LiveTools, RunReport, RunStop, ScriptCallProblem, ScriptProblem, WorkflowRefusal, WorkflowText } from "../../../extensions/sdk/profile.ts";
 import { workflowDescription } from "./description.ts";
 import { type ToolPassages, withoutOff } from "../../live-tools.ts";
-import type { LiveTools } from "../../../extensions/lib/live-tools.ts";
 
 function refused(refusal: WorkflowRefusal): string {
 	switch (refusal.kind) {

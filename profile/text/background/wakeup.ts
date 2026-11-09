@@ -6,7 +6,7 @@
  * Anthropic billing, never apply as such.
  */
 
-import type { WakeupMissingField, WakeupText } from "../../../extensions/background/text.ts";
+import type { WakeupMissingField, WakeupText } from "../../../extensions/sdk/profile.ts";
 
 const MISSING: Record<WakeupMissingField, string> = {
 	delayAndReason: "`delaySeconds` and `reason` are required when `stop` is not true.",

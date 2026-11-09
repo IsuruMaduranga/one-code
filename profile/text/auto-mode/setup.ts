@@ -4,7 +4,7 @@
  * facts the harness gathered, as strict JSON the base parses.
  */
 
-import type { AutoModeSetupText } from "../../../extensions/auto-mode/text.ts";
+import type { AutoModeSetupText } from "../../../extensions/sdk/profile.ts";
 
 export const autoModeSetup: AutoModeSetupText = {
 	system: [

@@ -5,14 +5,12 @@
  * (extensions/system-prompt/template.ts).
  */
 
-import type { PromptTier } from "../../../extensions/lib/model-tier.ts";
-import type { SystemPromptText } from "../../../extensions/system-prompt/text.ts";
+import type { LiveTools, PromptTier, SystemPromptText } from "../../../extensions/sdk/profile.ts";
 import type { PromptBundle } from "./common.ts";
 import { frontierBundle } from "./frontier.ts";
 import { lowBundle } from "./low.ts";
 import { memoryPromptSection } from "./memory.ts";
 import { midBundle } from "./mid.ts";
-import type { LiveTools } from "../../../extensions/lib/live-tools.ts";
 import { type ToolPassages, withoutOff } from "../../live-tools.ts";
 import { TYPED_SKILL_BULLET } from "./common.ts";
 import { DELEGATE_STRICT } from "./low.ts";

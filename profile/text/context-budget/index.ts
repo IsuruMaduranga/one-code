@@ -3,7 +3,7 @@
  * Code puts inside its `<total_tokens>` block, byte for byte.
  */
 
-import type { ContextBudgetText } from "../../../extensions/context-budget/text.ts";
+import type { ContextBudgetText } from "../../../extensions/sdk/profile.ts";
 
 export const contextBudget: ContextBudgetText = {
 	clearAtNudge: "First privately list what you need next; then request every item that doesn't depend on another's result in this one response.",

@@ -5,8 +5,7 @@
  * none, and the notice that a hook rewrote a file the model just wrote.
  */
 
-import type { HookBlock } from "../../../extensions/hooks/protocol.ts";
-import type { HooksText } from "../../../extensions/hooks/text.ts";
+import type { HookBlock, HooksText } from "../../../extensions/sdk/profile.ts";
 
 function blockReason(block: HookBlock): string {
 	switch (block.kind) {

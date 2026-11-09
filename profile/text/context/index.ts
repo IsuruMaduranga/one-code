@@ -5,8 +5,7 @@
  * them, and One Code's own ONECODE.md preamble and notes.
  */
 
-import type { ContextChange, ContextText, InstructionSource } from "../../../extensions/lib/context-text.ts";
-import type { MemoryIndexCut, MemoryIndexSize } from "../../../extensions/lib/context-text.ts";
+import type { ContextChange, ContextText, InstructionSource, MemoryIndexCut, MemoryIndexSize } from "../../../extensions/sdk/profile.ts";
 
 const DESCRIPTORS: Record<InstructionSource, string> = {
 	global: "user's private global instructions for all projects",

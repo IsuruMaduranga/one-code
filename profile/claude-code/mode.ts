@@ -26,9 +26,7 @@
 
 import os from "node:os";
 import { join } from "node:path";
-import { readJsonFile } from "../../extensions/lib/atomic-write.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
-import { productStateDir } from "../../extensions/lib/paths.ts";
+import { envName, productStateDir, readJsonFile } from "../../extensions/sdk/source-provider.ts";
 
 export type ConfigMode = "claude-compatible" | "independent";
 

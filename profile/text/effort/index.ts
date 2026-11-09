@@ -1,6 +1,6 @@
 /** One Code's `/effort` text (the profile's `text.effort`): the ultracode reminders. */
 
-import type { EffortText } from "../../../extensions/effort/text.ts";
+import type { EffortText } from "../../../extensions/sdk/profile.ts";
 
 export const effort: EffortText = {
 	/**

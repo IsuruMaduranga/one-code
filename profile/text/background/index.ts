@@ -3,7 +3,7 @@
  * tools, schedule_wakeup, monitor, task_output, task_stop and /loop.
  */
 
-import type { BackgroundText } from "../../../extensions/background/text.ts";
+import type { BackgroundText } from "../../../extensions/sdk/profile.ts";
 import { cron } from "./cron.ts";
 import { loop } from "./loop.ts";
 import { monitor } from "./monitor.ts";

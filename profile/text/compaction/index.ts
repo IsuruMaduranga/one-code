@@ -9,7 +9,7 @@
  * space, as Claude Code's do; they are written `\x20` so editors keep them.
  */
 
-import type { CompactionReason, CompactionText, KeptTail, KeptTailLandmark } from "../../../extensions/compaction/text.ts";
+import type { CompactionReason, CompactionText, KeptTail, KeptTailLandmark } from "../../../extensions/sdk/profile.ts";
 
 export const COMPACTION_INSTRUCTION = `CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.
 

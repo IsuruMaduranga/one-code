@@ -4,8 +4,7 @@
  * results, and the periodic reminder.
  */
 
-import type { TaskItem, TaskStatus } from "../../../extensions/tasks/store.ts";
-import type { TasksText, TaskView, UpdateProblem } from "../../../extensions/tasks/text.ts";
+import type { TaskItem, TaskStatus, TaskView, TasksText, UpdateProblem } from "../../../extensions/sdk/profile.ts";
 import {
 	TASK_CREATE_DESCRIPTION,
 	TASK_CREATE_PARAMS,

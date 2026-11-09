@@ -5,8 +5,7 @@
  * shared checkout. Each names the fix.
  */
 
-import type { GitTargetProblem, StashRisk, WorktreeGuardRefusal, WorktreeGuardText } from "../../../extensions/worktree/text.ts";
-import type { CheckoutProgram } from "../../../extensions/auto-mode/git-checkout-programs.ts";
+import type { CheckoutProgram, GitTargetProblem, StashRisk, WorktreeGuardRefusal, WorktreeGuardText } from "../../../extensions/sdk/profile.ts";
 
 /** Why the target cannot be verified, and the fix, for a worktree at `wt`. */
 function gitTarget(problem: GitTargetProblem, wt: string): [string, string] {

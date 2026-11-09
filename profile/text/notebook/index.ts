@@ -4,7 +4,7 @@
  * NotebookEdit wording with One Code's extras (description.ts).
  */
 
-import type { CellRef, EditOutcome, NotebookFailure, NotebookText } from "../../../extensions/notebook/text.ts";
+import type { CellRef, EditOutcome, NotebookFailure, NotebookText } from "../../../extensions/sdk/profile.ts";
 import { NOTEBOOK_EDIT_DESCRIPTION } from "./description.ts";
 
 /** `aaa (markdown), cell-1 (code)`: every id the notebook currently answers to. */

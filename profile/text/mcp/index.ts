@@ -4,7 +4,7 @@
  * the server tools' results and the resource tools.
  */
 
-import type { ImageProblem, McpFailure, McpStep, McpText, ServerInstructions, StderrTail } from "../../../extensions/mcp/text.ts";
+import type { ImageProblem, McpFailure, McpStep, McpText, ServerInstructions, StderrTail } from "../../../extensions/sdk/profile.ts";
 
 const plural = (names: readonly string[]) => `MCP server${names.length === 1 ? "" : "s"} ${names.join(", ")}`;
 

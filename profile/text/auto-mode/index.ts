@@ -4,9 +4,8 @@
  * its retry note verbatim (findings §33), and One Code's block reasons.
  */
 
-import type { AutoModeText, ClassifierBlock, FloorTarget } from "../../../extensions/auto-mode/text.ts";
+import type { AutoModeText, ClassifierBlock, FloorTarget, LiveTools } from "../../../extensions/sdk/profile.ts";
 import { type ToolPassages, withoutOff } from "../../live-tools.ts";
-import type { LiveTools } from "../../../extensions/lib/live-tools.ts";
 
 const OPUS_NOTE =
 	"While auto mode is active:\n\n" +

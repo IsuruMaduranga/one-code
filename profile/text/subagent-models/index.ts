@@ -4,9 +4,7 @@
  * menu. One Code's own text; the aliases are Claude Code's tier names.
  */
 
-import type { SubagentModelSource } from "../../../extensions/subagents/model-select.ts";
-import type { LiveTools } from "../../../extensions/lib/live-tools.ts";
-import type { ChainSource, MenuLabel, SubagentModelNotice, SubagentModelsText } from "../../../extensions/subagents/model-text.ts";
+import type { ChainSource, LiveTools, MenuLabel, SubagentModelNotice, SubagentModelSource, SubagentModelsText } from "../../../extensions/sdk/profile.ts";
 
 /** Which choice a model came from, named for the reader. */
 const SOURCE: Record<SubagentModelSource, string> = {

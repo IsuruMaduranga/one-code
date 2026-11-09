@@ -4,7 +4,7 @@
  * the session reminders.
  */
 
-import type { EnterWorktreeFailure, RemoveBlocker, WorktreeNameProblem, WorktreeSessionView, WorktreeText } from "../../../extensions/worktree/text.ts";
+import type { EnterWorktreeFailure, RemoveBlocker, WorktreeNameProblem, WorktreeSessionView, WorktreeText } from "../../../extensions/sdk/profile.ts";
 import { enterWorktreeDescription, ENTER_WORKTREE_PARAMS, EXIT_WORKTREE_DESCRIPTION, EXIT_WORKTREE_PARAMS } from "./descriptions.ts";
 import { checkoutProgram } from "./guard.ts";
 

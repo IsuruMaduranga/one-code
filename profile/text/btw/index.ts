@@ -4,7 +4,7 @@
  * CC 2.1.278).
  */
 
-import type { BtwText } from "../../../extensions/btw/text.ts";
+import type { BtwText } from "../../../extensions/sdk/profile.ts";
 
 /**
  * CC's verbatim side-question reminder (captures/btw.json message 20). It frames

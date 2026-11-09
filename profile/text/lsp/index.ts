@@ -4,7 +4,7 @@
  * block (Claude Code's `<new-diagnostics>` shape).
  */
 
-import type { LspFailure, LspText, ShownDiagnostic } from "../../../extensions/lsp/text.ts";
+import type { LspFailure, LspText, ShownDiagnostic } from "../../../extensions/sdk/profile.ts";
 
 const PROJECT_CODE_REASON: Record<string, string> = {
 	"rust-analyzer": "runs this project's build scripts and proc macros",

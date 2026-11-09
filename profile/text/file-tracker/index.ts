@@ -5,7 +5,7 @@
  * re-read steer One Code adds because it does not mark a changed file as read.
  */
 
-import type { ChangeExcerpt, FileToolOutcome, FileTrackerText } from "../../../extensions/file-tracker/text.ts";
+import type { ChangeExcerpt, FileToolOutcome, FileTrackerText } from "../../../extensions/sdk/profile.ts";
 
 /** The success texts say the file state is current: the tracker observes the file after every successful write or edit. */
 const FILE_STATE_CURRENT = " (file state is current in your context — no need to read it back)";

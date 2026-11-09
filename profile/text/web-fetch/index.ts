@@ -4,9 +4,8 @@
  * fetched pages, and the reader model's prompt.
  */
 
-import type { FetchAnswer, FetchFailure, ReaderFailure, UrlProblem, WebFetchText } from "../../../extensions/web-fetch/text.ts";
+import type { FetchAnswer, FetchFailure, LiveTools, ReaderFailure, UrlProblem, WebFetchText } from "../../../extensions/sdk/profile.ts";
 import { webFetchDescription } from "./description.ts";
-import type { LiveTools } from "../../../extensions/lib/live-tools.ts";
 import { type ToolPassages, withoutOff } from "../../live-tools.ts";
 
 function urlRejected(problem: UrlProblem): string {

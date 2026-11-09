@@ -5,11 +5,10 @@
  * and One Code's guard blocks and background-run results.
  */
 
-import type { ShellBlock, ShellEnd, ShellText } from "../../../extensions/lib/shell-text.ts";
+import type { LiveTools, ShellBlock, ShellEnd, ShellText } from "../../../extensions/sdk/profile.ts";
 import { BASH_PARAMS, bashDescription } from "./bash-description.ts";
 import { powerShellToolDescription } from "./powershell-description.ts";
 import { type ToolPassages, withoutOff } from "../../live-tools.ts";
-import type { LiveTools } from "../../../extensions/lib/live-tools.ts";
 
 function blocked(block: ShellBlock, live: LiveTools): string {
 	switch (block.kind) {

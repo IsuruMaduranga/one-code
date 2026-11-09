@@ -4,8 +4,7 @@
  * notes on routes that fell back, and every failure.
  */
 
-import { BRAVE_KEY_ENV, SETTINGS_FILE, SETTINGS_SNIPPET, TAVILY_KEY_ENV } from "../../../extensions/web/backends.ts";
-import type { BackendAttempt, BackendFailure, ChainFailure, ProviderSearchFailure, WebSearchText } from "../../../extensions/web/text.ts";
+import { BRAVE_KEY_ENV, SETTINGS_FILE, SETTINGS_SNIPPET, TAVILY_KEY_ENV, type BackendAttempt, type BackendFailure, type ChainFailure, type ProviderSearchFailure, type WebSearchText } from "../../../extensions/sdk/profile.ts";
 import { webSearchDescription } from "./description.ts";
 
 /**

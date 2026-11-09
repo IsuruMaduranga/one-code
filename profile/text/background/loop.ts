@@ -11,8 +11,7 @@
  * (extensions/background/loop-skill.ts, loop-fire.ts).
  */
 
-import { AUTONOMOUS_LOOP, AUTONOMOUS_LOOP_DYNAMIC, LOOP_FILE_DYNAMIC_SENTINEL, LOOP_FILE_SENTINEL } from "../../../extensions/background/loop-fire.ts";
-import type { LoopFile, LoopText, LoopTick } from "../../../extensions/background/text.ts";
+import { AUTONOMOUS_LOOP, AUTONOMOUS_LOOP_DYNAMIC, LOOP_FILE_DYNAMIC_SENTINEL, LOOP_FILE_SENTINEL, type LoopFile, type LoopText, type LoopTick } from "../../../extensions/sdk/profile.ts";
 import { AUTONOMOUS_PREAMBLE, AUTONOMOUS_PREAMBLE_PERSISTENT } from "./loop-preamble.ts";
 
 const yl = "schedule_wakeup";

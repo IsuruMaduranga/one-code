@@ -4,11 +4,9 @@
  * its result wording.
  */
 
-import type { AskUserText } from "../../../extensions/ask-user/text.ts";
-import type { Answer, Question } from "../../../extensions/ask-user/questions.ts";
+import type { Answer, AskUserText, LiveTools, Question } from "../../../extensions/sdk/profile.ts";
 import { ASK_PARAMS, askDescription } from "./description.ts";
 import { type ToolPassages, withoutOff } from "../../live-tools.ts";
-import type { LiveTools } from "../../../extensions/lib/live-tools.ts";
 
 /**
  * Claude Code's answer list: `"question"="answer"` per answered question, with

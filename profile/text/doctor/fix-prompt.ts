@@ -22,7 +22,7 @@
  * kept in substance. Rationale: working-docs/decisions/doctor.md.
  */
 
-import type { FixPromptInput } from "../../../extensions/doctor/text.ts";
+import type { FixPromptInput } from "../../../extensions/sdk/profile.ts";
 
 
 /** The ground rule that maps the Claude Code paths the prompt names to independent mode's own. */

@@ -3,7 +3,7 @@
  * results, and the skills listing's framing (Claude Code's header).
  */
 
-import type { SkillText } from "../../../extensions/skill/text.ts";
+import type { SkillText } from "../../../extensions/sdk/profile.ts";
 
 const listed = (listing: string | undefined) => listing ?? "(no skills available)";
 

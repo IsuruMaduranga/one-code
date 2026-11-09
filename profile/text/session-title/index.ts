@@ -4,7 +4,7 @@
  * CC 2.1.278, findings §14), verbatim.
  */
 
-import type { SessionTitleText } from "../../../extensions/session-title/text.ts";
+import type { SessionTitleText } from "../../../extensions/sdk/profile.ts";
 
 /** CC's naming instruction (system prompt), verbatim from the 2.1.278 capture. */
 export const SESSION_TITLE_PROMPT =

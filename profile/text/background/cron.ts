@@ -5,7 +5,7 @@
  * jitter sentence is Claude Code's own, understating its code.
  */
 
-import type { CronCreateFailure, CronText, ShownJob } from "../../../extensions/background/text.ts";
+import type { CronCreateFailure, CronText, ShownJob } from "../../../extensions/sdk/profile.ts";
 
 const SESSION_ONLY = "Session-only (not written to disk, dies when this session ends)";
 

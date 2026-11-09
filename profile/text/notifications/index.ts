@@ -6,9 +6,8 @@
  * reason, the workflow summary, the one-shot and interactive session notes).
  */
 
-import type { NotificationsText, OneShotWork, TaskSummary } from "../../../extensions/lib/notifications-text.ts";
+import type { LiveTools, NotificationsText, OneShotWork, TaskSummary } from "../../../extensions/sdk/profile.ts";
 import { type ToolPassages, withoutOff } from "../../live-tools.ts";
-import type { LiveTools } from "../../../extensions/lib/live-tools.ts";
 
 export const AGENT_MESSAGE_OPENER = "Another Claude session sent a message:";
 

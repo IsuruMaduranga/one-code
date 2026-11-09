@@ -5,8 +5,7 @@
  * Code's; the rest is One Code's.
  */
 
-import type { PermissionRefusal, PermissionsText } from "../../../extensions/permissions/text.ts";
-import type { LiveTools } from "../../../extensions/lib/live-tools.ts";
+import type { LiveTools, PermissionRefusal, PermissionsText } from "../../../extensions/sdk/profile.ts";
 import { type ToolPassages, withoutOff } from "../../live-tools.ts";
 
 // Must agree with the plan-mode reminder (plan-mode/reminder.ts): the plan is

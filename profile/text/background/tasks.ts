@@ -5,7 +5,7 @@
  * stopped by its id here. The clipped-output header is Claude Code's.
  */
 
-import type { ShownTask, TaskToolsText } from "../../../extensions/background/text.ts";
+import type { ShownTask, TaskToolsText } from "../../../extensions/sdk/profile.ts";
 
 export const tasks: TaskToolsText = {
 	outputDescription:

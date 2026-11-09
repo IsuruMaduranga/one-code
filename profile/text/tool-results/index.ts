@@ -5,7 +5,7 @@
  * memory.
  */
 
-import type { ToolResultsText } from "../../../extensions/lib/tool-results-text.ts";
+import type { ToolResultsText } from "../../../extensions/sdk/profile.ts";
 
 const REJECTED =
 	"The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file).";

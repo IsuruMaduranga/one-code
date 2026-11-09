@@ -11,7 +11,7 @@
  * tool names are One Code's.
  */
 
-import type { WorkflowSizeGuideline } from "../../../extensions/lib/product-settings.ts";
+import type { WorkflowSizeGuideline } from "../../../extensions/sdk/profile.ts";
 
 export const WORKFLOW_DESCRIPTION_BODY = `Execute a workflow script that orchestrates multiple subagents deterministically. Workflows run in the background — this tool returns immediately with a task ID, and a <task-notification> arrives when the workflow completes. Use /workflows to watch live progress.
 

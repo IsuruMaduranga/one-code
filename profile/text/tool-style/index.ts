@@ -8,9 +8,8 @@
  * numbered lines, `old_string`); edit's gets the read rule appended.
  */
 
-import type { ToolStyleText } from "../../../extensions/tool-style/text.ts";
+import type { LiveTools, ToolStyleText } from "../../../extensions/sdk/profile.ts";
 import { type ToolPassages, withoutOff } from "../../live-tools.ts";
-import type { LiveTools } from "../../../extensions/lib/live-tools.ts";
 
 export const WRITE_SHORT_DESCRIPTION = `Writes a file to the local filesystem, overwriting if one exists.
 

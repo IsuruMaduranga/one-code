@@ -4,8 +4,7 @@
  */
 
 import { type ToolPassages, withoutOff } from "../../live-tools.ts";
-import type { ArtifactsText, NoBrowser, PublishBrowser, PublishProblem, ShownArtifact } from "../../../extensions/artifacts/text.ts";
-import type { LiveTools } from "../../../extensions/lib/live-tools.ts";
+import type { ArtifactsText, LiveTools, NoBrowser, PublishBrowser, PublishProblem, ShownArtifact } from "../../../extensions/sdk/profile.ts";
 
 const NO_BROWSER: Record<NoBrowser, string> = {
 	ssh: "this session runs over SSH",

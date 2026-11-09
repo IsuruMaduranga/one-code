@@ -8,12 +8,11 @@
  * results); One Code's elsewhere.
  */
 
-import type { AgentTools, LaunchLine, PendingRun, RunFailure, RunStatus, SubagentRefusal, SubagentsText } from "../../../extensions/subagents/text.ts";
+import type { AgentTools, LaunchLine, LiveTools, PendingRun, RunFailure, RunStatus, SubagentRefusal, SubagentsText } from "../../../extensions/sdk/profile.ts";
 import { checkoutProgram } from "../worktree/guard.ts";
 import { agentDescription } from "./agent-description.ts";
 import { guideAgent } from "./guide-agent.ts";
 import { type ToolPassages, withoutOff } from "../../live-tools.ts";
-import type { LiveTools } from "../../../extensions/lib/live-tools.ts";
 
 /**
  * The anti-fabrication sentence, carried by the RESULT of a background spawn

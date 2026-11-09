@@ -14,14 +14,9 @@
 import { CONFIG_MODE_ENV, CONFIG_MODE_KEY, claudeSourcesOn, configModeFromEnv, savedConfigMode } from "./mode.ts";
 import { existsSync } from "node:fs";
 import os from "node:os";
-import { productSettingsPath, readSettingsForWrite, writeSettings } from "../../extensions/lib/product-settings.ts";
+import { claudeJsonPath, claudeUserDir, findProjectConfigs, isClaudeFamilyModel, isClaudeLocation, managedSettingsPaths, productSettingsPath, readSettingsForWrite, tildify, writeSettings, type EnvAlias, type McpFile, type SettingsFile, type SourceProvider, type SourceSwitch } from "../../extensions/sdk/source-provider.ts";
 import { join } from "node:path";
-import { findProjectConfigs } from "../../extensions/mcp/config.ts";
-import { claudeJsonPath, claudeUserDir, isClaudeLocation, tildify } from "../../extensions/lib/paths.ts";
-import { managedSettingsPaths } from "../../extensions/lib/claude-settings.ts";
 import { settingsPaths } from "./settings.ts";
-import type { EnvAlias, McpFile, SettingsFile, SourceProvider, SourceSwitch } from "../../extensions/lib/sources.ts";
-import { isClaudeFamilyModel } from "../../extensions/lib/model-family.ts";
 import { claudeCodeInstructionView } from "./instructions.ts";
 
 /**

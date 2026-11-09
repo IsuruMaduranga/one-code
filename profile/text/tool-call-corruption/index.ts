@@ -4,7 +4,7 @@
  * a call whose arguments look cut off or broken.
  */
 
-import type { ArgumentDamage, ToolCallCorruptionText } from "../../../extensions/tool-call-corruption/text.ts";
+import type { ArgumentDamage, ToolCallCorruptionText } from "../../../extensions/sdk/profile.ts";
 
 function damage(d: ArgumentDamage): string {
 	switch (d.kind) {

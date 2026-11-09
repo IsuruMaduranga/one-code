@@ -15,8 +15,7 @@
  * (extensions/subagents/guide-agent.ts).
  */
 
-import type { GuideInput, GuideInstall, GuideSetup } from "../../../extensions/subagents/guide-agent.ts";
-import type { SubagentsText } from "../../../extensions/subagents/text.ts";
+import type { GuideInput, GuideInstall, GuideSetup, SubagentsText } from "../../../extensions/sdk/profile.ts";
 
 export const GUIDE_AGENT = "one-code-guide";
 

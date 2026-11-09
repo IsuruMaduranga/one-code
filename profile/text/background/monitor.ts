@@ -2,7 +2,7 @@
  * One Code's monitor text (the profile's `text.background.monitor`).
  */
 
-import type { MonitorEnd, MonitorStartFailure, MonitorText } from "../../../extensions/background/text.ts";
+import type { MonitorEnd, MonitorStartFailure, MonitorText } from "../../../extensions/sdk/profile.ts";
 
 function startFailed(failure: MonitorStartFailure): string {
 	switch (failure.kind) {

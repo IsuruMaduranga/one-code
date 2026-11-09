@@ -4,7 +4,7 @@
  * command fails, times out or writes too much.
  */
 
-import type { PluginsText } from "../../../extensions/plugins/text.ts";
+import type { PluginsText } from "../../../extensions/sdk/profile.ts";
 
 export const plugins: PluginsText = {
 	placeholderFailed: ({ osMessage }) => `command failed: ${osMessage}`,

@@ -8,7 +8,7 @@
  */
 
 import { join } from "node:path";
-import { claudeUserSettingsPath, managedSettingsPaths, readSettingsFile } from "../../extensions/lib/claude-settings.ts";
+import { claudeUserSettingsPath, managedSettingsPaths, readSettingsFile } from "../../extensions/sdk/source-provider.ts";
 
 /** Claude Code's user, project and local settings files. */
 export function settingsPaths(cwd: string, home: string): { user: string; project: string; local: string } {
