@@ -12,8 +12,8 @@
  * that entry directly. It costs nothing: the entry exists, so the mark reads.
  */
 
-import { appendPoint } from "../lib/ledger/wire.ts";
-import { MAX_CACHE_MARKERS } from "../lib/request-replay.ts";
+import { appendPoint } from "../lib/request/ledger/wire.ts";
+import { MAX_CACHE_MARKERS } from "../lib/side-calls/request-replay.ts";
 
 type Block = Record<string, unknown> & { cache_control?: unknown };
 type Message = { role?: unknown; content?: unknown };

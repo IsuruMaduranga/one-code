@@ -16,10 +16,10 @@
  * rejected. Fire times carry Claude Code's deterministic jitter (`JITTER`).
  */
 
-import { brandedId } from "../brand.mjs";
+import { brandedId } from "../profile/brand.mjs";
 import { randomUUID } from "node:crypto";
 import { Type } from "typebox";
-import { sliceColumns, visibleWidth } from "../text-width.ts";
+import { sliceColumns, visibleWidth } from "../ui/text-width.ts";
 import type { CronCreateFailure, CronText, ShownJob } from "../../background/text.ts";
 
 /** Claude Code's per-session job cap. */
@@ -244,7 +244,7 @@ export interface CronJob {
 	prompt: string;
 	recurring: boolean;
 	source: CronSource;
-	/** A subagent's task id when the job is that agent's (lib/agent-cron.ts). */
+	/** A subagent's task id when the job is that agent's (lib/agents/agent-cron.ts). */
 	agentId?: string;
 	/** A subagent job's working directory, where its fire resolves loop.md and skills. */
 	cwd?: string;
@@ -543,7 +543,7 @@ export function shownJob(job: CronJob): ShownJob {
 
 /**
  * The three tools' parameters, worded by the profile, shared by the main
- * session's tools and a subagent's proxies (lib/agent-cron.ts). `durable` is
+ * session's tools and a subagent's proxies (lib/agents/agent-cron.ts). `durable` is
  * accepted and ignored, as in Claude Code with its durable mode off;
  * cron_list and cron_delete stay open to stray fields like our other tools
  * (deepseek sends `query` to an empty schema; decisions/tools.md, "Session

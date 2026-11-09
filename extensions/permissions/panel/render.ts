@@ -6,8 +6,8 @@
  * One Code where Claude Code names itself.
  */
 
-import { brand } from "../../lib/brand.mjs";
-import { cutPlainText, hintLines, panelTopRule, type RenderBlock as Block, searchBoxLines, truncateLine, visibleWidth, windowBlocks, wrapPlainText } from "../../lib/tui-render.ts";
+import { brand } from "../../lib/profile/brand.mjs";
+import { cutPlainText, hintLines, panelTopRule, type RenderBlock as Block, searchBoxLines, truncateLine, visibleWidth, windowBlocks, wrapPlainText } from "../../lib/ui/tui-render.ts";
 import {
 	AUTO_SECTION_LABELS,
 	AUTO_SECTIONS,

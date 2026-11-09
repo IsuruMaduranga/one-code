@@ -4,8 +4,8 @@
  * files plus "Open auto-memory folder", with an Auto-memory status line and a
  * learn-more link. Enter opens the selected entry (in `$EDITOR`); Esc closes.
  * Above the list, where CC keeps its toggle rows (↑ from the first file
- * reaches them): CC's "Auto-memory" toggle (lib/auto-memory.ts), then the
- * source provider's switch when the profile has one (lib/sources.ts; One
+ * reaches them): CC's "Auto-memory" toggle (lib/context/auto-memory.ts), then the
+ * source provider's switch when the profile has one (lib/profile/sources.ts; One
  * Code's "Config sources", Claude-compatible or independent), which switches
  * after a confirmation, since it changes every place configuration is read
  * from.
@@ -14,11 +14,11 @@
  * extension owns repaint, the overlay, and the actual open.
  */
 
-import { brand } from "../lib/brand.mjs";
+import { brand } from "../lib/profile/brand.mjs";
 import type { MemoryEntry } from "./entries.ts";
-import type { SourceSwitch } from "../lib/sources.ts";
-import { keyId } from "../lib/key-input.ts";
-import { wrapHints, wrapProse } from "../lib/tui-render.ts";
+import type { SourceSwitch } from "../lib/profile/sources.ts";
+import { keyId } from "../lib/ui/key-input.ts";
+import { wrapHints, wrapProse } from "../lib/ui/tui-render.ts";
 
 export const MEMORY_DOCS_URL = brand.homepage;
 
@@ -44,7 +44,7 @@ export interface SettingView<T> {
 	fromEnv?: boolean;
 }
 
-/** Auto-memory; its environment variable (`envVar`, lib/auto-memory.ts `autoMemoryEnvVar`) can set it. */
+/** Auto-memory; its environment variable (`envVar`, lib/context/auto-memory.ts `autoMemoryEnvVar`) can set it. */
 export interface AutoMemoryView extends SettingView<boolean> {
 	envVar?: string;
 }

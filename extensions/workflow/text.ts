@@ -8,7 +8,7 @@
  * result preview's cap are base formats.
  */
 
-import type { WorkflowSizeGuideline } from "../lib/product-settings.ts";
+import type { WorkflowSizeGuideline } from "../lib/profile/product-settings.ts";
 
 /** A workflow call refused before any run starts. */
 export type WorkflowRefusal =

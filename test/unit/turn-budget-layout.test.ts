@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { wrapReminder } from "../../extensions/lib/reminders.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { wrapReminder } from "../../extensions/lib/request/reminders.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { clearAtNudge, resolveCountdowns, withTurnBudgetMessages } from "../../extensions/system-reminder/turn-budget-layout.ts";
 import { totalTokensBlock } from "../../extensions/lib/context/budget.ts";
 

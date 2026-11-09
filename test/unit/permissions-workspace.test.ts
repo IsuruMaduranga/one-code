@@ -7,10 +7,10 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { productProjectSettingsPath, productSettingsPath } from "../../extensions/lib/product-settings.ts";
-import { forwardSlashes } from "../../extensions/lib/paths.ts";
-import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
-import { WORKSPACE_CHANNEL } from "../../extensions/lib/workspace-channel.ts";
+import { productProjectSettingsPath, productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
+import { forwardSlashes } from "../../extensions/lib/profile/paths.ts";
+import { MODE_CHANNEL } from "../../extensions/lib/rules/plan-mode-channels.ts";
+import { WORKSPACE_CHANNEL } from "../../extensions/lib/rules/workspace-channel.ts";
 import { decide } from "../../extensions/lib/rules/matcher.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { listWorkspaceDirectories } from "../../extensions/lib/rules/settings.ts";

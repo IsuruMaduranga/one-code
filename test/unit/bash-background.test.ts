@@ -11,7 +11,7 @@ import {
 } from "../../extensions/lib/shell-run/bash-background.ts";
 import type { BackgroundTask } from "../../extensions/lib/agents/task-registry.ts";
 import { localPwsh } from "./helpers/local-pwsh.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const text = requireText("shell");
 
@@ -170,7 +170,7 @@ const pwsh = localPwsh();
 /**
  * The powershell extension runs its `run_in_background` through the same
  * starter with its own spawn spec; stop and timeout must end a PowerShell tree
- * the way they end a bash one (on Windows: taskkill /T /F, lib/process-tree.ts).
+ * the way they end a bash one (on Windows: taskkill /T /F, lib/shell-run/process-tree.ts).
  */
 describe.skipIf(!pwsh)("startBackgroundBash with a PowerShell spec (real pwsh)", { timeout: 45_000 }, () => {
 	const startPwsh = (command: string, extra?: { timeoutSeconds?: number }) => {

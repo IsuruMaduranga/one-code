@@ -1,6 +1,6 @@
 /**
  * Environment facts for Claude Code's `# Environment` block
- * (lib/environment-block.ts) and the memory directory the system prompt names.
+ * (lib/context/environment-block.ts) and the memory directory the system prompt names.
  * Collected once per cwd and cached so the text stays byte-stable across turns
  * — required for provider prompt caching to pay off. Nothing time-valued
  * belongs here: the date rides its own first-message reminder (claude-context),
@@ -9,16 +9,16 @@
  */
 
 import os from "node:os";
-import type { EnvironmentFacts } from "../lib/environment-block.ts";
-import { findGitRoot } from "../lib/git.ts";
-import { autoMemoryEnabled } from "../lib/auto-memory.ts";
-import { projectMemoryDir } from "../lib/memory.ts";
+import type { EnvironmentFacts } from "../lib/context/environment-block.ts";
+import { findGitRoot } from "../lib/context/git.ts";
+import { autoMemoryEnabled } from "../lib/context/auto-memory.ts";
+import { projectMemoryDir } from "../lib/context/memory.ts";
 
 /** The facts the environment block shows, plus the memory directory the system prompt names. */
 export interface EnvironmentInfo extends Omit<EnvironmentFacts, "scratchpadDir" | "workspaceDirs"> {
 	/**
 	 * Per-project auto-memory directory; the memory extension guarantees it
-	 * exists. Undefined while auto-memory is off (lib/auto-memory.ts): the
+	 * exists. Undefined while auto-memory is off (lib/context/auto-memory.ts): the
 	 * prompt then has no memory section.
 	 */
 	memoryDir: string | undefined;

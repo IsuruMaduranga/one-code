@@ -2,8 +2,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { persistIfLarge, PERSIST_MAX_BYTES } from "../../extensions/lib/persisted-output.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { persistIfLarge, PERSIST_MAX_BYTES } from "../../extensions/lib/request/persisted-output.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const words = requireText("toolResults");
 /** The block the base builds around the profile's two lines. */

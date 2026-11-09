@@ -12,8 +12,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
 
 import { completeSimple } from "@earendil-works/pi-ai/compat";
-import { productProjectSettingsPath } from "../../extensions/lib/product-settings.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
+import { productProjectSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "../../test/unit/helpers/fake-pi.ts";
 import { stubHome } from "../../test/unit/helpers/home.ts";

@@ -1,6 +1,6 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { beforeEach, describe, expect, it } from "vitest";
-import { modelLine, newerModelSuggestion } from "../../extensions/lib/newer-model.ts";
+import { modelLine, newerModelSuggestion } from "../../extensions/lib/models/newer-model.ts";
 import { pinReleaseDates } from "./catalog-fixture.ts";
 
 type ModelFactsRow = { releaseDate: string; toolCall?: false };

@@ -1,5 +1,5 @@
 /**
- * pi's compaction keep window, at startup (lib/compaction-keep.mjs has the
+ * pi's compaction keep window, at startup (lib/app/compaction-keep.mjs has the
  * rule and why).
  *
  * On the user's own pi, while neither the user's nor the project's settings set
@@ -11,7 +11,7 @@
  * and is never questioned; `/doctor` shows it. The bundled app sets 0 itself.
  */
 
-import { brand } from "../lib/brand.mjs";
+import { brand } from "../lib/profile/brand.mjs";
 import os from "node:os";
 import { join } from "node:path";
 import { type ExtensionContext, getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
@@ -23,9 +23,9 @@ import {
 	keepWindowPrompt,
 	ONE_CODE_KEEP_RECENT_TOKENS,
 	withCompactionKeepBackfilled,
-} from "../lib/compaction-keep.mjs";
-import { readSettingsForWrite, SETTINGS_DISPLAY, writeSettings } from "../lib/product-settings.ts";
-import { tildify } from "../lib/paths.ts";
+} from "../lib/app/compaction-keep.mjs";
+import { readSettingsForWrite, SETTINGS_DISPLAY, writeSettings } from "../lib/profile/product-settings.ts";
+import { tildify } from "../lib/profile/paths.ts";
 import { declined, recordDeclined } from "./declined.ts";
 
 /** `~/.onecode/settings.json` key: the user answered "No" to the question. */

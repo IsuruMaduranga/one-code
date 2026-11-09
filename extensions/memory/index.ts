@@ -1,6 +1,6 @@
 /**
  * memory extension — filesystem side of the auto-memory system (see
- * extensions/lib/memory.ts for the design and the prompt side).
+ * extensions/lib/context/memory.ts for the design and the prompt side).
  *
  * - session start: create the per-project memory directory (the system prompt
  *   promises the model "this directory already exists") and inject the
@@ -20,30 +20,30 @@
  *   opens in the external $EDITOR/$VISUAL (or the OS opener), as CC does.
  */
 
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import { mkdirSync, readFileSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
-import { claudeMdLimitWarning, combinedLimitWarning, projectMemoryDir } from "../lib/memory.ts";
-import { INDEX_MAX_CHARS, INDEX_MAX_LINES, indexLimitStatus, stampFrontmatter } from "../lib/memory-content.ts";
-import { requireText } from "../lib/profile.ts";
-import { allowedPath, sourceSwitch } from "../lib/sources.ts";
-import { agentSkippedInstructions } from "../lib/instruction-budget.ts";
-import { productSettingsPath, readSettingsForWrite, writeSettings } from "../lib/product-settings.ts";
-import { comparablePath, isPathAtOrUnder, productStateDir, tildify, tryRealpath } from "../lib/paths.ts";
+import { claudeMdLimitWarning, combinedLimitWarning, projectMemoryDir } from "../lib/context/memory.ts";
+import { INDEX_MAX_CHARS, INDEX_MAX_LINES, indexLimitStatus, stampFrontmatter } from "../lib/context/memory-content.ts";
+import { requireText } from "../lib/profile/profile.ts";
+import { allowedPath, sourceSwitch } from "../lib/profile/sources.ts";
+import { agentSkippedInstructions } from "../lib/context/instruction-budget.ts";
+import { productSettingsPath, readSettingsForWrite, writeSettings } from "../lib/profile/product-settings.ts";
+import { comparablePath, isPathAtOrUnder, productStateDir, tildify, tryRealpath } from "../lib/profile/paths.ts";
 import { resolveThroughLinks } from "../lib/shell/paths.ts";
-import { resolveToolPath } from "../lib/tool-path.ts";
-import { tryReadFile } from "../lib/plugins.ts";
-import { REMINDER_CHANNEL } from "../lib/reminders.ts";
-import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
+import { resolveToolPath } from "../lib/rules/tool-path.ts";
+import { tryReadFile } from "../lib/plugins/plugins.ts";
+import { REMINDER_CHANNEL } from "../lib/request/reminders.ts";
+import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "../lib/ui/tui-render.ts";
 import { buildMemoryEntries, entryName, type MemoryEntry } from "./entries.ts";
 import { editorHint, memoryDisplayPath, openPath } from "./open-external.ts";
 import { applyMemoryKey, type AutoMemoryView, decodeMemoryKey, initialMemoryState, type ModeView, renderMemoryPanel, settingChanges } from "./panel.ts";
-import { AUTO_MEMORY_KEY, autoMemoryEnabled, autoMemoryEnvVar, autoMemoryFromEnv, savedAutoMemory, savedAutoMemorySource } from "../lib/auto-memory.ts";
-import { registerLocalCommand } from "../lib/local-command.ts";
-import { canShowCustomUi } from "../lib/headless-output.ts";
-import { panelUi } from "../lib/panel-focus.ts";
+import { AUTO_MEMORY_KEY, autoMemoryEnabled, autoMemoryEnvVar, autoMemoryFromEnv, savedAutoMemory, savedAutoMemorySource } from "../lib/context/auto-memory.ts";
+import { registerLocalCommand } from "../lib/ui/local-command.ts";
+import { canShowCustomUi } from "../lib/notify/headless-output.ts";
+import { panelUi } from "../lib/ui/panel-focus.ts";
 
 const MEMORY_PANEL_MAX_HEIGHT = 20;
 
@@ -111,7 +111,7 @@ function memoryExtension(pi: ExtensionAPI) {
 			}
 		}
 
-		// Auto-memory off (lib/auto-memory.ts): no folder, no stamping.
+		// Auto-memory off (lib/context/auto-memory.ts): no folder, no stamping.
 		if (!autoMemoryEnabled(ctx.cwd)) return;
 
 		// Like Claude Code: one memory dir per git repo (shared by worktrees and

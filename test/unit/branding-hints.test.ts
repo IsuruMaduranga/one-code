@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ARGUMENT_HINT_CHANNEL } from "../../extensions/lib/argument-hints.ts";
+import { ARGUMENT_HINT_CHANNEL } from "../../extensions/lib/ui/argument-hints.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 // The editor itself is not under test: capture the hint renderer it is given.

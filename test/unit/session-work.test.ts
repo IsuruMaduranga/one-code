@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capField, sessionBackgroundTask, sessionCron } from "../../extensions/lib/session-work.ts";
+import { capField, sessionBackgroundTask, sessionCron } from "../../extensions/lib/notify/session-work.ts";
 
 describe("session work for the Stop hook (Claude Code's session_crons / background_tasks)", () => {
 	it("caps a field at 1000 characters with Claude Code's in-string marker", () => {

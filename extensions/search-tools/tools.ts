@@ -3,7 +3,7 @@
  * tools should be active for a given prompt tier.
  */
 
-import type { PromptTier } from "../lib/model-tier.ts";
+import type { PromptTier } from "../lib/models/model-tier.ts";
 
 /** pi built-ins that exist in the registry but are not active by default. */
 export const SEARCH_TOOLS = ["grep", "find", "ls"] as const;

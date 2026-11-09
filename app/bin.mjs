@@ -2,7 +2,7 @@
 /**
  * The bundled app's command. It checks the Node version, finds the extension
  * package named by this package's `productExtension` field, and hands over to
- * its `createApp` (extensions/lib/create-app.mjs), which takes every name from
+ * its `createApp` (extensions/lib/app/create-app.mjs), which takes every name from
  * the profile's brand. A product's app is this same file: only package.json
  * differs, stamped from the brand (scripts/apply-brand.mjs).
  *
@@ -35,7 +35,7 @@ if (major < 22 || (major === 22 && minor < 19)) {
 const require = createRequire(import.meta.url);
 let createAppPath;
 try {
-	createAppPath = join(dirname(require.resolve(`${app.productExtension}/package.json`)), "extensions", "lib", "create-app.mjs");
+	createAppPath = join(dirname(require.resolve(`${app.productExtension}/package.json`)), "extensions", "lib", "app", "create-app.mjs");
 } catch {}
 if (!createAppPath || !existsSync(createAppPath)) {
 	process.stderr.write(

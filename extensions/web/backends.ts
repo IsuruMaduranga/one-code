@@ -16,7 +16,7 @@
  * Failures are data (text.ts); the profile words them.
  */
 
-import { SETTINGS_DISPLAY } from "../lib/product-settings.ts";
+import { SETTINGS_DISPLAY } from "../lib/profile/product-settings.ts";
 import type { BackendAttempt, BackendFailure, ChainFailure } from "./text.ts";
 
 /** A backend failed for a reason the profile words. */

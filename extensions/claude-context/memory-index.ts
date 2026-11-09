@@ -1,11 +1,11 @@
 /** Read the startup/compaction memory index without loading excluded or non-text files. */
 import os from "node:os";
 import { join } from "node:path";
-import { readFileIfPresent } from "../lib/instructions.ts";
-import { autoMemoryEnabled } from "../lib/auto-memory.ts";
-import { projectMemoryDir } from "../lib/memory.ts";
-import { truncateIndex } from "../lib/memory-content.ts";
-import { allowedPath } from "../lib/sources.ts";
+import { readFileIfPresent } from "../lib/context/instructions.ts";
+import { autoMemoryEnabled } from "../lib/context/auto-memory.ts";
+import { projectMemoryDir } from "../lib/context/memory.ts";
+import { truncateIndex } from "../lib/context/memory-content.ts";
+import { allowedPath } from "../lib/profile/sources.ts";
 
 export function readMemoryIndex(cwd: string, home: string = os.homedir()): { path: string; content: string } | null {
 	if (!autoMemoryEnabled(cwd)) return null;

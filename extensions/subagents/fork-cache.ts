@@ -25,8 +25,8 @@
  * filled the window.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { DEFER_CHANNEL } from "../lib/deferred.ts";
-import { type AffinityModel, affinityHeaders, captureMatches, forkOutputRoom, forkRequestPayload, forkBaselineNames, MIN_REPLAY_OUTPUT_TOKENS, type RequestCapture, uncoveredMessages } from "../lib/request-replay.ts";
+import { DEFER_CHANNEL } from "../lib/request/deferred.ts";
+import { type AffinityModel, affinityHeaders, captureMatches, forkOutputRoom, forkRequestPayload, forkBaselineNames, MIN_REPLAY_OUTPUT_TOKENS, type RequestCapture, uncoveredMessages } from "../lib/side-calls/request-replay.ts";
 
 type ModelRef = { api?: string; provider?: string; id?: string };
 

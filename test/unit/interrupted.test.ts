@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { RunOutcomeLatch, runOutcome, wasInterrupted } from "../../extensions/lib/interrupt.ts";
+import { RunOutcomeLatch, runOutcome, wasInterrupted } from "../../extensions/lib/notify/interrupt.ts";
 import { INTERRUPTED_TEXT } from "../../extensions/interrupted/line.ts";
-import { brand } from "../../extensions/lib/brand.mjs";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
 
 describe("INTERRUPTED_TEXT", () => {
 	it("mirrors Claude Code's InterruptedByUser wording, rebranded", () => {

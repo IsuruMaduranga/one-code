@@ -16,7 +16,7 @@
  *
  * Claude Code tells the model the conversation was cleared: the new
  * conversation opens with the `/clear` breadcrumb (caveat, command, empty
- * stdout — lib/local-command.ts). It cannot be queued from the handler: pi's
+ * stdout — lib/ui/local-command.ts). It cannot be queued from the handler: pi's
  * `newSession()` replaces the whole runtime (a `session_shutdown` with reason
  * "new" on the old extension runner, every factory run again — findings §8),
  * so a reminder queued before the call dies with the old queue. The NEW
@@ -25,9 +25,9 @@
  * they are the same user action as far as the model is concerned.
  */
 
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { announceLocalCommand } from "../lib/local-command.ts";
+import { announceLocalCommand } from "../lib/ui/local-command.ts";
 
 function clearExtension(pi: ExtensionAPI) {
 	pi.registerCommand("clear", {

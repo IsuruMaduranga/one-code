@@ -18,8 +18,8 @@
  * width, never cut, so nothing in an overwide line hides past the edge.
  */
 
-import { hardWrapColumns } from "../lib/text-width.ts";
-import { sanitizeDisplayText } from "../lib/terminal-text.ts";
+import { hardWrapColumns } from "../lib/ui/text-width.ts";
+import { sanitizeDisplayText } from "../lib/ui/terminal-text.ts";
 import {
 	callLine,
 	countNoun,
@@ -36,8 +36,8 @@ import {
 	textContent,
 	type ThemeLike,
 	type TuiComponent,
-} from "../lib/tui-render.ts";
-import { userDenialKind } from "../lib/user-denial.ts";
+} from "../lib/ui/tui-render.ts";
+import { userDenialKind } from "../lib/consent/user-denial.ts";
 
 /** Content lines shown before the `… +N lines` trailer (Claude Code's). */
 export const WRITE_PREVIEW_LINES = 10;

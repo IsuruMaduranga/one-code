@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { agentViewTarget, applyBorderBadge, fitBadge, unwrapUserMessage, userMessageForAgent } from "../../extensions/lib/agent-view.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
-import { visibleWidth } from "../../extensions/lib/text-width.ts";
+import { agentViewTarget, applyBorderBadge, fitBadge, unwrapUserMessage, userMessageForAgent } from "../../extensions/lib/agents/agent-view.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { visibleWidth } from "../../extensions/lib/ui/text-width.ts";
 import { moveTasksSelection, renderTasksDialog, tasksItems } from "../../extensions/subagents/tasks-dialog.ts";
 
 const paint = { fg: (_color: string, text: string) => text, bold: (text: string) => text };

@@ -7,7 +7,7 @@
  * renderer and the key handler agree on what "the selected row" is.
  */
 
-import type { SkillScope, SkillState } from "../../lib/skill-overrides.ts";
+import type { SkillScope, SkillState } from "../../lib/plugins/skill-overrides.ts";
 import type { SkillsKey } from "./keys.ts";
 
 export interface SkillsRow {

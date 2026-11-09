@@ -2,18 +2,18 @@ import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { resetAutoMemoryForTest } from "../../extensions/lib/auto-memory.ts";
-import { memoryDir } from "../../extensions/lib/memory.ts";
-import { localGateMode } from "../../extensions/lib/permission-gate.ts";
-import { powerShellSpawn } from "../../extensions/lib/shell-spawn.ts";
-import { sessionResultsDir } from "../../extensions/lib/persisted-output.ts";
+import { resetAutoMemoryForTest } from "../../extensions/lib/context/auto-memory.ts";
+import { memoryDir } from "../../extensions/lib/context/memory.ts";
+import { localGateMode } from "../../extensions/lib/agents/permission-gate.ts";
+import { powerShellSpawn } from "../../extensions/lib/shell-run/shell-spawn.ts";
+import { sessionResultsDir } from "../../extensions/lib/request/persisted-output.ts";
 import { buildGate as buildGateHarness } from "./helpers/permission-gate-harness.ts";
 import { useRepositorySettings } from "./helpers/settings-files.ts";
 import { persistProjectAllowApproval } from "../../extensions/lib/consent/project-trust.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { stubHome } from "./helpers/home.ts";
 import { POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import type { PermissionRefusal } from "../../extensions/permissions/text.ts";
 
 /** Why the child gate refused a call, in the profile's words. */
@@ -69,7 +69,7 @@ describe("permissionGateFactory", () => {
 
 	it("lets the agent read back its own persisted tool output (sessionResultsDir)", async () => {
 		const { handler } = buildGateHarness({ permissions: {} });
-		// No ctx in this harness → the same private per-process fallback lib/persisted-output.ts writes to.
+		// No ctx in this harness → the same private per-process fallback lib/request/persisted-output.ts writes to.
 		const persisted = join(sessionResultsDir(undefined), "tool-results", "abc.txt");
 		expect(await handler({ toolName: "read", input: { path: persisted } })).toBeUndefined();
 		// The shared temp folder every session-less run once wrote to is not working space.

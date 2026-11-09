@@ -1,5 +1,5 @@
 /**
- * Key decoding for the /mcp panel (pure), named through `lib/key-input.ts`
+ * Key decoding for the /mcp panel (pure), named through `lib/ui/key-input.ts`
  * so every terminal encoding of a key decodes alike.
  *
  * The panel is a two-level menu (server list → server detail with a numbered
@@ -8,7 +8,7 @@
  * other printable input is ignored.
  */
 
-import { keyId } from "../../lib/key-input.ts";
+import { keyId } from "../../lib/ui/key-input.ts";
 
 export type McpKey =
 	| { kind: "up" | "down" | "enter" | "back" | "close" }

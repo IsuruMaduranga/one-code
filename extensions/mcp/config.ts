@@ -10,7 +10,7 @@
  *   <cwd>/.mcp.json                   (project, checked in — walked up to the repo root)
  *   <cwd>/.claude/settings.local.json (project, personal)
  *
- * Independent mode (lib/sources.ts) reads none of the three Claude Code
+ * Independent mode (lib/profile/sources.ts) reads none of the three Claude Code
  * files: plugins, registered servers and pi's two files only.
  *
  * Every file holds an `mcpServers` object. A stdio server has `command` (plus
@@ -27,11 +27,11 @@
  * ignored. A Claude Code file's server of the same name wins, with a note.
  */
 
-import { brand } from "../lib/brand.mjs";
+import { brand } from "../lib/profile/brand.mjs";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { expandTilde } from "../lib/paths.ts";
-import { type McpFile, openSources } from "../lib/sources.ts";
+import { expandTilde } from "../lib/profile/paths.ts";
+import { type McpFile, openSources } from "../lib/profile/sources.ts";
 import { hashServerConfig } from "./trust.ts";
 
 export interface StdioServer {

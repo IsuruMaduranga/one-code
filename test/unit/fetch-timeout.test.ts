@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fetchWithTimeout } from "../../extensions/lib/fetch-timeout.ts";
+import { fetchWithTimeout } from "../../extensions/lib/core/fetch-timeout.ts";
 
 /** Headers at once, then a body that never arrives and ignores the abort signal. */
 const stalledBody = (async () =>

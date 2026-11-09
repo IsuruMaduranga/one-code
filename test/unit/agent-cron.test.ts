@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { AGENT_CRON_CHANNEL, type AgentCronRequest, agentCronTools } from "../../extensions/lib/agent-cron.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { AGENT_CRON_CHANNEL, type AgentCronRequest, agentCronTools } from "../../extensions/lib/agents/agent-cron.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const { cron } = requireText("background");
 

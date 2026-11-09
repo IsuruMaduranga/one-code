@@ -3,7 +3,7 @@
  *
  * Claude Code's classifier reads the same CLAUDE.md the agent does, so an
  * instruction like "never force push" steers both at once. This asks the
- * agent's own instruction source (lib/instructions.ts `classifier`): the
+ * agent's own instruction source (lib/context/instructions.ts `classifier`): the
  * base's AGENTS.md and ONECODE.md files, and what the profile's provider adds
  * (One Code's: the managed and global files, every ancestor's CLAUDE.md,
  * `.claude/CLAUDE.md`, `.claude/rules` and CLAUDE.local.md), with the same
@@ -20,10 +20,10 @@
  * them safe; without it, a repository could ship its own authorisation.
  */
 
-import { type ClassifierFile, openInstructions } from "../../lib/instructions.ts";
-import { classifierInstructionNote, fitToWindow } from "../../lib/instruction-budget.ts";
-import { estimateTextTokens } from "../../lib/pi-ai-estimate.ts";
-import { tryRealpath } from "../../lib/paths.ts";
+import { type ClassifierFile, openInstructions } from "../../lib/context/instructions.ts";
+import { classifierInstructionNote, fitToWindow } from "../../lib/context/instruction-budget.ts";
+import { estimateTextTokens } from "../../lib/models/pi-ai-estimate.ts";
+import { tryRealpath } from "../../lib/profile/paths.ts";
 
 /**
  * Concatenated instruction files in the agent's order (managed and global,
@@ -32,7 +32,7 @@ import { tryRealpath } from "../../lib/paths.ts";
  * user-global preference; undefined when there are none. A file is whole, as
  * Claude Code's classifier gets the agent's CLAUDE.md (a cut would drop the
  * restrictions past it), unless the agent's window budget skips it
- * (lib/instruction-budget.ts, against `contextWindow`, the session model's):
+ * (lib/context/instruction-budget.ts, against `contextWindow`, the session model's):
  * then a note replaces it in its labelled slot, so the files that make the
  * agent survivable cannot push every call past the classifier's window. The
  * agent's files are skipped exactly as the agent skips them; the files only
@@ -40,7 +40,7 @@ import { tryRealpath } from "../../lib/paths.ts";
  * share what the agent's loaded files leave of the half. A transcript too
  * large for that window is not judged (`decisions/auto-mode.md`). With the
  * claude-context feature off the agent reads no instruction file, and
- * neither does the classifier (lib/instructions.ts). `agentDir`
+ * neither does the classifier (lib/context/instructions.ts). `agentDir`
  * is pi's (`getAgentDir()`), for its global AGENTS.md.
  */
 export function loadProjectInstructions(cwd: string, home: string, contextWindow: number | undefined, agentDir: string | undefined): string | undefined {

@@ -4,12 +4,12 @@ import { dirname, join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { pinReleaseDates } from "./catalog-fixture.ts";
-import { MODEL_UNUSABLE_CHANNEL } from "../../extensions/lib/model-unusable.ts";
-import { productSettingsPath, readSuggestNewerModels } from "../../extensions/lib/product-settings.ts";
+import { MODEL_UNUSABLE_CHANNEL } from "../../extensions/lib/models/model-unusable.ts";
+import { productSettingsPath, readSuggestNewerModels } from "../../extensions/lib/profile/product-settings.ts";
 import newerModelExtension from "../../extensions/newer-model/index.ts";
-import { NOTICE_CHANNEL } from "../../extensions/lib/notices.ts";
+import { NOTICE_CHANNEL } from "../../extensions/lib/notify/notices.ts";
 import { createFakeCtx, createFakePi, flushNotices } from "./helpers/fake-pi.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 
 const model = (id: string) => ({ provider: "openai", id, name: id, api: "openai-responses", cost: { input: 1, output: 3 } }) as Model<Api>;
 const old = model("gpt-5.6-luna");
@@ -40,7 +40,7 @@ function mount(mode = "tui", hasUI = true) {
 	const getAll = vi.fn(() => { throw new Error("Suggestions must use available models, not the full catalog"); });
 	const ctx = createFakeCtx({ mode, hasUI, model: old, modelRegistry: { getAvailable, getAll } });
 	newerModelExtension(fake.pi as never);
-	// The notice reaches the UI when the lifecycle notice batch closes (lib/notices.ts).
+	// The notice reaches the UI when the lifecycle notice batch closes (lib/notify/notices.ts).
 	const start = async () => { await fake.fire("session_start", { reason: "startup" }, ctx); await flushNotices(); };
 	const select = async (m: Model<Api>) => { await fake.fire("model_select", { model: m }, ctx); await flushNotices(); };
 	return { fake, ctx, start, select, emit, getAvailable, getAll };

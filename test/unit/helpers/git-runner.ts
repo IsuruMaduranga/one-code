@@ -2,7 +2,7 @@
  * A stand-in for git, for the git status tests (git-status and One Code's
  * git-status-wording).
  */
-import type { GitRunner } from "../../../extensions/lib/git-status.ts";
+import type { GitRunner } from "../../../extensions/lib/context/git-status.ts";
 
 /** A fake git runner keyed by the space-joined argv; any other call fails. */
 export function fakeRunner(map: Record<string, string>): GitRunner {

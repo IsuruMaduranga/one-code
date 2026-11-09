@@ -24,7 +24,7 @@
 
 import { readFileSync } from "node:fs";
 import { extname, isAbsolute, join, resolve } from "node:path";
-import { pathWithinBase, sanitizePathSegment } from "../lib/plugin-root.ts";
+import { pathWithinBase, sanitizePathSegment } from "../lib/plugins/plugin-root.ts";
 
 export interface ResolvedPluginServer {
 	/** `plugin:<pluginName>:<serverName>` — the client-map key. */
@@ -48,7 +48,7 @@ export interface ResolvedPluginServer {
 export interface PluginServerSource {
 	name: string;
 	path: string;
-	/** Per-origin plugin-data base dir (Plugin.dataRoot from lib/plugins.ts). */
+	/** Per-origin plugin-data base dir (Plugin.dataRoot from lib/plugins/plugins.ts). */
 	dataRoot: string;
 }
 

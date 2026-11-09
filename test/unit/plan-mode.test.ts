@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { visibleWidth } from "../../extensions/lib/text-width.ts";
-import { wrapProse } from "../../extensions/lib/tui-render.ts";
+import { visibleWidth } from "../../extensions/lib/ui/text-width.ts";
+import { wrapProse } from "../../extensions/lib/ui/tui-render.ts";
 import { randomSlug } from "../../extensions/plan-mode/slug.ts";
 import {
 	clampOffset,

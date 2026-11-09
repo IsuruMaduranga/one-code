@@ -1,0 +1,1065 @@
+/**
+ * Compact tool rendering shared by every One Code tool — the Claude Code look:
+ *
+ *   ● Label(one-line arg summary)
+ *     ⎿  first lines of the result
+ *        … +N lines (ctrl+o to expand)
+ *
+ * instead of pi's default fallback (bold tool name + full JSON args + full
+ * output inside a colored box). Pure module — no pi imports; the theme object
+ * pi passes to renderers arrives as an argument, and components are the
+ * minimal `{ render, invalidate }` shape pi-tui expects (pi-tui itself is not
+ * importable from an extension — findings §3).
+ *
+ * pi-tui crashes the whole app on a rendered line wider than the terminal, so
+ * every line goes through `truncateLine` — never skip it.
+ */
+
+import { isAbsolute, relative } from "node:path";
+import { framesToText, notificationBody, parseNotificationFrames } from "../notify/notifications.ts";
+import { fitPainted, hardWrapColumns, sliceColumns, visibleWidth } from "./text-width.ts";
+import { sanitizeDisplayText } from "./terminal-text.ts";
+import { userDenialKind } from "../consent/user-denial.ts";
+export { notificationBody };
+export { visibleWidth } from "./text-width.ts";
+
+/** The structural subset of pi-tui's Component that pi's renderers require. */
+export interface TuiComponent {
+	render(width: number): string[];
+	invalidate(): void;
+}
+
+/** The structural subset of pi's Theme that this module uses. */
+export interface ThemeLike {
+	fg(color: string, text: string): string;
+	bold(text: string): string;
+	italic(text: string): string;
+}
+
+/**
+ * A ctx that is live and has a UI, else undefined. pi invalidates an
+ * extension's ctx when the session is replaced (/clear, /new, /resume —
+ * findings §8): every getter on it throws from then on, and a widget's timer or
+ * a child's late event can still fire afterwards. Painting through this turns
+ * the stale ctx into "no UI" instead of an uncaught throw in a timer callback,
+ * which took the whole process down once (SUBAGENT-REVIEW H1).
+ */
+export function liveUiCtx<T extends { hasUI: boolean }>(ctx: T | undefined): T | undefined {
+	try {
+		return ctx?.hasUI ? ctx : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * A `paint(color, text)` closure that degrades to the plain text whenever the
+ * theme is missing, lacks `fg`, or `fg` throws — the guard every `ctx.ui.custom`
+ * renderer needs, since the theme object handed in there is loosely typed.
+ */
+export function safeThemePaint(theme: unknown): (color: string, text: string) => string {
+	return (color: string, text: string) => {
+		const themed = theme as { fg?(c: string, t: string): string } | undefined;
+		try {
+			return themed?.fg ? themed.fg(color, text) : text;
+		} catch {
+			return text;
+		}
+	};
+}
+
+/** The `inverse(text)` counterpart to safeThemePaint, with the same degrade-to-plain guard. */
+export function safeThemeInverse(theme: unknown): (text: string) => string {
+	return (text: string) => {
+		const themed = theme as { inverse?(t: string): string } | undefined;
+		try {
+			return themed?.inverse ? themed.inverse(text) : text;
+		} catch {
+			return text;
+		}
+	};
+}
+
+/** The `bold(text)` counterpart to safeThemePaint, with the same degrade-to-plain guard. */
+export function safeThemeBold(theme: unknown): (text: string) => string {
+	return (text: string) => {
+		const themed = theme as { bold?(t: string): string } | undefined;
+		try {
+			return themed?.bold ? themed.bold(text) : text;
+		} catch {
+			return text;
+		}
+	};
+}
+
+/** Humane elapsed time, Claude Code style: 45s, 1m 7s, 2h 5m. */
+export function formatDuration(startedAt?: number, finishedAt?: number, now?: number): string {
+	if (startedAt === undefined) return "";
+	const end = finishedAt ?? now ?? startedAt;
+	const total = Math.max(0, Math.round((end - startedAt) / 1000));
+	if (total < 60) return `${total}s`;
+	if (total < 3600) return `${Math.floor(total / 60)}m ${total % 60}s`;
+	return `${Math.floor(total / 3600)}h ${Math.floor((total % 3600) / 60)}m`;
+}
+
+/** `2 shells`, `1 shell` — a count with its (s-pluralized) noun. */
+export function countNoun(count: number, noun: string): string {
+	return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+/** Right-align plain text within `width` terminal columns. */
+export function alignRight(text: string, width: number): string {
+	const length = visibleWidth(text);
+	if (length >= width) return sliceColumns(text, Math.max(0, width)).text;
+	return " ".repeat(width - length) + text;
+}
+
+/**
+ * setWidget factory for a one-line, dim, right-aligned note (Claude Code's
+ * above-input chrome: the context token counter, the effort-changed note).
+ * The one-column right margin matches the paddingX pi gives string widgets.
+ */
+export function dimRightAlignedWidget(text: string): (tui: unknown, theme: unknown) => TuiComponent {
+	return (_tui, theme) => {
+		const paint = safeThemePaint(theme);
+		return linesComponent((width) => [paint("dim", alignRight(text, Math.max(1, width - 1)))]);
+	};
+}
+
+/** Strikethrough via raw SGR 9/29 — pi themes have no strike paint. */
+export function strike(text: string): string {
+	return `\x1b[9m${text}\x1b[29m`;
+}
+
+/**
+ * Height for a bounded panel that docks below the transcript (like Claude
+ * Code's /plugins and /skills): capped at `max` so the conversation stays
+ * visible, at least `min` when the terminal has room — but never taller than
+ * the terminal itself, so a short pane (< min+2 rows) shrinks to fit instead of
+ * overflowing.
+ */
+export function boundedDockHeight(terminalRows: number, max: number, min = 12): number {
+	const avail = Math.max(1, terminalRows - 2);
+	return avail <= min ? avail : Math.min(avail, max);
+}
+
+/** Cut plain (unpainted) text to `width` terminal columns, with an ellipsis. */
+export function cutPlainText(text: string, width: number): string {
+	if (width <= 0) return "";
+	if (visibleWidth(text) <= width) return text;
+	// Reserve one column for the ellipsis (itself width 1).
+	return `${sliceColumns(text, Math.max(0, width - 1)).text}…`;
+}
+
+/**
+ * Fit a key-hint row (`a · b · c`) into `width` columns by breaking it at its
+ * ` · ` separators onto as many lines as it needs, so a narrow terminal shows
+ * every key instead of cutting the last ones off. A single hint wider than
+ * the row is cut with an ellipsis.
+ */
+export function wrapHints(text: string, width: number, separator = " · "): string[] {
+	if (width <= 0) return [""];
+	if (visibleWidth(text) <= width) return [text];
+	const lines: string[] = [];
+	let current = "";
+	for (const hint of text.split(separator)) {
+		const joined = current ? `${current}${separator}${hint}` : hint;
+		if (!current || visibleWidth(joined) <= width) {
+			current = joined;
+			continue;
+		}
+		lines.push(cutPlainText(current, width));
+		current = hint;
+	}
+	if (current) lines.push(cutPlainText(current, width));
+	return lines;
+}
+
+/**
+ * A panel's key-hint rows: each hint line wrapped at its separators to fit
+ * `width` after `indent`, so no key is cut off on a narrow terminal, and
+ * returned indented (plain; the caller paints). A list panel counts the rows
+ * in its body budget.
+ */
+export function hintLines(hints: string | readonly string[], width: number, indent = ""): string[] {
+	const room = Math.max(1, width - visibleWidth(indent));
+	return (typeof hints === "string" ? [hints] : hints).flatMap((line) => wrapHints(line, room).map((part) => `${indent}${part}`));
+}
+
+/** Cut then pad plain (unpainted) text to exactly `width` terminal columns. */
+export function padPlainText(text: string, width: number): string {
+	const shortened = cutPlainText(text, width);
+	return shortened + " ".repeat(Math.max(0, width - visibleWidth(shortened)));
+}
+
+/** First non-empty line of a possibly-multiline string, trimmed. */
+export function firstNonEmptyLine(text: string): string {
+	return text.split("\n").map((l) => l.trim()).find(Boolean) ?? "";
+}
+
+/**
+ * Full-width rule that separates a docked panel from the transcript above it,
+ * the way Claude Code frames its /skills, /plugins and /mcp menus. Paint takes
+ * a (color, text) painter; the "border" theme token gives a visible-but-calm line.
+ */
+export function panelTopRule(paint: (color: string, text: string) => string, width: number): string {
+	return paint("border", "─".repeat(Math.max(0, width)));
+}
+
+/**
+ * A rounded, bordered single-line search input, Claude Code style. Returns three
+ * lines (top border, the input row, bottom border), already indented one column.
+ * The placeholder shows dim until the user types. `paint` colors the border with
+ * the "border" token; the query text stays in the default foreground. `icon`
+ * leads the text (a plain text input passes ""); the box keeps its width.
+ */
+export function searchBoxLines(
+	query: string,
+	placeholder: string,
+	paint: (color: string, text: string) => string,
+	width: number,
+	icon = "⌕ ",
+): string[] {
+	const boxWidth = Math.max(12, width - 2); // one column of margin each side
+	const inner = boxWidth - 2; // space between the vertical borders
+	const label = `${icon}${query || placeholder}`;
+	const cut = cutPlainText(label, inner - 2); // one space padding each side
+	const content = ` ${cut}${" ".repeat(Math.max(0, inner - 2 - visibleWidth(cut)))} `;
+	const v = paint("border", "│");
+	return [
+		` ${paint("border", `╭${"─".repeat(inner)}╮`)}`,
+		` ${v}${query ? content : paint("dim", content)}${v}`,
+		` ${paint("border", `╰${"─".repeat(inner)}╯`)}`,
+	];
+}
+
+/** A run of rendered lines that either can (`selectable`) or cannot host the cursor. */
+export interface RenderBlock {
+	lines: string[];
+	selectable: boolean;
+}
+
+/**
+ * Window a list of blocks so the block holding the Nth selectable row (`cursor`)
+ * stays visible within `budget` lines, returning the visible lines and how many
+ * blocks fell off the bottom. Group headers ride along as non-selectable blocks.
+ * The cursor's own block is always shown even when it alone exceeds the budget,
+ * so a tall selected row never scrolls itself off screen.
+ */
+export function windowBlocks(blocks: RenderBlock[], cursor: number, budget: number): { lines: string[]; more: number } {
+	const selectableIndexes = blocks.map((b, i) => (b.selectable ? i : -1)).filter((i) => i >= 0);
+	const cursorBlock = selectableIndexes[cursor] ?? 0;
+	const linesBetween = (from: number, to: number) => blocks.slice(from, to + 1).reduce((n, b) => n + b.lines.length, 0);
+	let start = 0;
+	while (start < cursorBlock && linesBetween(start, cursorBlock) > budget) start++;
+	const lines: string[] = [];
+	let index = start;
+	for (; index < blocks.length; index++) {
+		if (lines.length > 0 && lines.length + blocks[index].lines.length > budget) break;
+		lines.push(...blocks[index].lines);
+	}
+	return { lines, more: blocks.length - index };
+}
+
+/**
+ * Split a row into a left half padded against a right-aligned annotation
+ * (two-space gap), fusing into one cut line when the left share would drop
+ * below readability. The single home of this layout rule — strip rows, pane
+ * rows, and transcript headers all build on it.
+ */
+export function splitRow(left: string, right: string, width: number): { fused: string } | { left: string; right: string } {
+	const rightWidth = visibleWidth(right);
+	const leftWidth = width - rightWidth - 2;
+	if (rightWidth === 0 || leftWidth < 8) return { fused: cutPlainText(`${left}  ${right}`.trimEnd(), width) };
+	return { left: padPlainText(left, leftWidth), right };
+}
+
+/** splitRow flattened to one plain string, exactly `width` wide. */
+export function splitCell(left: string, right: string, width: number): string {
+	const row = splitRow(left, right, width);
+	return "fused" in row ? padPlainText(row.fused, width) : `${row.left}  ${row.right}`;
+}
+
+/** Hard-wrap plain text to `width` terminal columns, preserving blank lines. */
+export function wrapPlainText(text: string, width: number): string[] {
+	const columns = Math.max(1, width);
+	const out: string[] = [];
+	for (const raw of text.replace(/\r\n/g, "\n").split("\n")) {
+		if (raw.length === 0) out.push("");
+		else out.push(...hardWrapColumns(raw, columns));
+	}
+	return out;
+}
+
+/**
+ * Word-aware wrap for prose (task text, assistant text, the dim transcript lines, a plan): breaks at spaces,
+ * hard-breaking only words longer than the width; preserves blank lines. A
+ * line's leading indent stays and its continuation lines hang under it (a
+ * nested list, an indented code line), unless the indent takes half the width.
+ * Plain text in, plain lines out — painting happens after, per line.
+ */
+export function wrapProse(text: string, width: number): string[] {
+	const columns = Math.max(1, width);
+	const out: string[] = [];
+	for (const raw of text.replace(/\r\n/g, "\n").split("\n")) {
+		if (raw.trim() === "") {
+			out.push("");
+			continue;
+		}
+		const lead = /^[ \t]*/.exec(raw)![0];
+		const indent = lead.replace(/\t/g, "  ");
+		const hang = visibleWidth(indent) * 2 < columns ? indent : "";
+		const room = columns - visibleWidth(hang);
+		const push = (part: string) => out.push(`${hang}${part}`);
+		let line = "";
+		for (const word of raw.slice(lead.length).split(" ")) {
+			if (visibleWidth(word) > room) {
+				// A word wider than the screen (path, hash): flush, then hard-break it.
+				// The last chunk becomes the running line so later words can join it.
+				if (line) push(line);
+				const chunks = hardWrapColumns(word, room);
+				line = chunks.pop() ?? "";
+				for (const chunk of chunks) push(chunk);
+				continue;
+			}
+			const candidate = line ? `${line} ${word}` : word;
+			if (visibleWidth(candidate) > room) {
+				push(line);
+				line = word;
+			} else {
+				line = candidate;
+			}
+		}
+		push(line);
+	}
+	return out;
+}
+
+/**
+ * Cut a painted line to `width` terminal columns without splitting ANSI escape
+ * sequences or a wide/emoji grapheme, ending with an ellipsis and a reset so
+ * truncation cannot leak a colour into the next line. pi-tui *crashes* the
+ * whole app on an overwide line ("Rendered line exceeds terminal width") — and
+ * it measures columns, not code points: a CJK ideograph or an emoji is two
+ * columns wide (findings/TUI-REVIEW H1). It only validates a component when its
+ * output changes, so an overflow can hide in static content for weeks, then
+ * kill pi the moment something makes it re-render.
+ */
+export function truncateLine(line: string, width: number): string {
+	if (width <= 0) return "";
+	if (visibleWidth(line) <= width) return line;
+	// Reserve one column for the ellipsis (itself width 1).
+	const { text } = fitPainted(line, Math.max(0, width - 1));
+	return `${text}\x1b[0m…`;
+}
+
+/**
+ * Wrap a line-producing function as a component; lines are width-truncated.
+ *
+ * The result is memoized by width: pi-tui calls every mounted component's
+ * `render(width)` on every frame (findings §15), while any state change makes
+ * pi re-invoke the renderer factory and mint a fresh component — so within one
+ * component's lifetime `build` is pure and the cache can only go stale through
+ * `invalidate()` (theme swap), which clears it.
+ */
+export function linesComponent(build: (width: number) => string[]): TuiComponent {
+	const cache = new Map<number, string[]>();
+	return {
+		render(width: number): string[] {
+			const hit = cache.get(width);
+			if (hit) return hit;
+			const lines = build(width).map((line) => truncateLine(line, width));
+			if (cache.size >= 4) cache.clear(); // resizes produce a few widths, never many
+			cache.set(width, lines);
+			return lines;
+		},
+		invalidate() {
+			cache.clear();
+		},
+	};
+}
+
+/**
+ * A dim transcript line led by a dim mark ("✻ Cooked for 5m 12s",
+ * "※ recap: …") — the shared shape behind the turn-duration and recap
+ * display-only entries. Text wider than the terminal word-wraps under itself
+ * (a hanging indent past the mark) instead of being cut at the edge.
+ * Width-memoized via linesComponent.
+ */
+export function dimMarkedLine(theme: unknown, mark: string, text: string): TuiComponent {
+	const paint = safeThemePaint(theme);
+	return linesComponent((width) => {
+		const indent = visibleWidth(mark) + 1;
+		return wrapProse(text, width - indent).map((line, index) => `${index === 0 ? paint("dim", mark) : " ".repeat(indent - 1)} ${paint("dim", line)}`);
+	});
+}
+
+/**
+ * Params commonly carrying the human-meaningful part of a tool call, in
+ * priority order. Used when a tool does not supply its own `title`.
+ */
+const PRIMARY_ARG_KEYS = [
+	"command",
+	"query",
+	"url",
+	"path",
+	"file_path",
+	"skill",
+	"pattern",
+	"task_id",
+	"taskId",
+	"id",
+	"agent",
+	"name",
+	"action",
+	"subject",
+	"description",
+	"prompt",
+	"task",
+] as const;
+
+/** Collapse whitespace/newlines so a summary always fits on one line (control characters removed). */
+function oneLine(text: string, max = 96): string {
+	const flat = sanitizeDisplayText(text).replace(/\s+/g, " ").trim();
+	return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+/**
+ * One-line summary of a tool's arguments for the call line. Picks the first
+ * well-known primary key present, else the first string value; returns "" for
+ * empty/absent args (streaming tool calls render before args are complete).
+ */
+export function summarizeArgs(args: unknown): string {
+	if (typeof args === "string") return oneLine(args);
+	if (!args || typeof args !== "object") return "";
+	const record = args as Record<string, unknown>;
+	for (const key of PRIMARY_ARG_KEYS) {
+		const value = record[key];
+		if (typeof value === "string" && value.trim()) return oneLine(value);
+		if (typeof value === "number") return String(value);
+	}
+	for (const value of Object.values(record)) {
+		if (typeof value === "string" && value.trim()) return oneLine(value);
+	}
+	return "";
+}
+
+export const EXPAND_HINT = "ctrl+o to expand";
+
+/**
+ * The hint for collapsed output: the user's key for pi's `app.tools.expand`
+ * where pi (1.5.0 on) injects `keyText` into the render context or the message
+ * renderer's options, so a rebound key shows as bound; null when the action
+ * has no key (no hint beats a wrong one; null, since an undefined argument
+ * would take a parameter's default); `EXPAND_HINT` on an older pi.
+ */
+export function expandHintFor(source: unknown): string | null {
+	const keyText = (source as { keyText?: unknown } | undefined)?.keyText;
+	if (typeof keyText !== "function") return EXPAND_HINT;
+	const key = boundKey((binding) => (keyText as (binding: string) => unknown).call(source, binding), "app.tools.expand", "ctrl+o");
+	return key ? `${key} to expand` : null;
+}
+
+/** The user's key for a pi binding (pi's `keyText`): `fallback` without `keyText`, when it throws or returns a non-string; null when unbound. */
+export function boundKey(keyText: ((binding: string) => unknown) | undefined, binding: string, fallback: string): string | null {
+	if (!keyText) return fallback;
+	try {
+		const key = keyText(binding);
+		return typeof key === "string" ? key || null : fallback;
+	} catch {
+		return fallback;
+	}
+}
+
+/** The hint as a trailer's tail: ` (hint)` or `, hint`, nothing when there is no key. */
+export function hintSuffix(hint: string | null, form: "paren" | "comma"): string {
+	if (!hint) return "";
+	return form === "paren" ? ` (${hint})` : `, ${hint}`;
+}
+
+/** An omitted hint is `EXPAND_HINT`; null stays null (no key). */
+const hintOrDefault = (hint: string | null | undefined): string | null => (hint === undefined ? EXPAND_HINT : hint);
+
+/** Split result text into shown lines + hidden count for the collapsed view. */
+export function collapseLines(
+	text: string,
+	expanded: boolean,
+	maxCollapsed = 5,
+): { lines: string[]; hidden: number } {
+	const lines = text.replace(/\s+$/, "").split("\n");
+	if (expanded || lines.length <= maxCollapsed) return { lines, hidden: 0 };
+	return { lines: lines.slice(0, maxCollapsed), hidden: lines.length - maxCollapsed };
+}
+
+/** Status → bullet color for the call line. */
+export function bulletColor(isPartial: boolean, isError: boolean): string {
+	if (isPartial) return "muted";
+	return isError ? "error" : "success";
+}
+
+/**
+ * Theme tokens the running-call bullet breathes through, giving the ● a pulse
+ * while the tool is in flight: a clay flash rises out of the greys once per
+ * cycle, reading as a heartbeat. Ends on the static success/error bullet.
+ */
+export const SPINNER_COLORS = ["dim", "muted", "accent", "muted"] as const;
+/** Bullet pulse tick; ~1.2s per full breath (4 frames), a calm heartbeat well clear of pi's 80ms spinner. */
+export const SPINNER_INTERVAL_MS = 300;
+
+/** Persistent per-tool-row spinner state, stored on `context.state`. */
+interface SpinnerState {
+	frame: number;
+	timer: ReturnType<typeof setInterval> | undefined;
+}
+
+/** The subset of a tool render context the bullet pulse needs. */
+export interface SpinnerContext {
+	isPartial: boolean;
+	/** Wired to `ui.requestRender()` in the live TUI; absent in unit stubs. */
+	invalidate?: () => void;
+	/** Persistent per-row store; absent in unit stubs. */
+	state?: { ccSpinner?: SpinnerState };
+}
+
+/**
+ * Bullet colour for the call line, driving the running-call pulse. pi re-invokes
+ * `renderCall` on every `invalidate()` with a fresh context, and `context.state`
+ * is the same object across a tool row's lifetime — so the frame counter and the
+ * interval handle live there. While `isPartial`, a lone interval advances the
+ * frame and calls `context.invalidate()` to repaint; it self-terminates the moment
+ * `isPartial` flips false, because `renderCall` components get no dispose hook
+ * (findings §3). Returns `undefined` when idle so `callLine` uses its static
+ * success/error bullet. Call once per `renderCall`, not per `render(width)`.
+ */
+export function spinnerBulletColor(context: SpinnerContext): string | undefined {
+	// No persistent state (or no way to repaint) → no animation; fall back to the
+	// static bullet. tool-execution.ts always supplies both in the live TUI.
+	const state = context.state;
+	const invalidate = context.invalidate;
+	if (!state || typeof invalidate !== "function") return undefined;
+	if (!context.isPartial) {
+		if (state.ccSpinner?.timer) {
+			clearInterval(state.ccSpinner.timer);
+			state.ccSpinner.timer = undefined;
+		}
+		return undefined;
+	}
+	const spinner = (state.ccSpinner ??= { frame: 0, timer: undefined });
+	if (!spinner.timer) {
+		spinner.timer = setInterval(() => {
+			spinner.frame = (spinner.frame + 1) % SPINNER_COLORS.length;
+			invalidate();
+		}, SPINNER_INTERVAL_MS);
+	}
+	return SPINNER_COLORS[spinner.frame];
+}
+
+/**
+ * `● Label(summary)` — the call line. `bulletColorOverride` (from
+ * `spinnerBulletColor`) paints the running-call pulse; omit it for the static
+ * status colour.
+ */
+export function callLine(
+	theme: ThemeLike,
+	label: string,
+	summary: string,
+	isPartial: boolean,
+	isError: boolean,
+	bulletColorOverride?: string,
+): string {
+	const bullet = theme.fg(bulletColorOverride ?? bulletColor(isPartial, isError), "●");
+	// A label can carry an MCP server's or tool's own name, a summary the model's arguments.
+	const name = theme.bold(sanitizeDisplayText(label));
+	const shown = sanitizeDisplayText(summary);
+	return shown ? `${bullet} ${name}(${theme.fg("muted", shown)})` : `${bullet} ${name}`;
+}
+
+/**
+ * `  ⎿  line…` — the result lines. First line carries the elbow, the rest are
+ * aligned under it; a `… +N lines` trailer advertises ctrl+o when collapsed.
+ * The text is a tool's output (a shell, an MCP server, a web page), so its
+ * escape sequences and control characters are removed before it is painted.
+ */
+export function resultLines(theme: ThemeLike, text: string, expanded: boolean, isError: boolean, opts: { maxCollapsed?: number; hint?: string | null } = {}): string[] {
+	const { lines, hidden } = collapseLines(sanitizeDisplayText(text), expanded, opts.maxCollapsed ?? 5);
+	const color = isError ? "error" : "muted";
+	const out = lines.map((line, i) => (i === 0 ? `  ⎿  ${theme.fg(color, line)}` : `     ${theme.fg(color, line)}`));
+	if (hidden > 0) out.push(`     ${theme.fg("dim", `… +${hidden} lines${hintSuffix(hintOrDefault(opts.hint), "paren")}`)}`);
+	return out;
+}
+
+/** Join a tool result's text blocks into one string. */
+export function textContent(result: { content?: Array<{ type: string; text?: string }> }): string {
+	if (!result?.content) return "";
+	return result.content
+		.filter((block) => block.type === "text" && typeof block.text === "string")
+		.map((block) => block.text as string)
+		.join("\n")
+		.trim();
+}
+
+/** The file operation a rejected file tool names: "User rejected write to …", "User rejected update to …". */
+export type RejectedFileOp = "write" | "update";
+
+/** Claude Code's transcript line for a call the user rejected with a reason, or for a tool with no line of its own. */
+export const TOOL_USE_REJECTED = "Tool use rejected";
+
+/**
+ * A file tool's `path` for the transcript, as Claude Code shows it: relative to
+ * the working directory when it is absolute, as the model wrote it otherwise.
+ */
+export function displayToolPath(raw: string, cwd: string | undefined): string {
+	if (!cwd || !isAbsolute(raw)) return raw;
+	return relative(cwd, raw) || raw;
+}
+
+/**
+ * The result line for a call the user rejected, or undefined when the result
+ * is not a rejection. The model reads the whole rejection text; the transcript
+ * shows Claude Code's short line instead: "User rejected write to <path>" for a
+ * file tool rejected without a reason, "Tool use rejected" otherwise. A
+ * rejection without a reason also stops the turn, and the turn's own
+ * "Interrupted" line follows it.
+ */
+export function rejectionLine(
+	theme: ThemeLike,
+	result: { content?: Array<{ type: string; text?: string }> },
+	isError: boolean,
+	file?: { op: RejectedFileOp; path: string | undefined },
+): string | undefined {
+	if (!isError) return undefined;
+	const kind = userDenialKind(textContent(result));
+	if (!kind) return undefined;
+	if (kind === "stop" && file?.path) return `  ⎿  ${rejectedFileHead(theme, file.op, file.path)}`;
+	return `  ⎿  ${theme.fg("dim", TOOL_USE_REJECTED)}`;
+}
+
+/** "User rejected <op> to <path>", dimmed with the path in bold: a file tool's reasonless rejection, before the `⎿` elbow. */
+export function rejectedFileHead(theme: ThemeLike, op: RejectedFileOp, path: string): string {
+	return `${theme.fg("dim", `User rejected ${op} to `)}${theme.bold(theme.fg("dim", sanitizeDisplayText(path)))}`;
+}
+
+export interface CcRenderSpec<TArgs = unknown, TDetails = unknown> {
+	/** One-line arg summary shown in parentheses. Default: `summarizeArgs`. */
+	title?: (args: TArgs | undefined) => string | undefined;
+	/**
+	 * Result text to display (still collapsed/expanded by the shared logic).
+	 * Default: the result's text content. Return "" to hide the result block.
+	 */
+	result?: (
+		result: { content: Array<{ type: string; text?: string }>; details?: TDetails },
+		args: TArgs | undefined,
+		isError: boolean,
+	) => string | undefined;
+	/** Lines shown before the `… +N lines` trailer kicks in. Default 5. */
+	maxCollapsedLines?: number;
+	/**
+	 * Already-painted text (an OSC 8 hyperlink, say) appended to the first
+	 * result line after the result is sanitized. Build it only from values the
+	 * tool controls, never from its output: nothing strips its escapes.
+	 */
+	link?: (result: { details?: TDetails }, isError: boolean) => string | undefined;
+}
+
+/**
+ * renderShell/renderCall/renderResult for `pi.registerTool` — spread into the
+ * definition: `...ccToolRenderers("Task Output", { title: (a) => a?.task_id })`.
+ *
+ * Renderers must never throw (pi silently swaps in its verbose fallback), so
+ * everything user-supplied is guarded.
+ */
+export function ccToolRenderers<TArgs = any, TDetails = any>(
+	label: string,
+	spec: CcRenderSpec<TArgs, TDetails> = {},
+): {
+	renderShell: "self";
+	renderCall: (args: TArgs, theme: any, context: any) => TuiComponent;
+	renderResult: (result: any, options: { expanded: boolean; isPartial: boolean }, theme: any, context: any) => TuiComponent;
+} {
+	const titleOf = (args: TArgs | undefined): string => {
+		try {
+			const custom = spec.title?.(args);
+			if (custom !== undefined) return oneLine(custom);
+		} catch {
+			// fall through to the generic summary
+		}
+		return summarizeArgs(args);
+	};
+
+	return {
+		renderShell: "self",
+		renderCall(args: TArgs, theme: ThemeLike, context: { isPartial: boolean; isError: boolean } & SpinnerContext) {
+			const bulletOverride = spinnerBulletColor(context);
+			return linesComponent(() => [callLine(theme, label, titleOf(args), context.isPartial, context.isError, bulletOverride)]);
+		},
+		renderResult(
+			result: { content: Array<{ type: string; text?: string }>; details?: TDetails },
+			options: { expanded: boolean; isPartial: boolean },
+			theme: ThemeLike,
+			context: { args?: TArgs; isError: boolean },
+		) {
+			const stripped = stripReminderBlocks(result);
+			const rejected = rejectionLine(theme, stripped, context.isError);
+			if (rejected) return linesComponent(() => [rejected]);
+			let text: string | undefined;
+			try {
+				text = spec.result?.(result, context.args, context.isError);
+			} catch {
+				text = undefined;
+			}
+			text ??= textContent(stripped);
+			if (!text) return linesComponent(() => []);
+			let link: string | undefined;
+			try {
+				link = spec.link?.(result, context.isError);
+			} catch {
+				link = undefined;
+			}
+			return linesComponent((width) => {
+				const lines = resultLines(theme, text, options.expanded, context.isError, { maxCollapsed: spec.maxCollapsedLines, hint: expandHintFor(context) });
+				if (link && lines.length > 0) {
+					// Truncation drops a cut link's closing escape and leaves the
+					// hyperlink open, so a link that does not fit goes in as plain text.
+					const joined = `${lines[0]} ${link}`;
+					lines[0] = visibleWidth(joined) <= width ? joined : `${lines[0]} ${sanitizeDisplayText(link)}`;
+				}
+				return lines;
+			});
+		},
+	};
+}
+
+/** True when a line is visually empty — ANSI codes (Box padding paints) don't count as content. */
+export function isBlankLine(line: string): boolean {
+	return line.replace(/\x1b\[[0-9;]*m/g, "").trim() === "";
+}
+
+/** Indent a component's lines under a `⎿` elbow, CC-style. */
+export function elbowIndent(lines: string[]): string[] {
+	const trimmed = [...lines];
+	while (trimmed.length > 0 && isBlankLine(trimmed[0])) trimmed.shift();
+	return trimmed.map((line, i) => (i === 0 ? `  ⎿  ${line}` : `     ${line}`));
+}
+
+export interface CcWrapOptions<TArgs = any> {
+	/** One-line arg summary for the call line. Default: `summarizeArgs`. */
+	title?: (args: TArgs | undefined) => string | undefined;
+	/**
+	 * Keep the base call component and only replace its first (header) line
+	 * with the `●` call line — for tools whose call component carries real
+	 * content below the header (edit's diff preview, shown before approval).
+	 */
+	keepBaseCall?: boolean;
+	/** A file tool: a rejection without a reason reads "User rejected <op> to <path>" (the path from `title`). */
+	rejectedAs?: RejectedFileOp;
+}
+
+/**
+ * Wrap a pi built-in tool's renderers in the `●`/`⎿` language while keeping
+ * the base result component — its streaming, truncation, and ctrl+o expansion
+ * behavior is upstream's and better than a reimplementation. Inner components
+ * are stored on `context.state` rather than returned as `lastComponent`,
+ * because base renderers cast `lastComponent` to their own concrete classes
+ * and would throw on our wrapper.
+ */
+/**
+ * One harness block as it is written into a stored tool result: the
+ * `<system-reminder>` frame, the raw `<total_tokens>` budget line, the raw
+ * `<new-diagnostics>` block. Model-facing only; every transcript view strips
+ * them (Claude Code shows none of these to the user).
+ */
+const HARNESS_BLOCK = String.raw`<system-reminder>[\s\S]*?</system-reminder>|<total_tokens>[^<]*</total_tokens>|<new-diagnostics>[\s\S]*?</new-diagnostics>`;
+/** A text block that IS a harness block (the injector appends them as blocks of their own). */
+const HARNESS_BLOCK_ONLY = new RegExp(String.raw`^\s*(?:${HARNESS_BLOCK})\s*$`);
+/** A run of harness blocks at the END of a text block (the same bytes after a merge or a `suffix`). */
+const HARNESS_TAIL = new RegExp(String.raw`(?:\s*(?:${HARNESS_BLOCK}))+\s*$`);
+
+/**
+ * Display text with the harness blocks that were appended to it removed. Only
+ * a block that stands alone or closes the text is stripped — never one quoted
+ * in the middle of real output (a file that documents these tags reads back
+ * intact). Returns "" when nothing but harness blocks remained.
+ */
+export function stripHarnessText(text: string): string {
+	if (HARNESS_BLOCK_ONLY.test(text)) return "";
+	return text.replace(HARNESS_TAIL, "");
+}
+
+/**
+ * A tool result with the harness blocks removed from its content, for display.
+ * One-shot reminders are persisted into the stored result (system-reminder
+ * extension) as text blocks of their own; the model must see them, the
+ * transcript view must not — Claude Code hides them the same way. A text block
+ * that ends in harness blocks keeps its own text and loses the tail.
+ */
+export function stripReminderBlocks<T extends { content?: unknown }>(result: T): T {
+	const content = result?.content;
+	if (!Array.isArray(content)) return result;
+	let changed = false;
+	const kept: unknown[] = [];
+	for (const block of content) {
+		const text = block && typeof block === "object" && (block as any).type === "text" ? (block as any).text : undefined;
+		if (typeof text !== "string") {
+			kept.push(block);
+			continue;
+		}
+		const stripped = stripHarnessText(text);
+		if (stripped === text) {
+			kept.push(block);
+			continue;
+		}
+		changed = true;
+		if (stripped !== "") kept.push({ ...(block as object), text: stripped });
+	}
+	return changed ? { ...result, content: kept } : result;
+}
+
+/**
+ * The context pi's built-in renderers get under the wrapper. pi 1.1.0 added
+ * two fields that would change our rows: the shell's `durationMs` prints a
+ * "Took Ns" line Claude Code's rows do not have, and `outputPad` sets the edit
+ * preview's and diff's indent. Hide the first and pin the second to the 1 pi
+ * hard-coded before, so a row looks the same on every pi and setting.
+ */
+function baseContext(context: any, lastComponent: unknown): any {
+	return { ...context, durationMs: undefined, outputPad: 1, lastComponent };
+}
+
+export function ccWrapBuiltinRenderers<TArgs = any>(
+	label: string,
+	base: {
+		renderCall?: (args: any, theme: any, context: any) => any;
+		renderResult?: (result: any, options: any, theme: any, context: any) => any;
+	},
+	opts: CcWrapOptions<TArgs> = {},
+): {
+	renderShell: "self";
+	renderCall: (args: TArgs, theme: any, context: any) => TuiComponent;
+	renderResult: (result: any, options: { expanded: boolean; isPartial: boolean }, theme: any, context: any) => TuiComponent;
+} {
+	const rawTitle = (args: TArgs | undefined): string | undefined => {
+		try {
+			return opts.title?.(args);
+		} catch {
+			return undefined;
+		}
+	};
+	const titleOf = (args: TArgs | undefined): string => {
+		const custom = rawTitle(args);
+		return summarizeArgs(custom !== undefined ? custom : args);
+	};
+
+	return {
+		renderShell: "self",
+		renderCall(args: TArgs, theme: ThemeLike, context: any) {
+			const bulletOverride = spinnerBulletColor(context);
+			const head = () => callLine(theme, label, titleOf(args), context.isPartial, context.isError, bulletOverride);
+			if (!opts.keepBaseCall || !base.renderCall) {
+				return linesComponent(() => [head()]);
+			}
+			let inner: any;
+			try {
+				inner = base.renderCall(args, theme, baseContext(context, context.state.ccInnerCall));
+				context.state.ccInnerCall = inner;
+			} catch {
+				return linesComponent(() => [head()]);
+			}
+			// Memoized by width for settled calls (same contract as linesComponent);
+			// a partial call streams through its base component, so it stays live.
+			const cache = new Map<number, string[]>();
+			return {
+				render(width: number): string[] {
+					const hit = !context.isPartial && cache.get(width);
+					if (hit) return hit;
+					// The base component is a padded Box: skip its blank padding
+					// (painted lines — ANSI-aware test), then its header line —
+					// ours replaces it.
+					const lines: string[] = [...(inner.render(width) ?? [])];
+					while (lines.length > 0 && isBlankLine(lines[0])) lines.shift();
+					lines.shift();
+					const out = [head(), ...lines].map((line) => truncateLine(line, width));
+					if (cache.size >= 4) cache.clear();
+					cache.set(width, out);
+					return out;
+				},
+				invalidate() {
+					cache.clear();
+					inner.invalidate?.();
+				},
+			};
+		},
+		renderResult(rawResult: any, options: { expanded: boolean; isPartial: boolean }, theme: ThemeLike, context: any) {
+			const result = stripReminderBlocks(rawResult);
+			const path = rawTitle(context.args);
+			const rejected = rejectionLine(theme, result, context.isError, opts.rejectedAs && {
+				op: opts.rejectedAs,
+				path: path ? displayToolPath(path, context.cwd) : undefined,
+			});
+			if (rejected) return linesComponent(() => [rejected]);
+			let inner: any;
+			try {
+				inner = base.renderResult?.(result, options, theme, baseContext(context, context.state.ccInnerResult));
+				context.state.ccInnerResult = inner;
+			} catch {
+				inner = undefined;
+			}
+			if (!inner) {
+				const text = textContent(result);
+				if (!text) return linesComponent(() => []);
+				return linesComponent(() => resultLines(theme, text, options.expanded, context.isError, { hint: expandHintFor(context) }));
+			}
+			// Same memoization as the call wrapper: settled results are static.
+			const cache = new Map<number, string[]>();
+			return {
+				render(width: number): string[] {
+					const hit = !options.isPartial && cache.get(width);
+					if (hit) return hit;
+					const innerLines: string[] = inner.render(Math.max(10, width - 5)) ?? [];
+					const out = innerLines.every((line) => line.trim() === "")
+						? []
+						: elbowIndent(innerLines).map((line) => truncateLine(line, width));
+					if (cache.size >= 4) cache.clear();
+					cache.set(width, out);
+					return out;
+				},
+				invalidate() {
+					cache.clear();
+					inner.invalidate?.();
+				},
+			};
+		},
+	};
+}
+
+/** Text of a CustomMessage's content (string or text-block array). */
+export function customMessageText(content: unknown): string {
+	if (typeof content === "string") return content;
+	if (Array.isArray(content)) {
+		return content
+			.map((block) => (block && typeof block === "object" && (block as any).type === "text" ? ((block as any).text ?? "") : ""))
+			.join("\n");
+	}
+	return String(content ?? "");
+}
+
+/** `Sep 11 12:03pm` — the time stamp on Claude Code's "Running scheduled task" line. */
+export function formatFireTime(ms: number): string {
+	const d = new Date(ms);
+	const month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getMonth()];
+	const hours = d.getHours();
+	const h12 = hours % 12 === 0 ? 12 : hours % 12;
+	const minutes = String(d.getMinutes()).padStart(2, "0");
+	return `${month} ${d.getDate()} ${h12}:${minutes}${hours < 12 ? "am" : "pm"}`;
+}
+
+/**
+ * A fired wakeup or loop tick in the transcript: Claude Code's dim
+ * `✻ Running scheduled task (Sep 11 12:03pm)` line, the prompt itself under it
+ * on ctrl+o (the prompt is the turn's input, verbatim — findings §21).
+ */
+export function scheduledTaskComponent(theme: ThemeLike, prompt: string, firedAt: number, expanded: boolean, opts: { label?: string; suffix?: string; hint?: string | null } = {}): TuiComponent {
+	const lines = sanitizeDisplayText(prompt).trim().split("\n");
+	const headline = `${opts.label ?? "Running scheduled task"} (${formatFireTime(firedAt)})${opts.suffix ?? ""}`;
+	const hint = hintOrDefault(opts.hint);
+	return linesComponent(() => {
+		if (!expanded) {
+			return [`${theme.fg("dim", "✻")} ${theme.fg("dim", headline)}${theme.fg("dim", ` (+${lines.length} lines${hintSuffix(hint, "comma")})`)}`];
+		}
+		return [`${theme.fg("dim", "✻")} ${theme.fg("dim", headline)}`, ...lines.map((l) => `  ${theme.fg("muted", l)}`)];
+	});
+}
+
+/**
+ * Compact transcript rendering for harness-injected messages (background
+ * completions, subagent replies and reports, monitor batches): one dim headline
+ * per frame collapsed, each with its own "+N lines" hint, the bodies on ctrl+o.
+ * A coalesced message (several frames arriving together) therefore lists one
+ * line per event, the way the events would read had they arrived apart. The
+ * wire frames (`<task-notification>`, the agent-message envelope) are
+ * model-only; `parseNotificationFrames` takes them apart for display.
+ */
+/** An agent task's `<summary>`: `Agent "<description>" finished` / `failed: …` / `was stopped…` (findings §24). */
+function isAgentCompletion(summary: string): boolean {
+	return summary.startsWith('Agent "');
+}
+
+/**
+ * A notification that opens a session's first turn goes out as a user message
+ * (lib/notify/notifications.ts, "First turn of a session"), and pi draws a user
+ * message as markdown with no per-message renderer, so the wire frames would
+ * show in full. This is that message's display text: the headlines
+ * `notificationComponent` shows collapsed, one paragraph per frame, without
+ * the expand hint (a user message does not expand). `undefined` when the text
+ * is not wholly harness frames, so a real prompt renders as typed.
+ */
+export function notificationUserMarkdown(text: string): string | undefined {
+	// Every user message renders through here: a typed prompt skips the parse.
+	if (!text.includes("<task-notification>") && !text.includes("<agent-message ")) return undefined;
+	const parsed = parseNotificationFrames(sanitizeDisplayText(text));
+	if (parsed.length === 0 || parsed.some((frame) => frame.kind === "text")) return undefined;
+	const frames = parsed.filter((frame) => !(frame.kind === "task" && frame.pointer));
+	return (frames.length > 0 ? frames : parsed)
+		.map((frame) => {
+			if (frame.kind === "agent-message") return `› Message from @${frame.from}`;
+			if (frame.kind === "task" && isAgentCompletion(frame.summary)) {
+				const took = frame.durationMs === undefined ? "" : ` · ${formatDuration(0, frame.durationMs)}`;
+				return `● ${oneLine(frame.summary)}${took}`;
+			}
+			return frame.kind === "task" ? `✳ ${oneLine(frame.summary)}` : "";
+		})
+		.join("\n\n");
+}
+
+/**
+ * `agentName` names the agent a message comes from (its task id is the
+ * wire address): the headline reads `› Message from @<name>`, falling back to
+ * the address when the name is unknown.
+ */
+export function notificationComponent(theme: ThemeLike, text: string, expanded: boolean, opts: { agentName?: (from: string) => string | undefined; hint?: string | null } = {}): TuiComponent {
+	const { agentName } = opts;
+	const expandHint = hintOrDefault(opts.hint);
+	// An agent's completion pointer says nothing the message above it does not;
+	// CC's transcript shows the message alone. Bodies carry shell output and
+	// agent replies, so control characters are removed before parsing.
+	const parsed = parseNotificationFrames(sanitizeDisplayText(text));
+	const frames = parsed.filter((frame) => !(frame.kind === "task" && frame.pointer));
+	if (frames.length === 0) frames.push({ kind: "text", text: framesToText(parsed) });
+	const dim = (s: string) => theme.fg("dim", s);
+	const muted = (s: string) => theme.fg("muted", s);
+	// pi's custom-message shell already prepends a spacer — emit content only.
+	return linesComponent((width) => {
+		const out: string[] = [];
+		// Body lines wrap to the terminal (CC wraps its long preamble line) rather
+		// than being cut; continuation lines start at column 0, as CC's do.
+		const body = (lines: string[]) => lines.flatMap((l) => wrapPlainText(`  ${l}`, width).map((w) => muted(w)));
+		const hint = (lines: string[]) => (lines.length > 0 ? dim(` (+${lines.length} lines${hintSuffix(expandHint, "comma")})`) : "");
+		for (const frame of frames) {
+			if (frame.kind === "agent-message") {
+				// Claude Code's look: `› Message from @ID (ctrl+o to expand)` collapsed;
+				// the header, then the body as delivered (preamble, indented report),
+				// indented under it, when expanded. The guard is never shown.
+				const bodyLines = frame.body.split("\n");
+				const sender = agentName?.(frame.from) ?? frame.from;
+				if (expanded) out.push(dim(`› Message from ${sender}`), ...body(bodyLines));
+				else out.push(dim(`› Message from @${sender}`) + hint(bodyLines));
+				continue;
+			}
+			if (frame.kind === "task" && isAgentCompletion(frame.summary)) {
+				// Claude Code 2.1.283's line for an agent's turn: `⏺ Agent "<desc>"
+				// finished · 3s`, the dot tinted by outcome, no expand hint (findings
+				// §40). ctrl+o still shows the report under it.
+				const dot = theme.fg(frame.status === "failed" ? "error" : frame.status === "completed" ? "success" : "dim", "●");
+				const took = frame.durationMs === undefined ? "" : dim(` · ${formatDuration(0, frame.durationMs)}`);
+				out.push(`${dot} ${oneLine(frame.summary)}${took}`);
+				if (expanded && frame.body) out.push(...body(frame.body.split("\n")));
+				continue;
+			}
+			const headline = frame.kind === "task" ? frame.summary : oneLine(frame.text.split("\n")[0] ?? "");
+			const bodyLines = frame.kind === "task" ? (frame.body ? frame.body.split("\n") : []) : frame.text.split("\n").slice(1);
+			const head = `${dim("✳")} ${muted(theme.italic(oneLine(headline)))}`;
+			if (expanded) out.push(head, ...body(bodyLines));
+			else out.push(head + hint(bodyLines));
+		}
+		return out;
+	});
+}

@@ -1,6 +1,6 @@
 /**
  * Key decoding for the /plugins panel (pure), named through
- * `lib/key-input.ts` so every terminal encoding of a key decodes alike.
+ * `lib/ui/key-input.ts` so every terminal encoding of a key decodes alike.
  *
  * Navigation keys are always controls; any other printable input is a `text`
  * intent the state layer routes (search box, Add Marketplace draft, or a
@@ -8,7 +8,7 @@
  * escape sequences are swallowed so they never leak into a draft.
  */
 
-import { keyId, keyText } from "../../lib/key-input.ts";
+import { keyId, keyText } from "../../lib/ui/key-input.ts";
 
 export type PanelKey =
 	| { kind: "up" | "down" | "pageUp" | "pageDown" | "nextTab" | "prevTab" | "enter" | "back" | "space" | "backspace" | "close" }

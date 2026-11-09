@@ -12,26 +12,26 @@
  *     ./install. All layout/key logic is pure in ./panel; this file owns
  *     mutable state, async marketplace/install work, and repaints.
  *
- * Every write goes to the One Code plugin root (lib/plugin-root.ts) —
+ * Every write goes to the One Code plugin root (lib/plugins/plugin-root.ts) —
  * ~/.claude is read-only here, always.
  */
 
-import { brand } from "../lib/brand.mjs";
-import { feature } from "../lib/feature.ts";
+import { brand } from "../lib/profile/brand.mjs";
+import { feature } from "../lib/profile/feature.ts";
 import { randomUUID } from "node:crypto";
 import { readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readFavorites, toggleFavorite } from "./favorites.ts";
-import { announceArgumentHint, type CommandHint, frontmatterCommandHint } from "../lib/argument-hints.ts";
-import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../lib/mcp-status.ts";
-import { canShowCustomUi, notifyOrPrint, notifyRpcReadOnly } from "../lib/headless-output.ts";
-import { createUserMessageSender, sessionOutlivesTurn } from "../lib/notifications.ts";
-import { ONE_SHOT_COMMAND_FAILED_CHANNEL } from "../lib/interrupt.ts";
-import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
-import { setOverride } from "../lib/plugin-overrides.ts";
-import { pathWithinBase, pluginRoot } from "../lib/plugin-root.ts";
+import { announceArgumentHint, type CommandHint, frontmatterCommandHint } from "../lib/ui/argument-hints.ts";
+import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../lib/plugins/mcp-status.ts";
+import { canShowCustomUi, notifyOrPrint, notifyRpcReadOnly } from "../lib/notify/headless-output.ts";
+import { createUserMessageSender, sessionOutlivesTurn } from "../lib/notify/notifications.ts";
+import { ONE_SHOT_COMMAND_FAILED_CHANNEL } from "../lib/notify/interrupt.ts";
+import { persistIfLarge, sessionResultsDir } from "../lib/request/persisted-output.ts";
+import { setOverride } from "../lib/plugins/plugin-overrides.ts";
+import { pathWithinBase, pluginRoot } from "../lib/plugins/plugin-root.ts";
 import {
 	defaultDiscoverRoots,
 	type DiscoveredPlugins,
@@ -40,11 +40,11 @@ import {
 	invalidatePluginsCache,
 	type Plugin,
 	pluginResources,
-} from "../lib/plugins.ts";
-import { estimateSkillTokens } from "../lib/skill-scan.ts";
-import { readSkillStates, setSkillOverride } from "../lib/skill-overrides.ts";
-import { boundedDockHeight, safeThemeBold, safeThemeInverse, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
-import { readUsage, recordUsage } from "../lib/usage-tracker.ts";
+} from "../lib/plugins/plugins.ts";
+import { estimateSkillTokens } from "../lib/plugins/skill-scan.ts";
+import { readSkillStates, setSkillOverride } from "../lib/plugins/skill-overrides.ts";
+import { boundedDockHeight, safeThemeBold, safeThemeInverse, safeThemePaint, truncateLine } from "../lib/ui/tui-render.ts";
+import { readUsage, recordUsage } from "../lib/plugins/usage-tracker.ts";
 import { fetchInstallCounts, readCachedCounts } from "./counts.ts";
 import { installPlugin, uninstallPlugin } from "./install/install.ts";
 import { setInstalledEnabled } from "./install/registry.ts";
@@ -69,12 +69,12 @@ import { buildDiscoverRows, buildInstalledRows, buildMarketplaceRows, type Disco
 import { applyPanelKey, initialPanelState, type PanelEffect, type PanelView } from "./panel/state.ts";
 import { expandTemplate, runPlaceholderCommand } from "./shell-expand.ts";
 import { watchPermissionBridge } from "../lib/agents/subagent-gate.ts";
-import { followWorkCwd } from "../lib/worktree-channel.ts";
-import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
-import { sessionAlive } from "../lib/session-lifecycle.ts";
-import { registerLocalCommand } from "../lib/local-command.ts";
+import { followWorkCwd } from "../lib/agents/worktree-channel.ts";
+import { parseFrontmatterLoosely } from "../lib/core/frontmatter.ts";
+import { sessionAlive } from "../lib/notify/session-lifecycle.ts";
+import { registerLocalCommand } from "../lib/ui/local-command.ts";
 import { promptCommandText } from "../lib/plugins/skill-invoke.ts";
-import { panelUi } from "../lib/panel-focus.ts";
+import { panelUi } from "../lib/ui/panel-focus.ts";
 
 
 // The panel is a bounded dock like Claude Code's /plugins, NOT a full-screen

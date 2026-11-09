@@ -15,7 +15,7 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { tildify } from "../lib/paths.ts";
+import { tildify } from "../lib/profile/paths.ts";
 import { CLIENT_RUNTIME, escapeHtml, THEME_TOKENS, utcStamp } from "./gallery.ts";
 import type { ArtifactMeta } from "./store.ts";
 

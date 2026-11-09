@@ -1,5 +1,5 @@
 /**
- * The feature registry (lib/features.ts) agrees with what pi loads: every
+ * The feature registry (lib/profile/features.ts) agrees with what pi loads: every
  * entry in package.json `pi.extensions` and in the child list belongs to
  * exactly one feature, every registered entry exists and wraps its factory in
  * `feature(<its id>, …)`, and the switch rules hold.
@@ -7,8 +7,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { CHILD_EXTENSIONS, childEntry } from "../../extensions/lib/child-extensions.ts";
-import { enabledFeatures, FEATURE_IDS, FEATURES, featureOfEntry, featureProblems, TOOL_FEATURES } from "../../extensions/lib/features.ts";
+import { CHILD_EXTENSIONS, childEntry } from "../../extensions/lib/agents/child-extensions.ts";
+import { enabledFeatures, FEATURE_IDS, FEATURES, featureOfEntry, featureProblems, TOOL_FEATURES } from "../../extensions/lib/profile/features.ts";
 
 const repo = join(import.meta.dirname, "../..");
 const manifest = JSON.parse(readFileSync(join(repo, "package.json"), "utf8")) as { pi: { extensions: string[] } };

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { brand } from "../../extensions/lib/brand.mjs";
-import { visibleWidth } from "../../extensions/lib/text-width.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
+import { visibleWidth } from "../../extensions/lib/ui/text-width.ts";
 import { decodePanelKey, type PanelKey } from "../../extensions/permissions/panel/keys.ts";
 import { describeRule, type PanelPaint, renderPanel } from "../../extensions/permissions/panel/render.ts";
 import { type AutoEntryRow, applyPanelKey, initialPanelState, type PanelEffect, type PanelState, type PanelView, type RuleRow } from "../../extensions/permissions/panel/state.ts";

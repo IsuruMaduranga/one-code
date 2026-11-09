@@ -6,7 +6,7 @@
  */
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { describeIsolation, worktreeBashWriteGuardReason, worktreeWriteGuardReason } from "../../extensions/lib/worktree-isolation.ts";
+import { describeIsolation, worktreeBashWriteGuardReason, worktreeWriteGuardReason } from "../../extensions/lib/agents/worktree-isolation.ts";
 import type { WorktreeGuardRefusal } from "../../extensions/worktree/text.ts";
 import { worktreeGuard } from "../text/worktree/guard.ts";
 

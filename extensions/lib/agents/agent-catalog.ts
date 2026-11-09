@@ -14,12 +14,12 @@
  * Subdirectories are searched recursively.
  */
 
-import { activeProfile, PROFILE_DIR } from "../profile.ts";
+import { activeProfile, PROFILE_DIR } from "../profile/profile.ts";
 import { readdirSync, readFileSync, type Stats, statSync } from "node:fs";
 import { basename, join } from "node:path";
-import { parseFrontmatterLoosely } from "../frontmatter.ts";
-import { projectConfigDir, userConfigDir } from "../sources.ts";
-import { SUBAGENT_HANDBACK } from "../subagent-handback.ts";
+import { parseFrontmatterLoosely } from "../core/frontmatter.ts";
+import { projectConfigDir, userConfigDir } from "../profile/sources.ts";
+import { SUBAGENT_HANDBACK } from "./subagent-handback.ts";
 import { normalizeToolName } from "../rules/matcher.ts";
 import { subagentWords } from "../../subagents/words.ts";
 
@@ -176,7 +176,7 @@ export function parseAgentFile(path: string, content: string): AgentDefinition |
 /**
  * Lowest to highest precedence: the catalog bundled with this package, then the
  * user's `~/.claude/agents`, then the project's `.claude/agents` (`~/.onecode`
- * and `.onecode` in independent mode, lib/sources.ts). A user or project
+ * and `.onecode` in independent mode, lib/profile/sources.ts). A user or project
  * definition with the same name replaces a bundled one.
  */
 export function agentDirs(cwd: string, home: string, bundled?: string): string[] {
@@ -270,7 +270,7 @@ export function usableAllowlistedTools(registered: string[], allowlist: string[]
 export function agentToolOptions(agent: AgentDefinition | undefined): { tools?: string[]; excludeTools?: string[] } {
 	// The profile's disabled tools join pi's own excludeTools, which filters
 	// built-ins, extension tools and injected custom tools (shared MCP tools)
-	// alike (lib/profile.ts).
+	// alike (lib/profile/profile.ts).
 	const disabled = [...activeProfile().disabledTools];
 	const exclude = disabled.length > 0 ? [...new Set([...(agent?.excludeTools ?? []), ...disabled])] : agent?.excludeTools;
 	return { tools: childToolAllowlist(agent?.tools), excludeTools: exclude };

@@ -8,9 +8,9 @@
  * too.
  */
 import { describe, expect, it } from "vitest";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { compactionGitStatus, resumeFactsNotice } from "../../extensions/claude-context/context-facts.ts";
-import { clipGitStatus, formatGitStatus } from "../../extensions/lib/git-status.ts";
+import { clipGitStatus, formatGitStatus } from "../../extensions/lib/context/git-status.ts";
 import { context } from "../text/context/index.ts";
 
 describe("One Code's context text", () => {

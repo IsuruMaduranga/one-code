@@ -4,12 +4,12 @@
  * Claude Code has three: a short form for its current models, with one extra
  * bullet ("IMPORTANT: Avoid using this tool to run `cat`…") when auto mode is
  * off, and a long form for its weakest models that is the same in every mode.
- * One Code picks the form by tier (lib/tool-variants.ts) and the extra bullet
+ * One Code picks the form by tier (lib/profile/tool-variants.ts) and the extra bullet
  * by the permission mode. Two kinds of change from Claude Code's text: tool
  * names are One Code's (`read`, `edit`, `write`, `monitor`, `task_create`),
  * and the working-directory sentence says what this tool does, since each
  * command starts in the session's working directory and a `cd` does not carry
- * over (lib/shell-tool.ts), where Claude Code tracks the directory between
+ * over (lib/shell-run/shell-tool.ts), where Claude Code tracks the directory between
  * calls. The parameter texts are Claude Code's. On the tiny tier, the one
  * with dedicated grep, find and ls tools (search-tools/tools.ts), the long
  * form's two shell-`find` bullets give way to a pointer at those tools, as

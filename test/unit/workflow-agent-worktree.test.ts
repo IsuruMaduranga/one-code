@@ -8,8 +8,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import * as agentLoader from "../../extensions/lib/agent-loader.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import * as agentLoader from "../../extensions/lib/agents/agent-loader.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { AgentRunner } from "../../extensions/workflow/agent-session.ts";
 import { keptWorktreeOf } from "../../extensions/workflow/types.ts";
 

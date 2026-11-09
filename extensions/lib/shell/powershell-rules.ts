@@ -32,7 +32,7 @@
  * decisions/windows.md "The PowerShell pre-gate reads PowerShell's own parse").
  */
 
-import type { PowerShellParse } from "../powershell-parser.ts";
+import type { PowerShellParse } from "./powershell-parser.ts";
 import { type PowerShellTreeOptions, powershellTreeReadOnly } from "./powershell-tree.ts";
 
 /** Claude Code's `COMMON_ALIASES` (utils/powershell/parser.ts), alias → canonical cmdlet. */
@@ -451,7 +451,7 @@ const ROUGH_SEPARATORS = /[;|&\r\n(){}]+/;
 // Read-only
 
 export interface PowerShellReadOnlyOptions extends PowerShellTreeOptions {
-	/** PowerShell's own parse of the line (lib/powershell-parser.ts); without one nothing is read-only. */
+	/** PowerShell's own parse of the line (lib/shell/powershell-parser.ts); without one nothing is read-only. */
 	parse?: PowerShellParse;
 }
 

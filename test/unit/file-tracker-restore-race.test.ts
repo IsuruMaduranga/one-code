@@ -32,9 +32,9 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
 });
 
 const { default: fileTrackerExtension } = await import("../../extensions/file-tracker/index.ts");
-const { REMINDER_CHANNEL } = await import("../../extensions/lib/reminders.ts");
+const { REMINDER_CHANNEL } = await import("../../extensions/lib/request/reminders.ts");
 const { createFakeCtx, createFakePi } = await import("./helpers/fake-pi.ts");
-const { requireText } = await import("../../extensions/lib/profile.ts");
+const { requireText } = await import("../../extensions/lib/profile/profile.ts");
 
 /** The restore's result block for a file that read back as `text`. */
 const restoredResult = (text: string) => requireText("fileTracker").restoredResult({ text });

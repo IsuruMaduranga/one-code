@@ -10,8 +10,8 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import { replacedBuiltinsView } from "../../extensions/doctor/builtins.ts";
-import { brand } from "../../extensions/lib/brand.mjs";
-import { piHasBuiltinExtensions } from "../../extensions/lib/pi-version.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
+import { piHasBuiltinExtensions } from "../../extensions/lib/app/pi-version.ts";
 import {
 	BUILTIN_EXTENSIONS_PI,
 	builtinEnabled,
@@ -22,7 +22,7 @@ import {
 	turnOffPrompt,
 	withBuiltinsTurnedOff,
 	withReplacedBuiltinsOff,
-} from "../../extensions/lib/replaced-builtins.mjs";
+} from "../../extensions/lib/app/replaced-builtins.mjs";
 import { piDist, piRoot } from "./helpers/pi-install.ts";
 
 /** pi's own glob matcher, the one its `!` override entries go through. */

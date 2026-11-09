@@ -8,36 +8,36 @@
  * One SubagentRuntime is built lazily per extension and shared across all runs:
  * a single ModelRuntime. Each run gets its own AgentSession — and its own
  * resource loader, since disposing a session kills the loader it ran on
- * (lib/agent-loader.ts) — backed by a persisted SessionManager under
+ * (lib/agents/agent-loader.ts) — backed by a persisted SessionManager under
  * `<sessionDir>/subagents/<taskId>/`, so a finished run can be resumed from disk.
  */
 
-import { childWriteWatcher } from "../lib/child-writes.ts";
+import { childWriteWatcher } from "../lib/agents/child-writes.ts";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { type AgentSession, type ExtensionError, getAgentDir, SessionManager, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Api, Message, Model } from "@earendil-works/pi-ai";
-import { whenAborted } from "../lib/abort.ts";
-import { type AgentLoaderOptions, buildAgentLoader, createSharedModelRuntime, disposeChildSession, openChildSession } from "../lib/agent-loader.ts";
-import { agentPromptIdentity, PrefixWarmGate, prefixWarmKey, type Release } from "../lib/prefix-warm-gate.ts";
+import { whenAborted } from "../lib/core/abort.ts";
+import { type AgentLoaderOptions, buildAgentLoader, createSharedModelRuntime, disposeChildSession, openChildSession } from "../lib/agents/agent-loader.ts";
+import { agentPromptIdentity, PrefixWarmGate, prefixWarmKey, type Release } from "../lib/side-calls/prefix-warm-gate.ts";
 import type { PermissionBridge } from "../lib/agents/subagent-gate.ts";
 import type { HookBridge } from "../lib/agents/hook-bridge.ts";
-import { findConfigured, modelSpec } from "../lib/model-policy.ts";
+import { findConfigured, modelSpec } from "../lib/models/model-policy.ts";
 import { isModelUnavailableError } from "../lib/models/classifier-model.ts";
 import { type AgentDefinition, agentToolOptions, unusableAllowlistError } from "../lib/agents/agent-catalog.ts";
-import { childExtensionPaths } from "../lib/child-extensions.ts";
-import { type HandbackSlot, SUBAGENT_HANDBACK, subagentHandbackExtension } from "../lib/subagent-handback.ts";
-import type { RequestCapture } from "../lib/request-replay.ts";
+import { childExtensionPaths } from "../lib/agents/child-extensions.ts";
+import { type HandbackSlot, SUBAGENT_HANDBACK, subagentHandbackExtension } from "../lib/agents/subagent-handback.ts";
+import type { RequestCapture } from "../lib/side-calls/request-replay.ts";
 import { forkCacheExtension } from "./fork-cache.ts";
 import { parentModeExtension } from "./parent-mode.ts";
-import { type DeferRequest, deferLikeParentExtension, injectedByParent } from "../lib/deferred.ts";
+import { type DeferRequest, deferLikeParentExtension, injectedByParent } from "../lib/request/deferred.ts";
 import type { ChildHandle, ChildOutcome, RpcChildHandle } from "./outcome.ts";
 import { sendToMainTool } from "./send-to-main-tool.ts";
 import { type AbortReason, SessionTurnTracker } from "./session-turns.ts";
 import type { UsageTotals } from "../lib/agents/usage.ts";
 import { subagentWords } from "./words.ts";
 import { streamingText, type TranscriptBlock } from "./live-runs.ts";
-import { cutPlainText, firstNonEmptyLine, stripReminderBlocks, summarizeArgs, textContent } from "../lib/tui-render.ts";
+import { cutPlainText, firstNonEmptyLine, stripReminderBlocks, summarizeArgs, textContent } from "../lib/ui/tui-render.ts";
 
 /**
  * Optional live sink for the subagent panel: a one-line activity string from
@@ -165,7 +165,7 @@ export class SubagentRuntime {
 	 * still-connecting (possibly empty) one.
 	 */
 	private readonly getMcpTools: () => ToolDefinition[] | Promise<ToolDefinition[]>;
-	/** The tools the parent session defers (lib/deferred.ts queryDeferred): a child defers the ones injected into it the same way. */
+	/** The tools the parent session defers (lib/request/deferred.ts queryDeferred): a child defers the ones injected into it the same way. */
 	private readonly getParentDeferred: () => DeferRequest[];
 	/** The main session's live permission mode, for a fork: told to it when it differs from what it was told (parent-mode.ts). */
 	private readonly getParentMode: (() => string) | undefined;
@@ -182,7 +182,7 @@ export class SubagentRuntime {
 	/** A child extension handler threw (pi swallows it otherwise); surfaced to the user by index.ts. */
 	private readonly onExtensionError: (runName: string | undefined, error: ExtensionError) => void;
 	private readonly onModelUnusable: (model: string, reason: string) => void;
-	/** A child's edit or write changed a file (lib/child-writes.ts); index.ts tells the parent's file-tracker. */
+	/** A child's edit or write changed a file (lib/agents/child-writes.ts); index.ts tells the parent's file-tracker. */
 	private readonly onChildWrite: (path: string, runName: string | undefined) => void;
 	/** Child session id → run name, for the bridge wrapper above. */
 	private readonly runNames = new Map<string, string>();
@@ -194,7 +194,7 @@ export class SubagentRuntime {
 	 * Parallel children with the same request prefix (same agent prompt and
 	 * model; forks share the parent's) let the first one start streaming before
 	 * the rest go, so the fan-out writes the shared prefix once and reads it
-	 * N-1 times (lib/prefix-warm-gate.ts).
+	 * N-1 times (lib/side-calls/prefix-warm-gate.ts).
 	 */
 	private readonly warmGate = new PrefixWarmGate();
 
@@ -285,7 +285,7 @@ export class SubagentRuntime {
 			neverGate: NEVER_GATE,
 			extraExtensionPaths: childExtensionPaths(),
 			// Every child hands back through SubagentHandback (deferred in a fork,
-			// lib/subagent-handback.ts). Inline extensions load after the paths
+			// lib/agents/subagent-handback.ts). Inline extensions load after the paths
 			// above, so the fork-cache one, last, sees the final body.
 			extraFactories: [
 				// The tools injected below (the spawn and cron tools, the shared MCP
@@ -367,7 +367,7 @@ export class SubagentRuntime {
 					// The provider refused this model for this account ("not supported
 					// with a ChatGPT account", 404 on the model): the catalog offered it,
 					// the account cannot run it. Tell the parent so selection skips it
-					// from now on (lib/model-unusable.ts) — the same class of error the
+					// from now on (lib/models/model-unusable.ts) — the same class of error the
 					// auto-mode classifier steps over (`isModelUnavailableError`).
 					const reply = e.message as { stopReason?: string; errorMessage?: string; provider?: string; model?: string };
 					if (reply.stopReason === "error" && reply.errorMessage && reply.provider && reply.model && isModelUnavailableError(reply.errorMessage)) {

@@ -13,8 +13,8 @@ import {
 	sessionOutlivesTurn,
 	shellSummary,
 	taskNotification,
-} from "../../extensions/lib/notifications.ts";
-import { announcePromptOptions, PROMPT_OPTIONS_CHANNEL } from "../../extensions/lib/prompt-options.ts";
+} from "../../extensions/lib/notify/notifications.ts";
+import { announcePromptOptions, PROMPT_OPTIONS_CHANNEL } from "../../extensions/lib/ui/prompt-options.ts";
 
 /** A kind=shell notification for a finished background command. */
 const shellDone = (id: string, tail?: string) =>

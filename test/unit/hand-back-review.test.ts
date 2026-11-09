@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../extensions/lib/rules/auto-mode-actions.ts";
-import { withReview } from "../../extensions/lib/notifications.ts";
+import { withReview } from "../../extensions/lib/notify/notifications.ts";
 import { awaitHandBackReview, handBackReviewTimeoutVerdict } from "../../extensions/subagents/hand-back-review.ts";
 
 const run = { taskId: "t1", name: "worker" };

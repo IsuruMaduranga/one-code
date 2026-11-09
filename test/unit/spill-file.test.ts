@@ -11,8 +11,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { createBashToolDefinition } from "@earendil-works/pi-coding-agent";
-import { boundSpillIn, keepSpillReadable, piSpillPath } from "../../extensions/lib/spill-file.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { boundSpillIn, keepSpillReadable, piSpillPath } from "../../extensions/lib/shell-run/spill-file.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { decide } from "../../extensions/lib/rules/matcher.ts";
 import { createFakeCtx } from "./helpers/fake-pi.ts";
 

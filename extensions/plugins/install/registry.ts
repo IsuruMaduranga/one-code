@@ -7,7 +7,7 @@
  */
 
 import { join } from "node:path";
-import { readJsonFile, writeJsonAtomic } from "../../lib/atomic-write.ts";
+import { readJsonFile, writeJsonAtomic } from "../../lib/core/atomic-write.ts";
 
 export interface InstalledEntry {
 	scope: "user";

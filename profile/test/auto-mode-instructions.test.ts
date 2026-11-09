@@ -1,4 +1,4 @@
-import { resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile.ts";
+import { resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 import { profile } from "../index.ts";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -9,8 +9,8 @@ import { buildClaudeMdBlock } from "../../extensions/claude-context/claude-conte
 import { discoverContextFiles } from "../claude-code/instructions.ts";
 import { readInstructionFiles } from "../claude-code/settings.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
-import { classifierInstructionNote, skippedInstructionNote } from "../../extensions/lib/instruction-budget.ts";
-import { estimateTextTokens } from "../../extensions/lib/pi-ai-estimate.ts";
+import { classifierInstructionNote, skippedInstructionNote } from "../../extensions/lib/context/instruction-budget.ts";
+import { estimateTextTokens } from "../../extensions/lib/models/pi-ai-estimate.ts";
 
 let root: string;
 let repo: string;

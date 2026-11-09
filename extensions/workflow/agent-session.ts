@@ -4,7 +4,7 @@
  * in-memory session file; the run shares a single ModelRuntime across all its
  * agents (building one per agent is expensive). The resource loader is NOT
  * shared: disposing one session on a loader invalidates the loader's runtime
- * for every other session built on it (lib/agent-loader.ts, LIFECYCLE-REVIEW
+ * for every other session built on it (lib/agents/agent-loader.ts, LIFECYCLE-REVIEW
  * H3), so each agent() call opens its own through `openChildSession`, which
  * also emits the `session_start` pi's SDK never sends (H2).
  *
@@ -14,35 +14,35 @@
  * `extensionFactories`, which DefaultResourceLoader always loads.
  */
 
-import { childWriteWatcher } from "../lib/child-writes.ts";
+import { childWriteWatcher } from "../lib/agents/child-writes.ts";
 import { randomBytes } from "node:crypto";
 import os from "node:os";
 import { getAgentDir, type ModelRuntime, SessionManager, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
-import { whenAborted } from "../lib/abort.ts";
-import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
-import { createSharedModelRuntime, disposeChildSession, finalAssistantText, openChildSession } from "../lib/agent-loader.ts";
-import { modelSpec as modelSpecOf, supportsImageInput } from "../lib/model-policy.ts";
+import { whenAborted } from "../lib/core/abort.ts";
+import { persistIfLarge, sessionResultsDir } from "../lib/request/persisted-output.ts";
+import { createSharedModelRuntime, disposeChildSession, finalAssistantText, openChildSession } from "../lib/agents/agent-loader.ts";
+import { modelSpec as modelSpecOf, supportsImageInput } from "../lib/models/model-policy.ts";
 import { isModelUnavailableError } from "../lib/models/classifier-model.ts";
-import { agentPromptIdentity, PrefixWarmGate, prefixWarmKey } from "../lib/prefix-warm-gate.ts";
+import { agentPromptIdentity, PrefixWarmGate, prefixWarmKey } from "../lib/side-calls/prefix-warm-gate.ts";
 import type { PermissionBridge } from "../lib/agents/subagent-gate.ts";
-import { localGateMode, MODE_ENV } from "../lib/permission-gate.ts";
+import { localGateMode, MODE_ENV } from "../lib/agents/permission-gate.ts";
 import type { HookBridge } from "../lib/agents/hook-bridge.ts";
-import { summarizeArgs } from "../lib/tui-render.ts";
+import { summarizeArgs } from "../lib/ui/tui-render.ts";
 import { type AgentDefinition, agentFileSources, agentToolOptions, discoverAgents, unusableAllowlistError } from "../lib/agents/agent-catalog.ts";
-import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
-import { childExtensionPaths } from "../lib/child-extensions.ts";
-import { oneTurnHandbackSlot, subagentHandbackExtension } from "../lib/subagent-handback.ts";
+import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins/plugins.ts";
+import { childExtensionPaths } from "../lib/agents/child-extensions.ts";
+import { oneTurnHandbackSlot, subagentHandbackExtension } from "../lib/agents/subagent-handback.ts";
 import type { SubagentDefault } from "../lib/models/subagent-default.ts";
 import { expensiveModelGate, resolveSubagentModel, subagentModelMenu } from "../lib/models/subagent-model.ts";
-import { withoutUnusable } from "../lib/model-unusable.ts";
+import { withoutUnusable } from "../lib/models/model-unusable.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "../lib/agents/agent-worktree.ts";
 import type { AgentCallOptions, AgentCallResult, AgentEffort, AgentRunUpdate, KeptWorktree } from "./types.ts";
 import { WorkflowScriptError } from "./types.ts";
 import { workflowWords } from "./words.ts";
-import { type DeferRequest, deferLikeParentExtension, injectedByParent } from "../lib/deferred.ts";
+import { type DeferRequest, deferLikeParentExtension, injectedByParent } from "../lib/request/deferred.ts";
 
 const MAX_SCHEMA_RETRIES = 2;
 const OUTPUT_CAP = 50_000;
@@ -56,11 +56,11 @@ export interface AgentRunnerOptions {
 	defaultEffort?: AgentEffort | string;
 	/** Surface model-resolution notices (fallbacks, provider crossings) in the run log. */
 	onNotice?: (message: string) => void;
-	/** Models this account cannot run (`provider/id`), learned this session — dropped from the catalog before resolving (lib/model-unusable.ts). */
+	/** Models this account cannot run (`provider/id`), learned this session — dropped from the catalog before resolving (lib/models/model-unusable.ts). */
 	unusableModels?: () => ReadonlySet<string>;
 	/** An agent's provider refused its model as not usable on this account (`isModelUnavailableError`): report it so every picker skips it. */
 	onModelUnusable?: (model: string, reason: string) => void;
-	/** An agent's edit or write changed a file (lib/child-writes.ts), for the parent's file-tracker. */
+	/** An agent's edit or write changed a file (lib/agents/child-writes.ts), for the parent's file-tracker. */
 	onChildWrite?: (path: string, agent: string | undefined) => void;
 	/**
 	 * The parent permissions extension's decision closure (same bridge the
@@ -76,11 +76,11 @@ export interface AgentRunnerOptions {
 	/** Each finished agent's dollar cost (review S13: workflow agents never reached the footer). */
 	onUsage?: (cost: number) => void;
 	/**
-	 * The parent's live MCP tools (lib/mcp-share.ts `watchMcpTools`), injected
+	 * The parent's live MCP tools (lib/plugins/mcp-share.ts `watchMcpTools`), injected
 	 * as custom tools over the parent's connections, as the subagent runner does.
 	 */
 	getMcpTools?: () => ToolDefinition[] | Promise<ToolDefinition[]>;
-	/** The tools the parent defers (lib/deferred.ts DEFERRED_QUERY_CHANNEL): the agent defers them too, so its MCP tools are listed, not declared. */
+	/** The tools the parent defers (lib/request/deferred.ts DEFERRED_QUERY_CHANNEL): the agent defers them too, so its MCP tools are listed, not declared. */
 	getParentDeferred?: () => DeferRequest[];
 	/** Where an answer past OUTPUT_CAP is saved (`<dir>/tool-results/`): the run's directory. */
 	resultsDir?: string;
@@ -206,7 +206,7 @@ export class AgentRunner {
 	/**
 	 * `parallel()` children of one agent type share a request prefix; the first
 	 * starts streaming before the rest go, so the fan-out writes the prefix once
-	 * and reads it N-1 times (lib/prefix-warm-gate.ts).
+	 * and reads it N-1 times (lib/side-calls/prefix-warm-gate.ts).
 	 */
 	private readonly warmGate = new PrefixWarmGate();
 
@@ -330,7 +330,7 @@ export class AgentRunner {
 		const unhookAbort = whenAborted(signal, () => void session.abort());
 		// Forward tool calls for the viewer's Activity pane, and report a provider
 		// refusing the agent's model (the same check the subagent runner makes, so
-		// the refusal reaches every automatic picker — lib/model-unusable.ts).
+		// the refusal reaches every automatic picker — lib/models/model-unusable.ts).
 		// Never let a bad event shape kill the agent.
 		const childWrote = childWriteWatcher(session.sessionManager?.getCwd?.() ?? this.options.cwd);
 		const unsubscribe = session.subscribe((event) => {

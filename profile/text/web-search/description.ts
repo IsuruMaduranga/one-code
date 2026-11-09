@@ -3,7 +3,7 @@
  *
  * The short form, on frontier and workhorse models, is One Code's own: it
  * names the backends that answer and how the domain filters apply to each.
- * The long form, on cheap and tiny models (lib/tool-variants.ts), is the text
+ * The long form, on cheap and tiny models (lib/profile/tool-variants.ts), is the text
  * Claude Code writes for its weakest models, addressed to the model rather
  * than to Claude, with the backends line in place of "Web search is only
  * available in the US".

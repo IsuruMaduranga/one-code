@@ -16,11 +16,11 @@ import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import btwExtension from "../../extensions/btw/index.ts";
 import recapExtension from "../../extensions/recap/index.ts";
 import webFetchExtension from "../../extensions/web-fetch/index.ts";
-import { cacheSideCallConversation, SIDE_CALL_CACHE_APIS } from "../../extensions/lib/side-call-cache.ts";
+import { cacheSideCallConversation, SIDE_CALL_CACHE_APIS } from "../../extensions/lib/side-calls/side-call-cache.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
-vi.mock("../../extensions/lib/side-call-usage.ts", () => ({ logSideCallUsage: vi.fn(), SIDE_CALL_KINDS: ["reader", "btw", "recap"] }));
+vi.mock("../../extensions/lib/side-calls/side-call-usage.ts", () => ({ logSideCallUsage: vi.fn(), SIDE_CALL_KINDS: ["reader", "btw", "recap"] }));
 
 const complete = vi.mocked(completeSimple);
 const answer = { content: [{ type: "text", text: "An answer." }], stopReason: "stop", usage: {} } as Awaited<ReturnType<typeof completeSimple>>;

@@ -9,9 +9,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type AgentSession, ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { openChildSession } from "../../extensions/lib/agent-loader.ts";
-import { CHILD_EXTENSION_PATHS } from "../../extensions/lib/child-extensions.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { openChildSession } from "../../extensions/lib/agents/agent-loader.ts";
+import { CHILD_EXTENSION_PATHS } from "../../extensions/lib/agents/child-extensions.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "oc-child-shell-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));

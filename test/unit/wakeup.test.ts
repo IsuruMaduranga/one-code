@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { envName } from "../../extensions/lib/brand.mjs";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { CronStore } from "../../extensions/lib/agents/cron.ts";
 import { DynamicLoop, KEEPALIVE_DELAY_SECONDS, keepaliveEnabled, scheduledText } from "../../extensions/background/wakeup.ts";
 

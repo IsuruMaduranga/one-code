@@ -4,7 +4,7 @@
  * loads. Pure (fs reads only), so ordering and labelling are unit-testable.
  *
  * The instruction files come straight from `openInstructions().paths`
- * (lib/instructions.ts and the profile's provider: the single source of truth
+ * (lib/context/instructions.ts and the profile's provider: the single source of truth
  * for "what's loaded into context"), so this never
  * re-derives discovery or drifts from it. Layered on top, for the picker only:
  * the two always-offered primaries (the instruction targets: global + project
@@ -14,7 +14,7 @@
  * concept at all), and the auto-memory folder as the last entry.
  */
 
-import { brand } from "../lib/brand.mjs";
+import { brand } from "../lib/profile/brand.mjs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import {
 	AGENTS_DESCRIPTOR,
@@ -28,10 +28,10 @@ import {
 	PRODUCT_GLOBAL_DESCRIPTOR,
 	openInstructions,
 	PROJECT_DESCRIPTOR,
-} from "../lib/instructions.ts";
-import { forwardSlashes, isRelativeInside, tildify } from "../lib/paths.ts";
-import { projectConfigDirName } from "../lib/sources.ts";
-import { tryReadFile } from "../lib/plugins.ts";
+} from "../lib/context/instructions.ts";
+import { forwardSlashes, isRelativeInside, tildify } from "../lib/profile/paths.ts";
+import { projectConfigDirName } from "../lib/profile/sources.ts";
+import { tryReadFile } from "../lib/plugins/plugins.ts";
 
 export interface MemoryEntry {
 	/** Left-hand label: a friendly role name for known files, else the path. */
@@ -81,7 +81,7 @@ export function buildMemoryEntries(opts: {
 	const { cwd, home, homeOneCodeDir, agentDir, memoryDir } = opts;
 	// The always-offered rows are the files a user writes: CLAUDE.md with One
 	// Code's provider on, the global ONECODE.md and the project's AGENTS.md
-	// without it (lib/instructions.ts instructionTargets).
+	// without it (lib/context/instructions.ts instructionTargets).
 	const targets = instructionTargets(home, homeOneCodeDir);
 	// The same files the # claudeMd block takes, so the list matches what it sends.
 	const discovered = openInstructions(home, agentDir).paths({ cwd, homeOneCodeDir });

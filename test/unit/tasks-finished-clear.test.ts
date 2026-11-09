@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import tasksExtension from "../../extensions/tasks/index.ts";
 import { FINISHED_LIST_CLEAR_MS } from "../../extensions/tasks/store.ts";
-import { taskToggleKey } from "../../extensions/lib/keys.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { taskToggleKey } from "../../extensions/lib/ui/keys.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 /**

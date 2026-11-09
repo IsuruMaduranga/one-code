@@ -3,8 +3,8 @@
  * as the parent's captured request plus the fork's tail.
  */
 import { describe, expect, it } from "vitest";
-import { DEFER_CHANNEL } from "../../extensions/lib/deferred.ts";
-import { captureRequest, type RequestCapture } from "../../extensions/lib/request-replay.ts";
+import { DEFER_CHANNEL } from "../../extensions/lib/request/deferred.ts";
+import { captureRequest, type RequestCapture } from "../../extensions/lib/side-calls/request-replay.ts";
 import { forkCacheExtension } from "../../extensions/subagents/fork-cache.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 

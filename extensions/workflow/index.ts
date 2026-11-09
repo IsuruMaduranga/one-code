@@ -9,7 +9,7 @@
  * journals persist under the session dir, so `resumeFromRunId` replays the
  * unchanged prefix of an edited or interrupted run. Saved workflows live in
  * `.claude/workflows/` (project) and `~/.claude/workflows/` (user), or their
- * `.onecode` twins in independent mode (lib/sources.ts).
+ * `.onecode` twins in independent mode (lib/profile/sources.ts).
  *
  * The description is Claude Code's (description.ts); the authoring reference
  * it points to is the bundled `workflow-authoring` skill. `enableWorkflows`,
@@ -23,32 +23,32 @@
  * delivers the message. On older pi a queued message does not arm.
  */
 
-import { brandedId } from "../lib/brand.mjs";
-import { feature } from "../lib/feature.ts";
+import { brandedId } from "../lib/profile/brand.mjs";
+import { feature } from "../lib/profile/feature.ts";
 import { prepareWorkflowArguments } from "./args.ts";
-import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../lib/child-writes.ts";
+import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../lib/agents/child-writes.ts";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 import { contentText } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { recordUsage } from "../lib/usage-bus.ts";
-import { readWorkflowSettings } from "../lib/product-settings.ts";
-import { registerVariantTool } from "../lib/tool-variants.ts";
+import { recordUsage } from "../lib/notify/usage-bus.ts";
+import { readWorkflowSettings } from "../lib/profile/product-settings.ts";
+import { registerVariantTool } from "../lib/profile/tool-variants.ts";
 import type { WorkflowText } from "./text.ts";
 import { workflowWords } from "./words.ts";
-import { requireText } from "../lib/profile.ts";
-import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent } from "../lib/model-unusable.ts";
-import { whenAborted } from "../lib/abort.ts";
-import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, taskNotification, taskStatusOf, workflowSummary } from "../lib/notifications.ts";
-import { QueuedDelivery } from "../lib/queued-delivery.ts";
-import { REMINDER_CHANNEL } from "../lib/reminders.ts";
+import { requireText } from "../lib/profile/profile.ts";
+import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent } from "../lib/models/model-unusable.ts";
+import { whenAborted } from "../lib/core/abort.ts";
+import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, taskNotification, taskStatusOf, workflowSummary } from "../lib/notify/notifications.ts";
+import { QueuedDelivery } from "../lib/notify/queued-delivery.ts";
+import { REMINDER_CHANNEL } from "../lib/request/reminders.ts";
 import { ULTRACODE_MODE_CHANNEL } from "../lib/ui/effort-slider.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../lib/rules/modes.ts";
 import { watchPermissionBridge } from "../lib/agents/subagent-gate.ts";
 import { watchHookBridge } from "../lib/agents/hook-bridge.ts";
-import { watchMcpTools } from "../lib/mcp-share.ts";
+import { watchMcpTools } from "../lib/plugins/mcp-share.ts";
 import { applicableSubagentDefault, loadSubagentDefault } from "../lib/models/subagent-default.ts";
 import { discoverSavedWorkflows, findSavedWorkflow, workflowDirs } from "./saved-workflows.ts";
 import { buildRunReport, type RunHandle, WorkflowRunManager } from "./run-manager.ts";
@@ -60,7 +60,7 @@ import {
 	safeThemeBold,
 	safeThemePaint,
 	truncateLine,
-} from "../lib/tui-render.ts";
+} from "../lib/ui/tui-render.ts";
 import { WorkflowScriptError } from "./types.ts";
 import {
 	clampViewerState,
@@ -76,15 +76,15 @@ import { WorkflowWidget } from "./widget.ts";
 
 /** The custom-message type a finished workflow's result is delivered as. */
 const WORKFLOW_RESULT_TYPE = brandedId("workflow-result");
-import { registerLocalCommand } from "../lib/local-command.ts";
-import { canShowCustomUi } from "../lib/headless-output.ts";
-import { sessionWorkCwd } from "../lib/worktree-channel.ts";
-import { followEnteredWorktree } from "../lib/worktree-isolation.ts";
-import { isKeyRelease, keyId } from "../lib/key-input.ts";
-import { projectConfigDirName } from "../lib/sources.ts";
-import { panelUi } from "../lib/panel-focus.ts";
-import { dockRowsReporter, trackDockRows } from "../lib/dock-rows.ts";
-import { queryDeferred } from "../lib/deferred.ts";
+import { registerLocalCommand } from "../lib/ui/local-command.ts";
+import { canShowCustomUi } from "../lib/notify/headless-output.ts";
+import { sessionWorkCwd } from "../lib/agents/worktree-channel.ts";
+import { followEnteredWorktree } from "../lib/agents/worktree-isolation.ts";
+import { isKeyRelease, keyId } from "../lib/ui/key-input.ts";
+import { projectConfigDirName } from "../lib/profile/sources.ts";
+import { panelUi } from "../lib/ui/panel-focus.ts";
+import { dockRowsReporter, trackDockRows } from "../lib/ui/dock-rows.ts";
+import { queryDeferred } from "../lib/request/deferred.ts";
 
 /** The tool's parameters, described in the profile's words. */
 function workflowParams(text: WorkflowText) {
@@ -102,7 +102,7 @@ function workflowParams(text: WorkflowText) {
 
 function workflowExtension(pi: ExtensionAPI) {
 	const text = requireText("workflow");
-	// Models the account refused this session (classifier/subagent reports, lib/model-unusable.ts):
+	// Models the account refused this session (classifier/subagent reports, lib/models/model-unusable.ts):
 	// workflow agents share the subagent selector, so they resolve around them too.
 	const unusableModels = new Set<string>();
 	pi.events.on(MODEL_UNUSABLE_CHANNEL, (data) => {
@@ -387,7 +387,7 @@ function workflowExtension(pi: ExtensionAPI) {
 	// carries the opt-in, so the keyword's single-turn one-shot is skipped: one
 	// instruction for one fact. Since pi 0.86 `input` also fires for a message
 	// queued mid-turn; its one-shot waits until pi delivers that message
-	// (lib/queued-delivery.ts), or it would ride the running tool's result, before
+	// (lib/notify/queued-delivery.ts), or it would ride the running tool's result, before
 	// the message. On older pi a queued message never reaches `input` and the
 	// keyword arms nothing (the mode covers it).
 	let ultracodeMode = false;

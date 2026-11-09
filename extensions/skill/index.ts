@@ -13,7 +13,7 @@
  * `before_agent_start`'s systemPromptOptions rather than rediscovered here.
  */
 
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import { readFileSync, statSync } from "node:fs";
 import os from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
@@ -21,12 +21,12 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { canShowCustomUi, notifyOrPrint, notifyRpcReadOnly } from "../lib/headless-output.ts";
-import { pluginRoot } from "../lib/plugin-root.ts";
-import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
-import { awaitOneShotTurn, sessionOutlivesTurn } from "../lib/notifications.ts";
-import { PROMPT_OPTIONS_CHANNEL, type PromptOptionsAnnouncement } from "../lib/prompt-options.ts";
-import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../lib/reminders.ts";
+import { canShowCustomUi, notifyOrPrint, notifyRpcReadOnly } from "../lib/notify/headless-output.ts";
+import { pluginRoot } from "../lib/plugins/plugin-root.ts";
+import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins/plugins.ts";
+import { awaitOneShotTurn, sessionOutlivesTurn } from "../lib/notify/notifications.ts";
+import { PROMPT_OPTIONS_CHANNEL, type PromptOptionsAnnouncement } from "../lib/ui/prompt-options.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../lib/request/reminders.ts";
 import {
 	nextSkillState,
 	readSkillStates,
@@ -35,11 +35,11 @@ import {
 	type SkillState,
 	skillOverrideKey,
 	skillStateFor,
-} from "../lib/skill-overrides.ts";
-import { BUNDLED_SKILLS_DIR, estimateSkillTokens, promptTemplateNames, scanSkills, scopeIn, userSkillRoots } from "../lib/skill-scan.ts";
-import { sessionModelTier } from "../lib/session-model-tier.ts";
-import { readUsage, recordUsage, usageKey } from "../lib/usage-tracker.ts";
-import { boundedDockHeight, ccToolRenderers, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
+} from "../lib/plugins/skill-overrides.ts";
+import { BUNDLED_SKILLS_DIR, estimateSkillTokens, promptTemplateNames, scanSkills, scopeIn, userSkillRoots } from "../lib/plugins/skill-scan.ts";
+import { sessionModelTier } from "../lib/models/session-model-tier.ts";
+import { readUsage, recordUsage, usageKey } from "../lib/plugins/usage-tracker.ts";
+import { boundedDockHeight, ccToolRenderers, safeThemeBold, safeThemePaint, truncateLine } from "../lib/ui/tui-render.ts";
 import {
 	bareSkillMatches,
 	commandDisplayLine,
@@ -55,16 +55,16 @@ import {
 import { codeReviewBody } from "./code-review.ts";
 import { decodeSkillsKey } from "./panel/keys.ts";
 import { frontmatterFlag, readableSkillLines, skillListingBudget, skillListingText, usageScore, withoutPiSkillsBlock } from "./listing.ts";
-import { BUNDLED_SKILL_FEATURES } from "../lib/features.ts";
-import { featureEnabled, requireText } from "../lib/profile.ts";
+import { BUNDLED_SKILL_FEATURES } from "../lib/profile/features.ts";
+import { featureEnabled, requireText } from "../lib/profile/profile.ts";
 import { renderSkillsPanel, type SkillsPaint } from "./panel/render.ts";
 import { listableSkillNames } from "./announce.ts";
 import { applySkillsKey, followRow, initialSkillsState, type SkillsRow, visibleRows } from "./panel/state.ts";
-import { announceArgumentHint, type CommandHint, frontmatterCommandHint } from "../lib/argument-hints.ts";
-import { parseSlashCommand, SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../lib/skill-body.ts";
-import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
-import { registerLocalCommand } from "../lib/local-command.ts";
-import { panelUi } from "../lib/panel-focus.ts";
+import { announceArgumentHint, type CommandHint, frontmatterCommandHint } from "../lib/ui/argument-hints.ts";
+import { parseSlashCommand, SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../lib/plugins/skill-body.ts";
+import { parseFrontmatterLoosely } from "../lib/core/frontmatter.ts";
+import { registerLocalCommand } from "../lib/ui/local-command.ts";
+import { panelUi } from "../lib/ui/panel-focus.ts";
 
 interface IndexedSkill {
 	name: string;
@@ -126,7 +126,7 @@ function skillExtension(pi: ExtensionAPI) {
 	 * before_agent_start). Until then an idle skill delivery goes out as a user
 	 * message: pi's `sendMessage(…, {triggerTurn})` skips that preamble, so a
 	 * session opening with `/loop …` or `/simplify` ran its first request
-	 * without our system prompt or reminder stack (lib/notifications.ts,
+	 * without our system prompt or reminder stack (lib/notify/notifications.ts,
 	 * "First turn of a session"; upstream_prs.md #17). Later turns get the
 	 * prompt from system-prompt's context_with_system handler (idle-turn.ts).
 	 */
@@ -142,7 +142,7 @@ function skillExtension(pi: ExtensionAPI) {
 	const oneShotSkillNames = new Set<string>();
 
 	// A factory re-run builds each session's instance, so this is belt and braces
-	// (lib/notifications.ts resets its twin the same way).
+	// (lib/notify/notifications.ts resets its twin the same way).
 	pi.on("session_start", (_event, ctx) => {
 		prompted = false;
 		oneShot = !sessionOutlivesTurn(ctx.mode);
@@ -238,7 +238,7 @@ function skillExtension(pi: ExtensionAPI) {
 		const stripped = withoutPiSkillsBlock(event.systemPrompt);
 		return stripped === event.systemPrompt ? undefined : { systemPrompt: stripped };
 	});
-	// The first turn a background completion opens (lib/prompt-options.ts)
+	// The first turn a background completion opens (lib/ui/prompt-options.ts)
 	// carries the same listing a typed first prompt would.
 	// The first announcement wins, as in system-prompt: both describe one turn.
 	let announcedSkills = false;
@@ -305,7 +305,7 @@ function skillExtension(pi: ExtensionAPI) {
 		return disabled;
 	};
 
-	/** A SKILL.md's `argument-hint`, the prompt's placeholder after its command (lib/argument-hints.ts). */
+	/** A SKILL.md's `argument-hint`, the prompt's placeholder after its command (lib/ui/argument-hints.ts). */
 	const readArgumentHint = (path: string): CommandHint | undefined => frontmatterCommandHint(readFrontmatter(path));
 
 	// Per-skill availability comes from the skill-overrides store (the /skills
@@ -530,7 +530,7 @@ function skillExtension(pi: ExtensionAPI) {
 
 	/**
 	 * A skill's body and the arguments still to append: a generated body
-	 * (lib/skill-body.ts, `/loop`) carries its arguments, a file's does not.
+	 * (lib/plugins/skill-body.ts, `/loop`) carries its arguments, a file's does not.
 	 * The bundled code-review picks its body by tier and effort (code-review.ts).
 	 */
 	const skillBody = (found: IndexedSkill, fileBody: string, args: string, cwd: string): { body: string; args: string } => {
@@ -551,7 +551,7 @@ function skillExtension(pi: ExtensionAPI) {
 	const baseDirFor = (found: IndexedSkill): string | undefined => (found.kind === "command" || isBundled(found.path) ? undefined : dirname(found.path));
 
 	// A fired scheduled prompt that is a skill's slash command runs that skill,
-	// as Claude Code's queue runs a fired `/babysit-prs` (lib/skill-body.ts).
+	// as Claude Code's queue runs a fired `/babysit-prs` (lib/plugins/skill-body.ts).
 	pi.events.on(SLASH_EXPAND_CHANNEL, (data) => {
 		const query = data as SlashExpandQuery;
 		const command = parseSlashCommand(query.text);

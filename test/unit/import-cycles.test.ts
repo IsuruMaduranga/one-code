@@ -3,7 +3,7 @@
  * static value imports. A module caught in a cycle can be handed out half
  * loaded (an export still undefined at another module's load time), which
  * surfaced as an order-dependent unit-test failure (`compareVersions is not
- * a function`) while `lib/notifications.ts` sat in one. Type-only imports are
+ * a function`) while `lib/notify/notifications.ts` sat in one. Type-only imports are
  * erased and `import()`/`require()` load on call, so neither counts.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";

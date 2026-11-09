@@ -1,12 +1,12 @@
 /** Reject damaged OpenRouter streams before tool execution, without changing the request prefix. */
-import { feature } from "../lib/feature.ts";
-import { requireText } from "../lib/profile.ts";
+import { feature } from "../lib/profile/feature.ts";
+import { requireText } from "../lib/profile/profile.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { notifyOrPrint } from "../lib/headless-output.ts";
-import { TURN_FAILED_CHANNEL, type TurnFailedEvent } from "../lib/interrupt.ts";
-import { sessionOutlivesTurn } from "../lib/notifications.ts";
+import { notifyOrPrint } from "../lib/notify/headless-output.ts";
+import { TURN_FAILED_CHANNEL, type TurnFailedEvent } from "../lib/notify/interrupt.ts";
+import { sessionOutlivesTurn } from "../lib/notify/notifications.ts";
 import { isOpenRouter, openRouterProviderName, toolCallCorruptionNotice, type UpstreamFailure } from "./openrouter-generation.ts";
-import { sessionAlive } from "../lib/session-lifecycle.ts";
+import { sessionAlive } from "../lib/notify/session-lifecycle.ts";
 import {
 	CONTENT_MARKUP_LIMIT,
 	RUNAWAY_PADDING_LIMIT,

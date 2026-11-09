@@ -5,8 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { isSafetyControlTarget, safetyControlWrite, safetyFloorBlockText, safetyFloorReason } from "../../extensions/permissions/auto-mode/safety-floor.ts";
 import { analyzeShellCommand } from "../../extensions/lib/shell/shell-analysis.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
-import { productProjectSettingsPath } from "../../extensions/lib/product-settings.ts";
-import { claudeJsonPath, forwardSlashes, toPosixPath } from "../../extensions/lib/paths.ts";
+import { productProjectSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
+import { claudeJsonPath, forwardSlashes, toPosixPath } from "../../extensions/lib/profile/paths.ts";
 
 let home: string;
 let cwd: string;

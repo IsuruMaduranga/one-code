@@ -7,7 +7,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { discoverPlugins } from "../../extensions/lib/plugins.ts";
+import { discoverPlugins } from "../../extensions/lib/plugins/plugins.ts";
 import { usePluginRoots, writePlugin, writeRegistry } from "../../test/unit/helpers/plugin-roots.ts";
 
 describe("Claude Code plugins' enabled state", () => {

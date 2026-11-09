@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { modeCycleKey } from "../../extensions/lib/keys.ts";
+import { modeCycleKey } from "../../extensions/lib/ui/keys.ts";
 import { WORDMARK, WORDMARK_WIDTH, bannerLines, bannerModeLabel, sectionSummary, truncateLine } from "../../extensions/branding/index.ts";
 import { shouldDefaultFlushOutputPad, shouldDefaultHideThinking, thinkingLabel } from "../../extensions/branding/startup.ts";
-import { boundKey } from "../../extensions/lib/tui-render.ts";
-import { brand } from "../../extensions/lib/brand.mjs";
+import { boundKey } from "../../extensions/lib/ui/tui-render.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
 
 // Identity paint keeps assertions about layout free of colour codes.
 const plain = (_color: string, text: string) => text;

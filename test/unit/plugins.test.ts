@@ -11,10 +11,10 @@ import {
 	loadInstalledPlugins,
 	pluginResources,
 	splitPluginKey,
-} from "../../extensions/lib/plugins.ts";
-import { setOverride } from "../../extensions/lib/plugin-overrides.ts";
-import { setSkillOverride, skillOverrideKey } from "../../extensions/lib/skill-overrides.ts";
-import { shellQuote } from "../../extensions/lib/shell-quote.ts";
+} from "../../extensions/lib/plugins/plugins.ts";
+import { setOverride } from "../../extensions/lib/plugins/plugin-overrides.ts";
+import { setSkillOverride, skillOverrideKey } from "../../extensions/lib/plugins/skill-overrides.ts";
+import { shellQuote } from "../../extensions/lib/shell/shell-quote.ts";
 import { splitShellPlaceholders, substituteArguments } from "../../extensions/plugins/template.ts";
 import { usePluginRoots, writePlugin, writeRegistry as writeRootRegistry } from "./helpers/plugin-roots.ts";
 

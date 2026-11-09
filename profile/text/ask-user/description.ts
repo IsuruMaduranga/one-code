@@ -4,7 +4,7 @@
  *
  * The short form goes to frontier and workhorse models; the long form, the
  * same text without the "Reserve this for decisions…" paragraph, to cheap
- * and tiny ones (lib/tool-variants.ts). The plan-mode note names One Code's
+ * and tiny ones (lib/profile/tool-variants.ts). The plan-mode note names One Code's
  * tools and drops "the user cannot see the plan until you call ExitPlanMode":
  * One Code's plan is a file the user can open at any time.
  */

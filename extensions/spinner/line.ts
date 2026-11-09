@@ -4,7 +4,7 @@
  * reconstructed Spinner source.
  */
 
-import { formatDuration } from "../lib/tui-render.ts";
+import { formatDuration } from "../lib/ui/tui-render.ts";
 import { formatTokenCount } from "../lib/agents/usage.ts";
 
 /**

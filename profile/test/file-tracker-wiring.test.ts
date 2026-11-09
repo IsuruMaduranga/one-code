@@ -11,11 +11,11 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fileTrackerExtension from "../../extensions/file-tracker/index.ts";
-import { CHILD_WROTE_CHANNEL } from "../../extensions/lib/child-writes.ts";
+import { CHILD_WROTE_CHANNEL } from "../../extensions/lib/agents/child-writes.ts";
 import { discoverContextFiles } from "../claude-code/instructions.ts";
-import { persistExternalIncludesApproval } from "../../extensions/lib/claude-external-includes.ts";
+import { persistExternalIncludesApproval } from "../../extensions/lib/context/claude-external-includes.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "../../test/unit/helpers/fake-pi.ts";
 import { stubHome } from "../../test/unit/helpers/home.ts";
 

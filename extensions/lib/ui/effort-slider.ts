@@ -17,9 +17,9 @@
  * terminal; `index.ts` only wires it to pi.
  */
 
-import { brandedId } from "../brand.mjs";
+import { brandedId } from "../profile/brand.mjs";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { keyId, keyText } from "../key-input.ts";
+import { keyId, keyText } from "./key-input.ts";
 
 /** The final stop on the track: top reasoning + workflows armed every turn. */
 export const ULTRACODE = "ultracode";
@@ -79,7 +79,7 @@ export type SliderKey = "left" | "right" | "first" | "last" | "confirm" | "sessi
 
 /**
  * Decode a raw terminal chunk. `Component.handleInput` hands over bytes, not key
- * names; `lib/key-input.ts` names them, so every terminal encoding of a key
+ * names; `lib/ui/key-input.ts` names them, so every terminal encoding of a key
  * (legacy, kitty, modifyOtherKeys) decodes alike.
  */
 export function decodeKey(data: string): SliderKey | undefined {

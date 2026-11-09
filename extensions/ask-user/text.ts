@@ -4,11 +4,11 @@
  * tool and its results (working-docs/features/profiles/).
  */
 
-import type { DescriptionForm } from "../lib/tool-variants.ts";
+import type { DescriptionForm } from "../lib/profile/tool-variants.ts";
 import type { Answer, Question } from "./questions.ts";
 
 export interface AskUserText {
-	/** Short or long by the model's tier (lib/tool-variants.ts). */
+	/** Short or long by the model's tier (lib/profile/tool-variants.ts). */
 	description(form: DescriptionForm): string;
 	/** The one-line entry in the system prompt's tool list. */
 	promptSnippet: string;

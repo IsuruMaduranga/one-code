@@ -1,5 +1,5 @@
 /**
- * lib/shell-tool.ts: the default `timeout` both shell descriptions promise
+ * lib/shell-run/shell-tool.ts: the default `timeout` both shell descriptions promise
  * (Claude Code's 120000 ms). pi's executor applies none, so a foreground
  * command without `timeout` ran until Esc, and a one-shot `run_in_background`
  * (which blocks the run) hung it forever. A detached background shell keeps
@@ -20,9 +20,9 @@ vi.mock("../../extensions/lib/shell-run/bash-background.ts", async (importOrigin
 	};
 });
 
-import { DEFAULT_TIMEOUT_MS, registerShellTool } from "../../extensions/lib/shell-tool.ts";
-import { oneShotNote } from "../../extensions/lib/notifications.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { DEFAULT_TIMEOUT_MS, registerShellTool } from "../../extensions/lib/shell-run/shell-tool.ts";
+import { oneShotNote } from "../../extensions/lib/notify/notifications.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 /** The profile's report of a one-shot background run the default or the model's timeout stopped. */

@@ -9,8 +9,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ULTRACODE_MODE_CHANNEL } from "../../extensions/lib/ui/effort-slider.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import workflowExtension from "../../extensions/workflow/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 

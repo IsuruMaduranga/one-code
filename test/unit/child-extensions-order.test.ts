@@ -5,7 +5,7 @@
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { CHILD_EXTENSIONS } from "../../extensions/lib/child-extensions.ts";
+import { CHILD_EXTENSIONS } from "../../extensions/lib/agents/child-extensions.ts";
 
 const packageOrder = (JSON.parse(readFileSync("package.json", "utf8")) as { pi: { extensions: string[] } }).pi.extensions.map((path) =>
 	path.replace(/^extensions\//, "").replace(/\/index\.ts$/, "").replace(/\.ts$/, ""),

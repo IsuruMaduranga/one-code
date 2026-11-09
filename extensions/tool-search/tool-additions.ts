@@ -1,7 +1,7 @@
 /**
  * Claude Code's `tool_addition` for tools that arrive mid-session (pure). One
  * Code renders the arrival as the deferred-tool addendum on the request's
- * tail (lib/deferred.ts deferredAddendumText), which reads correctly on any model.
+ * tail (lib/request/deferred.ts deferredAddendumText), which reads correctly on any model.
  * On a first-party model that takes mid-conversation tool changes, the
  * addendum leaves the message that carries it for a system message right
  * after it: Claude Code's sentence and names, then one reference-form
@@ -15,8 +15,8 @@
  * (a one-shot pinned there).
  */
 
-import { MID_CONVERSATION_SYSTEM_BETA, MID_CONVERSATION_TOOL_CHANGES_BETA, reseatMessageMark } from "../lib/anthropic-payload.ts";
-import { byWireCallId, systemRoleLayout, type WireMessage, type WirePart, withoutParts } from "../lib/system-role.ts";
+import { MID_CONVERSATION_SYSTEM_BETA, MID_CONVERSATION_TOOL_CHANGES_BETA, reseatMessageMark } from "../lib/request/anthropic-payload.ts";
+import { byWireCallId, systemRoleLayout, type WireMessage, type WirePart, withoutParts } from "../lib/request/system-role.ts";
 import { toolSearchWords } from "./words.ts";
 
 

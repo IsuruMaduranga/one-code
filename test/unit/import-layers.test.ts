@@ -1,11 +1,11 @@
 /**
  * The layers of `extensions/` (working-docs/reviews/DESIGN-REVIEW-2026-11-09.md
  * L2). A folder under `extensions/` is `lib/` (shared code), `sdk/` (the
- * surfaces a product imports) or a feature's folder (`lib/features.ts`), and:
+ * surfaces a product imports) or a feature's folder (`lib/profile/features.ts`), and:
  *
  * - `lib/` never loads a feature's module: a value import of a feature file
  *   makes every feature that uses the lib module depend on that feature.
- *   Type imports are erased and allowed (`lib/profile-contract.ts` names
+ *   Type imports are erased and allowed (`lib/profile/profile-contract.ts` names
  *   each feature's text types).
  * - A feature never imports another feature's files, except the type of
  *   another feature's words (`text.ts`). Cross-feature data goes over
@@ -20,7 +20,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, posix, relative } from "node:path";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
-import { FEATURES } from "../../extensions/lib/features.ts";
+import { FEATURES } from "../../extensions/lib/profile/features.ts";
 import { valueImports } from "./helpers/import-graph.ts";
 import { IMPORT_LAYER_VIOLATIONS } from "./import-layers-allowlist.ts";
 

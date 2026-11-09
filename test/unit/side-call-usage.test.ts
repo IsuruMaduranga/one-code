@@ -1,6 +1,6 @@
 import { appendFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { logSideCallUsage } from "../../extensions/lib/side-call-usage.ts";
+import { logSideCallUsage } from "../../extensions/lib/side-calls/side-call-usage.ts";
 
 vi.mock("node:fs", () => ({ appendFileSync: vi.fn() }));
 const append = vi.mocked(appendFileSync);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { scanToolCallMarkup, toolCallCorruptionReason } from "../../extensions/tool-call-corruption/tool-call-corruption.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import type { ArgumentDamage } from "../../extensions/tool-call-corruption/text.ts";
 
 /** The damage as the profile words it: the reason the base passes on. */

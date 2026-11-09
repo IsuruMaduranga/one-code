@@ -1,7 +1,7 @@
 /**
  * The wall-clock span of one user-visible turn.
  *
- * A turn can hold several agent runs (see `lib/interrupt.ts` for why), so the
+ * A turn can hold several agent runs (see `lib/notify/interrupt.ts` for why), so the
  * span opens on the FIRST run and closes at settle: a retried run keeps the
  * original start, which is what makes the rendered duration the time the user
  * actually waited rather than the time the last attempt took.
@@ -11,7 +11,7 @@
  * failure for an error. Claude Code gates its turn line the same way.
  */
 
-import { type RunMessage, RunOutcomeLatch } from "../lib/interrupt.ts";
+import { type RunMessage, RunOutcomeLatch } from "../lib/notify/interrupt.ts";
 
 export class TurnSpan {
 	/** Undefined rather than 0 for "no span open", so a start of 0 is still a start. */

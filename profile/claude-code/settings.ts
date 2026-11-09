@@ -2,7 +2,7 @@
  * Claude Code's own settings readers for One Code's source provider: the
  * paths of its three settings files, and its `instructionFiles` rule. The
  * settings.json format and the ladder stay in the base
- * (extensions/lib/claude-settings.ts); the user file's and managed files'
+ * (extensions/lib/profile/claude-settings.ts); the user file's and managed files'
  * paths stay there too, since the safety floor protects them in every
  * product.
  */

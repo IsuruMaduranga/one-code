@@ -17,7 +17,7 @@
 
 import { type Dirent, lstatSync, readdirSync, readlinkSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
-import { comparablePath, expandTilde, gitBashPathToNative, isPathAtOrUnder, tryRealpath } from "../paths.ts";
+import { comparablePath, expandTilde, gitBashPathToNative, isPathAtOrUnder, tryRealpath } from "../profile/paths.ts";
 
 /**
  * Tools whose calls write to a path. Lives here — the lowest shared layer both
@@ -53,7 +53,7 @@ export function conflictingPathArguments(input: Record<string, unknown> | undefi
 	return new Set(fields.map((key) => input?.[key])).size < 2 ? undefined : fields;
 }
 
-/** The shared comparison form (lib/paths.ts): `/` separators, case-folded on darwin/win32. */
+/** The shared comparison form (lib/profile/paths.ts): `/` separators, case-folded on darwin/win32. */
 const normalize = comparablePath;
 
 /**
@@ -107,7 +107,7 @@ export function resolveThroughLinks(target: string, hops = 0): string | undefine
 	}
 }
 
-/** True only when `target` is provably at or under `base` (lib/paths.ts `isPathAtOrUnder`, argument order kept for the callers here). */
+/** True only when `target` is provably at or under `base` (lib/profile/paths.ts `isPathAtOrUnder`, argument order kept for the callers here). */
 export function isWithin(base: string, target: string): boolean {
 	return isPathAtOrUnder(target, base);
 }
@@ -130,7 +130,7 @@ export function toAbsolute(cwd: string, token: string, home: string): string {
  * {@link toAbsolute} for a token taken from a bash command line. On Windows the
  * bash tool runs Git Bash, whose absolute paths are MSYS spellings — `/c/proj/f`
  * is `C:\proj\f`, `/tmp/f` sits under the user's temp dir — so the token is
- * converted first (lib/paths.ts gitBashPathToNative). `path.resolve` alone reads
+ * converted first (lib/profile/paths.ts gitBashPathToNative). `path.resolve` alone reads
  * `/c/proj/f` as `<cwd drive>:\c\proj\f`, which no gate recognises as the
  * project: the error fell towards escalate/prompt, never towards allow, but every
  * in-project write spelled that way went to the classifier. File-tool paths keep

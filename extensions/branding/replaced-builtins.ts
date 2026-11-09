@@ -1,5 +1,5 @@
 /**
- * pi 0.99's built-in tool search and MCP, at startup (lib/replaced-builtins.mjs
+ * pi 0.99's built-in tool search and MCP, at startup (lib/app/replaced-builtins.mjs
  * has the rule; decisions/tools.md "pi's built-in tool search and MCP").
  *
  * On the user's own pi, while the user's settings leave a built-in on, One
@@ -15,9 +15,9 @@
 import os from "node:os";
 import { type ExtensionContext, getAgentDir, SettingsManager, VERSION as PI_VERSION } from "@earendil-works/pi-coding-agent";
 import { configCommand, installKind, replacedBuiltinsView } from "../doctor/builtins.ts";
-import { tildify } from "../lib/paths.ts";
+import { tildify } from "../lib/profile/paths.ts";
 import { declined, recordDeclined } from "./declined.ts";
-import { replacedBuiltinsNotice, TURN_OFF_NO, TURN_OFF_YES, turnOffPrompt, withBuiltinsTurnedOff } from "../lib/replaced-builtins.mjs";
+import { replacedBuiltinsNotice, TURN_OFF_NO, TURN_OFF_YES, turnOffPrompt, withBuiltinsTurnedOff } from "../lib/app/replaced-builtins.mjs";
 
 /** `~/.onecode/settings.json` key: the user answered "No" to the question. */
 export const DECLINED_KEY = "piBuiltinsTurnOffDeclined";

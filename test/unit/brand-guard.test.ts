@@ -1,9 +1,9 @@
 /**
  * Phase 4c's exit check (working-docs/features/profiles/plan.md): the base
- * names the product only through the profile's brand (extensions/lib/brand.mjs,
+ * names the product only through the profile's brand (extensions/lib/profile/brand.mjs,
  * decisions/bi-fork.md "The brand is one static data file"). A new literal
  * fails here until it goes through `brandedId`, `envName`, `brand` or a
- * knob (lib/knobs.ts).
+ * knob (lib/profile/knobs.ts).
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { singleFlight } from "../../extensions/lib/single-flight.ts";
+import { singleFlight } from "../../extensions/lib/core/single-flight.ts";
 
 describe("singleFlight", () => {
 	it("shares one pending run per key and starts fresh once it settles", async () => {

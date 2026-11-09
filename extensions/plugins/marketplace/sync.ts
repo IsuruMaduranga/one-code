@@ -6,11 +6,11 @@
  * never at session start.
  */
 
-import { brand } from "../../lib/brand.mjs";
+import { brand } from "../../lib/profile/brand.mjs";
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { readJsonFile, writeJsonAtomic } from "../../lib/atomic-write.ts";
-import { fetchWithTimeout } from "../../lib/fetch-timeout.ts";
+import { readJsonFile, writeJsonAtomic } from "../../lib/core/atomic-write.ts";
+import { fetchWithTimeout } from "../../lib/core/fetch-timeout.ts";
 import { gitClone, gitUpdate } from "./git.ts";
 import { writeKnownMarketplace } from "./registry.ts";
 import {

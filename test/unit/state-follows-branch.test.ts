@@ -10,17 +10,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import effortExtension from "../../extensions/effort/index.ts";
-import { makeRecord, RECORD } from "../../extensions/lib/ledger/records.ts";
-import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
-import { REMINDER_CHANNEL, type ReminderPayload } from "../../extensions/lib/reminders.ts";
+import { makeRecord, RECORD } from "../../extensions/lib/request/ledger/records.ts";
+import { MODE_CHANNEL } from "../../extensions/lib/rules/plan-mode-channels.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { REMINDER_CHANNEL, type ReminderPayload } from "../../extensions/lib/request/reminders.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../extensions/lib/rules/modes.ts";
-import { MODE_ENV } from "../../extensions/lib/permission-gate.ts";
-import type { ToldFact } from "../../extensions/lib/ledger/records.ts";
+import { MODE_ENV } from "../../extensions/lib/agents/permission-gate.ts";
+import type { ToldFact } from "../../extensions/lib/request/ledger/records.ts";
 import { createFakeCtx, createFakePi, renderRequest } from "./helpers/fake-pi.ts";
 import { stateEntry } from "./helpers/state-entry.ts";
-import { brand, envName } from "../../extensions/lib/brand.mjs";
+import { brand, envName } from "../../extensions/lib/profile/brand.mjs";
 
 /** A request recorded on the branch: its model was told the mode in force. */
 const requestEntry = {

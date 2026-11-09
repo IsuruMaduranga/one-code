@@ -7,13 +7,13 @@
  *
  *   "2 shells · ↓ to manage" → focused: "[2 shells] · Enter to view tasks"
  *
- * Task objects arrive over TASK_REGISTER_CHANNEL (lib/shell-tasks.ts) and stay
+ * Task objects arrive over TASK_REGISTER_CHANNEL (lib/shell-run/shell-tasks.ts) and stay
  * live; status is read at render time. Key wiring lives in index.ts; this file
  * owns layout and the focus reducer only.
  */
 
 import type { BackgroundTask } from "../lib/agents/task-registry.ts";
-import { countNoun, cutPlainText as cut } from "../lib/tui-render.ts";
+import { countNoun, cutPlainText as cut } from "../lib/ui/tui-render.ts";
 import type { StripKey } from "./panel-keys.ts";
 import { type Paint, STRIP_LINGER_MS } from "./panel-render.ts";
 

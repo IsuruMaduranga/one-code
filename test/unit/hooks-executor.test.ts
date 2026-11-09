@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { runHookCommand } from "../../extensions/hooks/executor.ts";
-import { forwardSlashes } from "../../extensions/lib/paths.ts";
+import { forwardSlashes } from "../../extensions/lib/profile/paths.ts";
 
 // Real /bin/sh children, per the repo convention of never mocking
 // child_process: keep spawn in a thin executor and test that executor live.

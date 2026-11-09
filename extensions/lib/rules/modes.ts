@@ -9,14 +9,14 @@
  * either — it is reachable only via flag or settings.
  */
 
-import { brandedId } from "../brand.mjs";
+import { brandedId } from "../profile/brand.mjs";
 import type { PermissionMode } from "./matcher.ts";
-import { modeCycleKey, pauseGlyph } from "../keys.ts";
+import { modeCycleKey, pauseGlyph } from "../ui/keys.ts";
 
 /**
  * Footer badge per mode — Claude Code's exact strings and icons. The pause
  * icon is swapped for a single-cell glyph on Windows and WSL, where Windows
- * Terminal draws U+23F8 two cells wide and over the mode name (lib/keys.ts).
+ * Terminal draws U+23F8 two cells wide and over the mode name (lib/ui/keys.ts).
  */
 const PAUSE = pauseGlyph();
 export const MODE_BADGES: Record<PermissionMode, string> = {
@@ -94,7 +94,7 @@ export function isRealModel(id: string | undefined): id is string {
  * The key that cycles permission modes. Claude Code cycles on shift+tab and
  * says so in this footer; pi reserves shift+tab for the effort dial, so One Code
  * cycles on ctrl+q (see working-docs/decisions/modes.md) — alt+m on Windows and WSL,
- * where pi owns ctrl+q (lib/keys.ts) — and the hint names that key.
+ * where pi owns ctrl+q (lib/ui/keys.ts) — and the hint names that key.
  */
 export const CYCLE_KEY = modeCycleKey();
 export const CYCLE_KEY_HINT = `${CYCLE_KEY} to cycle`;

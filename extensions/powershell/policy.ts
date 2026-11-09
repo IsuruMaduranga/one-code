@@ -2,7 +2,7 @@
  * When the `powershell` tool is on, and which shell tool is primary (pure).
  *
  * Claude Code's gate (2.1.276 binary function `f0`, findings §22), read
- * through the `USE_POWERSHELL_TOOL` knob (lib/knobs.ts: the product's spelling,
+ * through the `USE_POWERSHELL_TOOL` knob (lib/profile/knobs.ts: the product's spelling,
  * or Claude Code's while its sources are on). It wins wherever it is set — truthy turns the
  * tool on, `0`/`false` off. Unset: on Windows the tool is on (Git Bash absent
  * → on by necessity; Git Bash present → on, the claude.ai/Console default the
@@ -12,12 +12,12 @@
  * loud at startup in Claude Code's words.
  */
 
-import { envName } from "../lib/brand.mjs";
-import { knobValue, readKnob } from "../lib/knobs.ts";
+import { envName } from "../lib/profile/brand.mjs";
+import { knobValue, readKnob } from "../lib/profile/knobs.ts";
 
 export type PowerShellSwitch = "on" | "off" | "unset";
 
-/** The knob that switches the powershell tool (lib/knobs.ts). */
+/** The knob that switches the powershell tool (lib/profile/knobs.ts). */
 export const POWERSHELL_KNOB = "USE_POWERSHELL_TOOL";
 
 /** The `USE_POWERSHELL_TOOL` knob as Claude Code reads its switch: unset/empty → unset, `0`/`false`/`no`/`off` → off, anything else → on. */

@@ -9,8 +9,8 @@
  * premise the user should re-examine.
  */
 
-import { brand } from "../../lib/brand.mjs";
-import { knobValue } from "../../lib/knobs.ts";
+import { brand } from "../../lib/profile/brand.mjs";
+import { knobValue } from "../../lib/profile/knobs.ts";
 
 export const CONSECUTIVE_BLOCK_LIMIT = 3;
 export const TOTAL_BLOCK_LIMIT = 20;
@@ -18,7 +18,7 @@ export const TOTAL_BLOCK_LIMIT = 20;
 /**
  * How long a timed resume prompt waits before denying the call, as Claude
  * Code's denial-limit fallback does (2.1.282: 120 s, overridden by
- * the `TICKLISH_WHISPER_TIMEOUT_MS` knob, lib/knobs.ts), so an unattended session is not
+ * the `TICKLISH_WHISPER_TIMEOUT_MS` knob, lib/profile/knobs.ts), so an unattended session is not
  * held by a prompt nobody will answer.
  */
 export const UNATTENDED_PROMPT_TIMEOUT_MS = 120_000;

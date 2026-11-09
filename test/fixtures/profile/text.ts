@@ -15,7 +15,7 @@ import type { ProfileText } from "../extensions/sdk/profile.ts";
 /**
  * An object argument as JSON, but with the NUL character left raw: the base
  * finds where a value lands in a text by passing a NUL hole and searching for
- * it (lib/template-probe.ts), which an escaped `\u0000` would hide.
+ * it (lib/profile/template-probe.ts), which an escaped `\u0000` would hide.
  */
 function shownObject(arg: object): string {
 	return JSON.stringify(arg).replaceAll("\\u0000", "\u0000");

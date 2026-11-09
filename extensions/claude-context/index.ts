@@ -5,7 +5,7 @@
  * CONTEXT_ORDER.claudeMd, the context block (userEmail + the git snapshot) at
  * CONTEXT_ORDER.context, and the date at CONTEXT_ORDER.date, which on a model
  * that takes a mid-conversation system message rides that message instead
- * (system-reminder, lib/system-role.ts). They are live state: a request that
+ * (system-reminder, lib/request/system-role.ts). They are live state: a request that
  * opens an epoch renders them, and every later request in the epoch replays
  * them from the ledger's record (extensions/ledger). The blocks carry ledger
  * facts (claude-context/context-facts.ts), so the first request of a resumed process says
@@ -21,33 +21,33 @@
  * extension (jiti gives each extension its own module instance).
  */
 
-import { brand, brandedId } from "../lib/brand.mjs";
-import { feature } from "../lib/feature.ts";
+import { brand, brandedId } from "../lib/profile/brand.mjs";
+import { feature } from "../lib/profile/feature.ts";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import os from "node:os";
 import { dirname } from "node:path";
 import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { buildClaudeMdBlock, buildContextBlock, buildOneCodeBlock, dateBlock, dateChangeReminder, localDate, nestedInstructionText } from "./claude-context.ts";
-import { collectImportedPaths, openInstructions } from "../lib/instructions.ts";
-import { collectGitStatus, GIT_SNAPSHOT_OWNER_CHANNEL } from "../lib/git-status.ts";
+import { collectImportedPaths, openInstructions } from "../lib/context/instructions.ts";
+import { collectGitStatus, GIT_SNAPSHOT_OWNER_CHANNEL } from "../lib/context/git-status.ts";
 import { readMemoryIndex } from "./memory-index.ts";
-import { productStateDir, tildify, tryRealpath } from "../lib/paths.ts";
-import { fitToWindow, restoredInstructionNotice, type SkippedInstruction, skippedInstructionWarning } from "../lib/instruction-budget.ts";
-import { queueNotice } from "../lib/notices.ts";
-import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, toldBlockFact } from "../lib/reminders.ts";
-import { inContextEntries } from "../lib/compaction-boundary.ts";
+import { productStateDir, tildify, tryRealpath } from "../lib/profile/paths.ts";
+import { fitToWindow, restoredInstructionNotice, type SkippedInstruction, skippedInstructionWarning } from "../lib/context/instruction-budget.ts";
+import { queueNotice } from "../lib/notify/notices.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, toldBlockFact } from "../lib/request/reminders.ts";
+import { inContextEntries } from "../lib/request/compaction-boundary.ts";
 import { compactionGitStatus, contextBlockFacts, contextFingerprints, dateFingerprint, FACT_KEYS, instructionFacts, liveFingerprints, type LiveFingerprints, resumeFactsNotice } from "./context-facts.ts";
-import { resolveToolPath } from "../lib/tool-path.ts";
-import { sessionWorkCwd, WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
+import { resolveToolPath } from "../lib/rules/tool-path.ts";
+import { sessionWorkCwd, WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/agents/worktree-channel.ts";
 import { pathArgument } from "../lib/shell/paths.ts";
-import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
-import { EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_NONE, EXTERNAL_INCLUDES_SETTING, EXTERNAL_INCLUDES_YES, externalIncludesDialog, persistExternalIncludesApproval, readExternalIncludesApproval } from "../lib/claude-external-includes.ts";
-import { registerLocalCommand } from "../lib/local-command.ts";
-import { consentDialog, installConsentDialogs, startupConsentReady } from "../lib/consent-dialogs.ts";
-import type { ToldFact } from "../lib/ledger/records.ts";
-import { foldSession } from "../lib/ledger/fold-memo.ts";
-import { sessionIdentity } from "../lib/anthropic-auth.ts";
+import { HARNESS_GIT_CONFIG } from "../lib/context/git.ts";
+import { EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_NONE, EXTERNAL_INCLUDES_SETTING, EXTERNAL_INCLUDES_YES, externalIncludesDialog, persistExternalIncludesApproval, readExternalIncludesApproval } from "../lib/context/claude-external-includes.ts";
+import { registerLocalCommand } from "../lib/ui/local-command.ts";
+import { consentDialog, installConsentDialogs, startupConsentReady } from "../lib/consent/consent-dialogs.ts";
+import type { ToldFact } from "../lib/request/ledger/records.ts";
+import { foldSession } from "../lib/request/ledger/fold-memo.ts";
+import { sessionIdentity } from "../lib/request/anthropic-auth.ts";
 
 const REMINDER_KEY = "claude-context";
 const PRODUCT_REMINDER_KEY = `${brand.idPrefix}-context`;
@@ -218,7 +218,7 @@ function claudeContextExtension(pi: ExtensionAPI) {
 	};
 	/**
 	 * The current model's context window: past half of it, the largest
-	 * instruction files are skipped (lib/instruction-budget.ts). Every model switch opens an epoch, so the live
+	 * instruction files are skipped (lib/context/instruction-budget.ts). Every model switch opens an epoch, so the live
 	 * blocks built with the new window are what the next request renders.
 	 */
 	let contextWindow: number | undefined;
@@ -382,7 +382,7 @@ function claudeContextExtension(pi: ExtensionAPI) {
 				approvalPending = askApproval(ctx, paths, true).catch(() => {});
 			}
 		}
-		// The instructions block carries the instruction files lib/instructions.ts
+		// The instructions block carries the instruction files lib/context/instructions.ts
 		// and the profile's provider pick (One Code's: by default the CLAUDE.md
 		// family, or the project's AGENTS.md files when it has no CLAUDE.md,
 		// byte-exact with Claude Code either way). ONECODE.md rides its own
@@ -416,7 +416,7 @@ function claudeContextExtension(pi: ExtensionAPI) {
 		// A process that starts on a compacted branch before the compaction's
 		// epoch opened (/compact, then /reload) renders that epoch's message 1:
 		// the blocks are the compaction's, not the conversation start's (R3-L11).
-		// The fold is shared with tool-search and the ledger: one fold per branch state (lib/ledger/fold-memo.ts).
+		// The fold is shared with tool-search and the ledger: one fold per branch state (lib/request/ledger/fold-memo.ts).
 		const fold = foldSession(ctx.sessionManager, sessionIdentity(pi, ctx.model));
 		if (fold.opensEpoch && fold.cause === "compaction") {
 			refreshForCompaction(ctx);
@@ -496,7 +496,7 @@ function claudeContextExtension(pi: ExtensionAPI) {
 
 	// A successful read attaches nested instruction files and matching path rules
 	// once each. These are one-shots: never replace the frozen first-prepend block.
-	// lib/instructions.ts and the profile's provider own traversal, matching and source ordering.
+	// lib/context/instructions.ts and the profile's provider own traversal, matching and source ordering.
 	pi.on("tool_result", (event, ctx) => {
 		if (event.toolName !== "read" || event.isError) return;
 		const raw = pathArgument(event.input);
@@ -526,7 +526,7 @@ function claudeContextExtension(pi: ExtensionAPI) {
 			shown.push(file.key);
 			// Past what the loaded top-level files and the nested ones in context (this
 			// read's included) leave of the half, the note rides in its place
-			// (lib/instruction-budget.ts), and its imports are not shown: a later read
+			// (lib/context/instruction-budget.ts), and its imports are not shown: a later read
 			// may still attach one.
 			const fit = fitToWindow([file], contextWindow, { used });
 			used = fit.loaded;

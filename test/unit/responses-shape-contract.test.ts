@@ -1,6 +1,6 @@
 /**
  * Contract with the installed pi-ai: whatever shape its Responses adapter puts
- * on the wire, the ledger's readers (lib/ledger/wire.ts) find every declared
+ * on the wire, the ledger's readers (lib/request/ledger/wire.ts) find every declared
  * tool and the start of the conversation. pi 1.4.0 moved the starting tools
  * into an `additional_tools` item for models flagged for mid-conversation
  * system messages and additional tools (findings §78); a later pi may move
@@ -15,7 +15,7 @@
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
-import { preludeLength, responsesDeclarations } from "../../extensions/lib/ledger/wire.ts";
+import { preludeLength, responsesDeclarations } from "../../extensions/lib/request/ledger/wire.ts";
 
 const root = process.env.ONE_CODE_PI_AI;
 const load = (subpath: string) => import(root ? pathToFileURL(join(root, "dist", `${subpath}.js`)).href : `@earendil-works/pi-ai/${subpath}`);

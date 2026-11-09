@@ -11,9 +11,9 @@
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { BackgroundTask } from "../lib/agents/task-registry.ts";
-import { canShowCustomUi } from "../lib/headless-output.ts";
-import type { ShellTaskTracker } from "../lib/shell-tasks.ts";
-import { linesComponent, liveUiCtx, safeThemeBold, safeThemeInverse, safeThemePaint } from "../lib/tui-render.ts";
+import { canShowCustomUi } from "../lib/notify/headless-output.ts";
+import type { ShellTaskTracker } from "../lib/shell-run/shell-tasks.ts";
+import { linesComponent, liveUiCtx, safeThemeBold, safeThemeInverse, safeThemePaint } from "../lib/ui/tui-render.ts";
 import { buildRows, MAX_STRIP_ROWS, recentlyLeftStrip, renderStrip, TASKS_NOTICE, type PanelRow } from "./panel-render.ts";
 import type { LiveRunRegistry } from "./live-runs.ts";
 import { renderShellChip, shellRows } from "./shell-panel.ts";
@@ -63,14 +63,14 @@ export class SubagentWidget {
 		private readonly registry: LiveRunRegistry,
 		private readonly getCtx: () => ExtensionContext | undefined,
 		private readonly shells?: ShellTaskTracker,
-		/** Told the rows this strip paints below the editor (lib/dock-rows.ts). */
+		/** Told the rows this strip paints below the editor (lib/ui/dock-rows.ts). */
 		private readonly onRows: (rows: number) => void = () => {},
 	) {
 		this.unsubscribes.push(registry.subscribe(() => this.schedule()));
 		if (shells) this.unsubscribes.push(shells.subscribe(() => this.schedule()));
 	}
 
-	/** The ctx to paint on: none once disposed, or once pi has invalidated it (lib/tui-render.ts liveUiCtx). */
+	/** The ctx to paint on: none once disposed, or once pi has invalidated it (lib/ui/tui-render.ts liveUiCtx). */
 	private liveCtx(): ExtensionContext | undefined {
 		return this.disposed ? undefined : liveUiCtx(this.getCtx());
 	}

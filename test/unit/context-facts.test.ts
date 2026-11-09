@@ -5,12 +5,12 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import claudeContextExtension from "../../extensions/claude-context/index.ts";
 import { contextBlockFacts, contextFingerprints, FACT_KEYS, gitFingerprint, instructionFacts, resumeFactsNotice } from "../../extensions/claude-context/context-facts.ts";
-import { GIT_SNAPSHOT_OWNER_CHANNEL } from "../../extensions/lib/git-status.ts";
-import { toldOf } from "../../extensions/lib/ledger/fold.ts";
-import type { ToldFact } from "../../extensions/lib/ledger/records.ts";
-import { projectMemoryDir } from "../../extensions/lib/memory.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
-import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/reminders.ts";
+import { GIT_SNAPSHOT_OWNER_CHANNEL } from "../../extensions/lib/context/git-status.ts";
+import { toldOf } from "../../extensions/lib/request/ledger/fold.ts";
+import type { ToldFact } from "../../extensions/lib/request/ledger/records.ts";
+import { projectMemoryDir } from "../../extensions/lib/context/memory.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi, renderRequest } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 

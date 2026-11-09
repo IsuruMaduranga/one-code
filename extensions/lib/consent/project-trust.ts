@@ -19,7 +19,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { consentStorePath } from "../consent-stores.ts";
+import { consentStorePath } from "./consent-stores.ts";
 
 interface ApprovalStore {
 	version: 1;

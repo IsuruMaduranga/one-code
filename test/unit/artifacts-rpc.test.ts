@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import artifactsExtension from "../../extensions/artifacts/index.ts";
 import { artifactsRoot, getArtifact, publishArtifact } from "../../extensions/artifacts/store.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 
 let dir: string;
 beforeEach(() => {

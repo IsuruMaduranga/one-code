@@ -4,7 +4,7 @@
  * The short form, on frontier and workhorse models, is One Code's own: it
  * describes what this fetch does that Claude Code's does not (an optional
  * `prompt`, windowed pages, Anthropic's server-side fetch). The long form, on
- * cheap and tiny models (lib/tool-variants.ts), is the text Claude Code writes
+ * cheap and tiny models (lib/profile/tool-variants.ts), is the text Claude Code writes
  * for its weakest models, with One Code's tool names, without the claude.ai
  * artifact line, with `prompt` optional and with the paging note in place of
  * "Results may be summarized".

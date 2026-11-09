@@ -2,14 +2,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeEach } from "vitest";
-import { envName } from "../extensions/lib/brand.mjs";
-import { emptyCatalogSources, setCatalogSourcesForTest } from "../extensions/lib/model-catalog-data.ts";
-import { setModelTierOverridesForTest } from "../extensions/lib/model-tier.ts";
-import { bashParserReady } from "../extensions/lib/bash-parser.ts";
-import { shareShippedProfileForTest } from "../extensions/lib/profile.ts";
+import { envName } from "../extensions/lib/profile/brand.mjs";
+import { emptyCatalogSources, setCatalogSourcesForTest } from "../extensions/lib/models/model-catalog-data.ts";
+import { setModelTierOverridesForTest } from "../extensions/lib/models/model-tier.ts";
+import { bashParserReady } from "../extensions/lib/shell/bash-parser.ts";
+import { shareShippedProfileForTest } from "../extensions/lib/profile/profile.ts";
 import { profile } from "../profile/index.ts";
 
-// The shipped profile through the test run's own module graph (lib/profile.ts
+// The shipped profile through the test run's own module graph (lib/profile/profile.ts
 // loads it on demand under jiti, where vitest's import is not the one used).
 shareShippedProfileForTest(profile);
 // What the profile in force needs besides this (One Code's source provider and

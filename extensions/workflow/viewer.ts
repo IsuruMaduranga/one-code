@@ -11,11 +11,11 @@
  * before painting so ANSI escapes never enter the width accounting.
  */
 
-import { cutPlainText as cut, formatDuration, padPlainText, splitCell, splitRow, visibleWidth, wrapHints, wrapPlainText, wrapProse } from "../lib/tui-render.ts";
+import { cutPlainText as cut, formatDuration, padPlainText, splitCell, splitRow, visibleWidth, wrapHints, wrapPlainText, wrapProse } from "../lib/ui/tui-render.ts";
 import { formatTokenCount } from "../lib/agents/usage.ts";
 import type { AgentRecord, RunStatus } from "./types.ts";
-import { keyId, keyText } from "../lib/key-input.ts";
-import { projectConfigDirName } from "../lib/sources.ts";
+import { keyId, keyText } from "../lib/ui/key-input.ts";
+import { projectConfigDirName } from "../lib/profile/sources.ts";
 
 /** Theme access the renderer needs: fg tokens ("accent", "dim", "error", …) and bold. */
 export interface ViewerPaint {
@@ -211,7 +211,7 @@ export function clampViewerState(state: ViewerState, runs: ViewerRunSnapshot[]):
 const cell = padPlainText;
 
 // The splitRow/splitCell layout rule (left half padded against a right-aligned
-// annotation, fused when narrow) is shared from lib/tui-render.ts — the
+// annotation, fused when narrow) is shared from lib/ui/tui-render.ts — the
 // header, the pane rows, and the status strip all build on it.
 
 const STATUS_MARK: Record<AgentRecord["status"], string> = {

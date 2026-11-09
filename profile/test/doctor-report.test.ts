@@ -4,9 +4,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { buildDoctorReport, summarizeProviders } from "../../extensions/doctor/build.ts";
 import { collectModelFacts, modelsSection } from "../../extensions/doctor/models.ts";
 import { type DoctorEnvironment, type Finding, type RegistryView, renderDoctorReport, renderDoctorText } from "../../extensions/doctor/report.ts";
-import { TESTED_PI_MAX_EXCLUSIVE } from "../../extensions/lib/pi-version.ts";
+import { TESTED_PI_MAX_EXCLUSIVE } from "../../extensions/lib/app/pi-version.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
-import { sourceSwitchStatus } from "../../extensions/lib/sources.ts";
+import { sourceSwitchStatus } from "../../extensions/lib/profile/sources.ts";
 import { pinCatalog, pinReleaseDates } from "../../test/unit/catalog-fixture.ts";
 import { tempHome } from "../../test/unit/helpers/temp-home.ts";
 

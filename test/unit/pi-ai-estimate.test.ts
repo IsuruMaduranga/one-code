@@ -3,7 +3,7 @@
  * deep subpaths (`api/simple-options`, `utils/estimate`), which the bundled
  * app's library loader rewrites onto a dead compat path, so the app could not
  * load the extension set. Those two helpers (and the estimator chain they need)
- * are now vendored in `extensions/lib/pi-ai-estimate.ts`.
+ * are now vendored in `extensions/lib/models/pi-ai-estimate.ts`.
  *
  * This test imports the REAL deep paths from node_modules and asserts the
  * vendored copies produce byte-identical numbers across a battery of inputs, so
@@ -15,7 +15,7 @@ import { clampMaxTokensToContext as realClampImpl } from "@earendil-works/pi-ai/
 import { estimateMessageTokens as realEstimate } from "@earendil-works/pi-ai/utils/estimate";
 import { normalizeContext as realNormalize } from "@earendil-works/pi-ai/utils/transcript";
 import { describe, expect, it } from "vitest";
-import { charsPerToken, clampMaxTokensToContext, estimateMessageTokens, normalizeContext } from "../../extensions/lib/pi-ai-estimate.ts";
+import { charsPerToken, clampMaxTokensToContext, estimateMessageTokens, normalizeContext } from "../../extensions/lib/models/pi-ai-estimate.ts";
 
 // Mirror fit.ts / completeSimple: normalize before clamping. The real
 // normalizeContext returns the branded TranscriptContext the real clamp expects,

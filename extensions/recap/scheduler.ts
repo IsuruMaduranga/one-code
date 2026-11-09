@@ -14,7 +14,7 @@
  * async model call it triggers stays in the extension.
  */
 
-import type { TimerOps } from "../lib/timer-ops.ts";
+import type { TimerOps } from "../lib/core/timer-ops.ts";
 
 export type { TimerOps };
 

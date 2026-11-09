@@ -5,7 +5,7 @@
  * Fails closed (`requireText`) when the profile has none: the gate always runs.
  */
 
-import { requireText } from "../../lib/profile.ts";
+import { requireText } from "../../lib/profile/profile.ts";
 import type { AutoModeText } from "./text.ts";
 
 export const autoModeWords = (): AutoModeText => requireText("autoMode");

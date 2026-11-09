@@ -15,12 +15,12 @@
 import { existsSync, readdirSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import os from "node:os";
-import { projectInstructionFiles } from "../lib/instructions.ts";
-import { projectConfigDir, userConfigDir } from "../lib/sources.ts";
-import { BUNDLED_SKILLS_DIR, scanSkills } from "../lib/skill-scan.ts";
-import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
-import { productStateDir } from "../lib/paths.ts";
-import { boundKey } from "../lib/tui-render.ts";
+import { projectInstructionFiles } from "../lib/context/instructions.ts";
+import { projectConfigDir, userConfigDir } from "../lib/profile/sources.ts";
+import { BUNDLED_SKILLS_DIR, scanSkills } from "../lib/plugins/skill-scan.ts";
+import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins/plugins.ts";
+import { productStateDir } from "../lib/profile/paths.ts";
+import { boundKey } from "../lib/ui/tui-render.ts";
 
 export interface StartupSection {
 	label: string;
@@ -38,7 +38,7 @@ export function contextFileNames(cwd: string, home: string = os.homedir()): stri
 }
 
 /**
- * Skills across the same sources our extensions feed to pi (lib/skill-scan.ts
+ * Skills across the same sources our extensions feed to pi (lib/plugins/skill-scan.ts
  * scanSkills: pi's own user dir, the mode's skill folders, the bundled
  * catalog, installed plugins), each name once: the set `/skills` lists and
  * `/doctor` counts.

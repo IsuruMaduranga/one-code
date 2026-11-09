@@ -1,6 +1,6 @@
 /** One Code's wrapper around a message the user sends to a running agent mid-turn: Claude Code's words. */
 import { describe, expect, it } from "vitest";
-import { userMessageForAgent } from "../../extensions/lib/agent-view.ts";
+import { userMessageForAgent } from "../../extensions/lib/agents/agent-view.ts";
 
 describe("userMessageForAgent", () => {
 	it("is Claude Code's mid-turn wrapper", () => {

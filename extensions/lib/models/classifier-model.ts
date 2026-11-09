@@ -26,12 +26,12 @@
  *
  * An explicit `autoMode.classifierModel` may name any provider, because naming
  * it is choosing it: it leads the chain, with notices for a cross-provider
- * choice and warnings for what it costs (`lib/model-choice-warnings.ts`).
+ * choice and warnings for what it costs (`lib/models/model-choice-warnings.ts`).
  */
 
-import { brand } from "../brand.mjs";
+import { brand } from "../profile/brand.mjs";
 import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
-import { type ChosenModelWarning, chosenModelWarnings } from "../model-choice-warnings.ts";
+import { type ChosenModelWarning, chosenModelWarnings } from "./model-choice-warnings.ts";
 import {
 	crossesProvider,
 	findConfigured,
@@ -42,9 +42,9 @@ import {
 	modelSpec as spec,
 	classifierPrice,
 	modelsContainedToSession,
-} from "../model-policy.ts";
-import { pairedModel } from "../model-pairings.ts";
-import { intrinsicTier, sameTierContainedCandidates } from "../model-tier.ts";
+} from "./model-policy.ts";
+import { pairedModel } from "./model-pairings.ts";
+import { intrinsicTier, sameTierContainedCandidates } from "./model-tier.ts";
 
 export interface Candidate {
 	model: Model<Api>;
@@ -84,7 +84,7 @@ export interface ClassifierNotice {
 	text: string;
 	/** Present for a session fallback, so renderers need not parse `text`. */
 	fallbackReason?: ClassifierFallbackReason;
-	/** Present for a warning about the user's chosen classifier (`lib/model-choice-warnings.ts`). */
+	/** Present for a warning about the user's chosen classifier (`lib/models/model-choice-warnings.ts`). */
 	choiceWarning?: ChosenModelWarning["kind"];
 }
 
@@ -143,7 +143,7 @@ export function classifierCandidates({ available, sessionModel, configured, conf
 
 /**
  * The automatic chain. For a session model the pairing table names
- * (`lib/model-pairings.ts`), its pick leads (or the session alone screens);
+ * (`lib/models/model-pairings.ts`), its pick leads (or the session alone screens);
  * otherwise the cost algorithm below. Entries stay on the session provider/route, sit in the
  * session's tier or above (`model-tier.ts`, from the public catalogs), cost
  * strictly less than the session model, are not experimental builds or moving
@@ -171,7 +171,7 @@ function automaticClassifierCandidates(available: Model<Api>[], sessionModel: Mo
 			text: `Auto mode is screening calls with ${spec(sessionModel)}, this session's model, because its catalog context window is unknown and no alternate classifier can be verified to contain it.`,
 		});
 	}
-	// The pairing table speaks first for the models it names (lib/model-pairings.ts),
+	// The pairing table speaks first for the models it names (lib/models/model-pairings.ts),
 	// under the same window and moving-alias gates; it may also keep the session.
 	const fits = (model: Model<Api>) => !isMovingAlias(model.id) && hasCatalogContextWindow(model) && model.contextWindow >= sessionModel.contextWindow;
 	const contained = modelsContainedToSession(available, sessionModel);

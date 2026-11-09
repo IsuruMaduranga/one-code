@@ -16,8 +16,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LspDiagnostic } from "../../extensions/lsp/format.ts";
 import { pathToUri } from "../../extensions/lsp/client.ts";
 import lspExtension from "../../extensions/lsp/index.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
 const state = vi.hoisted(() => ({

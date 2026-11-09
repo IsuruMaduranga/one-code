@@ -6,7 +6,7 @@
  * artifact text.
  */
 import { describe, expect, it } from "vitest";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { artifactsText } from "../text/artifacts/index.ts";
 import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
 

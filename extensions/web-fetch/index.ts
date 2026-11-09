@@ -11,28 +11,28 @@
  * invisibly, so the fallback is loud, never silent.
  *
  * On a first-party Anthropic API-key session, `prompt` goes to Anthropic's
- * server-side web fetch first (lib/anthropic-server-tools.ts); it falls back
+ * server-side web fetch first (lib/request/anthropic-server-tools.ts); it falls back
  * to the local fetch and reader above, with a note, whenever it does not
  * answer from a successful fetch.
  */
 
-import { brand } from "../lib/brand.mjs";
-import { feature } from "../lib/feature.ts";
+import { brand } from "../lib/profile/brand.mjs";
+import { feature } from "../lib/profile/feature.ts";
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { recordUsage } from "../lib/usage-bus.ts";
-import { releaseSideCalls, runSideCall } from "../lib/side-call-run.ts";
-import { DeadlineError, runWithDeadline } from "../lib/operation-deadline.ts";
+import { recordUsage } from "../lib/notify/usage-bus.ts";
+import { releaseSideCalls, runSideCall } from "../lib/side-calls/side-call-run.ts";
+import { DeadlineError, runWithDeadline } from "../lib/side-calls/operation-deadline.ts";
 import { Type } from "typebox";
-import { DEFER_CHANNEL } from "../lib/deferred.ts";
+import { DEFER_CHANNEL } from "../lib/request/deferred.ts";
 import { CrossHostRedirect, htmlToMarkdown, isSameHost, normalizeUrl, paginate } from "./extract.ts";
 import { pickReaderModel, READER_MAX_CHARS, READER_MAX_TOKENS, readerMessages } from "./summarize.ts";
-import { tryNativeWeb } from "../lib/anthropic-server-call.ts";
-import { fetchOutcome, isPrivateOrLocalUrl, nativeFetchBody, type ThinkingFields } from "../lib/anthropic-server-tools.ts";
-import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
-import { requireText } from "../lib/profile.ts";
-import { ccToolRenderers } from "../lib/tui-render.ts";
-import { registerFormTool } from "../lib/tool-variants.ts";
+import { tryNativeWeb } from "../lib/request/anthropic-server-call.ts";
+import { fetchOutcome, isPrivateOrLocalUrl, nativeFetchBody, type ThinkingFields } from "../lib/request/anthropic-server-tools.ts";
+import { persistIfLarge, sessionResultsDir } from "../lib/request/persisted-output.ts";
+import { requireText } from "../lib/profile/profile.ts";
+import { ccToolRenderers } from "../lib/ui/tui-render.ts";
+import { registerFormTool } from "../lib/profile/tool-variants.ts";
 import { readResponseText, WebFetchFailure } from "./response.ts";
 import { pageContent } from "./page-content.ts";
 import type { FetchAnswer, ReaderFailure, WebFetchText } from "./text.ts";
@@ -229,7 +229,7 @@ function webFetchExtension(pi: ExtensionAPI) {
 		}
 	};
 
-	// Short or long text by the model's tier (the profile's description, lib/tool-variants.ts).
+	// Short or long text by the model's tier (the profile's description, lib/profile/tool-variants.ts).
 	const tool = defineTool({
 		name: "web_fetch",
 		label: "Web Fetch",
@@ -267,7 +267,7 @@ function webFetchExtension(pi: ExtensionAPI) {
 			// With `prompt` on a first-party Anthropic API-key session, Anthropic's
 			// server-side fetch answers it with dynamic filtering. Anything short of
 			// an answer from a successful fetch falls through to the local path,
-			// with a note saying why (lib/anthropic-server-tools.ts fetchOutcome).
+			// with a note saying why (lib/request/anthropic-server-tools.ts fetchOutcome).
 			// Without `prompt` the local path always answers: it pages with
 			// `offset`, which the server tool cannot.
 			if (params.prompt && !isPrivateOrLocalUrl(target)) {

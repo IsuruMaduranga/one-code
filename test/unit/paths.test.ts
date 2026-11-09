@@ -1,8 +1,8 @@
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { claudeConfigDir, gitBashPathToNative, msysPathToWindows, productStateDir, absoluteFrom } from "../../extensions/lib/paths.ts";
-import { brand, envName } from "../../extensions/lib/brand.mjs";
+import { claudeConfigDir, gitBashPathToNative, msysPathToWindows, productStateDir, absoluteFrom } from "../../extensions/lib/profile/paths.ts";
+import { brand, envName } from "../../extensions/lib/profile/brand.mjs";
 
 describe("paths", () => {
 	it("defaults to ~/.claude and the brand's state dir in the home folder", () => {

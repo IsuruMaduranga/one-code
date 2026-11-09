@@ -5,7 +5,7 @@
  * The short form goes to frontier and workhorse models, the long form (the
  * text Claude Code writes for its weakest models, with the fork guidance,
  * the briefing section and worked examples) to cheap and tiny ones
- * (lib/tool-variants.ts). Changes from Claude Code's text: a fork rejects a
+ * (lib/profile/tool-variants.ts). Changes from Claude Code's text: a fork rejects a
  * `model` override rather than ignoring it, agent definitions come from
  * `.claude/agents/*.md` only, and tool names are One Code's. The closing
  * paragraph describes what only One Code has: `task_output` and `task_stop`,

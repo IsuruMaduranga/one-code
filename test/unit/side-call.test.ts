@@ -6,7 +6,7 @@ import {
 	toolStubs,
 	trimToTurnBoundary,
 	withoutSystemMessages,
-} from "../../extensions/lib/side-call.ts";
+} from "../../extensions/lib/side-calls/side-call.ts";
 
 describe("toolStubs", () => {
 	it("builds a name-only, empty-schema stub per tool with the given reason", () => {

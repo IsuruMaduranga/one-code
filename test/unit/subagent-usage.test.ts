@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { addUsage, emptyUsage, formatStats, formatTokenCount } from "../../extensions/lib/agents/usage.ts";
 
 describe("addUsage", () => {

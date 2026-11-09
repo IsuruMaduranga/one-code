@@ -13,7 +13,7 @@
 export interface PromptBundle {
 	lead: string[];
 	tail: string[];
-	/** Whether the memory section uses the long spec (`lib/memory.ts`). */
+	/** Whether the memory section uses the long spec (`lib/context/memory.ts`). */
 	verboseMemory: boolean;
 	/**
 	 * `lead` without the bullets that steer to `task_create`, for a session model

@@ -4,7 +4,7 @@
  * memory.test.ts checks where the cut falls and what it passes the profile.
  */
 import { describe, expect, it } from "vitest";
-import { INDEX_MAX_CHARS, INDEX_MAX_LINES, truncateIndex } from "../../extensions/lib/memory-content.ts";
+import { INDEX_MAX_CHARS, INDEX_MAX_LINES, truncateIndex } from "../../extensions/lib/context/memory-content.ts";
 import { memoryPromptSection } from "../text/system-prompt/memory.ts";
 
 describe("memoryPromptSection", () => {

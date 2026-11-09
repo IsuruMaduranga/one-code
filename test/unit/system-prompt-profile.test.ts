@@ -5,8 +5,8 @@
  * announce land where they ask.
  */
 import { afterEach, describe, expect, it } from "vitest";
-import type { Profile } from "../../extensions/lib/profile-contract.ts";
-import { requireText, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile.ts";
+import type { Profile } from "../../extensions/lib/profile/profile-contract.ts";
+import { requireText, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 import { buildClaudeCodeSystemPrompt } from "../../extensions/system-prompt/template.ts";
 import { profile as shipped } from "../../profile/index.ts";
 import type { SystemPromptSection, SystemPromptText } from "../../extensions/system-prompt/text.ts";

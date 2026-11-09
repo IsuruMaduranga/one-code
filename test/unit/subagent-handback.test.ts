@@ -1,6 +1,6 @@
 /**
  * Claude Code's SubagentHandback for every child session
- * (lib/subagent-handback.ts): the tool, its closing reminder, the turn
+ * (lib/agents/subagent-handback.ts): the tool, its closing reminder, the turn
  * tracker that reports a handed-back report (and falls back to the child's
  * final text), and the two runners that wire it in. Real pi SDK sessions on a
  * temp agent dir with no model: `prompt` is spied, and the spy calls the
@@ -11,10 +11,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentSession } from "@earendil-works/pi-coding-agent";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { DEFER_CHANNEL } from "../../extensions/lib/deferred.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
-import { oneTurnHandbackSlot, subagentHandbackExtension, subagentHandbackTool } from "../../extensions/lib/subagent-handback.ts";
+import { DEFER_CHANNEL } from "../../extensions/lib/request/deferred.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
+import { oneTurnHandbackSlot, subagentHandbackExtension, subagentHandbackTool } from "../../extensions/lib/agents/subagent-handback.ts";
 import { childToolAllowlist } from "../../extensions/lib/agents/agent-catalog.ts";
 import { forkTaskMessage } from "../../extensions/subagents/outcome.ts";
 import { SubagentRuntime } from "../../extensions/subagents/runner.ts";

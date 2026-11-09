@@ -15,10 +15,10 @@
 import { createWriteStream } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
 import type { BackgroundTask } from "../agents/task-registry.ts";
-import { whenAborted } from "../abort.ts";
-import { detachedSpawnOptions, KILL_GRACE_MS, rememberProcessGroup, stopProcessTree, waitForChildExit } from "../process-tree.ts";
-import { bashSpawnOrThrow, type ShellSpawn, spawnShellCommand } from "../shell-spawn.ts";
-import type { ShellText } from "../shell-text.ts";
+import { whenAborted } from "../core/abort.ts";
+import { detachedSpawnOptions, KILL_GRACE_MS, rememberProcessGroup, stopProcessTree, waitForChildExit } from "./process-tree.ts";
+import { bashSpawnOrThrow, type ShellSpawn, spawnShellCommand } from "./shell-spawn.ts";
+import type { ShellText } from "./shell-text.ts";
 
 export const STORED_OUTPUT_CAP = 200_000;
 
@@ -50,7 +50,7 @@ export interface StartBackgroundBashOptions {
 	logPath?: string;
 	/**
 	 * The interpreter to run `command` under. Default: the session's bash
-	 * (lib/shell-spawn.ts — Git Bash on Windows, `CLAUDE_CODE_GIT_BASH_PATH`
+	 * (lib/shell-run/shell-spawn.ts — Git Bash on Windows, `CLAUDE_CODE_GIT_BASH_PATH`
 	 * honoured); the powershell extension passes its own spec.
 	 */
 	shell?: ShellSpawn;
@@ -64,7 +64,7 @@ export interface StartBackgroundBashOptions {
 }
 
 export function startBackgroundBash(options: StartBackgroundBashOptions): BackgroundTask {
-	// Own process group, so stop/timeout can signal the whole tree (lib/process-tree.ts).
+	// Own process group, so stop/timeout can signal the whole tree (lib/shell-run/process-tree.ts).
 	const child = spawnShellCommand(options.shell ?? bashSpawnOrThrow(), options.command, {
 		cwd: options.cwd,
 		...detachedSpawnOptions(),
@@ -174,7 +174,7 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 	};
 
 	// Exit plus a short stdio grace, not `close`: a descendant the stop missed
-	// must not keep the task "running" for its whole life (lib/process-tree.ts).
+	// must not keep the task "running" for its whole life (lib/shell-run/process-tree.ts).
 	waitForChildExit(child).then(
 		({ code, signal }) => end(stopRequested ? "stopped" : timedOut || code !== 0 ? "failed" : "completed", code, signal),
 		(error: Error) => {

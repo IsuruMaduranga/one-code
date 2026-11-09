@@ -11,7 +11,7 @@ const kept = { role: "assistant", content: [thinking, text("done"), call], times
 const keptResult = { role: "toolResult", content: [text("file")], timestamp: 950 };
 const later = { role: "assistant", content: [thinking, text("next")], timestamp: 1_200 };
 const conversation = [summary, kept, keptResult, { role: "user", content: "go on", timestamp: 1_100 }, later];
-/** The compaction entry's time, as `lib/compaction-boundary.ts` reads it off the branch. */
+/** The compaction entry's time, as `lib/request/compaction-boundary.ts` reads it off the branch. */
 const COMPACTED = 1_000;
 
 describe("withoutKeptThinking", () => {
@@ -64,7 +64,7 @@ describe("kept-thinking's place in the manifest", () => {
 
 describe("latestCompaction", () => {
 	it("finds the newest compaction, where its kept tail starts, and its time", async () => {
-		const { inContextEntries, latestCompaction } = await import("../../extensions/lib/compaction-boundary.ts");
+		const { inContextEntries, latestCompaction } = await import("../../extensions/lib/request/compaction-boundary.ts");
 		const branch = [
 			{ id: "a", type: "message" },
 			{ id: "c0", type: "compaction", firstKeptEntryId: "a", timestamp: "2026-10-01T00:00:00.000Z" },

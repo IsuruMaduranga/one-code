@@ -14,7 +14,7 @@
  * Pure: no pi imports.
  */
 
-import { requireText } from "../../lib/profile.ts";
+import { requireText } from "../../lib/profile/profile.ts";
 import type { ClassifierText } from "./text.ts";
 
 /** The profile's classifier text. */

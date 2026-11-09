@@ -6,12 +6,12 @@ import {
 	localCommandCaveat,
 	localCommandBlocks,
 	registerLocalCommand,
-} from "../../extensions/lib/local-command.ts";
-import { escapeXml } from "../../extensions/lib/xml.ts";
+} from "../../extensions/lib/ui/local-command.ts";
+import { escapeXml } from "../../extensions/lib/core/xml.ts";
 import { modelSwitchStdout } from "../../extensions/model-default/index.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
-import { ARGUMENT_HINT_CHANNEL } from "../../extensions/lib/argument-hints.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
+import { ARGUMENT_HINT_CHANNEL } from "../../extensions/lib/ui/argument-hints.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 /** The caveat block as the base wraps the profile's caveat (One Code's: profile/test/local-command-wording.test.ts). */
 const caveatBlock = () => `<local-command-caveat>${requireText("notifications").localCommandCaveat}</local-command-caveat>\n`;

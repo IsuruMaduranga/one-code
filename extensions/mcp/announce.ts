@@ -13,9 +13,9 @@
 
 import { mcpFailuresReminder, shownFailure, shownInstructions } from "./client.ts";
 import type { McpText } from "./text.ts";
-import type { BlockFact, ToldFact } from "../lib/ledger/records.ts";
-import { toldBlockFact } from "../lib/reminders.ts";
-import { countNoun } from "../lib/tui-render.ts";
+import type { BlockFact, ToldFact } from "../lib/request/ledger/records.ts";
+import { toldBlockFact } from "../lib/request/reminders.ts";
+import { countNoun } from "../lib/ui/tui-render.ts";
 
 export interface McpSnapshot {
 	connected: Array<{ name: string; instructions?: string }>;

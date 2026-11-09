@@ -4,13 +4,13 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CLASSIFIER_USER_INPUT, userMessageDigest } from "../../extensions/permissions/auto-mode/history.ts";
 import type { TranscriptEntry } from "../../extensions/permissions/auto-mode/transcript.ts";
-import { TURN_FAILED_CHANNEL } from "../../extensions/lib/interrupt.ts";
+import { TURN_FAILED_CHANNEL } from "../../extensions/lib/notify/interrupt.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
-import { productStateDir } from "../../extensions/lib/brand.mjs";
-import { productSettingsPath } from "../../extensions/lib/product-settings.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { productStateDir } from "../../extensions/lib/profile/brand.mjs";
+import { productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const seen: TranscriptEntry[][] = [];
 const seenUserMessages: string[][] = [];

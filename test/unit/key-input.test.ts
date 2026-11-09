@@ -1,6 +1,6 @@
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { decodePrintableKey, isKeyRelease, isKeyRepeat, keyId, keyText, parseKey } from "../../extensions/lib/key-input.ts";
+import { decodePrintableKey, isKeyRelease, isKeyRepeat, keyId, keyText, parseKey } from "../../extensions/lib/ui/key-input.ts";
 import { resolvePiTuiEntry } from "../../extensions/lib/ui/prose.ts";
 
 // pi's own pi-tui (the copy pi loads, nested or hoisted) is the

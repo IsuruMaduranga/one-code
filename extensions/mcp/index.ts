@@ -15,16 +15,16 @@
  * the prompt; one-shots and subagent children await it (findings §15).
  */
 
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import os from "node:os";
 import { isDeepStrictEqual } from "node:util";
 import { CONFIG_DIR_NAME, getAgentDir, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { DEFER_CHANNEL } from "../lib/deferred.ts";
-import { MCP_TOOLS_CHANNEL } from "../lib/mcp-share.ts";
-import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
-import { emptyToolResultContent } from "../lib/empty-tool-result.ts";
-import { ccToolRenderers } from "../lib/tui-render.ts";
+import { DEFER_CHANNEL } from "../lib/request/deferred.ts";
+import { MCP_TOOLS_CHANNEL } from "../lib/plugins/mcp-share.ts";
+import { persistIfLarge, sessionResultsDir } from "../lib/request/persisted-output.ts";
+import { emptyToolResultContent } from "../lib/request/empty-tool-result.ts";
+import { ccToolRenderers } from "../lib/ui/tui-render.ts";
 import {
 	callTool,
 	close,
@@ -37,17 +37,17 @@ import {
 	readResource,
 	readResourceDir,
 } from "./client.ts";
-import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../lib/reminders.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../lib/request/reminders.ts";
 import { join } from "node:path";
 import {
 	MCP_STATUS_CHANNEL,
 	MCP_STATUS_REQUEST_CHANNEL,
 	type McpServerStatus,
 	type McpStatusEvent,
-} from "../lib/mcp-status.ts";
-import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
-import { readDisabledMcpServers, setMcpServerDisabled } from "../lib/mcp-overrides.ts";
-import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
+} from "../lib/plugins/mcp-status.ts";
+import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins/plugins.ts";
+import { readDisabledMcpServers, setMcpServerDisabled } from "../lib/plugins/mcp-overrides.ts";
+import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "../lib/ui/tui-render.ts";
 import { authenticate as runOAuthFlow, silentProvider } from "./oauth/flow.ts";
 import { hasStoredTokens } from "./oauth/store.ts";
 import { mcpChangeNotices, mcpDelta, mcpFacts, type McpSnapshot, mcpStartupNotices } from "./announce.ts";
@@ -55,9 +55,9 @@ import { decodeMcpKey } from "./panel/keys.ts";
 import { type McpEntry, type McpEntryStatus } from "./panel/model.ts";
 import { renderMcpPanel, type McpPaint } from "./panel/render.ts";
 import { applyMcpKey, initialMcpState, type McpEffect } from "./panel/state.ts";
-import { sessionAlive } from "../lib/session-lifecycle.ts";
+import { sessionAlive } from "../lib/notify/session-lifecycle.ts";
 import { loadServers, mcpConfigFiles, type McpServer, noMcpServersMessage, piMcpConfigPaths, registeredMcpServers } from "./config.ts";
-import { type McpFile, openSources } from "../lib/sources.ts";
+import { type McpFile, openSources } from "../lib/profile/sources.ts";
 import { approveMcpServers, type McpTrustDeps, persistApproval, projectRootOf, reconnectRefusal } from "./trust.ts";
 import {
 	capDescription,
@@ -68,12 +68,12 @@ import {
 	type McpResourceContents,
 	namespacedToolName,
 } from "./schema.ts";
-import { registerLocalCommand } from "../lib/local-command.ts";
-import { canShowCustomUi, notifyRpcReadOnly } from "../lib/headless-output.ts";
-import { relativeDisplayPath } from "../lib/paths.ts";
-import { consentDialog, startupConsentReady } from "../lib/consent-dialogs.ts";
-import { panelUi } from "../lib/panel-focus.ts";
-import { requireText } from "../lib/profile.ts";
+import { registerLocalCommand } from "../lib/ui/local-command.ts";
+import { canShowCustomUi, notifyRpcReadOnly } from "../lib/notify/headless-output.ts";
+import { relativeDisplayPath } from "../lib/profile/paths.ts";
+import { consentDialog, startupConsentReady } from "../lib/consent/consent-dialogs.ts";
+import { panelUi } from "../lib/ui/panel-focus.ts";
+import { requireText } from "../lib/profile/profile.ts";
 import { failureOf } from "./failure.ts";
 import type { McpText } from "./text.ts";
 
@@ -225,7 +225,7 @@ function mcpExtension(pi: ExtensionAPI) {
 	/** Resolves when every configured server has connected or failed. */
 	let connecting: Promise<void> | undefined;
 	let connectSettled = false;
-	// False after session_shutdown: every pi.* call throws from then on (lib/session-lifecycle.ts).
+	// False after session_shutdown: every pi.* call throws from then on (lib/notify/session-lifecycle.ts).
 	const alive = sessionAlive(pi);
 
 	/**

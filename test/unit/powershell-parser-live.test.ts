@@ -12,8 +12,8 @@ import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { type PowerShellAstNode, type PowerShellParse, PowerShellParser } from "../../extensions/lib/powershell-parser.ts";
-import { POWERSHELL_UTF8_PREFIX, powerShellParser, type ShellSpawn, spawnShellCommand } from "../../extensions/lib/shell-spawn.ts";
+import { type PowerShellAstNode, type PowerShellParse, PowerShellParser } from "../../extensions/lib/shell/powershell-parser.ts";
+import { POWERSHELL_UTF8_PREFIX, powerShellParser, type ShellSpawn, spawnShellCommand } from "../../extensions/lib/shell-run/shell-spawn.ts";
 import { localPwsh, windowsPowerShell } from "./helpers/local-pwsh.ts";
 import { POWERSHELL_TEST_TIMEOUT, testParser } from "./helpers/powershell-parse.ts";
 

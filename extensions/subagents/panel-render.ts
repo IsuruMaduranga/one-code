@@ -6,9 +6,9 @@
  * index.ts; this file owns layout only, mirroring workflow/viewer.ts.
  */
 
-import { cutPlainText as cut, formatDuration, splitCell, splitRow, visibleWidth, wrapProse } from "../lib/tui-render.ts";
+import { cutPlainText as cut, formatDuration, splitCell, splitRow, visibleWidth, wrapProse } from "../lib/ui/tui-render.ts";
 import { formatTokenCount } from "../lib/agents/usage.ts";
-import { sanitizeDisplayText } from "../lib/terminal-text.ts";
+import { sanitizeDisplayText } from "../lib/ui/terminal-text.ts";
 import { type LiveRun, type LiveStatus, streamingText, type TranscriptBlock } from "./live-runs.ts";
 import { FORK_AGENT } from "./runs.ts";
 

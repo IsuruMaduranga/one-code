@@ -16,7 +16,7 @@
  * merges only the fields pi itself modified, so this key survives pi's writes.
  *
  * The switch is also shown to the model the way Claude Code shows `/model`
- * (a local-command breadcrumb before the next prompt — lib/local-command.ts):
+ * (a local-command breadcrumb before the next prompt — lib/ui/local-command.ts):
  * CC's stdout is "Set model to `<name>` and saved as your default for new
  * sessions", and since persisting is what this extension does, the claim is
  * true here too (a failed write announces the switch without it). pi handles
@@ -35,13 +35,13 @@
  * one chosen.
  */
 
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import { join } from "node:path";
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { isObject } from "../lib/ledger/records.ts";
-import { readState, recordState } from "../lib/ledger/state.ts";
-import { announceLocalCommand } from "../lib/local-command.ts";
-import { readSettingsForWrite, writeSettings } from "../lib/product-settings.ts";
+import { isObject } from "../lib/request/ledger/records.ts";
+import { readState, recordState } from "../lib/request/ledger/state.ts";
+import { announceLocalCommand } from "../lib/ui/local-command.ts";
+import { readSettingsForWrite, writeSettings } from "../lib/profile/product-settings.ts";
 
 /** Pure merge: set the default model, preserving every other settings key. */
 export function applyDefaultModel(

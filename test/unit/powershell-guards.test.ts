@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { powershellGuardReason, startSleepSeconds } from "../../extensions/powershell/guards.ts";
 
 describe("startSleepSeconds", () => {

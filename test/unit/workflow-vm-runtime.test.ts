@@ -4,7 +4,7 @@ import { parseWorkflowScript } from "../../extensions/workflow/script-source.ts"
 import { runWorkflowScript, type WorkflowRuntimeOptions } from "../../extensions/workflow/vm-runtime.ts";
 import { WorkflowScriptError } from "../../extensions/workflow/types.ts";
 import { makeGlobals, type GlobalsOverrides } from "./workflow-test-helpers.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import type { RunStop } from "../../extensions/workflow/text.ts";
 
 /** Why a run stopped, as the profile words it: what the runtime rejects with. */

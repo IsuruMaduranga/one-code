@@ -22,17 +22,17 @@
  * Claude Code has no other LSP tools; navigation goes through grep/find.
  */
 
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import { mkdirSync } from "node:fs";
 import { extname, relative } from "node:path";
-import { StringEnum } from "../lib/string-enum.ts";
+import { StringEnum } from "../lib/core/string-enum.ts";
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { DEFER_CHANNEL } from "../lib/deferred.ts";
-import { absoluteFrom } from "../lib/paths.ts";
-import { defaultDiscoverRoots, discoverPlugins, pluginResources } from "../lib/plugins.ts";
-import { REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
-import { ccToolRenderers, cutPlainText } from "../lib/tui-render.ts";
+import { DEFER_CHANNEL } from "../lib/request/deferred.ts";
+import { absoluteFrom } from "../lib/profile/paths.ts";
+import { defaultDiscoverRoots, discoverPlugins, pluginResources } from "../lib/plugins/plugins.ts";
+import { REMINDER_CHANNEL, type ReminderPayload } from "../lib/request/reminders.ts";
+import { ccToolRenderers, cutPlainText } from "../lib/ui/tui-render.ts";
 import { LspClient, type LspClientOptions, pathToUri } from "./client.ts";
 import { filterDiagnostics, formatDiagnostics, type LspDiagnostic, type SeverityFilter } from "./format.ts";
 import { describeStartFailure, INSTALL_HINTS } from "./install-hints.ts";
@@ -46,11 +46,11 @@ import {
 } from "./plugin-servers.ts";
 import { findProjectRoot, serverForPath, typescriptPreflight } from "./servers.ts";
 import { computeDelta, DeliveredTracker, fingerprintDiagnostic, formatNewDiagnostics, markDelivered } from "./watcher.ts";
-import { registerLocalCommand } from "../lib/local-command.ts";
-import { singleFlight } from "../lib/single-flight.ts";
-import { findProjectRoot as findRepoRoot } from "../lib/git.ts";
+import { registerLocalCommand } from "../lib/ui/local-command.ts";
+import { singleFlight } from "../lib/core/single-flight.ts";
+import { findProjectRoot as findRepoRoot } from "../lib/context/git.ts";
 import { createLspTrustGate, PROJECT_CODE_SERVERS } from "./trust.ts";
-import { requireText } from "../lib/profile.ts";
+import { requireText } from "../lib/profile/profile.ts";
 import { failureOf } from "./failure.ts";
 import type { LspFailure } from "./text.ts";
 

@@ -18,8 +18,8 @@ import {
 	type SetupFacts,
 	settingsPatch,
 } from "../../extensions/permissions/auto-mode/setup.ts";
-import { productSettingsPath } from "../../extensions/lib/product-settings.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const facts: SetupFacts = {
 	cwd: "/home/u/proj",

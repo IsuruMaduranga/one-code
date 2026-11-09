@@ -11,7 +11,7 @@
  * The call is Claude Code's: the session's last provider request replayed
  * unchanged (system, every tool, every message), the reply that answered it,
  * the session's earlier side exchanges, then the reminder and question, so it
- * reads the cache the session wrote (lib/request-replay.ts; the compaction
+ * reads the cache the session wrote (lib/side-calls/request-replay.ts; the compaction
  * extension publishes the capture). Without a capture for the session model,
  * or on a provider API the replay does not cover, it falls back to a
  * standalone call: the current branch's messages (read from the session at
@@ -25,11 +25,11 @@
  * is threaded into the next one and listed in the panel, where it can be
  * browsed and cleared. A /tree keeps only the exchanges asked from a point
  * the selected branch holds. `f` forks the current answer into a background fork
- * subagent through the subagents extension (lib/btw-fork.ts).
+ * subagent through the subagents extension (lib/side-calls/btw-fork.ts).
  */
 
-import { brandedId } from "../lib/brand.mjs";
-import { feature } from "../lib/feature.ts";
+import { brandedId } from "../lib/profile/brand.mjs";
+import { feature } from "../lib/profile/feature.ts";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import {
 	convertToLlm,
@@ -41,22 +41,22 @@ import {
 	SettingsManager,
 	UserMessageComponent,
 } from "@earendil-works/pi-coding-agent";
-import { ARGUMENT_HINT_CHANNEL, type ArgumentHint } from "../lib/argument-hints.ts";
-import { btwForkedLine, type BtwForkResult, requestBtwFork } from "../lib/btw-fork.ts";
-import { canShowCustomUi, notifyOrPrint, printAnswer } from "../lib/headless-output.ts";
-import { announcePromptOptions } from "../lib/prompt-options.ts";
-import { followLastExchange, replaySideCall } from "../lib/replay-call.ts";
-import { answerText, branchMessages, stripImageBlocks, toolStubs, trimToTurnBoundary, withoutSystemMessages } from "../lib/side-call.ts";
-import { boundedDockHeight, linesComponent, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
-import { CONVERSATION_CACHE_PLACEMENT } from "../lib/side-call-cache.ts";
-import { releaseSideCalls, runSideCall } from "../lib/side-call-run.ts";
-import { recordUsage } from "../lib/usage-bus.ts";
+import { ARGUMENT_HINT_CHANNEL, type ArgumentHint } from "../lib/ui/argument-hints.ts";
+import { btwForkedLine, type BtwForkResult, requestBtwFork } from "../lib/side-calls/btw-fork.ts";
+import { canShowCustomUi, notifyOrPrint, printAnswer } from "../lib/notify/headless-output.ts";
+import { announcePromptOptions } from "../lib/ui/prompt-options.ts";
+import { followLastExchange, replaySideCall } from "../lib/side-calls/replay-call.ts";
+import { answerText, branchMessages, stripImageBlocks, toolStubs, trimToTurnBoundary, withoutSystemMessages } from "../lib/side-calls/side-call.ts";
+import { boundedDockHeight, linesComponent, safeThemePaint, truncateLine } from "../lib/ui/tui-render.ts";
+import { CONVERSATION_CACHE_PLACEMENT } from "../lib/side-calls/side-call-cache.ts";
+import { releaseSideCalls, runSideCall } from "../lib/side-calls/side-call-run.ts";
+import { recordUsage } from "../lib/notify/usage-bus.ts";
 import type { ProseRenderer } from "../subagents/panel-render.ts";
 import { createMarkdownProse } from "../lib/ui/prose.ts";
 import { applyBtwKey, type BtwBody, BTW_MAX_HEIGHT, copyAnswer, decodeBtwKey, initialBtwState, renderBtwPanel } from "./panel.ts";
-import { requireText } from "../lib/profile.ts";
+import { requireText } from "../lib/profile/profile.ts";
 import { type BtwExchange, exchangeMessages, historyMessages } from "./prompt.ts";
-import { panelUi } from "../lib/panel-focus.ts";
+import { panelUi } from "../lib/ui/panel-focus.ts";
 
 const BTW_MAX_TOKENS = 8192;
 const BTW_TIMEOUT_MS = 120_000;
@@ -212,7 +212,7 @@ function btwExtension(pi: ExtensionAPI) {
 			const askedAt = leafOf(ctx);
 			// The panel can fork a background agent whose completion opens the
 			// session's first turn; this context carries the options that turn
-			// is built from (lib/prompt-options.ts).
+			// is built from (lib/ui/prompt-options.ts).
 			announcePromptOptions(pi.events, ctx);
 
 			// RPC has dialogs but no custom panel. Deliver its answer as a notice,

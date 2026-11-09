@@ -1,12 +1,12 @@
 /**
- * The final layout pass (lib/ledger/layout.ts, findings §52): no system
+ * The final layout pass (lib/request/ledger/layout.ts, findings §52): no system
  * message with content stranded before a user message, whoever built the
  * list (lifecycle-grid-hunt round 3: R3-H1, R3-H2).
  */
 import { describe, expect, it } from "vitest";
-import { settleSystemMessages } from "../../extensions/lib/ledger/layout.ts";
-import { validateRequest } from "../../extensions/lib/ledger/validate.ts";
-import { captureRequest, extendPayload, forkRequestPayload } from "../../extensions/lib/request-replay.ts";
+import { settleSystemMessages } from "../../extensions/lib/request/ledger/layout.ts";
+import { validateRequest } from "../../extensions/lib/request/ledger/validate.ts";
+import { captureRequest, extendPayload, forkRequestPayload } from "../../extensions/lib/side-calls/request-replay.ts";
 
 const api = "anthropic-messages";
 const user = (text: string) => ({ role: "user", content: [{ type: "text", text }] });

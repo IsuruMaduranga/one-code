@@ -17,14 +17,14 @@
  * Set CC_FOOTER=0 to keep pi's built-in footer instead.
  */
 
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { linesComponent, safeThemePaint } from "../lib/tui-render.ts";
+import { linesComponent, safeThemePaint } from "../lib/ui/tui-render.ts";
 import { formatModel, isRealModel } from "../lib/rules/modes.ts";
 import { ULTRACODE_STATUS_KEY } from "../lib/ui/effort-slider.ts";
-import { USAGE_CHANNEL } from "../lib/usage-bus.ts";
+import { USAGE_CHANNEL } from "../lib/notify/usage-bus.ts";
 import { buildFooterLines, computeMainUsage, footerLocation, type FooterData } from "./footer-line.ts";
-import { WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
+import { WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/agents/worktree-channel.ts";
 import { fetchPrNumber, nextPrPollDelay, PR_SLOW_LOOKUP_MS } from "./pr.ts";
 
 function footerExtension(pi: ExtensionAPI) {

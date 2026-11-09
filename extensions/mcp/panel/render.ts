@@ -8,7 +8,7 @@
  * Only width-1 glyphs are used so cutPlainText's code-point count stays exact.
  */
 
-import { cutPlainText, hintLines, padPlainText, panelTopRule, type RenderBlock as Block, windowBlocks } from "../../lib/tui-render.ts";
+import { cutPlainText, hintLines, padPlainText, panelTopRule, type RenderBlock as Block, windowBlocks } from "../../lib/ui/tui-render.ts";
 import { actionsFor, type McpEntry, statusText } from "./model.ts";
 import { clampMcpCursor, detailEntry, type McpPanelState } from "./state.ts";
 

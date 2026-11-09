@@ -6,8 +6,8 @@ vi.mock("@earendil-works/pi-ai", async (importOriginal) => ({
 }));
 import { cleanupSessionResources } from "@earendil-works/pi-ai";
 import { classifierCacheKey, releaseClassifierResources } from "../../extensions/permissions/auto-mode/classifier.ts";
-import { releaseSideCalls } from "../../extensions/lib/side-call-run.ts";
-import { SIDE_CALL_KINDS } from "../../extensions/lib/side-call-usage.ts";
+import { releaseSideCalls } from "../../extensions/lib/side-calls/side-call-run.ts";
+import { SIDE_CALL_KINDS } from "../../extensions/lib/side-calls/side-call-usage.ts";
 
 // On openai-codex the classifier's key is pi-ai's sessionId, which keeps a
 // WebSocket and a 5-minute idle timer alive past the session (findings §59).

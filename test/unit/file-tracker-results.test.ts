@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import fileTrackerExtension from "../../extensions/file-tracker/index.ts";
 import { fileToolResultContent } from "../../extensions/file-tracker/results.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const fileTracker = requireText("fileTracker");
 const said = fileTracker.toolResult;

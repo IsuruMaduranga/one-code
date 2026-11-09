@@ -15,8 +15,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { beforeEach, describe, expect, it } from "vitest";
-import { bundledSources, setCatalogSourcesForTest } from "../../extensions/lib/model-catalog-data.ts";
-import { classifyModelTier } from "../../extensions/lib/model-tier.ts";
+import { bundledSources, setCatalogSourcesForTest } from "../../extensions/lib/models/model-catalog-data.ts";
+import { classifyModelTier } from "../../extensions/lib/models/model-tier.ts";
 
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "model-tier-catalog.json");
 const noEnv = {} as NodeJS.ProcessEnv;

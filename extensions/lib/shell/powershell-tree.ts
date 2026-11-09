@@ -1,6 +1,6 @@
 /**
  * The PowerShell pre-gate's verdicts, judged from PowerShell's own parse
- * (lib/powershell-parser.ts; decisions/windows.md "The PowerShell pre-gate
+ * (lib/shell/powershell-parser.ts; decisions/windows.md "The PowerShell pre-gate
  * reads PowerShell's own parse"). Pure apart from the filesystem reads the
  * path checks make.
  *
@@ -28,7 +28,7 @@ import { delimiter, isAbsolute, join } from "node:path";
 import { isSensitivePath } from "./sensitive.ts";
 import { isWithin, resolveForContainment, touchesGuardedPath } from "./paths.ts";
 import { isGuardedWritePath, removalLoses } from "./shell-analysis.ts";
-import type { PowerShellAstNode, PowerShellParse } from "../powershell-parser.ts";
+import type { PowerShellAstNode, PowerShellParse } from "./powershell-parser.ts";
 import {
 	applicationArgument,
 	type CmdletSpec,
@@ -42,7 +42,7 @@ import {
 	WRITE_TAILS,
 } from "./powershell-cmdlets.ts";
 import { hasPowerShellWildcard, powershellPathAbsolute, powershellPathProblem, powershellUnescaped } from "./powershell-paths.ts";
-import { comparablePath, system32Path } from "../paths.ts";
+import { comparablePath, system32Path } from "../profile/paths.ts";
 
 export interface PowerShellTreeOptions {
 	/** The working directory the command runs in. */

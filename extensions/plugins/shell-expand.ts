@@ -7,7 +7,7 @@
  * argument substituted into a placeholder's command goes in as a
  * single-quoted word (`template.ts`), so `$(…)`, `;` or a backtick pair in
  * what the user typed stays text. And the command runs in the bash every
- * other shell path uses (`lib/shell-spawn.ts`: Git Bash on Windows, never a
+ * other shell path uses (`lib/shell-run/shell-spawn.ts`: Git Bash on Windows, never a
  * bare `/bin/sh` or `cmd.exe`), as Claude Code runs these in its bash:
  * Node's `shell: true` used `/bin/sh` (dash on Debian and Ubuntu) and
  * `cmd.exe`, where `[[ ]]`, `head` and process substitution fail and the
@@ -15,10 +15,10 @@
  */
 
 import type { ChildProcess } from "node:child_process";
-import { detachedSpawnOptions, killProcessTree, waitForChildExit } from "../lib/process-tree.ts";
-import { bashSpawn, type ShellSpawn, spawnShellCommand } from "../lib/shell-spawn.ts";
-import { shellQuote } from "../lib/shell-quote.ts";
-import { requireText } from "../lib/profile.ts";
+import { detachedSpawnOptions, killProcessTree, waitForChildExit } from "../lib/shell-run/process-tree.ts";
+import { bashSpawn, type ShellSpawn, spawnShellCommand } from "../lib/shell-run/shell-spawn.ts";
+import { shellQuote } from "../lib/shell/shell-quote.ts";
+import { requireText } from "../lib/profile/profile.ts";
 import { splitShellPlaceholders, substituteArguments } from "./template.ts";
 import type { PluginsText } from "./text.ts";
 

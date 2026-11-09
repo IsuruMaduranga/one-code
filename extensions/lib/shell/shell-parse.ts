@@ -1,6 +1,6 @@
 /**
  * Bash command lines turned into simple commands, on tree-sitter-bash
- * (pure apart from the grammar, lib/bash-parser.ts).
+ * (pure apart from the grammar, lib/shell/bash-parser.ts).
  *
  * `parseCommand` walks the syntax tree and returns one {@link Segment} per
  * simple command, in source order: its words with quoting removed, the files
@@ -26,7 +26,7 @@
  *   (findings §30).
  */
 
-import { bashParserUnavailable, parseBash } from "../bash-parser.ts";
+import { bashParserUnavailable, parseBash } from "./bash-parser.ts";
 
 type SyntaxNode = NonNullable<ReturnType<NonNullable<ReturnType<typeof parseBash>>["rootNode"]["child"]>>;
 

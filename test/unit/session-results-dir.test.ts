@@ -7,9 +7,9 @@ import { statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { brand } from "../../extensions/lib/brand.mjs";
-import { persistIfLarge, sessionResultsDir } from "../../extensions/lib/persisted-output.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
+import { persistIfLarge, sessionResultsDir } from "../../extensions/lib/request/persisted-output.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const inMemory = (id: string, cwd = "/some/project") => ({ cwd, sessionManager: { getSessionDir: () => "", getSessionId: () => id } });
 

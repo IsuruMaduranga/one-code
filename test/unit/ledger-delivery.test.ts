@@ -1,10 +1,10 @@
 /**
- * "Delivered means the model saw it and the branch kept it" (lib/ledger/fold.ts
+ * "Delivered means the model saw it and the branch kept it" (lib/request/ledger/fold.ts
  * header, lifecycle-grid-hunt round 3: R3-M6 to M9, L1, L2): a request counts
  * only with its own reply on the branch, and a pi cache warm never records.
  */
 import { describe, expect, it } from "vitest";
-import { stripMarkers } from "../../extensions/lib/ledger/wire.ts";
+import { stripMarkers } from "../../extensions/lib/request/ledger/wire.ts";
 import { LedgerSim } from "./helpers/ledger-sim.ts";
 
 const texts = LedgerSim.texts;

@@ -2,8 +2,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { requireText } from "../../extensions/lib/profile.ts";
-import { projectConfigDir, userConfigDir } from "../../extensions/lib/sources.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { projectConfigDir, userConfigDir } from "../../extensions/lib/profile/sources.ts";
 import { agentDirs, agentSourcesStamp, childToolAllowlist, discoverAgents, parseAgentFile, parseToolList, usableAllowlistedTools } from "../../extensions/lib/agents/agent-catalog.ts";
 
 const words = () => requireText("subagents");

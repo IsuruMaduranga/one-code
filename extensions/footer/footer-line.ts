@@ -12,10 +12,10 @@
  * zero display width) always fits the width it was built for.
  */
 
-import { cutPlainText } from "../lib/tui-render.ts";
-import { tailColumns, visibleWidth } from "../lib/text-width.ts";
-import { costOf, usageEntryCost } from "../lib/usage-bus.ts";
-import type { WorktreeLocation } from "../lib/worktree-channel.ts";
+import { cutPlainText } from "../lib/ui/tui-render.ts";
+import { tailColumns, visibleWidth } from "../lib/ui/text-width.ts";
+import { costOf, usageEntryCost } from "../lib/notify/usage-bus.ts";
+import type { WorktreeLocation } from "../lib/agents/worktree-channel.ts";
 
 export type Paint = (color: string, text: string) => string;
 

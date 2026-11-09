@@ -1,4 +1,4 @@
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import type { Api, Model } from "@earendil-works/pi-ai";
 /**
  * doctor extension — `/doctor`, One Code's setup checkup.
@@ -33,35 +33,35 @@ import {
 	VERSION as PI_VERSION,
 } from "@earendil-works/pi-coding-agent";
 import { loadAutoModeConfig, persistClassifierModel } from "../lib/rules/auto-mode-config.ts";
-import { catalogRefreshDue, readCatalogRefreshEnabled, refreshModelCatalog } from "../lib/model-catalog-data.ts";
-import { BUILTIN_PROVIDER_POLICIES } from "../lib/model-policy.ts";
-import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../lib/model-unusable.ts";
-import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../lib/mcp-status.ts";
-import { canShowCustomUi, notifyOrPrint } from "../lib/headless-output.ts";
-import { createUserMessageSender, sessionOutlivesTurn } from "../lib/notifications.ts";
-import { modelSpec } from "../lib/model-policy.ts";
-import { sessionModelTier } from "../lib/session-model-tier.ts";
-import { productProjectSettingsPath, productSettingsPath, SETTINGS_DISPLAY } from "../lib/product-settings.ts";
-import { productStateDir } from "../lib/paths.ts";
-import { CLASSIFIER_SETTING_CHANGED_CHANNEL, SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../lib/settings-channels.ts";
-import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
+import { catalogRefreshDue, readCatalogRefreshEnabled, refreshModelCatalog } from "../lib/models/model-catalog-data.ts";
+import { BUILTIN_PROVIDER_POLICIES } from "../lib/models/model-policy.ts";
+import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../lib/models/model-unusable.ts";
+import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../lib/plugins/mcp-status.ts";
+import { canShowCustomUi, notifyOrPrint } from "../lib/notify/headless-output.ts";
+import { createUserMessageSender, sessionOutlivesTurn } from "../lib/notify/notifications.ts";
+import { modelSpec } from "../lib/models/model-policy.ts";
+import { sessionModelTier } from "../lib/models/session-model-tier.ts";
+import { productProjectSettingsPath, productSettingsPath, SETTINGS_DISPLAY } from "../lib/profile/product-settings.ts";
+import { productStateDir } from "../lib/profile/paths.ts";
+import { CLASSIFIER_SETTING_CHANGED_CHANNEL, SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../lib/rules/settings-channels.ts";
+import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "../lib/ui/tui-render.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../lib/rules/modes.ts";
 import { persistSubagentModel } from "../lib/models/subagent-default.ts";
 import { buildDoctorReport, productVersion } from "./build.ts";
 import { installKind, keepView, replacedBuiltinsView } from "./builtins.ts";
-import { requireText } from "../lib/profile.ts";
-import { modeCycleKey } from "../lib/keys.ts";
-import { UPGRADE_COMMANDS } from "../lib/update-check.mjs";
+import { requireText } from "../lib/profile/profile.ts";
+import { modeCycleKey } from "../lib/ui/keys.ts";
+import { UPGRADE_COMMANDS } from "../lib/app/update-check.mjs";
 import { computePresets, describePresetChanges, findPreset, PRESET_NAMES, presetsSection } from "./presets.ts";
 import { type DoctorReport, renderDoctorReport, renderDoctorText, renderSection } from "./report.ts";
 import { lookupLatestVersion } from "./update-lookup.ts";
 import { applyDoctorKey, decodeDoctorKey, type DoctorViewerState, renderDoctorViewer, visibleBodyRows } from "./viewer.ts";
-import { announceArgumentHint, extendingCompletions } from "../lib/argument-hints.ts";
-import { announceLocalCommand } from "../lib/local-command.ts";
+import { announceArgumentHint, extendingCompletions } from "../lib/ui/argument-hints.ts";
+import { announceLocalCommand } from "../lib/ui/local-command.ts";
 import { registeredMcpServers } from "../mcp/config.ts";
-import { sourceSwitchStatus, sourcesOff } from "../lib/sources.ts";
+import { sourceSwitchStatus, sourcesOff } from "../lib/profile/sources.ts";
 import { promptCommandText } from "../lib/plugins/skill-invoke.ts";
-import { panelUi } from "../lib/panel-focus.ts";
+import { panelUi } from "../lib/ui/panel-focus.ts";
 
 /** Rows the panel may take; the terminal's own height caps it (boundedDockHeight). */
 export const DOCTOR_PANEL_MAX_HEIGHT = 40;
@@ -69,7 +69,7 @@ export const DOCTOR_PANEL_MAX_HEIGHT = 40;
 function doctorExtension(pi: ExtensionAPI) {
 	const requestTier = sessionModelTier(pi);
 	const sendUserMessage = createUserMessageSender(pi);
-	// Models the account refused this session (lib/model-unusable.ts): the report
+	// Models the account refused this session (lib/models/model-unusable.ts): the report
 	// and presets must not recommend a model the session has just learned to avoid.
 	const unusableModels = new Set<string>();
 	pi.events.on(MODEL_UNUSABLE_CHANNEL, (data) => {
@@ -81,7 +81,7 @@ function doctorExtension(pi: ExtensionAPI) {
 		permission = data as PermissionStatus;
 	});
 
-	/** The mcp extension answers the request synchronously on the bus (lib/mcp-status.ts). */
+	/** The mcp extension answers the request synchronously on the bus (lib/plugins/mcp-status.ts). */
 	const mcpSnapshot = (): McpStatusEvent | undefined => {
 		let snapshot: McpStatusEvent | undefined;
 		const unsubscribe = pi.events.on(MCP_STATUS_CHANNEL, (data) => {
@@ -95,7 +95,7 @@ function doctorExtension(pi: ExtensionAPI) {
 		return snapshot;
 	};
 
-	// The public model catalogs behind the tiers (lib/model-catalog-data.ts):
+	// The public model catalogs behind the tiers (lib/models/model-catalog-data.ts):
 	// refreshed at most daily, only from a session that outlives the turn, never
 	// awaited in session_start (findings §15, §19), inert once the session is
 	// shutting down (session_shutdown cancels a fetch in flight), off with

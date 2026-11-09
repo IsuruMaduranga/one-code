@@ -12,8 +12,8 @@
  */
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { canShowCustomUi } from "../lib/headless-output.ts";
-import { linesComponent, liveUiCtx, safeThemeBold, safeThemePaint } from "../lib/tui-render.ts";
+import { canShowCustomUi } from "../lib/notify/headless-output.ts";
+import { linesComponent, liveUiCtx, safeThemeBold, safeThemePaint } from "../lib/ui/tui-render.ts";
 import type { RunHandle, WorkflowRunManager } from "./run-manager.ts";
 import { MAX_STATUS_ROWS, renderStatusRows, type ViewerRunSnapshot } from "./viewer.ts";
 
@@ -43,7 +43,7 @@ export class WorkflowWidget {
 	constructor(
 		private readonly manager: WorkflowRunManager,
 		private readonly getCtx: () => ExtensionContext | undefined,
-		/** Told the rows this strip paints below the editor (lib/dock-rows.ts). */
+		/** Told the rows this strip paints below the editor (lib/ui/dock-rows.ts). */
 		private readonly onRows: (rows: number) => void = () => {},
 	) {}
 

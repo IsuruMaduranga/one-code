@@ -17,9 +17,9 @@ import { AgentSession, type ToolDefinition } from "@earendil-works/pi-coding-age
 import { Type } from "typebox";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { AgentRunner } from "../../extensions/workflow/agent-session.ts";
-import { persistedFileBlock, PREVIEW_BYTES } from "../../extensions/lib/persisted-output.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
-import { projectConfigDirName } from "../../extensions/lib/sources.ts";
+import { persistedFileBlock, PREVIEW_BYTES } from "../../extensions/lib/request/persisted-output.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { projectConfigDirName } from "../../extensions/lib/profile/sources.ts";
 import { BUNDLED_AGENTS_DIR } from "../../extensions/lib/agents/agent-catalog.ts";
 
 let agentDir: string;

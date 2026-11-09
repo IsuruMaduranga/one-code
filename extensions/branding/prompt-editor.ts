@@ -5,15 +5,15 @@
  * the sanctioned base for a replacement (it already wires every app keybinding
  * through handleInput). We reserve a two-column left gutter and paint the
  * marker into it — see prompt-marker.ts for why that is cursor-safe — draw a
- * slash command's argument hint after the cursor (lib/argument-hints.ts), and
+ * slash command's argument hint after the cursor (lib/ui/argument-hints.ts), and
  * let ↑ restore queued messages through pi's dequeue action (queued-edit.ts). Registered via `ctx.ui.setEditorComponent`; this file is thin
  * wiring over the pure `applyPromptMarker`.
  */
 
 import { CustomEditor } from "@earendil-works/pi-coding-agent";
-import { applyBorderBadge, fitBadge } from "../lib/agent-view.ts";
-import { applyArgumentHint } from "../lib/argument-hints.ts";
-import { visibleWidth } from "../lib/text-width.ts";
+import { applyBorderBadge, fitBadge } from "../lib/agents/agent-view.ts";
+import { applyArgumentHint } from "../lib/ui/argument-hints.ts";
+import { visibleWidth } from "../lib/ui/text-width.ts";
 import { applyPromptMarker } from "./prompt-marker.ts";
 import { upEditsQueue } from "./queued-edit.ts";
 
@@ -27,7 +27,7 @@ export class PromptEditor extends CustomEditor {
 	#renderMarker: () => string;
 	/** The painted argument placeholder for the current input, if it is a hinted command. */
 	#renderHint: (text: string) => string | undefined;
-	/** The viewed agent's top-border label (plain text), or undefined on main (lib/agent-view.ts). */
+	/** The viewed agent's top-border label (plain text), or undefined on main (lib/agents/agent-view.ts). */
 	#badge: () => string | undefined;
 	/** Paints the fitted badge label as a chip, one space of padding on each side. */
 	#paintBadge: (label: string) => string;

@@ -8,7 +8,7 @@
  * port, so a fresh port per flow is fine even against a previously-registered client.
  */
 
-import { brand } from "../../lib/brand.mjs";
+import { brand } from "../../lib/profile/brand.mjs";
 import { createServer, type Server } from "node:http";
 
 export interface CallbackServer {

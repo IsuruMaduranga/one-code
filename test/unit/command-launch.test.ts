@@ -2,8 +2,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { commandLaunch, isBatchFile, quoteForCmd } from "../../extensions/lib/command-launch.ts";
-import { whichOnPath } from "../../extensions/lib/which.ts";
+import { commandLaunch, isBatchFile, quoteForCmd } from "../../extensions/lib/shell-run/command-launch.ts";
+import { whichOnPath } from "../../extensions/lib/shell-run/which.ts";
 
 /**
  * npm installs a language server (and VS Code its `code` CLI) on Windows as

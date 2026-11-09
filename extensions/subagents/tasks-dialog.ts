@@ -22,8 +22,8 @@
  */
 
 import type { BackgroundTask } from "../lib/agents/task-registry.ts";
-import { countNoun, cutPlainText as cut, formatDuration, hintLines, padPlainText } from "../lib/tui-render.ts";
-import { sanitizeDisplayText } from "../lib/terminal-text.ts";
+import { countNoun, cutPlainText as cut, formatDuration, hintLines, padPlainText } from "../lib/ui/tui-render.ts";
+import { sanitizeDisplayText } from "../lib/ui/terminal-text.ts";
 
 /** One selectable row. */
 export type TasksItem =

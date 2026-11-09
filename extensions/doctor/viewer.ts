@@ -4,8 +4,8 @@
  * an undiscoverable key). The wiring owns repaint and the fix/close effects.
  */
 
-import { panelTopRule, wrapHints } from "../lib/tui-render.ts";
-import { keyId, keyText } from "../lib/key-input.ts";
+import { panelTopRule, wrapHints } from "../lib/ui/tui-render.ts";
+import { keyId, keyText } from "../lib/ui/key-input.ts";
 
 export interface DoctorViewerState {
 	offset: number;

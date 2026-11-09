@@ -19,23 +19,23 @@
  * tell a user's file from one shipped with a copied checkout
  * (`readClaudeMcpjsonPolicy`).
  *
- * A "No" is persisted as a project-scope disable (`lib/mcp-overrides.ts`), so
+ * A "No" is persisted as a project-scope disable (`lib/plugins/mcp-overrides.ts`), so
  * the server shows as disabled in `/mcp` and Enable there brings it back —
  * that click is the consent, recorded here. Escape declines for this session
  * only. Same shape as `hooks/trust.ts`.
  */
 
-import { brand } from "../lib/brand.mjs";
+import { brand } from "../lib/profile/brand.mjs";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { primaryFamily, primarySettingsFile, readSettingsFile, settingsSources } from "../lib/claude-settings.ts";
-import { boundConsentItems } from "../lib/consent-preview.ts";
-import { consentStorePath } from "../lib/consent-stores.ts";
-import { processState } from "../lib/process-state.ts";
-import { tildify } from "../lib/paths.ts";
+import { primaryFamily, primarySettingsFile, readSettingsFile, settingsSources } from "../lib/profile/claude-settings.ts";
+import { boundConsentItems } from "../lib/consent/consent-preview.ts";
+import { consentStorePath } from "../lib/consent/consent-stores.ts";
+import { processState } from "../lib/profile/process-state.ts";
+import { tildify } from "../lib/profile/paths.ts";
 import type { McpServer } from "./config.ts";
-import { escapeControlText } from "../lib/terminal-text.ts";
+import { escapeControlText } from "../lib/ui/terminal-text.ts";
 
 interface ProjectApprovals {
 	/** "Use this and all future MCP servers in this project" was chosen. */
@@ -320,7 +320,7 @@ export interface McpTrustOutcome {
 /**
  * Process-lifetime memory per project+server+hash, so /clear (a new
  * session_start) and /reload do not re-ask a "No". Process state
- * (lib/process-state.ts), not module scope: pi evaluates this module again
+ * (lib/profile/process-state.ts), not module scope: pi evaluates this module again
  * at `/reload` and at a `/resume` into another directory (lifecycle grid
  * R3-L13).
  */

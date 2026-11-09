@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { modeCycleKey, pauseGlyph, taskToggleKey, useWindowsKeybindings } from "../../extensions/lib/keys.ts";
+import { modeCycleKey, pauseGlyph, taskToggleKey, useWindowsKeybindings } from "../../extensions/lib/ui/keys.ts";
 import { installHint } from "../../extensions/lsp/install-hints.ts";
 
 describe("useWindowsKeybindings (pi's rule, copied)", () => {

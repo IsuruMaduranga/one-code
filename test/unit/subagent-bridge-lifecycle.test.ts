@@ -3,13 +3,13 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { classify } from "../../extensions/permissions/auto-mode/classifier.ts";
-import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
-import { productSettingsPath } from "../../extensions/lib/product-settings.ts";
+import { MODE_CHANNEL } from "../../extensions/lib/rules/plan-mode-channels.ts";
+import { productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { type PermissionBridge, SUBAGENT_GATE_CHANNEL, watchPermissionBridge } from "../../extensions/lib/agents/subagent-gate.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { buildGate } from "./helpers/permission-gate-harness.ts";
-import { brand, envName } from "../../extensions/lib/brand.mjs";
+import { brand, envName } from "../../extensions/lib/profile/brand.mjs";
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;

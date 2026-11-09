@@ -110,7 +110,7 @@ export type WorktreeGuardRefusal =
 	| { kind: "stash"; risk: StashRisk; command: string }
 	/**
 	 * An isolated subagent's write lands in the shared checkout
-	 * (lib/worktree-isolation.ts). `target`: the path as written; `inCommand`:
+	 * (lib/agents/worktree-isolation.ts). `target`: the path as written; `inCommand`:
 	 * a shell command writes it; `mapped`: the same path in the worktree.
 	 */
 	| { kind: "sharedCheckoutWrite"; worktreePath: string; sharedRoot: string; target: string; inCommand: boolean; mapped: string };

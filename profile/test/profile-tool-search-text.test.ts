@@ -5,7 +5,7 @@
  * that replaces it beside the references.
  */
 import { describe, expect, it } from "vitest";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 describe("deferred tool wording", () => {
 	it("names the missed tool and the exact select: query to load it", () => {

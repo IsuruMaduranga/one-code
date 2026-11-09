@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
-import { productProjectSettingsPath, productSettingsPath } from "../../extensions/lib/product-settings.ts";
+import { productProjectSettingsPath, productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
 import {
 	loadPermissionSettings,
 	markOutsideReadPromptSeen,

@@ -5,7 +5,7 @@
  * (SYSTEM_PROMPT_SECTION_CHANNEL, text.ts), appended text, the working
  * directory and the budget line. The environment block, the model line and
  * the git snapshot are not here: they ride the first-message context
- * (lib/environment-block.ts, claude-context/claude-context.ts), or the mid-conversation
+ * (lib/context/environment-block.ts, claude-context/claude-context.ts), or the mid-conversation
  * system message on a model that takes one, as in Claude Code.
  *
  * For a fixed tier this function must be pure and deterministic: same inputs,
@@ -13,8 +13,8 @@
  */
 
 import type { BuildSystemPromptOptions } from "@earendil-works/pi-coding-agent";
-import type { PromptTier } from "../lib/model-tier.ts";
-import { profileText } from "../lib/profile.ts";
+import type { PromptTier } from "../lib/models/model-tier.ts";
+import { profileText } from "../lib/profile/profile.ts";
 import type { EnvironmentInfo } from "./environment.ts";
 import type { SystemPromptSection, SystemPromptSession } from "./text.ts";
 
@@ -56,7 +56,7 @@ export function buildClaudeCodeSystemPrompt(
 	 * the session, so it stays cache-stable.
 	 */
 	totalTokensLine?: string | null,
-	/** False when the session model runs without the task tools (`lib/model-tier.ts taskToolsEnabled`). */
+	/** False when the session model runs without the task tools (`lib/models/model-tier.ts taskToolsEnabled`). */
 	taskTools = true,
 	/** Sections other extensions announced, in announcement order. */
 	extraSections: readonly SystemPromptSection[] = [],

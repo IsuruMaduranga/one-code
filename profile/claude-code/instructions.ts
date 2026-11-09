@@ -1,6 +1,6 @@
 /**
  * One Code's instruction provider: Claude Code's instruction files on top of
- * the base's AGENTS.md (lib/instructions.ts; decisions/bi-fork.md, "Claude
+ * the base's AGENTS.md (lib/context/instructions.ts; decisions/bi-fork.md, "Claude
  * Code compatibility is One Code's profile code").
  *
  * Discovery mirrors Claude Code, not pi's own loader: the managed CLAUDE.md
@@ -14,7 +14,7 @@
  *
  * Nested subtree instruction files come later, when a file under them is read
  * (`nestedInstructionFiles`). Rules parsing, recursive discovery and path
- * matching live in lib/claude-rules.ts (the format stays in the base).
+ * matching live in lib/context/claude-rules.ts (the format stays in the base).
  */
 
 import { basename, dirname, join } from "node:path";
@@ -63,7 +63,7 @@ interface DiscoveryOptions {
 	rule?: InstructionFiles;
 	/** User consent for this project's external instruction imports. Never sourced from project files. */
 	includeExternal?: boolean;
-	/** The base's files: the global and per-directory AGENTS.md files, and the product files with `homeOneCodeDir` (lib/instructions.ts basePaths); found here when absent. */
+	/** The base's files: the global and per-directory AGENTS.md files, and the product files with `homeOneCodeDir` (lib/context/instructions.ts basePaths); found here when absent. */
 	base?: readonly ContextFilePath[];
 }
 

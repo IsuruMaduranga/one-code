@@ -8,9 +8,9 @@
  *
  * Its `context` hook runs right after kept-thinking, before anything injects:
  *
- * - it folds the branch (lib/ledger/fold.ts, through the shared memo in
- *   lib/ledger/fold-memo.ts) and decides whether this request
- *   opens an epoch (lib/ledger/plan.ts planRequest);
+ * - it folds the branch (lib/request/ledger/fold.ts, through the shared memo in
+ *   lib/request/ledger/fold-memo.ts) and decides whether this request
+ *   opens an epoch (lib/request/ledger/plan.ts planRequest);
  * - inside an epoch it cuts the messages the last request covered, so pi and
  *   every later `context` hook see only the tail, and the payload side puts
  *   the recorded list in front of what pi renders for it;
@@ -23,13 +23,13 @@
  * reopened file resumes on.
  */
 
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { sessionIdentity } from "../lib/anthropic-auth.ts";
-import { foldSession } from "../lib/ledger/fold-memo.ts";
-import { LEDGER_PLAN_CHANNEL, planRequest } from "../lib/ledger/plan.ts";
-import { makeRecord, RECORD } from "../lib/ledger/records.ts";
-import { extensionVersion } from "../lib/package-version.ts";
+import { sessionIdentity } from "../lib/request/anthropic-auth.ts";
+import { foldSession } from "../lib/request/ledger/fold-memo.ts";
+import { LEDGER_PLAN_CHANNEL, planRequest } from "../lib/request/ledger/plan.ts";
+import { makeRecord, RECORD } from "../lib/request/ledger/records.ts";
+import { extensionVersion } from "../lib/app/package-version.ts";
 
 function ledgerExtension(pi: ExtensionAPI) {
 	const by = extensionVersion();

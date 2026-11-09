@@ -19,23 +19,23 @@
  * that prompt. before_agent_start also re-announces the existing state.
  */
 
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { registerFormTool } from "../lib/tool-variants.ts";
+import { registerFormTool } from "../lib/profile/tool-variants.ts";
 import { Type } from "typebox";
-import { DEFER_CHANNEL } from "../lib/deferred.ts";
-import { productStateDir } from "../lib/paths.ts";
-import { REMINDER_CHANNEL } from "../lib/reminders.ts";
-import { canShowCustomUi } from "../lib/headless-output.ts";
-import { ccToolRenderers, safeThemePaint } from "../lib/tui-render.ts";
-import { userDenialText } from "../lib/user-denial.ts";
+import { DEFER_CHANNEL } from "../lib/request/deferred.ts";
+import { productStateDir } from "../lib/profile/paths.ts";
+import { REMINDER_CHANNEL } from "../lib/request/reminders.ts";
+import { canShowCustomUi } from "../lib/notify/headless-output.ts";
+import { ccToolRenderers, safeThemePaint } from "../lib/ui/tui-render.ts";
+import { userDenialText } from "../lib/consent/user-denial.ts";
 import type { PermissionMode } from "../lib/rules/matcher.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../lib/rules/modes.ts";
-import { requireText } from "../lib/profile.ts";
+import { requireText } from "../lib/profile/profile.ts";
 import { randomSlug } from "./slug.ts";
-import { readState, recordState } from "../lib/ledger/state.ts";
+import { readState, recordState } from "../lib/request/ledger/state.ts";
 
 /** A plan file larger than this is named after a compaction, not inlined: the model reads it when it needs it. */
 const PLAN_REFERENCE_CHARS = 40_000;
@@ -55,8 +55,8 @@ import {
 	selectPlanChoice,
 } from "./viewer.ts";
 
-import { MODE_CHANNEL, PLAN_FILE_CHANNEL, PLAN_FILE_ENTRY, planFileOnBranch, planFileRecords, type PlanFileRecord } from "../lib/plan-mode-channels.ts";
-import { panelUi } from "../lib/panel-focus.ts";
+import { MODE_CHANNEL, PLAN_FILE_CHANNEL, PLAN_FILE_ENTRY, planFileOnBranch, planFileRecords, type PlanFileRecord } from "../lib/rules/plan-mode-channels.ts";
+import { panelUi } from "../lib/ui/panel-focus.ts";
 export { MODE_CHANNEL, PLAN_FILE_CHANNEL };
 
 const PLANS_DIR = () => join(productStateDir(), "plans");
@@ -267,7 +267,7 @@ function planModeExtension(pi: ExtensionAPI) {
 	 * enter_plan_mode's description follows the model's tier: Claude Code's,
 	 * which prefers plan mode, on frontier and workhorse, and One Code's, which
 	 * says most tasks do not need it, on cheap and tiny (`texts.ts`, through the
-	 * shared lib/tool-variants.ts). A re-registration keeps the tool's active
+	 * shared lib/profile/tool-variants.ts). A re-registration keeps the tool's active
 	 * state, so the deferred tool stays deferred, and it sets no prompt snippet,
 	 * so the system prompt never moves with it.
 	 */

@@ -15,17 +15,17 @@
  * them to `buildDoctorReport`; everything below is deterministic given them.
  */
 
-import { brand } from "../lib/brand.mjs";
+import { brand } from "../lib/profile/brand.mjs";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import type { PromptTier } from "../lib/model-tier.ts";
-import { tildify } from "../lib/paths.ts";
-import type { McpStatusEvent } from "../lib/mcp-status.ts";
+import type { PromptTier } from "../lib/models/model-tier.ts";
+import { tildify } from "../lib/profile/paths.ts";
+import type { McpStatusEvent } from "../lib/plugins/mcp-status.ts";
 import type { ReplacedBuiltinsView } from "./builtins.ts";
-import type { CompactionKeepView } from "../lib/compaction-keep.mjs";
+import type { CompactionKeepView } from "../lib/app/compaction-keep.mjs";
 import type { RegisteredServer } from "../mcp/config.ts";
-import { wrapProse } from "../lib/tui-render.ts";
-import { countNoun } from "../lib/tui-render.ts";
-import type { SwitchStatus } from "../lib/sources.ts";
+import { wrapProse } from "../lib/ui/tui-render.ts";
+import { countNoun } from "../lib/ui/tui-render.ts";
+import type { SwitchStatus } from "../lib/profile/sources.ts";
 export { countNoun };
 
 export type LineLevel = "ok" | "info" | "warn" | "error" | "dim";
@@ -69,7 +69,7 @@ export interface DoctorEnvironment {
 	agentDir: string;
 	/** One Code's own state dir (~/.onecode or ONECODE_STATE_DIR). */
 	stateDir: string;
-	/** The source provider's switch, and what it reads (lib/sources.ts); absent without one. */
+	/** The source provider's switch, and what it reads (lib/profile/sources.ts); absent without one. */
 	sources?: SwitchStatus;
 	env: NodeJS.ProcessEnv;
 	platform: string;
@@ -81,7 +81,7 @@ export interface DoctorEnvironment {
 	piVersion?: string;
 	/** pi's built-ins One Code replaces and whether pi still loads them; undefined before pi 0.99 (doctor/builtins.ts). */
 	replacedBuiltins?: ReplacedBuiltinsView;
-	/** pi's compaction keep window and where it is set (lib/compaction-keep.mjs); undefined when the settings could not be read. */
+	/** pi's compaction keep window and where it is set (lib/app/compaction-keep.mjs); undefined when the settings could not be read. */
 	compactionKeep?: CompactionKeepView & { paths: { user: string; project: string } };
 	/** pi's `CONFIG_DIR_NAME`, the project folder its own `mcp.json` sits in (`.pi` when absent). */
 	piConfigDirName?: string;

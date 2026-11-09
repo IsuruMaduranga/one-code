@@ -9,7 +9,7 @@ import {
 	MonitorLineSplitter,
 	pushEvent,
 } from "../../extensions/background/monitor-batch.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const monitor = requireText("background").monitor;
 

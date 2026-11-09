@@ -11,8 +11,8 @@ import { vi } from "vitest";
 import hooksExtension from "../../../extensions/hooks/index.ts";
 import { resetHookSettingsCache } from "../../../extensions/hooks/settings.ts";
 import { type HookBridge, SUBAGENT_HOOK_CHANNEL } from "../../../extensions/lib/agents/hook-bridge.ts";
-import { envName } from "../../../extensions/lib/brand.mjs";
-import { shellQuote } from "../../../extensions/lib/shell-quote.ts";
+import { envName } from "../../../extensions/lib/profile/brand.mjs";
+import { shellQuote } from "../../../extensions/lib/shell/shell-quote.ts";
 import { createFakeCtx, createFakePi } from "./fake-pi.ts";
 
 export interface HookWorktreeDirs {

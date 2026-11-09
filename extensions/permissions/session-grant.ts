@@ -17,7 +17,7 @@
 
 import { dirname, resolve } from "node:path";
 import { toAbsolute } from "../lib/shell/paths.ts";
-import { tildify, toPosixPath } from "../lib/paths.ts";
+import { tildify, toPosixPath } from "../lib/profile/paths.ts";
 import { escapeLiteral, isAtOrInsideDir, normalizeToolName, parseRule, type PermissionMode, type PermissionRule, subjectKind, urlHost } from "../lib/rules/matcher.ts";
 
 export interface SessionGrant {

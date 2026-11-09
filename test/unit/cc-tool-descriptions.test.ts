@@ -1,5 +1,5 @@
 /**
- * Tool texts per tier and permission mode (lib/tool-variants.ts,
+ * Tool texts per tier and permission mode (lib/profile/tool-variants.ts,
  * decisions/system-prompt.md "Four registers"): frontier and workhorse carry
  * the short forms, cheap and tiny the long ones, and Bash's form also follows
  * whether the first request is in auto mode. The wiring tests check that a
@@ -10,12 +10,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import askUserExtension from "../../extensions/ask-user/index.ts";
 import bashExtension from "../../extensions/bash/index.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../../extensions/lib/rules/modes.ts";
 import toolStyleExtension from "../../extensions/tool-style/index.ts";
 import webSearchExtension from "../../extensions/web/index.ts";
 import webFetchExtension from "../../extensions/web-fetch/index.ts";
-import { descriptionForm, registerVariantTool } from "../../extensions/lib/tool-variants.ts";
+import { descriptionForm, registerVariantTool } from "../../extensions/lib/profile/tool-variants.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
 /** The profile's bash description for a form, the permission mode and the search-tools pointer. */

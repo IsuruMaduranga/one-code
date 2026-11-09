@@ -1,5 +1,5 @@
 /**
- * Open a sign-in URL in the user's default browser (`lib/open-browser.ts`),
+ * Open a sign-in URL in the user's default browser (`lib/ui/open-browser.ts`),
  * falling back to printing the URL for manual paste when no browser starts.
  *
  * The authorization URL is the server's choice (its metadata names the
@@ -8,7 +8,7 @@
  * scheme (`file:`, a custom handler) to whatever the desktop registered for it.
  */
 
-import { launchOpener, type OpenerPlan, openerPlan } from "../../lib/open-browser.ts";
+import { launchOpener, type OpenerPlan, openerPlan } from "../../lib/ui/open-browser.ts";
 
 export type BrowserPlan = OpenerPlan | { refused: string };
 

@@ -1,6 +1,6 @@
 /**
  * Plugin hook discovery (pure): each enabled plugin's hooks/hooks.json,
- * re-derived per call via lib/plugins.ts like every other plugin consumer
+ * re-derived per call via lib/plugins/plugins.ts like every other plugin consumer
  * (no cross-extension state under jiti).
  *
  * Plugin hooks are user scope — installing the plugin was the consent step —
@@ -9,7 +9,7 @@
  */
 
 import { readFileSync, statSync } from "node:fs";
-import { discoverPlugins, pluginResources, type DiscoverRoots } from "../lib/plugins.ts";
+import { discoverPlugins, pluginResources, type DiscoverRoots } from "../lib/plugins/plugins.ts";
 import { parseHooksBlock, type HooksSource } from "./settings.ts";
 
 interface CacheEntry {

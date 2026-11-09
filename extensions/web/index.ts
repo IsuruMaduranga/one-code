@@ -6,7 +6,7 @@
  *
  *   0. Anthropic's server-side `web_search` with dynamic filtering, in our own
  *      nested call, on a first-party Anthropic API-key session with a Claude
- *      4.6+ model available (lib/anthropic-server-tools.ts). pi-web-search's
+ *      4.6+ model available (lib/request/anthropic-server-tools.ts). pi-web-search's
  *      Anthropic call uses the older `web_search_20250305`, so it is the next
  *      step down, not this one.
  *   1. Provider-native search through the community `pi-web-search` package
@@ -28,24 +28,24 @@
  * WebFetch lives in `extensions/web-fetch` (our own); this file only owns search.
  */
 
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { homedir } from "node:os";
 import { Type } from "typebox";
 import webSearchPackage from "pi-web-search/src/index.ts";
 import { callApiStream, getConfig, getProviderKind } from "pi-web-search/src/api.ts";
 import { getWebSearchModel } from "pi-web-search/src/utils.ts";
-import { tryNativeWeb } from "../lib/anthropic-server-call.ts";
-import { nativeSearchBody, searchOutcome, searchSources, sourceLine, type ThinkingFields } from "../lib/anthropic-server-tools.ts";
-import { DeadlineError } from "../lib/operation-deadline.ts";
-import { requireText } from "../lib/profile.ts";
-import { readJsonFile } from "../lib/atomic-write.ts";
-import { recordUsage } from "../lib/usage-bus.ts";
-import { DEFER_CHANNEL, WITHHOLD_CHANNEL } from "../lib/deferred.ts";
-import { productSettingsPath } from "../lib/product-settings.ts";
-import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
-import { ccToolRenderers } from "../lib/tui-render.ts";
-import { registerFormTool } from "../lib/tool-variants.ts";
+import { tryNativeWeb } from "../lib/request/anthropic-server-call.ts";
+import { nativeSearchBody, searchOutcome, searchSources, sourceLine, type ThinkingFields } from "../lib/request/anthropic-server-tools.ts";
+import { DeadlineError } from "../lib/side-calls/operation-deadline.ts";
+import { requireText } from "../lib/profile/profile.ts";
+import { readJsonFile } from "../lib/core/atomic-write.ts";
+import { recordUsage } from "../lib/notify/usage-bus.ts";
+import { DEFER_CHANNEL, WITHHOLD_CHANNEL } from "../lib/request/deferred.ts";
+import { productSettingsPath } from "../lib/profile/product-settings.ts";
+import { persistIfLarge, sessionResultsDir } from "../lib/request/persisted-output.ts";
+import { ccToolRenderers } from "../lib/ui/tui-render.ts";
+import { registerFormTool } from "../lib/profile/tool-variants.ts";
 import { nativeSearchResult, ProviderSearchError } from "./native-results.ts";
 import { runNativeSearch } from "./native-call.ts";
 import {
@@ -87,7 +87,7 @@ function webExtension(pi: ExtensionAPI) {
 	// Per-session: the thinking-off fields a native-call model turned out to need.
 	const learnedNativeThinking = new Map<string, ThinkingFields>();
 
-	// Short or long text by the model's tier (the profile's description, lib/tool-variants.ts).
+	// Short or long text by the model's tier (the profile's description, lib/profile/tool-variants.ts).
 	const tool = defineTool({
 		name: "web_search",
 		label: "Web Search",

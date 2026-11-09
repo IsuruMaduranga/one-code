@@ -8,25 +8,25 @@
  * ("Artifacts").
  */
 
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import { randomBytes } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename } from "node:path";
-import { StringEnum } from "../lib/string-enum.ts";
+import { StringEnum } from "../lib/core/string-enum.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { readJsonFile } from "../lib/atomic-write.ts";
-import { DEFER_CHANNEL } from "../lib/deferred.ts";
-import { findProjectRoot } from "../lib/git.ts";
-import { registerLocalCommand } from "../lib/local-command.ts";
-import { productSettingsPath } from "../lib/product-settings.ts";
-import { launchOpener, noDisplayReason, openerPlan } from "../lib/open-browser.ts";
-import { tildify } from "../lib/paths.ts";
-import { sanitizeDisplayText, terminalLink } from "../lib/terminal-text.ts";
-import { resolveToolPath } from "../lib/tool-path.ts";
-import { ccToolRenderers } from "../lib/tui-render.ts";
-import { requireText } from "../lib/profile.ts";
+import { readJsonFile } from "../lib/core/atomic-write.ts";
+import { DEFER_CHANNEL } from "../lib/request/deferred.ts";
+import { findProjectRoot } from "../lib/context/git.ts";
+import { registerLocalCommand } from "../lib/ui/local-command.ts";
+import { productSettingsPath } from "../lib/profile/product-settings.ts";
+import { launchOpener, noDisplayReason, openerPlan } from "../lib/ui/open-browser.ts";
+import { tildify } from "../lib/profile/paths.ts";
+import { sanitizeDisplayText, terminalLink } from "../lib/ui/terminal-text.ts";
+import { resolveToolPath } from "../lib/rules/tool-path.ts";
+import { ccToolRenderers } from "../lib/ui/tui-render.ts";
+import { requireText } from "../lib/profile/profile.ts";
 import type { ArtifactsText, NoBrowser, PublishBrowser, PublishProblem } from "./text.ts";
 import {
 	type ArtifactMeta,

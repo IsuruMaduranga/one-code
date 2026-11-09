@@ -11,7 +11,7 @@ import {
 	markDelivered,
 	MAX_CHARS,
 } from "../../extensions/lsp/watcher.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const lspText = requireText("lsp");
 

@@ -11,10 +11,10 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { brand } from "../../extensions/lib/brand.mjs";
-import { guideDocsDirs, ONE_CODE_GUIDE_DIR } from "../../extensions/lib/guide-docs.ts";
-import { forwardSlashes } from "../../extensions/lib/paths.ts";
-import { activeProfile, setActiveProfileForTest } from "../../extensions/lib/profile.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
+import { guideDocsDirs, ONE_CODE_GUIDE_DIR } from "../../extensions/lib/agents/guide-docs.ts";
+import { forwardSlashes } from "../../extensions/lib/profile/paths.ts";
+import { activeProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 import { decide } from "../../extensions/lib/rules/matcher.ts";
 import { discoverAgents } from "../../extensions/lib/agents/agent-catalog.ts";
 import { guideAgentDefinition as definition, guideSystemPrompt as systemPrompt, type GuideInput, listableName, settingsSetup } from "../../extensions/subagents/guide-agent.ts";

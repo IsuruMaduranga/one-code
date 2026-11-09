@@ -13,8 +13,8 @@
  * is why the off-skill redaction below still matches it.
  */
 
-import { brandedId } from "../brand.mjs";
-import { requireText } from "../profile.ts";
+import { brandedId } from "../profile/brand.mjs";
+import { requireText } from "../profile/profile.ts";
 
 const SKILL_PREFIX = "/skill:";
 

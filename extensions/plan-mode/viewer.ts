@@ -11,8 +11,8 @@
  * the width accounting.
  */
 
-import { cutPlainText, hintLines, truncateLine, wrapProse } from "../lib/tui-render.ts";
-import { keyId } from "../lib/key-input.ts";
+import { cutPlainText, hintLines, truncateLine, wrapProse } from "../lib/ui/tui-render.ts";
+import { keyId } from "../lib/ui/key-input.ts";
 
 /** Renders Markdown to painted lines at a width (pi-tui's Markdown, which the transcript uses). */
 export type PlanMarkdown = (text: string, width: number) => string[];

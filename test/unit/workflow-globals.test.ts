@@ -3,7 +3,7 @@ import { hashAgentCall, ReplayCursor } from "../../extensions/workflow/journal.t
 import { createLimiter, createScriptGlobals, createRunAdmission } from "../../extensions/workflow/globals.ts";
 import type { AgentCallFn } from "../../extensions/workflow/types.ts";
 import { makeGlobals } from "./workflow-test-helpers.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import type { RunStop } from "../../extensions/workflow/text.ts";
 
 /** Why the runtime refused an agent() call, as the profile words it. */

@@ -24,7 +24,7 @@ export interface ShownJob {
 	prompt: string;
 }
 
-/** The cron tools, the main session's and a subagent's proxies alike (lib/agent-cron.ts). */
+/** The cron tools, the main session's and a subagent's proxies alike (lib/agents/agent-cron.ts). */
 export interface CronText {
 	createDescription(p: { maxAgeDays: number }): string;
 	createParams(p: { maxAgeDays: number }): { cron: string; prompt: string; recurring: string; durable: string };

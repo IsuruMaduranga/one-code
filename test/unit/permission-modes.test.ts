@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import permissionsExtension from "../../extensions/permissions/index.ts";
-import { brand, brandedId } from "../../extensions/lib/brand.mjs";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { brand, brandedId } from "../../extensions/lib/profile/brand.mjs";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import type { PermissionMode } from "../../extensions/lib/rules/matcher.ts";
-import { modeCycleKey, pauseGlyph } from "../../extensions/lib/keys.ts";
+import { modeCycleKey, pauseGlyph } from "../../extensions/lib/ui/keys.ts";
 
 // The key and the pause icon follow the platform (alt+m and a single-cell
-// glyph on Windows and WSL — lib/keys.ts), so the expectations are built from
+// glyph on Windows and WSL — lib/ui/keys.ts), so the expectations are built from
 // the same rule this process resolves to; keys.test.ts pins the rule itself.
 const KEY = modeCycleKey();
 const P = pauseGlyph();

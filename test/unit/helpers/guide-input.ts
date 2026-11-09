@@ -3,7 +3,7 @@
  * `GuideInput`), for guide-agent and its One Code sibling: an app install
  * with every doc folder found and an empty setup.
  */
-import { brand } from "../../../extensions/lib/brand.mjs";
+import { brand } from "../../../extensions/lib/profile/brand.mjs";
 import type { GuideInput } from "../../../extensions/subagents/guide-agent.ts";
 
 /** A setup with nothing configured. */

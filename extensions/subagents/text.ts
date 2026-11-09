@@ -5,12 +5,12 @@
  * reads: the tools' descriptions and parameters, their results and refusals,
  * a run's failures, the fork's framing, and the blocks the extension adds to
  * the conversation. The hand-back tool and the model menu are their own
- * groups (lib/handback-text.ts, model-text.ts). Progress lines the UI shows
+ * groups (lib/agents/handback-text.ts, model-text.ts). Progress lines the UI shows
  * and the panels are the base's. Deep modules reach the words through
  * `words.ts`.
  */
 
-import type { DescriptionForm } from "../lib/tool-variants.ts";
+import type { DescriptionForm } from "../lib/profile/tool-variants.ts";
 import type { CheckoutProgram } from "../lib/shell/git-checkout-programs.ts";
 import type { GuideInput } from "./guide-agent.ts";
 

@@ -8,7 +8,7 @@
 
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { productStateDir } from "../lib/paths.ts";
+import { productStateDir } from "../lib/profile/paths.ts";
 
 export interface HookLogEntry {
 	ts: string;

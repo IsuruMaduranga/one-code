@@ -2,7 +2,7 @@ import { validateToolArguments } from "@earendil-works/pi-ai";
 import { Value } from "typebox/value";
 import { describe, expect, it } from "vitest";
 import { jsonSchemaToTypeBox as convertSchema } from "../../extensions/mcp/schema.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import {
 	githubCustomPropertyAllowedValues,
 	githubCustomPropertyDescription,

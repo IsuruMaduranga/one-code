@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import tasksExtension from "../../extensions/tasks/index.ts";
 import { TaskStore } from "../../extensions/tasks/store.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 /**

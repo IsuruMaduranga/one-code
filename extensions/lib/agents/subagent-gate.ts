@@ -19,9 +19,9 @@
  * same shape as `MCP_TOOLS_CHANNEL` sharing tool definitions).
  */
 
-import { brandedId } from "../brand.mjs";
+import { brandedId } from "../profile/brand.mjs";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { type BridgeWatchApi, watchBridge } from "../bridge-watch.ts";
+import { type BridgeWatchApi, watchBridge } from "../consent/bridge-watch.ts";
 import { refusalText } from "../../permissions/words.ts";
 
 export const SUBAGENT_GATE_CHANNEL = brandedId("subagent-permission-gate");
@@ -78,7 +78,7 @@ export interface SubagentGatePayload {
 	decide: PermissionBridge;
 }
 
-/** A lazy getter for the latest published permission bridge (`lib/bridge-watch.ts`); undefined until the permissions extension publishes. */
+/** A lazy getter for the latest published permission bridge (`lib/consent/bridge-watch.ts`); undefined until the permissions extension publishes. */
 export function watchPermissionBridge(pi: BridgeWatchApi): () => PermissionBridge | undefined {
 	return watchBridge(pi, SUBAGENT_GATE_CHANNEL, (data) => (data as SubagentGatePayload | undefined)?.decide);
 }

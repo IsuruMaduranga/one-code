@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { DEFER_CHANNEL, deferredAddendumText, deferredRemovedText, WITHHOLD_CHANNEL } from "../../extensions/lib/deferred.ts";
-import { requestIdentity } from "../../extensions/lib/anthropic-auth.ts";
-import { makeRecord, RECORD } from "../../extensions/lib/ledger/records.ts";
-import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/mcp-share.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { DEFER_CHANNEL, deferredAddendumText, deferredRemovedText, WITHHOLD_CHANNEL } from "../../extensions/lib/request/deferred.ts";
+import { requestIdentity } from "../../extensions/lib/request/anthropic-auth.ts";
+import { makeRecord, RECORD } from "../../extensions/lib/request/ledger/records.ts";
+import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/plugins/mcp-share.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import toolSearchExtension from "../../extensions/tool-search/index.ts";
 import { makeToolSearchFakePi, type Reminder } from "./helpers/tool-search-fake-pi.ts";
 
@@ -12,7 +12,7 @@ import { makeToolSearchFakePi, type Reminder } from "./helpers/tool-search-fake-
  * renders on message 1. Inside an epoch message 1 is the ledger's record, so a
  * tool that registered since rides the request's tail, computed when the
  * request goes out from what is loadable then minus what the epoch told
- * (extensions/ledger, lib/reminders.ts RENDER_CHANNEL).
+ * (extensions/ledger, lib/request/reminders.ts RENDER_CHANNEL).
  */
 
 const makeFakePi = () => makeToolSearchFakePi(["read", "bash"]);

@@ -11,9 +11,9 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import systemPromptExtension from "../../extensions/system-prompt/index.ts";
 import { optionsForIdleTurn, withSystemHead } from "../../extensions/system-prompt/idle-turn.ts";
-import { announcePromptOptions, requestSystemPrompt } from "../../extensions/lib/prompt-options.ts";
+import { announcePromptOptions, requestSystemPrompt } from "../../extensions/lib/ui/prompt-options.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 /** A line only the profile's prompt carries (pi's default has none): its working-directory line. */
 const profilePromptMark = (cwd: string) => requireText("systemPrompt").cwdLine(cwd.replace(/\\/g, "/"));

@@ -1,0 +1,94 @@
+/**
+ * The `/btw` panel's `f to fork` request, sent to the subagents extension over
+ * pi.events (extensions share no module state). Claude Code's key spawns a
+ * fork subagent: it inherits the conversation, then the side question and its
+ * answer, takes the question as its task, runs in the background and reports
+ * back as a task notification.
+ *
+ * The subagents extension sets `handled` synchronously inside its listener, so
+ * the emitter can tell "nobody listens" (the extension is not loaded) from a
+ * fork still starting; `respond` settles the request once.
+ */
+
+import { brandedId } from "../profile/brand.mjs";
+import { randomBytes } from "node:crypto";
+import type { Message } from "@earendil-works/pi-ai";
+import { commandInputBlock, commandStdoutBlock } from "../ui/local-command.ts";
+import { cutPlainText } from "../ui/tui-render.ts";
+
+export const BTW_FORK_CHANNEL = brandedId("btw-fork");
+
+/** The started fork, or why it could not start. */
+export type BtwForkResult = { name: string; taskId: string } | { error: string };
+
+export interface BtwForkRequest {
+	/** The command context of the open panel (the listener reads cwd, session and model from it). */
+	ctx: unknown;
+	/** The side question: the fork's task. */
+	question: string;
+	/** The question and answer, appended to the fork's inherited conversation. */
+	messages: Message[];
+	/** Set by the listener before it returns. */
+	handled?: boolean;
+	respond: (result: BtwForkResult) => void;
+}
+
+/** Emit a fork request and wait for its answer; an error result when no listener took it. */
+export function requestBtwFork(
+	events: { emit(channel: string, data: unknown): void },
+	request: Omit<BtwForkRequest, "respond" | "handled">,
+): Promise<BtwForkResult> {
+	return new Promise((resolve) => {
+		const payload: BtwForkRequest = { ...request, respond: resolve };
+		events.emit(BTW_FORK_CHANNEL, payload);
+		if (!payload.handled) resolve({ error: "Forking needs the subagents extension, which is not loaded." });
+	});
+}
+
+/**
+ * The fork's base name, Claude Code's rule: the question's first three words,
+ * hyphen-joined, lowercased, cut to `[a-z0-9-]` and 24 characters; `fork`
+ * when nothing is left. "does reading outside project…" becomes
+ * `does-reading-outside`. A taken name is suffixed by the caller.
+ */
+export function btwForkName(question: string): string {
+	const slug = question
+		.trim()
+		.split(/\s+/)
+		.slice(0, 3)
+		.join("-")
+		.toLowerCase()
+		.replace(/[^a-z0-9-]/g, "")
+		.replace(/-+/g, "-")
+		.replace(/^-|-$/g, "")
+		.slice(0, 24);
+	return slug || "fork";
+}
+
+/** Claude Code's transcript line for a started fork: `⑂ forked <name> (<last 4 of the id>)`. */
+export function btwForkedLine(name: string, taskId: string): string {
+	return `⑂ forked ${name} (${taskId.slice(-4)})`;
+}
+
+/**
+ * A fork's task description, Claude Code's rule (findings §29): the question
+ * with whitespace collapsed, cut to 49 characters plus `…` past 50.
+ */
+export function btwForkDescription(question: string): string {
+	return cutPlainText(question.trim().replace(/\s+/g, " "), 50);
+}
+
+/**
+ * What the main conversation is told when a fork starts: Claude Code's
+ * local-command breadcrumb for `/btw <question>` and its stdout, the forked
+ * line (findings §40), as two bare text blocks on the next user message. No
+ * caveat block precedes them, unlike other local commands.
+ */
+export function btwForkRecord(name: string, taskId: string, question: string): string[] {
+	return [commandInputBlock("btw", question.trim()), commandStdoutBlock(btwForkedLine(name, taskId))];
+}
+
+/** A fork's task id, Claude Code's shape: `a<name>-<16 hex>` (`awhat-word-is-477c2d9e80467f14`). */
+export function btwForkTaskId(name: string): string {
+	return `a${name}-${randomBytes(8).toString("hex")}`;
+}

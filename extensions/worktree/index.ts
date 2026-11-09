@@ -12,34 +12,34 @@
  * the new branch.
  */
 
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { StringEnum } from "../lib/string-enum.ts";
+import { StringEnum } from "../lib/core/string-enum.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { restoreLatestDetails } from "../lib/branch-restore.ts";
+import { restoreLatestDetails } from "../lib/request/branch-restore.ts";
 import { checkoutGitRunsProgram } from "../lib/shell/git-checkout-programs.ts";
-import { DEFER_CHANNEL } from "../lib/deferred.ts";
-import { REMINDER_CHANNEL } from "../lib/reminders.ts";
-import { absoluteFrom, comparablePath, tryRealpath } from "../lib/paths.ts";
-import { WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
+import { DEFER_CHANNEL } from "../lib/request/deferred.ts";
+import { REMINDER_CHANNEL } from "../lib/request/reminders.ts";
+import { absoluteFrom, comparablePath, tryRealpath } from "../lib/profile/paths.ts";
+import { WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/agents/worktree-channel.ts";
 import { namesGit, unlistedWorktreesReason, worktreeBashGuardReason } from "../lib/rules/worktree-guards.ts";
 import { worktreePowershellGuardReason } from "./powershell-guards.ts";
-import { bashParserReady } from "../lib/bash-parser.ts";
-import { ORIGINAL_COMMAND_CHANNEL, type OriginalCommandRecord } from "../lib/original-command.ts";
-import { requireText } from "../lib/profile.ts";
+import { bashParserReady } from "../lib/shell/bash-parser.ts";
+import { ORIGINAL_COMMAND_CHANNEL, type OriginalCommandRecord } from "../lib/shell/original-command.ts";
+import { requireText } from "../lib/profile/profile.ts";
 import type { EnterWorktreeFailure, RemoveBlocker, WorktreeGuardRefusal } from "./text.ts";
 import { rewriteToolInput, validateWorktreeName } from "./rewrite.ts";
-import { ccToolRenderers } from "../lib/tui-render.ts";
-import { findProjectRoot, HARNESS_GIT_CONFIG, HARNESS_GIT_NO_HOOKS, repositoryWorktrees } from "../lib/git.ts";
-import { projectConfigDir, projectConfigDirName } from "../lib/sources.ts";
-import { readState, readStringsState, recordState } from "../lib/ledger/state.ts";
-import { processState } from "../lib/process-state.ts";
+import { ccToolRenderers } from "../lib/ui/tui-render.ts";
+import { findProjectRoot, HARNESS_GIT_CONFIG, HARNESS_GIT_NO_HOOKS, repositoryWorktrees } from "../lib/context/git.ts";
+import { projectConfigDir, projectConfigDirName } from "../lib/profile/sources.ts";
+import { readState, readStringsState, recordState } from "../lib/request/ledger/state.ts";
+import { processState } from "../lib/profile/process-state.ts";
 
 const run = promisify(execFile);
 const REMINDER_KEY = "cc-worktree-session";
@@ -80,7 +80,7 @@ const MISSING_REPORTED_STATE = "worktree:missing-reported";
 const CARRIED_STATE = "worktree:carried";
 
 /**
- * The worktree the session is in, as process state (lib/process-state.ts): a
+ * The worktree the session is in, as process state (lib/profile/process-state.ts): a
  * /clear or /new starts an empty branch, and Claude Code keeps the session in
  * its worktree across that (decisions/tools.md). Children never load this
  * extension, so only the main session writes it.
@@ -272,7 +272,7 @@ function worktreeExtension(pi: ExtensionAPI) {
 			const program = checkoutGitRunsProgram(repoRoot, homedir(), []);
 			if (program) return fail({ kind: "checkoutRunsProgram", program });
 
-			// `.onecode/worktrees` in independent mode (lib/sources.ts).
+			// `.onecode/worktrees` in independent mode (lib/profile/sources.ts).
 			const worktreesDir = join(projectConfigDir(repoRoot), "worktrees");
 			mkdirSync(worktreesDir, { recursive: true });
 			// Self-ignoring directory: worktrees never show up as untracked files.

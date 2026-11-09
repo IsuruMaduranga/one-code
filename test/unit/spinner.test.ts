@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { alignRight, formatDuration } from "../../extensions/lib/tui-render.ts";
+import { alignRight, formatDuration } from "../../extensions/lib/ui/tui-render.ts";
 import { composeWorkingMessage, estimateTokens, messageChars, spinnerFrames } from "../../extensions/spinner/line.ts";
 import { pickVerb, SPINNER_VERBS } from "../../extensions/spinner/verbs.ts";
 

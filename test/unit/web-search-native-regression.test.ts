@@ -16,7 +16,7 @@ vi.mock("pi-web-search/src/utils.ts", async (importOriginal) => ({
 	...await importOriginal<typeof import("pi-web-search/src/utils.ts")>(),
 	getWebSearchModel: async () => ({ provider: "google", api: "google-generative-ai", id: "gemini-test" }),
 }));
-vi.mock("../../extensions/lib/anthropic-server-call.ts", () => ({ tryNativeWeb: async () => ({ kind: "unavailable" }) }));
+vi.mock("../../extensions/lib/request/anthropic-server-call.ts", () => ({ tryNativeWeb: async () => ({ kind: "unavailable" }) }));
 
 type Result = { content: Array<{ type: string; text: string }>; details: { backend?: string; error?: unknown }; isError?: boolean };
 const braveResult = { title: "Brave result", url: "https://example.com", snippet: "Result snippet" };

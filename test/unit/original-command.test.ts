@@ -3,7 +3,7 @@ import {
 	commandToEvaluate,
 	ORIGINAL_COMMAND_CHANNEL,
 	trackOriginalCommands,
-} from "../../extensions/lib/original-command.ts";
+} from "../../extensions/lib/shell/original-command.ts";
 
 function fakeBus() {
 	const handlers = new Map<string, Array<(payload: unknown) => void>>();

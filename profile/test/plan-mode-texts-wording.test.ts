@@ -5,8 +5,8 @@
  * The base's plan-mode-texts.test.ts checks where plan mode puts each text.
  */
 import { describe, expect, it } from "vitest";
-import { descriptionForm } from "../../extensions/lib/tool-variants.ts";
-import { userDenialText } from "../../extensions/lib/user-denial.ts";
+import { descriptionForm } from "../../extensions/lib/profile/tool-variants.ts";
+import { userDenialText } from "../../extensions/lib/consent/user-denial.ts";
 import {
 	approvedPlanText,
 	ENTER_PLAN_MODE_DESCRIPTION,
@@ -16,7 +16,7 @@ import {
 	EXIT_PLAN_MODE_DESCRIPTION,
 	exitedPlanModeText,
 } from "../text/plan-mode/texts.ts";
-import { PROMPT_TIERS } from "../../extensions/lib/model-tier.ts";
+import { PROMPT_TIERS } from "../../extensions/lib/models/model-tier.ts";
 
 describe("plan-mode tool descriptions", () => {
 	it("enter_plan_mode carries Claude Code's description on frontier and workhorse, One Code's on cheap and tiny", () => {

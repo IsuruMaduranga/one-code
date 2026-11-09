@@ -17,8 +17,8 @@ import {
 	trimModelsDev,
 	trimOpenRouter,
 	unknownRepos,
-} from "../../extensions/lib/model-catalog-data.ts";
-import { autoSelectable, autoSelectSkipReason, bareId, buildCatalogIndex, catalogModelFor, sizeFromName } from "../../extensions/lib/model-catalog.ts";
+} from "../../extensions/lib/models/model-catalog-data.ts";
+import { autoSelectable, autoSelectSkipReason, bareId, buildCatalogIndex, catalogModelFor, sizeFromName } from "../../extensions/lib/models/model-catalog.ts";
 import { catalogSources, type FixtureModel } from "./catalog-fixture.ts";
 
 const entry = (models: FixtureModel[], id: string) => buildCatalogIndex(catalogSources(models)).models.get(id)!;

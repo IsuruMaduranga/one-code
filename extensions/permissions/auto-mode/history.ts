@@ -1,6 +1,6 @@
 /** Project the active session branch for the classifier; never keep a second transcript. */
 import { createHash } from "node:crypto";
-import { inContextEntries, latestCompaction } from "../../lib/compaction-boundary.ts";
+import { inContextEntries, latestCompaction } from "../../lib/request/compaction-boundary.ts";
 import { isHistoricalRead, type TranscriptEntry } from "./transcript.ts";
 
 /** Non-model-facing provenance for user messages and harness permission facts. */

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { classifierCandidates, describeCandidate, isModelUnavailableError } from "../../extensions/lib/models/classifier-model.ts";
-import { CLASSIFIER_CALL_TOKENS, classifierCallCost } from "../../extensions/lib/model-policy.ts";
-import { intrinsicTier } from "../../extensions/lib/model-tier.ts";
+import { CLASSIFIER_CALL_TOKENS, classifierCallCost } from "../../extensions/lib/models/model-policy.ts";
+import { intrinsicTier } from "../../extensions/lib/models/model-tier.ts";
 import { type FixtureModel, pinCatalog } from "./catalog-fixture.ts";
 
 /** Minimal structural stand-in; selection consults provider/id/cost/contextWindow. */

@@ -13,9 +13,9 @@
  * the session.
  */
 
-import { LOCAL_COMMAND_TAG_PREFIXES } from "../lib/local-command.ts";
-import { customMessageText } from "../lib/tui-render.ts";
-import { sanitizeTitle } from "../lib/terminal-text.ts";
+import { LOCAL_COMMAND_TAG_PREFIXES } from "../lib/ui/local-command.ts";
+import { customMessageText } from "../lib/ui/tui-render.ts";
+import { sanitizeTitle } from "../lib/ui/terminal-text.ts";
 import type { SessionTitleText } from "./text.ts";
 
 /** CC's `MAX_CONVERSATION_TEXT`: the tail of the first message that is sent (recent context wins). */

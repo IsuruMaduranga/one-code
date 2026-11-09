@@ -3,7 +3,7 @@
  *
  * Two knobs, the environment's first:
  *
- * - The `SUBAGENT_MODEL` knob (lib/knobs.ts): the product's
+ * - The `SUBAGENT_MODEL` knob (lib/profile/knobs.ts): the product's
  *   `<envPrefix>_SUBAGENT_MODEL`, or Claude Code's `CLAUDE_CODE_SUBAGENT_MODEL`
  *   while its sources are on. Honored from the real
  *   environment, and from the `env` block of *user and managed* settings files
@@ -31,15 +31,15 @@
  * pass through to resolveSubagentModel, which owns the semantics.
  */
 
-import { type Knob, knobAppliesTo, readKnob } from "../knobs.ts";
-import { isBorrowedUserFile, readSettingsFile } from "../claude-settings.ts";
-import { productSettingsPath, readSettingsForWrite, writeSettings } from "../product-settings.ts";
+import { type Knob, knobAppliesTo, readKnob } from "../profile/knobs.ts";
+import { isBorrowedUserFile, readSettingsFile } from "../profile/claude-settings.ts";
+import { productSettingsPath, readSettingsForWrite, writeSettings } from "../profile/product-settings.ts";
 import { autoModeSettingsFiles } from "../rules/auto-mode-config.ts";
 
-/** The environment knob for the subagent default (lib/knobs.ts). */
+/** The environment knob for the subagent default (lib/profile/knobs.ts). */
 export const SUBAGENT_MODEL_KNOB = "SUBAGENT_MODEL";
 
-/** The configured default, from the `subagentModel` setting or the `SUBAGENT_MODEL` environment knob (lib/knobs.ts). */
+/** The configured default, from the `subagentModel` setting or the `SUBAGENT_MODEL` environment knob (lib/profile/knobs.ts). */
 export type SubagentDefault = SubagentSettingDefault | SubagentEnvDefault;
 
 export interface SubagentEnvDefault {
@@ -47,7 +47,7 @@ export interface SubagentEnvDefault {
 	source: "env";
 	/** The variable that set it, in the process or a settings `env` block, for notices. */
 	envVar: string;
-	/** Set through another tool's spelling (the provider's alias), so it applies where the provider says (lib/knobs.ts `knobAppliesTo`). */
+	/** Set through another tool's spelling (the provider's alias), so it applies where the provider says (lib/profile/knobs.ts `knobAppliesTo`). */
 	borrowed: boolean;
 }
 
@@ -119,7 +119,7 @@ export function loadSubagentDefault(home: string, env: NodeJS.ProcessEnv = proce
  * `subagentModel` is the product's own setting — the user told *this* harness
  * what subagents run on, so it applies on any provider, and so does the
  * product's own spelling of the knob. Another tool's spelling applies where
- * the source provider says (lib/knobs.ts `knobAppliesTo`; One Code's: Claude
+ * the source provider says (lib/profile/knobs.ts `knobAppliesTo`; One Code's: Claude
  * Code's only on a Claude model).
  */
 export function applicableSubagentDefault(

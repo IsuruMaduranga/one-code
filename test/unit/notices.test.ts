@@ -3,13 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createEventBus } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { NOTICE_CHANNEL, queueNotice } from "../../extensions/lib/notices.ts";
+import { NOTICE_CHANNEL, queueNotice } from "../../extensions/lib/notify/notices.ts";
 import newerModelExtension from "../../extensions/newer-model/index.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { pinCatalog } from "./catalog-fixture.ts";
 import { createFakeCtx, createFakePi, flushNotices } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
-import { productStateDir } from "../../extensions/lib/brand.mjs";
+import { productStateDir } from "../../extensions/lib/profile/brand.mjs";
 
 const uiCtx = (hasUI = true) => {
 	const notify = vi.fn();

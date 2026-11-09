@@ -1,0 +1,46 @@
+/**
+ * A subagent's or workflow agent's file edits, announced to the parent session.
+ *
+ * An in-process child keeps its own file tracker, so a file the parent read and
+ * a child then edited looks to the parent like a change "on disk" by someone
+ * else, and the parent's notice said so (the user, a formatter, a command).
+ * The child runners publish each successful edit, write or notebook edit on
+ * the parent's bus; the parent's file-tracker names the child in its notice
+ * instead. The file stays stale either way, so the parent still re-reads
+ * before editing it.
+ */
+
+import { brandedId } from "../profile/brand.mjs";
+import { isWritingTool, pathArgument } from "../shell/paths.ts";
+import { resolveToolPath } from "../rules/tool-path.ts";
+
+export const CHILD_WROTE_CHANNEL = brandedId("child-wrote");
+
+export interface ChildWrote {
+	/** Absolute path of the file the child changed. */
+	path: string;
+	/** The child's name or description, for the notice; undefined when unknown. */
+	agent?: string;
+}
+
+/**
+ * Tracks a child session's tool calls and returns the changed file when one of
+ * its file-writing calls (edit, write, notebook_edit) ends without an error,
+ * resolved as the child's tools resolved it (lib/rules/tool-path.ts), which is how
+ * the parent's file-tracker keys it.
+ */
+export function childWriteWatcher(cwd: string) {
+	const started = new Map<string, string>();
+	return (event: { type?: string; toolName?: string; toolCallId?: string; args?: unknown; isError?: boolean }): string | undefined => {
+		if (!event.toolCallId || !event.toolName || !isWritingTool(event.toolName)) return undefined;
+		if (event.type === "tool_execution_start") {
+			const path = pathArgument(event.args as Record<string, unknown> | undefined);
+			if (path) started.set(event.toolCallId, resolveToolPath(path, cwd));
+			return undefined;
+		}
+		if (event.type !== "tool_execution_end") return undefined;
+		const path = started.get(event.toolCallId);
+		started.delete(event.toolCallId);
+		return event.isError ? undefined : path;
+	};
+}

@@ -10,18 +10,18 @@
  * own notice, not a paraphrase.
  */
 
-import { brand } from "../lib/brand.mjs";
+import { brand } from "../lib/profile/brand.mjs";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { modeCycleKey } from "../lib/keys.ts";
+import { modeCycleKey } from "../lib/ui/keys.ts";
 import { loadAutoModeConfig } from "../lib/rules/auto-mode-config.ts";
 import { classifierCandidates, describeCandidate, type ClassifierNotice } from "../lib/models/classifier-model.ts";
-import { chosenModelWarnings, type ChosenModelWarning } from "../lib/model-choice-warnings.ts";
-import { loadCatalogSources, readCatalogRefreshEnabled } from "../lib/model-catalog-data.ts";
-import { autoSelectSkipReason, catalogModelFor } from "../lib/model-catalog.ts";
-import { DAY_MS, modelsContainedToSession, modelSpec, pricedInput, supportsImageInput } from "../lib/model-policy.ts";
-import { newerModelSuggestion, type NewerModelSuggestion } from "../lib/newer-model.ts";
-import { productSettingsPath, readSuggestNewerModels, SETTINGS_DISPLAY } from "../lib/product-settings.ts";
-import { productStateDir } from "../lib/paths.ts";
+import { chosenModelWarnings, type ChosenModelWarning } from "../lib/models/model-choice-warnings.ts";
+import { loadCatalogSources, readCatalogRefreshEnabled } from "../lib/models/model-catalog-data.ts";
+import { autoSelectSkipReason, catalogModelFor } from "../lib/models/model-catalog.ts";
+import { DAY_MS, modelsContainedToSession, modelSpec, pricedInput, supportsImageInput } from "../lib/models/model-policy.ts";
+import { newerModelSuggestion, type NewerModelSuggestion } from "../lib/models/newer-model.ts";
+import { productSettingsPath, readSuggestNewerModels, SETTINGS_DISPLAY } from "../lib/profile/product-settings.ts";
+import { productStateDir } from "../lib/profile/paths.ts";
 import {
 	classifyModelTier,
 	intrinsicTier,
@@ -30,9 +30,9 @@ import {
 	resolveModelTier,
 	servedCatalogIds,
 	tierOverride,
-} from "../lib/model-tier.ts";
+} from "../lib/models/model-tier.ts";
 import { applicableSubagentDefault, loadSubagentDefault, SUBAGENT_MODEL_KNOB, type SubagentDefault } from "../lib/models/subagent-default.ts";
-import { knobLimit } from "../lib/knobs.ts";
+import { knobLimit } from "../lib/profile/knobs.ts";
 import { resolveSubagentModel, type SubagentModelResolution } from "../lib/models/subagent-model.ts";
 import { contextLabel, type Finding, priceLabel, type ReportLine, type ReportSection, type SessionView } from "./report.ts";
 
@@ -57,7 +57,7 @@ export interface ModelFacts {
 	/** Whether the public model catalogs know the session model, and why automatic picks skip it, if they do. */
 	inCatalog: boolean;
 	skipReason?: string;
-	/** The model catalogs in use (lib/model-catalog-data.ts). */
+	/** The model catalogs in use (lib/models/model-catalog-data.ts). */
 	catalog: { fetchedAt: string; refreshed: boolean; refreshEnabled: boolean };
 }
 

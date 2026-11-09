@@ -6,9 +6,9 @@
  * on overwide lines, so both layers guard).
  */
 
-import { brand } from "../../lib/brand.mjs";
+import { brand } from "../../lib/profile/brand.mjs";
 import { formatInstallCount } from "../counts.ts";
-import { cutPlainText, hintLines, panelTopRule, type RenderBlock as Block, searchBoxLines, windowBlocks } from "../../lib/tui-render.ts";
+import { cutPlainText, hintLines, panelTopRule, type RenderBlock as Block, searchBoxLines, windowBlocks } from "../../lib/ui/tui-render.ts";
 import type { DiscoverRow, InstalledRow } from "./rows.ts";
 import { clampPanelState, type PanelState, type PanelView, resolveDetail, selectableRows, TABS, type Tab } from "./state.ts";
 

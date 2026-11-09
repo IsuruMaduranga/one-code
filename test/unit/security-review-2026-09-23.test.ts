@@ -14,7 +14,7 @@ import { safetyControlWrite, safetyFloorReason, shellNamesControlFile } from "..
 import { analyzeShellCommand, parseCommand } from "../../extensions/lib/shell/shell-analysis.ts";
 import { configRunsProgram } from "../../extensions/lib/shell/git-checkout-programs.ts";
 import { gitStatusMeta, gitStatusMetaArgs } from "../../extensions/permissions/auto-mode/git-status-meta.ts";
-import { gitStatusOutput, HARNESS_GIT_CONFIG } from "../../extensions/lib/git.ts";
+import { gitStatusOutput, HARNESS_GIT_CONFIG } from "../../extensions/lib/context/git.ts";
 import { createLspTrustGate, isLspRootTrusted, persistLspTrust } from "../../extensions/lsp/trust.ts";
 import { HAVE_POWERSHELL, psReadOnly, POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
 

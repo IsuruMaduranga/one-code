@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import vm from "node:vm";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { parseWorkflowScript, wrapScriptBody } from "../../extensions/workflow/script-source.ts";
 import type { ScriptProblem } from "../../extensions/workflow/text.ts";
 

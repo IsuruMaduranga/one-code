@@ -7,12 +7,12 @@ import {
 	type AgentSession, type ExtensionAPI, type ExtensionFactory,
 } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createUserMessageSender } from "../../extensions/lib/notifications.ts";
-import { ONE_SHOT_COMMAND_FAILED_CHANNEL } from "../../extensions/lib/interrupt.ts";
+import { createUserMessageSender } from "../../extensions/lib/notify/notifications.ts";
+import { ONE_SHOT_COMMAND_FAILED_CHANNEL } from "../../extensions/lib/notify/interrupt.ts";
 import doctorExtension from "../../extensions/doctor/index.ts";
-import { brand } from "../../extensions/lib/brand.mjs";
-import { instructionTargets } from "../../extensions/lib/instructions.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
+import { instructionTargets } from "../../extensions/lib/context/instructions.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { promptCommandText } from "../../extensions/lib/plugins/skill-invoke.ts";
 
 function deferred() {

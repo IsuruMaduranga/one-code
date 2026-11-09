@@ -2,7 +2,7 @@ import { runAgentLoop, type BeforeToolCallResult } from "@earendil-works/pi-agen
 import { createAssistantMessageEventStream, type AssistantMessage, type Message, type Model } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import toolCallCorruptionExtension from "../../extensions/tool-call-corruption/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 

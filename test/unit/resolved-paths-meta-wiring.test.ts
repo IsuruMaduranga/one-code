@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TranscriptEntry } from "../../extensions/permissions/auto-mode/transcript.ts";
-import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
+import { MODE_CHANNEL } from "../../extensions/lib/rules/plan-mode-channels.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";

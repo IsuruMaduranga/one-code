@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { brand } from "../../extensions/lib/brand.mjs";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
 import { decodePanelKey } from "../../extensions/plugins/panel/keys.ts";
 import { renderPanel, type PanelPaint } from "../../extensions/plugins/panel/render.ts";
 import {
@@ -15,7 +15,7 @@ import {
 	type PanelView,
 } from "../../extensions/plugins/panel/state.ts";
 import type { MarketplaceSnapshot } from "../../extensions/plugins/marketplace/sync.ts";
-import type { Plugin } from "../../extensions/lib/plugins.ts";
+import type { Plugin } from "../../extensions/lib/plugins/plugins.ts";
 
 const paint: PanelPaint = {
 	fg: (_color, text) => text,

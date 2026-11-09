@@ -5,7 +5,7 @@
  * On agent_end, if the turn's last assistant message was aborted by the user
  * (findings: pi marks it `stopReason: "aborted"`, or `"error"` on a run whose
  * signal is aborted when the abort reached the provider call —
- * `lib/interrupt.ts`), a display-only session entry
+ * `lib/notify/interrupt.ts`), a display-only session entry
  * is appended (`appendEntry` — not part of the LLM context, so the model never
  * sees the note about its own interruption), rendered dim to match CC's
  * InterruptedByUser component. The paired turn-duration line suppresses itself
@@ -15,12 +15,12 @@
  * turn too, but gets no note: the user has already said what to do instead.
  */
 
-import { brandedId } from "../lib/brand.mjs";
-import { feature } from "../lib/feature.ts";
+import { brandedId } from "../lib/profile/brand.mjs";
+import { feature } from "../lib/profile/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { wasInterrupted } from "../lib/interrupt.ts";
-import { SEND_NOW_CHANNEL } from "../lib/send-now-channel.ts";
-import { linesComponent, safeThemePaint } from "../lib/tui-render.ts";
+import { wasInterrupted } from "../lib/notify/interrupt.ts";
+import { SEND_NOW_CHANNEL } from "../lib/notify/send-now-channel.ts";
+import { linesComponent, safeThemePaint } from "../lib/ui/tui-render.ts";
 import { INTERRUPTED_TEXT } from "./line.ts";
 
 const ENTRY_TYPE = brandedId("interrupted");

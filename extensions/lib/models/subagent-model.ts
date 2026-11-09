@@ -47,7 +47,7 @@
  * resolution accepts any available model whether or not it was listed.
  */
 
-import { brandedId } from "../brand.mjs";
+import { brandedId } from "../profile/brand.mjs";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { SubagentDefault } from "./subagent-default.ts";
 import type { MenuLabel, SubagentModelNotice, SubagentModelsText } from "../../subagents/model-text.ts";
@@ -62,10 +62,10 @@ import {
 	modelSpec as spec,
 	pricedInput,
 	supportsImageInput,
-} from "../model-policy.ts";
-import { pairedModel } from "../model-pairings.ts";
-import { requireText } from "../profile.ts";
-import { atLeastTier, economicalContainedCandidates, intrinsicTier, type PromptTier, sameTierContainedCandidates } from "../model-tier.ts";
+} from "./model-policy.ts";
+import { pairedModel } from "./model-pairings.ts";
+import { requireText } from "../profile/profile.ts";
+import { atLeastTier, economicalContainedCandidates, intrinsicTier, type PromptTier, sameTierContainedCandidates } from "./model-tier.ts";
 
 /**
  * Cross-extension channel carrying the resolved default subagent model, so the
@@ -378,7 +378,7 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 	// models by construction; those sessions degrade to the session model below.
 	if (sessionModel && !suppressAutomatic) {
 		// The pairing table speaks first for the models it names
-		// (lib/model-pairings.ts): a measured smaller model of the session's
+		// (lib/models/model-pairings.ts): a measured smaller model of the session's
 		// vendor, never dearer than the session where both are priced. Reuse the
 		// `contained` set computed above for the hot path.
 		const paired = pairedModel("subagent", available, sessionModel, { contained, requireImageInput });

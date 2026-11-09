@@ -5,10 +5,10 @@ import {
 	responsesToolLoadCompat,
 	supportsToolReferences,
 	toolSearchLoads,
-} from "../../extensions/lib/deferred.ts";
+} from "../../extensions/lib/request/deferred.ts";
 import { type Item, real, toolsItem as headWith } from "./helpers/responses-fixture.ts";
 import { totalTokensBlock } from "../../extensions/lib/context/budget.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const words = requireText("toolSearch");
 /** tool_search's result for a load, in the profile's words. */

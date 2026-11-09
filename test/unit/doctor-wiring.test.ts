@@ -4,18 +4,18 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import doctorExtension from "../../extensions/doctor/index.ts";
 import { pinCatalog, pinReleaseDates } from "./catalog-fixture.ts";
-import { MODEL_UNUSABLE_CHANNEL } from "../../extensions/lib/model-unusable.ts";
-import { CLASSIFIER_SETTING_CHANGED_CHANNEL, SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../../extensions/lib/settings-channels.ts";
+import { MODEL_UNUSABLE_CHANNEL } from "../../extensions/lib/models/model-unusable.ts";
+import { CLASSIFIER_SETTING_CHANGED_CHANNEL, SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../../extensions/lib/rules/settings-channels.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../../extensions/lib/rules/modes.ts";
 import { createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { captureUserTurns } from "./helpers/user-turn.ts";
-import { localCommandBlocks } from "../../extensions/lib/local-command.ts";
-import { REMINDER_CHANNEL, type ReminderPayload } from "../../extensions/lib/reminders.ts";
+import { localCommandBlocks } from "../../extensions/lib/ui/local-command.ts";
+import { REMINDER_CHANNEL, type ReminderPayload } from "../../extensions/lib/request/reminders.ts";
 import { commandDisplayLine, promptCommandText } from "../../extensions/lib/plugins/skill-invoke.ts";
-import { brand, envName, productStateDir } from "../../extensions/lib/brand.mjs";
-import { productSettingsPath } from "../../extensions/lib/product-settings.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { brand, envName, productStateDir } from "../../extensions/lib/profile/brand.mjs";
+import { productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const model = (provider: string, id: string, input: number, api = "anthropic-messages") =>
 	({ provider, id, name: id, api, cost: { input, output: input * 5 }, contextWindow: 200_000 }) as any;

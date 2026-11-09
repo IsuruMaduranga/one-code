@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import bashExtension from "../../extensions/bash/index.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { createFakePi } from "./helpers/fake-pi.ts";
 
 /**

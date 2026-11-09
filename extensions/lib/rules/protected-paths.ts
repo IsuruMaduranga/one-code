@@ -12,7 +12,7 @@
  * the check runs before allow rules are evaluated.
  */
 
-import { brand } from "../brand.mjs";
+import { brand } from "../profile/brand.mjs";
 import { relative, resolve, sep } from "node:path";
 
 /** Directories whose entire contents are protected. */
@@ -46,7 +46,7 @@ const PROTECTED_DIRS = [
 
 /**
  * `.claude/worktrees` is where the agent keeps its own git worktrees
- * (`.onecode/worktrees` in independent mode, lib/sources.ts), and
+ * (`.onecode/worktrees` in independent mode, lib/profile/sources.ts), and
  * `.onecode/plans` holds plan-mode documents (rendered to the user, never
  * executed) — ordinary working space rather than configuration.
  */

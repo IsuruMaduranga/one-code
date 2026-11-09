@@ -7,8 +7,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseFrontmatterLoosely } from "../../extensions/lib/frontmatter.ts";
-import { BUNDLED_SKILLS_DIR } from "../../extensions/lib/skill-scan.ts";
+import { parseFrontmatterLoosely } from "../../extensions/lib/core/frontmatter.ts";
+import { BUNDLED_SKILLS_DIR } from "../../extensions/lib/plugins/skill-scan.ts";
 import { sha } from "./helpers/sha.ts";
 
 const read = (...path: string[]) => readFileSync(join(BUNDLED_SKILLS_DIR, ...path), "utf-8").replace(/\r\n/g, "\n");

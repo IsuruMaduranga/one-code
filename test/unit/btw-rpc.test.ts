@@ -4,10 +4,10 @@ import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
-vi.mock("../../extensions/lib/side-call-usage.ts", () => ({ logSideCallUsage: vi.fn(), SIDE_CALL_KINDS: ["reader", "btw", "recap"] }));
+vi.mock("../../extensions/lib/side-calls/side-call-usage.ts", () => ({ logSideCallUsage: vi.fn(), SIDE_CALL_KINDS: ["reader", "btw", "recap"] }));
 
 const complete = vi.mocked(completeSimple);
-const { logSideCallUsage } = await import("../../extensions/lib/side-call-usage.ts");
+const { logSideCallUsage } = await import("../../extensions/lib/side-calls/side-call-usage.ts");
 const logSideCall = vi.mocked(logSideCallUsage);
 const answer = (text: string) => ({ content: [{ type: "text", text }], stopReason: "stop", usage: {} }) as Awaited<ReturnType<typeof completeSimple>>;
 beforeEach(async () => {

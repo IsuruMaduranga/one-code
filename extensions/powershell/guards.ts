@@ -16,7 +16,7 @@
  */
 
 import { leadingSleepReason } from "../lib/shell/bash-guards.ts";
-import { shellWords } from "../lib/shell-words.ts";
+import { shellWords } from "../lib/shell/shell-words.ts";
 import { gitSubcommand } from "../lib/shell/shell-analysis.ts";
 import { powershellStatements, statementCommand } from "../lib/shell/powershell-rules.ts";
 

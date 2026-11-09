@@ -14,7 +14,7 @@
 import { Worker } from "node:worker_threads";
 import { performance } from "node:perf_hooks";
 import { MAX_AGENTS_PER_RUN, MAX_ITEMS_PER_CALL, MAX_NOTICES_PER_TICK, type ScriptGlobals } from "./globals.ts";
-import { whenAborted } from "../lib/abort.ts";
+import { whenAborted } from "../lib/core/abort.ts";
 import { wrapScriptBody } from "./script-source.ts";
 import { WorkflowScriptError, type AgentCallOptions } from "./types.ts";
 import { workflowWords } from "./words.ts";

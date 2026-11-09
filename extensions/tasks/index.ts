@@ -15,17 +15,17 @@
  * hide` / `/tasks show` toggle it here; the key's hint is always on screen.
  */
 
-import { feature } from "../lib/feature.ts";
-import { StringEnum } from "../lib/string-enum.ts";
+import { feature } from "../lib/profile/feature.ts";
+import { StringEnum } from "../lib/core/string-enum.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { restoreLatestDetails } from "../lib/branch-restore.ts";
-import { DEFER_CHANNEL, WITHHOLD_CHANNEL } from "../lib/deferred.ts";
-import { taskToolsEnabled } from "../lib/model-tier.ts";
-import { sessionModelTier } from "../lib/session-model-tier.ts";
-import { ccToolRenderers, linesComponent, safeThemeBold, safeThemePaint, strike } from "../lib/tui-render.ts";
-import { REMINDER_CHANNEL } from "../lib/reminders.ts";
-import { requireText } from "../lib/profile.ts";
+import { restoreLatestDetails } from "../lib/request/branch-restore.ts";
+import { DEFER_CHANNEL, WITHHOLD_CHANNEL } from "../lib/request/deferred.ts";
+import { taskToolsEnabled } from "../lib/models/model-tier.ts";
+import { sessionModelTier } from "../lib/models/session-model-tier.ts";
+import { ccToolRenderers, linesComponent, safeThemeBold, safeThemePaint, strike } from "../lib/ui/tui-render.ts";
+import { REMINDER_CHANNEL } from "../lib/request/reminders.ts";
+import { requireText } from "../lib/profile/profile.ts";
 import {
 	FINISHED_LIST_CLEAR_MS,
 	formatHiddenTaskWidget,
@@ -36,9 +36,9 @@ import {
 	type TaskSnapshot,
 	TaskStore,
 } from "./store.ts";
-import { registerLocalCommand } from "../lib/local-command.ts";
-import { canShowCustomUi } from "../lib/headless-output.ts";
-import { taskToggleKey } from "../lib/keys.ts";
+import { registerLocalCommand } from "../lib/ui/local-command.ts";
+import { canShowCustomUi } from "../lib/notify/headless-output.ts";
+import { taskToggleKey } from "../lib/ui/keys.ts";
 
 interface TaskDetails {
 	taskSnapshot: TaskSnapshot;
@@ -110,7 +110,7 @@ function tasksExtension(pi: ExtensionAPI) {
 	};
 
 	// Claude Code's model gate: frontier models and Sonnet 5+ run without the
-	// task tools unless CLAUDE_CODE_ENABLE_TODO_TOOLS is set (lib/model-tier.ts
+	// task tools unless CLAUDE_CODE_ENABLE_TODO_TOOLS is set (lib/models/model-tier.ts
 	// taskToolsEnabled). Re-applied on a model change, so switching to a model
 	// that has them brings them back through the deferred listing.
 	let withheld = false;

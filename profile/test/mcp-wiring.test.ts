@@ -19,9 +19,9 @@ import { type Tool, validateToolArguments } from "@earendil-works/pi-ai";
 import * as mcpClient from "../../extensions/mcp/client.ts";
 import mcpExtension from "../../extensions/mcp/index.ts";
 import { noMcpServersMessage } from "../../extensions/mcp/config.ts";
-import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/mcp-share.ts";
-import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../../extensions/lib/mcp-status.ts";
-import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/reminders.ts";
+import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/plugins/mcp-share.ts";
+import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../../extensions/lib/plugins/mcp-status.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/request/reminders.ts";
 import { mcpFacts, type McpSnapshot } from "../../extensions/mcp/announce.ts";
 import type { McpFailure } from "../../extensions/mcp/text.ts";
 import { mcp as mcpText } from "../text/mcp/index.ts";
@@ -31,7 +31,7 @@ function renderInEpoch(events: { emit(channel: string, data: unknown): void }, t
 	return renderRequest(events, { facts: mcpFacts(told, mcpText) }).map((block) => block.text);
 }
 import { createFakeCtx, createFakePi, type FakePi, renderRequest } from "../../test/unit/helpers/fake-pi.ts";
-import { localCommandBlocks } from "../../extensions/lib/local-command.ts";
+import { localCommandBlocks } from "../../extensions/lib/ui/local-command.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { tempHome } from "../../test/unit/helpers/temp-home.ts";
 

@@ -14,7 +14,7 @@ import {
 	viewerHeight,
 	type ViewerRunSnapshot,
 } from "../../extensions/workflow/viewer.ts";
-import { formatDuration, wrapPlainText } from "../../extensions/lib/tui-render.ts";
+import { formatDuration, wrapPlainText } from "../../extensions/lib/ui/tui-render.ts";
 import type { AgentRecord } from "../../extensions/workflow/types.ts";
 
 /** Paint that tags styled text so tests can strip/inspect it. */

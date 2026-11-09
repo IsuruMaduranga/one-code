@@ -1,15 +1,15 @@
 /**
  * Newest-release lookup for the doctor's Installation section (pure given a
  * fetch). Shares the app's daily update notice's mechanism
- * (lib/update-check.mjs): the same packument, the same "newest installable
+ * (lib/app/update-check.mjs): the same packument, the same "newest installable
  * version" rule — a day's release age under Homebrew, `dist-tags.latest`
  * otherwise — a short timeout, silent on failure, and skipped under pi's
  * offline switch or ONECODE_NO_UPDATE_CHECK — a diagnostic must never hang on
  * the network or restore egress the user turned off.
  */
 
-import { compareVersions } from "../lib/pi-version.ts";
-import { APP_PACKAGE, EXTENSION_PACKAGE, NO_UPDATE_CHECK_VAR, minReleaseAgeFor, pickAvailableVersion, registryPackumentUrl } from "../lib/update-check.mjs";
+import { compareVersions } from "../lib/app/pi-version.ts";
+import { APP_PACKAGE, EXTENSION_PACKAGE, NO_UPDATE_CHECK_VAR, minReleaseAgeFor, pickAvailableVersion, registryPackumentUrl } from "../lib/app/update-check.mjs";
 import type { DoctorEnvironment } from "./report.ts";
 
 export const APP_REGISTRY_URL = registryPackumentUrl(APP_PACKAGE);

@@ -25,8 +25,8 @@
 
 import { type Dirent, existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
-import { findGitRoot, gitdirFileTarget } from "../git.ts";
-import { expandTilde } from "../paths.ts";
+import { findGitRoot, gitdirFileTarget } from "../context/git.ts";
+import { expandTilde } from "../profile/paths.ts";
 
 const BOOLEAN = /^(true|false|yes|no|on|off|1|0)?$/i;
 

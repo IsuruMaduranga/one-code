@@ -11,7 +11,7 @@
  * and re-lists every skill.
  */
 
-import { skillListingVisibility } from "../lib/skill-overrides.ts";
+import { skillListingVisibility } from "../lib/plugins/skill-overrides.ts";
 import type { ListedSkill } from "./listing.ts";
 
 /**

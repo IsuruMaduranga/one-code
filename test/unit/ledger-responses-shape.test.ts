@@ -6,7 +6,7 @@
  * elements come from a real pi 1.4.0 request (fixtures/responses-pi-1.4.0.json).
  */
 import { describe, expect, it } from "vitest";
-import { preludeLength, recordedBody, recordedRequest, recordedToolNames, spliceRequest, withBranchToolOrder } from "../../extensions/lib/ledger/wire.ts";
+import { preludeLength, recordedBody, recordedRequest, recordedToolNames, spliceRequest, withBranchToolOrder } from "../../extensions/lib/request/ledger/wire.ts";
 import { declaredNames as declarations, type Item, real, toolsItem } from "./helpers/responses-fixture.ts";
 
 const api = "openai-responses";

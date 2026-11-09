@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SessionTurnTracker } from "../../extensions/subagents/session-turns.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const words = () => requireText("subagents");
 

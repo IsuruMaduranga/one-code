@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { autoModeSystemNote } from "../../extensions/permissions/auto-mode/system-note.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const model = (provider: string, id: string, input?: number) =>
 	({ provider, id, name: id, cost: input === undefined ? undefined : { input, output: input * 4 }, contextWindow: 200_000 }) as any;

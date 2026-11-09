@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { claudeSourcesOn, configMode, readConfigMode, resetConfigModeForTest, savedConfigMode } from "../claude-code/mode.ts";
-import { memoryDir } from "../../extensions/lib/memory.ts";
+import { memoryDir } from "../../extensions/lib/context/memory.ts";
 import { stubHome } from "../../test/unit/helpers/home.ts";
 
 function homeWith(settings: string | undefined): string {

@@ -1,11 +1,11 @@
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { brand } from "../../extensions/lib/brand.mjs";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { startCallbackServer } from "../../extensions/mcp/oauth/callback.ts";
-import { readDisabledMcpServers, setMcpServerDisabled } from "../../extensions/lib/mcp-overrides.ts";
+import { readDisabledMcpServers, setMcpServerDisabled } from "../../extensions/lib/plugins/mcp-overrides.ts";
 import { hasStoredTokens, readAuth, updateAuth, writeAuth } from "../../extensions/mcp/oauth/store.ts";
 import { McpOAuthProvider } from "../../extensions/mcp/oauth/provider.ts";
 

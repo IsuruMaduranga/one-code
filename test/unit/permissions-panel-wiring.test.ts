@@ -14,14 +14,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
 
 import { completeSimple } from "@earendil-works/pi-ai/compat";
-import { productProjectSettingsPath, productSettingsPath } from "../../extensions/lib/product-settings.ts";
-import { forwardSlashes } from "../../extensions/lib/paths.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
+import { productProjectSettingsPath, productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
+import { forwardSlashes } from "../../extensions/lib/profile/paths.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
-import { brand, brandedId, productStateDir } from "../../extensions/lib/brand.mjs";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { brand, brandedId, productStateDir } from "../../extensions/lib/profile/brand.mjs";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { defaultEnvironment } from "../../extensions/permissions/auto-mode/classifier-prompt.ts";
 import { indexFor } from "../../extensions/permissions/auto-mode/prompt.ts";
 

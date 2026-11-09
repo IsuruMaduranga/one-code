@@ -3,7 +3,7 @@
  * the product named. How the base wraps it: test/unit/local-command.test.ts.
  */
 import { describe, expect, it } from "vitest";
-import { localCommandBlocks } from "../../extensions/lib/local-command.ts";
+import { localCommandBlocks } from "../../extensions/lib/ui/local-command.ts";
 
 describe("One Code's local-command caveat", () => {
 	it("reproduces the /model trio byte for byte", () => {

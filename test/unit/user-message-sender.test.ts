@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ONE_SHOT_COMMAND_FAILED_CHANNEL } from "../../extensions/lib/interrupt.ts";
-import { createUserMessageSender } from "../../extensions/lib/notifications.ts";
+import { ONE_SHOT_COMMAND_FAILED_CHANNEL } from "../../extensions/lib/notify/interrupt.ts";
+import { createUserMessageSender } from "../../extensions/lib/notify/notifications.ts";
 import { createFakePi } from "./helpers/fake-pi.ts";
 import { captureUserTurns } from "./helpers/user-turn.ts";
 

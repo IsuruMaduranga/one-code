@@ -11,7 +11,7 @@ import { beginInteractiveAuth, callTool, connect, finishInteractiveAuth, isUnaut
 import { failureOf } from "../../extensions/mcp/failure.ts";
 import { silentProvider } from "../../extensions/mcp/oauth/flow.ts";
 import { McpOAuthProvider } from "../../extensions/mcp/oauth/provider.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 let home: string;
 const server = { name: "oauth-audit", kind: "http" as const, url: "https://mcp.example.test/mcp", source: "test" };

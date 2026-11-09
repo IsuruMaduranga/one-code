@@ -7,8 +7,8 @@ import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../extensio
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { pinCatalog } from "./catalog-fixture.ts";
-import { brand } from "../../extensions/lib/brand.mjs";
-import { productSettingsPath } from "../../extensions/lib/product-settings.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
+import { productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
 
 const model = (id: string, contextWindow: number, price: number) => ({ provider: "openai-codex", id, name: id, contextWindow, maxTokens: 8192, cost: { input: price, output: price * 4 } });
 // All frontier on OpenAI's own API, released together so none supersedes another; ids the

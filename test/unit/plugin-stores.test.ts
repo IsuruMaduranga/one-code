@@ -2,14 +2,14 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { readJsonFile, writeJsonAtomic } from "../../extensions/lib/atomic-write.ts";
-import { brand } from "../../extensions/lib/brand.mjs";
+import { readJsonFile, writeJsonAtomic } from "../../extensions/lib/core/atomic-write.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
 import { readFavorites, toggleFavorite } from "../../extensions/plugins/favorites.ts";
-import { readOverrides, setOverride } from "../../extensions/lib/plugin-overrides.ts";
-import { pluginRoot } from "../../extensions/lib/plugin-root.ts";
-import { isSkillEnabled, readSkillStates, setSkillOverride, skillOverrideKey } from "../../extensions/lib/skill-overrides.ts";
-import { estimateSkillTokens, scanSkills } from "../../extensions/lib/skill-scan.ts";
-import { formatRecency, readUsage, recordUsage } from "../../extensions/lib/usage-tracker.ts";
+import { readOverrides, setOverride } from "../../extensions/lib/plugins/plugin-overrides.ts";
+import { pluginRoot } from "../../extensions/lib/plugins/plugin-root.ts";
+import { isSkillEnabled, readSkillStates, setSkillOverride, skillOverrideKey } from "../../extensions/lib/plugins/skill-overrides.ts";
+import { estimateSkillTokens, scanSkills } from "../../extensions/lib/plugins/skill-scan.ts";
+import { formatRecency, readUsage, recordUsage } from "../../extensions/lib/plugins/usage-tracker.ts";
 import { skillScanDirs, writeSkill } from "./helpers/skill-dirs.ts";
 
 let root: string;
@@ -130,10 +130,10 @@ describe("write-boundary invariant", () => {
 		// The isolation contract: ~/.claude is read-only. Statically scan every
 		// module of this feature that performs writes for a ".claude" literal.
 		const writeModules = [
-			"extensions/lib/atomic-write.ts",
-			"extensions/lib/plugin-overrides.ts",
-			"extensions/lib/skill-overrides.ts",
-			"extensions/lib/usage-tracker.ts",
+			"extensions/lib/core/atomic-write.ts",
+			"extensions/lib/plugins/plugin-overrides.ts",
+			"extensions/lib/plugins/skill-overrides.ts",
+			"extensions/lib/plugins/usage-tracker.ts",
 			"extensions/plugins/favorites.ts",
 			"extensions/plugins/marketplace/registry.ts",
 			"extensions/plugins/marketplace/git.ts",
@@ -152,7 +152,7 @@ describe("write-boundary invariant", () => {
 			expect(/\.claude(?!-plugin)/.test(source), `${module} must not reference .claude in code`).toBe(false);
 		}
 		// And the one module that DOES read .claude settings must not write at all.
-		const settings = readFileSync(join(__dirname, "..", "..", "extensions/lib/claude-settings.ts"), "utf-8");
+		const settings = readFileSync(join(__dirname, "..", "..", "extensions/lib/profile/claude-settings.ts"), "utf-8");
 		for (const writer of ["writeFileSync", "writeJsonAtomic", "renameSync", "appendFileSync"]) {
 			expect(settings.includes(writer), `claude-settings.ts must stay read-only (${writer})`).toBe(false);
 		}

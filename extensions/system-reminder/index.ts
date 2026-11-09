@@ -1,6 +1,6 @@
 /**
  * system-reminder extension, the renderer of the record-once request path
- * (lib/reminders.ts has the placement contract, extensions/ledger the design).
+ * (lib/request/reminders.ts has the placement contract, extensions/ledger the design).
  * It owns the live reminder state every other extension feeds over
  * `one-code:system-reminder`: the `first-prepend` stack and the open sticky
  * states. A one-shot is persisted when emitted, as a `one-code:pending` entry,
@@ -15,27 +15,27 @@
  * with the request. Nothing is snapshotted or restored: everything above the
  * tail is the record.
  *
- * On a model that takes a mid-conversation system message (lib/system-role.ts),
+ * On a model that takes a mid-conversation system message (lib/request/system-role.ts),
  * its `before_provider_request` hook lifts the stack's session-fact blocks off
  * the first user message into one system message after it (an epoch's request
  * only), and shapes the tail's `<total_tokens>` lines (system-reminder/turn-budget-layout.ts).
  */
 
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { CLEAR_AT_BETA, MID_CONVERSATION_SYSTEM_BETA, reseatMessageMark, withBetas } from "../lib/anthropic-payload.ts";
-import { emptyToolResultContent } from "../lib/empty-tool-result.ts";
-import { foldBranch } from "../lib/ledger/fold.ts";
-import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../lib/ledger/plan.ts";
-import { type EntryLike, makeRecord, type PendingRecordData, RECORD, stateOnBranch } from "../lib/ledger/records.ts";
-import { recordState } from "../lib/ledger/state.ts";
-import { contentHash } from "../lib/ledger/wire.ts";
-import { claudeFamily } from "../lib/model-tier.ts";
-import { extensionVersion } from "../lib/package-version.ts";
-import { LiveReminders, type OneShot, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, renderReminders, type ReminderPayload, stickyFact } from "../lib/reminders.ts";
-import { sessionAlive } from "../lib/session-lifecycle.ts";
-import { instructionRole, messagesKey, type MovedBlock, systemRoleLayout, wireShape, withSystemRoleContext } from "../lib/system-role.ts";
+import { CLEAR_AT_BETA, MID_CONVERSATION_SYSTEM_BETA, reseatMessageMark, withBetas } from "../lib/request/anthropic-payload.ts";
+import { emptyToolResultContent } from "../lib/request/empty-tool-result.ts";
+import { foldBranch } from "../lib/request/ledger/fold.ts";
+import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../lib/request/ledger/plan.ts";
+import { type EntryLike, makeRecord, type PendingRecordData, RECORD, stateOnBranch } from "../lib/request/ledger/records.ts";
+import { recordState } from "../lib/request/ledger/state.ts";
+import { contentHash } from "../lib/request/ledger/wire.ts";
+import { claudeFamily } from "../lib/models/model-tier.ts";
+import { extensionVersion } from "../lib/app/package-version.ts";
+import { LiveReminders, type OneShot, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, renderReminders, type ReminderPayload, stickyFact } from "../lib/request/reminders.ts";
+import { sessionAlive } from "../lib/notify/session-lifecycle.ts";
+import { instructionRole, messagesKey, type MovedBlock, systemRoleLayout, wireShape, withSystemRoleContext } from "../lib/request/system-role.ts";
 import { resolveCountdowns, withTurnBudgetMessages } from "./turn-budget-layout.ts";
 
 /** Whether requests carry the `<total_tokens>` budget lines (`CC_TOTAL_TOKENS=0` turns them off). */

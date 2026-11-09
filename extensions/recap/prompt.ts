@@ -6,7 +6,7 @@
  * prepends is omitted here (kept decoupled from One Code's memory extension).
  */
 
-import { trimToTurnBoundary } from "../lib/side-call.ts";
+import { trimToTurnBoundary } from "../lib/side-calls/side-call.ts";
 
 /** CC's REFERENCE_MARK (figures.ts) — the away-summary/recap marker. */
 export const REFERENCE_MARK = "※";

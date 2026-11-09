@@ -19,24 +19,24 @@
  * told (RENDER_CHANNEL), never by rewriting message 1.
  */
 
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import { getCurrentSystemMessage } from "@earendil-works/pi-ai";
 import type { BuildSystemPromptOptions, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { environmentBlock, modelLine } from "../lib/environment-block.ts";
-import { GIT_SNAPSHOT_OWNER_CHANNEL } from "../lib/git-status.ts";
-import { interactiveSessionNote, oneShotSessionNote, sessionOutlivesTurn } from "../lib/notifications.ts";
-import { taskToolsEnabled } from "../lib/model-tier.ts";
-import { sessionModelTier } from "../lib/session-model-tier.ts";
-import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, toldBlockFact } from "../lib/reminders.ts";
-import { privateSessionScratchpadDir } from "../lib/scratchpad.ts";
+import { environmentBlock, modelLine } from "../lib/context/environment-block.ts";
+import { GIT_SNAPSHOT_OWNER_CHANNEL } from "../lib/context/git-status.ts";
+import { interactiveSessionNote, oneShotSessionNote, sessionOutlivesTurn } from "../lib/notify/notifications.ts";
+import { taskToolsEnabled } from "../lib/models/model-tier.ts";
+import { sessionModelTier } from "../lib/models/session-model-tier.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, toldBlockFact } from "../lib/request/reminders.ts";
+import { privateSessionScratchpadDir } from "../lib/core/scratchpad.ts";
 import { collectEnvironment, type EnvironmentInfo } from "./environment.ts";
 import { totalTokensBlock, turnTokenBudget } from "../lib/context/budget.ts";
-import { featureEnabled, profileText, toolLive } from "../lib/profile.ts";
+import { featureEnabled, profileText, toolLive } from "../lib/profile/profile.ts";
 import { optionsForIdleTurn, withSystemHead } from "./idle-turn.ts";
 import { buildClaudeCodeSystemPrompt } from "./template.ts";
 import { SYSTEM_PROMPT_SECTION_CHANNEL, type SystemPromptSection } from "./text.ts";
-import { WORKSPACE_CHANNEL, type WorkspaceAnnouncement } from "../lib/workspace-channel.ts";
-import { PROMPT_OPTIONS_CHANNEL, type PromptOptionsAnnouncement, SYSTEM_PROMPT_REQUEST_CHANNEL, type SystemPromptRequest } from "../lib/prompt-options.ts";
+import { WORKSPACE_CHANNEL, type WorkspaceAnnouncement } from "../lib/rules/workspace-channel.ts";
+import { PROMPT_OPTIONS_CHANNEL, type PromptOptionsAnnouncement, SYSTEM_PROMPT_REQUEST_CHANNEL, type SystemPromptRequest } from "../lib/ui/prompt-options.ts";
 
 /** The told fact of the scratchpad the environment block names. */
 const SCRATCHPAD_FACT = "environment:scratchpad";
@@ -80,7 +80,7 @@ function systemPromptExtension(pi: ExtensionAPI) {
 		// the extension that makes the promise creates it. Failure (unwritable
 		// /tmp) drops the line rather than promising a directory writes will error
 		// on. On a shared /tmp it must also be private to this user
-		// (lib/scratchpad.ts ensurePrivateScratchpad); otherwise the line is dropped.
+		// (lib/core/scratchpad.ts ensurePrivateScratchpad); otherwise the line is dropped.
 		scratchpad = privateSessionScratchpadDir(ctx.cwd, ctx.sessionManager.getSessionId());
 		// The main session's context block carries Claude Code's git snapshot (claude-context).
 		pi.events.emit(GIT_SNAPSHOT_OWNER_CHANNEL, {});
@@ -169,7 +169,7 @@ function systemPromptExtension(pi: ExtensionAPI) {
 	});
 
 	// A command that starts background work before any prompt announces pi's
-	// options (lib/prompt-options.ts), so the turn its completion opens is built
+	// options (lib/ui/prompt-options.ts), so the turn its completion opens is built
 	// like a typed one. A typed prompt's own options always win.
 	pi.events.on(PROMPT_OPTIONS_CHANNEL, (data) => {
 		const options = (data as PromptOptionsAnnouncement | undefined)?.options;
@@ -199,7 +199,7 @@ function systemPromptExtension(pi: ExtensionAPI) {
 		return { messages: withSystemHead(event.messages, prompt, getCurrentSystemMessage(event.messages)) };
 	});
 
-	// A fork inherits this prompt, not pi's (lib/prompt-options.ts).
+	// A fork inherits this prompt, not pi's (lib/ui/prompt-options.ts).
 	pi.events.on(SYSTEM_PROMPT_REQUEST_CHANNEL, (data) => {
 		const request = data as SystemPromptRequest;
 		const prompt = nextRequestPrompt(request.ctx as ExtensionContext);

@@ -30,7 +30,7 @@ import type { AgentRecord, RunProgressEvent, RunStatus, WorkflowMeta } from "./t
 import { WorkflowScriptError } from "./types.ts";
 import type { ViewerRunSnapshot } from "./viewer.ts";
 import { workflowWords } from "./words.ts";
-import type { DeferRequest } from "../lib/deferred.ts";
+import type { DeferRequest } from "../lib/request/deferred.ts";
 
 const WALL_CLOCK_CAP_MS = 30 * 60 * 1000;
 const RECENT_EVENTS_CAP = 200;
@@ -52,11 +52,11 @@ export interface StartRunOptions {
 	getHookBridge?: () => HookBridge | undefined;
 	/** Each finished agent's dollar cost, for the footer's all-in total (review S13). */
 	onUsage?: (cost: number) => void;
-	/** Models this account cannot run, learned this session (lib/model-unusable.ts); the runner resolves around them. */
+	/** Models this account cannot run, learned this session (lib/models/model-unusable.ts); the runner resolves around them. */
 	unusableModels?: () => ReadonlySet<string>;
-	/** An agent's provider refused its model: published so every picker skips it (lib/model-unusable.ts). */
+	/** An agent's provider refused its model: published so every picker skips it (lib/models/model-unusable.ts). */
 	onModelUnusable?: (model: string, reason: string) => void;
-	/** An agent's edit or write changed a file (lib/child-writes.ts). */
+	/** An agent's edit or write changed a file (lib/agents/child-writes.ts). */
 	onChildWrite?: (path: string, agent: string | undefined) => void;
 	/** The parent's live MCP tools, shared into every workflow agent (see AgentRunnerOptions). */
 	getMcpTools?: () => ToolDefinition[] | Promise<ToolDefinition[]>;

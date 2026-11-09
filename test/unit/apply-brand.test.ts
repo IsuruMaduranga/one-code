@@ -4,7 +4,7 @@
  * (profile/test/apply-brand-committed.test.ts).
  */
 import { describe, expect, it } from "vitest";
-import { brand } from "../../extensions/lib/brand.mjs";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
 import { stampApp, stampExtension } from "../../scripts/apply-brand.mjs";
 
 describe("apply-brand", () => {

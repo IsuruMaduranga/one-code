@@ -4,17 +4,17 @@
  * until needed).
  */
 
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
-import { StringEnum } from "../lib/string-enum.ts";
+import { StringEnum } from "../lib/core/string-enum.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { DEFER_CHANNEL } from "../lib/deferred.ts";
-import { ccToolRenderers } from "../lib/tui-render.ts";
+import { DEFER_CHANNEL } from "../lib/request/deferred.ts";
+import { ccToolRenderers } from "../lib/ui/tui-render.ts";
 import { applyEdit, cellRefs, type EditMode, type Notebook, notebookFailure, parseNotebook } from "./notebook.ts";
-import { resolveToolPath } from "../lib/tool-path.ts";
-import { requireText } from "../lib/profile.ts";
+import { resolveToolPath } from "../lib/rules/tool-path.ts";
+import { requireText } from "../lib/profile/profile.ts";
 
 function notebookExtension(pi: ExtensionAPI) {
 	const text = requireText("notebook");
@@ -45,7 +45,7 @@ function notebookExtension(pi: ExtensionAPI) {
 				};
 			}
 			const editMode = (params.edit_mode ?? "replace") as EditMode;
-			// The file tracker guards this path with the same resolution (lib/tool-path.ts).
+			// The file tracker guards this path with the same resolution (lib/rules/tool-path.ts).
 			const path = resolveToolPath(rawPath, ctx.cwd);
 			// Held outside the try so a failure raised AFTER the parse can name the
 			// ids the notebook actually has — a bare "cell_id is required" left both

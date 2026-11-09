@@ -10,16 +10,16 @@
  * `buildDoctorReport` the `/doctor` command uses.
  */
 
-import { brand } from "../lib/brand.mjs";
+import { brand } from "../lib/profile/brand.mjs";
 import { join } from "node:path";
 import { CONFIG_DIR_NAME, ModelRegistry, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { keepView, replacedBuiltinsView } from "./builtins.ts";
-import { productStateDir } from "../lib/paths.ts";
+import { productStateDir } from "../lib/profile/paths.ts";
 import { loadPermissionSettings } from "../lib/rules/settings.ts";
 import { buildDoctorReport } from "./build.ts";
 import { type DoctorReport, renderDoctorText, type SessionView } from "./report.ts";
 import { lookupLatestVersion } from "./update-lookup.ts";
-import { sourceSwitchStatus } from "../lib/sources.ts";
+import { sourceSwitchStatus } from "../lib/profile/sources.ts";
 
 export interface DoctorCliOptions {
 	agentDir: string;

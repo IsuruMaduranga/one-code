@@ -17,17 +17,17 @@
  *   write to `.git/hooks` or `.claude`.
  */
 
-import { brand, brandedId } from "../lib/brand.mjs";
-import { feature } from "../lib/feature.ts";
+import { brand, brandedId } from "../lib/profile/brand.mjs";
+import { feature } from "../lib/profile/feature.ts";
 import os from "node:os";
 import { join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { type ChildAction, SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../lib/rules/auto-mode-actions.ts";
-import { guideDocsDirs } from "../lib/guide-docs.ts";
-import { TURN_FAILED_CHANNEL, type TurnFailedEvent } from "../lib/interrupt.ts";
-import { handBackWarning, type HandBackVerdict } from "../lib/notifications.ts";
-import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent } from "../lib/model-unusable.ts";
+import { guideDocsDirs } from "../lib/agents/guide-docs.ts";
+import { TURN_FAILED_CHANNEL, type TurnFailedEvent } from "../lib/notify/interrupt.ts";
+import { handBackWarning, type HandBackVerdict } from "../lib/notify/notifications.ts";
+import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent } from "../lib/models/model-unusable.ts";
 
 import { classifierCacheKey, classifierChain, classify, createClassifierState, releaseClassifierResources } from "./auto-mode/classifier.ts";
 import {
@@ -45,10 +45,10 @@ import {
 	persistClassifierModel,
 	removeOneCodePermissionAllow,
 } from "../lib/rules/auto-mode-config.ts";
-import { modelPickerComponent, type PickerEntry, pickerSpec, toPickerEntries } from "../lib/model-picker.ts";
-import { findConfigured, modelIdentity } from "../lib/model-policy.ts";
-import { CLASSIFIER_SETTING_CHANGED_CHANNEL } from "../lib/settings-channels.ts";
-import { readSuggestNewerModels, SETTINGS_DISPLAY } from "../lib/product-settings.ts";
+import { modelPickerComponent, type PickerEntry, pickerSpec, toPickerEntries } from "../lib/models/model-picker.ts";
+import { findConfigured, modelIdentity } from "../lib/models/model-policy.ts";
+import { CLASSIFIER_SETTING_CHANGED_CHANNEL } from "../lib/rules/settings-channels.ts";
+import { readSuggestNewerModels, SETTINGS_DISPLAY } from "../lib/profile/product-settings.ts";
 import { auditPermissionAllow, autoModeSetupText, renderProposal, settingsPatch } from "./auto-mode/setup.ts";
 import { draftSetup, gatherFacts } from "./auto-mode/setup-run.ts";
 import { buildRuleset, defaultEnvironment } from "./auto-mode/classifier-prompt.ts";
@@ -63,24 +63,24 @@ import { PauseTracker, unattendedPromptNotice, unattendedPromptTimeoutMs } from 
 import { safetyControlWrite, safetyFloorBlockText, safetyFloorReason, sessionSettingsFiles } from "./auto-mode/safety-floor.ts";
 import { isExecutionPrimitivePath, isSensitivePath } from "../lib/shell/sensitive.ts";
 import { analyzeShellCommand } from "../lib/shell/shell-analysis.ts";
-import { bashParserReady, bashParserUnavailable } from "../lib/bash-parser.ts";
-import type { PowerShellParse } from "../lib/powershell-parser.ts";
-import { powerShellParser } from "../lib/shell-spawn.ts";
+import { bashParserReady, bashParserUnavailable } from "../lib/shell/bash-parser.ts";
+import type { PowerShellParse } from "../lib/shell/powershell-parser.ts";
+import { powerShellParser } from "../lib/shell-run/shell-spawn.ts";
 import { powershellReadOnly } from "../lib/shell/powershell-rules.ts";
 import { isShellTool } from "../lib/rules/matcher.ts";
-import { gitStatusOutput } from "../lib/git.ts";
+import { gitStatusOutput } from "../lib/context/git.ts";
 import { gitStatusMeta, gitStatusMetaArgs, reachesIgnoredFiles, wantsGitStatusMeta } from "./auto-mode/git-status-meta.ts";
 import { actionResolvedPaths } from "./auto-mode/resolved-paths-meta.ts";
-import { autoMemoryEnabled } from "../lib/auto-memory.ts";
-import { projectMemoryDir } from "../lib/memory.ts";
-import { queueNotice } from "../lib/notices.ts";
-import { canShowCustomUi, rpcReadOnlyText } from "../lib/headless-output.ts";
-import { sessionResultsDir } from "../lib/persisted-output.ts";
-import { privateSessionScratchpadDir } from "../lib/scratchpad.ts";
-import { CONTEXT_ORDER, REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
-import { readState, readStringsState, recordState } from "../lib/ledger/state.ts";
-import { processState } from "../lib/process-state.ts";
-import { type EntryLike, readRecord } from "../lib/ledger/records.ts";
+import { autoMemoryEnabled } from "../lib/context/auto-memory.ts";
+import { projectMemoryDir } from "../lib/context/memory.ts";
+import { queueNotice } from "../lib/notify/notices.ts";
+import { canShowCustomUi, rpcReadOnlyText } from "../lib/notify/headless-output.ts";
+import { sessionResultsDir } from "../lib/request/persisted-output.ts";
+import { privateSessionScratchpadDir } from "../lib/core/scratchpad.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, type ReminderPayload } from "../lib/request/reminders.ts";
+import { readState, readStringsState, recordState } from "../lib/request/ledger/state.ts";
+import { processState } from "../lib/profile/process-state.ts";
+import { type EntryLike, readRecord } from "../lib/request/ledger/records.ts";
 import {
 	decide,
 	extractSubject,
@@ -93,11 +93,11 @@ import {
 } from "../lib/rules/matcher.ts";
 import { type SessionGrant, sessionGrant } from "./session-grant.ts";
 import { formatModel, modeBadge, nextMode, PERMISSION_MODE_STATE, PERMISSION_STATUS_CHANNEL, type PermissionStatus, CYCLE_KEY } from "../lib/rules/modes.ts";
-import { intrinsicTier, usesClaudeCodeFastPaths } from "../lib/model-tier.ts";
+import { intrinsicTier, usesClaudeCodeFastPaths } from "../lib/models/model-tier.ts";
 import { type ChildToolCall, type ChildGateDecision, sessionPermissionBridge, SUBAGENT_GATE_CHANNEL } from "../lib/agents/subagent-gate.ts";
-import { trackOriginalCommands } from "../lib/original-command.ts";
-import { followWorkCwd } from "../lib/worktree-channel.ts";
-import { MODE_CHANNEL, PLAN_FILE_CHANNEL } from "../lib/plan-mode-channels.ts";
+import { trackOriginalCommands } from "../lib/shell/original-command.ts";
+import { followWorkCwd } from "../lib/agents/worktree-channel.ts";
+import { MODE_CHANNEL, PLAN_FILE_CHANNEL } from "../lib/rules/plan-mode-channels.ts";
 import { isWritingTool } from "../lib/rules/protected-paths.ts";
 import { denyRuleLines } from "./rule-prose.ts";
 import {
@@ -117,20 +117,20 @@ import {
 	type SourcedDirectory,
 	type SourcedRule,
 } from "../lib/rules/settings.ts";
-import { isRepoFile, sourceId } from "../lib/claude-settings.ts";
-import type { SettingsFile } from "../lib/sources.ts";
-import { MODE_ENV, parsePowerShell, resolvedOrSelf, runtimeProtectedDirs, runtimeSecretPaths } from "../lib/permission-gate.ts";
+import { isRepoFile, sourceId } from "../lib/profile/claude-settings.ts";
+import type { SettingsFile } from "../lib/profile/sources.ts";
+import { MODE_ENV, parsePowerShell, resolvedOrSelf, runtimeProtectedDirs, runtimeSecretPaths } from "../lib/agents/permission-gate.ts";
 import { describeProjectAllow, persistProjectAllowApproval, projectAllowApproved, projectDirectoryConsentEntry, type TrustFiring } from "../lib/consent/project-trust.ts";
 import { parseAddDirFlag, tooBroadForWorkspace, validateWorkspaceDirectory } from "./workspace.ts";
-import { WORKSPACE_CHANNEL, type WorkspaceAnnouncement } from "../lib/workspace-channel.ts";
-import { findProjectRoot } from "../lib/git.ts";
-import { productProjectSettingsPath, productSettingsPath } from "../lib/product-settings.ts";
-import { recordUsage } from "../lib/usage-bus.ts";
-import { announceLocalCommand, registerLocalCommand } from "../lib/local-command.ts";
-import { protectedFiles } from "../lib/sources.ts";
-import { relativeDisplayPath, tildify, tryRealpath } from "../lib/paths.ts";
+import { WORKSPACE_CHANNEL, type WorkspaceAnnouncement } from "../lib/rules/workspace-channel.ts";
+import { findProjectRoot } from "../lib/context/git.ts";
+import { productProjectSettingsPath, productSettingsPath } from "../lib/profile/product-settings.ts";
+import { recordUsage } from "../lib/notify/usage-bus.ts";
+import { announceLocalCommand, registerLocalCommand } from "../lib/ui/local-command.ts";
+import { protectedFiles } from "../lib/profile/sources.ts";
+import { relativeDisplayPath, tildify, tryRealpath } from "../lib/profile/paths.ts";
 import { openPermissionsPanel, type PermissionsPanelHost } from "./panel/host.ts";
-import { PANEL_FOCUS_CHANNEL, PanelFocus, panelUi } from "../lib/panel-focus.ts";
+import { PANEL_FOCUS_CHANNEL, PanelFocus, panelUi } from "../lib/ui/panel-focus.ts";
 import {
 	AUTO_SECTION_LABELS,
 	AUTO_SECTIONS,
@@ -145,11 +145,11 @@ import {
 } from "./panel/state.ts";
 import { builtinRuleCounts } from "./auto-mode/rules.ts";
 import { autoModeSystemNote } from "./auto-mode/system-note.ts";
-import { announceArgumentHint } from "../lib/argument-hints.ts";
-import { userDenialText } from "../lib/user-denial.ts";
+import { announceArgumentHint } from "../lib/ui/argument-hints.ts";
+import { userDenialText } from "../lib/consent/user-denial.ts";
 import type { PermissionRefusal } from "./text.ts";
 import { permissionWords } from "./words.ts";
-import { liveUiCtx } from "../lib/tui-render.ts";
+import { liveUiCtx } from "../lib/ui/tui-render.ts";
 
 /** Shown when a permission prompt is held behind an open panel (serializePrompt). */
 const PROMPT_WAITS_FOR_PANEL = "A permission request is waiting. Close this panel to answer it.";
@@ -229,7 +229,7 @@ const WORKSPACE_DIRS_STATE = "workspace-dirs";
 
 /**
  * What the user granted "for this session" and what auto mode's loop-breaker
- * counted. This is process state (lib/process-state.ts): pi re-runs this
+ * counted. This is process state (lib/profile/process-state.ts): pi re-runs this
  * factory at a /reload, which is the same conversation and keeps them
  * (decisions/modes.md), and every other session start clears them. Only the
  * main session loads this extension (children reach it through the bridge),
@@ -254,7 +254,7 @@ const askOptions = (grant: SessionGrant | undefined) => (grant ? [YES, grant.lab
 const approved = (choice: string | undefined, grant: SessionGrant | undefined) =>
 	choice === YES || (grant !== undefined && choice === grant.label);
 
-/** Panel keys for the product's own files (lib/claude-settings.ts sourceId): the only ones it edits. */
+/** Panel keys for the product's own files (lib/profile/claude-settings.ts sourceId): the only ones it edits. */
 const PRODUCT_USER = sourceId({ owner: "product", scope: "user" });
 /** The rule dialog's destinations for the product's own two settings files (`onecode-user`, `onecode-project`). */
 const PRODUCT_USER_DESTINATION = `${brand.bin}-user`;
@@ -316,7 +316,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 	});
 
 	// The live mode is published in the process environment (MODE_ENV) for the
-	// in-process child gate (lib/permission-gate.ts), which judges under it when
+	// in-process child gate (lib/agents/permission-gate.ts), which judges under it when
 	// no bridge to this extension is reachable. Subagents run in-process; there
 	// is no child *process* reading this any more.
 	//
@@ -401,13 +401,13 @@ function permissionsExtension(pi: ExtensionAPI) {
 	let resolvedCwd: string | undefined;
 	/** The settings ladder's files, resolved once per session so the auto-mode floor need not re-walk for the project root on every tool call. */
 	let sessionSettings: string[] | undefined;
-	/** pi's own agent directory, protected like the static list (lib/permission-gate.ts runtimeProtectedDirs). */
+	/** pi's own agent directory, protected like the static list (lib/agents/permission-gate.ts runtimeProtectedDirs). */
 	let protectedDirs: string[] = [];
 	/** The harness's own secret stores, never read unclassified outside the working space (runtimeSecretPaths). */
 	let secretPaths: string[] = [];
 	/** The harness's readable session dirs, resolved at session start; `readableRoots` adds the workspace to them. */
 	let harnessReadableRoots: string[] = [];
-	/** The shipped docs the `one-code-guide` agent reads (lib/guide-docs.ts): readable, never writable. */
+	/** The shipped docs the `one-code-guide` agent reads (lib/agents/guide-docs.ts): readable, never writable. */
 	let docsDirPaths: string[] = [];
 	/**
 	 * Workspace directories (workspace.ts): from settings, where the
@@ -436,7 +436,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		readableRoots = [...harnessReadableRoots, ...docsDirPaths, ...workspaceDirs];
 		if (sessionStarted) announceWorkspace();
 	};
-	/** What the system prompt was last told the workspace is (lib/workspace-channel.ts). */
+	/** What the system prompt was last told the workspace is (lib/rules/workspace-channel.ts). */
 	let announcedWorkspace: string | undefined;
 	let sessionStarted = false;
 	/**
@@ -545,7 +545,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 	// Drop the cached config and classifier selection state, then refresh the badge.
 	// A model switch must re-evaluate the capability and context-window requirements.
 	// `"batched"` (session_start, model_select) joins the info line with other
-	// extensions' lifecycle notices (lib/notices.ts).
+	// extensions' lifecycle notices (lib/notify/notices.ts).
 	const resetClassifierChoice = (sessionModel?: Model<Api>, announce: boolean | "batched" = true) => {
 		autoConfig = undefined; // reloaded lazily
 		classifierState.pinned = undefined;
@@ -585,13 +585,13 @@ function permissionsExtension(pi: ExtensionAPI) {
 	const classifierState = createClassifierState();
 	// What another role learned the hard way (a subagent's provider refused its
 	// model as not usable on this account) is a rejection here too — the roles
-	// share one selection floor, so they share one first pick (lib/model-unusable.ts).
+	// share one selection floor, so they share one first pick (lib/models/model-unusable.ts).
 	pi.events.on(MODEL_UNUSABLE_CHANNEL, (data) => {
 		classifierState.rejected.add((data as ModelUnusableEvent).model);
 	});
 	/** Report each classifier reply's usage to the all-in footer cost. */
 	const onClassifierUsage = (usage: unknown) => recordUsage(pi, "classifier", usage);
-	/** A candidate the provider refused for this account: published so subagent/workflow selection skips it too (lib/model-unusable.ts). */
+	/** A candidate the provider refused for this account: published so subagent/workflow selection skips it too (lib/models/model-unusable.ts). */
 	const onClassifierModelUnusable = (model: string, reason: string) =>
 		pi.events.emit(MODEL_UNUSABLE_CHANNEL, { model, reason } satisfies ModelUnusableEvent);
 
@@ -616,7 +616,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 	 * back-to-back info notices into a single status line (findings §63), so a
 	 * second one would overwrite the first. `lead` opens that line (the
 	 * confirmation `/auto-mode model` gives); `force` announces outside auto mode;
-	 * `batched` hands the info line to the lifecycle notice owner (lib/notices.ts).
+	 * `batched` hands the info line to the lifecycle notice owner (lib/notify/notices.ts).
 	 */
 	const announceClassifierChoice = (sessionModel?: Model<Api>, opts: { lead?: string; force?: boolean; batched?: boolean } = {}) => {
 		if ((mode !== "auto" && !opts.force) || !badgeCtx) return;
@@ -901,7 +901,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 				text: permissionWords().autoModeActive,
 				key: "permission-mode",
 				// Session state: rides every user message since auto mode came on, so
-				// the cached prefix holds turn to turn (lib/reminders.ts).
+				// the cached prefix holds turn to turn (lib/request/reminders.ts).
 				placement: "sticky-append",
 				toolCallId,
 			});
@@ -1090,7 +1090,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		const carried = event.reason === "new" && !branchMode ? normalizePermissionMode(process.env[MODE_ENV]) : undefined;
 		reloadSettings(ctx, event.reason === "startup", carried);
 		if (!STANDING_REMINDER_MODES.has(mode)) setMode(mode, true);
-		// The system prompt lists the workspace as the session starts (lib/workspace-channel.ts).
+		// The system prompt lists the workspace as the session starts (lib/rules/workspace-channel.ts).
 		sessionStarted = true;
 		announcedWorkspace = undefined;
 		announceWorkspace();
@@ -1199,7 +1199,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 	// for the thinking dial. ctrl+q is the one ctrl+letter pi leaves unbound
 	// that terminals don't already own (ctrl+m *is* Enter's byte, alt needs
 	// option-as-meta configured on macOS) — except on Windows and WSL, where
-	// pi binds ctrl+q itself and the key is alt+m (lib/keys.ts) — see
+	// pi binds ctrl+q itself and the key is alt+m (lib/ui/keys.ts) — see
 	// working-docs/decisions.md.
 	pi.registerShortcut(CYCLE_KEY, {
 		description: "Cycle permission mode",
@@ -2465,7 +2465,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 	 * Apply a chosen classifier model: validate auth first (a persisted model
 	 * with no credentials would fail every call), persist to user scope, release
 	 * the session pin so the choice takes effect on the next call, and say what
-	 * it costs (`lib/model-choice-warnings.ts`).
+	 * it costs (`lib/models/model-choice-warnings.ts`).
 	 */
 	const applyClassifierChoice = async (spec: string, ctx: ExtensionContext): Promise<void> => {
 		const model = findConfigured(ctx.modelRegistry.getAvailable(), spec);

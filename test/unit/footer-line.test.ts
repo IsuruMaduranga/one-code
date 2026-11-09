@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { brandedId } from "../../extensions/lib/brand.mjs";
-import { visibleWidth } from "../../extensions/lib/text-width.ts";
+import { brandedId } from "../../extensions/lib/profile/brand.mjs";
+import { visibleWidth } from "../../extensions/lib/ui/text-width.ts";
 import {
 	buildFooterLines,
 	computeMainUsage,

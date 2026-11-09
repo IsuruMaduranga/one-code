@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { BackgroundTask } from "../../extensions/lib/agents/task-registry.ts";
 import { TASK_REGISTER_CHANNEL } from "../../extensions/lib/agents/task-registry.ts";
-import { trackShellTasks } from "../../extensions/lib/shell-tasks.ts";
+import { trackShellTasks } from "../../extensions/lib/shell-run/shell-tasks.ts";
 import { decodeStripKey } from "../../extensions/subagents/panel-keys.ts";
 import { STRIP_LINGER_MS } from "../../extensions/subagents/panel-render.ts";
 import { reduceShellKey, renderShellChip, shellRows } from "../../extensions/subagents/shell-panel.ts";

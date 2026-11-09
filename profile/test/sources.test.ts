@@ -1,5 +1,5 @@
 /**
- * The source view's config folders (lib/sources.ts): One Code's provider
+ * The source view's config folders (lib/profile/sources.ts): One Code's provider
  * puts Claude Code's in place of the product's own, independent mode and a
  * profile without a provider keep the product's. The settings ladder a
  * provider shapes, and the safety floor every file of it joins.
@@ -13,14 +13,14 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { safetyControlWrite } from "../../extensions/permissions/auto-mode/safety-floor.ts";
 import { loadPermissionSettings } from "../../extensions/lib/rules/settings.ts";
-import { settingsSources } from "../../extensions/lib/claude-settings.ts";
-import { instructionFileNames, instructionTargets, openInstructions } from "../../extensions/lib/instructions.ts";
+import { settingsSources } from "../../extensions/lib/profile/claude-settings.ts";
+import { instructionFileNames, instructionTargets, openInstructions } from "../../extensions/lib/context/instructions.ts";
 import { autoModeSettingsFiles } from "../../extensions/lib/rules/auto-mode-config.ts";
-import { isClaudeLocation } from "../../extensions/lib/paths.ts";
+import { isClaudeLocation } from "../../extensions/lib/profile/paths.ts";
 import { INIT_PROMPT, initPrompt } from "../text/init/prompt.ts";
-import { profileModuleKey, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile.ts";
-import { shareModuleForTest } from "../../extensions/lib/shared-module.ts";
-import { configDirs, projectConfigDir, type SourceProvider, userConfigDir } from "../../extensions/lib/sources.ts";
+import { profileModuleKey, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
+import { shareModuleForTest } from "../../extensions/lib/profile/shared-module.ts";
+import { configDirs, projectConfigDir, type SourceProvider, userConfigDir } from "../../extensions/lib/profile/sources.ts";
 import { profile } from "../index.ts";
 import { tempHome } from "../../test/unit/helpers/temp-home.ts";
 
@@ -55,7 +55,7 @@ describe("the provider outside pi's loader", () => {
 	// executor and the shell module run in plain Node children in tests, whose
 	// strip-only TypeScript rejects enums and parameter properties.
 	it("loads the profile under Node's strip-only TypeScript", () => {
-		const sources = pathToFileURL(join(process.cwd(), "extensions", "lib", "sources.ts")).href;
+		const sources = pathToFileURL(join(process.cwd(), "extensions", "lib", "profile", "sources.ts")).href;
 		const script = `import { userConfigDir } from ${JSON.stringify(sources)}; console.log(userConfigDir(${JSON.stringify(home)}));`;
 		const run = spawnSync(process.execPath, ["--experimental-strip-types", "--no-warnings", "--input-type=module", "-e", script], { encoding: "utf-8", env: { ...process.env, ONECODE_CONFIG_MODE: "claude-compatible" } });
 		expect(run.stderr).toBe("");

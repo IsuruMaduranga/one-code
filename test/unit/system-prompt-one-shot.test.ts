@@ -1,13 +1,13 @@
 /**
  * A one-shot session (`-p`, `--mode json`) gets the profile's note up front
- * (lib/notifications.ts oneShotSessionNote); an interactive session does not.
+ * (lib/notify/notifications.ts oneShotSessionNote); an interactive session does not.
  * One Code's wording of the note is checked in profile/test/.
  */
 import { describe, expect, it } from "vitest";
 import systemPromptExtension from "../../extensions/system-prompt/index.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
-import { CONTEXT_ORDER, REMINDER_CHANNEL, toldBlockFact } from "../../extensions/lib/reminders.ts";
-import { sessionScratchpadDir } from "../../extensions/lib/scratchpad.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, toldBlockFact } from "../../extensions/lib/request/reminders.ts";
+import { sessionScratchpadDir } from "../../extensions/lib/core/scratchpad.ts";
 import { createFakeCtx, createFakePi, renderRequest } from "./helpers/fake-pi.ts";
 
 const queued = async (mode: string) => {

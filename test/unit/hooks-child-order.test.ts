@@ -5,10 +5,10 @@ import { AgentSession, SessionManager, type ToolCallEventResult, type ToolDefini
 import { Type } from "typebox";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HookBridge } from "../../extensions/lib/agents/hook-bridge.ts";
-import { openChildSession } from "../../extensions/lib/agent-loader.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { openChildSession } from "../../extensions/lib/agents/agent-loader.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { SubagentRuntime } from "../../extensions/subagents/runner.ts";
-import { registerWorktreeIsolation, releaseWorktreeIsolation } from "../../extensions/lib/worktree-isolation.ts";
+import { registerWorktreeIsolation, releaseWorktreeIsolation } from "../../extensions/lib/agents/worktree-isolation.ts";
 
 describe("child hook and permission order", () => {
 	let root: string;

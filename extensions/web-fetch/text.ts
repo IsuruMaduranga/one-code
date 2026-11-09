@@ -5,7 +5,7 @@
  * (page-content.ts): they hold the data boundary.
  */
 
-import type { DescriptionForm } from "../lib/tool-variants.ts";
+import type { DescriptionForm } from "../lib/profile/tool-variants.ts";
 
 /** Why a URL was refused before any request. */
 export type UrlProblem = { kind: "invalid"; input: string } | { kind: "scheme"; protocol: string } | { kind: "credentials" } | { kind: "noDot" };
@@ -37,7 +37,7 @@ export type FetchAnswer =
 	| { kind: "raw"; window?: { from: number; to: number; total: number; next: number }; readerFailure?: ReaderFailure };
 
 export interface WebFetchText {
-	/** Short on frontier and workhorse, long on cheap and tiny (lib/tool-variants.ts). */
+	/** Short on frontier and workhorse, long on cheap and tiny (lib/profile/tool-variants.ts). */
 	description(form: DescriptionForm): string;
 	params: Record<"url" | "prompt" | "offset", string> & { max_chars(defaultChars: number): string };
 	/** Search terms for `tool_search`, beyond the tool's name and description. */

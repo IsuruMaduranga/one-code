@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { envName } from "../../extensions/lib/brand.mjs";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { ccToolName, matcherApplies, toolMatchCandidates, ccToolInput, nativeToolInput } from "../../extensions/lib/rules/hook-matcher.ts";
 import { loadPluginHooks } from "../../extensions/hooks/plugin-hooks.ts";
 import { applyPostToolUseOutcome, type FinishedRun, interpretHookResult, parseEnvelope } from "../../extensions/lib/rules/hook-protocol.ts";

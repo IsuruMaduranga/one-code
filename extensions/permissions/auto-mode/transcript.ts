@@ -16,8 +16,8 @@
 // the hooks matcher (its `ccToolName` is the correct-direction, mcp-passthrough
 // map; lib/rules/matcher.ts's is lower-cased and cannot recover casing).
 import { ccToolName } from "../../lib/rules/hook-matcher.ts";
-// The shell tools render as `{"<Tool>":"<command>"}` (lib/shell-tools.ts is the one list).
-import { SHELL_TOOLS } from "../../lib/shell-tools.ts";
+// The shell tools render as `{"<Tool>":"<command>"}` (lib/shell-run/shell-tools.ts is the one list).
+import { SHELL_TOOLS } from "../../lib/shell-run/shell-tools.ts";
 import type { GitStatusMeta } from "./git-status-meta.ts";
 import { classifierText } from "./classifier-prompt.ts";
 import type { ResolvedPathFact } from "./resolved-paths-meta.ts";

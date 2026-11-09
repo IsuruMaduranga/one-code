@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { AgentRunner } from "../../extensions/workflow/agent-session.ts";
 import { buildRunReport, WorkflowRunManager } from "../../extensions/workflow/run-manager.ts";
 import { buildDetail } from "../../extensions/workflow/viewer.ts";

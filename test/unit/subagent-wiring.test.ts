@@ -5,13 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../extensions/lib/rules/auto-mode-actions.ts";
 import backgroundExtension from "../../extensions/background/index.ts";
 import { type BackgroundTask, TASK_REGISTER_CHANNEL } from "../../extensions/lib/agents/task-registry.ts";
-import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/mcp-share.ts";
-import { DEFAULT_COALESCE_MS, oneShotNote } from "../../extensions/lib/notifications.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
-import { AGENT_VIEW_CHANNEL } from "../../extensions/lib/agent-view.ts";
+import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/plugins/mcp-share.ts";
+import { DEFAULT_COALESCE_MS, oneShotNote } from "../../extensions/lib/notify/notifications.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { AGENT_VIEW_CHANNEL } from "../../extensions/lib/agents/agent-view.ts";
 import { SUBAGENT_GATE_CHANNEL } from "../../extensions/lib/agents/subagent-gate.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../../extensions/lib/rules/modes.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import * as defaults from "../../extensions/lib/models/subagent-default.ts";
 import subagentsExtension from "../../extensions/subagents/index.ts";
 import type { ChildOutcome } from "../../extensions/subagents/outcome.ts";
@@ -552,7 +552,7 @@ describe("fork runs in a one-shot session", () => {
 
 	// A fork's first request extends the parent's recorded one, tools block
 	// included; the ledger keeps a recorded declaration only while the live
-	// schema matches (lib/ledger/wire.ts mergeDeclarations), so a fork's spawn
+	// schema matches (lib/request/ledger/wire.ts mergeDeclarations), so a fork's spawn
 	// tool with its own schema replaced the parent's Agent mid-array and the fork
 	// missed the parent's cache from there on.
 	it("gives a fork a spawn tool with the parent's Agent schema", async () => {

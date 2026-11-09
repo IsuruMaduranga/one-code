@@ -21,11 +21,11 @@ import {
 	idleRefusal,
 	ONE_HOUR_MS,
 } from "../../extensions/idle-compact/policy.ts";
-import { hasOneHourCache } from "../../extensions/lib/anthropic-payload.ts";
-import { brandedId } from "../../extensions/lib/brand.mjs";
-import { unrefTimers } from "../../extensions/lib/timer-ops.ts";
+import { hasOneHourCache } from "../../extensions/lib/request/anthropic-payload.ts";
+import { brandedId } from "../../extensions/lib/profile/brand.mjs";
+import { unrefTimers } from "../../extensions/lib/core/timer-ops.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
-import { LEDGER_SENT_CHANNEL, type LedgerSent } from "../../extensions/lib/ledger/plan.ts";
+import { LEDGER_SENT_CHANNEL, type LedgerSent } from "../../extensions/lib/request/ledger/plan.ts";
 
 const FIRE_MS = 54 * 60_000;
 const ephemeral = (ttl?: string) => ({ type: "ephemeral", ...(ttl ? { ttl } : {}) });

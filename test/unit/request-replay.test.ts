@@ -15,7 +15,7 @@ import {
 	type RequestCapture,
 	replayOutputCap,
 	replayTail,
-} from "../../extensions/lib/request-replay.ts";
+} from "../../extensions/lib/side-calls/request-replay.ts";
 import { declaredNames as declared, type Item, real, toolsItem as headWith } from "./helpers/responses-fixture.ts";
 
 const anthropic = { api: "anthropic-messages", provider: "anthropic", id: "claude-sonnet-5" };

@@ -6,7 +6,7 @@
  * unusable tools list, a refused worktree).
  */
 
-import { requireText } from "../lib/profile.ts";
+import { requireText } from "../lib/profile/profile.ts";
 import type { SubagentsText } from "./text.ts";
 
 export const subagentWords = (): SubagentsText => requireText("subagents");

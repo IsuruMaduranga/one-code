@@ -8,13 +8,13 @@
  * turn and must come out byte-identical (prompt-cache stability).
  */
 
-import { brandedId } from "../lib/brand.mjs";
-import type { PromptTier } from "../lib/model-tier.ts";
+import { brandedId } from "../lib/profile/brand.mjs";
+import type { PromptTier } from "../lib/models/model-tier.ts";
 
 /** What a section may depend on: all of it fixed for the session (or until the model changes). */
 export interface SystemPromptSession {
 	tier: PromptTier;
-	/** False when the session model runs without the task tools (lib/model-tier.ts taskToolsEnabled). */
+	/** False when the session model runs without the task tools (lib/models/model-tier.ts taskToolsEnabled). */
 	taskTools: boolean;
 	/** The session's active tools, as pi selects them; undefined before pi reports them. */
 	tools: readonly string[] | undefined;

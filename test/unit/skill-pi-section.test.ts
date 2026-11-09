@@ -10,10 +10,10 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import skillExtension from "../../extensions/skill/index.ts";
 import { withoutPiSkillsBlock } from "../../extensions/skill/listing.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
-import { pluginRoot } from "../../extensions/lib/plugin-root.ts";
-import { setSkillState } from "../../extensions/lib/skill-overrides.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
+import { pluginRoot } from "../../extensions/lib/plugins/plugin-root.ts";
+import { setSkillState } from "../../extensions/lib/plugins/skill-overrides.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 // pi's own renderer, by file: the strip must match what the installed pi produces.

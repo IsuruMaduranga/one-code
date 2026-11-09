@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Refresh the model catalogs bundled with a release, extensions/lib/model-catalog/:
+ * Refresh the model catalogs bundled with a release, extensions/lib/models/model-catalog/:
  * models.dev's api.json, OpenRouter's model list and Hugging Face parameter
  * counts, each trimmed to the fields the tier algorithm reads but kept in the
- * API's own shape (extensions/lib/model-catalog-data.ts). A session refreshes
+ * API's own shape (extensions/lib/models/model-catalog-data.ts). A session refreshes
  * the same payloads daily at runtime; this copy is what a fresh install and an
  * offline machine use. Run it before every release and every pi version bump,
  * then review the tier diff:
@@ -25,8 +25,8 @@ import {
 	trimModelsDev,
 	trimOpenRouter,
 	unknownRepos,
-} from "../extensions/lib/model-catalog-data.ts";
-import { BUILTIN_PROVIDER_POLICIES } from "../extensions/lib/model-policy.ts";
+} from "../extensions/lib/models/model-catalog-data.ts";
+import { BUILTIN_PROVIDER_POLICIES } from "../extensions/lib/models/model-policy.ts";
 
 const dir = bundledCatalogDir();
 const headers = { accept: "application/json", "user-agent": "Mozilla/5.0 (compatible; one-code-gen-model-catalog)" };

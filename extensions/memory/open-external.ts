@@ -15,9 +15,9 @@
 
 import { spawn } from "node:child_process";
 import { relative } from "node:path";
-import { childProcessEnv } from "../lib/app-launch.mjs";
-import { commandLaunch } from "../lib/command-launch.ts";
-import { forwardSlashes, isRelativeInside, tildify } from "../lib/paths.ts";
+import { childProcessEnv } from "../lib/app/app-launch.mjs";
+import { commandLaunch } from "../lib/shell-run/command-launch.ts";
+import { forwardSlashes, isRelativeInside, tildify } from "../lib/profile/paths.ts";
 
 export interface OpenPlan {
 	command: string;
@@ -97,7 +97,7 @@ export function openPath(path: string, kind: "file" | "folder"): Promise<OpenRes
 		let child: ReturnType<typeof spawn>;
 		try {
 			// `$EDITOR=code` is VS Code's `code.cmd` shim on Windows, which a bare spawn cannot start.
-			// The user's own environment under the bundled app (lib/app-launch.mjs): an
+			// The user's own environment under the bundled app (lib/app/app-launch.mjs): an
 			// editor with a terminal must not hand the app's pi state to a `pi` run there.
 			const env = childProcessEnv(process.env);
 			const launch = commandLaunch(command, args, env);

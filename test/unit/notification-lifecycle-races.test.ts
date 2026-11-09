@@ -4,7 +4,7 @@ import {
 	NOTIFICATION_ID_KEY,
 	TASK_OUTPUT_DELIVERED_CHANNEL,
 	taskNotification,
-} from "../../extensions/lib/notifications.ts";
+} from "../../extensions/lib/notify/notifications.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
 const completion = (taskId: string) => taskNotification({ kind: "shell", taskId, status: "completed", summary: `${taskId} finished` });

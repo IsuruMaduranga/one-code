@@ -1,5 +1,5 @@
 /**
- * One Code's memory section of the system prompt (moved from lib/memory.ts).
+ * One Code's memory section of the system prompt (moved from lib/context/memory.ts).
  */
 
 /**

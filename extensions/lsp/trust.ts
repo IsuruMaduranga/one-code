@@ -15,10 +15,10 @@
  * installing the plugin was the consent.
  */
 
-import { readJsonFile, writeJsonAtomic } from "../lib/atomic-write.ts";
-import { consentStorePath } from "../lib/consent-stores.ts";
-import { comparablePath, isPathAtOrUnder } from "../lib/paths.ts";
-import { singleFlight } from "../lib/single-flight.ts";
+import { readJsonFile, writeJsonAtomic } from "../lib/core/atomic-write.ts";
+import { consentStorePath } from "../lib/consent/consent-stores.ts";
+import { comparablePath, isPathAtOrUnder } from "../lib/profile/paths.ts";
+import { singleFlight } from "../lib/core/single-flight.ts";
 
 /** Built-in server commands that execute project code. */
 export const PROJECT_CODE_SERVERS: ReadonlySet<string> = new Set(["rust-analyzer", "jdtls"]);

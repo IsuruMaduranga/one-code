@@ -8,11 +8,11 @@
  * including never) and "Plugins", then healthy "MCP servers", then "Skills".
  */
 
-import type { McpServerStatus } from "../../lib/mcp-status.ts";
-import type { Plugin } from "../../lib/plugins.ts";
-import type { ScannedSkill } from "../../lib/skill-scan.ts";
-import { isSkillEnabled, type SkillState, skillOverrideKey } from "../../lib/skill-overrides.ts";
-import { formatRecency, type UsageEntry, usageKey } from "../../lib/usage-tracker.ts";
+import type { McpServerStatus } from "../../lib/plugins/mcp-status.ts";
+import type { Plugin } from "../../lib/plugins/plugins.ts";
+import type { ScannedSkill } from "../../lib/plugins/skill-scan.ts";
+import { isSkillEnabled, type SkillState, skillOverrideKey } from "../../lib/plugins/skill-overrides.ts";
+import { formatRecency, type UsageEntry, usageKey } from "../../lib/plugins/usage-tracker.ts";
 import type { Favorites } from "../favorites.ts";
 import type { MarketplaceSnapshot } from "../marketplace/sync.ts";
 import type { KnownMarketplace } from "../marketplace/types.ts";

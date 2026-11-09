@@ -8,7 +8,7 @@
 import { existsSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
 import type { LspFailure } from "./text.ts";
-import { ancestorDirs } from "../lib/instructions.ts";
+import { ancestorDirs } from "../lib/context/instructions.ts";
 
 export interface ServerConfig {
 	command: string;

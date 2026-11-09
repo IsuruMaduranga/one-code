@@ -1,6 +1,6 @@
 /**
  * Leaving tools that are off out of One Code's text
- * (extensions/lib/live-tools.ts): each text lists, per tool, the sentences or
+ * (extensions/lib/profile/live-tools.ts): each text lists, per tool, the sentences or
  * lines that name it, and they are cut when the tool is off.
  * test/unit/profile-live-tools.test.ts renders every such text with each
  * optional tool off and fails on any mention left.

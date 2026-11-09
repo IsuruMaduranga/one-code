@@ -5,8 +5,8 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import initExtension from "../../extensions/init/index.ts";
-import { instructionTargets } from "../../extensions/lib/instructions.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { instructionTargets } from "../../extensions/lib/context/instructions.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { commandDisplayLine, promptCommandText } from "../../extensions/lib/plugins/skill-invoke.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { captureUserTurns } from "./helpers/user-turn.ts";

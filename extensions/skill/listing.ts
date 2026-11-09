@@ -18,8 +18,8 @@
  * while the budget lasts and are listed by name after that.
  */
 
-import { type SkillState, skillListingVisibility } from "../lib/skill-overrides.ts";
-import type { UsageEntry } from "../lib/usage-tracker.ts";
+import { type SkillState, skillListingVisibility } from "../lib/plugins/skill-overrides.ts";
+import type { UsageEntry } from "../lib/plugins/usage-tracker.ts";
 
 /** Claude Code's per-entry cap (its `skillListingMaxDescChars` default). */
 export const SKILL_DESCRIPTION_CAP = 1536;

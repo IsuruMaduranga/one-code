@@ -4,7 +4,7 @@
  * run, in order. One Code's wording is checked in profile/test/.
  */
 import { describe, expect, it } from "vitest";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { pendingClaimReminder } from "../../extensions/subagents/pending-claim.ts";
 
 describe("pendingClaimReminder", () => {

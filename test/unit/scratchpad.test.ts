@@ -3,15 +3,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { resolveForContainment } from "../../extensions/lib/shell/paths.ts";
-import { brand } from "../../extensions/lib/brand.mjs";
-import { comparablePath } from "../../extensions/lib/paths.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
+import { comparablePath } from "../../extensions/lib/profile/paths.ts";
 import {
 	ensurePrivateScratchpad,
 	isPrivateScratchpad,
 	ownerDirProblem,
 	scratchpadDir,
 	sessionScratchpadDir,
-} from "../../extensions/lib/scratchpad.ts";
+} from "../../extensions/lib/core/scratchpad.ts";
 import { isInsideDir } from "../../extensions/lib/rules/matcher.ts";
 
 describe("scratchpadDir", () => {

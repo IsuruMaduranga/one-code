@@ -9,8 +9,8 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseFrontmatterLoosely } from "../../extensions/lib/frontmatter.ts";
-import { BUNDLED_SKILLS_DIR, scanSkills } from "../../extensions/lib/skill-scan.ts";
+import { parseFrontmatterLoosely } from "../../extensions/lib/core/frontmatter.ts";
+import { BUNDLED_SKILLS_DIR, scanSkills } from "../../extensions/lib/plugins/skill-scan.ts";
 import { WORKFLOW_DESCRIPTION_BODY, workflowDescription, workflowSizeLine } from "../text/workflow/description.ts";
 import { sha } from "./helpers/sha.ts";
 

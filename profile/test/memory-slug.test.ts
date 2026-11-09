@@ -3,8 +3,8 @@ import os from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
-import { memoryDir, projectSlug } from "../../extensions/lib/memory.ts";
-import { productProjectSettingsPathFor } from "../../extensions/lib/product-settings.ts";
+import { memoryDir, projectSlug } from "../../extensions/lib/context/memory.ts";
+import { productProjectSettingsPathFor } from "../../extensions/lib/profile/product-settings.ts";
 
 // Golden suffixes come from Claude Code 2.1.296's DO/Le/Use expressions:
 // 200 sanitized characters, then "-" and abs(signed UTF-16 hash).toString(36).

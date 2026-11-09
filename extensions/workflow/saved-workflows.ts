@@ -10,7 +10,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { parseWorkflowScript } from "./script-source.ts";
 import type { SavedWorkflow } from "./types.ts";
-import { projectConfigDir, userConfigDir } from "../lib/sources.ts";
+import { projectConfigDir, userConfigDir } from "../lib/profile/sources.ts";
 
 function scanDir(dir: string, source: SavedWorkflow["source"]): SavedWorkflow[] {
 	if (!existsSync(dir)) return [];
@@ -29,7 +29,7 @@ function scanDir(dir: string, source: SavedWorkflow["source"]): SavedWorkflow[] 
 	return found;
 }
 
-/** `.claude/workflows` and `~/.claude/workflows`, or their `.onecode` twins in independent mode (lib/sources.ts). */
+/** `.claude/workflows` and `~/.claude/workflows`, or their `.onecode` twins in independent mode (lib/profile/sources.ts). */
 export function workflowDirs(cwd: string, home: string): { project: string; user: string } {
 	return { project: join(projectConfigDir(cwd), "workflows"), user: join(userConfigDir(home), "workflows") };
 }

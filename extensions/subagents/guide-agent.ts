@@ -12,7 +12,7 @@
  * gathers the inputs.
  */
 
-import { brand } from "../lib/brand.mjs";
+import { brand } from "../lib/profile/brand.mjs";
 import type { AgentDefinition } from "../lib/agents/agent-catalog.ts";
 import { subagentWords } from "./words.ts";
 
@@ -46,7 +46,7 @@ export interface GuideInput {
 	docs: { guide: string; piDocs?: string; piExamples?: string };
 	install: GuideInstall;
 	setup: GuideSetup;
-	/** The names of the instruction files a user writes (lib/instructions.ts instructionTargets), and the project config folder's name. */
+	/** The names of the instruction files a user writes (lib/context/instructions.ts instructionTargets), and the project config folder's name. */
 	config: { instructionFiles: string[]; configDir: string };
 }
 

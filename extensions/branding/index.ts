@@ -13,23 +13,23 @@
  * Set `CC_NO_BANNER=1` to keep pi's original header.
  */
 
-import { brand } from "../lib/brand.mjs";
-import { feature } from "../lib/feature.ts";
-import { PROFILE_DIR } from "../lib/profile.ts";
+import { brand } from "../lib/profile/brand.mjs";
+import { feature } from "../lib/profile/feature.ts";
+import { PROFILE_DIR } from "../lib/profile/profile.ts";
 import { existsSync, readFileSync } from "node:fs";
-import { ARGUMENT_HINT_CHANNEL, type ArgumentHint, type CommandHint, frontmatterCommandHint, hintForInput, PI_BUILTIN_HINTS } from "../lib/argument-hints.ts";
-import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
-import { promptTemplateFiles } from "../lib/skill-scan.ts";
-import { modeCycleKey } from "../lib/keys.ts";
+import { ARGUMENT_HINT_CHANNEL, type ArgumentHint, type CommandHint, frontmatterCommandHint, hintForInput, PI_BUILTIN_HINTS } from "../lib/ui/argument-hints.ts";
+import { parseFrontmatterLoosely } from "../lib/core/frontmatter.ts";
+import { promptTemplateFiles } from "../lib/plugins/skill-scan.ts";
+import { modeCycleKey } from "../lib/ui/keys.ts";
 import os from "node:os";
 import { basename, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 // pi's loader maps this import to pi's own module, so keyText reads the keybindings pi loaded.
 import { getAgentDir, keyText as piKeyText, SettingsManager, VERSION as PI_VERSION } from "@earendil-works/pi-coding-agent";
-import { piVersionWarning } from "../lib/pi-version.ts";
+import { piVersionWarning } from "../lib/app/pi-version.ts";
 import { handleCompactionKeep } from "./compaction-keep.ts";
 import { handleReplacedBuiltins } from "./replaced-builtins.ts";
-import { extensionVersion } from "../lib/package-version.ts";
+import { extensionVersion } from "../lib/app/package-version.ts";
 import {
 	formatModel,
 	formatModelSpec,
@@ -47,11 +47,11 @@ import {
 	type StartupSection,
 	thinkingLabel,
 } from "./startup.ts";
-import { boundKey, linesComponent, safeThemeInverse, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
-import { AGENT_VIEW_CHANNEL, type AgentViewAnnouncement, type AgentViewTarget } from "../lib/agent-view.ts";
+import { boundKey, linesComponent, safeThemeInverse, safeThemePaint, truncateLine } from "../lib/ui/tui-render.ts";
+import { AGENT_VIEW_CHANNEL, type AgentViewAnnouncement, type AgentViewTarget } from "../lib/agents/agent-view.ts";
 import { markAssistantMarkdown } from "./assistant-marker.ts";
 import { PROMPT_PADDING, PromptEditor } from "./prompt-editor.ts";
-import { sanitizeTitle } from "../lib/terminal-text.ts";
+import { sanitizeTitle } from "../lib/ui/terminal-text.ts";
 
 export { truncateLine };
 
@@ -253,7 +253,7 @@ function installPromptMarker(
 		return `\x1b[1m${safeThemePaint(ui.theme)("accent", PROMPT_GLYPH)}\x1b[0m${" ".repeat(PROMPT_PADDING - 1)}`;
 	};
 	const renderHint = (text: string) => {
-		// While an agent is viewed the empty editor addresses it (lib/agent-view.ts).
+		// While an agent is viewed the empty editor addresses it (lib/agents/agent-view.ts).
 		const placeholder = text === "" && agentView.target ? agentView.target.placeholder : hintForInput(text, argumentHints);
 		return placeholder === undefined ? undefined : safeThemePaint(ui.theme)("dim", placeholder);
 	};
@@ -376,10 +376,10 @@ function brandingExtension(pi: ExtensionAPI) {
 		live = false;
 	});
 
-	// Commands' argument placeholders (lib/argument-hints.ts), drawn by the prompt editor.
+	// Commands' argument placeholders (lib/ui/argument-hints.ts), drawn by the prompt editor.
 	// Declared before the CC_NO_BANNER return below: session_start reads it.
 	const argumentHints = new Map<string, CommandHint>(Object.entries(PI_BUILTIN_HINTS).map(([command, hint]) => [command, { hint }]));
-	// The agent the user is viewing, if any: the editor then targets it (lib/agent-view.ts).
+	// The agent the user is viewing, if any: the editor then targets it (lib/agents/agent-view.ts).
 	const agentView: { target?: AgentViewTarget } = {};
 	pi.events.on(AGENT_VIEW_CHANNEL, (data) => {
 		agentView.target = (data as AgentViewAnnouncement | undefined)?.target;
@@ -434,7 +434,7 @@ function brandingExtension(pi: ExtensionAPI) {
 			// Commands not bound: nothing was marked read, so the next turn reads pi's list.
 		}
 		// Soft drift guard: warn once at startup when the hosting pi is outside
-		// the range this release was tested against (see lib/pi-version.ts).
+		// the range this release was tested against (see lib/app/pi-version.ts).
 		const versionWarning = piVersionWarning(PI_VERSION);
 		if (versionWarning) ctx.ui.notify(versionWarning, "warning");
 		// pi 0.99 skips its built-in tool search and MCP for ours and warns at

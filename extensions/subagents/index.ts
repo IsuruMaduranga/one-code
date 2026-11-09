@@ -16,28 +16,28 @@
  * children persist their sessions per run to make that possible).
  */
 
-import { INSTALL_METHOD_VAR } from "../lib/app-launch.mjs";
-import { brand } from "../lib/brand.mjs";
-import { knobLimit, knobNames } from "../lib/knobs.ts";
-import { feature } from "../lib/feature.ts";
-import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../lib/child-writes.ts";
-import { canShowCustomUi } from "../lib/headless-output.ts";
+import { INSTALL_METHOD_VAR } from "../lib/app/app-launch.mjs";
+import { brand } from "../lib/profile/brand.mjs";
+import { knobLimit, knobNames } from "../lib/profile/knobs.ts";
+import { feature } from "../lib/profile/feature.ts";
+import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../lib/agents/child-writes.ts";
+import { canShowCustomUi } from "../lib/notify/headless-output.ts";
 import { existsSync, mkdirSync, readdirSync, renameSync, writeFileSync, readFileSync } from "node:fs";
-import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, agentCronTools, agentOwnsCronJobs } from "../lib/agent-cron.ts";
-import { profileText, toolLive } from "../lib/profile.ts";
+import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, agentCronTools, agentOwnsCronJobs } from "../lib/agents/agent-cron.ts";
+import { profileText, toolLive } from "../lib/profile/profile.ts";
 import os from "node:os";
 import { dirname, join } from "node:path";
-import { isPathAtOrUnder } from "../lib/paths.ts";
+import { isPathAtOrUnder } from "../lib/profile/paths.ts";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { StringEnum } from "../lib/string-enum.ts";
+import { StringEnum } from "../lib/core/string-enum.ts";
 import type { Api, Message, Model } from "@earendil-works/pi-ai";
 import { type AgentToolResult, defineTool, getAgentDir, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../lib/rules/auto-mode-actions.ts";
 import { type AgentDefinition, agentFileSources, agentSourcesStamp, BUNDLED_AGENTS_DIR, discoverAgents } from "../lib/agents/agent-catalog.ts";
-import { findConfigured, modelIdentity, modelSpec, supportsImageInput } from "../lib/model-policy.ts";
-import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../lib/model-unusable.ts";
+import { findConfigured, modelIdentity, modelSpec, supportsImageInput } from "../lib/models/model-policy.ts";
+import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../lib/models/model-unusable.ts";
 import { applicableSubagentDefault, loadSubagentDefault, persistSubagentModel, SUBAGENT_MODEL_KNOB, type SubagentDefault } from "../lib/models/subagent-default.ts";
 import {
 	expensiveModelGate,
@@ -49,30 +49,30 @@ import {
 	subagentModelsReminder,
 	subagentStatusModel,
 } from "../lib/models/subagent-model.ts";
-import { modelPickerComponent, pickerSpec, toPickerEntries, type PickerEntry } from "../lib/model-picker.ts";
-import { chosenModelWarnings } from "../lib/model-choice-warnings.ts";
-import { readSuggestNewerModels, SETTINGS_DISPLAY } from "../lib/product-settings.ts";
-import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
-import { guideDocs } from "../lib/guide-docs.ts";
-import { extensionVersion } from "../lib/package-version.ts";
-import { scanSkills } from "../lib/skill-scan.ts";
+import { modelPickerComponent, pickerSpec, toPickerEntries, type PickerEntry } from "../lib/models/model-picker.ts";
+import { chosenModelWarnings } from "../lib/models/model-choice-warnings.ts";
+import { readSuggestNewerModels, SETTINGS_DISPLAY } from "../lib/profile/product-settings.ts";
+import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins/plugins.ts";
+import { guideDocs } from "../lib/agents/guide-docs.ts";
+import { extensionVersion } from "../lib/app/package-version.ts";
+import { scanSkills } from "../lib/plugins/skill-scan.ts";
 import { type GuideInput, guideAgentDefinition, settingsSetup } from "./guide-agent.ts";
-import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpServerStatus, type McpStatusEvent, type McpStatusKind } from "../lib/mcp-status.ts";
+import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpServerStatus, type McpStatusEvent, type McpStatusKind } from "../lib/plugins/mcp-status.ts";
 
-import { DEFER_CHANNEL, queryDeferred } from "../lib/deferred.ts";
-import { requestSystemPrompt } from "../lib/prompt-options.ts";
-import { captureMatches, LAST_REQUEST_CHANNEL, type RequestCapture } from "../lib/request-replay.ts";
-import { BTW_FORK_CHANNEL, btwForkDescription, btwForkName, btwForkRecord, btwForkTaskId, type BtwForkRequest, type BtwForkResult } from "../lib/btw-fork.ts";
-import { watchMcpTools } from "../lib/mcp-share.ts";
-import { sessionModelTier } from "../lib/session-model-tier.ts";
-import { type DescriptionForm, followDescriptionForm, registerVariantTool } from "../lib/tool-variants.ts";
+import { DEFER_CHANNEL, queryDeferred } from "../lib/request/deferred.ts";
+import { requestSystemPrompt } from "../lib/ui/prompt-options.ts";
+import { captureMatches, LAST_REQUEST_CHANNEL, type RequestCapture } from "../lib/side-calls/request-replay.ts";
+import { BTW_FORK_CHANNEL, btwForkDescription, btwForkName, btwForkRecord, btwForkTaskId, type BtwForkRequest, type BtwForkResult } from "../lib/side-calls/btw-fork.ts";
+import { watchMcpTools } from "../lib/plugins/mcp-share.ts";
+import { sessionModelTier } from "../lib/models/session-model-tier.ts";
+import { type DescriptionForm, followDescriptionForm, registerVariantTool } from "../lib/profile/tool-variants.ts";
 import { prepareAgentArguments } from "./agent-args.ts";
-import { projectConfigDirName } from "../lib/sources.ts";
-import { instructionFileNames } from "../lib/instructions.ts";
+import { projectConfigDirName } from "../lib/profile/sources.ts";
+import { instructionFileNames } from "../lib/context/instructions.ts";
 import { pendingClaimReminder, runningAfterCompactionReminder } from "./pending-claim.ts";
 import { watchPermissionBridge } from "../lib/agents/subagent-gate.ts";
 import { watchHookBridge } from "../lib/agents/hook-bridge.ts";
-import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, type ReminderPayload, toldBlockFact } from "../lib/reminders.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, type ReminderPayload, toldBlockFact } from "../lib/request/reminders.ts";
 import { type BackgroundTask, generateTaskId, TASK_REGISTER_CHANNEL } from "../lib/agents/task-registry.ts";
 import { type ChildAction } from "../lib/rules/auto-mode-actions.ts";
 import { type ChildOutcome, forkTaskMessage, OUTPUT_CAP, type RpcChildHandle } from "./outcome.ts";
@@ -82,9 +82,9 @@ import { emptyUsage, formatStats, type UsageTotals } from "../lib/agents/usage.t
 import { cleanupWorktree, createWorktree, isGitRepo, keptWorktreeNote, type Worktree } from "../lib/agents/agent-worktree.ts";
 import type { AgentTools, LaunchLine, RunStatus, SubagentRefusal, SubagentsText } from "./text.ts";
 import { subagentWords } from "./words.ts";
-import { findProjectRoot } from "../lib/git.ts";
-import { followEnteredWorktree, registerWorktreeIsolation } from "../lib/worktree-isolation.ts";
-import { sessionWorkCwd } from "../lib/worktree-channel.ts";
+import { findProjectRoot } from "../lib/context/git.ts";
+import { followEnteredWorktree, registerWorktreeIsolation } from "../lib/agents/worktree-isolation.ts";
+import { sessionWorkCwd } from "../lib/agents/worktree-channel.ts";
 import {
 	agentNote,
 	agentMessage,
@@ -98,30 +98,30 @@ import {
 	taskNotification,
 	type TaskStatus,
 	withReview,
-} from "../lib/notifications.ts";
-import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
-import { ccToolRenderers, customMessageText, expandHintFor, liveUiCtx, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
+} from "../lib/notify/notifications.ts";
+import { persistIfLarge, sessionResultsDir } from "../lib/request/persisted-output.ts";
+import { ccToolRenderers, customMessageText, expandHintFor, liveUiCtx, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../lib/ui/tui-render.ts";
 import { deriveActivity, type FinishOutcome, LiveRunRegistry } from "./live-runs.ts";
 import { awaitHandBackReview } from "./hand-back-review.ts";
 import type { LiveSink } from "./runner.ts";
-import { recordUsage } from "../lib/usage-bus.ts";
-import { SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../lib/settings-channels.ts";
+import { recordUsage } from "../lib/notify/usage-bus.ts";
+import { SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../lib/rules/settings-channels.ts";
 import { SubagentWidget } from "./panel-widget.ts";
 import { type ProseRenderer, renderTranscript } from "./panel-render.ts";
 import { decodeStripKey, editorYieldsDown, isStripEntryKey, type StripKey } from "./panel-keys.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../lib/rules/modes.ts";
-import { AGENT_VIEW_CHANNEL, type AgentViewAnnouncement, agentViewTarget, userMessageForAgent } from "../lib/agent-view.ts";
-import { isKeyRelease, keyId, keyText } from "../lib/key-input.ts";
+import { AGENT_VIEW_CHANNEL, type AgentViewAnnouncement, agentViewTarget, userMessageForAgent } from "../lib/agents/agent-view.ts";
+import { isKeyRelease, keyId, keyText } from "../lib/ui/key-input.ts";
 import { moveTasksSelection, renderShellDetail, renderTasksDialog, settleTasksView, shellDetailKey, tasksItems, type TasksView } from "./tasks-dialog.ts";
 import { reduceShellKey, shellRows } from "./shell-panel.ts";
-import { trackShellTasks } from "../lib/shell-tasks.ts";
+import { trackShellTasks } from "../lib/shell-run/shell-tasks.ts";
 import { createMarkdownProse } from "../lib/ui/prose.ts";
 import { asScrollableViewport, ViewportMirror } from "./viewport-mirror.ts";
-import { registerLocalCommand } from "../lib/local-command.ts";
-import { extendingCompletions } from "../lib/argument-hints.ts";
-import { readStringsState, recordState } from "../lib/ledger/state.ts";
-import { panelUi } from "../lib/panel-focus.ts";
-import { dockRowsReporter, trackDockRows } from "../lib/dock-rows.ts";
+import { registerLocalCommand } from "../lib/ui/local-command.ts";
+import { extendingCompletions } from "../lib/ui/argument-hints.ts";
+import { readStringsState, recordState } from "../lib/request/ledger/state.ts";
+import { panelUi } from "../lib/ui/panel-focus.ts";
+import { dockRowsReporter, trackDockRows } from "../lib/ui/dock-rows.ts";
 
 /** How the guide's setup list names a server that is not connected. */
 const MCP_STATUS_LABELS: Record<McpStatusKind, string | undefined> = {
@@ -262,7 +262,7 @@ const BLOCK_ORDER: Record<SubagentBlockKey, number> = {
 	"subagent-agents": CONTEXT_ORDER.agents,
 	"subagent-delegation": CONTEXT_ORDER.delegation,
 };
-/** The `one-code:state` key of the models this account refused (lib/model-unusable.ts). */
+/** The `one-code:state` key of the models this account refused (lib/models/model-unusable.ts). */
 const REFUSED_MODELS_STATE = "subagents:refused-models";
 
 function subagentsExtension(pi: ExtensionAPI) {
@@ -397,7 +397,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 	 * classifier's rejections arrive on the shared channel, a child's own
 	 * provider refusal is reported by the runtime. Both roles pick from one
 	 * floor, so both would otherwise keep landing on the same refused model
-	 * (lib/model-unusable.ts). `usableModels` is the catalog every resolution
+	 * (lib/models/model-unusable.ts). `usableModels` is the catalog every resolution
 	 * and menu here reads.
 	 */
 	const unusableModels = new Set<string>();
@@ -544,7 +544,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 	/**
 	 * What an agent may use, for its catalog row (the profile words the
 	 * clause). Tools the session cannot have are left out: the agent cannot use
-	 * them either way, and the row must not name them (lib/live-tools.ts).
+	 * them either way, and the row must not name them (lib/profile/live-tools.ts).
 	 */
 	const agentTools = (a: AgentDefinition): AgentTools => {
 		const listed = (a.tools ?? []).filter(toolLive);
@@ -943,7 +943,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 	};
 
 	/**
-	 * Tell the editor which agent it now addresses (lib/agent-view.ts), or that
+	 * Tell the editor which agent it now addresses (lib/agents/agent-view.ts), or that
 	 * it is back on main. Viewing a run also puts it on `/tasks`' Completed list
 	 * once it settles, as Claude Code keeps a viewed agent (findings §40).
 	 */
@@ -1646,7 +1646,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 	 */
 	const spawnToolsFor = (record: AgentRunRecord, { resident = false } = {}): ToolDefinition[] => {
 		const depth = record.depth ?? 0;
-		// The child's cron tools reach this session's store (lib/agent-cron.ts);
+		// The child's cron tools reach this session's store (lib/agents/agent-cron.ts);
 		// none when the background feature is off (no store answers them).
 		const cronText = toolLive("cron_create") ? profileText().background?.cron : undefined;
 		const cron = cronText ? (agentCronTools(pi.events, { agentId: record.taskId, cwd: record.cwd, resident }, cronText) as unknown as ToolDefinition[]) : [];
@@ -1884,7 +1884,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		// agent stays reachable — SendMessage resumes it from its session
 		// file. Worktree residents are exempt: release would remove the
 		// worktree a resume still needs. So is one that owns a cron job, which
-		// fires only to a live agent (lib/agent-cron.ts). Armed from every turn end.
+		// fires only to a live agent (lib/agents/agent-cron.ts). Armed from every turn end.
 		let reaper: ReturnType<typeof setTimeout> | undefined;
 		const armReaper = () => {
 			if (worktree) return;
@@ -2023,7 +2023,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 	};
 
 	/**
-	 * `/btw`'s `f to fork` (lib/btw-fork.ts): a background fork that inherits
+	 * `/btw`'s `f to fork` (lib/side-calls/btw-fork.ts): a background fork that inherits
 	 * the conversation (if the session has one yet), then the side question and
 	 * its answer, and takes the question as its task. It reports back like any
 	 * spawned fork.
@@ -2091,7 +2091,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 	});
 
 	// Claude Code's Agent text, short or long by the model's tier
-	// (agent-description.ts, lib/tool-variants.ts); registered again when the
+	// (agent-description.ts, lib/profile/tool-variants.ts); registered again when the
 	// form changes.
 	const agentParams = subagentParams(words);
 	const agentTool = defineTool({

@@ -17,7 +17,7 @@
  *       turned off (ONECODE_FEATURES_OFF), plus a tool-switch check
  *       (ONECODE_TOOLS_OFF): each run must finish and send a request, the
  *       turned-off tools must be missing from it, and no text may name one
- *       (lib/live-tools.ts); a guard feature (hooks,
+ *       (lib/profile/live-tools.ts); a guard feature (hooks,
  *       the edit guard) turned off from the environment must stop pi at
  *       startup instead; with --dir, each run's requests are written there
  *
@@ -39,10 +39,10 @@ import os from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { withCompactionKeepBackfilled } from "../../extensions/lib/compaction-keep.mjs";
-import { FEATURE_IDS, FEATURES, isGuardFeature } from "../../extensions/lib/features.ts";
-import { projectSlug } from "../../extensions/lib/memory.ts";
-import { withReplacedBuiltinsOff } from "../../extensions/lib/replaced-builtins.mjs";
+import { withCompactionKeepBackfilled } from "../../extensions/lib/app/compaction-keep.mjs";
+import { FEATURE_IDS, FEATURES, isGuardFeature } from "../../extensions/lib/profile/features.ts";
+import { projectSlug } from "../../extensions/lib/context/memory.ts";
+import { withReplacedBuiltinsOff } from "../../extensions/lib/app/replaced-builtins.mjs";
 
 const { values: opts } = parseArgs({
 	options: {
@@ -162,7 +162,7 @@ const PROJECT_SKILLS = {
 	"golden-hidden": ["description: A user-only skill.", "Hidden steps."],
 };
 
-/** Writes the project skills, and turns golden-off off and golden-hidden user-only (lib/skill-overrides.ts). */
+/** Writes the project skills, and turns golden-off off and golden-hidden user-only (lib/plugins/skill-overrides.ts). */
 function writeProjectSkills(project, agentDir) {
 	for (const [name, lines] of Object.entries(PROJECT_SKILLS)) {
 		const dir = join(project, ".claude", "skills", name);
@@ -450,7 +450,7 @@ function makeNormalizer({ home, project, root }) {
 	const text = (s) => {
 		let out = s;
 		for (const [from, to] of replacements) out = out.split(from).join(to);
-		// The scratchpad (lib/scratchpad.ts): <tmp>/onecode-<uid>/<project slug>/<session>/scratchpad.
+		// The scratchpad (lib/core/scratchpad.ts): <tmp>/onecode-<uid>/<project slug>/<session>/scratchpad.
 		out = out.replace(/\/[^\s`'"]*\/onecode-\d+\/[^/\s]+\/[^/\s]+\/scratchpad/g, "<SCRATCHPAD>");
 		// Cron job ids (lib/agents/cron.ts, 8 hex digits) where results name them,
 		// and as cron_delete's input (Anthropic's object, OpenAI's JSON string).

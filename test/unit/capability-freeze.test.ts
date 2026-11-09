@@ -2,20 +2,20 @@
  * Message 1's capability blocks are live state, rendered when a request opens
  * an epoch; inside an epoch message 1 is the ledger's record, so their owners
  * announce what changed on the request's tail at render time, from what the
- * epoch told (extensions/ledger, lib/reminders.ts RENDER_CHANNEL).
+ * epoch told (extensions/ledger, lib/request/reminders.ts RENDER_CHANNEL).
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { toolsInUse } from "../../extensions/lib/deferred.ts";
-import type { ToldFact } from "../../extensions/lib/ledger/records.ts";
-import { pluginRoot } from "../../extensions/lib/plugin-root.ts";
-import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/reminders.ts";
-import { projectConfigDir } from "../../extensions/lib/sources.ts";
-import { setSkillState } from "../../extensions/lib/skill-overrides.ts";
+import { toolsInUse } from "../../extensions/lib/request/deferred.ts";
+import type { ToldFact } from "../../extensions/lib/request/ledger/records.ts";
+import { pluginRoot } from "../../extensions/lib/plugins/plugin-root.ts";
+import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/request/reminders.ts";
+import { projectConfigDir } from "../../extensions/lib/profile/sources.ts";
+import { setSkillState } from "../../extensions/lib/plugins/skill-overrides.ts";
 import { listableSkillNames } from "../../extensions/skill/announce.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import skillExtension from "../../extensions/skill/index.ts";
 import subagentsExtension from "../../extensions/subagents/index.ts";
 import { createFakeCtx, createFakePi, type FakePi, renderRequest } from "./helpers/fake-pi.ts";

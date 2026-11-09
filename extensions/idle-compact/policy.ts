@@ -22,7 +22,7 @@
  * "Idle compaction before the cache expires").
  */
 
-import type { TimerOps } from "../lib/timer-ops.ts";
+import type { TimerOps } from "../lib/core/timer-ops.ts";
 
 /** The notice Claude Code appends after an idle compaction. */
 export const IDLE_COMPACT_NOTICE = "Compacted while idle, before the prompt cache expired";

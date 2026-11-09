@@ -5,7 +5,7 @@
  * The authoring reference (script API, quality patterns, resume, worked
  * examples) is the bundled `workflow-authoring` skill, which the description
  * tells the model to load before writing a script. The size line follows
- * `workflowSizeGuideline` in One Code's settings (lib/product-settings.ts);
+ * `workflowSizeGuideline` in One Code's settings (lib/profile/product-settings.ts);
  * "unrestricted" sends no line, as in Claude Code. Changes from Claude Code's
  * text: the setting is named where Claude Code points to its /config row, and
  * tool names are One Code's.

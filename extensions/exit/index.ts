@@ -16,10 +16,10 @@
  * a Claude Code user needs, without patching pi.
  */
 
-import { brand } from "../lib/brand.mjs";
-import { feature } from "../lib/feature.ts";
+import { brand } from "../lib/profile/brand.mjs";
+import { feature } from "../lib/profile/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { ONE_SHOT_COMMAND_FAILED_CHANNEL, type RunOutcome, RunOutcomeLatch, TURN_FAILED_CHANNEL } from "../lib/interrupt.ts";
+import { ONE_SHOT_COMMAND_FAILED_CHANNEL, type RunOutcome, RunOutcomeLatch, TURN_FAILED_CHANNEL } from "../lib/notify/interrupt.ts";
 
 function exitExtension(pi: ExtensionAPI) {
 	const outcome = new RunOutcomeLatch();

@@ -1,8 +1,8 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { memoryDir, projectSlug } from "../../extensions/lib/memory.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
-import { userConfigDir } from "../../extensions/lib/sources.ts";
+import { memoryDir, projectSlug } from "../../extensions/lib/context/memory.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { userConfigDir } from "../../extensions/lib/profile/sources.ts";
 import {
 	INDEX_MAX_CHARS,
 	INDEX_MAX_LINES,
@@ -10,7 +10,7 @@ import {
 	loadableIndexContent,
 	stampFrontmatter,
 	truncateIndex,
-} from "../../extensions/lib/memory-content.ts";
+} from "../../extensions/lib/context/memory-content.ts";
 
 describe("projectSlug", () => {
 	it("matches Claude Code's slugging: non [A-Za-z0-9-] chars become dashes", () => {

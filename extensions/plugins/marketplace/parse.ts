@@ -14,7 +14,7 @@ import { existsSync, statSync } from "node:fs";
 import os from "node:os";
 import { basename, isAbsolute, resolve } from "node:path";
 import type { MarketplaceSource } from "./types.ts";
-import { expandTilde } from "../../lib/paths.ts";
+import { expandTilde } from "../../lib/profile/paths.ts";
 
 export interface ParsedMarketplaceInput {
 	source: MarketplaceSource;

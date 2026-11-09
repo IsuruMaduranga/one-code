@@ -2,7 +2,7 @@
 /**
  * Keyless smoke for one pi version: load this checkout as a pi package on the
  * given pi CLI and run one real turn against a local mock model, so a pi in
- * the tested range (extensions/lib/pi-version.ts) is shown to load the whole
+ * the tested range (extensions/lib/app/pi-version.ts) is shown to load the whole
  * extension set, start a session and run a tool. The mock speaks the OpenAI
  * chat-completions stream: its first reply calls the bash tool with a marker
  * command, its second answers with a done marker once the tool result is back.

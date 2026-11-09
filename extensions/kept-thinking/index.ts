@@ -12,10 +12,10 @@
  * compaction), so each capture carries the stripped history the session sent.
  */
 
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { signsThinking, withoutKeptThinking } from "../lib/request/kept-thinking.ts";
-import { latestCompaction } from "../lib/compaction-boundary.ts";
+import { latestCompaction } from "../lib/request/compaction-boundary.ts";
 
 function keptThinkingExtension(pi: ExtensionAPI) {
 	pi.on("context", (event, ctx) => {

@@ -1,26 +1,26 @@
 /**
- * The profile in force (lib/profile.ts), the feature() wrapper's view of pi
- * (lib/feature.ts), and the permission gate's use of the tool switches.
+ * The profile in force (lib/profile/profile.ts), the feature() wrapper's view of pi
+ * (lib/profile/feature.ts), and the permission gate's use of the tool switches.
  */
 import { afterEach, describe, expect, it } from "vitest";
-import { childExtensionPaths } from "../../extensions/lib/child-extensions.ts";
-import { feature, profiledPi } from "../../extensions/lib/feature.ts";
-import { activeProfile, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile.ts";
-import type { Profile } from "../../extensions/lib/profile-contract.ts";
+import { childExtensionPaths } from "../../extensions/lib/agents/child-extensions.ts";
+import { feature, profiledPi } from "../../extensions/lib/profile/feature.ts";
+import { activeProfile, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
+import type { Profile } from "../../extensions/lib/profile/profile-contract.ts";
 import { profile as shippedProfile } from "../../profile/index.ts";
-import { discoverPlugins, invalidatePluginsCache } from "../../extensions/lib/plugins.ts";
-import { autoMemoryEnabled, resetAutoMemoryForTest } from "../../extensions/lib/auto-memory.ts";
-import { DEFER_CHANNEL } from "../../extensions/lib/deferred.ts";
-import { watchMcpTools } from "../../extensions/lib/mcp-share.ts";
-import { scanSkills } from "../../extensions/lib/skill-scan.ts";
+import { discoverPlugins, invalidatePluginsCache } from "../../extensions/lib/plugins/plugins.ts";
+import { autoMemoryEnabled, resetAutoMemoryForTest } from "../../extensions/lib/context/auto-memory.ts";
+import { DEFER_CHANNEL } from "../../extensions/lib/request/deferred.ts";
+import { watchMcpTools } from "../../extensions/lib/plugins/mcp-share.ts";
+import { scanSkills } from "../../extensions/lib/plugins/skill-scan.ts";
 import { decide } from "../../extensions/lib/rules/matcher.ts";
 import { ALLOWLIST_ESSENTIALS, agentToolOptions } from "../../extensions/lib/agents/agent-catalog.ts";
-import { PINNED_TOOLS } from "../../extensions/lib/profile.ts";
-import { WITHHOLD_CHANNEL } from "../../extensions/lib/deferred.ts";
+import { PINNED_TOOLS } from "../../extensions/lib/profile/profile.ts";
+import { WITHHOLD_CHANNEL } from "../../extensions/lib/request/deferred.ts";
 import toolSearchExtension from "../../extensions/tool-search/index.ts";
 import { createFakePi } from "./helpers/fake-pi.ts";
 import { makeToolSearchFakePi } from "./helpers/tool-search-fake-pi.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 
 const empty: Profile = { features: {}, tools: {}, childExtensions: [], text: shippedProfile.text };
 const use = (profile: Partial<Profile>, env: NodeJS.ProcessEnv = {}) =>

@@ -4,16 +4,16 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { classify } from "../../extensions/permissions/auto-mode/classifier.ts";
 import { classifierHistory, messageText } from "../../extensions/permissions/auto-mode/history.ts";
-import { invalidatePluginsCache } from "../../extensions/lib/plugins.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
-import { shellQuote } from "../../extensions/lib/shell-quote.ts";
+import { invalidatePluginsCache } from "../../extensions/lib/plugins/plugins.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { shellQuote } from "../../extensions/lib/shell/shell-quote.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import pluginsExtension from "../../extensions/plugins/index.ts";
 import skillExtension from "../../extensions/skill/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
-import { brand } from "../../extensions/lib/brand.mjs";
-import { productSettingsPath } from "../../extensions/lib/product-settings.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
+import { productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
 
 vi.mock("../../extensions/permissions/auto-mode/classifier.ts", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../../extensions/permissions/auto-mode/classifier.ts")>()),

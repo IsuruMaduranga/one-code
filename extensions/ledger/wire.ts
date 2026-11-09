@@ -6,9 +6,9 @@
  *
  * 1. Inside an epoch it splices: the base request's recorded list, then pi's
  *    rendering of the tail, under the recorded system prompt and tools, with
- *    tools added mid-epoch appended (lib/ledger/wire.ts spliceRequest).
- * 2. It settles the layout (lib/ledger/layout.ts: no system message stranded
- *    before a user message) and validates the request (lib/ledger/validate.ts): no reference to an
+ *    tools added mid-epoch appended (lib/request/ledger/wire.ts spliceRequest).
+ * 2. It settles the layout (lib/request/ledger/layout.ts: no system message stranded
+ *    before a user message) and validates the request (lib/request/ledger/validate.ts): no reference to an
  *    undeclared tool, no system message stranded before a user message. A
  *    problem is a bug; it is dropped and reported, so it costs one block,
  *    never a 400. ONECODE_LEDGER_STRICT=1 sends it unrepaired instead, for
@@ -30,19 +30,19 @@
  * apart: pi-ai clamps a request's cap to the window's room, down to 1.
  */
 
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { sessionIdentity } from "../lib/anthropic-auth.ts";
-import { notifyOrPrint } from "../lib/headless-output.ts";
-import { foldSession } from "../lib/ledger/fold-memo.ts";
-import { LEDGER_PLAN_CHANNEL, LEDGER_SENT_CHANNEL, type LedgerSent, type RequestPlan } from "../lib/ledger/plan.ts";
-import { makeRecord, RECORD, type ToldFact } from "../lib/ledger/records.ts";
-import { deliveredAfterRepair, repairRequest, validateRequest } from "../lib/ledger/validate.ts";
-import { settlePayload } from "../lib/ledger/layout.ts";
-import { appendPoint, encodeRequest, hasWarmCap, listKey, type RecordedRequest, recordedBody, recordedRequest, samePrefix, spliceRequest, type WirePayload, withBranchToolOrder, withRequestFields } from "../lib/ledger/wire.ts";
-import { type AffinityModel, affinityHeaders } from "../lib/request-replay.ts";
-import { extensionVersion } from "../lib/package-version.ts";
-import { brand, envName } from "../lib/brand.mjs";
+import { sessionIdentity } from "../lib/request/anthropic-auth.ts";
+import { notifyOrPrint } from "../lib/notify/headless-output.ts";
+import { foldSession } from "../lib/request/ledger/fold-memo.ts";
+import { LEDGER_PLAN_CHANNEL, LEDGER_SENT_CHANNEL, type LedgerSent, type RequestPlan } from "../lib/request/ledger/plan.ts";
+import { makeRecord, RECORD, type ToldFact } from "../lib/request/ledger/records.ts";
+import { deliveredAfterRepair, repairRequest, validateRequest } from "../lib/request/ledger/validate.ts";
+import { settlePayload } from "../lib/request/ledger/layout.ts";
+import { appendPoint, encodeRequest, hasWarmCap, listKey, type RecordedRequest, recordedBody, recordedRequest, samePrefix, spliceRequest, type WirePayload, withBranchToolOrder, withRequestFields } from "../lib/request/ledger/wire.ts";
+import { type AffinityModel, affinityHeaders } from "../lib/side-calls/request-replay.ts";
+import { extensionVersion } from "../lib/app/package-version.ts";
+import { brand, envName } from "../lib/profile/brand.mjs";
 
 function ledgerWireExtension(pi: ExtensionAPI) {
 	const by = extensionVersion();
@@ -120,7 +120,7 @@ function ledgerWireExtension(pi: ExtensionAPI) {
 		// An epoch renders pi's tools again, in the order the branch first declared them.
 		else payload = withBranchToolOrder(payload, current.fold.toolOrder, api);
 		const spliced = payload;
-		// The final layout pass: no system message stranded before a user message (lib/ledger/layout.ts).
+		// The final layout pass: no system message stranded before a user message (lib/request/ledger/layout.ts).
 		payload = settlePayload(payload, api, listKey(api), end);
 		let delivered: { consumed: string[]; facts: ToldFact[] } = { consumed: current.consumed, facts: current.carried.flatMap((block) => block.facts) };
 

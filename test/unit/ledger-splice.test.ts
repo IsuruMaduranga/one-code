@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { foldBranch } from "../../extensions/lib/ledger/fold.ts";
-import { planRequest } from "../../extensions/lib/ledger/plan.ts";
-import { makeRecord, RECORD } from "../../extensions/lib/ledger/records.ts";
-import { deliveredAfterRepair, repairRequest, validateRequest } from "../../extensions/lib/ledger/validate.ts";
-import { contentHash, declaredToolNames, isTrailer, mergeDeclarations, payloadHead, preludeLength, recordedRequest, spliceRequest, withBranchToolOrder, withRecordedHead } from "../../extensions/lib/ledger/wire.ts";
+import { foldBranch } from "../../extensions/lib/request/ledger/fold.ts";
+import { planRequest } from "../../extensions/lib/request/ledger/plan.ts";
+import { makeRecord, RECORD } from "../../extensions/lib/request/ledger/records.ts";
+import { deliveredAfterRepair, repairRequest, validateRequest } from "../../extensions/lib/request/ledger/validate.ts";
+import { contentHash, declaredToolNames, isTrailer, mergeDeclarations, payloadHead, preludeLength, recordedRequest, spliceRequest, withBranchToolOrder, withRecordedHead } from "../../extensions/lib/request/ledger/wire.ts";
 
 const identity = { api: "anthropic-messages", provider: "anthropic", model: "claude-sonnet-5-5", auth: "key" };
 const mark = { type: "ephemeral" };

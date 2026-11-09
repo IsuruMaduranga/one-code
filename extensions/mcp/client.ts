@@ -3,14 +3,14 @@
  * lifecycle, timeouts, and failure reporting.
  */
 
-import { brand } from "../lib/brand.mjs";
+import { brand } from "../lib/profile/brand.mjs";
 import { isDeepStrictEqual } from "node:util";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
-import { childProcessEnv } from "../lib/app-launch.mjs";
+import { childProcessEnv } from "../lib/app/app-launch.mjs";
 import type { McpServer } from "./config.ts";
 import { collectPages } from "./discovery.ts";
 import { failureOf, McpFailureError, shownStderr } from "./failure.ts";
@@ -177,7 +177,7 @@ function buildTransport(
 		const transport = new sdk.StdioClientTransport({
 			command: server.command,
 			args: server.args,
-			// The user's own environment under the bundled app (lib/app-launch.mjs), then the server's.
+			// The user's own environment under the bundled app (lib/app/app-launch.mjs), then the server's.
 			env: { ...(childProcessEnv(process.env) as Record<string, string>), ...(server.env ?? {}) },
 			...(server.cwd ? { cwd: server.cwd } : {}),
 			stderr: "pipe",

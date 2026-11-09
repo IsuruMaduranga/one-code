@@ -7,7 +7,7 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { DEFER_CHANNEL } from "../../extensions/lib/deferred.ts";
+import { DEFER_CHANNEL } from "../../extensions/lib/request/deferred.ts";
 
 export const LATE_TOOL_NAME = "late_echo";
 

@@ -8,9 +8,9 @@
  * side.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { claudeConfigDir, productStateDir } from "../../extensions/lib/paths.ts";
-import { runtimeProtectedDirs } from "../../extensions/lib/permission-gate.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
+import { claudeConfigDir, productStateDir } from "../../extensions/lib/profile/paths.ts";
+import { runtimeProtectedDirs } from "../../extensions/lib/agents/permission-gate.ts";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 
 afterEach(() => vi.unstubAllEnvs());
 

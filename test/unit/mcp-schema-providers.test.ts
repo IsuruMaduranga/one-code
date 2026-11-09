@@ -7,7 +7,7 @@ import { getJsonSchemaToolParameters, makeStrictJsonSchema, resolveJsonSchemaStr
 import { convertResponsesTools } from "@earendil-works/pi-ai/api/openai-responses-shared";
 import { convertTools as convertGoogleTools } from "@earendil-works/pi-ai/api/google-shared";
 import { jsonSchemaToTypeBox as convertSchema } from "../../extensions/mcp/schema.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const mcpText = requireText("mcp");
 

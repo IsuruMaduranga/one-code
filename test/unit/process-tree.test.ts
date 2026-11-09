@@ -1,5 +1,5 @@
 /**
- * lib/process-tree.ts against real shells (the repo never mocks child_process).
+ * lib/shell-run/process-tree.ts against real shells (the repo never mocks child_process).
  * With zsh as $SHELL, `cmd; echo` and pipelines run the command outside the
  * `$SHELL -c` leader; signalling the leader alone left them as orphans holding
  * the stdout pipe (LIFECYCLE-REVIEW-2026-09-06 M2). Detached spawn + group kill
@@ -14,8 +14,8 @@
 import { execFile, spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { detachedSpawnOptions, EXIT_STDIO_MAX_MS, killProcessTree, rememberedGroupAlive, stopProcessTree, waitForChildExit } from "../../extensions/lib/process-tree.ts";
-import { bashSpawnOrThrow } from "../../extensions/lib/shell-spawn.ts";
+import { detachedSpawnOptions, EXIT_STDIO_MAX_MS, killProcessTree, rememberedGroupAlive, stopProcessTree, waitForChildExit } from "../../extensions/lib/shell-run/process-tree.ts";
+import { bashSpawnOrThrow } from "../../extensions/lib/shell-run/shell-spawn.ts";
 
 const win32 = process.platform === "win32";
 
@@ -92,7 +92,7 @@ describe("killProcessTree", () => {
 
 describe("stopProcessTree", () => {
 	// Windows has no SIGTERM to ignore: taskkill /F is the first and only signal,
-	// so the grace period does not exist there (lib/process-tree.ts).
+	// so the grace period does not exist there (lib/shell-run/process-tree.ts).
 	it.skipIf(win32)("SIGKILLs after the grace period when the tree ignores SIGTERM", async () => {
 		// The shell ignores TERM and the disposition is inherited by sleep.
 		const child = spawnShell("trap '' TERM; sleep 30");
@@ -155,7 +155,7 @@ describe("stopProcessTree", () => {
 	it.skipIf(win32)("force-kills a stopped tree at process exit, before its grace timer could fire (A3-M1, the quit path)", async () => {
 		// A throwaway node process stops its own TERM-resistant group and exits 50 ms
 		// later, as pi's quit does (dispose, then process.exit).
-		const moduleUrl = new URL(`file://${resolve("extensions/lib/process-tree.ts")}`).href;
+		const moduleUrl = new URL(`file://${resolve("extensions/lib/shell-run/process-tree.ts")}`).href;
 		const script = [
 			`import { spawn } from "node:child_process";`,
 			`import { detachedSpawnOptions, stopProcessTree } from ${JSON.stringify(moduleUrl)};`,

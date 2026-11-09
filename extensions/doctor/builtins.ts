@@ -1,17 +1,17 @@
 /**
  * Which of pi's built-in extensions that One Code replaces the running pi
- * still loads, read from pi's own settings (lib/replaced-builtins.mjs has the
+ * still loads, read from pi's own settings (lib/app/replaced-builtins.mjs has the
  * rule). Shared by the startup notice (branding) and `/doctor`, in the
  * session and from `onecode doctor`.
  */
 
-import { brand } from "../lib/brand.mjs";
+import { brand } from "../lib/profile/brand.mjs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { CONFIG_DIR_NAME, getPackageDir, type SettingsManager } from "@earendil-works/pi-coding-agent";
-import { piHasBuiltinExtensions } from "../lib/pi-version.ts";
-import { type CompactionKeepView, compactionKeepView } from "../lib/compaction-keep.mjs";
-import { BUILTIN_EXTENSIONS_PI, type BuiltinLeftOn, builtinsLeftOn, type GlobMatcher, globMatches } from "../lib/replaced-builtins.mjs";
+import { piHasBuiltinExtensions } from "../lib/app/pi-version.ts";
+import { type CompactionKeepView, compactionKeepView } from "../lib/app/compaction-keep.mjs";
+import { BUILTIN_EXTENSIONS_PI, type BuiltinLeftOn, builtinsLeftOn, type GlobMatcher, globMatches } from "../lib/app/replaced-builtins.mjs";
 
 /**
  * pi's own minimatch, the matcher its `!` override entries go through, loaded

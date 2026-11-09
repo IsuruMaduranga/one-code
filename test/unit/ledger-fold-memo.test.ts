@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { foldOnce, foldSession } from "../../extensions/lib/ledger/fold-memo.ts";
-import { foldBranch } from "../../extensions/lib/ledger/fold.ts";
-import { type EntryLike, makeRecord, RECORD, type RequestIdentity } from "../../extensions/lib/ledger/records.ts";
-import { resetProcessStateForTest } from "../../extensions/lib/process-state.ts";
+import { foldOnce, foldSession } from "../../extensions/lib/request/ledger/fold-memo.ts";
+import { foldBranch } from "../../extensions/lib/request/ledger/fold.ts";
+import { type EntryLike, makeRecord, RECORD, type RequestIdentity } from "../../extensions/lib/request/ledger/records.ts";
+import { resetProcessStateForTest } from "../../extensions/lib/profile/process-state.ts";
 
 const live: RequestIdentity = { api: "anthropic-messages", provider: "anthropic", model: "claude-sonnet-4-6", auth: "key" };
 

@@ -7,8 +7,8 @@
  * persisted output and a denial without words.
  */
 import { describe, expect, it } from "vitest";
-import { requireText } from "../../extensions/lib/profile.ts";
-import { userDenialKind, userDenialText } from "../../extensions/lib/user-denial.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { userDenialKind, userDenialText } from "../../extensions/lib/consent/user-denial.ts";
 import { toolCallCorruption } from "../text/tool-call-corruption/index.ts";
 import { toolResults } from "../text/tool-results/index.ts";
 

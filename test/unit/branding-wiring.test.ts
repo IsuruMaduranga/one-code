@@ -4,12 +4,12 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import brandingExtension from "../../extensions/branding/index.ts";
-import { ARGUMENT_HINT_CHANNEL } from "../../extensions/lib/argument-hints.ts";
+import { ARGUMENT_HINT_CHANNEL } from "../../extensions/lib/ui/argument-hints.ts";
 import { KEEP_DECLINED_KEY } from "../../extensions/branding/compaction-keep.ts";
-import { KEEP_NO, KEEP_YES } from "../../extensions/lib/compaction-keep.mjs";
-import { TURN_OFF_YES } from "../../extensions/lib/replaced-builtins.mjs";
-import { brand } from "../../extensions/lib/brand.mjs";
-import { productSettingsPath } from "../../extensions/lib/product-settings.ts";
+import { KEEP_NO, KEEP_YES } from "../../extensions/lib/app/compaction-keep.mjs";
+import { TURN_OFF_YES } from "../../extensions/lib/app/replaced-builtins.mjs";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
+import { productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
 import { stubHome } from "./helpers/home.ts";
 
 function fakePi() {

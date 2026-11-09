@@ -1,5 +1,5 @@
 /**
- * lib/tool-path.ts is a vendored copy of pi's `resolveToCwd` (not exported by
+ * lib/rules/tool-path.ts is a vendored copy of pi's `resolveToCwd` (not exported by
  * the package); this checks it against pi's own function, so a pi upgrade
  * that changes the resolution fails here instead of reopening the file
  * tracker's bypass (TOOLS-REVIEW-2026-09-26 M1).
@@ -10,7 +10,7 @@ import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 // pi's internal module (not in the package exports), imported only to compare.
 import { resolveToCwd } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/path-utils.js";
-import { normalizeToolPath, resolveToolPath } from "../../extensions/lib/tool-path.ts";
+import { normalizeToolPath, resolveToolPath } from "../../extensions/lib/rules/tool-path.ts";
 
 describe("resolveToolPath", () => {
 	const cwd = join(homedir(), "proj");

@@ -5,7 +5,7 @@
  */
 
 import type { ChildAction } from "../lib/rules/auto-mode-actions.ts";
-import type { FireConversation } from "../lib/agent-cron.ts";
+import type { FireConversation } from "../lib/agents/agent-cron.ts";
 import type { UsageTotals } from "../lib/agents/usage.ts";
 import { subagentWords } from "./words.ts";
 
@@ -27,7 +27,7 @@ export interface ForkIsolation {
  * With `isolation`, the fork is told that its working directory moved: the
  * inherited system prompt and transcript name the parent's checkout in every
  * path, so without this line a worktree fork edits the main tree (the guard in
- * lib/worktree-isolation.ts then refuses the write, but the model needs to know
+ * lib/agents/worktree-isolation.ts then refuses the write, but the model needs to know
  * where to write instead — SUBAGENT-REVIEW H3).
  */
 export function forkTaskMessage(task: string, isolation?: ForkIsolation): string {
@@ -64,7 +64,7 @@ export interface RpcChildHandle {
 	 * the caller never reports a delivery that did not happen.
 	 */
 	send(message: string): Promise<"started" | "steered">;
-	/** The agent's own session: a cron fire's `/loop` sentinel reads and records its delivery there (lib/agent-cron.ts). */
+	/** The agent's own session: a cron fire's `/loop` sentinel reads and records its delivery there (lib/agents/agent-cron.ts). */
 	conversation: FireConversation;
 	busy(): boolean;
 	exited(): boolean;

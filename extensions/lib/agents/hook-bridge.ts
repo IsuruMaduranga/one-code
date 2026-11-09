@@ -23,8 +23,8 @@
  * implement yet).
  */
 
-import { brandedId } from "../brand.mjs";
-import { type BridgeWatchApi, watchBridge } from "../bridge-watch.ts";
+import { brandedId } from "../profile/brand.mjs";
+import { type BridgeWatchApi, watchBridge } from "../consent/bridge-watch.ts";
 
 export const SUBAGENT_HOOK_CHANNEL = brandedId("subagent-hook-bridge");
 
@@ -79,7 +79,7 @@ export interface SubagentHookPayload {
 	bridge: HookBridge;
 }
 
-/** A lazy getter for the latest published hook bridge (`lib/bridge-watch.ts`); undefined until the hooks extension publishes. */
+/** A lazy getter for the latest published hook bridge (`lib/consent/bridge-watch.ts`); undefined until the hooks extension publishes. */
 export function watchHookBridge(pi: BridgeWatchApi): () => HookBridge | undefined {
 	return watchBridge(pi, SUBAGENT_HOOK_CHANNEL, (data) => (data as SubagentHookPayload | undefined)?.bridge);
 }

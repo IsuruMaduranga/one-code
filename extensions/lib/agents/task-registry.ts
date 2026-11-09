@@ -6,7 +6,7 @@
  * event bus, since module state does not cross extension boundaries).
  */
 
-import { brandedId } from "../brand.mjs";
+import { brandedId } from "../profile/brand.mjs";
 import { randomBytes } from "node:crypto";
 import type { ShownTask } from "../../background/text.ts";
 

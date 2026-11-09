@@ -17,8 +17,8 @@ import {
 } from "../../extensions/permissions/auto-mode/prompt.ts";
 import { buildCategoryIndex, groundCategory } from "../../extensions/permissions/auto-mode/rules.ts";
 import { buildRuleset } from "../../extensions/permissions/auto-mode/classifier-prompt.ts";
-import { brand, envName } from "../../extensions/lib/brand.mjs";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { brand, envName } from "../../extensions/lib/profile/brand.mjs";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { CLEAN_UP_REQUEST, DEFAULT_ENVIRONMENT } from "./helpers/classify-request.ts";
 
 const words = requireText("classifier");

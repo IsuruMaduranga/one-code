@@ -18,7 +18,7 @@ export interface FixPromptInput {
 	productProjectSettingsPath: string;
 	/** True when auto mode is writing `auto-mode-decisions.jsonl` next to the session files. */
 	decisionLogEnabled: boolean;
-	/** True when the profile's source provider is switched off (One Code's independent mode, lib/sources.ts `sourcesOff`). */
+	/** True when the profile's source provider is switched off (One Code's independent mode, lib/profile/sources.ts `sourcesOff`). */
 	sourcesOff?: boolean;
 	/** The key that cycles permission modes, as the TUI names it. */
 	modeCycleKey: string;

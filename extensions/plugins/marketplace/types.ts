@@ -8,7 +8,7 @@
  * entry never blanks the rest of the marketplace.
  */
 
-import { validPluginName } from "../../lib/plugins.ts";
+import { validPluginName } from "../../lib/plugins/plugins.ts";
 
 export type MarketplaceSource =
 	| { source: "github"; repo: string; ref?: string }

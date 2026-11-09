@@ -34,7 +34,7 @@ import {
 	type Segment,
 	type Token,
 } from "./shell-analysis.ts";
-import { shellWords } from "../shell-words.ts";
+import { shellWords } from "./shell-words.ts";
 
 export const clip = (text: string, max = 200): string => (text.length > max ? `${text.slice(0, max)}…` : text);
 

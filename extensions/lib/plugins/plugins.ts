@@ -1,0 +1,428 @@
+/**
+ * Claude Code plugin discovery (pure).
+ *
+ * Two roots are merged:
+ *
+ *   ~/.claude/plugins/            Claude Code's own installs — READ-ONLY.
+ *   <agentDir>/plugins/           One Code's installs (lib/plugins/plugin-root.ts) —
+ *                                 the only root One Code ever writes.
+ *
+ * Both hold the same on-disk format:
+ *
+ *   <root>/installed_plugins.json
+ *     { "version": 2, "plugins": { "<name>@<marketplace>": [{ scope, installPath, version, ... }] } }
+ *
+ *   <installPath>/.claude-plugin/plugin.json   { name, description, author }
+ *   <installPath>/agents/*.md                  agent definitions
+ *   <installPath>/commands/*.md                slash commands
+ *   <installPath>/skills/<name>/SKILL.md       skills
+ *   <installPath>/.mcp.json                    MCP servers
+ *   <installPath>/.lsp.json                    LSP servers (extensions/lsp)
+ *
+ * Enabled state differs by origin: Claude Code keeps it in settings.json's
+ * `enabledPlugins` map (its installed_plugins.json entries have NO enabled
+ * field), overridable from One Code via <one-code root>/overrides.json;
+ * One Code's own entries carry `enabled` directly (we own that schema copy).
+ *
+ * Claude Code namespaces everything a plugin provides as `<plugin>:<name>`, so
+ * two plugins can both ship a `commit` command.
+ */
+
+import { brand, brandedId } from "../profile/brand.mjs";
+import { featureEnabled } from "../profile/profile.ts";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import os from "node:os";
+import { basename, join, resolve, sep } from "node:path";
+import { readJsonFile } from "../core/atomic-write.ts";
+import { readEnabledPlugins } from "../profile/claude-settings.ts";
+import { readOverrides } from "./plugin-overrides.ts";
+import { pluginRoot } from "./plugin-root.ts";
+import { isSkillEnabled, readSkillStates, skillOverrideKey } from "./skill-overrides.ts";
+import { openSources } from "../profile/sources.ts";
+
+export interface PluginManifest {
+	name?: string;
+	description?: string;
+}
+
+export type PluginOrigin = "claude" | "product";
+
+export interface Plugin {
+	/** Raw registry key (`<name>@<marketplace>`) — what enabledPlugins/overrides key on. */
+	id: string;
+	/** Plugin name, without the @marketplace suffix (manifest name when present). */
+	name: string;
+	marketplace?: string;
+	path: string;
+	version?: string;
+	description?: string;
+	/** Which root the plugin was discovered under. */
+	originRoot: PluginOrigin;
+	/** Effective enabled state after settings/override merging. */
+	enabled: boolean;
+	/** True when a claude-origin plugin's state comes from our overrides.json. */
+	overridden?: boolean;
+	/** Base dir for the plugin's `${CLAUDE_PLUGIN_DATA}` (per-origin). */
+	dataRoot: string;
+	/** Raw `enabled` from the installed_plugins.json entry (meaningful only for the product origin). */
+	rawEnabled?: boolean;
+}
+
+export interface PluginResources {
+	agentsDir?: string;
+	commandsDir?: string;
+	skillsDir?: string;
+	mcpConfig?: string;
+	/** <plugin>/hooks/hooks.json when present — consumed by extensions/hooks. */
+	hooksConfig?: string;
+	/** <plugin>/.lsp.json when present — consumed by extensions/lsp. */
+	lspConfig?: string;
+}
+
+interface InstalledEntry {
+	scope?: string;
+	/** For scope "project"/"local": the project the plugin was installed for. */
+	projectPath?: string;
+	installPath?: string;
+	version?: string;
+	enabled?: boolean;
+}
+
+/**
+ * Whether an installed-plugin entry applies to the session cwd. A project- or
+ * local-scoped entry belongs to one project (its `projectPath`), so it should
+ * be live only in that project or a descendant — not in every project under One
+ * Code (review L6). A user-scoped entry (or one with no `projectPath`, or when
+ * cwd is unknown) applies everywhere.
+ */
+export function entryAppliesToCwd(entry: InstalledEntry, cwd: string | undefined): boolean {
+	if (!cwd) return true;
+	if (entry.scope !== "project" && entry.scope !== "local") return true;
+	if (!entry.projectPath) return true;
+	const base = resolve(entry.projectPath);
+	const here = resolve(cwd);
+	return here === base || here.startsWith(base + sep);
+}
+
+export function splitPluginKey(key: string): { name: string; marketplace?: string } {
+	const at = key.lastIndexOf("@");
+	if (at <= 0) return { name: key };
+	return { name: key.slice(0, at), marketplace: key.slice(at + 1) };
+}
+
+/** Read a file's raw contents, or `undefined` if it doesn't exist or can't be read. */
+export function tryReadFile(path: string): string | undefined {
+	try {
+		return readFileSync(path, "utf-8");
+	} catch {
+		return undefined;
+	}
+}
+
+/** One root's installed plugins, before enabled-policy is applied. */
+export interface InstalledPlugin {
+	id: string;
+	name: string;
+	marketplace?: string;
+	path: string;
+	version?: string;
+	description?: string;
+	rawEnabled?: boolean;
+}
+
+/**
+ * Reads a root's installed-plugin registry (`<pluginsDir>/installed_plugins.json`).
+ * Format reader only — no enabled policy here: Claude Code's entries carry no
+ * enabled field (that state lives in settings.json), so the first entry with an
+ * existing installPath wins; a raw `enabled` value is passed through for the
+ * One Code root, where the entry schema is ours.
+ */
+export function loadInstalledPlugins(pluginsDir: string, cwd?: string): InstalledPlugin[] {
+	const registry = readJsonFile<{ plugins?: Record<string, InstalledEntry[]> }>(
+		join(pluginsDir, "installed_plugins.json"),
+	);
+	if (!registry?.plugins) return [];
+
+	const plugins: InstalledPlugin[] = [];
+	for (const [key, entries] of Object.entries(registry.plugins)) {
+		if (!Array.isArray(entries) || entries.length === 0) continue;
+		const entry = entries.find((e) =>
+			e && typeof e === "object" && !Array.isArray(e) &&
+			typeof e.installPath === "string" && e.installPath.length > 0 &&
+			(e.projectPath === undefined || typeof e.projectPath === "string") &&
+			existsSync(e.installPath) && entryAppliesToCwd(e, cwd),
+		);
+		if (!entry?.installPath) continue;
+
+		const { name, marketplace } = splitPluginKey(key);
+		const manifest = readJsonFile<PluginManifest>(join(entry.installPath, ".claude-plugin", "plugin.json"));
+		plugins.push({
+			id: key,
+			// A third-party manifest is copied in verbatim: a non-string `name`
+			// (or one carrying path separators) would later crash `localeCompare`
+			// or poison the namespace it becomes. Fall back to the registry key's
+			// name for anything not a clean string (review H2).
+			name: validPluginName(manifest?.name) ?? name,
+			marketplace,
+			path: entry.installPath,
+			version: typeof entry.version === "string" ? entry.version : undefined,
+			description: typeof manifest?.description === "string" ? manifest.description : undefined,
+			rawEnabled: typeof entry.enabled === "boolean" ? entry.enabled : undefined,
+		});
+	}
+	return plugins.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** A manifest `name` usable as a namespace and plugin identifier. */
+export function validPluginName(value: unknown): string | undefined {
+	if (typeof value !== "string") return undefined;
+	const trimmed = value.trim();
+	if (trimmed.length === 0 || trimmed === "." || trimmed.includes("..")) return undefined;
+	if (/[/\\:@\s\p{Cc}\p{Cf}]/u.test(trimmed)) return undefined;
+	return trimmed;
+}
+
+export function pluginResources(plugin: Pick<Plugin, "path">): PluginResources {
+	const dirIfExists = (name: string) => {
+		const path = join(plugin.path, name);
+		return existsSync(path) && statSync(path).isDirectory() ? path : undefined;
+	};
+	const fileIfExists = (...segments: string[]) => {
+		const path = join(plugin.path, ...segments);
+		return existsSync(path) ? path : undefined;
+	};
+	return {
+		agentsDir: dirIfExists("agents"),
+		commandsDir: dirIfExists("commands"),
+		skillsDir: dirIfExists("skills"),
+		mcpConfig: fileIfExists(".mcp.json"),
+		hooksConfig: fileIfExists("hooks", "hooks.json"),
+		lspConfig: fileIfExists(".lsp.json"),
+	};
+}
+
+export interface PluginSkill {
+	/** Namespaced `<plugin>:<skill>`, as Claude Code presents it. */
+	name: string;
+	plugin: string;
+	path: string;
+}
+
+/** Each immediate subdirectory holding a SKILL.md is one skill. */
+export function findPluginSkills(plugin: Pick<Plugin, "name">, skillsDir: string): PluginSkill[] {
+	const skills: PluginSkill[] = [];
+	let entries: string[];
+	try {
+		entries = readdirSync(skillsDir);
+	} catch {
+		return skills;
+	}
+	for (const entry of entries) {
+		const skillFile = join(skillsDir, entry, "SKILL.md");
+		if (existsSync(skillFile)) {
+			skills.push({ name: `${plugin.name}:${entry}`, plugin: plugin.name, path: skillFile });
+		}
+	}
+	return skills;
+}
+
+export interface PluginCommand {
+	/** Namespaced `<plugin>:<command>`. */
+	name: string;
+	plugin: string;
+	path: string;
+}
+
+export function findPluginCommands(plugin: Pick<Plugin, "name">, commandsDir: string): PluginCommand[] {
+	let entries: string[];
+	try {
+		entries = readdirSync(commandsDir);
+	} catch {
+		return [];
+	}
+	return entries
+		.filter((entry) => entry.endsWith(".md"))
+		.map((entry) => ({
+			name: `${plugin.name}:${basename(entry, ".md")}`,
+			plugin: plugin.name,
+			path: join(commandsDir, entry),
+		}));
+}
+
+/** The two roots + settings locations discovery reads from. */
+export interface DiscoverRoots {
+	/** Another tool's plugin install root, read only (the source view's `pluginsDir`; One Code's provider: `~/.claude/plugins`); unset without one. */
+	claudePluginsDir?: string;
+	/** One Code's plugin root (`<agentDir>/plugins`) — ours to write. */
+	oneCodeRoot: string;
+	cwd: string;
+	home: string;
+}
+
+/** The standard roots; wiring passes `getAgentDir()` (pure modules can't). */
+export function defaultDiscoverRoots(agentDir: string, cwd: string = process.cwd(), home: string = os.homedir()): DiscoverRoots {
+	return {
+		claudePluginsDir: openSources(home).pluginsDir,
+		oneCodeRoot: pluginRoot(agentDir),
+		cwd,
+		home,
+	};
+}
+
+/**
+ * The enabled-state precedence for a Claude Code-installed plugin: a One Code
+ * override wins, then Claude Code's own settings, then default-enabled.
+ */
+export function claudePluginEnabled(
+	id: string,
+	ccEnabled: Record<string, boolean>,
+	overrides: Record<string, boolean>,
+): boolean {
+	return overrides[id] ?? ccEnabled[id] ?? true;
+}
+
+/** One Code-installed plugins carry enabled on their own registry entry. */
+export function oneCodePluginEnabled(rawEnabled: boolean | undefined): boolean {
+	return rawEnabled ?? true;
+}
+
+/**
+ * Everything the installed plugins contribute, resolved in one pass.
+ *
+ * IMPORTANT: this is a function each consuming extension calls for itself, not a
+ * shared singleton. Under jiti every extension file gets its own module
+ * instance, so module-level state written by one extension is invisible to
+ * another — a shared registry silently read as empty. Re-deriving is cheap (a
+ * few small JSON files plus directory checks) and has no load-order constraints.
+ */
+export interface NamespacedDir {
+	dir: string;
+	namespace: string;
+}
+
+export interface DiscoveredPlugins {
+	/** Every installed plugin, enabled or not (the /plugins panel needs both). */
+	plugins: Plugin[];
+	/** Enabled plugins only — the set whose resources are wired in below. */
+	enabledPlugins: Plugin[];
+	agentDirs: NamespacedDir[];
+	skills: PluginSkill[];
+	commands: PluginCommand[];
+	mcpConfigs: string[];
+	/** The plugin each `mcpConfigs` path belongs to, so its servers can be namespaced `plugin:<name>:<server>`. */
+	mcpConfigPlugins: Map<string, string>;
+	/** Per-plugin summary keyed by plugin id, for status output. */
+	byPlugin: Map<string, { agents: boolean; skills: number; commands: number; mcp: boolean; lsp: boolean }>;
+}
+
+/**
+ * ONE discovery cache for the whole process. Seven extensions import this
+ * module (branding, hooks, lsp, mcp, plugins, skill, subagents) and jiti gives
+ * each its own module instance, so a module-level variable meant seven full
+ * disk scans at startup and an invalidation that cleared only the caller's
+ * copy. The cache therefore hangs off `globalThis` under a symbol: a pure
+ * memo of filesystem state (not steering state — the module-isolation rule in
+ * CLAUDE.md is about *that*), read-through, cleared everywhere at once.
+ */
+const CACHE_SLOT = Symbol.for(brandedId("plugins-discovery-cache"));
+type CacheBox = { current?: { key: string; result: DiscoveredPlugins } };
+const box: CacheBox = ((globalThis as Record<symbol, unknown>)[CACHE_SLOT] ??= {}) as CacheBox;
+
+/**
+ * Drops the process-wide discovery cache; the /plugins panel calls this after
+ * installs/toggles so every extension's next discoverPlugins() reflects them.
+ */
+export function invalidatePluginsCache(): void {
+	box.current = undefined;
+}
+
+/** What discovery reports when the profile turns the plugins feature off: no plugin, so no plugin resource anywhere. */
+function noPlugins(): DiscoveredPlugins {
+	return { plugins: [], enabledPlugins: [], agentDirs: [], skills: [], commands: [], mcpConfigs: [], mcpConfigPlugins: new Map(), byPlugin: new Map() };
+}
+
+/**
+ * Every installed plugin and the resources of the enabled ones. With the
+ * profile's plugins feature off it reports none, so the agents, skills,
+ * commands, hooks, MCP and LSP servers that other features read from plugins
+ * go with it (lib/profile/profile.ts).
+ */
+export function discoverPlugins(roots: DiscoverRoots): DiscoveredPlugins {
+	if (!featureEnabled("plugins")) return noPlugins();
+	const claudeDir = roots.claudePluginsDir;
+	const key = [claudeDir ?? "", roots.oneCodeRoot, roots.cwd, roots.home].join("\n");
+	if (box.current?.key === key) return box.current.result;
+
+	const ccEnabled = claudeDir ? readEnabledPlugins(roots.cwd, roots.home) : {};
+	const overrides = readOverrides(roots.oneCodeRoot);
+	const skillOverrides = readSkillStates(roots.oneCodeRoot);
+
+	const claudePlugins: Plugin[] = claudeDir
+		? loadInstalledPlugins(claudeDir, roots.cwd).map((p) => ({
+				...p,
+				originRoot: "claude" as const,
+				enabled: claudePluginEnabled(p.id, ccEnabled, overrides),
+				overridden: p.id in overrides,
+				dataRoot: join(claudeDir, "data"),
+			}))
+		: [];
+
+	const oneCodePlugins: Plugin[] = loadInstalledPlugins(roots.oneCodeRoot, roots.cwd).map((p) => ({
+		...p,
+		originRoot: "product" as const,
+		enabled: oneCodePluginEnabled(p.rawEnabled),
+		dataRoot: join(roots.oneCodeRoot, "data"),
+	}));
+
+	// Same plugin id installed under both roots: the One Code copy wins — it's
+	// the one this harness actively manages.
+	const byId = new Map<string, Plugin>();
+	for (const plugin of [...claudePlugins, ...oneCodePlugins]) byId.set(plugin.id, plugin);
+	const plugins = [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
+	const enabledPlugins = plugins.filter((p) => p.enabled);
+
+	const result: DiscoveredPlugins = {
+		plugins,
+		enabledPlugins,
+		agentDirs: [],
+		skills: [],
+		commands: [],
+		mcpConfigs: [],
+		mcpConfigPlugins: new Map(),
+		byPlugin: new Map(),
+	};
+
+	for (const plugin of plugins) {
+		// One plugin's fault (a broken symlink in its resource dirs, a statSync
+		// permission error) must skip only that plugin, not blank out every
+		// other plugin's skills/commands/agents for the session. safeDiscover's
+		// outer catch is the last resort; this keeps the blast radius to one entry.
+		try {
+			const resources = pluginResources(plugin);
+			const skills = resources.skillsDir ? findPluginSkills(plugin, resources.skillsDir) : [];
+			const commands = resources.commandsDir ? findPluginCommands(plugin, resources.commandsDir) : [];
+
+			result.byPlugin.set(plugin.id, {
+				agents: !!resources.agentsDir,
+				skills: skills.length,
+				commands: commands.length,
+				mcp: !!resources.mcpConfig,
+				lsp: !!resources.lspConfig,
+			});
+
+			if (!plugin.enabled) continue;
+			if (resources.agentsDir) result.agentDirs.push({ dir: resources.agentsDir, namespace: plugin.name });
+			result.skills.push(...skills.filter((s) => isSkillEnabled(skillOverrides, skillOverrideKey("plugin", s.name))));
+			result.commands.push(...commands);
+			if (resources.mcpConfig) {
+				result.mcpConfigs.push(resources.mcpConfig);
+				result.mcpConfigPlugins.set(resources.mcpConfig, plugin.name);
+			}
+		} catch (error) {
+			console.error(`${brand.name}: skipping plugin "${plugin.id}" — its resources could not be read: ${(error as Error).message}`);
+		}
+	}
+
+	box.current = { key, result };
+	return result;
+}

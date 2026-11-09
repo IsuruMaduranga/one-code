@@ -12,11 +12,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../extensions/lib/rules/auto-mode-actions.ts";
 import { CONSECUTIVE_BLOCK_LIMIT } from "../../extensions/permissions/auto-mode/pause.ts";
 import { classify } from "../../extensions/permissions/auto-mode/classifier.ts";
-import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
-import { handBackWarning, type HandBackVerdict } from "../../extensions/lib/notifications.ts";
+import { MODE_CHANNEL } from "../../extensions/lib/rules/plan-mode-channels.ts";
+import { handBackWarning, type HandBackVerdict } from "../../extensions/lib/notify/notifications.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
-import { brand, envName } from "../../extensions/lib/brand.mjs";
+import { brand, envName } from "../../extensions/lib/profile/brand.mjs";
 
 vi.mock("../../extensions/permissions/auto-mode/classifier.ts", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../../extensions/permissions/auto-mode/classifier.ts")>()),

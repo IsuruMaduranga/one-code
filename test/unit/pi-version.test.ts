@@ -8,7 +8,7 @@ import {
 	piVersionWarning,
 	TESTED_PI_MAX_EXCLUSIVE,
 	TESTED_PI_MIN,
-} from "../../extensions/lib/pi-version.ts";
+} from "../../extensions/lib/app/pi-version.ts";
 
 describe("parseVersion", () => {
 	it("parses plain dotted numerics", () => {

@@ -10,7 +10,7 @@ import {
 	isNewerVersion,
 	isOffline,
 	pickAvailableVersion,
-} from "../../extensions/lib/update-check.mjs";
+} from "../../extensions/lib/app/update-check.mjs";
 
 const DAY = 24 * 60 * 60 * 1000;
 

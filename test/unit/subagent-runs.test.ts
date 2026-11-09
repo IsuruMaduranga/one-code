@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { findSessionFile, freeRunName, nextRunName, resolveRunName, RunRegistry } from "../../extensions/subagents/runs.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 describe("nextRunName", () => {
 	it("allocates the lowest free <agent>-<n>", () => {

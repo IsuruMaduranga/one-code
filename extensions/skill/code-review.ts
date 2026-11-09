@@ -26,7 +26,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { PromptTier } from "../lib/model-tier.ts";
+import type { PromptTier } from "../lib/models/model-tier.ts";
 
 export const REVIEW_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 export type ReviewEffort = (typeof REVIEW_EFFORTS)[number];

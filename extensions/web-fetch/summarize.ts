@@ -14,7 +14,7 @@
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { type EconomicalModelChoice, pickEconomicalContainedModel } from "../lib/model-tier.ts";
+import { type EconomicalModelChoice, pickEconomicalContainedModel } from "../lib/models/model-tier.ts";
 import { pageContent, pageText } from "./page-content.ts";
 import type { WebFetchText } from "./text.ts";
 

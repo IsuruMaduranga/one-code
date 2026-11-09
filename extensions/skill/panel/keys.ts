@@ -1,6 +1,6 @@
 /**
  * Key decoding for the /skills panel (pure), named through
- * `lib/key-input.ts` so every terminal encoding of a key decodes alike.
+ * `lib/ui/key-input.ts` so every terminal encoding of a key decodes alike.
  *
  * Same key map as the /plugins panel; kept local so the skill
  * extension carries no dependency on another extension's internals. Printable
@@ -9,7 +9,7 @@
  * spaces, so Space is always the cycle action, never typed.
  */
 
-import { keyId, keyText } from "../../lib/key-input.ts";
+import { keyId, keyText } from "../../lib/ui/key-input.ts";
 
 export type SkillsKey =
 	| { kind: "up" | "down" | "enter" | "space" | "back" | "backspace" | "close" }

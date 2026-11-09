@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { agentMessage, frameForDelivery, handBackPointer, taskNotification } from "../../extensions/lib/notifications.ts";
+import { agentMessage, frameForDelivery, handBackPointer, taskNotification } from "../../extensions/lib/notify/notifications.ts";
 import {
 	bulletColor,
 	callLine,
@@ -29,8 +29,8 @@ import {
 	type ThemeLike,
 	stripHarnessText,
 	stripReminderBlocks,
-} from "../../extensions/lib/tui-render.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+} from "../../extensions/lib/ui/tui-render.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 /** `text` without whitespace: compares text a renderer may have wrapped. */
 const squash = (text: string) => text.replace(/\s+/g, "");
@@ -443,8 +443,8 @@ describe("a call the user rejected", () => {
 	const opts = { expanded: true, isPartial: false };
 
 	it("shows Claude Code's short line, never the model-facing text", async () => {
-		const { ccToolRenderers, ccWrapBuiltinRenderers } = await import("../../extensions/lib/tui-render.ts");
-		const { userDenialText } = await import("../../extensions/lib/user-denial.ts");
+		const { ccToolRenderers, ccWrapBuiltinRenderers } = await import("../../extensions/lib/ui/tui-render.ts");
+		const { userDenialText } = await import("../../extensions/lib/consent/user-denial.ts");
 		const base = { renderResult: () => ({ render: () => ["BASE"], invalidate() {} }) };
 		const bash = ccWrapBuiltinRenderers<{ command?: string }>("Bash", base, { title: (a) => a?.command });
 		const edit = ccWrapBuiltinRenderers<{ path?: string }>("Update", base, { title: (a) => a?.path, rejectedAs: "update" });
@@ -461,8 +461,8 @@ describe("a call the user rejected", () => {
 	});
 
 	it("leaves other errors, and a success that quotes the text, to the normal view", async () => {
-		const { ccWrapBuiltinRenderers } = await import("../../extensions/lib/tui-render.ts");
-		const { userDenialText } = await import("../../extensions/lib/user-denial.ts");
+		const { ccWrapBuiltinRenderers } = await import("../../extensions/lib/ui/tui-render.ts");
+		const { userDenialText } = await import("../../extensions/lib/consent/user-denial.ts");
 		const base = { renderResult: () => ({ render: () => ["BASE"], invalidate() {} }) };
 		const bash = ccWrapBuiltinRenderers("Bash", base);
 		expect(bash.renderResult(rejection("exit 1"), opts, plainTheme, { args: {}, isError: true, state: {} }).render(120)).toEqual(["  ⎿  BASE"]);
@@ -474,7 +474,7 @@ describe("pi's render context under the wrapper", () => {
 	const plainTheme: ThemeLike = { fg: (_c, t) => t, bold: (t) => t, italic: (t) => t };
 
 	it("hides pi 1.1.0's shell duration and pins the base renderers' padding", async () => {
-		const { ccWrapBuiltinRenderers } = await import("../../extensions/lib/tui-render.ts");
+		const { ccWrapBuiltinRenderers } = await import("../../extensions/lib/ui/tui-render.ts");
 		const seen: Array<Record<string, unknown>> = [];
 		const component = { render: () => ["BASE"], invalidate() {} };
 		const base = {
@@ -494,13 +494,13 @@ describe("pi's render context under the wrapper", () => {
 
 describe("elbowIndent / ccWrapBuiltinRenderers", () => {
 	it("indents under the elbow and strips leading blank lines", async () => {
-		const { elbowIndent } = await import("../../extensions/lib/tui-render.ts");
+		const { elbowIndent } = await import("../../extensions/lib/ui/tui-render.ts");
 		expect(elbowIndent(["", "a", "b"])).toEqual(["  ⎿  a", "     b"]);
 		expect(elbowIndent([])).toEqual([]);
 	});
 
 	it("replaces the base call line and keeps the base result, indented", async () => {
-		const { ccWrapBuiltinRenderers } = await import("../../extensions/lib/tui-render.ts");
+		const { ccWrapBuiltinRenderers } = await import("../../extensions/lib/ui/tui-render.ts");
 		const base = {
 			renderCall: () => ({ render: () => ["$ ls -la"], invalidate() {} }),
 			renderResult: () => ({ render: () => ["file-a", "file-b"], invalidate() {} }),
@@ -518,7 +518,7 @@ describe("elbowIndent / ccWrapBuiltinRenderers", () => {
 	});
 
 	it("keepBaseCall keeps the body (diff preview) and swaps only the header", async () => {
-		const { ccWrapBuiltinRenderers } = await import("../../extensions/lib/tui-render.ts");
+		const { ccWrapBuiltinRenderers } = await import("../../extensions/lib/ui/tui-render.ts");
 		const base = {
 			// Base call components are padded Boxes: blank line(s) before the header.
 			renderCall: () => ({ render: () => ["", "edit src/x.ts", "-old line", "+new line"], invalidate() {} }),
@@ -534,7 +534,7 @@ describe("elbowIndent / ccWrapBuiltinRenderers", () => {
 	});
 
 	it("stores inner components on state, not lastComponent (base renderers cast it)", async () => {
-		const { ccWrapBuiltinRenderers } = await import("../../extensions/lib/tui-render.ts");
+		const { ccWrapBuiltinRenderers } = await import("../../extensions/lib/ui/tui-render.ts");
 		const seen: unknown[] = [];
 		const inner = { render: () => ["out"], invalidate() {} };
 		const base = {
@@ -552,7 +552,7 @@ describe("elbowIndent / ccWrapBuiltinRenderers", () => {
 	});
 
 	it("a throwing base result renderer falls back to plain text, never the JSON dump", async () => {
-		const { ccWrapBuiltinRenderers } = await import("../../extensions/lib/tui-render.ts");
+		const { ccWrapBuiltinRenderers } = await import("../../extensions/lib/ui/tui-render.ts");
 		const base = {
 			renderResult: () => {
 				throw new Error("boom");

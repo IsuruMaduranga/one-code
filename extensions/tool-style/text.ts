@@ -4,7 +4,7 @@
  * Read, grep, find and ls keep pi's descriptions untouched.
  */
 
-import type { DescriptionForm } from "../lib/tool-variants.ts";
+import type { DescriptionForm } from "../lib/profile/tool-variants.ts";
 
 export interface ToolStyleText {
 	/** The write tool's description, by the session's description form. */

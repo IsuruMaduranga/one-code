@@ -7,7 +7,7 @@
  * long-running work over TASK_REGISTER_CHANNEL at runtime, so task_output and
  * task_stop address every background task in the session regardless of which
  * extension started it. Events and completions are delivered as steered
- * task notifications (lib/notifications.ts), never as user input; a fired
+ * task notifications (lib/notify/notifications.ts), never as user input; a fired
  * wakeup or cron job re-invokes the session with its prompt verbatim.
  *
  * Every scheduled prompt lives in one CronStore (cron.ts): cron_create jobs
@@ -18,16 +18,16 @@
  * model schedules the loop itself.
  */
 
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { whenAborted } from "../lib/abort.ts";
-import { DEFER_CHANNEL } from "../lib/deferred.ts";
-import { persistedFilePreview, persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
-import { detachedSpawnOptions, KILL_GRACE_MS, rememberProcessGroup, stopProcessTree, waitForChildExit } from "../lib/process-tree.ts";
-import { sessionAlive } from "../lib/session-lifecycle.ts";
-import { bashSpawn, spawnShellCommand } from "../lib/shell-spawn.ts";
-import { ccToolRenderers, customMessageText, expandHintFor, formatFireTime, liveUiCtx, notificationComponent, notificationUserMarkdown, scheduledTaskComponent } from "../lib/tui-render.ts";
+import { whenAborted } from "../lib/core/abort.ts";
+import { DEFER_CHANNEL } from "../lib/request/deferred.ts";
+import { persistedFilePreview, persistIfLarge, sessionResultsDir } from "../lib/request/persisted-output.ts";
+import { detachedSpawnOptions, KILL_GRACE_MS, rememberProcessGroup, stopProcessTree, waitForChildExit } from "../lib/shell-run/process-tree.ts";
+import { sessionAlive } from "../lib/notify/session-lifecycle.ts";
+import { bashSpawn, spawnShellCommand } from "../lib/shell-run/shell-spawn.ts";
+import { ccToolRenderers, customMessageText, expandHintFor, formatFireTime, liveUiCtx, notificationComponent, notificationUserMarkdown, scheduledTaskComponent } from "../lib/ui/tui-render.ts";
 import {
 	type BackgroundTask,
 	BackgroundRegistry,
@@ -71,7 +71,7 @@ import {
 	type TaskOutputDelivered,
 	taskNotification,
 	taskStatusOf,
-} from "../lib/notifications.ts";
+} from "../lib/notify/notifications.ts";
 import {
 	batchSize,
 	emptyBatch,
@@ -83,23 +83,23 @@ import {
 	MonitorLineSplitter,
 	pushEvent,
 } from "./monitor-batch.ts";
-import { registerLocalCommand } from "../lib/local-command.ts";
+import { registerLocalCommand } from "../lib/ui/local-command.ts";
 import { applyNoopFolds, decideFold, type FoldDetails, type FoldEntry, foldSuffix } from "./noop-fold.ts";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, type FireConversation } from "../lib/agent-cron.ts";
-import { requireText } from "../lib/profile.ts";
-import { SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../lib/skill-body.ts";
-import { BUNDLED_SKILLS_DIR } from "../lib/skill-scan.ts";
+import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, type FireConversation } from "../lib/agents/agent-cron.ts";
+import { requireText } from "../lib/profile/profile.ts";
+import { SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../lib/plugins/skill-body.ts";
+import { BUNDLED_SKILLS_DIR } from "../lib/plugins/skill-scan.ts";
 import { createWriteStream, mkdirSync, type WriteStream } from "node:fs";
 import { join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import { SESSION_WORK_CHANNEL, sessionBackgroundTask, sessionCron, type SessionWorkQuery } from "../lib/session-work.ts";
-import { WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
-import { queueNotice } from "../lib/notices.ts";
-import { makeRecord, RECORD } from "../lib/ledger/records.ts";
-import { recordState, stateSinceCompaction } from "../lib/ledger/state.ts";
-import { processState } from "../lib/process-state.ts";
-import { extensionVersion } from "../lib/package-version.ts";
+import { SESSION_WORK_CHANNEL, sessionBackgroundTask, sessionCron, type SessionWorkQuery } from "../lib/notify/session-work.ts";
+import { WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/agents/worktree-channel.ts";
+import { queueNotice } from "../lib/notify/notices.ts";
+import { makeRecord, RECORD } from "../lib/request/ledger/records.ts";
+import { recordState, stateSinceCompaction } from "../lib/request/ledger/state.ts";
+import { processState } from "../lib/profile/process-state.ts";
+import { extensionVersion } from "../lib/app/package-version.ts";
 import { STORED_OUTPUT_CAP, tailCap } from "../lib/shell-run/bash-background.ts";
 
 /** Claude Code's `task_output` limit (`TASK_MAX_OUTPUT_DEFAULT`). */
@@ -116,7 +116,7 @@ const MAX_TIMER_MS = 2 ** 31 - 1;
  * then, and the new instance has no handle on them). Say so, once, in the NEW
  * session: the old session's UI is torn down right after `session_shutdown`,
  * so a notice printed there is lost (LIFECYCLE-REVIEW-2026-09-06 L3). The
- * notice is process state (lib/process-state.ts): module scope would lose it
+ * notice is process state (lib/profile/process-state.ts): module scope would lose it
  * wherever pi evaluates this module again, at `/reload` and at a `/resume`
  * into another directory (lifecycle grid R3-L13).
  */
@@ -219,7 +219,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 		updateWidget();
 		task.finished?.then(updateWidget, updateWidget);
 	});
-	// A subagent's cron tools (lib/agent-cron.ts): its jobs, its view, its deletes.
+	// A subagent's cron tools (lib/agents/agent-cron.ts): its jobs, its view, its deletes.
 	pi.events.on(AGENT_CRON_CHANNEL, (data) => {
 		const request = data as AgentCronRequest;
 		if (request.op === "create") {
@@ -242,7 +242,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 			}
 		}
 	});
-	// The Stop hook's session_crons / background_tasks (lib/session-work.ts).
+	// The Stop hook's session_crons / background_tasks (lib/notify/session-work.ts).
 	pi.events.on(SESSION_WORK_CHANNEL, (data) => {
 		const query = data as SessionWorkQuery;
 		query.crons.push(...cron.list().map(sessionCron));
@@ -268,7 +268,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 		notificationComponent(theme, customMessageText(message.content), options.expanded, { hint: expandHintFor(options) }),
 	);
 	// A notification that opens the session's first turn is a user message
-	// (lib/notifications.ts, "First turn of a session"); pi draws those as
+	// (lib/notify/notifications.ts, "First turn of a session"); pi draws those as
 	// markdown, so the same headline replaces the frames here. Every notifier's
 	// messages pass through this one transformer.
 	pi.registerMarkdownTransformer((markdown, context) =>
@@ -285,7 +285,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 	}
 
 	// A monitor's end the model already read through task_output is withdrawn
-	// like a shell's (lib/notifications.ts).
+	// like a shell's (lib/notify/notifications.ts).
 	const notify = createTaskNotifier(pi, {
 		withdrawOnDelivery: true,
 		// A fire's message reached the conversation: what it told the model is on the branch from here.
@@ -336,7 +336,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 	/**
 	 * The text a fired prompt delivers, as Claude Code's queue would run it: a
 	 * no-prompt /loop sentinel expands (loop-fire.ts), and a slash command that
-	 * names a skill runs that skill (lib/skill-body.ts); anything else is the
+	 * names a skill runs that skill (lib/plugins/skill-body.ts); anything else is the
 	 * prompt verbatim. Both resolve in the job owner's directory: a subagent's
 	 * own, or the main session's worktree while it is in one.
 	 */
@@ -568,7 +568,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 				// leader — with zsh a `cmd; echo` or a pipeline otherwise lives on as an
 				// orphan holding the stdout pipe, so the task never finishes and, in a
 				// one-shot run, the process cannot exit (LIFECYCLE-REVIEW M2, measured).
-				// The session's bash (Git Bash on Windows) — lib/shell-spawn.ts.
+				// The session's bash (Git Bash on Windows) — lib/shell-run/shell-spawn.ts.
 				const bash = bashSpawn();
 				if (!bash.spawn) return startFailed({ kind: "noShell", osMessage: bash.error });
 				const child = spawnShellCommand(bash.spawn, params.command, {
@@ -587,7 +587,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 				child.stderr?.on("data", (chunk: Buffer) => {
 					record(stderrText.write(chunk));
 				});
-				// Exit plus a short stdio grace, not `close` (lib/process-tree.ts).
+				// Exit plus a short stdio grace, not `close` (lib/shell-run/process-tree.ts).
 				// The last line may have no newline; it is an event all the same.
 				const drain = () => {
 					for (const line of [...lines.push(stdoutText.end()), ...lines.end()]) onEvent(line);
@@ -733,7 +733,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 			const header = text.tasks.taskLine(shownTask(task));
 			const body = taskOutputBody(task, ctx, text.tasks) || text.tasks.noOutputYet;
 			// The model now holds a finished task's output: a completion notification
-			// still waiting to go out for it is redundant (lib/notifications.ts).
+			// still waiting to go out for it is redundant (lib/notify/notifications.ts).
 			if (task.status !== "running") pi.events.emit(TASK_OUTPUT_DELIVERED_CHANNEL, { taskId: task.id } satisfies TaskOutputDelivered);
 			return {
 				content: [{ type: "text", text: `${header}\n\n${body}` }],
@@ -876,7 +876,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 	});
 
 	// `/loop` is a bundled skill whose body depends on its arguments; build it
-	// for the skill extension (lib/skill-body.ts). Only our own SKILL.md: a
+	// for the skill extension (lib/plugins/skill-body.ts). Only our own SKILL.md: a
 	// project skill named "loop" keeps its file's body.
 	const loopSkillPath = join(BUNDLED_SKILLS_DIR, "loop", "SKILL.md");
 	pi.events.on(SKILL_BODY_CHANNEL, (data) => {

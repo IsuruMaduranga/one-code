@@ -14,7 +14,7 @@
 
 import { statSync } from "node:fs";
 import { delimiter, parse, resolve } from "node:path";
-import { expandTilde, tryRealpath } from "../lib/paths.ts";
+import { expandTilde, tryRealpath } from "../lib/profile/paths.ts";
 import { isWithin } from "../lib/shell/paths.ts";
 
 export type ValidatedDirectory = { path: string } | { error: string };

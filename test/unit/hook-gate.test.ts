@@ -1,12 +1,12 @@
 /**
- * lib/hook-gate.ts: the child half of the subagent hook bridge — a child's
+ * lib/agents/hook-gate.ts: the child half of the subagent hook bridge — a child's
  * tool_call/tool_result forwarded to the parent's hooks and the outcome applied
  * as the parent applies it to its own calls; fail-open without a bridge.
  */
 import { describe, expect, it } from "vitest";
 import type { ChildHookCall, ChildHookResult, HookBridge } from "../../extensions/lib/agents/hook-bridge.ts";
-import { hookGateFactory } from "../../extensions/lib/hook-gate.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
+import { hookGateFactory } from "../../extensions/lib/agents/hook-gate.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 function mount(bridge: HookBridge | undefined, agentTypeOf?: (id: string | undefined) => string | undefined) {

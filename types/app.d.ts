@@ -1,9 +1,9 @@
 /**
- * Types for the plain-JS update-check module (extensions/lib/update-check.mjs),
+ * Types for the plain-JS update-check module (extensions/lib/app/update-check.mjs),
  * shared by the bundled app and the doctor; tsc has no allowJs, so the
  * extension code and the unit tests see it through this declaration.
  */
-declare module "*/lib/update-check.mjs" {
+declare module "*/update-check.mjs" {
 	export const APP_PACKAGE: string;
 	export const EXTENSION_PACKAGE: string;
 	export const HOMEBREW_FORMULA: string | undefined;
@@ -29,7 +29,7 @@ declare module "*/lib/update-check.mjs" {
 	}): (pi: unknown) => void;
 }
 
-/** Types for the plain-JS launcher-environment module (extensions/lib/app-launch.mjs). */
+/** Types for the plain-JS launcher-environment module (extensions/lib/app/app-launch.mjs). */
 declare module "*/app-launch.mjs" {
 	export const APP_AGENT_DIR_VAR: string;
 	export const LAUNCHER_ENV_VAR: string;
@@ -44,7 +44,7 @@ declare module "*/app-launch.mjs" {
 	export function childProcessEnv(env?: NodeJS.ProcessEnv, platform?: NodeJS.Platform): NodeJS.ProcessEnv;
 }
 
-/** Types for the plain-JS replaced-built-ins module (extensions/lib/replaced-builtins.mjs). */
+/** Types for the plain-JS replaced-built-ins module (extensions/lib/app/replaced-builtins.mjs). */
 declare module "*/replaced-builtins.mjs" {
 	export interface ReplacedBuiltin {
 		name: string;
@@ -70,7 +70,7 @@ declare module "*/replaced-builtins.mjs" {
 	export function turnOffPrompt(left: readonly BuiltinLeftOn[], settingsPath: string, configCommand?: string): string;
 }
 
-/** Types for the plain-JS compaction keep-window module (extensions/lib/compaction-keep.mjs). */
+/** Types for the plain-JS compaction keep-window module (extensions/lib/app/compaction-keep.mjs). */
 declare module "*/compaction-keep.mjs" {
 	export interface CompactionKeepView {
 		value: number;
@@ -87,7 +87,7 @@ declare module "*/compaction-keep.mjs" {
 	export function keepWindowFix(settingsPath: string, model?: string): string;
 }
 
-/** Types for the plain-JS brand module (extensions/lib/brand.mjs); `profile/brand.json` must satisfy `Brand` (brand.test.ts). */
+/** Types for the plain-JS brand module (extensions/lib/profile/brand.mjs); `profile/brand.json` must satisfy `Brand` (brand.test.ts). */
 declare module "*/brand.mjs" {
 	export interface Brand {
 		/** Display name, in UI text: "One Code". */

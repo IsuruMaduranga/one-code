@@ -4,11 +4,11 @@
  */
 import { beforeAll, beforeEach } from "vitest";
 import { join } from "node:path";
-import { PROFILE_DIR, profileModuleKey } from "../../extensions/lib/profile.ts";
-import { shareModuleForTest } from "../../extensions/lib/shared-module.ts";
+import { PROFILE_DIR, profileModuleKey } from "../../extensions/lib/profile/profile.ts";
+import { shareModuleForTest } from "../../extensions/lib/profile/shared-module.ts";
 import { profile } from "../index.ts";
 
-// One Code's source provider loads on first use (lib/profile.ts sourceProvider).
+// One Code's source provider loads on first use (lib/profile/profile.ts sourceProvider).
 // Imported here once the test file is, so the lib/ modules it pulls in load
 // under the file's own vi.mock calls; set again for each file. The config mode
 // is part of the provider and is imported the same way, for the same reason.

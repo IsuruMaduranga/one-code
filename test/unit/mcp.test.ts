@@ -14,7 +14,7 @@ import {
 	validateImageData,
 } from "../../extensions/mcp/schema.ts";
 import { createTailBuffer, mcpInstructionsReminder as instructionsWith } from "../../extensions/mcp/client.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { makeMcpConfigDirs, piMcpConfigs, writeMcpServers as write } from "./helpers/mcp-config.ts";
 import { TINY_GIF, TINY_JPEG, TINY_PNG, TINY_WEBP } from "./helpers/tiny-images.ts";
 

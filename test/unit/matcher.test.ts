@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { foldsCase, forwardSlashes, toPosixPath } from "../../extensions/lib/paths.ts";
+import { foldsCase, forwardSlashes, toPosixPath } from "../../extensions/lib/profile/paths.ts";
 import {
 	bashSubcommands,
 	decide,
@@ -22,7 +22,7 @@ import {
 	unescapeLiteral,
 } from "../../extensions/lib/rules/matcher.ts";
 import { isProtectedPath } from "../../extensions/lib/rules/protected-paths.ts";
-import { brand } from "../../extensions/lib/brand.mjs";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
 import { HAVE_POWERSHELL, psParse, POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
 
 const CWD = "/home/user/project";

@@ -6,7 +6,7 @@
  * token-budget suffix is CC's separate /budget feature and is not replicated.
  */
 
-import { countNoun, formatDuration } from "../lib/tui-render.ts";
+import { countNoun, formatDuration } from "../lib/ui/tui-render.ts";
 
 /** CC's TEARDROP_ASTERISK (figures.ts), the mark leading the duration line. */
 export const TURN_MARK = "✻";

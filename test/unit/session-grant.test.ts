@@ -5,7 +5,7 @@
  */
 import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { toPosixPath } from "../../extensions/lib/paths.ts";
+import { toPosixPath } from "../../extensions/lib/profile/paths.ts";
 import { decide } from "../../extensions/lib/rules/matcher.ts";
 import { sessionGrant } from "../../extensions/permissions/session-grant.ts";
 

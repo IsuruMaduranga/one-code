@@ -4,7 +4,7 @@
  * a file: test/unit/instruction-budget.test.ts.
  */
 import { describe, expect, it } from "vitest";
-import { skippedInstructionNote } from "../../extensions/lib/instruction-budget.ts";
+import { skippedInstructionNote } from "../../extensions/lib/context/instruction-budget.ts";
 
 describe("One Code's skipped-instruction note", () => {
 	it("tells the model the size, the window, the files a section inlines, and to read what it needs", () => {

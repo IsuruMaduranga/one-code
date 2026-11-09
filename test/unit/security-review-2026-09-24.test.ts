@@ -13,14 +13,14 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { conflictingPathArguments } from "../../extensions/lib/shell/paths.ts";
 import { analyzeShellCommand } from "../../extensions/lib/shell/shell-analysis.ts";
-import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { MODE_CHANNEL } from "../../extensions/lib/rules/plan-mode-channels.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { powershellInjectionSyntax } from "../../extensions/lib/shell/powershell-rules.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { HAVE_POWERSHELL, psReadOnly, POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 
 let root: string;
 let cwd: string;

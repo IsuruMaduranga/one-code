@@ -1,4 +1,4 @@
-import { requireText } from "../../../extensions/lib/profile.ts";
+import { requireText } from "../../../extensions/lib/profile/profile.ts";
 import type { SearchResult } from "../../../extensions/web/backends.ts";
 import type { ProviderSearchFailure } from "../../../extensions/web/text.ts";
 

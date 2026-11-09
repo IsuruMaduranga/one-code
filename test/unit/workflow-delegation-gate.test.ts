@@ -4,7 +4,7 @@
  * conversation's spawns go through, via the parent's permission bridge.
  */
 import { describe, expect, it, vi } from "vitest";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { judgeWorkflowDelegation } from "../../extensions/workflow/agent-session.ts";
 
 describe("judgeWorkflowDelegation", () => {

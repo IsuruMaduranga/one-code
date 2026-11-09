@@ -16,33 +16,33 @@
  * that went through bash and never touched an intercepted tool.
  */
 
-import { feature } from "../lib/feature.ts";
-import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../lib/child-writes.ts";
+import { feature } from "../lib/profile/feature.ts";
+import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../lib/agents/child-writes.ts";
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createReadToolDefinition, type ExtensionAPI, type ExtensionContext, getAgentDir, type SessionCompactEvent } from "@earendil-works/pi-coding-agent";
 import { pathArgument } from "../lib/shell/paths.ts";
-import { bashParserReady } from "../lib/bash-parser.ts";
-import { agentInstructionSections } from "../lib/instructions.ts";
-import { fitToWindow } from "../lib/instruction-budget.ts";
-import { inContextEntries, latestCompaction } from "../lib/compaction-boundary.ts";
-import { autoMemoryEnabled } from "../lib/auto-memory.ts";
-import { projectMemoryDir } from "../lib/memory.ts";
-import { comparablePath, isPathAtOrUnder, tryRealpath } from "../lib/paths.ts";
-import { estimateTextTokens } from "../lib/pi-ai-estimate.ts";
-import { planFileOnBranch } from "../lib/plan-mode-channels.ts";
-import { requireText } from "../lib/profile.ts";
-import { REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
-import { resolveToolPath } from "../lib/tool-path.ts";
+import { bashParserReady } from "../lib/shell/bash-parser.ts";
+import { agentInstructionSections } from "../lib/context/instructions.ts";
+import { fitToWindow } from "../lib/context/instruction-budget.ts";
+import { inContextEntries, latestCompaction } from "../lib/request/compaction-boundary.ts";
+import { autoMemoryEnabled } from "../lib/context/auto-memory.ts";
+import { projectMemoryDir } from "../lib/context/memory.ts";
+import { comparablePath, isPathAtOrUnder, tryRealpath } from "../lib/profile/paths.ts";
+import { estimateTextTokens } from "../lib/models/pi-ai-estimate.ts";
+import { planFileOnBranch } from "../lib/rules/plan-mode-channels.ts";
+import { requireText } from "../lib/profile/profile.ts";
+import { REMINDER_CHANNEL, type ReminderPayload } from "../lib/request/reminders.ts";
+import { resolveToolPath } from "../lib/rules/tool-path.ts";
 import { parseRules, ruleMatches } from "../lib/rules/matcher.ts";
 import { loadPermissionSettings } from "../lib/rules/settings.ts";
 import { type FileObservation, filesSeenOnBranch, keptReadPaths, keptShellReadPaths, shellCallsOnBranch } from "./replay.ts";
 import { type RestoredRead, restoreBlocks, restoreCandidates } from "./restore.ts";
 import { fileToolResultContent } from "./results.ts";
 import { shellReadPaths, shownInFull } from "./shell-reads.ts";
-import { sessionWorkCwd, WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
+import { sessionWorkCwd, WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/agents/worktree-channel.ts";
 import { describeChanges, type FileStamp, FileTracker } from "./tracker.ts";
 
 const GUARDED_TOOLS = new Set(["edit", "write", "notebook_edit"]);
@@ -182,7 +182,7 @@ function pathOf(input: unknown, cwd: string): string | undefined {
 	const raw = pathArgument(input as Record<string, unknown> | undefined);
 	if (typeof raw !== "string" || !raw.trim()) return undefined;
 	// pi's own resolution (`~`, `@`, `file://`, …): the guard must check the
-	// file the tool will actually touch (lib/tool-path.ts).
+	// file the tool will actually touch (lib/rules/tool-path.ts).
 	return resolveToolPath(raw, cwd);
 }
 
@@ -193,7 +193,7 @@ function pathOf(input: unknown, cwd: string): string | undefined {
  * `read` in the kept turns returned (`kept`) and the files a kept bash call
  * showed in full (`keptShell`), both absolute as recorded. Claude Code's
  * restore skips them; they stay read. A file the window budget skips rides
- * message 1 as a note (lib/instruction-budget.ts): neither it nor its imports
+ * message 1 as a note (lib/context/instruction-budget.ts): neither it nor its imports
  * are shown.
  */
 function inContextFiles(ctx: ExtensionContext, branch: readonly { type: string; customType?: string; data?: unknown }[], kept: string[], keptShell: string[]): Set<string> {
@@ -256,7 +256,7 @@ function fileTrackerExtension(pi: ExtensionAPI) {
 	const recordShellReads = (callId: string, paths: string[]) => {
 		if (paths.length > 0) shellReadsByCall.set(callId, paths);
 	};
-	/** The entered worktree, where the shell runs while one is active (lib/worktree-channel.ts). */
+	/** The entered worktree, where the shell runs while one is active (lib/agents/worktree-channel.ts). */
 	let entered: WorktreeLocation | undefined;
 	pi.events.on(WORKTREE_CHANNEL, (data) => {
 		const location = data as WorktreeLocation | null | undefined;
@@ -271,7 +271,7 @@ function fileTrackerExtension(pi: ExtensionAPI) {
 	let touched = new Map<string, number>();
 	/**
 	 * Files this session's own child agents changed since the parent last saw
-	 * them (lib/child-writes.ts). Every way the parent sees a file clears its
+	 * them (lib/agents/child-writes.ts). Every way the parent sees a file clears its
 	 * entry: a file tool, a shell read, a rebuild from disk, the change scan.
 	 */
 	const childWrites = new Map<string, string | undefined>();
@@ -512,7 +512,7 @@ function fileTrackerExtension(pi: ExtensionAPI) {
 	 *   every tool round, so the model reads the change before its next edit
 	 *   (review M5). The one-shot is a pending entry when the next request goes
 	 *   out, and the renderer places it on that request's trailing tool result
-	 *   (lib/reminders.ts), the same mechanism tool-search's deferred-tool miss
+	 *   (lib/request/reminders.ts), the same mechanism tool-search's deferred-tool miss
 	 *   uses; reminders never enter a stored result. Our own edit/write/read of a file was observed by
 	 *   the `tool_result` handler above before this fires, so it is fresh here
 	 *   and never reported as external — but only for a call that ran alone. pi

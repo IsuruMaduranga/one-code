@@ -1,6 +1,6 @@
 /**
  * Claude Code's `<total_tokens>N tokens left</total_tokens>` signal, pure half.
- * The base frames it (the tag is how lib/reminders.ts recognizes the block on a
+ * The base frames it (the tag is how lib/request/reminders.ts recognizes the block on a
  * tool result); the profile words what is inside (text.ts).
  *
  * What the number is (read off a live Claude Code session and the 2.1.261

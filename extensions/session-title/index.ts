@@ -21,16 +21,16 @@
  * has nowhere to show) and under CC_SESSION_TITLE=0.
  */
 
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { withReasoningFallback } from "../lib/model-policy.ts";
-import { pickEconomicalContainedModel } from "../lib/model-tier.ts";
-import { sessionOutlivesTurn } from "../lib/notifications.ts";
-import { isUserRun } from "../lib/prompt-options.ts";
-import { recordUsage } from "../lib/usage-bus.ts";
-import { requireText } from "../lib/profile.ts";
+import { withReasoningFallback } from "../lib/models/model-policy.ts";
+import { pickEconomicalContainedModel } from "../lib/models/model-tier.ts";
+import { sessionOutlivesTurn } from "../lib/notify/notifications.ts";
+import { isUserRun } from "../lib/ui/prompt-options.ts";
+import { recordUsage } from "../lib/notify/usage-bus.ts";
+import { requireText } from "../lib/profile/profile.ts";
 import { firstUserText, isNameableText, parseTitle, sessionTitleInput } from "./title.ts";
 
 const TITLE_MAX_TOKENS = 128; // a noun phrase, with room for a JSON wrapper

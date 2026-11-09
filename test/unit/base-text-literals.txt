@@ -298,34 +298,10 @@ idle-compact/policy.ts
 init/index.ts
 	"Initialize a new ${…} file with codebase documentation"
 
-lib/anthropic-server-call.ts
-	"not an Anthropic session"
-	"no model on this provider supports dynamic filtering (Claude 4.6 or later)"
-	"no usable credentials for ${…}/${…}"
-	"native web: authentication did not resolve in time"
-	"Anthropic API returned no response body"
-
-lib/anthropic-server-tools.ts
-	"no Anthropic API key"
-	"Claude account sign-in (native web tools are enabled for API keys only)"
-
-lib/argument-hints.ts
-	"<optional custom summarization instructions>"
-
-lib/bash-parser.ts
-	"the bash grammar failed to load (${…})"
-	"the bash grammar is still loading"
-
-lib/btw-fork.ts
-	"Forking needs the subagents extension, which is not loaded."
-
-lib/claude-external-includes.ts
-	"Yes, allow external imports"
-	"No, disable external imports"
-	"No external CLAUDE.md includes in this project, so /config has nothing to change. Other settings: /settings (pi's settings), /model, /permissions, /memory."
-	"  Yes covers those too, plus any this project adds later."
-	"This project's CLAUDE.md or .claude/rules imports files outside the current working directory. Never allow this for third-party repositories."
-	"Important: Only use ${…} with files you trust. Accessing untrusted files may pose security risks."
+lib/app/pi-version.ts
+	"${…} is tested against pi ${…}; you are running pi ${…}. "
+	"Things may still work, but if tools or settings misbehave, update ${…} "
+	"(or pin pi inside the tested range)."
 
 lib/consent/project-trust.ts
 	"add ${…} workspace director${…}, whose files would be read without a prompt and, in accept-edits mode, edited without one:\n${…}"
@@ -336,35 +312,49 @@ lib/consent/project-trust.ts
 	" (in auto mode, without the classifier). Whoever committed the file granted this, not you."
 	" Approval is remembered until these settings change; declining keeps them off for this session."
 
-lib/empty-tool-result.ts
-	"No files found matching pattern"
+lib/context/claude-external-includes.ts
+	"Yes, allow external imports"
+	"No, disable external imports"
+	"No external CLAUDE.md includes in this project, so /config has nothing to change. Other settings: /settings (pi's settings), /model, /permissions, /memory."
+	"  Yes covers those too, plus any this project adds later."
+	"This project's CLAUDE.md or .claude/rules imports files outside the current working directory. Never allow this for third-party repositories."
+	"Important: Only use ${…} with files you trust. Accessing untrusted files may pose security risks."
 
-lib/features.ts
-	"\"${…}\" is part of the safety core or the request pipeline and cannot be turned off"
-
-lib/fetch-timeout.ts
-	"${…} did not answer within ${…} ms"
-
-lib/headless-output.ts
-	"${…} in RPC is read-only; use the TUI to ${…}."
-
-lib/instruction-budget.ts
+lib/context/instruction-budget.ts
 	"${…} (~${…} tokens) is not loaded: instruction files may take at most half of this model's "
 	"${…}-token context window; the model sees its path instead · /memory to trim it"
 	"${…} fits this model's ${…}-token context window and loads in full again"
 	"${…} loads in full again: this model's context window is unknown"
 
-lib/knobs.ts
-	"not applied on this model"
-
-lib/memory.ts
+lib/context/memory.ts
 	"${…} is over the ${…}-char limit (${…} chars) · /memory to free up context"
 	"Project instructions total ${…} chars, over the ${…}-char limit · /memory to free up context"
 
-lib/model-catalog-data.ts
+lib/core/fetch-timeout.ts
+	"${…} did not answer within ${…} ms"
+
+lib/core/scratchpad.ts
+	"it is a symlink"
+	"it is not a directory"
+	"it is owned by uid ${…}"
+	"others may write to it"
+
+lib/models/classifier-model.ts
+	"autoMode.classifierModel ${…} is not an available model (unknown id, or no credentials for its provider); auto mode chooses automatically instead."
+	"autoMode.classifierModel ${…} was set for a different provider than this session (${…}); "
+	"a same-provider model screens calls instead. Re-set it with /auto-mode model on this session to use it here."
+	"autoMode.classifierModel ${…} is a different provider than this session (${…}): "
+	"it reads your messages and CLAUDE.md, so those go to that provider. It was set for this session, so it is used."
+	"Auto mode is screening calls with ${…}, this session's model, because its catalog context window is unknown and no alternate classifier can be verified to contain it."
+	"Auto mode is screening calls with ${…}, this session's model: ${…}'s model pairing table finds no smaller model of its vendor close enough in capability to screen for it."
+	"Auto mode is screening calls with ${…}, this session's model, because no cheaper same-provider/route model in its ${…} tier or above contains its ${…}-token catalog context window."
+	"${…} (paired with the session model in ${…}'s model pairing table)"
+	"${…} (cheapest model within ${…} in the session's tier or above that contains the session catalog context window)"
+
+lib/models/model-catalog-data.ts
 	"a model catalog came back empty"
 
-lib/model-catalog.ts
+lib/models/model-catalog.ts
 	"a small-model name, size unpublished"
 	"${…}, ${…} of ${…}'s largest current model (${…})"
 	"$${…}/M blended, ${…} of ${…}'s median current price ($${…})"
@@ -375,7 +365,7 @@ lib/model-catalog.ts
 	"over two years older than its vendor's newest model"
 	"not a text model"
 
-lib/model-choice-warnings.ts
+lib/models/model-choice-warnings.ts
 	"or ${…} clear for the automatic choice."
 	"a moving alias: the model behind it can change without notice"
 	"an experimental build, which can change or be withdrawn without notice"
@@ -394,10 +384,10 @@ lib/model-choice-warnings.ts
 	"Pick a cheaper one with ${…}, ${…}"
 	"The ${…} ${…} has a newer model in its line: ${…}"
 
-lib/model-picker.ts
+lib/models/model-picker.ts
 	"  (no available model matches)"
 
-lib/model-tier.ts
+lib/models/model-tier.ts
 	"anthropic frontier allowlist (prompt and tool forms)"
 	"not in the catalogs; a small size in its id"
 	"not in the catalogs; a small-model name"
@@ -405,62 +395,55 @@ lib/model-tier.ts
 	"unpriced, not in the catalogs"
 	"not in the catalogs"
 
-lib/models/classifier-model.ts
-	"autoMode.classifierModel ${…} is not an available model (unknown id, or no credentials for its provider); auto mode chooses automatically instead."
-	"autoMode.classifierModel ${…} was set for a different provider than this session (${…}); "
-	"a same-provider model screens calls instead. Re-set it with /auto-mode model on this session to use it here."
-	"autoMode.classifierModel ${…} is a different provider than this session (${…}): "
-	"it reads your messages and CLAUDE.md, so those go to that provider. It was set for this session, so it is used."
-	"Auto mode is screening calls with ${…}, this session's model, because its catalog context window is unknown and no alternate classifier can be verified to contain it."
-	"Auto mode is screening calls with ${…}, this session's model: ${…}'s model pairing table finds no smaller model of its vendor close enough in capability to screen for it."
-	"Auto mode is screening calls with ${…}, this session's model, because no cheaper same-provider/route model in its ${…} tier or above contains its ${…}-token catalog context window."
-	"${…} (paired with the session model in ${…}'s model pairing table)"
-	"${…} (cheapest model within ${…} in the session's tier or above that contains the session catalog context window)"
-
-lib/newer-model.ts
+lib/models/newer-model.ts
 	"costs about the same"
 
-lib/notifications.ts
+lib/models/session-model-tier.ts
+	"Request tier is unavailable: emit session_start before building the request surface."
+
+lib/notify/headless-output.ts
+	"${…} in RPC is read-only; use the TUI to ${…}."
+
+lib/notify/notifications.ts
 	"taskStatusOf received a non-terminal 'running' status; a completion notification must carry a terminal status."
 	"Session shut down before the command's user turn completed."
 	"Session shut down before the command's user turn completed."
 	"Session shut down before the command's user turn completed."
 	"Command's user turn did not start within 30 seconds. Check model authentication and extension input hooks, then retry."
 
-lib/pi-version.ts
-	"${…} is tested against pi ${…}; you are running pi ${…}. "
-	"Things may still work, but if tools or settings misbehave, update ${…} "
-	"(or pin pi inside the tested range)."
-
-lib/plugins.ts
+lib/plugins/plugins.ts
 	"${…}: skipping plugin \"${…}\" — its resources could not be read: ${…}"
 
-lib/powershell-parse-script.ts
-	"\n$ErrorActionPreference = 'Stop'\n$utf8 = New-Object System.Text.UTF8Encoding $false\n$out = [Console]::Out\n\n# Command lookup must never load or run a module: autoloading is off, and the\n# built-in modules the gate's cmdlets live in are imported from $PSHOME by\n# path, so a same-named module earlier on PSModulePath cannot stand in. The\n# walker only reports what a name resolves to (type, module, path); the gate\n# enforces which of those it trusts (powershell-tree.ts).\n$PSModuleAutoLoadingPreference = 'None'\nforeach ($module in 'Microsoft.PowerShell.Management', 'Microsoft.PowerShell.Utility', 'Microsoft.PowerShell.Security') {\n\t$manifest = \"$PSHOME/Modules/$module\"\n\tif ([System.IO.Directory]::Exists($manifest)) { try { Import-Module -Name $manifest } catch {} }\n}\n$binderType = 'System.Management.Automation.Language.StaticParameterBinder' -as [type]\n\nfunction Send-Record($record) {\n\t$json = ConvertTo-Json -InputObject $record -Depth 5 -Compress\n\t$out.WriteLine([Convert]::ToBase64String($utf8.GetBytes($json)))\n\t$out.Flush()\n}\n\nfunction Get-NodeFields($node) {\n\t$f = @{}\n\tswitch ($node.GetType().Name) {\n\t\t'CommandAst' { $f.operator = [string]$node.InvocationOperator; $f.name = $node.GetCommandName() }\n\t\t'CommandParameterAst' { $f.name = $node.ParameterName }\n\t\t'StringConstantExpressionAst' { $f.value = $node.Value; $f.kind = [string]$node.StringConstantType }\n\t\t'ExpandableStringExpressionAst' { $f.value = $node.Value; $f.kind = [string]$node.StringConstantType }\n\t\t'ConstantExpressionAst' { $f.value = [string]$node.Value }\n\t\t'VariableExpressionAst' { $f.name = $node.VariablePath.UserPath; $f.splatted = $node.Splatted }\n\t\t'FileRedirectionAst' { $f.from = [string]$node.FromStream; $f.append = $node.Append }\n\t\t'MergingRedirectionAst' { $f.from = [string]$node.FromStream; $f.to = [string]$node.ToStream }\n\t\t'BinaryExpressionAst' { $f.operator = [string]$node.Operator }\n\t\t'UnaryExpressionAst' { $f.operator = [string]$node.TokenKind }\n\t\t'AssignmentStatementAst' { $f.operator = [string]$node.Operator }\n\t\t'PipelineChainAst' { $f.operator = [string]$node.Operator; $f.background = $node.Background }\n\t\t'PipelineAst' { if ($node.PSObject.Properties['Background']) { $f.background = $node.Background } }\n\t\t'TypeExpressionAst' { $f.name = $node.TypeName.FullName }\n\t\t'TypeConstraintAst' { $f.name = $node.TypeName.FullName }\n\t\t'MemberExpressionAst' { $f.static = $node.Static }\n\t\t'InvokeMemberExpressionAst' { $f.static = $node.Static }\n\t}\n\t$f\n}\n\nSend-Record @{\n\tid = 0\n\tready = $true\n\tedition = [string]$PSVersionTable.PSEdition\n\tversion = [string]$PSVersionTable.PSVersion\n\tlanguage = [string]$ExecutionContext.SessionState.LanguageMode\n}\n\nwhile ($null -ne ($line = [Console]::In.ReadLine())) {\n\t$space = $line.IndexOf(' ')\n\tif ($space -lt 1) { continue }\n\t$id = [int]$line.Substring(0, $space)\n\ttry {\n\t\t$command = $utf8.GetString([Convert]::FromBase64String($line.Substring($space + 1)))\n\t\t$tokens = $null\n\t\t$parseErrors = $null\n\t\t$ast = [System.Management.Automation.Language.Parser]::ParseInput($command, [ref]$tokens, [ref]$parseErrors)\n\t\t$all = @($ast.FindAll({ $true }, $true))\n\t\t$index = New-Object 'System.Collections.Generic.Dictionary[System.Object,int]'\n\t\t$nodes = New-Object System.Collections.ArrayList\n\t\t$asts = New-Object System.Collections.ArrayList\n\t\tforeach ($node in $all) {\n\t\t\tif ($index.ContainsKey($node)) { continue }\n\t\t\t$parent = -1\n\t\t\tif ($null -ne $node.Parent -and $index.ContainsKey($node.Parent)) { $parent = $index[$node.Parent] }\n\t\t\t$record = Get-NodeFields $node\n\t\t\t$record.type = $node.GetType().Name\n\t\t\t$record.parent = $parent\n\t\t\t$record.start = $node.Extent.StartOffset\n\t\t\t$record.end = $node.Extent.EndOffset\n\t\t\t$index[$node] = $nodes.Count\n\t\t\t[void]$nodes.Add($record)\n\t\t\t[void]$asts.Add($node)\n\t\t}\n\t\t# Second pass, once every node has its index: what each static command\n\t\t# name resolves to in this PowerShell, and for a cmdlet how PowerShell's\n\t\t# own binder assigns its arguments to parameters.\n\t\tfor ($i = 0; $i -lt $nodes.Count; $i++) {\n\t\t\tif ($nodes[$i].type -ne 'CommandAst' -or $null -eq $nodes[$i].name) { continue }\n\t\t\t$command = $asts[$i]\n\t\t\t$info = $null\n\t\t\ttry { $info = $ExecutionContext.InvokeCommand.GetCommand($nodes[$i].name, 'All') } catch {}\n\t\t\tif ($null -eq $info) { continue }\n\t\t\tif ($info -is [System.Management.Automation.AliasInfo]) {\n\t\t\t\t$nodes[$i].alias = $true\n\t\t\t\t$info = $info.ResolvedCommand\n\t\t\t\tif ($null -eq $info) { continue }\n\t\t\t}\n\t\t\t$nodes[$i].commandType = [string]$info.CommandType\n\t\t\t$nodes[$i].resolvedName = $info.Name\n\t\t\tif ($info -is [System.Management.Automation.ApplicationInfo]) { $nodes[$i].resolvedName = $info.Path }\n\t\t\t$nodes[$i].module = [string]$info.ModuleName\n\t\t\tif ($info -isnot [System.Management.Automation.CmdletInfo]) { continue }\n\t\t\tif ($null -eq $binderType) { $nodes[$i].bindingUnavailable = $true; continue }\n\t\t\ttry {\n\t\t\t\t# An aliased command is bound as a copy spelled with the cmdlet's name,\n\t\t\t\t# so the binding never depends on how an edition's binder treats an\n\t\t\t\t# alias; each bound value is mapped back by extent.\n\t\t\t\t$bindAst = $command\n\t\t\t\t$origin = 0\n\t\t\t\t$nameEnd = 0\n\t\t\t\t$delta = 0\n\t\t\t\tif ($nodes[$i].alias) {\n\t\t\t\t\t$nameExtent = $command.CommandElements[0].Extent\n\t\t\t\t\t$relative = $nameExtent.StartOffset - $command.Extent.StartOffset\n\t\t\t\t\t$text = $command.Extent.Text\n\t\t\t\t\t$copy = $text.Substring(0, $relative) + $info.Name + $text.Substring($relative + $nameExtent.Text.Length)\n\t\t\t\t\t$bindAst = [System.Management.Automation.Language.Parser]::ParseInput($copy, [ref]$null, [ref]$null).Find({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $false)\n\t\t\t\t\t$origin = $command.Extent.StartOffset\n\t\t\t\t\t$nameEnd = $relative + $info.Name.Length\n\t\t\t\t\t$delta = $info.Name.Length - $nameExtent.Text.Length\n\t\t\t\t}\n\t\t\t\t# The node of the original command a bound value stands for, or -1:\n\t\t\t\t# the value itself, or the node with the same (mapped) extent and type.\n\t\t\t\t# The binder builds values of its own for a remaining-arguments\n\t\t\t\t# parameter (Write-Output a b: an array of copies).\n\t\t\t\t$original = {\n\t\t\t\t\tparam($ast)\n\t\t\t\t\tif ([object]::ReferenceEquals($bindAst, $command) -and $index.ContainsKey($ast)) { return $index[$ast] }\n\t\t\t\t\t$start = $ast.Extent.StartOffset\n\t\t\t\t\t$end = $ast.Extent.EndOffset\n\t\t\t\t\tif (-not [object]::ReferenceEquals($bindAst, $command)) {\n\t\t\t\t\t\tif ($start -ge $nameEnd) { $start -= $delta }\n\t\t\t\t\t\tif ($end -ge $nameEnd) { $end -= $delta }\n\t\t\t\t\t\t$start += $origin\n\t\t\t\t\t\t$end += $origin\n\t\t\t\t\t}\n\t\t\t\t\t$type = $ast.GetType().Name\n\t\t\t\t\tfor ($j = $i + 1; $j -lt $nodes.Count -and $nodes[$j].start -lt $command.Extent.EndOffset; $j++) {\n\t\t\t\t\t\tif ($nodes[$j].start -eq $start -and $nodes[$j].end -eq $end -and $nodes[$j].type -eq $type) { return $j }\n\t\t\t\t\t}\n\t\t\t\t\treturn -1\n\t\t\t\t}\n\t\t\t\t$bound = $binderType::BindCommand($bindAst, $true)\n\t\t\t\t$nodes[$i].bindings = @(foreach ($key in $bound.BoundParameters.Keys) {\n\t\t\t\t\t$result = $bound.BoundParameters[$key]\n\t\t\t\t\t$record = @{ parameter = [string]$key; value = -1 }\n\t\t\t\t\tif ($null -ne $result.Value) {\n\t\t\t\t\t\t$record.value = & $original $result.Value\n\t\t\t\t\t\t# -2 marks a value the binder built: its elements, if an array,\n\t\t\t\t\t\t# are mapped one by one.\n\t\t\t\t\t\tif ($record.value -lt 0) {\n\t\t\t\t\t\t\t$record.value = -2\n\t\t\t\t\t\t\tif ($result.Value -is [System.Management.Automation.Language.ArrayLiteralAst]) {\n\t\t\t\t\t\t\t\t$record.elements = @(foreach ($element in $result.Value.Elements) { & $original $element })\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\t$record\n\t\t\t\t})\n\t\t\t\t$nodes[$i].bindingErrors = @(foreach ($key in $bound.BindingExceptions.Keys) { [string]$key })\n\t\t\t} catch {\n\t\t\t\t$nodes[$i].bindingUnavailable = $true\n\t\t\t}\n\t\t}\n\t\tSend-Record @{ id = $id; nodes = @($nodes); errors = @($parseErrors | ForEach-Object { $_.ErrorId }) }\n\t} catch {\n\t\tSend-Record @{ id = $id; failure = $_.Exception.Message }\n\t}\n}\n"
+lib/profile/features.ts
+	"\"${…}\" is part of the safety core or the request pipeline and cannot be turned off"
 
-lib/powershell-parser.ts
-	"PowerShell could not start: ${…}"
-	"the PowerShell parser stopped"
-	"the PowerShell parser did not answer within ${…} ms"
-	"the PowerShell parser timed out after ${…} ms"
-	"the PowerShell parser was stopped"
-	"PowerShell could not start: ${…}"
-	"the PowerShell parser exited (${…})"
-	"the PowerShell parser wrote a line that is not part of its protocol"
-	"PowerShell runs in ${…} mode, where the parser is not available"
-	"the PowerShell parser failed: ${…}"
-	"the PowerShell parser is off after ${…} failures (last: ${…})"
+lib/profile/knobs.ts
+	"not applied on this model"
 
-lib/product-settings.ts
+lib/profile/product-settings.ts
 	"${…}: root must be a JSON object"
 
-lib/profile.ts
+lib/profile/profile.ts
 	"${…} cannot turn off \"${…}\": it guards tool calls (only a profile can)"
 	"\"${…}\" cannot be turned off"
 	"\nThe profile in profile/ is invalid, so the harness will not start: ${…}\n\n"
 	"it has no text for \"${…}\", which this session reads"
 
-lib/reminders.ts
+lib/request/anthropic-server-call.ts
+	"not an Anthropic session"
+	"no model on this provider supports dynamic filtering (Claude 4.6 or later)"
+	"no usable credentials for ${…}/${…}"
+	"native web: authentication did not resolve in time"
+	"Anthropic API returned no response body"
+
+lib/request/anthropic-server-tools.ts
+	"no Anthropic API key"
+	"Claude account sign-in (native web tools are enabled for API keys only)"
+
+lib/request/empty-tool-result.ts
+	"No files found matching pattern"
+
+lib/request/reminders.ts
 	"The conversation history before this point was compacted into the following summary:\n\n<summary>\n"
 
 lib/rules/auto-mode-config.ts
@@ -477,19 +460,10 @@ lib/rules/auto-mode-config.ts
 lib/rules/hook-protocol.ts
 	"Hook exceeded its output limit; reduce stdout/stderr to at most ${…} bytes per stream."
 
-lib/scratchpad.ts
-	"it is a symlink"
-	"it is not a directory"
-	"it is owned by uid ${…}"
-	"others may write to it"
-
-lib/session-model-tier.ts
-	"Request tier is unavailable: emit session_start before building the request surface."
-
-lib/shell-result.ts
+lib/shell-run/shell-result.ts
 	"Command exited with code ${…}"
 
-lib/shell-spawn.ts
+lib/shell-run/shell-spawn.ts
 	"${…} ignored: \"${…}\" is not a bash or sh binary."
 	"No bash shell found."
 	"Invalid timeout: must be a finite number of seconds"
@@ -497,9 +471,29 @@ lib/shell-spawn.ts
 	"No PowerShell executable found. Install PowerShell 7 (pwsh) and put it on PATH."
 	"Working directory does not exist: ${…}\nCannot execute PowerShell commands."
 
-lib/shell-tool.ts
+lib/shell-run/shell-tool.ts
 	"Running in the background (task ${…}${…})"
 	"Running in the background (↓ to manage)"
+
+lib/shell/bash-parser.ts
+	"the bash grammar failed to load (${…})"
+	"the bash grammar is still loading"
+
+lib/shell/powershell-parse-script.ts
+	"\n$ErrorActionPreference = 'Stop'\n$utf8 = New-Object System.Text.UTF8Encoding $false\n$out = [Console]::Out\n\n# Command lookup must never load or run a module: autoloading is off, and the\n# built-in modules the gate's cmdlets live in are imported from $PSHOME by\n# path, so a same-named module earlier on PSModulePath cannot stand in. The\n# walker only reports what a name resolves to (type, module, path); the gate\n# enforces which of those it trusts (powershell-tree.ts).\n$PSModuleAutoLoadingPreference = 'None'\nforeach ($module in 'Microsoft.PowerShell.Management', 'Microsoft.PowerShell.Utility', 'Microsoft.PowerShell.Security') {\n\t$manifest = \"$PSHOME/Modules/$module\"\n\tif ([System.IO.Directory]::Exists($manifest)) { try { Import-Module -Name $manifest } catch {} }\n}\n$binderType = 'System.Management.Automation.Language.StaticParameterBinder' -as [type]\n\nfunction Send-Record($record) {\n\t$json = ConvertTo-Json -InputObject $record -Depth 5 -Compress\n\t$out.WriteLine([Convert]::ToBase64String($utf8.GetBytes($json)))\n\t$out.Flush()\n}\n\nfunction Get-NodeFields($node) {\n\t$f = @{}\n\tswitch ($node.GetType().Name) {\n\t\t'CommandAst' { $f.operator = [string]$node.InvocationOperator; $f.name = $node.GetCommandName() }\n\t\t'CommandParameterAst' { $f.name = $node.ParameterName }\n\t\t'StringConstantExpressionAst' { $f.value = $node.Value; $f.kind = [string]$node.StringConstantType }\n\t\t'ExpandableStringExpressionAst' { $f.value = $node.Value; $f.kind = [string]$node.StringConstantType }\n\t\t'ConstantExpressionAst' { $f.value = [string]$node.Value }\n\t\t'VariableExpressionAst' { $f.name = $node.VariablePath.UserPath; $f.splatted = $node.Splatted }\n\t\t'FileRedirectionAst' { $f.from = [string]$node.FromStream; $f.append = $node.Append }\n\t\t'MergingRedirectionAst' { $f.from = [string]$node.FromStream; $f.to = [string]$node.ToStream }\n\t\t'BinaryExpressionAst' { $f.operator = [string]$node.Operator }\n\t\t'UnaryExpressionAst' { $f.operator = [string]$node.TokenKind }\n\t\t'AssignmentStatementAst' { $f.operator = [string]$node.Operator }\n\t\t'PipelineChainAst' { $f.operator = [string]$node.Operator; $f.background = $node.Background }\n\t\t'PipelineAst' { if ($node.PSObject.Properties['Background']) { $f.background = $node.Background } }\n\t\t'TypeExpressionAst' { $f.name = $node.TypeName.FullName }\n\t\t'TypeConstraintAst' { $f.name = $node.TypeName.FullName }\n\t\t'MemberExpressionAst' { $f.static = $node.Static }\n\t\t'InvokeMemberExpressionAst' { $f.static = $node.Static }\n\t}\n\t$f\n}\n\nSend-Record @{\n\tid = 0\n\tready = $true\n\tedition = [string]$PSVersionTable.PSEdition\n\tversion = [string]$PSVersionTable.PSVersion\n\tlanguage = [string]$ExecutionContext.SessionState.LanguageMode\n}\n\nwhile ($null -ne ($line = [Console]::In.ReadLine())) {\n\t$space = $line.IndexOf(' ')\n\tif ($space -lt 1) { continue }\n\t$id = [int]$line.Substring(0, $space)\n\ttry {\n\t\t$command = $utf8.GetString([Convert]::FromBase64String($line.Substring($space + 1)))\n\t\t$tokens = $null\n\t\t$parseErrors = $null\n\t\t$ast = [System.Management.Automation.Language.Parser]::ParseInput($command, [ref]$tokens, [ref]$parseErrors)\n\t\t$all = @($ast.FindAll({ $true }, $true))\n\t\t$index = New-Object 'System.Collections.Generic.Dictionary[System.Object,int]'\n\t\t$nodes = New-Object System.Collections.ArrayList\n\t\t$asts = New-Object System.Collections.ArrayList\n\t\tforeach ($node in $all) {\n\t\t\tif ($index.ContainsKey($node)) { continue }\n\t\t\t$parent = -1\n\t\t\tif ($null -ne $node.Parent -and $index.ContainsKey($node.Parent)) { $parent = $index[$node.Parent] }\n\t\t\t$record = Get-NodeFields $node\n\t\t\t$record.type = $node.GetType().Name\n\t\t\t$record.parent = $parent\n\t\t\t$record.start = $node.Extent.StartOffset\n\t\t\t$record.end = $node.Extent.EndOffset\n\t\t\t$index[$node] = $nodes.Count\n\t\t\t[void]$nodes.Add($record)\n\t\t\t[void]$asts.Add($node)\n\t\t}\n\t\t# Second pass, once every node has its index: what each static command\n\t\t# name resolves to in this PowerShell, and for a cmdlet how PowerShell's\n\t\t# own binder assigns its arguments to parameters.\n\t\tfor ($i = 0; $i -lt $nodes.Count; $i++) {\n\t\t\tif ($nodes[$i].type -ne 'CommandAst' -or $null -eq $nodes[$i].name) { continue }\n\t\t\t$command = $asts[$i]\n\t\t\t$info = $null\n\t\t\ttry { $info = $ExecutionContext.InvokeCommand.GetCommand($nodes[$i].name, 'All') } catch {}\n\t\t\tif ($null -eq $info) { continue }\n\t\t\tif ($info -is [System.Management.Automation.AliasInfo]) {\n\t\t\t\t$nodes[$i].alias = $true\n\t\t\t\t$info = $info.ResolvedCommand\n\t\t\t\tif ($null -eq $info) { continue }\n\t\t\t}\n\t\t\t$nodes[$i].commandType = [string]$info.CommandType\n\t\t\t$nodes[$i].resolvedName = $info.Name\n\t\t\tif ($info -is [System.Management.Automation.ApplicationInfo]) { $nodes[$i].resolvedName = $info.Path }\n\t\t\t$nodes[$i].module = [string]$info.ModuleName\n\t\t\tif ($info -isnot [System.Management.Automation.CmdletInfo]) { continue }\n\t\t\tif ($null -eq $binderType) { $nodes[$i].bindingUnavailable = $true; continue }\n\t\t\ttry {\n\t\t\t\t# An aliased command is bound as a copy spelled with the cmdlet's name,\n\t\t\t\t# so the binding never depends on how an edition's binder treats an\n\t\t\t\t# alias; each bound value is mapped back by extent.\n\t\t\t\t$bindAst = $command\n\t\t\t\t$origin = 0\n\t\t\t\t$nameEnd = 0\n\t\t\t\t$delta = 0\n\t\t\t\tif ($nodes[$i].alias) {\n\t\t\t\t\t$nameExtent = $command.CommandElements[0].Extent\n\t\t\t\t\t$relative = $nameExtent.StartOffset - $command.Extent.StartOffset\n\t\t\t\t\t$text = $command.Extent.Text\n\t\t\t\t\t$copy = $text.Substring(0, $relative) + $info.Name + $text.Substring($relative + $nameExtent.Text.Length)\n\t\t\t\t\t$bindAst = [System.Management.Automation.Language.Parser]::ParseInput($copy, [ref]$null, [ref]$null).Find({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $false)\n\t\t\t\t\t$origin = $command.Extent.StartOffset\n\t\t\t\t\t$nameEnd = $relative + $info.Name.Length\n\t\t\t\t\t$delta = $info.Name.Length - $nameExtent.Text.Length\n\t\t\t\t}\n\t\t\t\t# The node of the original command a bound value stands for, or -1:\n\t\t\t\t# the value itself, or the node with the same (mapped) extent and type.\n\t\t\t\t# The binder builds values of its own for a remaining-arguments\n\t\t\t\t# parameter (Write-Output a b: an array of copies).\n\t\t\t\t$original = {\n\t\t\t\t\tparam($ast)\n\t\t\t\t\tif ([object]::ReferenceEquals($bindAst, $command) -and $index.ContainsKey($ast)) { return $index[$ast] }\n\t\t\t\t\t$start = $ast.Extent.StartOffset\n\t\t\t\t\t$end = $ast.Extent.EndOffset\n\t\t\t\t\tif (-not [object]::ReferenceEquals($bindAst, $command)) {\n\t\t\t\t\t\tif ($start -ge $nameEnd) { $start -= $delta }\n\t\t\t\t\t\tif ($end -ge $nameEnd) { $end -= $delta }\n\t\t\t\t\t\t$start += $origin\n\t\t\t\t\t\t$end += $origin\n\t\t\t\t\t}\n\t\t\t\t\t$type = $ast.GetType().Name\n\t\t\t\t\tfor ($j = $i + 1; $j -lt $nodes.Count -and $nodes[$j].start -lt $command.Extent.EndOffset; $j++) {\n\t\t\t\t\t\tif ($nodes[$j].start -eq $start -and $nodes[$j].end -eq $end -and $nodes[$j].type -eq $type) { return $j }\n\t\t\t\t\t}\n\t\t\t\t\treturn -1\n\t\t\t\t}\n\t\t\t\t$bound = $binderType::BindCommand($bindAst, $true)\n\t\t\t\t$nodes[$i].bindings = @(foreach ($key in $bound.BoundParameters.Keys) {\n\t\t\t\t\t$result = $bound.BoundParameters[$key]\n\t\t\t\t\t$record = @{ parameter = [string]$key; value = -1 }\n\t\t\t\t\tif ($null -ne $result.Value) {\n\t\t\t\t\t\t$record.value = & $original $result.Value\n\t\t\t\t\t\t# -2 marks a value the binder built: its elements, if an array,\n\t\t\t\t\t\t# are mapped one by one.\n\t\t\t\t\t\tif ($record.value -lt 0) {\n\t\t\t\t\t\t\t$record.value = -2\n\t\t\t\t\t\t\tif ($result.Value -is [System.Management.Automation.Language.ArrayLiteralAst]) {\n\t\t\t\t\t\t\t\t$record.elements = @(foreach ($element in $result.Value.Elements) { & $original $element })\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\t$record\n\t\t\t\t})\n\t\t\t\t$nodes[$i].bindingErrors = @(foreach ($key in $bound.BindingExceptions.Keys) { [string]$key })\n\t\t\t} catch {\n\t\t\t\t$nodes[$i].bindingUnavailable = $true\n\t\t\t}\n\t\t}\n\t\tSend-Record @{ id = $id; nodes = @($nodes); errors = @($parseErrors | ForEach-Object { $_.ErrorId }) }\n\t} catch {\n\t\tSend-Record @{ id = $id; failure = $_.Exception.Message }\n\t}\n}\n"
+
+lib/shell/powershell-parser.ts
+	"PowerShell could not start: ${…}"
+	"the PowerShell parser stopped"
+	"the PowerShell parser did not answer within ${…} ms"
+	"the PowerShell parser timed out after ${…} ms"
+	"the PowerShell parser was stopped"
+	"PowerShell could not start: ${…}"
+	"the PowerShell parser exited (${…})"
+	"the PowerShell parser wrote a line that is not part of its protocol"
+	"PowerShell runs in ${…} mode, where the parser is not available"
+	"the PowerShell parser failed: ${…}"
+	"the PowerShell parser is off after ${…} failures (last: ${…})"
 
 lib/shell/powershell-paths.ts
 	"a path outside the working directory"
@@ -630,6 +624,12 @@ lib/shell/shell-parse.ts
 	"uses $\"…\" locale quoting, whose translation this check cannot see"
 	"uses ${…}, which this check does not model"
 	"uses a $'…' escape (\\u, \\U or \\c?) whose meaning depends on the bash version"
+
+lib/side-calls/btw-fork.ts
+	"Forking needs the subagents extension, which is not loaded."
+
+lib/ui/argument-hints.ts
+	"<optional custom summarization instructions>"
 
 lib/ui/effort-slider.ts
 	"←/→ or h/l adjust · Enter confirm · s for this session only · Esc cancel · shift+tab cycles the plain levels"

@@ -4,7 +4,7 @@
  * hands the profile: test/unit/environment-block.test.ts.
  */
 import { describe, expect, it } from "vitest";
-import { claudeDisplayName, environmentBlock, modelLine } from "../../extensions/lib/environment-block.ts";
+import { claudeDisplayName, environmentBlock, modelLine } from "../../extensions/lib/context/environment-block.ts";
 
 describe("environmentBlock", () => {
 	it("is Claude Code's block byte for byte", () => {

@@ -1,7 +1,7 @@
 /**
  * What the memory extension needs from a profile (types only): the words for
  * the MEMORY.md index's load limits, checked after each write of it. The
- * limits themselves stay in the base (lib/memory-content.ts). The index's
+ * limits themselves stay in the base (lib/context/memory-content.ts). The index's
  * truncation line belongs to the instruction block that loads it
  * (claude-context), not to this group.
  */

@@ -3,12 +3,12 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resetAutoMemoryForTest } from "../../extensions/lib/auto-memory.ts";
-import { projectMemoryDir } from "../../extensions/lib/memory.ts";
+import { resetAutoMemoryForTest } from "../../extensions/lib/context/auto-memory.ts";
+import { projectMemoryDir } from "../../extensions/lib/context/memory.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
-import { brand } from "../../extensions/lib/brand.mjs";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
 
 describe("auto-memory off", () => {
 	let root: string;

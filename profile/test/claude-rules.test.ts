@@ -11,9 +11,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import claudeContextExtension from "../../extensions/claude-context/index.ts";
 import { buildClaudeMdBlock, nestedInstructionText } from "../../extensions/claude-context/claude-context.ts";
 import { discoverContextFiles, nestedInstructionFiles } from "../claude-code/instructions.ts";
-import { discoverRules, parseRule, readRuleInstructions, ruleMatches, splitRulePaths } from "../../extensions/lib/claude-rules.ts";
-import { claudeManagedDir, forwardSlashes, isPathAtOrUnder } from "../../extensions/lib/paths.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
+import { discoverRules, parseRule, readRuleInstructions, ruleMatches, splitRulePaths } from "../../extensions/lib/context/claude-rules.ts";
+import { claudeManagedDir, forwardSlashes, isPathAtOrUnder } from "../../extensions/lib/profile/paths.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi } from "../../test/unit/helpers/fake-pi.ts";
 import { stubHome } from "../../test/unit/helpers/home.ts";
 

@@ -26,8 +26,8 @@
  * and pi's event bus only delivers to listeners already registered.
  */
 
-import { activeProfile, requireText, toolSwitch } from "../lib/profile.ts";
-import { feature } from "../lib/feature.ts";
+import { activeProfile, requireText, toolSwitch } from "../lib/profile/profile.ts";
+import { feature } from "../lib/profile/feature.ts";
 import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import {
@@ -58,21 +58,21 @@ import {
 	deferredRemovedText,
 	withheldMissReminderText,
 	unavailableToolReminderText,
-} from "../lib/deferred.ts";
-import { looksLikeAnthropicRequest, MID_CONVERSATION_SYSTEM_BETA, withBetas } from "../lib/anthropic-payload.ts";
+} from "../lib/request/deferred.ts";
+import { looksLikeAnthropicRequest, MID_CONVERSATION_SYSTEM_BETA, withBetas } from "../lib/request/anthropic-payload.ts";
 import { liftAddenda, supportsToolAdditions, TOOL_ADDITION_BETAS, withToolAdditions } from "./tool-additions.ts";
-import { inContextEntries } from "../lib/compaction-boundary.ts";
-import { CALLABLE_TOOLS } from "../lib/ledger/fold.ts";
-import { foldOnce, sameEntries } from "../lib/ledger/fold-memo.ts";
-import { recordedToolNames } from "../lib/ledger/wire.ts";
-import { MCP_TOOLS_CHANNEL } from "../lib/mcp-share.ts";
-import { sessionIdentity } from "../lib/anthropic-auth.ts";
-import type { EntryLike } from "../lib/ledger/records.ts";
-import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../lib/reminders.ts";
-import { sessionAlive } from "../lib/session-lifecycle.ts";
-import { ccToolRenderers } from "../lib/tui-render.ts";
+import { inContextEntries } from "../lib/request/compaction-boundary.ts";
+import { CALLABLE_TOOLS } from "../lib/request/ledger/fold.ts";
+import { foldOnce, sameEntries } from "../lib/request/ledger/fold-memo.ts";
+import { recordedToolNames } from "../lib/request/ledger/wire.ts";
+import { MCP_TOOLS_CHANNEL } from "../lib/plugins/mcp-share.ts";
+import { sessionIdentity } from "../lib/request/anthropic-auth.ts";
+import type { EntryLike } from "../lib/request/ledger/records.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../lib/request/reminders.ts";
+import { sessionAlive } from "../lib/notify/session-lifecycle.ts";
+import { ccToolRenderers } from "../lib/ui/tui-render.ts";
 import { normalizeToolName } from "../lib/rules/matcher.ts";
-import { registerLocalCommand } from "../lib/local-command.ts";
+import { registerLocalCommand } from "../lib/ui/local-command.ts";
 
 /** The told mode for "this epoch's message 1 lists deferred tools this run cannot load", said once per epoch. */
 const UNAVAILABLE_MODE = "deferred-unavailable";
@@ -83,7 +83,7 @@ const branchOf = (session: SessionLike | undefined) => (session?.getBranch?.() ?
 
 function toolSearchExtension(pi: ExtensionAPI) {
 	const words = requireText("toolSearch");
-	// Owned here (see lib/deferred.ts): the only instance, fed over DEFER_CHANNEL.
+	// Owned here (see lib/request/deferred.ts): the only instance, fed over DEFER_CHANNEL.
 	const deferredRegistry = new DeferredRegistry();
 	// Names WITHHOLD_CHANNEL removed from the registry, kept only so a direct
 	// call to one still gets an explanation (tool_execution_end below) instead
@@ -101,13 +101,13 @@ function toolSearchExtension(pi: ExtensionAPI) {
 	let currentModel: { provider?: string; api?: string; id?: string; compat?: unknown } | undefined;
 	/**
 	 * The branch's fold with the live identity, so a model or auth switch
-	 * counts. Shared with the ledger (lib/ledger/fold-memo.ts): the fold this
+	 * counts. Shared with the ledger (lib/request/ledger/fold-memo.ts): the fold this
 	 * turn_start takes serves the request's `context` hook, and a server's
 	 * connect defers its tools in a burst with nothing appended between.
 	 */
 	const foldOf = (owner: SessionLike | undefined, branch: EntryLike[], model: typeof currentModel) => foldOnce(owner, branch, sessionIdentity(pi, model));
 
-	/** Whether tool_search is registered; a `--tools` list without it turns deferral off (lib/deferred.ts). */
+	/** Whether tool_search is registered; a `--tools` list without it turns deferral off (lib/request/deferred.ts). */
 	const deferring = () => deferralEnabled(pi.getAllTools());
 	const searchableTools = (all = pi.getAllTools()) => {
 		if (!deferralEnabled(all)) return [];
@@ -213,7 +213,7 @@ function toolSearchExtension(pi: ExtensionAPI) {
 	let used: { entries: readonly EntryLike[]; loads: ReadonlyMap<string, string[]>; inUse: ReadonlySet<string> } | undefined;
 	/**
 	 * The branch's in-context loads and tools in use, read again only when the
-	 * branch changed (lib/ledger/fold-memo.ts `sameEntries`): the reconciler runs
+	 * branch changed (lib/request/ledger/fold-memo.ts `sameEntries`): the reconciler runs
 	 * at every turn, model switch, defer and withhold, and a server's connect
 	 * defers its tools in a burst with nothing appended between. Both are pure
 	 * functions of the entries; the registry, the model and this turn's loads
@@ -228,7 +228,7 @@ function toolSearchExtension(pi: ExtensionAPI) {
 	};
 
 	/**
-	 * The one place deferred tools are activated and deactivated (lib/deferred.ts
+	 * The one place deferred tools are activated and deactivated (lib/request/deferred.ts
 	 * callableDeferredTools): a deferred tool is active exactly when the branch
 	 * gives a reason. Its history uses it (a load or a call in context), the
 	 * epoch announced it callable, the recorded head the next request starts
@@ -241,7 +241,7 @@ function toolSearchExtension(pi: ExtensionAPI) {
 	 * (turn_start) and whenever the inputs change.
 	 */
 	// Withheld tools plus the tools the profile turns off: never active, pi's
-	// built-ins included (lib/profile.ts).
+	// built-ins included (lib/profile/profile.ts).
 	const profileDisabled = activeProfile().disabledTools;
 	const neverActive = () => (profileDisabled.size === 0 ? withheldNames : new Set([...withheldNames, ...profileDisabled]));
 	// Tools the profile defers, adopted here however they were registered: pi's
@@ -294,7 +294,7 @@ function toolSearchExtension(pi: ExtensionAPI) {
 	// `defer_loading: true` definition, and a tool that tool_search loaded — which
 	// pi promotes into the eager list — is demoted back to deferred and loaded
 	// through `tool_reference` blocks in the tool_search result that activated it
-	// (lib/deferred.ts stabilizeDeferredTools has the rules;
+	// (lib/request/deferred.ts stabilizeDeferredTools has the rules;
 	// working-docs/decisions/caching.md the measurements). On OpenAI Responses
 	// models with native tool loading (GPT-5.4 and newer on openai and
 	// openai-codex) a loaded tool leaves `tools` for pi-ai's own load item at the

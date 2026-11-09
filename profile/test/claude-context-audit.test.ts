@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import claudeContextExtension from "../../extensions/claude-context/index.ts";
 import systemReminderExtension from "../../extensions/system-reminder/index.ts";
-import { discoverOneCodeFiles, openInstructions } from "../../extensions/lib/instructions.ts";
+import { discoverOneCodeFiles, openInstructions } from "../../extensions/lib/context/instructions.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi } from "../../test/unit/helpers/fake-pi.ts";
 import { stubHome } from "../../test/unit/helpers/home.ts";
 

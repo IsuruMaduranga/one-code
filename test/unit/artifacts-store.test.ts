@@ -28,7 +28,7 @@ import {
 	withLock,
 } from "../../extensions/artifacts/store.ts";
 import { renderViewer } from "../../extensions/artifacts/viewer.ts";
-import { noDisplayReason, openerPlan } from "../../extensions/lib/open-browser.ts";
+import { noDisplayReason, openerPlan } from "../../extensions/lib/ui/open-browser.ts";
 
 let base: string;
 let root: string;

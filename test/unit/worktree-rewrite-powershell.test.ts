@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { powershellQuote } from "../../extensions/lib/shell-quote.ts";
+import { powershellQuote } from "../../extensions/lib/shell/shell-quote.ts";
 import { rewriteToolInput } from "../../extensions/worktree/rewrite.ts";
 
 describe("rewriteToolInput for powershell", () => {

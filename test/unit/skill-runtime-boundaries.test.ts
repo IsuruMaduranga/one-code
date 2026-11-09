@@ -3,11 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import skillExtension from "../../extensions/skill/index.ts";
-import { pluginRoot } from "../../extensions/lib/plugin-root.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
-import { setSkillState } from "../../extensions/lib/skill-overrides.ts";
-import { scopeForPath } from "../../extensions/lib/skill-scan.ts";
-import { SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../../extensions/lib/skill-body.ts";
+import { pluginRoot } from "../../extensions/lib/plugins/plugin-root.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { setSkillState } from "../../extensions/lib/plugins/skill-overrides.ts";
+import { scopeForPath } from "../../extensions/lib/plugins/skill-scan.ts";
+import { SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../../extensions/lib/plugins/skill-body.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 let root: string;

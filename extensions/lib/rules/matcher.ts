@@ -7,7 +7,7 @@
  * existing ~/.claude/settings.json files work unchanged.
  */
 
-import { isToolDisabled, toolSwitch } from "../profile.ts";
+import { isToolDisabled, toolSwitch } from "../profile/profile.ts";
 import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
@@ -17,7 +17,7 @@ import { pathArgument, resolveForContainment, toAbsolute, toAbsoluteBash } from 
 import { isSensitivePath } from "../shell/sensitive.ts";
 import { isProtectedPath, isWritingTool } from "./protected-paths.ts";
 import { powershellTreeContainedEdits } from "../shell/powershell-tree.ts";
-import type { PowerShellParse } from "../powershell-parser.ts";
+import type { PowerShellParse } from "../shell/powershell-parser.ts";
 import {
 	canonicalCommandName,
 	canonicalizeStatement,
@@ -26,8 +26,8 @@ import {
 	powershellReadOnly,
 	powershellStatements,
 } from "../shell/powershell-rules.ts";
-import { comparablePath, expandTilde, foldsCase, forwardSlashes, isRelativeInside, toPosixPath } from "../paths.ts";
-import { isShellToolName } from "../shell-tools.ts";
+import { comparablePath, expandTilde, foldsCase, forwardSlashes, isRelativeInside, toPosixPath } from "../profile/paths.ts";
+import { isShellToolName } from "../shell-run/shell-tools.ts";
 
 export type PermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermissions" | "dontAsk" | "auto";
 /** "classify" is auto mode's outcome: hand the call to the approval classifier. */
@@ -384,7 +384,7 @@ export function matchesPowerShellPattern(pattern: string, statement: string): bo
 /** Deny/ask semantics for PowerShell: the pattern covers the line, any statement, or any canonical/nested form. */
 const powershellPatternMatchesAny = anyFormMatcher(powershellMatchForms, matchesPowerShellPattern);
 
-/** The tools whose subject is a shell command line and whose rules follow the Bash shape (lib/shell-tools.ts). */
+/** The tools whose subject is a shell command line and whose rules follow the Bash shape (lib/shell-run/shell-tools.ts). */
 export function isShellTool(toolName: string): boolean {
 	return isShellToolName(normalizeToolName(toolName));
 }
@@ -472,7 +472,7 @@ export function findBashAllowRule(
  * Every candidate is spelled with forward slashes: patterns are `/`-globs
  * (gitignore semantics, as in Claude Code), so on Windows the native
  * `C:\Users\x\docs\a.md` is matched as Claude Code matches it — its POSIX form
- * `/c/Users/x/docs/a.md` (`lib/paths.ts toPosixPath`, the shape CC's own
+ * `/c/Users/x/docs/a.md` (`lib/profile/paths.ts toPosixPath`, the shape CC's own
  * Windows rules such as `Read(//c/Users/x/**)` are written in) — and also as
  * `C:/Users/x/docs/a.md`, so a rule spelled with the drive letter works too.
  * darwin and win32 compare case-insensitively, like their filesystems.
@@ -791,7 +791,7 @@ export const AUTO_ALLOWED_TOOLS = new Set<string>([
 
 /**
  * A tool that runs without approval: the base's set, plus any the profile
- * marks `autoAllow` (lib/profile.ts). The profile keys tools by their
+ * marks `autoAllow` (lib/profile/profile.ts). The profile keys tools by their
  * registered name, so both the raw and the normalized spelling are looked up.
  * Plan mode does not use this: the base's set is plan-safe by construction,
  * a product's auto-allowed tool need not be.
@@ -846,7 +846,7 @@ export interface DecideInput {
 	 */
 	resolvedCwd?: string;
 	/**
-	 * Where the session persists oversized tool outputs (`lib/persisted-output.ts
+	 * Where the session persists oversized tool outputs (`lib/request/persisted-output.ts
 	 * sessionResultsDir`). Readable like the working directory: the model is
 	 * told to read those files back.
 	 */
@@ -875,7 +875,7 @@ export interface DecideInput {
 	 */
 	protectedDirs?: string[];
 	/**
-	 * The harness's own secret stores (`lib/permission-gate.ts
+	 * The harness's own secret stores (`lib/agents/permission-gate.ts
 	 * runtimeSecretPaths`, the sole producer): files, and directories judged
 	 * with everything under them. Absolute, literal and resolved. Outside the
 	 * working space they count as credential paths, like the basename
@@ -893,12 +893,12 @@ export interface DecideInput {
 	workspaceDirs?: string[];
 	/**
 	 * The calling model is frontier or workhorse tier, so its calls get Claude
-	 * Code's fast paths (`lib/model-tier.ts usesClaudeCodeFastPaths`). Absent is
+	 * Code's fast paths (`lib/models/model-tier.ts usesClaudeCodeFastPaths`). Absent is
 	 * the stricter gate cheap and tiny models keep.
 	 */
 	claudeCodeFastPaths?: boolean;
 	/**
-	 * PowerShell's own parse of a `powershell` subject (lib/powershell-parser.ts),
+	 * PowerShell's own parse of a `powershell` subject (lib/shell/powershell-parser.ts),
 	 * made by the caller before deciding. Absent, no PowerShell line is read-only
 	 * or a contained edit here: the gate clears nothing it has not parsed.
 	 */
@@ -909,7 +909,7 @@ export interface DecideInput {
 	 */
 	blockReadsOutsideWorkingDirectories?: boolean;
 	/**
-	 * Documentation the harness ships and reads (lib/guide-docs.ts: One Code's
+	 * Documentation the harness ships and reads (lib/agents/guide-docs.ts: One Code's
 	 * user guide, the running pi's docs and examples), absolute and resolved.
 	 * A read inside one is allowed like a working-directory read, on every model
 	 * tier, so the `one-code-guide` agent reads them without a prompt. Never a
@@ -941,7 +941,7 @@ export interface Decision {
 		| "blocked-outside-read"
 		/** A read, or an acceptEdits write, whose path is outside the working directory. */
 		| "working-dir"
-		/** A tool the profile turned off (lib/profile.ts). */
+		/** A tool the profile turned off (lib/profile/profile.ts). */
 		| "profile-disabled";
 }
 

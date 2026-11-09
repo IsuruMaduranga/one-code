@@ -7,9 +7,9 @@ import {
 } from "../../extensions/lib/context/budget.ts";
 import contextBudgetExtension from "../../extensions/context-budget/index.ts";
 import systemReminderExtension from "../../extensions/system-reminder/index.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const contextBudget = requireText("contextBudget");
 /** The budget line for `left` tokens, as the base frames the profile's words. */

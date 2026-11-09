@@ -3,7 +3,7 @@
  * the transcript after each response.
  *
  * The turn's wall-clock is measured across agent_start→agent_settled by span.ts
- * (one turn can hold several runs — `lib/interrupt.ts`) and emitted as a
+ * (one turn can hold several runs — `lib/notify/interrupt.ts`) and emitted as a
  * display-only session entry (`appendEntry` — not part of the LLM context, so
  * the model never sees its own timing line), rendered dim and led by the ✻ mark
  * to match CC's TurnDurationMessage. CC shows it after every response with no
@@ -13,11 +13,11 @@
  * background shells outlive the turn, `· N shells still running`.
  */
 
-import { brandedId } from "../lib/brand.mjs";
-import { feature } from "../lib/feature.ts";
+import { brandedId } from "../lib/profile/brand.mjs";
+import { feature } from "../lib/profile/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { trackShellTasks } from "../lib/shell-tasks.ts";
-import { dimMarkedLine } from "../lib/tui-render.ts";
+import { trackShellTasks } from "../lib/shell-run/shell-tasks.ts";
+import { dimMarkedLine } from "../lib/ui/tui-render.ts";
 import { formatDoneAt, TURN_MARK, turnDurationText } from "./line.ts";
 import { TurnSpan } from "./span.ts";
 import { pickCompletionVerb } from "./verbs.ts";

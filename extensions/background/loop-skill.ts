@@ -9,14 +9,14 @@
  * Pure: no pi imports.
  */
 
-import { knobValue } from "../lib/knobs.ts";
+import { knobValue } from "../lib/profile/knobs.ts";
 import type { LoopSkillForm } from "./text.ts";
 import { envFlag } from "./wakeup.ts";
 
 /** The interval a bare `/loop` uses. */
 const DEFAULT_INTERVAL = "10m";
 
-/** Whether the autonomous-loop instructions take their persistent variant (the `LOOP_PERSISTENT` knob, lib/knobs.ts). */
+/** Whether the autonomous-loop instructions take their persistent variant (the `LOOP_PERSISTENT` knob, lib/profile/knobs.ts). */
 export function loopPersistent(env: NodeJS.ProcessEnv = process.env): boolean {
 	return envFlag(knobValue("LOOP_PERSISTENT", env), false);
 }

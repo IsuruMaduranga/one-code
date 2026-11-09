@@ -7,7 +7,7 @@ import { installPlugin, uninstallPlugin } from "../../extensions/plugins/install
 import { gitClone, gitUpdate } from "../../extensions/plugins/marketplace/git.ts";
 import * as pluginGit from "../../extensions/plugins/marketplace/git.ts";
 import { addInstalledPlugin, installedEntry, removeInstalledPlugin, setInstalledEnabled } from "../../extensions/plugins/install/registry.ts";
-import { sanitizePathSegment } from "../../extensions/lib/plugin-root.ts";
+import { sanitizePathSegment } from "../../extensions/lib/plugins/plugin-root.ts";
 import { versionedCachePath, withinBase } from "../../extensions/plugins/install/paths.ts";
 import { ensureOfficialRegistered, isStale, OFFICIAL_MARKETPLACE_NAME } from "../../extensions/plugins/marketplace/official.ts";
 import { parseMarketplaceInput } from "../../extensions/plugins/marketplace/parse.ts";

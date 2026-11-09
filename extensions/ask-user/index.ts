@@ -11,18 +11,18 @@
  * pulled in a second, conflicting TypeBox.
  */
 
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { canShowCustomUi } from "../lib/headless-output.ts";
-import { ccToolRenderers, safeThemeBold, safeThemeInverse, safeThemePaint } from "../lib/tui-render.ts";
-import { registerFormTool } from "../lib/tool-variants.ts";
-import { requireText } from "../lib/profile.ts";
+import { canShowCustomUi } from "../lib/notify/headless-output.ts";
+import { ccToolRenderers, safeThemeBold, safeThemeInverse, safeThemePaint } from "../lib/ui/tui-render.ts";
+import { registerFormTool } from "../lib/profile/tool-variants.ts";
+import { requireText } from "../lib/profile/profile.ts";
 import { askThroughDialogs } from "./dialogs.ts";
 import type { Answer, Question } from "./questions.ts";
 import type { AskUserText } from "./text.ts";
 import { applyWidgetKey, createWidgetState, decodeWidgetKey, renderWidget, type WidgetResult } from "./widget.ts";
-import { panelUi } from "../lib/panel-focus.ts";
+import { panelUi } from "../lib/ui/panel-focus.ts";
 
 /** The tool's parameters, documented in the profile's words. */
 const askParams = (params: AskUserText["params"]) =>
@@ -47,7 +47,7 @@ const askParams = (params: AskUserText["params"]) =>
 
 function askUserExtension(pi: ExtensionAPI) {
 	const text = requireText("askUser");
-	// The profile's text, short or long by the model's tier (lib/tool-variants.ts);
+	// The profile's text, short or long by the model's tier (lib/profile/tool-variants.ts);
 	// registered again when the form changes.
 	const tool = defineTool({
 		name: "ask_user_question",

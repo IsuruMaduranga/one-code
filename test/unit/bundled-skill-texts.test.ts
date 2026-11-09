@@ -8,7 +8,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { BUNDLED_SKILLS_DIR } from "../../extensions/lib/skill-scan.ts";
+import { BUNDLED_SKILLS_DIR } from "../../extensions/lib/plugins/skill-scan.ts";
 import {
 	codeReviewBody,
 	codeReviewCell,

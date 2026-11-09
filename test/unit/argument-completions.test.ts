@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extendingCompletions, withoutExactMatch } from "../../extensions/lib/argument-hints.ts";
+import { extendingCompletions, withoutExactMatch } from "../../extensions/lib/ui/argument-hints.ts";
 
 describe("extendingCompletions", () => {
 	it("offers only values longer than what was typed, and closes the menu on an exact match", () => {

@@ -15,11 +15,11 @@
  * and without the mark.
  */
 
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { looksLikeAnthropicRequest } from "../lib/anthropic-payload.ts";
-import { isFirstPartyAnthropic } from "../lib/anthropic-server-tools.ts";
-import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../lib/ledger/plan.ts";
+import { looksLikeAnthropicRequest } from "../lib/request/anthropic-payload.ts";
+import { isFirstPartyAnthropic } from "../lib/request/anthropic-server-tools.ts";
+import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../lib/request/ledger/plan.ts";
 import { baseMark, withPreviousMark } from "./previous-mark.ts";
 
 function cacheMarksExtension(pi: ExtensionAPI) {

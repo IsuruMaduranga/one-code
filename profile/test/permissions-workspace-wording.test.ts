@@ -4,7 +4,7 @@
  * checks which directories reach it.
  */
 import { describe, expect, it } from "vitest";
-import { environmentBlock } from "../../extensions/lib/environment-block.ts";
+import { environmentBlock } from "../../extensions/lib/context/environment-block.ts";
 
 describe("the environment block", () => {
 	const env = { cwd: "/p", isGitRepo: true, platform: "darwin", osVersion: "x", shell: "zsh" };

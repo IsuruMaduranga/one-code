@@ -30,7 +30,7 @@
  * persisted as a `one-code:pending` entry when the hook answers, so it rides
  * the next request whatever opens it (a prompt, a notification, the
  * continuation after a mid-turn compaction) and counts as delivered only when
- * that request's reply stays on the branch (lib/ledger/fold.ts). Until
+ * that request's reply stays on the branch (lib/request/ledger/fold.ts). Until
  * 2026-09-05 each was a custom steer (one extra LLM turn per hook per tool,
  * pi draining one steer per call) and prompt context landed BEFORE the prompt
  * (STEERING-REVIEW-2026-09-05 M6); until 2026-10-21 prompt, session and
@@ -44,14 +44,14 @@
  * (settings, consent, logging) and a payload naming the child.
  */
 
-import { brandedId } from "../lib/brand.mjs";
-import { feature } from "../lib/feature.ts";
+import { brandedId } from "../lib/profile/brand.mjs";
+import { feature } from "../lib/profile/feature.ts";
 import { randomUUID } from "node:crypto";
 import { contentText } from "@earendil-works/pi-ai";
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { RunOutcomeLatch } from "../lib/interrupt.ts";
-import { SESSION_WORK_CHANNEL, type SessionWorkQuery } from "../lib/session-work.ts";
-import { defaultDiscoverRoots } from "../lib/plugins.ts";
+import { RunOutcomeLatch } from "../lib/notify/interrupt.ts";
+import { SESSION_WORK_CHANNEL, type SessionWorkQuery } from "../lib/notify/session-work.ts";
+import { defaultDiscoverRoots } from "../lib/plugins/plugins.ts";
 import { appendHookLog, formatDebugLine, hooksDebugEnabled, hooksLogPath } from "./debug.ts";
 import { runHookCommand } from "./executor.ts";
 import { PRECOMPACT_INSTRUCTIONS_CHANNEL, type PreCompactInstructions } from "../lib/request/precompact-instructions.ts";
@@ -68,15 +68,15 @@ import {
 	interpretHookResult,
 } from "../lib/rules/hook-protocol.ts";
 import { type HookCommand, type HooksSource, loadHookSettings } from "./settings.ts";
-import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
-import { REMINDER_CHANNEL, type ReminderPayload, wrapReminder } from "../lib/reminders.ts";
+import { persistIfLarge, sessionResultsDir } from "../lib/request/persisted-output.ts";
+import { REMINDER_CHANNEL, type ReminderPayload, wrapReminder } from "../lib/request/reminders.ts";
 import { type ChildHookCall, type ChildHookResult, type HookBridge, SUBAGENT_HOOK_CHANNEL, type SubagentHookPayload } from "../lib/agents/hook-bridge.ts";
 import { projectHooksApproved } from "./trust.ts";
 import { PromptContextRouter } from "./prompt-context.ts";
 import { SKILL_INVOCATION_TYPE, type SkillInvocationDetails } from "../lib/plugins/skill-invoke.ts";
-import { consentDialog } from "../lib/consent-dialogs.ts";
-import { followWorkCwd } from "../lib/worktree-channel.ts";
-import { requireText } from "../lib/profile.ts";
+import { consentDialog } from "../lib/consent/consent-dialogs.ts";
+import { followWorkCwd } from "../lib/agents/worktree-channel.ts";
+import { requireText } from "../lib/profile/profile.ts";
 
 /**
  * Every hook text that reaches the model is bounded through this: additional
@@ -138,7 +138,7 @@ function hooksExtension(pi: ExtensionAPI) {
 			.join("\n") || undefined;
 	const workCwd = followWorkCwd(pi.events);
 	let stopHookBlocks = 0;
-	/** Prompt, session and compaction hook context, as a one-shot the next request carries (lib/reminders.ts). */
+	/** Prompt, session and compaction hook context, as a one-shot the next request carries (lib/request/reminders.ts). */
 	const deliverContext = (event: CcHookEvent, added: string) => pi.events.emit(REMINDER_CHANNEL, { text: contextText(event, added), placement: "last-append" });
 	/** UserPromptSubmit context, held until pi delivers its prompt (prompt-context.ts). */
 	const promptContext = new PromptContextRouter();
@@ -605,7 +605,7 @@ function hooksExtension(pi: ExtensionAPI) {
 
 	// ---- Stop ---------------------------------------------------------------
 	// agent_settled, not agent_end: CC fires Stop once, when the main agent has
-	// finished responding, and a turn can hold several runs (`lib/interrupt.ts`).
+	// finished responding, and a turn can hold several runs (`lib/notify/interrupt.ts`).
 	// Dispatching per run would run the user's Stop hook several times per turn and
 	// let a blocking hook inject its follow-up mid-retry.
 	const stopOutcome = new RunOutcomeLatch();
@@ -626,7 +626,7 @@ function hooksExtension(pi: ExtensionAPI) {
 		// means no run ended in this turn, which is not a response to stop on either.
 		if (stopOutcome.take() !== "ok") return;
 		// Claude Code's two lists of what will wake the session later, filled by the
-		// background extension (lib/session-work.ts); empty arrays when none.
+		// background extension (lib/notify/session-work.ts); empty arrays when none.
 		const work: SessionWorkQuery = { crons: [], tasks: [] };
 		pi.events.emit(SESSION_WORK_CHANNEL, work);
 		const payload: HookStdinPayload = {

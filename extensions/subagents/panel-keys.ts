@@ -5,12 +5,12 @@
  * all, esc hands focus back to the editor (index.ts owns what each does; an
  * open view stays open while the editor addresses its agent). Raw terminal
  * bytes in, intents out — no side effects, fully unit-testable. Keys are named
- * through `lib/key-input.ts`, so the legacy, kitty and modifyOtherKeys
+ * through `lib/ui/key-input.ts`, so the legacy, kitty and modifyOtherKeys
  * encodings decode alike, and a kitty key release (sent after every press) is
  * never mistaken for typing.
  */
 
-import { isKeyRelease, keyId, keyText } from "../lib/key-input.ts";
+import { isKeyRelease, keyId, keyText } from "../lib/ui/key-input.ts";
 
 export type StripKey = "up" | "down" | "open" | "leave" | "stop" | "stopAll" | "pageUp" | "pageDown";
 

@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const completeSimple = vi.fn();
 vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: (...args: unknown[]) => completeSimple(...args) }));
 
-const { replaySideCall } = await import("../../extensions/lib/replay-call.ts");
-const { captureRequest, LastExchange } = await import("../../extensions/lib/request-replay.ts");
+const { replaySideCall } = await import("../../extensions/lib/side-calls/replay-call.ts");
+const { captureRequest, LastExchange } = await import("../../extensions/lib/side-calls/request-replay.ts");
 
 const model = { api: "anthropic-messages", provider: "my-proxy", id: "claude-sonnet-5", baseUrl: "https://proxy.example" } as never;
 const ctx = {

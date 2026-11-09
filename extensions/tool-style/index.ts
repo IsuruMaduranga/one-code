@@ -8,7 +8,7 @@
  * from pi's own definition byte-identical, so the system prompt and tool
  * schemas are unchanged, with one exception: write carries Claude Code's
  * description, short or long by the model's tier (write-description.ts,
- * lib/tool-variants.ts), and is registered again when the form changes;
+ * lib/profile/tool-variants.ts), and is registered again when the form changes;
  * edit carries pi's plus the read rule. Both texts come from the profile
  * (text.ts).
  * Execution delegates to a per-cwd instance of pi's
@@ -28,8 +28,8 @@
  * session_start/model_select and removes them for frontier models.
  */
 
-import { feature } from "../lib/feature.ts";
-import { requireText } from "../lib/profile.ts";
+import { feature } from "../lib/profile/feature.ts";
+import { requireText } from "../lib/profile/profile.ts";
 import { readFile, stat } from "node:fs/promises";
 import type { ExtensionAPI, ExtensionToolContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
@@ -41,10 +41,10 @@ import {
 	createWriteToolDefinition,
 	generateDiffString,
 } from "@earendil-works/pi-coding-agent";
-import { perCwd } from "../lib/per-cwd.ts";
-import { type DescriptionForm, registerFormTool } from "../lib/tool-variants.ts";
-import { resolveToolPath } from "../lib/tool-path.ts";
-import { ccWrapBuiltinRenderers, type RejectedFileOp } from "../lib/tui-render.ts";
+import { perCwd } from "../lib/core/per-cwd.ts";
+import { type DescriptionForm, registerFormTool } from "../lib/profile/tool-variants.ts";
+import { resolveToolPath } from "../lib/rules/tool-path.ts";
+import { ccWrapBuiltinRenderers, type RejectedFileOp } from "../lib/ui/tui-render.ts";
 import type { ToolStyleText } from "./text.ts";
 import { createWriteRenderers, WRITE_DIFF_MAX_BYTES, type WriteRenderDeps, writeDetails } from "./write-render.ts";
 

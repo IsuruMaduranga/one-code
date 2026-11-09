@@ -3,8 +3,8 @@ import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 // pi's own resolver, reached by file path (its package root does not export it), to pin the vendored copy to it.
 import { resolveToCwd } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/path-utils.js";
-import { shellQuote } from "../../extensions/lib/shell-quote.ts";
-import { normalizeToolPath } from "../../extensions/lib/tool-path.ts";
+import { shellQuote } from "../../extensions/lib/shell/shell-quote.ts";
+import { normalizeToolPath } from "../../extensions/lib/rules/tool-path.ts";
 import { rewriteToolInput, validateWorktreeName } from "../../extensions/worktree/rewrite.ts";
 
 const WT = "/repo/.claude/worktrees/fix";

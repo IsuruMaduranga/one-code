@@ -11,9 +11,9 @@
  */
 
 import { basename } from "node:path";
-import { unwrapUserMessage } from "../lib/agent-view.ts";
-import { cutPlainText, firstNonEmptyLine } from "../lib/tui-render.ts";
-import { sanitizeDisplayText } from "../lib/terminal-text.ts";
+import { unwrapUserMessage } from "../lib/agents/agent-view.ts";
+import { cutPlainText, firstNonEmptyLine } from "../lib/ui/tui-render.ts";
+import { sanitizeDisplayText } from "../lib/ui/terminal-text.ts";
 import { normalizeToolName } from "../lib/rules/matcher.ts";
 import { emptyUsage, sumUsage, type UsageTotals } from "../lib/agents/usage.ts";
 

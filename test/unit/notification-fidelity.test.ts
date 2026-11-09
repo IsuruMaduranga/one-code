@@ -1,6 +1,6 @@
 /**
  * Locks the harness-notification frames the base builds around the profile's
- * words (lib/notifications.ts): the `<task-notification>` tags and their
+ * words (lib/notify/notifications.ts): the `<task-notification>` tags and their
  * order, the `<agent-message>` envelope and the hand-back's indentation, the
  * clip on a flagged hand-back's reason, and the framing each delivery gets.
  * Every word inside a frame comes from the active profile, so these hold on
@@ -22,8 +22,8 @@ import {
 	taskNotification,
 	taskStatusOf,
 	workflowSummary,
-} from "../../extensions/lib/notifications.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+} from "../../extensions/lib/notify/notifications.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const words = requireText("notifications");
 const AGENT_MESSAGE_GUARD = words.agentMessage.guard;

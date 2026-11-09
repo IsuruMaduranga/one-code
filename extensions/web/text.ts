@@ -3,10 +3,10 @@
  * backends decide what happened; the profile words it
  * (working-docs/features/profiles/). Backend labels and the user's progress
  * lines stay in the base as UI; the server-side search's prompt and fallback
- * reasons are the `nativeWeb` group (lib/native-web-text.ts).
+ * reasons are the `nativeWeb` group (lib/request/native-web-text.ts).
  */
 
-import type { DescriptionForm } from "../lib/tool-variants.ts";
+import type { DescriptionForm } from "../lib/profile/tool-variants.ts";
 import type { SearchResult } from "./backends.ts";
 
 /** Why one search backend failed. `api` names the service; `osMessage` is the system's own text. */
@@ -39,7 +39,7 @@ export type ProviderSearchFailure =
 	| { kind: "other"; osMessage: string };
 
 export interface WebSearchText {
-	/** Short on frontier and workhorse, long on cheap and tiny (lib/tool-variants.ts). */
+	/** Short on frontier and workhorse, long on cheap and tiny (lib/profile/tool-variants.ts). */
 	description(form: DescriptionForm): string;
 	params: Record<"query" | "allowed_domains" | "blocked_domains", string>;
 	/** Search terms for `tool_search`, beyond the tool's name and description. */
@@ -47,7 +47,7 @@ export interface WebSearchText {
 	cancelled(query: string): string;
 	/**
 	 * Anthropic's server-side search answered. `sourceLines`: one markdown link
-	 * per source, already escaped (lib/anthropic-server-tools.ts sourceLine);
+	 * per source, already escaped (lib/request/anthropic-server-tools.ts sourceLine);
 	 * `filtered`: the call had domain filters, which the search enforced.
 	 */
 	nativeAnswer(p: { answer: string; cutOff: boolean; sourceLines: readonly string[]; spec: string; filtered: boolean }): string;

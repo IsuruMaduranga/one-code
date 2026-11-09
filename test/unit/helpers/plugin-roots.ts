@@ -7,7 +7,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach } from "vitest";
-import { type DiscoverRoots, invalidatePluginsCache } from "../../../extensions/lib/plugins.ts";
+import { type DiscoverRoots, invalidatePluginsCache } from "../../../extensions/lib/plugins/plugins.ts";
 
 export type PluginRoots = DiscoverRoots & { claudePluginsDir: string };
 

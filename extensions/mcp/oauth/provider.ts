@@ -12,7 +12,7 @@
  * using stored tokens) is constructed without an opener and refuses to redirect.
  */
 
-import { brand } from "../../lib/brand.mjs";
+import { brand } from "../../lib/profile/brand.mjs";
 import type {
 	OAuthClientInformationFull,
 	OAuthClientInformationMixed,
@@ -22,7 +22,7 @@ import type {
 import { randomBytes } from "node:crypto";
 import type { OAuthClientProvider, OAuthDiscoveryState } from "@modelcontextprotocol/sdk/client/auth.js";
 import { type OAuthServer, readAuth, type StoredAuth, writeAuth } from "./store.ts";
-import { requireText } from "../../lib/profile.ts";
+import { requireText } from "../../lib/profile/profile.ts";
 
 export class McpAuthenticationRequiredError extends Error {}
 

@@ -21,7 +21,7 @@ import {
 	typescriptPreflight,
 	findTypescript,
 } from "../../extensions/lsp/servers.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { diag } from "./helpers/lsp-diagnostics.ts";
 
 const lspText = requireText("lsp");

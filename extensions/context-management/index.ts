@@ -38,11 +38,11 @@
  * for an anthropic-messages endpoint you have confirmed accepts it.
  */
 
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { isAnthropicOAuth } from "../lib/anthropic-auth.ts";
-import { looksLikeAnthropicRequest } from "../lib/anthropic-payload.ts";
-import { CACHE_RETENTION_ENV, mainSessionCacheRetention } from "../lib/cache-retention.ts";
+import { isAnthropicOAuth } from "../lib/request/anthropic-auth.ts";
+import { looksLikeAnthropicRequest } from "../lib/request/anthropic-payload.ts";
+import { CACHE_RETENTION_ENV, mainSessionCacheRetention } from "../lib/request/cache-retention.ts";
 
 const CLEAR_THINKING_EDIT = { type: "clear_thinking_20251015", keep: "all" };
 const CONTEXT_MANAGEMENT_BETA = "context-management-2025-06-27";
@@ -91,7 +91,7 @@ export function anthropicBetas(oauth: boolean, compat: AnthropicModelCompat | un
 
 // The payload predicate lives in lib (pure, shared with compaction and
 // tool-search); re-exported so existing importers keep working.
-export { looksLikeAnthropicRequest } from "../lib/anthropic-payload.ts";
+export { looksLikeAnthropicRequest } from "../lib/request/anthropic-payload.ts";
 
 /**
  * The edit is rejected unless thinking is on: enabled or adaptive in the
@@ -156,7 +156,7 @@ function contextManagementExtension(pi: ExtensionAPI) {
 	// Prompt-cache TTL for the main session: one hour in the interactive modes,
 	// the way Claude Code caches (a pause between turns no longer re-writes the
 	// context); a `-p`/json run keeps pi's 5-minute default, and so do
-	// in-process children (lib/cache-retention.ts). pi reads the variable per
+	// in-process children (lib/request/cache-retention.ts). pi reads the variable per
 	// request, so setting it here, before the first prompt, is early enough.
 	pi.on("session_start", (_event, ctx) => {
 		const value = mainSessionCacheRetention(ctx.mode, process.env[CACHE_RETENTION_ENV]);

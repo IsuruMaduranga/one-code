@@ -17,15 +17,15 @@ import { existsSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
-import { readSettingsFile } from "../../lib/claude-settings.ts";
-import { withReasoningFallback } from "../../lib/model-policy.ts";
+import { readSettingsFile } from "../../lib/profile/claude-settings.ts";
+import { withReasoningFallback } from "../../lib/models/model-policy.ts";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { type AutoModeConfig, autoModeSettingsFiles } from "../../lib/rules/auto-mode-config.ts";
-import { isBorrowedUserFile } from "../../lib/claude-settings.ts";
+import { isBorrowedUserFile } from "../../lib/profile/claude-settings.ts";
 import { classifierCandidates, replyText, withAuthBaseUrl } from "../../lib/models/classifier-model.ts";
 import { autoModeSetupText, buildSetupPrompt, parseGitRemotes, redactSecrets, type SetupDraft, parseSetupDraft, type SetupFacts } from "./setup.ts";
-import { HARNESS_GIT_CONFIG } from "../../lib/git.ts";
-import { instructionTargets } from "../../lib/instructions.ts";
+import { HARNESS_GIT_CONFIG } from "../../lib/context/git.ts";
+import { instructionTargets } from "../../lib/context/instructions.ts";
 
 const PROBE_TIMEOUT_MS = 10_000;
 /** Drafting reads a big fact dump and writes a full slot list — give it room. */

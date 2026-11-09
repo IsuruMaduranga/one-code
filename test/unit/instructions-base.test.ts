@@ -1,5 +1,5 @@
 /**
- * The base's instruction files without a provider (lib/instructions.ts): what
+ * The base's instruction files without a provider (lib/context/instructions.ts): what
  * a product that reads no Claude Code file gets. Each directory's AGENTS.md
  * and the product file, imports confined to the project, the same files on a
  * nested read and for the classifier; One Code's provider is covered by the
@@ -9,11 +9,11 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { openInstructions } from "../../extensions/lib/instructions.ts";
-import { persistExternalIncludesApproval } from "../../extensions/lib/claude-external-includes.ts";
-import { resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile.ts";
+import { openInstructions } from "../../extensions/lib/context/instructions.ts";
+import { persistExternalIncludesApproval } from "../../extensions/lib/context/claude-external-includes.ts";
+import { resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 import { profile } from "../../profile/index.ts";
-import { brand, envName } from "../../extensions/lib/brand.mjs";
+import { brand, envName } from "../../extensions/lib/profile/brand.mjs";
 
 let root: string;
 let home: string;

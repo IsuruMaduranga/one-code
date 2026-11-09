@@ -8,7 +8,7 @@
  */
 
 import { join } from "node:path";
-import { pathWithinBase, sanitizePathSegment } from "../../lib/plugin-root.ts";
+import { pathWithinBase, sanitizePathSegment } from "../../lib/plugins/plugin-root.ts";
 
 /** The directory holding every version of one plugin: `<root>/cache/<marketplace>/<plugin>`. */
 export function pluginCacheDir(root: string, marketplace: string, plugin: string): string {

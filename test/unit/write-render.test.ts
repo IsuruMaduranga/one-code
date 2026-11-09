@@ -1,8 +1,8 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { visibleWidth } from "../../extensions/lib/text-width.ts";
-import { EXPAND_HINT, type ThemeLike } from "../../extensions/lib/tui-render.ts";
-import { userDenialText } from "../../extensions/lib/user-denial.ts";
+import { visibleWidth } from "../../extensions/lib/ui/text-width.ts";
+import { EXPAND_HINT, type ThemeLike } from "../../extensions/lib/ui/tui-render.ts";
+import { userDenialText } from "../../extensions/lib/consent/user-denial.ts";
 import {
 	contentPreviewLines,
 	countLines,

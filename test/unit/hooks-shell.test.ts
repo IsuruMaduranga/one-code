@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import { defaultHookShell, hookShellSpawn, runHookCommand } from "../../extensions/hooks/executor.ts";
 import { matcherApplies, toolMatchCandidates } from "../../extensions/lib/rules/hook-matcher.ts";
 import { parseHooksBlock } from "../../extensions/hooks/settings.ts";
-import { resolvePowerShellSpawn } from "../../extensions/lib/shell-spawn.ts";
+import { resolvePowerShellSpawn } from "../../extensions/lib/shell-run/shell-spawn.ts";
 import { PORTABLE_PWSH_DIR } from "./helpers/local-pwsh.ts";
 
 describe("parseHooksBlock shell field", () => {

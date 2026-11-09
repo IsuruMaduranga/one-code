@@ -4,11 +4,11 @@
  * what the model reads (working-docs/features/profiles/).
  */
 
-import type { DescriptionForm } from "../lib/tool-variants.ts";
+import type { DescriptionForm } from "../lib/profile/tool-variants.ts";
 
 export interface PlanModeText {
 	descriptions: {
-		/** Short on frontier and workhorse, long on cheap and tiny (lib/tool-variants.ts). */
+		/** Short on frontier and workhorse, long on cheap and tiny (lib/profile/tool-variants.ts). */
 		enter_plan_mode(form: DescriptionForm): string;
 		exit_plan_mode: string;
 	};

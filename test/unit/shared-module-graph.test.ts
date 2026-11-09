@@ -1,6 +1,6 @@
 /**
  * The profile and its source provider load through `sharedModule`
- * (lib/shared-module.ts), which under pi is the calling extension's jiti
+ * (lib/profile/shared-module.ts), which under pi is the calling extension's jiti
  * `require`. In the bundled app pi resolves its own packages by alias, and a
  * synchronous `require` of pi's `dist/` then transpiles it under those aliases:
  * pi's deep `@earendil-works/pi-ai/utils/retry` import is rewritten to a dead
@@ -48,7 +48,7 @@ describe("modules loaded through sharedModule", () => {
 	});
 
 	it("import no pi package as a value: the profile's source provider, when it has one", () => {
-		// A source provider is optional (lib/sources.ts); a profile without one has no graph here.
+		// A source provider is optional (lib/profile/sources.ts); a profile without one has no graph here.
 		expect(profile.sources === undefined ? [] : piValueImports(join(ROOT, "profile", profile.sources))).toEqual([]);
 	});
 });

@@ -1,16 +1,16 @@
-import { ONE_SHOT_COMMAND_FAILED_CHANNEL } from "../../extensions/lib/interrupt.ts";
+import { ONE_SHOT_COMMAND_FAILED_CHANNEL } from "../../extensions/lib/notify/interrupt.ts";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import pluginsExtension from "../../extensions/plugins/index.ts";
-import { invalidatePluginsCache } from "../../extensions/lib/plugins.ts";
+import { invalidatePluginsCache } from "../../extensions/lib/plugins/plugins.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { captureUserTurns } from "./helpers/user-turn.ts";
 import { SUBAGENT_GATE_CHANNEL } from "../../extensions/lib/agents/subagent-gate.ts";
-import { shellQuote } from "../../extensions/lib/shell-quote.ts";
-import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
+import { shellQuote } from "../../extensions/lib/shell/shell-quote.ts";
+import { WORKTREE_CHANNEL } from "../../extensions/lib/agents/worktree-channel.ts";
 import { promptCommandText } from "../../extensions/lib/plugins/skill-invoke.ts";
 
 let home: string;

@@ -7,7 +7,7 @@
  *
  * Claude Code's guide fetches its docs over the web and runs on `haiku`. Ours
  * reads the user guide shipped in this package and the running pi's docs and
- * examples (lib/guide-docs.ts), so the answer matches the installed version,
+ * examples (lib/agents/guide-docs.ts), so the answer matches the installed version,
  * and runs on the session's subagent model (no `model` here, so the usual
  * resolution applies). It answers about One Code only, and when One Code lacks
  * something it suggests how to add it, down to a custom pi extension. The base

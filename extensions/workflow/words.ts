@@ -6,7 +6,7 @@
  * starts without it.
  */
 
-import { requireText } from "../lib/profile.ts";
+import { requireText } from "../lib/profile/profile.ts";
 import type { WorkflowText } from "./text.ts";
 
 export const workflowWords = (): WorkflowText => requireText("workflow");

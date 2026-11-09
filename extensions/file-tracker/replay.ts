@@ -18,8 +18,8 @@
  * (round-2 review H1).
  */
 
-import { latestCompaction } from "../lib/compaction-boundary.ts";
-import { type FileVersion, isFileVersion, readRecord } from "../lib/ledger/records.ts";
+import { latestCompaction } from "../lib/request/compaction-boundary.ts";
+import { type FileVersion, isFileVersion, readRecord } from "../lib/request/ledger/records.ts";
 import { shownInFull } from "./shell-reads.ts";
 
 interface ToolCallBlock {
@@ -75,7 +75,7 @@ export interface SeenFile {
  * records the version the edit left (the live tracker observes the file
  * again after its own write, and the compaction keeps that). A restore counts only after the latest compaction, and there it
  * counts whether or not a request delivered it yet. A later compaction is
- * the only thing that drops a restore undelivered (lib/ledger/fold.ts), so
+ * the only thing that drops a restore undelivered (lib/request/ledger/fold.ts), so
  * one recorded since the latest is either delivered or rides the next
  * request, and the model sees the file before it can call a tool on it; the
  * live session counts it read from the compaction on, too. A notice counts

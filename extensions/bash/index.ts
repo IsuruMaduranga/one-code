@@ -7,30 +7,30 @@
  * delegates to pi's real executor (`createBashToolDefinition`) so upstream
  * bash behavior — timeout handling, PI_* env, spawn hooks — stays exactly
  * pi's (its tail cut of a long output is replaced by Claude Code's head-first
- * one, lib/spill-file.ts); the shared body in lib/shell-tool.ts adds the background
+ * one, lib/shell-run/spill-file.ts); the shared body in lib/shell-run/shell-tool.ts adds the background
  * branch (spool to `<sessionDir>/bash/<taskId>/output.log`, the shared
  * background registry, a steered completion notification), and this file only
  * supplies what is bash's: pi's definition, the bash the session resolved
- * (lib/shell-spawn.ts — Git Bash on Windows, `CLAUDE_CODE_GIT_BASH_PATH`
+ * (lib/shell-run/shell-spawn.ts — Git Bash on Windows, `CLAUDE_CODE_GIT_BASH_PATH`
  * honoured), Claude Code's description (description.ts) and the bash guards. The permission
  * gate and auto-mode classifier run before execute like any bash call — a
  * background command is NOT auto-allowed, and the gate fires before anything
  * detaches.
  */
 
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import { join } from "node:path";
 import type { BashSpawnContext, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createBashToolDefinition, createLocalBashOperations, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { childProcessEnv, LAUNCHER_ENV_VAR } from "../lib/app-launch.mjs";
-import { perCwd } from "../lib/per-cwd.ts";
-import { bashSpawn, piShellEnv, withChildProcessEnv } from "../lib/shell-spawn.ts";
-import { registerShellTool } from "../lib/shell-tool.ts";
-import { type DescriptionForm, followDescriptionForm } from "../lib/tool-variants.ts";
+import { childProcessEnv, LAUNCHER_ENV_VAR } from "../lib/app/app-launch.mjs";
+import { perCwd } from "../lib/core/per-cwd.ts";
+import { bashSpawn, piShellEnv, withChildProcessEnv } from "../lib/shell-run/shell-spawn.ts";
+import { registerShellTool } from "../lib/shell-run/shell-tool.ts";
+import { type DescriptionForm, followDescriptionForm } from "../lib/profile/tool-variants.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../lib/rules/modes.ts";
-import type { ShellParams } from "../lib/shell-text.ts";
-import { requireText } from "../lib/profile.ts";
+import type { ShellParams } from "../lib/shell-run/shell-text.ts";
+import { requireText } from "../lib/profile/profile.ts";
 import { bashGuardReason } from "../lib/shell/bash-guards.ts";
 
 /** The tool's parameters, described in the profile's words. */
@@ -52,7 +52,7 @@ function bashExtension(pi: ExtensionAPI) {
  * (stderr is the parent's TUI), so it prints nothing.
  */
 export function bashTool(pi: ExtensionAPI, { announce }: { announce: boolean }) {
-	// The session's bash, resolved once (lib/shell-spawn.ts). An ignored
+	// The session's bash, resolved once (lib/shell-run/shell-spawn.ts). An ignored
 	// CLAUDE_CODE_GIT_BASH_PATH is reported once, at the first session start.
 	const bash = bashSpawn();
 	const shellPath = bash.spawn?.commandTransport === "stdin" ? undefined : bash.spawn?.shell;
@@ -69,7 +69,7 @@ export function bashTool(pi: ExtensionAPI, { announce }: { announce: boolean }) 
 	// change ctx.cwd mid-session). The same bash drives pi's foreground
 	// executor, so the override applies there too.
 	// Every command the model runs gets the user's own environment back under
-	// the bundled app (lib/app-launch.mjs), so a `pi` it starts is the user's pi.
+	// the bundled app (lib/app/app-launch.mjs), so a `pi` it starts is the user's pi.
 	const spawnHook = (context: BashSpawnContext): BashSpawnContext => ({ ...context, env: childProcessEnv(context.env) });
 	const base = createBashToolDefinition(process.cwd(), { shellPath, spawnHook });
 

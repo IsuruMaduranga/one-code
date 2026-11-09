@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { boundConsentItems } from "../../extensions/lib/consent-preview.ts";
-import { escapeControlText, sanitizeDisplayText, sanitizeTitle, terminalLink } from "../../extensions/lib/terminal-text.ts";
+import { boundConsentItems } from "../../extensions/lib/consent/consent-preview.ts";
+import { escapeControlText, sanitizeDisplayText, sanitizeTitle, terminalLink } from "../../extensions/lib/ui/terminal-text.ts";
 import {
 	callLine,
 	ccToolRenderers,
@@ -9,7 +9,7 @@ import {
 	scheduledTaskComponent,
 	summarizeArgs,
 	type ThemeLike,
-} from "../../extensions/lib/tui-render.ts";
+} from "../../extensions/lib/ui/tui-render.ts";
 import { promptTitle } from "../../extensions/mcp/trust.ts";
 import { parseTitle } from "../../extensions/session-title/title.ts";
 import { LiveRunRegistry } from "../../extensions/subagents/live-runs.ts";

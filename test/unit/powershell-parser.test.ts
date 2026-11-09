@@ -1,5 +1,5 @@
 /**
- * The PowerShell parse server's client (lib/powershell-parser.ts) against a
+ * The PowerShell parse server's client (lib/shell/powershell-parser.ts) against a
  * fake child process: the base64 line protocol, the ready handshake,
  * timeouts, crashes and the restart cap, Constrained Language Mode, the idle
  * stop, and the process-wide instance. The real walker against a real
@@ -9,8 +9,8 @@ import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { POWERSHELL_PARSE_BOOTSTRAP, POWERSHELL_PARSE_WALKER } from "../../extensions/lib/powershell-parse-script.ts";
-import { PowerShellParser, sharedPowerShellParser } from "../../extensions/lib/powershell-parser.ts";
+import { POWERSHELL_PARSE_BOOTSTRAP, POWERSHELL_PARSE_WALKER } from "../../extensions/lib/shell/powershell-parse-script.ts";
+import { PowerShellParser, sharedPowerShellParser } from "../../extensions/lib/shell/powershell-parser.ts";
 
 const b64 = (text: string) => Buffer.from(text, "utf8").toString("base64");
 const unb64 = (text: string) => Buffer.from(text, "base64").toString("utf8");

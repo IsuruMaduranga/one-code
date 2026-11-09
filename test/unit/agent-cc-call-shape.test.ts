@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { validateToolArguments } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { decide, extractSubject, parseRules } from "../../extensions/lib/rules/matcher.ts";
 import { prepareAgentArguments } from "../../extensions/subagents/agent-args.ts";
 import subagentsExtension from "../../extensions/subagents/index.ts";

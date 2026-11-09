@@ -5,8 +5,8 @@
  * (working-docs/findings/43-anthropic-server-web-tools.md).
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { runServerCall, serverCallUsage, tryNativeWeb } from "../../extensions/lib/anthropic-server-call.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { runServerCall, serverCallUsage, tryNativeWeb } from "../../extensions/lib/request/anthropic-server-call.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import {
 	createServerCallAccumulator,
 	fetchOutcome,
@@ -26,7 +26,7 @@ import {
 	thinkingRetry,
 	WEB_FETCH_TOOL_TYPE,
 	WEB_SEARCH_TOOL_TYPE,
-} from "../../extensions/lib/anthropic-server-tools.ts";
+} from "../../extensions/lib/request/anthropic-server-tools.ts";
 
 const nativeWeb = requireText("nativeWeb");
 

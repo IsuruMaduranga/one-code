@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { PROMPT_TIERS, type PromptTier } from "../../extensions/lib/model-tier.ts";
+import { PROMPT_TIERS, type PromptTier } from "../../extensions/lib/models/model-tier.ts";
 import type { EnvironmentInfo } from "../../extensions/system-prompt/environment.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { buildClaudeCodeSystemPrompt } from "../../extensions/system-prompt/template.ts";
 
 /**

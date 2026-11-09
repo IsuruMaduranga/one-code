@@ -19,8 +19,8 @@ import {
 	TASKS_NOTICE,
 	toolDisplayLabel,
 } from "../../extensions/subagents/panel-render.ts";
-import { userMessageForAgent } from "../../extensions/lib/agent-view.ts";
-import { wrapProse } from "../../extensions/lib/tui-render.ts";
+import { userMessageForAgent } from "../../extensions/lib/agents/agent-view.ts";
+import { wrapProse } from "../../extensions/lib/ui/tui-render.ts";
 import { decodeStripKey } from "../../extensions/subagents/panel-keys.ts";
 import { resolvePiTuiEntry } from "../../extensions/lib/ui/prose.ts";
 import { existsSync } from "node:fs";

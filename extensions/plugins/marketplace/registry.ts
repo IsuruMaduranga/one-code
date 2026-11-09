@@ -8,8 +8,8 @@
  */
 
 import { join } from "node:path";
-import { readJsonFile, writeJsonAtomic } from "../../lib/atomic-write.ts";
-import { sanitizePathSegment } from "../../lib/plugin-root.ts";
+import { readJsonFile, writeJsonAtomic } from "../../lib/core/atomic-write.ts";
+import { sanitizePathSegment } from "../../lib/plugins/plugin-root.ts";
 import { type KnownMarketplace, parseKnownMarketplace } from "./types.ts";
 
 const FILE = "known_marketplaces.json";

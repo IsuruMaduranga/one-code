@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyNoopFolds, decideFold, type FoldEntry, foldSuffix } from "../../extensions/background/noop-fold.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const loop = requireText("background").loop;
 

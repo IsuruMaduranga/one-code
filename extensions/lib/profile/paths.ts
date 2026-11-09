@@ -1,0 +1,217 @@
+/**
+ * Where One Code reads and writes (pure).
+ *
+ * The policy is "own state, borrowed config": `~/.claude` is Claude Code's
+ * directory and One Code treats it as a read-only compatibility surface
+ * (settings, skills, agents, plugins, CLAUDE.md); everything One Code
+ * *generates* — plan files, and over time the rest of its state — lands in
+ * One Code's own `~/.onecode`, so neither product's artifacts mingle with the
+ * other's. See "Own state, borrowed config" in working-docs/decisions.md.
+ */
+
+import { realpathSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { isAbsolute, join, relative, resolve } from "node:path";
+import { productStateDir } from "./brand.mjs";
+
+/**
+ * Claude Code's config dir — the compat surface One Code reads, never writes.
+ * Honours CLAUDE_CONFIG_DIR the way Claude Code itself does.
+ */
+export function claudeConfigDir(env: Record<string, string | undefined> = process.env): string {
+	return env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
+}
+
+/**
+ * Claude Code's organization-managed root: `managed-settings.json`
+ * (lib/profile/claude-settings.ts) and the managed CLAUDE.md and rules all live here.
+ * On Windows it is `C:\Program Files\ClaudeCode`, the only Windows path the
+ * Claude Code binary names (2.1.292); `C:\ProgramData\ClaudeCode` is not read.
+ * The Windows policy registry keys are a separate source, not read here.
+ */
+export function claudeManagedDir(platform: NodeJS.Platform = process.platform): string {
+	if (platform === "darwin") return "/Library/Application Support/ClaudeCode";
+	if (platform === "win32") return "C:\\Program Files\\ClaudeCode";
+	return "/etc/claude-code";
+}
+
+/**
+ * The user-scope Claude Code dir for a given `home` — `claudeConfigDir` for
+ * callers that thread a `home` (tests, `~`-expansion). `CLAUDE_CONFIG_DIR`
+ * still wins, exactly as Claude Code honours it; project-scope `<cwd>/.claude`
+ * is never relocated by that variable, so callers keep spelling that one out.
+ */
+export function claudeUserDir(home: string, env: Record<string, string | undefined> = process.env): string {
+	return env.CLAUDE_CONFIG_DIR || join(home, ".claude");
+}
+
+/**
+ * Claude Code's `.claude.json` (MCP servers, onboarding state): beside the
+ * home dir by default, and INSIDE `CLAUDE_CONFIG_DIR` when that is set — the
+ * one user-scope file that does not live under `~/.claude`.
+ */
+export function claudeJsonPath(home: string, env: Record<string, string | undefined> = process.env): string {
+	return env.CLAUDE_CONFIG_DIR ? join(env.CLAUDE_CONFIG_DIR, ".claude.json") : join(home, ".claude.json");
+}
+
+/**
+ * Shell-style `~` expansion with one semantics everywhere: a bare `~` is
+ * `home`, `~/x` is under it, and `~user` is left alone (no other user's home is
+ * ever guessed). Anything else is returned unchanged.
+ */
+export function expandTilde(path: string, home: string): string {
+	if (path === "~") return home;
+	if (path.startsWith("~/")) return join(home, path.slice(2));
+	return path;
+}
+
+/**
+ * The product's own state dir (`~/.onecode`, or `ONECODE_STATE_DIR`): everything
+ * the product generates goes here. Callers that already thread a `home` (the
+ * settings loaders, hermetic in tests) pass it so the root stays under that home.
+ */
+export { productStateDir };
+
+/**
+ * A path with forward slashes, in Claude Code's POSIX shape on Windows
+ * (`utils/windowsPaths.ts windowsPathToPosixPath`): `C:\Users\x` becomes
+ * `/c/Users/x`, a UNC `\\server\share` becomes `//server/share`, anything
+ * else only flips its separators. This is the form Claude Code matches
+ * permission path patterns against on Windows, so a rule written for it —
+ * `Read(//c/Users/x/**)` — matches here too. Elsewhere the path is unchanged.
+ */
+export function toPosixPath(path: string): string {
+	if (process.platform !== "win32") return path;
+	if (path.startsWith("\\\\")) return path.replace(/\\/g, "/");
+	const drive = /^([A-Za-z]):[/\\]/.exec(path);
+	if (drive) return `/${drive[1].toLowerCase()}${path.slice(2).replace(/\\/g, "/")}`;
+	return path.replace(/\\/g, "/");
+}
+
+/**
+ * The inverse conversion, for a path spelled the way Git Bash (MSYS2) spells
+ * it, on every platform (pure — `gitBashPathToNative` is the win32-gated
+ * form). Claude Code's `posixPathToWindowsPath` covers the first two shapes:
+ * `/c/Users/x` is `C:\Users\x`, `/cygdrive/c/x` is `C:\x`. The third is Git
+ * for Windows' own mount table: `/tmp/x` is `<tmp>\x`, because its default
+ * fstab mounts `/tmp` on the user's temp dir (`usertemp`; findings §22 saw
+ * `pwd` print `/tmp/…` for a cwd under `%TEMP%`). Every other POSIX absolute
+ * path (`/usr/bin/…`, `/etc/hosts` — files under the Git install) and every
+ * non-POSIX path is returned as given.
+ */
+export function msysPathToWindows(path: string, tmp: string): string {
+	const drive = /^\/(?:cygdrive\/)?([A-Za-z])(?:\/(.*))?$/.exec(path);
+	if (drive) return `${drive[1].toUpperCase()}:\\${(drive[2] ?? "").replace(/\//g, "\\")}`;
+	const temp = /^\/tmp(?:\/(.*))?$/.exec(path);
+	if (temp) return temp[1] ? join(tmp, temp[1]) : tmp;
+	return path;
+}
+
+/**
+ * A token from a bash command line as the path it reaches on this machine:
+ * on Windows the bash tool runs Git Bash, so `/c/…`, `/cygdrive/c/…` and
+ * `/tmp/…` are converted ({@link msysPathToWindows}); elsewhere, and for any
+ * other spelling, the token is unchanged. For bash tokens only — pi's file
+ * tools resolve their paths natively, so a gate judging a file-tool path must
+ * see what `path.resolve` sees.
+ */
+export function gitBashPathToNative(token: string): string {
+	return process.platform === "win32" ? msysPathToWindows(token, tmpdir()) : token;
+}
+
+/**
+ * A Windows system executable by its canonical location, `%SystemRoot%\System32\<name>`
+ * (defaulting to `C:\Windows`), so a PATH entry can never substitute it —
+ * `taskkill.exe`, `cmd.exe`, Windows PowerShell's `powershell.exe`.
+ */
+export function system32Path(name: string, env: Record<string, string | undefined> = process.env): string {
+	return join(env.SystemRoot ?? "C:\\Windows", "System32", name);
+}
+
+/**
+ * The real path of `target`, or undefined when nothing about it resolves:
+ * the native realpath first (on Windows it also expands 8.3 short names and
+ * fixes the case), the JS one as a fallback. Shared by every containment
+ * resolver so "resolved" means one thing.
+ */
+export function tryRealpath(target: string): string | undefined {
+	try {
+		return realpathSync.native(target);
+	} catch {
+		try {
+			return realpathSync(target);
+		} catch {
+			return undefined;
+		}
+	}
+}
+
+/** `path` as given when absolute, else joined onto `base` (no `..` normalisation — the spelling stays recognisable). */
+export function absoluteFrom(base: string, path: string): string {
+	return isAbsolute(path) ? path : join(base, path);
+}
+
+/** Separators as `/`, whatever the platform — for display and for `/`-spelled comparisons. */
+export function forwardSlashes(path: string): string {
+	return path.replace(/\\/g, "/");
+}
+
+/** Filesystems that fold case (darwin, win32): two spellings of one path compare equal. */
+export function foldsCase(): boolean {
+	return process.platform !== "linux";
+}
+
+/**
+ * The one comparison form of a path: resolved, `/` separators, no trailing
+ * slash, case-folded where the filesystem folds (darwin, win32). Every
+ * containment check in the codebase compares these — the shell pre-gate's
+ * `resolveForContainment`/`isWithin`, the permission matcher's session dirs,
+ * the safety floor — so "under this directory" means one thing everywhere.
+ */
+export function comparablePath(path: string): string {
+	const absolute = resolve(path);
+	// Backslashes separate Windows paths, but name literal sibling files on POSIX.
+	const normalized = (process.platform === "win32" ? forwardSlashes(absolute) : absolute).replace(/\/+$/, "");
+	return foldsCase() ? normalized.toLowerCase() : normalized;
+}
+
+/** Whether `path` is at or under `dir`, on {@link comparablePath} forms. No symlink resolution — resolve both sides first when that matters. */
+export function isPathAtOrUnder(path: string, dir: string): boolean {
+	const target = comparablePath(path);
+	const base = comparablePath(dir);
+	return target === base || target.startsWith(`${base}/`);
+}
+
+/** A `path.relative` result that stays inside its base: non-empty, no `..` hop, not another root/drive. */
+export function isRelativeInside(rel: string): boolean {
+	return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+}
+
+/**
+ * `~`-abbreviated display form of a path: the home dir itself is `~`, a path
+ * under it is `~/rest` with forward slashes, anything else is returned as
+ * given (`C:\Users\x\.claude` under `C:\Users\x` shows as `~/.claude`;
+ * `path.relative` compares case-insensitively on Windows, like its filesystem).
+ */
+export function tildify(path: string, home: string): string {
+	if (!home) return path;
+	const rest = relative(resolve(home), resolve(path));
+	if (rest === "") return "~";
+	return isRelativeInside(rest) ? `~/${forwardSlashes(rest)}` : path;
+}
+
+/** A path as the user names it from `cwd`, forward-slashed: `.claude/settings.json` for a file in the working directory's tree. */
+export function relativeDisplayPath(cwd: string, path: string): string {
+	return forwardSlashes(relative(cwd, path));
+}
+
+/** Independent mode excludes Claude locations even when reached through aliases or imports. */
+export function isClaudeLocation(path: string, userDir: string): boolean {
+	return [path, tryRealpath(path)].some((candidate) => candidate !== undefined && (
+		/(?:^|[/\\])\.claude(?:[/\\]|$)/i.test(candidate) ||
+		/(?:^|[/\\])\.claude\.json$/i.test(candidate) ||
+		/(?:^|[/\\])CLAUDE(?:\.local)?\.md$/i.test(candidate) ||
+		isPathAtOrUnder(candidate, tryRealpath(userDir) ?? userDir) ||
+		isPathAtOrUnder(candidate, claudeManagedDir())
+	));
+}

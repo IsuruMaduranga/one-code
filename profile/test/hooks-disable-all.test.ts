@@ -6,8 +6,8 @@ import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { loadHookSettings, resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
 
 const fixture = vi.hoisted(() => ({ managedPath: "" }));
-vi.mock("../../extensions/lib/claude-settings.ts", async (importOriginal) => ({
-	...(await importOriginal<typeof import("../../extensions/lib/claude-settings.ts")>()),
+vi.mock("../../extensions/lib/profile/claude-settings.ts", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../extensions/lib/profile/claude-settings.ts")>()),
 	managedSettingsPaths: () => [fixture.managedPath],
 }));
 

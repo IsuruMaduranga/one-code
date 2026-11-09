@@ -7,21 +7,21 @@
  * MCP servers reachable, what external programs are missing — then the issues.
  */
 
-import { brand } from "../lib/brand.mjs";
+import { brand } from "../lib/profile/brand.mjs";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { extensionVersion } from "../lib/package-version.ts";
-import { piVersionWarning, TESTED_PI_MAX_EXCLUSIVE, TESTED_PI_MIN } from "../lib/pi-version.ts";
-import { modelSpec } from "../lib/model-policy.ts";
-import { readJsonFile } from "../lib/atomic-write.ts";
-import { productSettingsPath } from "../lib/product-settings.ts";
+import { extensionVersion } from "../lib/app/package-version.ts";
+import { piVersionWarning, TESTED_PI_MAX_EXCLUSIVE, TESTED_PI_MIN } from "../lib/app/pi-version.ts";
+import { modelSpec } from "../lib/models/model-policy.ts";
+import { readJsonFile } from "../lib/core/atomic-write.ts";
+import { productSettingsPath } from "../lib/profile/product-settings.ts";
 import { webSearchSettingsFrom } from "../web/backends.ts";
 import { collectCompat, importedConfigSection, mcpSection } from "./compat.ts";
 import { checkDependencies, dependenciesSection, type ShellsInput } from "./dependencies.ts";
-import { readSettingsEnv } from "../lib/claude-settings.ts";
-import { resolveBashSpawn, resolvePowerShellSpawn } from "../lib/shell-spawn.ts";
-import { upgradeCommandFor } from "../lib/update-check.mjs";
-import { replacedBuiltinsFix } from "../lib/replaced-builtins.mjs";
-import { keepWindowFix } from "../lib/compaction-keep.mjs";
+import { readSettingsEnv } from "../lib/profile/claude-settings.ts";
+import { resolveBashSpawn, resolvePowerShellSpawn } from "../lib/shell-run/shell-spawn.ts";
+import { upgradeCommandFor } from "../lib/app/update-check.mjs";
+import { replacedBuiltinsFix } from "../lib/app/replaced-builtins.mjs";
+import { keepWindowFix } from "../lib/app/compaction-keep.mjs";
 import { configCommand } from "./builtins.ts";
 import { shellToolPolicy } from "../powershell/policy.ts";
 import { collectModelFacts, modelsSection } from "./models.ts";
@@ -113,7 +113,7 @@ function replacedBuiltinsLines(env: DoctorEnvironment, lines: ReportLine[], find
 	});
 }
 
-/** pi's compaction keep window: 0, or above 0 with the fix (lib/compaction-keep.mjs). */
+/** pi's compaction keep window: 0, or above 0 with the fix (lib/app/compaction-keep.mjs). */
 function compactionKeepLines(env: DoctorEnvironment, lines: ReportLine[], findings: Finding[]): void {
 	const view = env.compactionKeep;
 	if (!view) return;

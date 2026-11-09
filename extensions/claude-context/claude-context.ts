@@ -3,34 +3,34 @@
  * (the instruction files and the MEMORY.md index), the context block (the
  * user's email and the git snapshot) and the date, each its own
  * `<system-reminder>` (see extensions/claude-context for the wiring, and
- * lib/reminders.ts for placement; on a model that takes a mid-conversation
- * system message the date moves into it, lib/system-role.ts). Which files the
- * instructions block carries is lib/instructions.ts.
+ * lib/request/reminders.ts for placement; on a model that takes a mid-conversation
+ * system message the date moves into it, lib/request/system-role.ts). Which files the
+ * instructions block carries is lib/context/instructions.ts.
  *
  * This module is pure (no pi imports) and byte-exact with Claude Code. The
  * blocks are identical across model tiers — only the `# Memory` *spec* in the
- * system prompt varies by tier (handled in lib/memory.ts), never these blocks.
+ * system prompt varies by tier (handled in lib/context/memory.ts), never these blocks.
  *
  * ONECODE.md files ride their OWN `# oneCodeMd` block (`buildOneCodeBlock`),
  * emitted after the instructions block so they take precedence over it,
  * keeping that block byte-exact with Claude Code.
  */
 
-import { type ContextFile, instructionTargets, MEMORY_DESCRIPTOR } from "../lib/instructions.ts";
-import { contextWords } from "../lib/context-words.ts";
+import { type ContextFile, instructionTargets, MEMORY_DESCRIPTOR } from "../lib/context/instructions.ts";
+import { contextWords } from "../lib/context/context-words.ts";
 
 /** Claude Code's `nested_memory` rendering (the reminder queue adds the `<system-reminder>` frame). */
 export function nestedInstructionText(file: { path: string; content: string }): string {
 	return contextWords().nestedFile({ path: file.path, content: file.content });
 }
 
-/** The block's preamble, naming the files above it: AGENTS.md in independent mode (lib/sources.ts). */
+/** The block's preamble, naming the files above it: AGENTS.md in independent mode (lib/profile/sources.ts). */
 function productPreamble(): string {
 	return contextWords().productPreamble({ above: instructionTargets().project });
 }
 
 /**
- * Assemble the `# oneCodeMd` block's inner text (wrapper added by lib/reminders.ts):
+ * Assemble the `# oneCodeMd` block's inner text (wrapper added by lib/request/reminders.ts):
  * the precedence preamble, then one `Contents of {path} ({descriptor}):\n\n{content}`
  * section per file (same raw-content join as the claudeMd block). Returns null when
  * there are no ONECODE.md files, so nothing extra rides when the feature is unused.
@@ -77,7 +77,7 @@ function withoutFinalNewline(text: string): string {
 
 /**
  * The instructions block's inner text (the `<system-reminder>` wrapper is added
- * by lib/reminders.ts):
+ * by lib/request/reminders.ts):
  *
  *   {PREAMBLE}\n\n
  *   {section}\n{section}\n…{last section without its final newline}
@@ -108,7 +108,7 @@ export function buildClaudeMdBlock(opts: {
 /**
  * The context block's inner text: the preamble, `# userEmail` with Claude
  * Code's use-only-to-identify sentence, the `# gitStatus` snapshot
- * (lib/git-status.ts), then a blank line and the footer. Null with neither an
+ * (lib/context/git-status.ts), then a blank line and the footer. Null with neither an
  * email nor a snapshot.
  */
 export function buildContextBlock(opts: { email?: string | null; gitStatus?: string | null }): string | null {

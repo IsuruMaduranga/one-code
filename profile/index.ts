@@ -2,7 +2,7 @@
  * One Code's profile: everything that makes the base harness One Code
  * (working-docs/decisions/bi-fork.md). A product built on the base replaces
  * this folder with its own implementation of `Profile`
- * (extensions/lib/profile-contract.ts), importing the base only through
+ * (extensions/lib/profile/profile-contract.ts), importing the base only through
  * extensions/sdk/.
  *
  * One Code runs every feature and keeps each tool's base switches. Its text

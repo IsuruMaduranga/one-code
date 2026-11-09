@@ -7,9 +7,9 @@ import effortExtension from "../../extensions/effort/index.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import pluginsExtension from "../../extensions/plugins/index.ts";
 import skillExtension from "../../extensions/skill/index.ts";
-import { invalidatePluginsCache } from "../../extensions/lib/plugins.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
-import { productProjectSettingsPath } from "../../extensions/lib/product-settings.ts";
+import { invalidatePluginsCache } from "../../extensions/lib/plugins/plugins.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
+import { productProjectSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 

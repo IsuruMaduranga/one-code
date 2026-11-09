@@ -5,10 +5,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import systemReminderExtension from "../../extensions/system-reminder/index.ts";
 import fileTrackerExtension from "../../extensions/file-tracker/index.ts";
 import toolStyleExtension from "../../extensions/tool-style/index.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { SessionTurnTracker } from "../../extensions/subagents/session-turns.ts";
 import { applyPostToolUseOutcome } from "../../extensions/lib/rules/hook-protocol.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 const text = (value: string) => ({ type: "text", text: value });
@@ -54,7 +54,7 @@ describe("the empty tool-result marker", () => {
 	it("adds the marker, preserves structured content, and leaves a pending reminder out of the stored result", async () => {
 		const structuredContent = { exit_code: 0, output: "" };
 		const result = await resultFor([], "bash", true, structuredContent);
-		// The reminder rides the next request's tail instead (lib/reminders.ts).
+		// The reminder rides the next request's tail instead (lib/request/reminders.ts).
 		expect(result.content).toEqual([text(marker("Bash"))]);
 		expect(result.structuredContent).toBe(structuredContent);
 		expect(result.isError).toBe(false);

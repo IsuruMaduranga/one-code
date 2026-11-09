@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { readRuleInstructions } from "../../extensions/lib/claude-rules.ts";
+import { readRuleInstructions } from "../../extensions/lib/context/claude-rules.ts";
 import { discoverContextFiles } from "../claude-code/instructions.ts";
 
 let root: string;

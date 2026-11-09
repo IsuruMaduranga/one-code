@@ -12,9 +12,9 @@ vi.mock("../../extensions/memory/open-external.ts", async (importOriginal) => ({
 	...await importOriginal<typeof import("../../extensions/memory/open-external.ts")>(),
 	openPath: vi.fn(async () => ({ ok: true })),
 }));
-import { localCommandBlocks } from "../../extensions/lib/local-command.ts";
-import { BUNDLED_SKILLS_DIR } from "../../extensions/lib/skill-scan.ts";
-import { REMINDER_CHANNEL, type ReminderPayload } from "../../extensions/lib/reminders.ts";
+import { localCommandBlocks } from "../../extensions/lib/ui/local-command.ts";
+import { BUNDLED_SKILLS_DIR } from "../../extensions/lib/plugins/skill-scan.ts";
+import { REMINDER_CHANNEL, type ReminderPayload } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 

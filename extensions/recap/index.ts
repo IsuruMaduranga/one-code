@@ -11,7 +11,7 @@
  * Generation is Claude Code 2.1.261's: the session's last provider request
  * replayed unchanged on the session model, the reply that answered it, then
  * the verbatim prompt, so the call reads the cache the session wrote and
- * writes the reply for the user's next turn (lib/request-replay.ts; the
+ * writes the reply for the user's next turn (lib/side-calls/request-replay.ts; the
  * compaction extension publishes the capture). Without a capture for the
  * session model, or on a provider API the replay does not cover, it falls back
  * to a small standalone call on a cheap same-containment model
@@ -27,20 +27,20 @@
  * overrides the 5-minute delay.
  */
 
-import { brandedId } from "../lib/brand.mjs";
-import { feature } from "../lib/feature.ts";
+import { brandedId } from "../lib/profile/brand.mjs";
+import { feature } from "../lib/profile/feature.ts";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { convertToLlm, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { followLastExchange, replaySideCall } from "../lib/replay-call.ts";
-import { recordUsage } from "../lib/usage-bus.ts";
-import { pickEconomicalContainedModel } from "../lib/model-tier.ts";
-import { CONVERSATION_CACHE_PLACEMENT } from "../lib/side-call-cache.ts";
-import { releaseSideCalls, runSideCall } from "../lib/side-call-run.ts";
-import { answerText, branchMessages, stripImageBlocks, toolStubs, withoutSystemMessages } from "../lib/side-call.ts";
-import { unrefTimers } from "../lib/timer-ops.ts";
-import { dimMarkedLine } from "../lib/tui-render.ts";
-import { requireText } from "../lib/profile.ts";
+import { followLastExchange, replaySideCall } from "../lib/side-calls/replay-call.ts";
+import { recordUsage } from "../lib/notify/usage-bus.ts";
+import { pickEconomicalContainedModel } from "../lib/models/model-tier.ts";
+import { CONVERSATION_CACHE_PLACEMENT } from "../lib/side-calls/side-call-cache.ts";
+import { releaseSideCalls, runSideCall } from "../lib/side-calls/side-call-run.ts";
+import { answerText, branchMessages, stripImageBlocks, toolStubs, withoutSystemMessages } from "../lib/side-calls/side-call.ts";
+import { unrefTimers } from "../lib/core/timer-ops.ts";
+import { dimMarkedLine } from "../lib/ui/tui-render.ts";
+import { requireText } from "../lib/profile/profile.ts";
 import { recapLine, recentForRecap, REFERENCE_MARK } from "./prompt.ts";
 import { RecapScheduler } from "./scheduler.ts";
 

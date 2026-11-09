@@ -11,14 +11,14 @@ import {
 	worktreeGuardFactory,
 	worktreeIsolationFor,
 	worktreeWriteGuardReason,
-} from "../../extensions/lib/worktree-isolation.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+} from "../../extensions/lib/agents/worktree-isolation.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import type { WorktreeGuardRefusal } from "../../extensions/worktree/text.ts";
 import { captureToolCallHandler } from "./helpers/permission-gate-harness.ts";
 
 /**
  * Worktree isolation for subagents and workflow agents
- * (lib/worktree-isolation.ts): the registry, the guard factory's wiring, and
+ * (lib/agents/worktree-isolation.ts): the registry, the guard factory's wiring, and
  * the write guards' decisions as the refusal data the profile words. One
  * Code's wording of the write refusals is tested in
  * profile/test/worktree-isolation-wording.test.ts.
@@ -48,7 +48,7 @@ describe("worktree isolation registry", () => {
 // The refusal decisions are owned by worktree-guards.test.ts — these tests
 // only pin the wiring: the guard factory fires for registered worktrees. Its
 // placement BEFORE the permission gate is set by extensionFactories order in
-// lib/agent-loader.ts (load-bearing, commented there).
+// lib/agents/agent-loader.ts (load-bearing, commented there).
 describe("worktreeGuardFactory", () => {
 	function guardedCwd(): { handler: ReturnType<typeof captureToolCallHandler>; cwd: string } {
 		const cwd = mkdtempSync(join(os.tmpdir(), "wt-guard-cwd-"));

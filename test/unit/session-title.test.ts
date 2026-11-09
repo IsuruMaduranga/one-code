@@ -7,7 +7,7 @@ import {
 	SESSION_TEXT_LIMIT,
 	sessionTitleInput as titleInput,
 } from "../../extensions/session-title/title.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 /** The naming request's user message in the active profile's words. */

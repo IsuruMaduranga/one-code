@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type BackgroundTask, TASK_REGISTER_CHANNEL } from "../../extensions/lib/agents/task-registry.ts";
-import { trackShellTasks } from "../../extensions/lib/shell-tasks.ts";
+import { trackShellTasks } from "../../extensions/lib/shell-run/shell-tasks.ts";
 import { LiveRunRegistry } from "../../extensions/subagents/live-runs.ts";
 import { SubagentWidget } from "../../extensions/subagents/panel-widget.ts";
 import type { RunHandle, WorkflowRunManager } from "../../extensions/workflow/run-manager.ts";

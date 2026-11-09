@@ -10,7 +10,7 @@
  * so together they pin the bytes Claude Code sends.
  */
 import { describe, expect, it } from "vitest";
-import { agentSummary, handBackPointer, handBackWarning, monitorEndedSummary, monitorEventSummary, shellSummary, workflowSummary } from "../../extensions/lib/notifications.ts";
+import { agentSummary, handBackPointer, handBackWarning, monitorEndedSummary, monitorEventSummary, shellSummary, workflowSummary } from "../../extensions/lib/notify/notifications.ts";
 import {
 	AGENT_MESSAGE_GUARD,
 	AGENT_MESSAGE_OPENER,

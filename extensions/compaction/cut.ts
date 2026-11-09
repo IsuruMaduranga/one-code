@@ -15,7 +15,7 @@
  * leave the doomed span, so the summary does not repeat what stays verbatim.
  */
 
-import { latestCompaction } from "../lib/compaction-boundary.ts";
+import { latestCompaction } from "../lib/request/compaction-boundary.ts";
 
 /** The fields of a session entry the cut reads; pi's `SessionEntry` fits it. */
 export type CutEntry = {

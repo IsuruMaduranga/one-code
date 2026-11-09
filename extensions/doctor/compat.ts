@@ -4,7 +4,7 @@
  * compatibility report behind "your setup works unchanged".
  *
  * The files are the settings ladder and the source provider's state files
- * (lib/claude-settings.ts settingsSources, lib/sources.ts), each named by its
+ * (lib/profile/claude-settings.ts settingsSources, lib/profile/sources.ts), each named by its
  * label and judged by its role: with One Code's provider on, Claude Code's
  * files and One Code's own; without it, One Code's two alone.
  *
@@ -22,28 +22,28 @@
  * Code's 40k-char soft limit, a hook or MCP config the loaders rejected.
  */
 
-import { SETTINGS_DISPLAY } from "../lib/product-settings.ts";
-import { brand } from "../lib/brand.mjs";
-import { readKnob } from "../lib/knobs.ts";
+import { SETTINGS_DISPLAY } from "../lib/profile/product-settings.ts";
+import { brand } from "../lib/profile/brand.mjs";
+import { readKnob } from "../lib/profile/knobs.ts";
 import { SUBAGENT_MODEL_KNOB } from "../lib/models/subagent-default.ts";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { loadPluginHooks } from "../hooks/plugin-hooks.ts";
 import { type HooksSource, loadHookSettings } from "../hooks/settings.ts";
 // Claude Code's auto-memory switch, read through the whole settings ladder.
-import { AUTO_MEMORY_KEY as AUTO_MEMORY } from "../lib/auto-memory.ts";
-import { isPathAtOrUnder, productStateDir } from "../lib/paths.ts";
-import { isBorrowedUserFile, isRepoFile, primaryFamily, primarySettingsFile, settingsSources, type SourceId, sourceId } from "../lib/claude-settings.ts";
-import { protectedFiles, type SettingsFile, sourceSwitch } from "../lib/sources.ts";
-import { agentSkippedInstructions } from "../lib/instruction-budget.ts";
-import { openInstructions } from "../lib/instructions.ts";
-import { CLAUDE_MD_CHAR_LIMIT, claudeMdLimitWarning, projectMemoryDir } from "../lib/memory.ts";
-import { skippedInstructionWarning } from "../lib/instruction-budget.ts";
-import { indexLimitStatus } from "../lib/memory-content.ts";
-import { readDisabledMcpServers } from "../lib/mcp-overrides.ts";
-import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
-import { defaultDiscoverRoots, discoverPlugins, type DiscoveredPlugins } from "../lib/plugins.ts";
-import { BUNDLED_SKILLS_DIR, promptTemplateNames, scanSkills } from "../lib/skill-scan.ts";
+import { AUTO_MEMORY_KEY as AUTO_MEMORY } from "../lib/context/auto-memory.ts";
+import { isPathAtOrUnder, productStateDir } from "../lib/profile/paths.ts";
+import { isBorrowedUserFile, isRepoFile, primaryFamily, primarySettingsFile, settingsSources, type SourceId, sourceId } from "../lib/profile/claude-settings.ts";
+import { protectedFiles, type SettingsFile, sourceSwitch } from "../lib/profile/sources.ts";
+import { agentSkippedInstructions } from "../lib/context/instruction-budget.ts";
+import { openInstructions } from "../lib/context/instructions.ts";
+import { CLAUDE_MD_CHAR_LIMIT, claudeMdLimitWarning, projectMemoryDir } from "../lib/context/memory.ts";
+import { skippedInstructionWarning } from "../lib/context/instruction-budget.ts";
+import { indexLimitStatus } from "../lib/context/memory-content.ts";
+import { readDisabledMcpServers } from "../lib/plugins/mcp-overrides.ts";
+import { parseFrontmatterLoosely } from "../lib/core/frontmatter.ts";
+import { defaultDiscoverRoots, discoverPlugins, type DiscoveredPlugins } from "../lib/plugins/plugins.ts";
+import { BUNDLED_SKILLS_DIR, promptTemplateNames, scanSkills } from "../lib/plugins/skill-scan.ts";
 import { loadServers, type McpServer, piMcpConfigPaths, type RegisteredServer } from "../mcp/config.ts";
 import type { PermissionMode } from "../lib/rules/matcher.ts";
 import { MODES_NEVER_FROM_PROJECT } from "../lib/rules/settings.ts";
@@ -51,7 +51,7 @@ import { agentDirs, parseAgentFile } from "../lib/agents/agent-catalog.ts";
 import type { Finding, ReportLine, ReportSection, SessionView } from "./report.ts";
 import { countNoun, shortenHome } from "./report.ts";
 
-/** A file's role (lib/claude-settings.ts sourceId), or another tool's state file. */
+/** A file's role (lib/profile/claude-settings.ts sourceId), or another tool's state file. */
 export type SettingsScope = SourceId | "borrowed-state";
 
 export interface SettingsFileReport {
@@ -93,12 +93,12 @@ export interface CompatReport {
 /**
  * The top-level keys One Code reads from each settings scope — the policy the
  * loaders implement (lib/rules/settings.ts, hooks/settings.ts, lib/rules/auto-mode-config.ts,
- * lib/models/subagent-default.ts, mcp/trust.ts, lib/plugins.ts). A repository's own
+ * lib/models/subagent-default.ts, mcp/trust.ts, lib/plugins/plugins.ts). A repository's own
  * files get no `autoMode` (the classifier is what contains the repo) and no `env`
  * (a checked-in env block must not route subagents).
  */
 const MCP_POLICY_KEYS = ["enableAllProjectMcpServers", "enabledMcpjsonServers", "disabledMcpjsonServers"];
-/** One Code's workflow keys, read from its user and project files (lib/product-settings.ts). */
+/** One Code's workflow keys, read from its user and project files (lib/profile/product-settings.ts). */
 const WORKFLOW_KEYS = ["enableWorkflows", "disableWorkflows", "workflowSizeGuideline"];
 const CLAUDE_PROJECT_KEYS = new Set(["permissions", "hooks", "enabledPlugins", AUTO_MEMORY, ...MCP_POLICY_KEYS]);
 const SCOPE_KEYS: Partial<Record<SettingsScope, ReadonlySet<string>>> = {
@@ -113,7 +113,7 @@ const SCOPE_KEYS: Partial<Record<SettingsScope, ReadonlySet<string>>> = {
 		"permissions",
 		"webSearch",
 		"disabledMcpServers",
-		// The /memory panel's auto-memory row (lib/auto-memory.ts); the source switch's key is added in knownKeys.
+		// The /memory panel's auto-memory row (lib/context/auto-memory.ts); the source switch's key is added in knownKeys.
 		AUTO_MEMORY,
 		"modelTiers",
 		"suggestNewerModels",
@@ -129,7 +129,7 @@ const SCOPE_KEYS: Partial<Record<SettingsScope, ReadonlySet<string>>> = {
 		"disabledMcpServers",
 		AUTO_MEMORY,
 		...WORKFLOW_KEYS,
-		// The external CLAUDE.md includes answer, per repository (lib/claude-external-includes.ts).
+		// The external CLAUDE.md includes answer, per repository (lib/context/claude-external-includes.ts).
 		"hasClaudeMdExternalIncludesApproved",
 		"hasClaudeMdExternalIncludesWarningShown",
 		"claudeMdExternalIncludesRoot",
@@ -140,7 +140,7 @@ const SCOPE_KEYS: Partial<Record<SettingsScope, ReadonlySet<string>>> = {
 /**
  * The keys One Code reads from a file: its role's (with the source switch's
  * key in the product's user file), plus what the loaders take by family
- * (lib/claude-settings.ts primaryFamily): hooks from every file of the
+ * (lib/profile/claude-settings.ts primaryFamily): hooks from every file of the
  * primary's family (hooks/settings.ts), `env` and MCP approvals from the
  * primary file (claude-settings.ts readSettingsEnv, mcp/trust.ts), and the
  * MCP tightening list from the family's local file. With the provider on

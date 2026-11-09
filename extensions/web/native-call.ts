@@ -1,4 +1,4 @@
-import { runWithDeadline } from "../lib/operation-deadline.ts";
+import { runWithDeadline } from "../lib/side-calls/operation-deadline.ts";
 
 /** Bound the provider-native transport, including auth, streamed bodies and source resolution. */
 export const NATIVE_SEARCH_TIMEOUT_MS = 120_000;

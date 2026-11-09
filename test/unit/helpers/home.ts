@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { vi } from "vitest";
-import { brand, envName } from "../../../extensions/lib/brand.mjs";
+import { brand, envName } from "../../../extensions/lib/profile/brand.mjs";
 
 /**
  * Point `os.homedir()` at `home` on every platform: it reads HOME on macOS and

@@ -10,8 +10,8 @@
  */
 
 import { isAbsolute, resolve } from "node:path";
-import { powershellQuote, shellQuote } from "../lib/shell-quote.ts";
-import { normalizeToolPath } from "../lib/tool-path.ts";
+import { powershellQuote, shellQuote } from "../lib/shell/shell-quote.ts";
+import { normalizeToolPath } from "../lib/rules/tool-path.ts";
 import type { WorktreeNameProblem } from "./text.ts";
 
 /** Tools whose `path` argument is relative to the session cwd. */
@@ -29,7 +29,7 @@ const DEFAULTS_TO_CWD = new Set(["grep", "find", "ls"]);
  * `cd` makes containment resolve inside the worktree —
  * working-docs/decisions/code-review-remediation.md ("Worktree vs. permission rules").
  * The original is deliberately NOT stored in `input`: a key there is
- * model-writable (lib/original-command.ts).
+ * model-writable (lib/shell/original-command.ts).
  */
 export function rewriteToolInput(
 	toolName: string,

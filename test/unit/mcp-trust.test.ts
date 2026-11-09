@@ -7,8 +7,8 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { envName } from "../../extensions/lib/brand.mjs";
-import { primaryFamily, settingsSources } from "../../extensions/lib/claude-settings.ts";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
+import { primaryFamily, settingsSources } from "../../extensions/lib/profile/claude-settings.ts";
 import type { McpServer, StdioServer } from "../../extensions/mcp/config.ts";
 import {
 	approveMcpServers,

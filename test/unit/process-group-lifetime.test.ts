@@ -3,8 +3,8 @@ import { once } from "node:events";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
-import { detachedSpawnOptions, rememberProcessGroup, waitForChildExit } from "../../extensions/lib/process-tree.ts";
-import { bashSpawnOrThrow, spawnShellCommand } from "../../extensions/lib/shell-spawn.ts";
+import { detachedSpawnOptions, rememberProcessGroup, waitForChildExit } from "../../extensions/lib/shell-run/process-tree.ts";
+import { bashSpawnOrThrow, spawnShellCommand } from "../../extensions/lib/shell-run/shell-spawn.ts";
 
 const alive = (pid: number) => {
 	try { process.kill(pid, 0); return true; } catch { return false; }

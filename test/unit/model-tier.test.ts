@@ -12,9 +12,9 @@ import {
 	taskToolsEnabled,
 	tierOverride,
 	usesClaudeCodeFastPaths,
-} from "../../extensions/lib/model-tier.ts";
+} from "../../extensions/lib/models/model-tier.ts";
 import { type FixtureModel, pinCatalog } from "./catalog-fixture.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 
 /** Minimal fake — the tier code reads only id/provider/cost. */
 function model(id: string, provider: string, inputCost?: number): Model<Api> {

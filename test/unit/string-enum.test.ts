@@ -1,10 +1,10 @@
 /**
- * lib/string-enum.ts: the plain `{ type: "string", enum }` schema the tools
+ * lib/core/string-enum.ts: the plain `{ type: "string", enum }` schema the tools
  * declare (providers reject anyOf/const patterns), with a description and a
  * default only when given.
  */
 import { describe, expect, it } from "vitest";
-import { StringEnum } from "../../extensions/lib/string-enum.ts";
+import { StringEnum } from "../../extensions/lib/core/string-enum.ts";
 
 describe("StringEnum", () => {
 	it("is a string schema listing the values", () => {

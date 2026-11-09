@@ -1,7 +1,7 @@
 /**
  * What tool-search needs from a profile (types only): the tool_search tool's
  * words and results, and the reminders about deferred tools
- * (lib/deferred.ts, tool-search/tool-additions.ts). Each listing is a head line
+ * (lib/request/deferred.ts, tool-search/tool-additions.ts). Each listing is a head line
  * then one name per line, a format the base keeps (it reads the addendum
  * back by its head).
  */

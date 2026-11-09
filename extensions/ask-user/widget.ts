@@ -14,9 +14,9 @@
  * painting wherever it can along the way.
  */
 
-import { cutPlainText, padPlainText, truncateLine, visibleWidth, wrapHints, wrapPlainText } from "../lib/tui-render.ts";
+import { cutPlainText, padPlainText, truncateLine, visibleWidth, wrapHints, wrapPlainText } from "../lib/ui/tui-render.ts";
 import type { Answer, Question } from "./questions.ts";
-import { keyId, keyText } from "../lib/key-input.ts";
+import { keyId, keyText } from "../lib/ui/key-input.ts";
 
 export type Paint = (color: string, text: string) => string;
 export type Bold = (text: string) => string;

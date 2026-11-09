@@ -5,7 +5,7 @@
  * the gate always runs.
  */
 
-import { requireText } from "../lib/profile.ts";
+import { requireText } from "../lib/profile/profile.ts";
 import type { PermissionRefusal, PermissionsText } from "./text.ts";
 
 export const permissionWords = (): PermissionsText => requireText("permissions");

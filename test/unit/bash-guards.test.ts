@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { parseCommand } from "../../extensions/lib/shell/shell-analysis.ts";
 import { bashGuardReason } from "../../extensions/lib/shell/bash-guards.ts";
-import type { ShellBlock } from "../../extensions/lib/shell-text.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import type { ShellBlock } from "../../extensions/lib/shell-run/shell-text.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 /**
  * Which shell calls the guards block, and what they tell the profile about

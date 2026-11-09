@@ -19,10 +19,10 @@
  * dequeue with alt+up fires none). TUI only.
  */
 
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { SEND_NOW_CHANNEL } from "../lib/send-now-channel.ts";
-import { safeThemePaint, truncateLine } from "../lib/tui-render.ts";
+import { SEND_NOW_CHANNEL } from "../lib/notify/send-now-channel.ts";
+import { safeThemePaint, truncateLine } from "../lib/ui/tui-render.ts";
 import { SEND_NOW_HINT, SendNowChord } from "./chord.ts";
 
 /** How long send now waits for the aborted turn to settle before giving up. */

@@ -13,7 +13,7 @@ import {
 	stickyFact,
 	toldBlockFact,
 	wrapReminder,
-} from "../../extensions/lib/reminders.ts";
+} from "../../extensions/lib/request/reminders.ts";
 
 // Minimal structural stand-ins for AgentMessage
 const user = (content: string | Array<{ type: string; text?: string }>, timestamp = 0) => ({ role: "user", content, timestamp }) as any;

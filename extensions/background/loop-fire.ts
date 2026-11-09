@@ -11,7 +11,7 @@
  * the corresponding `.onecode` directories in independent mode).
  */
 
-import { projectConfigDir, userConfigDir } from "../lib/sources.ts";
+import { projectConfigDir, userConfigDir } from "../lib/profile/sources.ts";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -48,7 +48,7 @@ export function freshDeliveryState(): LoopDeliveryState {
  * The `one-code:state` key the record lives under, on the branch of the
  * conversation the fires land in (the main session's, or a subagent's own):
  * it follows `/tree`, survives `/reload` and resume, and a compaction resets
- * it (lib/ledger/state.ts `stateSinceCompaction`).
+ * it (lib/request/ledger/state.ts `stateSinceCompaction`).
  */
 export const LOOP_DELIVERY_STATE = "loop-delivery";
 
@@ -104,7 +104,7 @@ function readLoopFileAt(path: string): LoopFile | null {
 
 /**
  * The loop-tasks file: the project's `.claude/loop.md` (`.onecode/loop.md` in
- * independent mode, lib/sources.ts), else the user config directory's
+ * independent mode, lib/profile/sources.ts), else the user config directory's
  * `loop.md` (Claude Code 2.1.296: `~/.claude/loop.md` or `CLAUDE_CONFIG_DIR`).
  */
 export function readLoopFile(cwd: string, home = homedir()): LoopFile | null {

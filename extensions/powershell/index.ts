@@ -4,11 +4,11 @@
  *
  * Registering a tool named `powershell` overrides pi's built-in (findings §2),
  * exactly as `extensions/bash` overrides `bash`, and the shared body in
- * lib/shell-tool.ts supplies the `run_in_background` orchestration for both.
+ * lib/shell-run/shell-tool.ts supplies the `run_in_background` orchestration for both.
  * The foreground path delegates to pi's real definition
  * (`createPowerShellToolDefinition`) so schema, cwd handling and streaming
  * stay upstream's (a long output is cut Claude Code's way, as for bash) — with One Code's own `operations`
- * (lib/shell-spawn.ts), because pi's local operations throw off Windows and
+ * (lib/shell-run/shell-spawn.ts), because pi's local operations throw off Windows and
  * this tool is developed against a `pwsh` on this Mac. The description is
  * Claude Code's captured text (description.ts); the guards are the PowerShell
  * spelling of bash's.
@@ -21,14 +21,14 @@
  * emits `session_start`.
  */
 
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createPowerShellToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { perCwd } from "../lib/per-cwd.ts";
-import { bashSpawn, createPowerShellOperations, POWERSHELL_TOOL_PREFIX, powerShellEdition, powerShellSpawn } from "../lib/shell-spawn.ts";
-import { registerShellTool } from "../lib/shell-tool.ts";
-import { requireText } from "../lib/profile.ts";
+import { perCwd } from "../lib/core/per-cwd.ts";
+import { bashSpawn, createPowerShellOperations, POWERSHELL_TOOL_PREFIX, powerShellEdition, powerShellSpawn } from "../lib/shell-run/shell-spawn.ts";
+import { registerShellTool } from "../lib/shell-run/shell-tool.ts";
+import { requireText } from "../lib/profile/profile.ts";
 import { powershellGuardReason } from "./guards.ts";
 import { shellToolPolicy, withShellTools } from "./policy.ts";
 

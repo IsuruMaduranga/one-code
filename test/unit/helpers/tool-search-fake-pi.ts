@@ -3,10 +3,10 @@
  * every reminder, a lifecycle `fire()`, and a mutable tool registry / active
  * set. Shared by tool-search-defer-miss.test.ts and tool-search-announce.test.ts.
  */
-import { DEFER_CHANNEL } from "../../../extensions/lib/deferred.ts";
-import { CALLABLE_TOOLS } from "../../../extensions/lib/ledger/fold.ts";
-import type { ToldFact } from "../../../extensions/lib/ledger/records.ts";
-import { REMINDER_CHANNEL, type RenderedBlock, type RenderRequest } from "../../../extensions/lib/reminders.ts";
+import { DEFER_CHANNEL } from "../../../extensions/lib/request/deferred.ts";
+import { CALLABLE_TOOLS } from "../../../extensions/lib/request/ledger/fold.ts";
+import type { ToldFact } from "../../../extensions/lib/request/ledger/records.ts";
+import { REMINDER_CHANNEL, type RenderedBlock, type RenderRequest } from "../../../extensions/lib/request/reminders.ts";
 import { renderRequest } from "./fake-pi.ts";
 
 export interface Reminder {

@@ -21,13 +21,13 @@
  * such a line is never touched.
  */
 
-import { reseatMessageMark } from "../lib/anthropic-payload.ts";
-import { wrapReminder } from "../lib/reminders.ts";
-import { messagesKey, type SystemRoleLayout, systemMessage, type WireMessage, type WirePart, byWireCallId, withoutParts } from "../lib/system-role.ts";
+import { reseatMessageMark } from "../lib/request/anthropic-payload.ts";
+import { wrapReminder } from "../lib/request/reminders.ts";
+import { messagesKey, type SystemRoleLayout, systemMessage, type WireMessage, type WirePart, byWireCallId, withoutParts } from "../lib/request/system-role.ts";
 import { totalTokensBlock } from "../lib/context/budget.ts";
-import { profileText } from "../lib/profile.ts";
+import { profileText } from "../lib/profile/profile.ts";
 import type { ContextBudgetText } from "../context-budget/text.ts";
-import { around, fillOf, memoOn } from "../lib/template-probe.ts";
+import { around, fillOf, memoOn } from "../lib/profile/template-probe.ts";
 
 /** The budget line for `left` tokens, in the profile's words; undefined without context-budget's words (no lines then). */
 function budgetLine(left: number): string | undefined {

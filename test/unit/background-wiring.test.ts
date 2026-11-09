@@ -30,8 +30,8 @@ vi.mock("node:fs", async (importOriginal) => {
 // notification before the first prompt goes out as a user message; from 1.2.0
 // (true) it is a custom message. Unset, the installed pi decides.
 const piModel = vi.hoisted(() => ({ customRunsFireBeforeAgentStart: undefined as boolean | undefined }));
-vi.mock("../../extensions/lib/pi-version.ts", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("../../extensions/lib/pi-version.ts")>();
+vi.mock("../../extensions/lib/app/pi-version.ts", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../extensions/lib/app/pi-version.ts")>();
 	return { ...actual, piFiresBeforeAgentStartForCustomRuns: (version: string | undefined) => piModel.customRunsFireBeforeAgentStart ?? actual.piFiresBeforeAgentStartForCustomRuns(version) };
 });
 import backgroundExtension from "../../extensions/background/index.ts";
@@ -39,18 +39,18 @@ import { RECURRING_MAX_AGE_DAYS } from "../../extensions/lib/agents/cron.ts";
 import { STORED_OUTPUT_CAP } from "../../extensions/lib/shell-run/bash-background.ts";
 import { MONITOR_BATCH_MAX_LINES } from "../../extensions/background/monitor-batch.ts";
 import { TASK_REGISTER_CHANNEL } from "../../extensions/lib/agents/task-registry.ts";
-import { DEFAULT_COALESCE_MS, escapeTaskText, monitorEndedSummary, monitorEventSummary, NOTIFICATION_ID_KEY, oneShotNote } from "../../extensions/lib/notifications.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
-import { SESSION_WORK_CHANNEL, type SessionWorkQuery } from "../../extensions/lib/session-work.ts";
-import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, agentOwnsCronJobs } from "../../extensions/lib/agent-cron.ts";
-import { SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../../extensions/lib/skill-body.ts";
-import { BUNDLED_SKILLS_DIR } from "../../extensions/lib/skill-scan.ts";
+import { DEFAULT_COALESCE_MS, escapeTaskText, monitorEndedSummary, monitorEventSummary, NOTIFICATION_ID_KEY, oneShotNote } from "../../extensions/lib/notify/notifications.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { SESSION_WORK_CHANNEL, type SessionWorkQuery } from "../../extensions/lib/notify/session-work.ts";
+import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, agentOwnsCronJobs } from "../../extensions/lib/agents/agent-cron.ts";
+import { SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../../extensions/lib/plugins/skill-body.ts";
+import { BUNDLED_SKILLS_DIR } from "../../extensions/lib/plugins/skill-scan.ts";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
+import { WORKTREE_CHANNEL } from "../../extensions/lib/agents/worktree-channel.ts";
 import { createFakeCtx, createFakePi, type FakePi, flushNotices } from "./helpers/fake-pi.ts";
-import { resetProcessStateForTest } from "../../extensions/lib/process-state.ts";
+import { resetProcessStateForTest } from "../../extensions/lib/profile/process-state.ts";
 
 // The profile's words: each test checks that the base hands them the right
 // facts and places what they return (One Code's wording is

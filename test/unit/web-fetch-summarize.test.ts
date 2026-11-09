@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { pinCatalog } from "./catalog-fixture.ts";
 import { pickReaderModel, READER_MAX_CHARS, readerMessages } from "../../extensions/web-fetch/summarize.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const webFetch = requireText("webFetch");
 

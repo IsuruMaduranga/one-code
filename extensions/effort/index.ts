@@ -21,17 +21,17 @@
  * same shape the permissions extension uses for plan mode.
  */
 
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import os from "node:os";
 import { join } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
 import { getAgentDir, SettingsManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { effortSetMessage, isPersistedEffort, type PersistedEffort } from "./settings.ts";
-import { requireText, toolLive } from "../lib/profile.ts";
-import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, stickyFact, toldBlockFact } from "../lib/reminders.ts";
-import { readState, recordState } from "../lib/ledger/state.ts";
-import { dimRightAlignedWidget, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
+import { requireText, toolLive } from "../lib/profile/profile.ts";
+import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, stickyFact, toldBlockFact } from "../lib/request/reminders.ts";
+import { readState, recordState } from "../lib/request/ledger/state.ts";
+import { dimRightAlignedWidget, safeThemePaint, truncateLine } from "../lib/ui/tui-render.ts";
 import {
 	acceptedEffortArgs,
 	choiceForState,
@@ -52,10 +52,10 @@ import {
 	ULTRACODE_MODE_CHANNEL,
 	ULTRACODE_STATUS_KEY,
 } from "../lib/ui/effort-slider.ts";
-import { registerLocalCommand } from "../lib/local-command.ts";
-import { readWorkflowSettings } from "../lib/product-settings.ts";
-import { panelUi } from "../lib/panel-focus.ts";
-import { extendingCompletions } from "../lib/argument-hints.ts";
+import { registerLocalCommand } from "../lib/ui/local-command.ts";
+import { readWorkflowSettings } from "../lib/profile/product-settings.ts";
+import { panelUi } from "../lib/ui/panel-focus.ts";
+import { extendingCompletions } from "../lib/ui/argument-hints.ts";
 
 /** The levels pi says the active model can reach; the full ladder when unknown. */
 function supportedLevels(ctx: ExtensionContext): ThinkingLevel[] {

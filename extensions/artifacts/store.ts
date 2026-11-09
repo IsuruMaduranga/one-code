@@ -28,13 +28,13 @@ import { chmodSync, copyFileSync, existsSync, constants as fsConstants, mkdirSyn
 import { uptime } from "node:os";
 import { basename, extname, join, posix, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { readJsonFile, writeTextAtomic } from "../lib/atomic-write.ts";
-import { comparablePath, isPathAtOrUnder, productStateDir, tildify } from "../lib/paths.ts";
-import { sanitizeDisplayText } from "../lib/terminal-text.ts";
+import { readJsonFile, writeTextAtomic } from "../lib/core/atomic-write.ts";
+import { comparablePath, isPathAtOrUnder, productStateDir, tildify } from "../lib/profile/paths.ts";
+import { sanitizeDisplayText } from "../lib/ui/terminal-text.ts";
 import { renderDownloadPayload, renderGallery } from "./gallery.ts";
 import type { PublishProblem, ShownArtifact, StoreBusy } from "./text.ts";
 import { renderViewer } from "./viewer.ts";
-import { requireText } from "../lib/profile.ts";
+import { requireText } from "../lib/profile/profile.ts";
 
 export interface ArtifactMeta {
 	id: string;

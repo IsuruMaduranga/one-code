@@ -11,10 +11,10 @@ import {
 	installMethodFor,
 	LAUNCHER_ENV_VAR,
 	LAUNCHER_VARS,
-} from "../../extensions/lib/app-launch.mjs";
-import { piShellEnv, spawnShellCommand, withChildProcessEnv } from "../../extensions/lib/shell-spawn.ts";
+} from "../../extensions/lib/app/app-launch.mjs";
+import { piShellEnv, spawnShellCommand, withChildProcessEnv } from "../../extensions/lib/shell-run/shell-spawn.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
-import { brand, envName } from "../../extensions/lib/brand.mjs";
+import { brand, envName } from "../../extensions/lib/profile/brand.mjs";
 
 const repoRoot = resolve(import.meta.dirname, "..", "..");
 const home = resolve("/home/alice");
@@ -181,8 +181,8 @@ describe("spawned commands under the app get the user's environment", { timeout:
 	});
 });
 
-describe("the app launcher (lib/create-app.mjs) applies the launcher environment", () => {
-	const source = readFileSync(join(repoRoot, "extensions", "lib", "create-app.mjs"), "utf8");
+describe("the app launcher (lib/app/create-app.mjs) applies the launcher environment", () => {
+	const source = readFileSync(join(repoRoot, "extensions", "lib", "app", "create-app.mjs"), "utf8");
 
 	it("sets it through app-launch.mjs, never inheriting PI_CODING_AGENT_DIR", () => {
 		expect(source).toContain("applyLauncherEnv(process.env,");

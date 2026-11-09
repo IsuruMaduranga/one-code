@@ -25,8 +25,8 @@ import os from "node:os";
 import { join } from "node:path";
 import type { OAuthClientInformationFull, OAuthClientMetadata, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { OAuthDiscoveryState } from "@modelcontextprotocol/sdk/client/auth.js";
-import { readJsonFile, writeJsonAtomic } from "../../lib/atomic-write.ts";
-import { productStateDir } from "../../lib/paths.ts";
+import { readJsonFile, writeJsonAtomic } from "../../lib/core/atomic-write.ts";
+import { productStateDir } from "../../lib/profile/paths.ts";
 
 /** The part of an http server's config its credentials are bound to. */
 export interface OAuthServer {

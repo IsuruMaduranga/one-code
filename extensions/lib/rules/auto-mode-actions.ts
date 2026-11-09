@@ -17,8 +17,8 @@
  * path auto mode exists to close.
  */
 
-import { brandedId } from "../brand.mjs";
-import type { HandBackVerdict } from "../notifications.ts";
+import { brandedId } from "../profile/brand.mjs";
+import type { HandBackVerdict } from "../notify/notifications.ts";
 
 export const SUBAGENT_ACTIONS_CHANNEL = brandedId("subagent-actions");
 

@@ -3,7 +3,7 @@
  * imports).
  *
  * A message queued mid-turn delivers as typed, so the user message with its
- * text is its own (lib/queued-delivery.ts). A prompt typed while idle is
+ * text is its own (lib/notify/queued-delivery.ts). A prompt typed while idle is
  * expanded by pi after the input handlers (a prompt template, a `/skill:` no
  * extension took), and a later handler may transform it, so its message
  * rarely carries the typed text. It is the next prompt pi delivers, though:
@@ -13,7 +13,7 @@
  * delivery claims nothing instead of taking an idle prompt's context.
  */
 
-import { QueuedDelivery } from "../lib/queued-delivery.ts";
+import { QueuedDelivery } from "../lib/notify/queued-delivery.ts";
 
 export class PromptContextRouter {
 	/** Context per queued message; null marks one whose hook added none. */

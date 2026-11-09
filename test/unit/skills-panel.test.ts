@@ -11,7 +11,7 @@ import {
 	skillListingVisibility,
 	skillOverrideKey,
 	skillStateFor,
-} from "../../extensions/lib/skill-overrides.ts";
+} from "../../extensions/lib/plugins/skill-overrides.ts";
 import { decodeSkillsKey } from "../../extensions/skill/panel/keys.ts";
 import { renderSkillsPanel } from "../../extensions/skill/panel/render.ts";
 import { applySkillsKey, followRow, initialSkillsState, type SkillsRow, visibleRows } from "../../extensions/skill/panel/state.ts";

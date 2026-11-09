@@ -4,7 +4,7 @@
  */
 
 import os from "node:os";
-import { productSettingsPath, readSettingsForWrite, writeSettings } from "../lib/product-settings.ts";
+import { productSettingsPath, readSettingsForWrite, writeSettings } from "../lib/profile/product-settings.ts";
 
 /** Whether the user answered "No" to the question kept under `key`; a malformed settings file reads as not declined. */
 export function declined(key: string): boolean {

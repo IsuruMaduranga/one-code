@@ -4,7 +4,7 @@
  * the base gathers and clips: test/unit/git-status.test.ts.
  */
 import { describe, expect, it } from "vitest";
-import { collectGitStatus, formatGitStatus, GIT_STATUS_MAX_CHARS } from "../../extensions/lib/git-status.ts";
+import { collectGitStatus, formatGitStatus, GIT_STATUS_MAX_CHARS } from "../../extensions/lib/context/git-status.ts";
 import { fakeRunner, IN_WORK_TREE } from "../../test/unit/helpers/git-runner.ts";
 
 describe("formatGitStatus", () => {

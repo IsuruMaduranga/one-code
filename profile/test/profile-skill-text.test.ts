@@ -6,7 +6,7 @@
  * other text.
  */
 import { describe, expect, it } from "vitest";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { skill } from "../text/skill/index.ts";
 
 describe("One Code's skill text", () => {

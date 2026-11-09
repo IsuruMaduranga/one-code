@@ -18,8 +18,8 @@
  * on their own; decisions/auto-mode.md "The resolvedPaths line").
  */
 
-import { comparablePath } from "../../lib/paths.ts";
-import type { PowerShellParse } from "../../lib/powershell-parser.ts";
+import { comparablePath } from "../../lib/profile/paths.ts";
+import type { PowerShellParse } from "../../lib/shell/powershell-parser.ts";
 import { isPathSubjectTool } from "../../lib/rules/matcher.ts";
 import { powershellSeparators, powershellUnescaped } from "../../lib/shell/powershell-paths.ts";
 import { isWithin, resolveForContainment, resolveThroughLinks, toAbsolute, toAbsoluteBash } from "../../lib/shell/paths.ts";

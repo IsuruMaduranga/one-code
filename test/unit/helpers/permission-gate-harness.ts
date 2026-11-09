@@ -1,14 +1,14 @@
 /**
  * Shared harness for testing inline-extension tool_call handlers directly
  * (the child permission gate and its sibling factories from
- * extensions/lib/agent-loader.ts) without building a real resource loader.
+ * extensions/lib/agents/agent-loader.ts) without building a real resource loader.
  */
 
 import { mkdtempSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
-import { permissionGateFactory } from "../../../extensions/lib/permission-gate.ts";
+import { permissionGateFactory } from "../../../extensions/lib/agents/permission-gate.ts";
 import { writeRepositorySettings, writeUserSettings } from "./settings-files.ts";
 
 export type ToolCallHandler = (event: {

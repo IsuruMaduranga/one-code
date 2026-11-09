@@ -2,7 +2,7 @@
  * One Code's config mode, the state of its source provider's switch
  * (sources.ts, "Config sources"; working-docs/features/config-modes/). The
  * base never asks it: it sees the provider's view and switch
- * (extensions/lib/sources.ts).
+ * (extensions/lib/profile/sources.ts).
  *
  * - `claude-compatible` (the default): Claude Code's `~/.claude`,
  *   `<repo>/.claude`, `CLAUDE.md` and `~/.claude.json`, plus the cross-tool

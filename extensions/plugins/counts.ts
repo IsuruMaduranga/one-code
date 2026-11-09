@@ -7,8 +7,8 @@
  */
 
 import { join } from "node:path";
-import { readJsonFile, writeJsonAtomic } from "../lib/atomic-write.ts";
-import { fetchWithTimeout } from "../lib/fetch-timeout.ts";
+import { readJsonFile, writeJsonAtomic } from "../lib/core/atomic-write.ts";
+import { fetchWithTimeout } from "../lib/core/fetch-timeout.ts";
 
 export const INSTALL_COUNTS_URL =
 	"https://raw.githubusercontent.com/anthropics/claude-plugins-official/refs/heads/stats/stats/plugin-installs.json";

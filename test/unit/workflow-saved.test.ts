@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { discoverSavedWorkflows, findSavedWorkflow } from "../../extensions/workflow/saved-workflows.ts";
-import { projectConfigDir, userConfigDir } from "../../extensions/lib/sources.ts";
+import { projectConfigDir, userConfigDir } from "../../extensions/lib/profile/sources.ts";
 import { tempHome } from "./helpers/temp-home.ts";
 
 const SCRIPT = (name: string) =>

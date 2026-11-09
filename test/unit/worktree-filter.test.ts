@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { createWorktree, type Worktree } from "../../extensions/lib/agents/agent-worktree.ts";
-import { releaseWorktreeIsolation } from "../../extensions/lib/worktree-isolation.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { releaseWorktreeIsolation } from "../../extensions/lib/agents/worktree-isolation.ts";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 it("refuses isolation before a repository checkout filter can execute", async () => {
 	const repo = mkdtempSync(join(tmpdir(), "worktree-filter-"));

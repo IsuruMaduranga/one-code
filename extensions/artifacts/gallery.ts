@@ -12,9 +12,9 @@
  * works. When the script cannot load, the button falls back to opening the page.
  */
 
-import { brand } from "../lib/brand.mjs";
+import { brand } from "../lib/profile/brand.mjs";
 import { homedir } from "node:os";
-import { tildify } from "../lib/paths.ts";
+import { tildify } from "../lib/profile/paths.ts";
 import type { ArtifactMeta } from "./store.ts";
 
 /** The light and dark palettes, as tokens; shared with the viewer (viewer.ts). */

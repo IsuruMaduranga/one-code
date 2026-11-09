@@ -9,7 +9,7 @@
  * own dequeue action, so the alt+up binding keeps working alongside.
  */
 
-import { visibleWidth } from "../lib/text-width.ts";
+import { visibleWidth } from "../lib/ui/text-width.ts";
 
 export interface QueueEditEditor {
 	getCursor(): { line: number; col: number };

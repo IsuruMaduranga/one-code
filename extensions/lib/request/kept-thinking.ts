@@ -11,7 +11,7 @@
  * compaction binds to that stripped history and stays.
  *
  * The kept turns are the assistant messages older than the latest compaction
- * entry on the session branch (`lib/compaction-boundary.ts`): every message
+ * entry on the session branch (`lib/request/compaction-boundary.ts`): every message
  * produced since is newer. Text and tool calls stay.
  */
 

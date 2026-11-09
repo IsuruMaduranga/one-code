@@ -10,9 +10,9 @@
  * profile/test/instruction-budget-claude-context.test.ts.
  */
 import { describe, expect, it } from "vitest";
-import { fitToWindow, skippedInstructionNote, skippedInstructionWarning } from "../../extensions/lib/instruction-budget.ts";
-import { estimateTextTokens } from "../../extensions/lib/pi-ai-estimate.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { fitToWindow, skippedInstructionNote, skippedInstructionWarning } from "../../extensions/lib/context/instruction-budget.ts";
+import { estimateTextTokens } from "../../extensions/lib/models/pi-ai-estimate.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 /** A file body of 24,000 characters, and pi-ai's token estimate for it (its chars-per-token depends on pi's version). */
 const BIG = "x".repeat(24_000);

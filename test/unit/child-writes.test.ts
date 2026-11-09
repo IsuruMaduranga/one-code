@@ -1,6 +1,6 @@
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { childWriteWatcher } from "../../extensions/lib/child-writes.ts";
+import { childWriteWatcher } from "../../extensions/lib/agents/child-writes.ts";
 
 describe("childWriteWatcher", () => {
 	const cwd = resolve("/work/project");

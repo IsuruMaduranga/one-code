@@ -14,9 +14,9 @@
  * message as plain text, and tips carry CC's own frequency machinery).
  */
 
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { safeThemePaint } from "../lib/tui-render.ts";
+import { safeThemePaint } from "../lib/ui/tui-render.ts";
 import { composeWorkingMessage, messageChars, spinnerFrames } from "./line.ts";
 import { pickVerb } from "./verbs.ts";
 

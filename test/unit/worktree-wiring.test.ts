@@ -8,12 +8,12 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ORIGINAL_COMMAND_CHANNEL, type OriginalCommandRecord } from "../../extensions/lib/original-command.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
-import { REMINDER_CHANNEL, type ReminderPayload } from "../../extensions/lib/reminders.ts";
-import { projectConfigDir, projectConfigDirName } from "../../extensions/lib/sources.ts";
-import { shellQuote } from "../../extensions/lib/shell-quote.ts";
-import { WORKTREE_CHANNEL, type WorktreeLocation } from "../../extensions/lib/worktree-channel.ts";
+import { ORIGINAL_COMMAND_CHANNEL, type OriginalCommandRecord } from "../../extensions/lib/shell/original-command.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { REMINDER_CHANNEL, type ReminderPayload } from "../../extensions/lib/request/reminders.ts";
+import { projectConfigDir, projectConfigDirName } from "../../extensions/lib/profile/sources.ts";
+import { shellQuote } from "../../extensions/lib/shell/shell-quote.ts";
+import { WORKTREE_CHANNEL, type WorktreeLocation } from "../../extensions/lib/agents/worktree-channel.ts";
 import worktreeExtension from "../../extensions/worktree/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 

@@ -5,8 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resolveForContainment } from "../../extensions/lib/shell/paths.ts";
 import { analyzeShellCommand, decodeAnsiC, parseCommand } from "../../extensions/lib/shell/shell-analysis.ts";
 import { bashMatchForms } from "../../extensions/lib/rules/matcher.ts";
-import { brand } from "../../extensions/lib/brand.mjs";
-import { forwardSlashes as sh, toPosixPath } from "../../extensions/lib/paths.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
+import { forwardSlashes as sh, toPosixPath } from "../../extensions/lib/profile/paths.ts";
 
 let cwd: string;
 let home: string;

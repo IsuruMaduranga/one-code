@@ -20,7 +20,7 @@
 
 import { isBroadExecutionRule, parseRule } from "../../lib/rules/matcher.ts";
 import { slotName } from "./classifier-prompt.ts";
-import { requireText } from "../../lib/profile.ts";
+import { requireText } from "../../lib/profile/profile.ts";
 import type { AutoModeSetupText } from "./text.ts";
 
 export interface SetupFacts {

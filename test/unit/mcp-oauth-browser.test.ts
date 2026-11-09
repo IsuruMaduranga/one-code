@@ -5,7 +5,7 @@
  * non-web scheme is never handed to the desktop's handler.
  */
 import { describe, expect, it } from "vitest";
-import { system32Path } from "../../extensions/lib/paths.ts";
+import { system32Path } from "../../extensions/lib/profile/paths.ts";
 import { browserOpenPlan, openBrowser, refuseAuthorizationUrl } from "../../extensions/mcp/oauth/browser.ts";
 
 const AUTH_URL = "https://auth.example.com/authorize?response_type=code&client_id=abc&code_challenge=xyz&redirect_uri=http%3A%2F%2F127.0.0.1%3A5555%2Fcallback&state=s1";

@@ -28,7 +28,7 @@ import { loadAutoModeConfig } from "../../extensions/lib/rules/auto-mode-config.
 import { isModelUnavailableError } from "../../extensions/lib/models/classifier-model.ts";
 import type { ClassifierBlock } from "../../extensions/permissions/auto-mode/text.ts";
 import { actionLength, MAX_ACTION_CHARS } from "../../extensions/permissions/auto-mode/transcript.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { pinCatalog } from "./catalog-fixture.ts";
 
 /** The profile's words for a block the classifier could not judge. */
@@ -118,7 +118,7 @@ describe("classify: pinning and fallback", () => {
 	it("reports a model the provider refuses as unusable, so the subagent selector can skip it too", async () => {
 		// The Codex "not supported when using Codex with a ChatGPT account" case:
 		// mini is refused, the classifier steps on, and the refusal is published
-		// (lib/model-unusable.ts) — a timeout or a transient error is not.
+		// (lib/models/model-unusable.ts) — a timeout or a transient error is not.
 		completeMock.mockImplementation(async (m: any) =>
 			m.id === "gpt-5-mini" ? errorReply("The 'gpt-5-mini' model is not supported when using Codex with a ChatGPT account.") : allowReply(),
 		);

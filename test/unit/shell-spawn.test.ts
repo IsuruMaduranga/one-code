@@ -1,5 +1,5 @@
 /**
- * lib/shell-spawn.ts — the resolvers with injected platform/env/fs, and the
+ * lib/shell-run/shell-spawn.ts — the resolvers with injected platform/env/fs, and the
  * PowerShell operations against a REAL pwsh when one is on this machine (PATH,
  * or the cc-windows-mode skill's portable copy); the repo never mocks
  * child_process. Skipped cleanly where no pwsh exists.
@@ -20,8 +20,8 @@ import {
 	resolvePowerShellSpawn,
 	type ShellSpawn,
 	spawnShellCommand,
-} from "../../extensions/lib/shell-spawn.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
+} from "../../extensions/lib/shell-run/shell-spawn.ts";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 
 const gitBash: ShellSpawn = { shell: "C:\\Program Files\\Git\\bin\\bash.exe", args: ["-c"] };
 

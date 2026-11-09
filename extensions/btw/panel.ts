@@ -15,8 +15,8 @@
  */
 
 import type { BtwExchange } from "./prompt.ts";
-import { keyId, keyText } from "../lib/key-input.ts";
-import { panelTopRule, safeThemeBold, safeThemePaint, truncateLine, wrapPlainText } from "../lib/tui-render.ts";
+import { keyId, keyText } from "../lib/ui/key-input.ts";
+import { panelTopRule, safeThemeBold, safeThemePaint, truncateLine, wrapPlainText } from "../lib/ui/tui-render.ts";
 
 export const BTW_MAX_HEIGHT = 24;
 

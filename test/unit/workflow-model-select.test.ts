@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { pinCatalog } from "./catalog-fixture.ts";
 import { resolveWorkflowAgentModel } from "../../extensions/workflow/agent-session.ts";
-import { supportsImageInput } from "../../extensions/lib/model-policy.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { supportsImageInput } from "../../extensions/lib/models/model-policy.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { resolveSubagentModel, subagentModelMenu } from "../../extensions/lib/models/subagent-model.ts";
 
 const model = (id: string, input: number) =>

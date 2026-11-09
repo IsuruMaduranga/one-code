@@ -15,7 +15,7 @@
  * that waits forever.
  */
 import { SUBAGENT_ACTIONS_CHANNEL, type ChildAction, type SubagentActionsPayload } from "../lib/rules/auto-mode-actions.ts";
-import type { HandBackVerdict } from "../lib/notifications.ts";
+import type { HandBackVerdict } from "../lib/notify/notifications.ts";
 
 import { subagentWords } from "./words.ts";
 /** How long a completion report waits for the gate's verdict before going out with a note instead. */

@@ -9,10 +9,10 @@
 import { describe, expect, it, vi } from "vitest";
 import artifactsExtension from "../../extensions/artifacts/index.ts";
 import backgroundExtension from "../../extensions/background/index.ts";
-import { DEFER_CHANNEL } from "../../extensions/lib/deferred.ts";
+import { DEFER_CHANNEL } from "../../extensions/lib/request/deferred.ts";
 import subagentsExtension from "../../extensions/subagents/index.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
-import { projectConfigDirName } from "../../extensions/lib/sources.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { projectConfigDirName } from "../../extensions/lib/profile/sources.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 function deferredBy(...extensions: Array<(pi: never) => void>) {

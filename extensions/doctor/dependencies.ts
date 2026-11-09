@@ -11,18 +11,18 @@
  * providers it depends on a third-party key.
  */
 
-import { SETTINGS_DISPLAY } from "../lib/product-settings.ts";
-import { brand, envName } from "../lib/brand.mjs";
+import { SETTINGS_DISPLAY } from "../lib/profile/product-settings.ts";
+import { brand, envName } from "../lib/profile/brand.mjs";
 import { POWERSHELL_KNOB } from "../powershell/policy.ts";
 import { type Dirent, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { whichOnPath } from "../lib/which.ts";
+import { whichOnPath } from "../lib/shell-run/which.ts";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { getProviderKind } from "pi-web-search/src/api.ts";
 import { installHint, serverInstallHint } from "../lsp/install-hints.ts";
 import { languageIdForPath, SERVERS } from "../lsp/servers.ts";
 import { typescriptPreflight } from "../lsp/servers.ts";
-import { profileText } from "../lib/profile.ts";
+import { profileText } from "../lib/profile/profile.ts";
 import type { McpServer } from "../mcp/config.ts";
 import { BRAVE_KEY_ENV, resolveChain, TAVILY_KEY_ENV, type WebSearchSettings } from "../web/backends.ts";
 import type { Finding, ReportLine, ReportSection } from "./report.ts";
@@ -110,7 +110,7 @@ export interface DependencyInput {
 	webSearchSettings: WebSearchSettings;
 	/**
 	 * The shell tools as the session resolves them (build.ts, from
-	 * lib/shell-spawn.ts + powershell/policy.ts): which bash, which PowerShell,
+	 * lib/shell-run/shell-spawn.ts + powershell/policy.ts): which bash, which PowerShell,
 	 * which one is primary, and the startup notices. On Windows this is the
 	 * first thing a user asks the doctor — "which shells did you find?" — and
 	 * the report had no line for it until 2026-09-19 (the Vultr VM session).

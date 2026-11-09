@@ -8,8 +8,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { requireText } from "../../extensions/lib/profile.ts";
-import { userConfigDir } from "../../extensions/lib/sources.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { userConfigDir } from "../../extensions/lib/profile/sources.ts";
 import { BUNDLED_AGENTS_DIR, parseAgentFile } from "../../extensions/lib/agents/agent-catalog.ts";
 import * as defaults from "../../extensions/lib/models/subagent-default.ts";
 import subagentsExtension from "../../extensions/subagents/index.ts";

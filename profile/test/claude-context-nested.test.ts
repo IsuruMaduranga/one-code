@@ -10,10 +10,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import claudeContextExtension from "../../extensions/claude-context/index.ts";
 import { nestedInstructionText } from "../../extensions/claude-context/claude-context.ts";
 import { nestedInstructionFiles } from "../claude-code/instructions.ts";
-import { openInstructions } from "../../extensions/lib/instructions.ts";
+import { openInstructions } from "../../extensions/lib/context/instructions.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
-import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
+import { WORKTREE_CHANNEL } from "../../extensions/lib/agents/worktree-channel.ts";
 import { createFakeCtx, createFakePi } from "../../test/unit/helpers/fake-pi.ts";
 
 let root: string;

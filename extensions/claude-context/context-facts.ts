@@ -6,13 +6,13 @@
  * status, and says what changed once. The historical blocks stay as sent.
  */
 import { buildClaudeMdBlock } from "./claude-context.ts";
-import type { ContextFile } from "../lib/instructions.ts";
-import type { ToldFact } from "../lib/ledger/records.ts";
-import { contentHash } from "../lib/ledger/wire.ts";
-import { toldBlockFact } from "../lib/reminders.ts";
-import type { ContextChange } from "../lib/context-text.ts";
-import { contextWords } from "../lib/context-words.ts";
-import { differingSpans } from "../lib/template-probe.ts";
+import type { ContextFile } from "../lib/context/instructions.ts";
+import type { ToldFact } from "../lib/request/ledger/records.ts";
+import { contentHash } from "../lib/request/ledger/wire.ts";
+import { toldBlockFact } from "../lib/request/reminders.ts";
+import type { ContextChange } from "../lib/context/context-text.ts";
+import { contextWords } from "../lib/context/context-words.ts";
+import { differingSpans } from "../lib/profile/template-probe.ts";
 
 /** The told keys of the fingerprints (whole-text block facts) and of the compaction flag (a mode). */
 export const FACT_KEYS = {

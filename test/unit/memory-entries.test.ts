@@ -1,6 +1,6 @@
 /**
  * The /memory panel's rows (memory/entries.ts): the instruction files a user
- * writes, for the profile in force (lib/instructions.ts instructionTargets),
+ * writes, for the profile in force (lib/context/instructions.ts instructionTargets),
  * always offered; ancestors by path before the project's own; the auto-memory
  * folder last. With One Code's source provider (Claude Code's files):
  * profile/test/memory-entries-claude-code.test.ts.
@@ -9,8 +9,8 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { brand } from "../../extensions/lib/brand.mjs";
-import { instructionTargets } from "../../extensions/lib/instructions.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
+import { instructionTargets } from "../../extensions/lib/context/instructions.ts";
 import { memoryEntriesIn, writeUnder } from "./helpers/memory-entries.ts";
 
 describe("buildMemoryEntries", () => {

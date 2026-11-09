@@ -17,12 +17,12 @@
  * CLAUDE.md needs no handling — pi discovers it natively alongside AGENTS.md.
  */
 
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import { existsSync } from "node:fs";
 import os from "node:os";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-import { BUNDLED_SKILLS_DIR, commandDirs, skillSourceDirs } from "../lib/skill-scan.ts";
+import { BUNDLED_SKILLS_DIR, commandDirs, skillSourceDirs } from "../lib/plugins/skill-scan.ts";
 
 /**
  * `claudeDir` is Claude Code's config dir (honours CLAUDE_CONFIG_DIR), defaulting
@@ -31,7 +31,7 @@ import { BUNDLED_SKILLS_DIR, commandDirs, skillSourceDirs } from "../lib/skill-s
  * via that env var.
  */
 export function claudeResourcePaths(cwd: string, home: string, bundledSkillsDir?: string): { skillPaths: string[]; promptPaths: string[] } {
-	// The folders come from the source view (lib/skill-scan.ts, lib/sources.ts).
+	// The folders come from the source view (lib/plugins/skill-scan.ts, lib/profile/sources.ts).
 	const candidates = {
 		skillPaths: [
 			...skillSourceDirs(cwd, home).map(({ dir }) => dir),

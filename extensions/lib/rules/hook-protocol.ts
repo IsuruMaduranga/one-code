@@ -5,10 +5,10 @@
  * fail-closed choices are One Code's own (see working-docs/decisions.md).
  */
 
-import { isAppendedReminderText } from "../reminders.ts";
-import { emptyToolResultText } from "../empty-tool-result.ts";
+import { isAppendedReminderText } from "../request/reminders.ts";
+import { emptyToolResultText } from "../request/empty-tool-result.ts";
 import { MAX_HOOK_OUTPUT_BYTES } from "../../hooks/executor.ts";
-import type { SessionBackgroundTask, SessionCron } from "../session-work.ts";
+import type { SessionBackgroundTask, SessionCron } from "../notify/session-work.ts";
 
 /** The contiguous run of reminder/countdown blocks at the tail of a tool result (review M3). */
 function trailingReminderBlocks<T extends { type: string }>(content: readonly T[]): T[] {

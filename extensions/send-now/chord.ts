@@ -7,7 +7,7 @@
  * with flags 7 (disambiguate, event types, alternate keys) where the terminal
  * supports it, or xterm's modifyOtherKeys form (`\x1b[27;5;120~`), which
  * pi-tui turns on otherwise and tmux sends with `extended-keys on`.
- * `lib/key-input.ts` names all three alike. With event types on, a release
+ * `lib/ui/key-input.ts` names all three alike. With event types on, a release
  * follows every press, so releases never change the chord's state.
  *
  * pi binds `ctrl+x` alone to "copy the last assistant message". The chord
@@ -17,7 +17,7 @@
  * other time `ctrl+x` reaches pi and copies.
  */
 
-import { isKeyRelease, keyId } from "../lib/key-input.ts";
+import { isKeyRelease, keyId } from "../lib/ui/key-input.ts";
 
 export type ChordKey = "ctrl+x" | "ctrl+s" | "release" | "other";
 

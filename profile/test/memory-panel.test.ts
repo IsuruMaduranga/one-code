@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { sources } from "../claude-code/sources.ts";
 import { describe, expect, it } from "vitest";
-import { claudeMdLimitWarning, combinedLimitWarning } from "../../extensions/lib/memory.ts";
+import { claudeMdLimitWarning, combinedLimitWarning } from "../../extensions/lib/context/memory.ts";
 import type { MemoryEntry } from "../../extensions/memory/entries.ts";
 import { editorHint, memoryDisplayPath, resolveOpen } from "../../extensions/memory/open-external.ts";
 import {

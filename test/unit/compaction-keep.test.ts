@@ -2,10 +2,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { brand } from "../../extensions/lib/brand.mjs";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
 import { buildDoctorReport } from "../../extensions/doctor/build.ts";
 import { renderDoctorText } from "../../extensions/doctor/report.ts";
-import { compactionKeepView, keepWindowFix, withCompactionKeepBackfilled } from "../../extensions/lib/compaction-keep.mjs";
+import { compactionKeepView, keepWindowFix, withCompactionKeepBackfilled } from "../../extensions/lib/app/compaction-keep.mjs";
 
 describe("withCompactionKeepBackfilled", () => {
 	it("sets 0 when the user has not set a keep window, keeping their other keys", () => {

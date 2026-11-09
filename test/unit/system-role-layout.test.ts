@@ -5,9 +5,9 @@
  */
 import { describe, expect, it } from "vitest";
 import systemReminderExtension from "../../extensions/system-reminder/index.ts";
-import { CONTEXT_ORDER, movesToSystemRole, REMINDER_CHANNEL, wrapReminder } from "../../extensions/lib/reminders.ts";
-import { reseatMessageMark } from "../../extensions/lib/anthropic-payload.ts";
-import { instructionRole, withSystemRoleContext } from "../../extensions/lib/system-role.ts";
+import { CONTEXT_ORDER, movesToSystemRole, REMINDER_CHANNEL, wrapReminder } from "../../extensions/lib/request/reminders.ts";
+import { reseatMessageMark } from "../../extensions/lib/request/anthropic-payload.ts";
+import { instructionRole, withSystemRoleContext } from "../../extensions/lib/request/system-role.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 const ENV = { framed: wrapReminder("# Environment\nx"), inner: "# Environment\nx" };

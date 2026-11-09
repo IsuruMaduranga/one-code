@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { HOMEBREW_MIN_RELEASE_AGE_MS } from "../../extensions/lib/update-check.mjs";
+import { HOMEBREW_MIN_RELEASE_AGE_MS } from "../../extensions/lib/app/update-check.mjs";
 import { APP_REGISTRY_URL, PACKAGE_REGISTRY_URL, lookupLatestVersion } from "../../extensions/doctor/update-lookup.ts";
-import { brand, envName } from "../../extensions/lib/brand.mjs";
+import { brand, envName } from "../../extensions/lib/profile/brand.mjs";
 
 const DAY = 24 * 60 * 60 * 1000;
 

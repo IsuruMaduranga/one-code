@@ -3,7 +3,7 @@
  * (block + updatedInput + additionalContext from several hooks combined) and
  * the Stop latch — Stop must fire once per SETTLED turn, not once per
  * internal run (a turn can retry/auto-compact and produce several agent_end
- * events before it settles — extensions/lib/interrupt.ts).
+ * events before it settles — extensions/lib/notify/interrupt.ts).
  *
  * Hooks are real shell commands run through the real executor (by design —
  * see executor.ts's own header), so this uses actual (trivial, instant)
@@ -25,10 +25,10 @@ import { PRECOMPACT_INSTRUCTIONS_CHANNEL, type PreCompactInstructions } from "..
 import { MAX_HOOK_OUTPUT_BYTES } from "../../extensions/hooks/executor.ts";
 import { resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
 import { type HookBridge, SUBAGENT_HOOK_CHANNEL } from "../../extensions/lib/agents/hook-bridge.ts";
-import { REMINDER_CHANNEL, wrapReminder } from "../../extensions/lib/reminders.ts";
+import { REMINDER_CHANNEL, wrapReminder } from "../../extensions/lib/request/reminders.ts";
 import { SKILL_INVOCATION_TYPE } from "../../extensions/lib/plugins/skill-invoke.ts";
-import { brandedId, envName } from "../../extensions/lib/brand.mjs";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { brandedId, envName } from "../../extensions/lib/profile/brand.mjs";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { writeUserSettings } from "./helpers/settings-files.ts";
 

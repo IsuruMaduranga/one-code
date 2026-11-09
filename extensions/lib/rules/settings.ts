@@ -18,11 +18,11 @@
  * Unknown keys in the files are preserved on write.
  */
 
-import { isRepoFile, readSettingsFile as readClaudeSettingsFile, settingsSources } from "../claude-settings.ts";
-import type { SettingsFile } from "../sources.ts";
-import { readSettingsForWrite, writeSettings } from "../product-settings.ts";
+import { isRepoFile, readSettingsFile as readClaudeSettingsFile, settingsSources } from "../profile/claude-settings.ts";
+import type { SettingsFile } from "../profile/sources.ts";
+import { readSettingsForWrite, writeSettings } from "../profile/product-settings.ts";
 import { resolve } from "node:path";
-import { expandTilde } from "../paths.ts";
+import { expandTilde } from "../profile/paths.ts";
 import type { PermissionMode } from "./matcher.ts";
 
 
@@ -99,7 +99,7 @@ export function normalizePermissionMode(value: unknown): PermissionMode | undefi
 }
 
 function readSettingsFile(path: string): ClaudeSettingsFile | undefined {
-	// Shared reader (lib/claude-settings.ts) — this module narrows to the
+	// Shared reader (lib/profile/claude-settings.ts) — this module narrows to the
 	// permissions-relevant shape.
 	return readClaudeSettingsFile(path) as ClaudeSettingsFile | undefined;
 }

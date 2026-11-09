@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import data from "../../profile/brand.json" with { type: "json" };
-import { type Brand, brand, brandedId, checkBrand, envName, productStateDir } from "../../extensions/lib/brand.mjs";
+import { type Brand, brand, brandedId, checkBrand, envName, productStateDir } from "../../extensions/lib/profile/brand.mjs";
 
 // The typecheck's proof that the shipped brand is complete.
 data satisfies Brand;

@@ -3,11 +3,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { WORKTREE_CHANNEL, type WorktreeLocation } from "../../extensions/lib/worktree-channel.ts";
-import { resetProcessStateForTest } from "../../extensions/lib/process-state.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
-import { projectConfigDir } from "../../extensions/lib/sources.ts";
-import { around } from "../../extensions/lib/template-probe.ts";
+import { WORKTREE_CHANNEL, type WorktreeLocation } from "../../extensions/lib/agents/worktree-channel.ts";
+import { resetProcessStateForTest } from "../../extensions/lib/profile/process-state.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { projectConfigDir } from "../../extensions/lib/profile/sources.ts";
+import { around } from "../../extensions/lib/profile/template-probe.ts";
 import worktreeExtension from "../../extensions/worktree/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 

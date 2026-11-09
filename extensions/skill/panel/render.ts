@@ -9,8 +9,8 @@
  * under-measure and risk pi's overwide-line crash.
  */
 
-import { cutPlainText, padPlainText, panelTopRule, searchBoxLines, visibleWidth, wrapHints } from "../../lib/tui-render.ts";
-import type { SkillState } from "../../lib/skill-overrides.ts";
+import { cutPlainText, padPlainText, panelTopRule, searchBoxLines, visibleWidth, wrapHints } from "../../lib/ui/tui-render.ts";
+import type { SkillState } from "../../lib/plugins/skill-overrides.ts";
 import { clampSkillsCursor, type SkillsPanelState, type SkillsRow, visibleRows } from "./state.ts";
 
 export interface SkillsPaint {

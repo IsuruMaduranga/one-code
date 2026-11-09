@@ -6,8 +6,8 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { system32Path } from "../../../extensions/lib/paths.ts";
-import { POWERSHELL_ARGS, resolvePowerShellSpawn, type ShellSpawn } from "../../../extensions/lib/shell-spawn.ts";
+import { system32Path } from "../../../extensions/lib/profile/paths.ts";
+import { POWERSHELL_ARGS, resolvePowerShellSpawn, type ShellSpawn } from "../../../extensions/lib/shell-run/shell-spawn.ts";
 
 export const PORTABLE_PWSH_DIR = join(homedir(), ".cache", "cc-windows-mode", "pwsh");
 

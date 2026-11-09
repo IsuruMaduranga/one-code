@@ -14,7 +14,7 @@
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { claudeFamily, usesClaudeCodeFastPaths } from "../../lib/model-tier.ts";
+import { claudeFamily, usesClaudeCodeFastPaths } from "../../lib/models/model-tier.ts";
 import { autoModeWords } from "./words.ts";
 
 /** The note for a session opening in auto mode on `model`, or undefined on a cheap or tiny model. */

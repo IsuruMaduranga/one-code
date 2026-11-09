@@ -1,5 +1,5 @@
 /**
- * One Code's source provider (lib/sources.ts): Claude Code's files on top of
+ * One Code's source provider (lib/profile/sources.ts): Claude Code's files on top of
  * the base's locations (decisions/bi-fork.md, "Claude Code compatibility is
  * One Code's profile code", "The provider's shape"). The profile names this
  * module (`sources`), so it loads on first use and is shared once per
@@ -59,7 +59,7 @@ const PROJECT_DIR = ".claude";
 
 /**
  * The knobs Claude Code spells `CLAUDE_CODE_<suffix>`, read after One Code's
- * `ONECODE_<suffix>` (lib/knobs.ts). `CLAUDE_CODE_SUBAGENT_MODEL` applies only
+ * `ONECODE_<suffix>` (lib/profile/knobs.ts). `CLAUDE_CODE_SUBAGENT_MODEL` applies only
  * on a Claude model: it was written for Claude Code, almost always as an
  * Anthropic alias ("sonnet"), and borrowing it elsewhere moved subagent work
  * off the provider the user chose (observed live: an opencode deepseek

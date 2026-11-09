@@ -1,14 +1,14 @@
 /**
- * Foreground shell results in Claude Code's shape (lib/shell-result.ts): a
+ * Foreground shell results in Claude Code's shape (lib/shell-run/shell-result.ts): a
  * failure is the profile's exit-code text over the output without pi's
  * trailer, a success loses its blank edges, an empty success is the profile's
  * empty-result text naming the tool. The inputs are pi's exact texts.
  */
 import { describe, expect, it, vi } from "vitest";
 import { Type } from "typebox";
-import { claudeCodeShellText } from "../../extensions/lib/shell-result.ts";
-import { registerShellTool } from "../../extensions/lib/shell-tool.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { claudeCodeShellText } from "../../extensions/lib/shell-run/shell-result.ts";
+import { registerShellTool } from "../../extensions/lib/shell-run/shell-tool.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 /** The profile's failure text for exit `code`, given the output the base passes (pi's, without its trailer). */

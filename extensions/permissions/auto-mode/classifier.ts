@@ -24,9 +24,9 @@ import { appendFileSync } from "node:fs";
 import { cleanupSessionResources, isContextOverflow, type Model, type Api, type AssistantMessage, type ThinkingLevel } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
-import { costRatioText, isNotablyCostlier } from "../../lib/model-choice-warnings.ts";
-import { modeCycleKey } from "../../lib/keys.ts";
-import { classifierCostRatio, forcedReasoningLevel, isReasoningMandatoryError, modelSpec as spec, reasoningRetryLevel } from "../../lib/model-policy.ts";
+import { costRatioText, isNotablyCostlier } from "../../lib/models/model-choice-warnings.ts";
+import { modeCycleKey } from "../../lib/ui/keys.ts";
+import { classifierCostRatio, forcedReasoningLevel, isReasoningMandatoryError, modelSpec as spec, reasoningRetryLevel } from "../../lib/models/model-policy.ts";
 import type { AutoModeConfig } from "../../lib/rules/auto-mode-config.ts";
 import { CLASSIFIER_CACHE_APIS, cacheClassifierHistory } from "./cache.ts";
 import {
@@ -234,7 +234,7 @@ export interface ClassifierDeps {
 	/**
 	 * A candidate the provider refused as not usable on this account (stepped
 	 * over and recorded in `state.rejected`). The wiring republishes it on
-	 * `lib/model-unusable.ts`'s channel so subagent selection — which shares this
+	 * `lib/models/model-unusable.ts`'s channel so subagent selection — which shares this
 	 * classifier's floor and therefore its first pick — skips it too.
 	 */
 	onModelUnusable?: (model: string, reason: string) => void;

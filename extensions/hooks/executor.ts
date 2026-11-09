@@ -11,7 +11,7 @@
  *
  * The interpreter is Claude Code's: bash (Git Bash on Windows, honouring
  * `CLAUDE_CODE_GIT_BASH_PATH`) unless the hook says `shell: "powershell"`, or
- * the machine is a Windows box without Git Bash — lib/shell-spawn.ts resolves
+ * the machine is a Windows box without Git Bash — lib/shell-run/shell-spawn.ts resolves
  * both through pi's own shell lookup.
  *
  * Hardening carried over:
@@ -46,10 +46,10 @@
  *   mechanism for the LSP client). A ref'd child holds the loop until `close`.
  */
 
-import { envName } from "../lib/brand.mjs";
+import { envName } from "../lib/profile/brand.mjs";
 import type { ChildProcess } from "node:child_process";
-import { detachedSpawnOptions, killProcessTree, waitForChildExit } from "../lib/process-tree.ts";
-import { bashSpawn, GIT_BASH_PATH_KNOB, POWERSHELL_UTF8_PREFIX, powerShellSpawn, type ShellSpawn, spawnShellCommand } from "../lib/shell-spawn.ts";
+import { detachedSpawnOptions, killProcessTree, waitForChildExit } from "../lib/shell-run/process-tree.ts";
+import { bashSpawn, GIT_BASH_PATH_KNOB, POWERSHELL_UTF8_PREFIX, powerShellSpawn, type ShellSpawn, spawnShellCommand } from "../lib/shell-run/shell-spawn.ts";
 import type { FinishedRun } from "../lib/rules/hook-protocol.ts";
 import type { HookShell } from "./settings.ts";
 
@@ -131,13 +131,13 @@ export function runHookCommand(command: string, stdinJson: string, opts: HookRun
 		// Windows PowerShell 5.1 (`powershell.exe`) defaults its console to
 		// UTF-16, which would corrupt this stream once decoded as UTF-8 below
 		// (setEncoding("utf8")) — the same fix every other PowerShell execution
-		// path applies (lib/shell-spawn.ts, extensions/powershell/index.ts).
+		// path applies (lib/shell-run/shell-spawn.ts, extensions/powershell/index.ts).
 		const runCommand = shell === "powershell" ? `${POWERSHELL_UTF8_PREFIX}${command}` : command;
 		try {
 			// An absolute interpreter path (pi's resolver never yields a bare name
 			// where a real bash exists), so a repo-local `sh` on PATH cannot hijack
 			// the hook; the shell leads its own process group so a timeout kills
-			// grandchildren too (Windows: taskkill /T — lib/process-tree.ts).
+			// grandchildren too (Windows: taskkill /T — lib/shell-run/process-tree.ts).
 			child = spawnShellCommand(spec, runCommand, {
 				cwd: opts.cwd,
 				// A fire-and-forget hook must outlive a parent that is exiting.
@@ -194,7 +194,7 @@ export function runHookCommand(command: string, stdinJson: string, opts: HookRun
 
 		const timer = setTimeout(() => {
 			timedOut = true;
-			// The whole process group the detached shell leads (lib/process-tree.ts).
+			// The whole process group the detached shell leads (lib/shell-run/process-tree.ts).
 			killProcessTree(child, "SIGKILL");
 		}, timeoutMs);
 		timer.unref();
@@ -209,7 +209,7 @@ export function runHookCommand(command: string, stdinJson: string, opts: HookRun
 
 		// Settles on exit plus a short stdio grace, not on `close`: a grandchild
 		// the kill missed could otherwise hold the pipes — and this promise — open
-		// for its whole life (lib/process-tree.ts). A killed process reports null,
+		// for its whole life (lib/shell-run/process-tree.ts). A killed process reports null,
 		// EXCEPT when the shell outlived the group kill just long enough to reap
 		// its child and exit 128+9 itself (see exitCode's contract). Normalizing
 		// keeps "we killed it" from ever looking like an ordinary non-zero exit,

@@ -8,7 +8,7 @@ import { buildRuleset } from "../../extensions/permissions/auto-mode/classifier-
 import { unattendedPromptTimeoutMs, UNATTENDED_PROMPT_TIMEOUT_MS } from "../../extensions/permissions/auto-mode/pause.ts";
 import { buildPayload, indexFor, parseStage2, stage1User, stage2User } from "../../extensions/permissions/auto-mode/prompt.ts";
 import { groundCategory } from "../../extensions/permissions/auto-mode/rules.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { CLEAN_UP_REQUEST, DEFAULT_ENVIRONMENT } from "../../test/unit/helpers/classify-request.ts";
 
 const index = indexFor(DEFAULT_ENVIRONMENT);

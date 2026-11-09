@@ -10,9 +10,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import claudeContextExtension from "../../extensions/claude-context/index.ts";
-import { restoredInstructionNotice, skippedInstructionNote, skippedInstructionWarning } from "../../extensions/lib/instruction-budget.ts";
-import { estimateTextTokens } from "../../extensions/lib/pi-ai-estimate.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
+import { restoredInstructionNotice, skippedInstructionNote, skippedInstructionWarning } from "../../extensions/lib/context/instruction-budget.ts";
+import { estimateTextTokens } from "../../extensions/lib/models/pi-ai-estimate.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "../../test/unit/helpers/fake-pi.ts";
 import { stubHome } from "../../test/unit/helpers/home.ts";
 

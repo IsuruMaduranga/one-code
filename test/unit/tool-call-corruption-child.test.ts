@@ -10,9 +10,9 @@ import { createAssistantMessageEventStream, type AssistantMessage } from "@earen
 import { type AgentSession, ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { openChildSession } from "../../extensions/lib/agent-loader.ts";
-import { CHILD_EXTENSION_PATHS } from "../../extensions/lib/child-extensions.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { openChildSession } from "../../extensions/lib/agents/agent-loader.ts";
+import { CHILD_EXTENSION_PATHS } from "../../extensions/lib/agents/child-extensions.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "oc-child-corruption-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));

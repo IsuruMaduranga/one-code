@@ -1,8 +1,8 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 import { classifierCandidates } from "../../extensions/lib/models/classifier-model.ts";
-import { chosenModelWarnings, costRatioText, isNotablyCostlier } from "../../extensions/lib/model-choice-warnings.ts";
-import { setModelTierOverridesForTest } from "../../extensions/lib/model-tier.ts";
+import { chosenModelWarnings, costRatioText, isNotablyCostlier } from "../../extensions/lib/models/model-choice-warnings.ts";
+import { setModelTierOverridesForTest } from "../../extensions/lib/models/model-tier.ts";
 import { pinReleaseDates } from "./catalog-fixture.ts";
 
 const model = (provider: string, id: string, input: number, contextWindow = 200_000) =>

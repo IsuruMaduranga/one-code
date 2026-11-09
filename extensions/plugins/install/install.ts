@@ -11,7 +11,7 @@
  * dependencies) fail loudly with the reason named.
  */
 
-import { brand } from "../../lib/brand.mjs";
+import { brand } from "../../lib/profile/brand.mjs";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, readdirSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, relative, sep } from "node:path";
@@ -19,7 +19,7 @@ import { gitClone, gitHeadSha } from "../marketplace/git.ts";
 import type { MarketplaceEntry } from "../marketplace/types.ts";
 import { addInstalledPlugin, installedEntry, removeInstalledPlugin } from "./registry.ts";
 import { pluginCacheDir, versionedCachePath, withinBase } from "./paths.ts";
-import { loadInstalledPlugins, validPluginName } from "../../lib/plugins.ts";
+import { loadInstalledPlugins, validPluginName } from "../../lib/plugins/plugins.ts";
 
 export interface InstallResult {
 	id: string;

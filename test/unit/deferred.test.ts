@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import {
 	deferredMissReminderText,
 	DeferredRegistry,
@@ -10,7 +10,7 @@ import {
 	selectedNames,
 	selectedRequests,
 	toolNotFoundName,
-} from "../../extensions/lib/deferred.ts";
+} from "../../extensions/lib/request/deferred.ts";
 
 const tools: SearchableTool[] = [
 	{ name: "notebook_edit", description: "Edit a Jupyter notebook cell", keywords: ["ipynb", "jupyter"] },

@@ -7,9 +7,9 @@ import { askThroughDialogs, TYPE_OWN } from "../../extensions/ask-user/dialogs.t
 import { selectPlanChoice } from "../../extensions/plan-mode/viewer.ts";
 import planModeExtension from "../../extensions/plan-mode/index.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../../extensions/lib/rules/modes.ts";
-import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
+import { MODE_CHANNEL } from "../../extensions/lib/rules/plan-mode-channels.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 
 function rpcDialog(options?: { signal?: AbortSignal }): Promise<undefined> {
 	return new Promise((resolve) => {

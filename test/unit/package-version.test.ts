@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { extensionVersion } from "../../extensions/lib/package-version.ts";
+import { extensionVersion } from "../../extensions/lib/app/package-version.ts";
 
 const rootPkg = JSON.parse(
 	readFileSync(

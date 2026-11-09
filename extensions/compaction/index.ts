@@ -35,7 +35,7 @@
  * summary style, never a broken compaction. CC_COMPACTION=0 opts out.
  */
 
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Context, Message, Model, Tool } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
@@ -54,18 +54,18 @@ import {
 	withClearThinking,
 } from "../context-management/index.ts";
 import { PRECOMPACT_INSTRUCTIONS_CHANNEL, type PreCompactInstructions } from "../lib/request/precompact-instructions.ts";
-import { looksLikeAnthropicRequest } from "../lib/anthropic-payload.ts";
-import { forcedReasoningLevel } from "../lib/model-policy.ts";
-import { captureRequest, extendPayload, LAST_REQUEST_CHANNEL, LastExchange, lastCovered, type RequestCapture, replayOutputCap } from "../lib/request-replay.ts";
-import { withoutSystemMessages } from "../lib/side-call.ts";
+import { looksLikeAnthropicRequest } from "../lib/request/anthropic-payload.ts";
+import { forcedReasoningLevel } from "../lib/models/model-policy.ts";
+import { captureRequest, extendPayload, LAST_REQUEST_CHANNEL, LastExchange, lastCovered, type RequestCapture, replayOutputCap } from "../lib/side-calls/request-replay.ts";
+import { withoutSystemMessages } from "../lib/side-calls/side-call.ts";
 import { followCoveredMessages } from "./covered-messages.ts";
-import { LEDGER_SENT_CHANNEL, type LedgerSent } from "../lib/ledger/plan.ts";
+import { LEDGER_SENT_CHANNEL, type LedgerSent } from "../lib/request/ledger/plan.ts";
 import { claudeCodeCut, type CutEntry, doomedMessages } from "./cut.ts";
 import { fitToBudget, replayFits, withoutUsage } from "./fit.ts";
 import { withoutThinking } from "../lib/request/kept-thinking.ts";
 import { COMPACTION_MAX_TOKENS, extractSummary } from "./prompt.ts";
 import type { CompactionText, KeptTail, KeptTailLandmark } from "./text.ts";
-import { requireText } from "../lib/profile.ts";
+import { requireText } from "../lib/profile/profile.ts";
 
 /** Compaction reads a whole context window; give it more room than the classifier's 30s. */
 const COMPACTION_TIMEOUT_MS = 120_000;
@@ -114,7 +114,7 @@ function compactionExtension(pi: ExtensionAPI) {
 
 	/**
 	 * The same request as it went on the wire, and the reply that answered it
-	 * (lib/request-replay.ts): the body the ledger's payload hook publishes once
+	 * (lib/side-calls/request-replay.ts): the body the ledger's payload hook publishes once
 	 * it has spliced and validated it, so it is final; it is published for the
 	 * btw and recap side calls too.
 	 */

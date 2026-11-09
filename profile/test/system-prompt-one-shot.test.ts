@@ -4,7 +4,7 @@
  * test/unit/system-prompt-one-shot.test.ts.
  */
 import { describe, expect, it } from "vitest";
-import { interactiveSessionNote, oneShotSessionNote } from "../../extensions/lib/notifications.ts";
+import { interactiveSessionNote, oneShotSessionNote } from "../../extensions/lib/notify/notifications.ts";
 
 describe("One Code's one-shot session note", () => {
 	it("says background work blocks, scheduled jobs never fire, and the session is not interactive", () => {

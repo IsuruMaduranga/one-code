@@ -11,12 +11,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { productProjectSettingsPath, productSettingsPath, readWorkflowSettings, type WorkflowSizeGuideline } from "../../extensions/lib/product-settings.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { productProjectSettingsPath, productSettingsPath, readWorkflowSettings, type WorkflowSizeGuideline } from "../../extensions/lib/profile/product-settings.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import workflowExtension from "../../extensions/workflow/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
-import { envName } from "../../extensions/lib/brand.mjs";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 
 /** The tool's description for a guideline, in the profile's words. */
 const workflowDescription = (guideline: WorkflowSizeGuideline, configured: boolean) =>

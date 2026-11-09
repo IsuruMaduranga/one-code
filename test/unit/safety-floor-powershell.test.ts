@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { powershellPathTokens, safetyControlWrite, safetyFloorReason } from "../../extensions/permissions/auto-mode/safety-floor.ts";
-import { brand } from "../../extensions/lib/brand.mjs";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const home = "/home/u";
 const cwd = "/home/u/proj";

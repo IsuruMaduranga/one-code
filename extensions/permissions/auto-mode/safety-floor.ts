@@ -18,10 +18,10 @@
  * complete to be sound — a `sed -i` on settings.json that the shell evidence
  * does not model as a write is the classifier's to catch, as today.
  *
- * The consent stores (`lib/consent-stores.ts`) are gate controls too: an
+ * The consent stores (`lib/consent/consent-stores.ts`) are gate controls too: an
  * entry in one approves a repository's hooks, MCP servers, allow rules or
  * language servers for every later session. So are the cached model catalogs
- * (`lib/model-catalog-data.ts catalogCacheFiles`): they decide the model's
+ * (`lib/models/model-catalog-data.ts catalogCacheFiles`): they decide the model's
  * tier, and the tier decides which fast paths skip the classifier.
  *
  * The target list is deliberately exact files, not directories: ~/.claude also
@@ -29,21 +29,21 @@
  * fires on routine work teaches the user to approve without reading.
  */
 
-import { stateDirPattern } from "../../lib/brand.mjs";
+import { stateDirPattern } from "../../lib/profile/brand.mjs";
 import { FIND_PATTERN_TESTS, findNegatedPatterns } from "../../lib/shell/read-only-options.ts";
 import { analyzeShellCommand, globComponentRegex, hasReadOnlyShellWords, isUnknownTilde, LOOPS, movesDirectory, parseCommand, resolvePayload, scopedTracker } from "../../lib/shell/shell-analysis.ts";
 import type { Token } from "../../lib/shell/shell-parse.ts";
-import { claudeUserSettingsPath, managedSettingsPaths, settingsSources } from "../../lib/claude-settings.ts";
-import { protectedFiles } from "../../lib/sources.ts";
-import { CONSENT_STORE_TAIL, consentStorePaths } from "../../lib/consent-stores.ts";
-import { productSettingsPath } from "../../lib/product-settings.ts";
-import { CATALOG_CACHE_TAIL, catalogCacheFiles } from "../../lib/model-catalog-data.ts";
-import { claudeJsonPath, comparablePath, productStateDir } from "../../lib/paths.ts";
+import { claudeUserSettingsPath, managedSettingsPaths, settingsSources } from "../../lib/profile/claude-settings.ts";
+import { protectedFiles } from "../../lib/profile/sources.ts";
+import { CONSENT_STORE_TAIL, consentStorePaths } from "../../lib/consent/consent-stores.ts";
+import { productSettingsPath } from "../../lib/profile/product-settings.ts";
+import { CATALOG_CACHE_TAIL, catalogCacheFiles } from "../../lib/models/model-catalog-data.ts";
+import { claudeJsonPath, comparablePath, productStateDir } from "../../lib/profile/paths.ts";
 import { isWritingTool, resolveForContainment, toAbsolute, toAbsoluteBash } from "../../lib/shell/paths.ts";
 import type { FloorTarget } from "./text.ts";
 import { autoModeWords } from "./words.ts";
 
-/** The same comparison form resolveForContainment's output is in (lib/paths.ts). */
+/** The same comparison form resolveForContainment's output is in (lib/profile/paths.ts). */
 const fold = comparablePath;
 
 /**
@@ -78,7 +78,7 @@ function safetyControlFiles(home: string, sessionFiles: readonly string[] = []):
 		// Claude Code's global state file also carries permission configuration;
 		// claudeJsonPath honours CLAUDE_CONFIG_DIR so a relocated file is still caught.
 		claudeJsonPath(home),
-		// The session's settings ladder (lib/claude-settings.ts settingsSources):
+		// The session's settings ladder (lib/profile/claude-settings.ts settingsSources):
 		// every file a source provider adds is a gate control in its own right,
 		// and the per-repo One Code settings file is caught here even when
 		// ONECODE_STATE_DIR relocated the state root, which the tail regex misses

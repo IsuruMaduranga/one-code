@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { brand } from "../../extensions/lib/brand.mjs";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
 import { decide, isBroadExecutionRule, parseRule, parseRules } from "../../extensions/lib/rules/matcher.ts";
 import { isProtectedPath, isWritingTool } from "../../extensions/lib/rules/protected-paths.ts";
 

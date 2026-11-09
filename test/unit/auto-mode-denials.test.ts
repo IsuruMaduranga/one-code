@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DenialStore, MAX_DENIALS, denialInputKey, permissionGrantedMessage } from "../../extensions/permissions/auto-mode/denials.ts";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const denial = (inputKey: string, display = inputKey) => ({
 	toolName: "bash",

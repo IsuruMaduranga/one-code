@@ -3,7 +3,7 @@
  * fork's history shows (lifecycle-grid-hunt round 3, R3-L15).
  */
 import { describe, expect, it } from "vitest";
-import { requireText } from "../../extensions/lib/profile.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { PERMISSION_MODE_STATE } from "../../extensions/lib/rules/modes.ts";
 import { parentModeExtension } from "../../extensions/subagents/parent-mode.ts";
 import { createFakeCtx, createFakePi, renderRequest } from "./helpers/fake-pi.ts";

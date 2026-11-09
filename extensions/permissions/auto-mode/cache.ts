@@ -1,6 +1,6 @@
 /** Classifier cache breakpoints on the wire. Never changes classifier text or verdict behavior. */
 
-import { MAX_SIDE_CALL_CACHE_MARKERS } from "../../lib/side-call-cache.ts";
+import { MAX_SIDE_CALL_CACHE_MARKERS } from "../../lib/side-calls/side-call-cache.ts";
 
 type WireRecord = Record<string, unknown>;
 

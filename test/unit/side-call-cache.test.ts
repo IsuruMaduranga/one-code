@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cacheSideCallConversation, MAX_SIDE_CALL_CACHE_MARKERS } from "../../extensions/lib/side-call-cache.ts";
+import { cacheSideCallConversation, MAX_SIDE_CALL_CACHE_MARKERS } from "../../extensions/lib/side-calls/side-call-cache.ts";
 
 const marker = { type: "ephemeral", ttl: "1h" };
 

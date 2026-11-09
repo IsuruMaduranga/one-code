@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import exitExtension from "../../extensions/exit/index.ts";
 import initExtension from "../../extensions/init/index.ts";
-import { TURN_FAILED_CHANNEL } from "../../extensions/lib/interrupt.ts";
+import { TURN_FAILED_CHANNEL } from "../../extensions/lib/notify/interrupt.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 let originalExitCode: typeof process.exitCode;

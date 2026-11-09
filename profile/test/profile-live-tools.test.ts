@@ -1,19 +1,19 @@
 /**
  * Text that names another tool follows the live tool set: rendered with one
- * optional tool off (lib/features.ts TOOL_FEATURES), One Code's texts never
+ * optional tool off (lib/profile/features.ts TOOL_FEATURES), One Code's texts never
  * name it. The golden sweep checks the same on a real frontier request
  * (test/e2e/golden-requests.mjs --sweep); this covers every tier and form.
  * The English words some tool names share ("a skill", "git workflow") are
  * listed in ENGLISH with the phrase that uses them.
  */
 import { describe, expect, it } from "vitest";
-import { TOOL_FEATURES } from "../../extensions/lib/features.ts";
-import type { LiveTools } from "../../extensions/lib/live-tools.ts";
-import type { DescriptionForm } from "../../extensions/lib/tool-variants.ts";
-import type { ShellBlock } from "../../extensions/lib/shell-text.ts";
+import { TOOL_FEATURES } from "../../extensions/lib/profile/features.ts";
+import type { LiveTools } from "../../extensions/lib/profile/live-tools.ts";
+import type { DescriptionForm } from "../../extensions/lib/profile/tool-variants.ts";
+import type { ShellBlock } from "../../extensions/lib/shell-run/shell-text.ts";
 import type { FixPromptInput } from "../../extensions/doctor/text.ts";
 import { profile } from "../index.ts";
-import { PROMPT_TIERS } from "../../extensions/lib/model-tier.ts";
+import { PROMPT_TIERS } from "../../extensions/lib/models/model-tier.ts";
 
 /** Phrases where a tool's name is an English word, not the tool. */
 const ENGLISH: Readonly<Record<string, readonly RegExp[]>> = {

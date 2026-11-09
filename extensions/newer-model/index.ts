@@ -1,13 +1,13 @@
 /** User-only model-upgrade advice. No reminders, transcript entries, or request hooks. */
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import { homedir } from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { modelSpec } from "../lib/model-policy.ts";
-import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../lib/model-unusable.ts";
-import { newerModelSuggestion } from "../lib/newer-model.ts";
-import { queueNotice } from "../lib/notices.ts";
-import { sessionOutlivesTurn } from "../lib/notifications.ts";
-import { readSuggestNewerModels } from "../lib/product-settings.ts";
+import { modelSpec } from "../lib/models/model-policy.ts";
+import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../lib/models/model-unusable.ts";
+import { newerModelSuggestion } from "../lib/models/newer-model.ts";
+import { queueNotice } from "../lib/notify/notices.ts";
+import { sessionOutlivesTurn } from "../lib/notify/notifications.ts";
+import { readSuggestNewerModels } from "../lib/profile/product-settings.ts";
 
 function newerModelExtension(pi: ExtensionAPI) {
 	const shown = new Set<string>();
@@ -20,7 +20,7 @@ function newerModelExtension(pi: ExtensionAPI) {
 		if (shown.has(key)) return;
 		const suggestion = newerModelSuggestion(withoutUnusable(ctx.modelRegistry.getAvailable(), unusable), model);
 		if (!suggestion) return;
-		// Joined with the other extensions' startup and model-switch notices (lib/notices.ts).
+		// Joined with the other extensions' startup and model-switch notices (lib/notify/notices.ts).
 		queueNotice(pi.events, ctx, "info", `${suggestion.text} ${suggestion.fix}`);
 		shown.add(key);
 	};

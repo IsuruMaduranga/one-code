@@ -4,11 +4,11 @@ import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildClaudeMdBlock, buildContextBlock, dateBlock, buildOneCodeBlock } from "../../extensions/claude-context/claude-context.ts";
-import { AGENTS_DESCRIPTOR, discoverOneCodeFiles, expandImports, PRODUCT_DESCRIPTOR, PRODUCT_GLOBAL_DESCRIPTOR, openInstructions, PROJECT_DESCRIPTOR } from "../../extensions/lib/instructions.ts";
+import { AGENTS_DESCRIPTOR, discoverOneCodeFiles, expandImports, PRODUCT_DESCRIPTOR, PRODUCT_GLOBAL_DESCRIPTOR, openInstructions, PROJECT_DESCRIPTOR } from "../../extensions/lib/context/instructions.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { discoverContextFilePaths, discoverContextFiles } from "../claude-code/instructions.ts";
-import { wrapReminder } from "../../extensions/lib/reminders.ts";
-import { truncateIndex } from "../../extensions/lib/memory-content.ts";
+import { wrapReminder } from "../../extensions/lib/request/reminders.ts";
+import { truncateIndex } from "../../extensions/lib/context/memory-content.ts";
 
 // Ancestor instruction files on the host must not affect temporary fixtures,
 // including when TMPDIR is inside a checkout that carries its own CLAUDE.md.

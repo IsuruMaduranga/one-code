@@ -26,10 +26,10 @@
  * all three off.
  */
 
-import { feature } from "../lib/feature.ts";
+import { feature } from "../lib/profile/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { CONTEXT_ORDER, REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
-import { requireText } from "../lib/profile.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, type ReminderPayload } from "../lib/request/reminders.ts";
+import { requireText } from "../lib/profile/profile.ts";
 import { totalTokensBlock, TurnBudget, turnTokenBudget } from "../lib/context/budget.ts";
 
 const USER_MESSAGE_KEY = "total-tokens";

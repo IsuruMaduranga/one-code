@@ -20,14 +20,14 @@
  * Code's notice. Failures are silent, as in Claude Code.
  */
 
-import { brandedId } from "../lib/brand.mjs";
-import { feature } from "../lib/feature.ts";
+import { brandedId } from "../lib/profile/brand.mjs";
+import { feature } from "../lib/profile/feature.ts";
 import { type ExtensionAPI, type ExtensionContext, getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { hasOneHourCache } from "../lib/anthropic-payload.ts";
-import { modelSpec } from "../lib/model-policy.ts";
-import { LAST_REQUEST_CHANNEL, type RequestCapture } from "../lib/request-replay.ts";
-import { unrefTimers } from "../lib/timer-ops.ts";
-import { dimMarkedLine, liveUiCtx } from "../lib/tui-render.ts";
+import { hasOneHourCache } from "../lib/request/anthropic-payload.ts";
+import { modelSpec } from "../lib/models/model-policy.ts";
+import { LAST_REQUEST_CHANNEL, type RequestCapture } from "../lib/side-calls/request-replay.ts";
+import { unrefTimers } from "../lib/core/timer-ops.ts";
+import { dimMarkedLine, liveUiCtx } from "../lib/ui/tui-render.ts";
 import { type ArmedRequest, IDLE_COMPACT_NOTICE, IdleCompactTimer, type IdleCompactConfig, idleCompactConfig, idleRefusal } from "./policy.ts";
 
 const ENTRY_TYPE = brandedId("idle-compact");
