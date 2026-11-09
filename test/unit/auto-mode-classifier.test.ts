@@ -6,7 +6,7 @@ import {
 	UNATTENDED_PROMPT_TIMEOUT_MS,
 	unattendedPromptNotice,
 	unattendedPromptTimeoutMs,
-} from "../../extensions/permissions/auto-mode/pause.ts";
+} from "../../extensions/safety/permissions/auto-mode/pause.ts";
 import {
 	buildPayload,
 	indexFor,
@@ -14,9 +14,9 @@ import {
 	parseStage2,
 	stage1User,
 	stage2User,
-} from "../../extensions/permissions/auto-mode/prompt.ts";
-import { buildCategoryIndex, groundCategory } from "../../extensions/permissions/auto-mode/rules.ts";
-import { buildRuleset } from "../../extensions/permissions/auto-mode/classifier-prompt.ts";
+} from "../../extensions/safety/permissions/auto-mode/prompt.ts";
+import { buildCategoryIndex, groundCategory } from "../../extensions/safety/permissions/auto-mode/rules.ts";
+import { buildRuleset } from "../../extensions/safety/permissions/auto-mode/classifier-prompt.ts";
 import { brand, envName } from "../../extensions/lib/profile/brand.mjs";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { CLEAN_UP_REQUEST, DEFAULT_ENVIRONMENT } from "./helpers/classify-request.ts";

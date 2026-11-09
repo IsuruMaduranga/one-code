@@ -6,8 +6,8 @@
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { McpServer } from "../../../extensions/mcp/config.ts";
-import { CHOICE_THIS, resetMcpTrustSessionState } from "../../../extensions/mcp/trust.ts";
+import type { McpServer } from "../../../extensions/tools/mcp/config.ts";
+import { CHOICE_THIS, resetMcpTrustSessionState } from "../../../extensions/tools/mcp/trust.ts";
 
 export interface McpTrustDirs {
 	/** The temp root holding everything; remove it after the test. */

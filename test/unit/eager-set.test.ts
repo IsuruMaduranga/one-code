@@ -7,10 +7,10 @@
  * Code's own forms: profile/test/cc-tool-descriptions-wording.test.ts).
  */
 import { describe, expect, it, vi } from "vitest";
-import artifactsExtension from "../../extensions/artifacts/index.ts";
-import backgroundExtension from "../../extensions/background/index.ts";
+import artifactsExtension from "../../extensions/tools/artifacts/index.ts";
+import backgroundExtension from "../../extensions/tools/background/index.ts";
 import { DEFER_CHANNEL } from "../../extensions/lib/request/deferred.ts";
-import subagentsExtension from "../../extensions/subagents/index.ts";
+import subagentsExtension from "../../extensions/agents/subagents/index.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { projectConfigDirName } from "../../extensions/lib/profile/sources.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";

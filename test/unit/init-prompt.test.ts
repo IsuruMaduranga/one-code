@@ -4,7 +4,7 @@
  * prompt itself: profile/test/profile-init-text.test.ts.
  */
 import { describe, expect, it, vi } from "vitest";
-import initExtension from "../../extensions/init/index.ts";
+import initExtension from "../../extensions/commands/init/index.ts";
 import { instructionTargets } from "../../extensions/lib/context/instructions.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { commandDisplayLine, promptCommandText } from "../../extensions/lib/plugins/skill-invoke.ts";

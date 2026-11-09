@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import sessionTitleExtension from "../../extensions/session-title/index.ts";
+import sessionTitleExtension from "../../extensions/agents/session-title/index.ts";
 import {
 	firstUserText,
 	isNameableText,
 	parseTitle,
 	SESSION_TEXT_LIMIT,
 	sessionTitleInput as titleInput,
-} from "../../extensions/session-title/title.ts";
+} from "../../extensions/agents/session-title/title.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 

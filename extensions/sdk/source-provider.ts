@@ -16,4 +16,4 @@ export { isClaudeFamilyModel } from "../lib/models/model-family.ts";
 export { absoluteFrom, claudeJsonPath, claudeManagedDir, claudeUserDir, isClaudeLocation, isPathAtOrUnder, productStateDir, tildify, tryRealpath } from "../lib/profile/paths.ts";
 export { productSettingsPath, readSettingsForWrite, writeSettings } from "../lib/profile/product-settings.ts";
 export type { EnvAlias, McpFile, SettingsFile, SourceProvider, SourceSwitch } from "../lib/profile/sources.ts";
-export { findProjectConfigs } from "../mcp/config.ts";
+export { findProjectConfigs } from "../tools/mcp/config.ts";

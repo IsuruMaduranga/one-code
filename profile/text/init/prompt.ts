@@ -1,6 +1,6 @@
 /**
  * The `/init` prompt: Claude Code's classic one, the prompt it sends by
- * default, submitted verbatim as a user turn by extensions/init/index.ts.
+ * default, submitted verbatim as a user turn by extensions/commands/init/index.ts.
  *
  * Three adaptations. The CLAUDE.md it writes is read by every Claude
  * Code-compatible agent, One Code included, so the opening sentence and the

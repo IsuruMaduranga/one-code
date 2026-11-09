@@ -31,7 +31,7 @@
 import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
 import { isWithin, resolveForContainment, toAbsoluteBash } from "../shell/paths.ts";
-import type { GitTargetProblem, StashRisk, WorktreeGuardRefusal } from "../../worktree/text.ts";
+import type { GitTargetProblem, StashRisk, WorktreeGuardRefusal } from "../../safety/worktree/text.ts";
 import { gitSubcommand, INLINE_SCRIPT_SHELLS, isUnknownTilde, leadTokens, LOOPS, movesDirectory, parseCommand, resolvePayload, scopedTracker, type Token } from "../shell/shell-analysis.ts";
 
 export interface WorktreeGuardContext {

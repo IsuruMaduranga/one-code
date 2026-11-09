@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import { runHookCommand } from "../../extensions/hooks/executor.ts";
+import { runHookCommand } from "../../extensions/safety/hooks/executor.ts";
 import { forwardSlashes } from "../../extensions/lib/profile/paths.ts";
 
 // Real /bin/sh children, per the repo convention of never mocking
@@ -148,7 +148,7 @@ describe("runHookCommand detached (fire-and-forget)", () => {
 	// (LIFECYCLE-REVIEW-2026-09-06 M4, measured). Run the executor in a child
 	// node process and time its exit: it must not wait for the hook.
 	it("does not keep the process alive for the hook's duration", async () => {
-		const executor = join(process.cwd(), "extensions", "hooks", "executor.ts");
+		const executor = join(process.cwd(), "extensions", "safety", "hooks", "executor.ts");
 		const script = join(dir, "detached-probe.mts");
 		writeFileSync(
 			script,

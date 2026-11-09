@@ -66,7 +66,7 @@ export interface RunMessage {
  * message landed did not interrupt anything. A run ends on a tool call only
  * when its batch terminates the loop; with the signal aborted that is a turn
  * the user stopped before the model replied (a rejection without a reason,
- * permissions/index.ts), so it is "aborted" too.
+ * safety/permissions/index.ts), so it is "aborted" too.
  */
 export function runOutcome(messages: ReadonlyArray<RunMessage> | undefined, signalAborted = false): RunOutcome {
 	if (!messages) return "ok";

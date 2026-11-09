@@ -16,7 +16,7 @@ import { promisify } from "node:util";
 import { registerWorktreeIsolation, releaseWorktreeIsolation } from "./worktree-isolation.ts";
 import { findProjectRoot, HARNESS_GIT_CONFIG, HARNESS_GIT_NO_HOOKS } from "../context/git.ts";
 import { checkoutGitRunsProgram } from "../shell/git-checkout-programs.ts";
-import { subagentWords } from "../../subagents/words.ts";
+import { subagentWords } from "../../agents/subagents/words.ts";
 
 const run = promisify(execFile);
 

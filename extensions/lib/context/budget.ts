@@ -15,7 +15,7 @@
  * within the estimator's error. `CC_TOTAL_TOKENS_BUDGET` overrides the figure.
  */
 
-import type { ContextBudgetText } from "../../context-budget/text.ts";
+import type { ContextBudgetText } from "../../context/context-budget/text.ts";
 
 /** Claude Code's per-turn budget as observed; the meaning of the figure is CC's max tokens per turn with compaction. */
 export const DEFAULT_TURN_TOKEN_BUDGET = 15_000_000;

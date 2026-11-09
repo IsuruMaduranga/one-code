@@ -11,7 +11,7 @@
  * command starts in the session's working directory and a `cd` does not carry
  * over (lib/shell-run/shell-tool.ts), where Claude Code tracks the directory between
  * calls. The parameter texts are Claude Code's. On the tiny tier, the one
- * with dedicated grep, find and ls tools (search-tools/tools.ts), the long
+ * with dedicated grep, find and ls tools (tools/search-tools/tools.ts), the long
  * form's two shell-`find` bullets give way to a pointer at those tools, as
  * tiny's system prompt says (system-prompt/tiers/low.ts).
  */

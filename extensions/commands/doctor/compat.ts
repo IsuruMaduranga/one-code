@@ -1,0 +1,636 @@
+/**
+ * The imported-configuration scan (pure fs): what of the user's setup One
+ * Code found, what it reads from each file, and what it does NOT honour — the
+ * compatibility report behind "your setup works unchanged".
+ *
+ * The files are the settings ladder and the source provider's state files
+ * (lib/profile/claude-settings.ts settingsSources, lib/profile/sources.ts), each named by its
+ * label and judged by its role: with One Code's provider on, Claude Code's
+ * files and One Code's own; without it, One Code's two alone.
+ *
+ * Every settings file gets one row: present / valid / the keys One Code consumes
+ * from it (permissions, hooks, plugins, MCP policy, the one `env` variable it
+ * borrows) and the keys it leaves alone. "Leaves alone" is stated per file
+ * because the answer differs by scope on purpose — a repository's own
+ * `.claude/settings.json` may not grant itself `auto` mode or configure the
+ * auto-mode classifier (working-docs/decisions/modes.md, auto-mode.md) — and a user
+ * reading "works unchanged" must see exactly where it does not.
+ *
+ * Findings are the things silent elsewhere: a settings file that fails to
+ * parse (loaders skip it and the user believes its rules are in force), a
+ * `defaultMode` in a file that never contributes one, a CLAUDE.md over Claude
+ * Code's 40k-char soft limit, a hook or MCP config the loaders rejected.
+ */
+
+import { SETTINGS_DISPLAY } from "../../lib/profile/product-settings.ts";
+import { brand } from "../../lib/profile/brand.mjs";
+import { readKnob } from "../../lib/profile/knobs.ts";
+import { SUBAGENT_MODEL_KNOB } from "../../lib/models/subagent-default.ts";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { basename, join } from "node:path";
+import { loadPluginHooks } from "../../safety/hooks/plugin-hooks.ts";
+import { type HooksSource, loadHookSettings } from "../../safety/hooks/settings.ts";
+// Claude Code's auto-memory switch, read through the whole settings ladder.
+import { AUTO_MEMORY_KEY as AUTO_MEMORY } from "../../lib/context/auto-memory.ts";
+import { isPathAtOrUnder, productStateDir } from "../../lib/profile/paths.ts";
+import { isBorrowedUserFile, isRepoFile, primaryFamily, primarySettingsFile, settingsSources, type SourceId, sourceId } from "../../lib/profile/claude-settings.ts";
+import { protectedFiles, type SettingsFile, sourceSwitch } from "../../lib/profile/sources.ts";
+import { agentSkippedInstructions } from "../../lib/context/instruction-budget.ts";
+import { openInstructions } from "../../lib/context/instructions.ts";
+import { CLAUDE_MD_CHAR_LIMIT, claudeMdLimitWarning, projectMemoryDir } from "../../lib/context/memory.ts";
+import { skippedInstructionWarning } from "../../lib/context/instruction-budget.ts";
+import { indexLimitStatus } from "../../lib/context/memory-content.ts";
+import { readDisabledMcpServers } from "../../lib/plugins/mcp-overrides.ts";
+import { parseFrontmatterLoosely } from "../../lib/core/frontmatter.ts";
+import { defaultDiscoverRoots, discoverPlugins, type DiscoveredPlugins } from "../../lib/plugins/plugins.ts";
+import { BUNDLED_SKILLS_DIR, promptTemplateNames, scanSkills } from "../../lib/plugins/skill-scan.ts";
+import { loadServers, type McpServer, piMcpConfigPaths, type RegisteredServer } from "../../tools/mcp/config.ts";
+import type { PermissionMode } from "../../lib/rules/matcher.ts";
+import { MODES_NEVER_FROM_PROJECT } from "../../lib/rules/settings.ts";
+import { agentDirs, parseAgentFile } from "../../lib/agents/agent-catalog.ts";
+import type { Finding, ReportLine, ReportSection, SessionView } from "./report.ts";
+import { countNoun, shortenHome } from "./report.ts";
+
+/** A file's role (lib/profile/claude-settings.ts sourceId), or another tool's state file. */
+export type SettingsScope = SourceId | "borrowed-state";
+
+export interface SettingsFileReport {
+	scope: SettingsScope;
+	label: string;
+	path: string;
+	exists: boolean;
+	/** False when the file exists but is not a JSON object. */
+	valid: boolean;
+	error?: string;
+	/** One phrase per consumed key, e.g. `permissions: 12 allow, 2 deny`. */
+	used: string[];
+	/** Top-level keys present that One Code never reads from this file. */
+	ignored: string[];
+	/** Keys present that One Code reads from OTHER scopes but deliberately not from this one. */
+	refused: string[];
+}
+
+export interface ContextFileReport {
+	path: string;
+	descriptor: string;
+	chars: number;
+	overLimit: boolean;
+}
+
+export interface CompatReport {
+	files: SettingsFileReport[];
+	contextFiles: ContextFileReport[];
+	memory: { dir: string; indexExists: boolean; indexStatus?: "ok" | "near" | "over" };
+	agents: { user: number; project: number; plugin: number; bundled: number; failed: string[] };
+	skills: { user: number; project: number; plugin: number; bundled: number; noDescription: string[] };
+	commands: number;
+	plugins: { claude: { total: number; enabled: number }; oneCode: { total: number; enabled: number } };
+	hooks: { sources: HooksSource[]; commands: number; diagnostics: string[] };
+	mcp: { servers: McpServer[]; disabled: Set<string>; configErrors: string[] };
+	findings: Finding[];
+}
+
+/**
+ * The top-level keys One Code reads from each settings scope — the policy the
+ * loaders implement (lib/rules/settings.ts, safety/hooks/settings.ts, lib/rules/auto-mode-config.ts,
+ * lib/models/subagent-default.ts, tools/mcp/trust.ts, lib/plugins/plugins.ts). A repository's own
+ * files get no `autoMode` (the classifier is what contains the repo) and no `env`
+ * (a checked-in env block must not route subagents).
+ */
+const MCP_POLICY_KEYS = ["enableAllProjectMcpServers", "enabledMcpjsonServers", "disabledMcpjsonServers"];
+/** One Code's workflow keys, read from its user and project files (lib/profile/product-settings.ts). */
+const WORKFLOW_KEYS = ["enableWorkflows", "disableWorkflows", "workflowSizeGuideline"];
+const CLAUDE_PROJECT_KEYS = new Set(["permissions", "hooks", "enabledPlugins", AUTO_MEMORY, ...MCP_POLICY_KEYS]);
+const SCOPE_KEYS: Partial<Record<SettingsScope, ReadonlySet<string>>> = {
+	"borrowed-user": new Set(["permissions", "hooks", "env", "enabledPlugins", "autoMode", AUTO_MEMORY, ...MCP_POLICY_KEYS]),
+	"borrowed-project": CLAUDE_PROJECT_KEYS,
+	"borrowed-local": CLAUDE_PROJECT_KEYS,
+	"borrowed-managed": new Set(["permissions", "hooks", "env", "autoMode", "enabledPlugins", AUTO_MEMORY]),
+	"product-user": new Set([
+		"subagentModel",
+		"subagentModelSetFor",
+		"autoMode",
+		"permissions",
+		"webSearch",
+		"disabledMcpServers",
+		// The /memory panel's auto-memory row (lib/context/auto-memory.ts); the source switch's key is added in knownKeys.
+		AUTO_MEMORY,
+		"modelTiers",
+		"suggestNewerModels",
+		"refreshModelCatalog",
+		"artifacts",
+		...WORKFLOW_KEYS,
+		// Remembered "No" answers to startup questions (ui/branding/declined.ts).
+		"compactionKeepDeclined",
+		"piBuiltinsTurnOffDeclined",
+	]),
+	"product-local": new Set([
+		"permissions",
+		"disabledMcpServers",
+		AUTO_MEMORY,
+		...WORKFLOW_KEYS,
+		// The external CLAUDE.md includes answer, per repository (lib/context/claude-external-includes.ts).
+		"hasClaudeMdExternalIncludesApproved",
+		"hasClaudeMdExternalIncludesWarningShown",
+		"claudeMdExternalIncludesRoot",
+	]),
+	"borrowed-state": new Set(),
+};
+
+/**
+ * The keys One Code reads from a file: its role's (with the source switch's
+ * key in the product's user file), plus what the loaders take by family
+ * (lib/profile/claude-settings.ts primaryFamily): hooks from every file of the
+ * primary's family (safety/hooks/settings.ts), `env` and MCP approvals from the
+ * primary file (claude-settings.ts readSettingsEnv, tools/mcp/trust.ts), and the
+ * MCP tightening list from the family's local file. With the provider on
+ * this adds nothing to Claude Code's rows; without it, One Code's two files
+ * are the family.
+ */
+function knownKeys(file: SettingsFile, family: readonly SettingsFile[]): ReadonlySet<string> {
+	const keys = new Set(SCOPE_KEYS[sourceId(file)]);
+	// The /memory panel's switch row, saved in the product's user file.
+	const sw = sourceSwitch();
+	if (sw && file.owner === "product" && file.scope === "user") keys.add(sw.key);
+	if (family.includes(file)) keys.add("hooks");
+	if (file.primary) for (const key of ["env", ...MCP_POLICY_KEYS]) keys.add(key);
+	if (family.includes(file) && file.scope === "local") keys.add("disabledMcpjsonServers");
+	return keys;
+}
+/** Never worth reporting as "ignored". */
+const SILENT_KEYS = new Set(["$schema"]);
+
+type Json = Record<string, unknown>;
+
+function readJsonObject(path: string): { exists: boolean; value?: Json; error?: string } {
+	if (!existsSync(path)) return { exists: false };
+	try {
+		const parsed = JSON.parse(readFileSync(path, "utf-8")) as unknown;
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { exists: true, error: "root must be a JSON object" };
+		return { exists: true, value: parsed as Json };
+	} catch (error) {
+		return { exists: true, error: (error as Error).message };
+	}
+}
+
+const count = (value: unknown): number => (Array.isArray(value) ? value.length : 0);
+
+function permissionsSummary(perms: unknown, file: SettingsFile, primaryPath: string, findings: Finding[], home: string): { used?: string; refused?: string } {
+	const { path } = file;
+	if (!perms || typeof perms !== "object") return {};
+	const p = perms as Json;
+	const parts: string[] = [];
+	const allow = count(p.allow);
+	const deny = count(p.deny);
+	const ask = count(p.ask);
+	if (allow || deny || ask) parts.push(`${allow} allow, ${deny} deny, ${ask} ask`);
+	if (isRepoFile(file)) {
+		if (allow) parts.push("allow rules apply after a once-per-config consent");
+	}
+	let refused: string | undefined;
+	const mode = typeof p.defaultMode === "string" ? p.defaultMode : undefined;
+	if (mode) {
+		const repoFile = isRepoFile(file);
+		// The loader's rule (lib/rules/settings.ts): the product's files give no defaultMode unless one is the primary user file.
+		if (file.owner === "product" && !file.primary) {
+			refused = `permissions.defaultMode "${mode}" — never read from ${brand.name}'s own files`;
+			findings.push({
+				level: "warn",
+				text: `${shortenHome(path, home)} sets permissions.defaultMode "${mode}", which ${brand.name} does not read from its own settings files.`,
+				fix: `Set the default mode in ${shortenHome(primaryPath, home)} (or start with --permission-mode); remove the key here.`,
+			});
+		} else if (repoFile && MODES_NEVER_FROM_PROJECT.has(mode as PermissionMode)) {
+			refused = `permissions.defaultMode "${mode}" — a repository's files may not select it`;
+			findings.push({
+				level: "warn",
+				text: `${shortenHome(path, home)} sets permissions.defaultMode "${mode}"; a repository's own settings never select that mode (it would let a cloned repo grant itself unattended approval). Claude Code applies the same rule.`,
+				fix: `Set it in ${shortenHome(primaryPath, home)} instead, or pass --permission-mode.`,
+			});
+		} else {
+			parts.push(`defaultMode ${mode}`);
+		}
+	}
+	if (p.disableBypassPermissionsMode === "disable") parts.push("bypass mode disabled");
+	if (Array.isArray(p.additionalDirectories) && p.additionalDirectories.length > 0) {
+		const dirs = p.additionalDirectories.length;
+		const fromRepo = isRepoFile(file);
+		parts.push(`${dirs} workspace director${dirs === 1 ? "y" : "ies"}${fromRepo ? " (applied once you trust the repository's settings)" : ""}`);
+	}
+	return { used: parts.length ? `permissions: ${parts.join("; ")}` : undefined, refused };
+}
+
+function hooksSummary(hooks: unknown): string | undefined {
+	if (!hooks || typeof hooks !== "object") return undefined;
+	const events = Object.entries(hooks as Json)
+		.filter(([, groups]) => Array.isArray(groups) && groups.length > 0)
+		.map(([event, groups]) => `${event} ×${(groups as unknown[]).reduce<number>((n, g) => n + count((g as Json)?.hooks), 0)}`);
+	return events.length ? `hooks: ${events.join(", ")}` : undefined;
+}
+
+/** Another tool's state file: its user-scope MCP servers; the rest is that tool's own. */
+function summarizeStateFile(path: string, label: string, home: string, findings: Finding[]): SettingsFileReport {
+	const report = readReport("borrowed-state", label, path, home, findings);
+	if (!report.file) return report.row;
+	const servers = report.file.mcpServers && typeof report.file.mcpServers === "object" ? Object.keys(report.file.mcpServers as Json).length : 0;
+	if (servers) report.row.used.push(`mcpServers: ${countNoun(servers, "user-scope server")}`);
+	report.row.used.push("everything else in this file (onboarding state, usage counters) belongs to the tool that wrote it");
+	return report.row;
+}
+
+/** A file's row before its keys are judged, and its parsed object when it exists and is valid. */
+function readReport(scope: SettingsScope, label: string, path: string, home: string, findings: Finding[]): { row: SettingsFileReport; file?: Json } {
+	const read = readJsonObject(path);
+	const row: SettingsFileReport = { scope, label, path, exists: read.exists, valid: !read.error, error: read.error, used: [], ignored: [], refused: [] };
+	if (!read.exists) return { row };
+	if (read.error || !read.value) {
+		findings.push({
+			level: "error",
+			text: `${shortenHome(path, home)} is not valid JSON (${read.error}); everything in it is ignored, so rules you believe are in force are not.`,
+			fix: "Fix the syntax (a trailing comma is the usual cause) and rerun /doctor.",
+		});
+		return { row };
+	}
+	return { row, file: read.value };
+}
+
+/** One ladder file's row: the keys One Code reads from it by its role, the ones it refuses there, and the ones it ignores. */
+function summarizeFile(source: SettingsFile, ladder: { primary?: SettingsFile; family: readonly SettingsFile[] }, home: string, findings: Finding[]): SettingsFileReport {
+	const { path } = source;
+	const scope = sourceId(source);
+	const read = readReport(scope, source.label, path, home, findings);
+	const report = read.row;
+	if (!read.file) return report;
+	const file = read.file;
+	const known = knownKeys(source, ladder.family);
+	/** Keys a branch below has already classified (used, refused or ignored), so the final sweep skips them. */
+	const handled = new Set<string>();
+	const borrowedUser = isBorrowedUserFile(source);
+
+	const perms = permissionsSummary(file.permissions, source, ladder.primary?.path ?? path, findings, home);
+	if (perms.used) report.used.push(perms.used);
+	if (perms.refused) report.refused.push(perms.refused);
+	const hooks = hooksSummary(file.hooks);
+	if (hooks && known.has("hooks")) report.used.push(hooks);
+	if (file.enabledPlugins && typeof file.enabledPlugins === "object" && known.has("enabledPlugins")) {
+		report.used.push(`enabledPlugins: ${Object.keys(file.enabledPlugins as Json).length}`);
+	}
+	if (file.env && typeof file.env === "object") {
+		handled.add("env");
+		const env = file.env as Json;
+		const keys = Object.keys(env);
+		if (known.has("env")) {
+			const knob = readKnob(SUBAGENT_MODEL_KNOB, env);
+			const used = knob?.value.trim() ? knob.name : undefined;
+			if (used) report.used.push(`env.${used} = "${knob?.value}"`);
+			const rest = keys.filter((k) => k !== used);
+			if (rest.length) report.ignored.push(`env (${countNoun(rest.length, "variable")} — ${brand.name} does not export settings env blocks)`);
+		} else if (keys.length) {
+			report.refused.push(`env (${keys.length}) — a repository's env block is not applied`);
+		}
+	}
+	if (file.autoMode && typeof file.autoMode === "object") {
+		handled.add("autoMode");
+		const auto = file.autoMode as Json;
+		const keys = Object.keys(auto);
+		if (known.has("autoMode")) {
+			// `classifierModel` is One Code's own key, read from ~/.onecode only.
+			if (borrowedUser && ("classifierModel" in auto || "classifierModelSetFor" in auto)) {
+				report.refused.push(`autoMode.classifierModel — ${brand.name}'s own key, read from ${SETTINGS_DISPLAY} only`);
+				findings.push({
+					level: "warn",
+					text: `${shortenHome(path, home)} carries autoMode.classifierModel, a ${brand.name} key read only from ${SETTINGS_DISPLAY}; the value here is ignored.`,
+					fix: `Set it with /auto-mode model (which writes ${SETTINGS_DISPLAY}) and delete the stale key from ${shortenHome(path, home)}.`,
+				});
+			}
+			const consumed = keys.filter((k) => !(borrowedUser && (k === "classifierModel" || k === "classifierModelSetFor")));
+			if (consumed.length) report.used.push(`autoMode: ${consumed.join(", ")}`);
+		} else {
+			report.refused.push(`autoMode (${keys.join(", ")}) — never read from a repository's files`);
+			findings.push({
+				level: "warn",
+				text: `${shortenHome(path, home)} has an autoMode block; auto-mode configuration is read from user and managed settings only, so it is ignored here (Claude Code does the same).`,
+				fix: `Move the block to ${SETTINGS_DISPLAY} (or run /auto-mode setup there).`,
+			});
+		}
+	}
+	if (borrowedUser && ("subagentModel" in file || "subagentModelSetFor" in file)) {
+		handled.add("subagentModel").add("subagentModelSetFor");
+		report.refused.push(`subagentModel — ${brand.name}'s own key, read from ${SETTINGS_DISPLAY} only`);
+		findings.push({
+			level: "warn",
+			text: `${shortenHome(path, home)} carries subagentModel, a ${brand.name} key that is now read only from ${SETTINGS_DISPLAY}; the value here is ignored.`,
+			fix: `Re-set it with /subagent (which writes the new location) and delete the stale key from ${shortenHome(path, home)}.`,
+		});
+	}
+	if (scope === "product-user") {
+		const sw = sourceSwitch();
+		if (sw && typeof file[sw.key] === "string") report.used.push(`${sw.key} "${file[sw.key]}" (/memory ${sw.title.toLowerCase()})`);
+		if (typeof file.subagentModel === "string") report.used.push(`subagentModel "${file.subagentModel}"`);
+		if (file.webSearch && typeof file.webSearch === "object") report.used.push("webSearch (keys/order for the search fallback)");
+	}
+	for (const key of ["enableAllProjectMcpServers", "enabledMcpjsonServers", "disabledMcpjsonServers"]) {
+		if (key in file && known.has(key)) report.used.push(`${key}: ${Array.isArray(file[key]) ? count(file[key]) : String(file[key])}`);
+	}
+	if ("disabledMcpServers" in file && known.has("disabledMcpServers")) report.used.push(`disabledMcpServers: ${count(file.disabledMcpServers)} (via /mcp disable)`);
+	if (typeof file[AUTO_MEMORY] === "boolean" && known.has(AUTO_MEMORY)) report.used.push(`${AUTO_MEMORY}: ${file[AUTO_MEMORY]}`);
+
+	for (const key of Object.keys(file)) {
+		if (known.has(key) || SILENT_KEYS.has(key) || handled.has(key)) continue;
+		report.ignored.push(key);
+	}
+	return report;
+}
+
+function walkMarkdown(dir: string, out: string[] = []): string[] {
+	let entries: string[];
+	try {
+		entries = readdirSync(dir);
+	} catch {
+		return out;
+	}
+	for (const entry of entries) {
+		const full = join(dir, entry);
+		try {
+			const stat = statSync(full);
+			if (stat.isDirectory()) walkMarkdown(full, out);
+			else if (entry.endsWith(".md")) out.push(full);
+		} catch {
+			// unreadable entry: skip
+		}
+	}
+	return out;
+}
+
+export interface CompatInput {
+	cwd: string;
+	home: string;
+	agentDir: string;
+	env: NodeJS.ProcessEnv;
+	/** `<package>/profile/agents`, so bundled agents are counted. */
+	bundledAgentsDir?: string;
+	/** pi's `CONFIG_DIR_NAME` (`.pi` when absent): where the project's pi `mcp.json` is. */
+	piConfigDirName?: string;
+	/** MCP servers other extensions registered, as the session loads them. */
+	registeredMcpServers?: readonly RegisteredServer[];
+	/** The session model's context window: past half of it, the largest context files are not loaded. */
+	contextWindow?: number;
+}
+
+export function collectCompat(input: CompatInput): CompatReport {
+	const { cwd, home, agentDir, env } = input;
+	const findings: Finding[] = [];
+	// The ladder's files and the provider's state files: another tool's first,
+	// then the product's own. With the provider switched off only the product's
+	// two are opened, and the switch names what that leaves unapplied.
+	const ladder = settingsSources(cwd, home);
+	const roles = { primary: primarySettingsFile(ladder), family: primaryFamily(ladder) };
+	const summarize = (file: SettingsFile) => summarizeFile(file, roles, home, findings);
+	const files: SettingsFileReport[] = [
+		...ladder.filter((file) => file.owner === "borrowed").map(summarize),
+		...protectedFiles(home).map((file) => summarizeStateFile(file.path, file.label, home, findings)),
+		...ladder.filter((file) => file.owner === "product").map(summarize),
+	];
+	for (const warning of sourceSwitch()?.offWarnings?.({ home }) ?? []) findings.push({ level: "warn", ...warning });
+
+	// The session's window budget, over the sections it loads (imports inlined,
+	// ONECODE.md included): past half the window, the largest are not loaded.
+	const skipped = agentSkippedInstructions({ cwd, home, agentDir, homeOneCodeDir: productStateDir(env, home), contextWindow: input.contextWindow });
+	const fix = "Trim the instruction files below half of the model's context window together, split this one into files the model reads when needed, or switch to a model with a larger window.";
+	for (const file of skipped) findings.push({ level: "warn", text: skippedInstructionWarning(shortenHome(file.path, home), file), fix });
+	const skippedPaths = new Set(skipped.map((file) => file.path));
+
+	// Context files, sized — the block every turn pays for.
+	const contextFiles: ContextFileReport[] = openInstructions(home, agentDir).paths({ cwd, homeOneCodeDir: productStateDir(env, home) }).map(({ path, descriptor }) => {
+		let chars = 0;
+		try {
+			chars = readFileSync(path, "utf-8").length;
+		} catch {
+			// unreadable: reported as 0 chars
+		}
+		const warning = claudeMdLimitWarning(basename(path), chars);
+		// A skipped file's warning above already names it.
+		if (warning && !skippedPaths.has(path)) {
+			findings.push({ level: "warn", text: `${shortenHome(path, home)}: ${warning}`, fix: `Trim it below ${CLAUDE_MD_CHAR_LIMIT / 1000}k chars, or run /doctor fix to have the model propose what to cut.` });
+		}
+		return { path, descriptor, chars, overLimit: warning !== null };
+	});
+
+	// Auto-memory (shared with Claude Code).
+	const memDir = projectMemoryDir(cwd, home);
+	const indexPath = join(memDir, "MEMORY.md");
+	let indexStatus: "ok" | "near" | "over" | undefined;
+	if (existsSync(indexPath)) {
+		try {
+			indexStatus = indexLimitStatus(readFileSync(indexPath, "utf-8"));
+		} catch {
+			indexStatus = undefined;
+		}
+		if (indexStatus === "over") findings.push({ level: "warn", text: `${shortenHome(indexPath, home)} is over the 200-line / 25KB load limit; entries past it are dropped.`, fix: "Shorten the index to one line per entry (/memory opens it)." });
+	}
+
+	// Plugins (Claude Code-installed, read-through, plus One Code's own root).
+	let discovered: DiscoveredPlugins | undefined;
+	try {
+		discovered = discoverPlugins(defaultDiscoverRoots(agentDir, cwd, home));
+	} catch (error) {
+		findings.push({ level: "warn", text: `Plugin discovery failed: ${(error as Error).message}` });
+	}
+	const pluginCounts = (origin: "claude" | "product") => {
+		const list = (discovered?.plugins ?? []).filter((p) => p.originRoot === origin);
+		return { total: list.length, enabled: list.filter((p) => p.enabled).length };
+	};
+
+	// Agents.
+	const agentFailed: string[] = [];
+	const countAgents = (dir: string): number => {
+		let ok = 0;
+		for (const file of walkMarkdown(dir)) {
+			let content = "";
+			try {
+				content = readFileSync(file, "utf-8");
+			} catch {
+				continue;
+			}
+			if (parseAgentFile(file, content)) ok++;
+			else agentFailed.push(file);
+		}
+		return ok;
+	};
+	const [userAgentsDir, projectAgentsDir] = agentDirs(cwd, home);
+	const agents = {
+		user: countAgents(userAgentsDir),
+		project: countAgents(projectAgentsDir),
+		plugin: (discovered?.agentDirs ?? []).reduce((n, d) => n + walkMarkdown(d.dir).length, 0),
+		bundled: input.bundledAgentsDir ? walkMarkdown(input.bundledAgentsDir).length : 0,
+		failed: agentFailed,
+	};
+	for (const file of agentFailed) {
+		findings.push({ level: "warn", text: `Agent file ${shortenHome(file, home)} has no body and is skipped.`, fix: "Add the agent's instructions below the frontmatter, or remove the file." });
+	}
+
+	// Skills.
+	const scanned = scanSkills(cwd, home, agentDir, discovered?.skills ?? [], BUNDLED_SKILLS_DIR);
+	const noDescription: string[] = [];
+	for (const skill of scanned) {
+		try {
+			const { frontmatter } = parseFrontmatterLoosely(readFileSync(skill.path, "utf-8"));
+			if (typeof frontmatter.description !== "string" || !frontmatter.description.trim()) noDescription.push(skill.path);
+		} catch {
+			// unreadable SKILL.md: pi reports it when it loads
+		}
+	}
+	const bundledSkills = scanned.filter((s) => isPathAtOrUnder(s.path, BUNDLED_SKILLS_DIR)).length;
+	const skills = {
+		user: scanned.filter((s) => s.scope === "user" && !isPathAtOrUnder(s.path, BUNDLED_SKILLS_DIR)).length,
+		project: scanned.filter((s) => s.scope === "project" && !isPathAtOrUnder(s.path, BUNDLED_SKILLS_DIR)).length,
+		plugin: scanned.filter((s) => s.scope === "plugin").length,
+		bundled: bundledSkills,
+		noDescription,
+	};
+	for (const path of noDescription) {
+		findings.push({
+			level: "warn",
+			text: `${shortenHome(path, home)} has no description in its frontmatter (malformed YAML drops every field), so the model matches it against its first body line.`,
+			fix: "Give the skill `name:` and `description:` lines between the leading `---` markers.",
+		});
+	}
+
+	// Hooks.
+	const hookDiagnostics: string[] = [];
+	const hooksLoaded = loadHookSettings(cwd, home);
+	hookDiagnostics.push(...hooksLoaded.diagnostics);
+	// Runtime dispatch skips plugin hooks when settings disable hooks; report what runs.
+	const pluginHooks = discovered && !hooksLoaded.disabled ? loadPluginHooks(defaultDiscoverRoots(agentDir, cwd, home), hookDiagnostics) : [];
+	const hookSources = [...hooksLoaded.sources, ...pluginHooks];
+	const hookCommands = hookSources.reduce(
+		(n, source) => n + Object.values(source.config).reduce((m, groups) => m + (groups ?? []).reduce((k, g) => k + g.hooks.length, 0), 0),
+		0,
+	);
+	for (const diagnostic of hookDiagnostics) findings.push({ level: "warn", text: `Hooks: ${diagnostic}` });
+
+	// MCP.
+	const configErrors: string[] = [];
+	const configNotes: string[] = [];
+	const servers = loadServers(cwd, home, env, discovered?.mcpConfigs ?? [], {
+		pluginNames: discovered?.mcpConfigPlugins,
+		onError: (path, message) => configErrors.push(`${shortenHome(path, home)}: ${message}`),
+		piConfigs: piMcpConfigPaths(agentDir, cwd, input.piConfigDirName),
+		onNote: (message) => configNotes.push(message),
+		registered: input.registeredMcpServers,
+	});
+	for (const error of configErrors) findings.push({ level: "error", text: `MCP config ${error} — its servers are not loaded.`, fix: "Fix the JSON and run /mcp reconnect." });
+	for (const note of configNotes) findings.push({ level: "warn", text: note });
+	for (const server of servers) {
+		if (server.missingEnv?.length) {
+			findings.push({
+				level: "warn",
+				text: `MCP server "${server.name}" references unset environment variable${server.missingEnv.length === 1 ? "" : "s"} ${server.missingEnv.join(", ")} (from ${shortenHome(server.source, home)}).`,
+				fix: "Export the variable before launching, or the server will fail to connect.",
+			});
+		}
+	}
+
+	return {
+		files,
+		contextFiles,
+		memory: { dir: memDir, indexExists: existsSync(indexPath), indexStatus },
+		agents,
+		skills,
+		commands: promptTemplateNames(cwd, home, agentDir).length,
+		plugins: { claude: pluginCounts("claude"), oneCode: pluginCounts("product") },
+		hooks: { sources: hookSources, commands: hookCommands, diagnostics: hookDiagnostics },
+		mcp: { servers, disabled: readDisabledMcpServers(cwd, home, env), configErrors },
+		findings,
+	};
+}
+
+/** `user 2 · project 0 · plugin 7` — counts by origin, the noun being the origin not the thing counted. */
+const byOrigin = (counts: Record<string, number>): string =>
+	Object.entries(counts)
+		.map(([origin, n]) => `${origin} ${n}`)
+		.join(" · ");
+
+export function importedConfigSection(compat: CompatReport, home: string): ReportSection {
+	const lines: ReportLine[] = [];
+	for (const file of compat.files) {
+		if (!file.exists) continue;
+		const path = shortenHome(file.path, home);
+		if (!file.valid) {
+			lines.push({ text: `${file.label} ${path}: invalid JSON — ignored`, level: "error" });
+			continue;
+		}
+		const used = file.used.length ? file.used.join(" · ") : `nothing ${brand.name} reads`;
+		lines.push({ text: `${file.label} ${path}: ${used}`, level: "ok" });
+		for (const refused of file.refused) lines.push({ text: `not honoured here: ${refused}`, indent: 1, level: "warn" });
+		if (file.ignored.length) lines.push({ text: `not used by ${brand.name}: ${file.ignored.join(", ")}`, indent: 1, level: "dim" });
+	}
+	if (lines.length === 0) lines.push({ text: "No settings files found — defaults apply (auto permission mode, no hooks, no plugins).", level: "dim" });
+
+	if (compat.contextFiles.length) {
+		const total = compat.contextFiles.reduce((n, f) => n + f.chars, 0);
+		lines.push({ text: `Instruction files (${compat.contextFiles.length}, ${(total / 1000).toFixed(1)}k chars read every turn):`, level: "ok" });
+		for (const file of compat.contextFiles) {
+			lines.push({ text: `${shortenHome(file.path, home)} — ${(file.chars / 1000).toFixed(1)}k chars${file.overLimit ? " (over the 40k soft limit)" : ""}`, indent: 1, level: file.overLimit ? "warn" : "dim" });
+		}
+	} else {
+		lines.push({ text: `Instruction files: none (no CLAUDE.md, AGENTS.md or ${brand.productFile} from here to the repository root)`, level: "dim" });
+	}
+	lines.push({
+		text: compat.memory.indexExists
+			? `Auto-memory: ${shortenHome(compat.memory.dir, home)} (MEMORY.md ${compat.memory.indexStatus ?? "present"}; shared with Claude Code)`
+			: `Auto-memory: ${shortenHome(compat.memory.dir, home)} (empty; created when the model saves its first note)`,
+		level: "dim",
+	});
+	const a = compat.agents;
+	lines.push({
+		text: `Agents: ${byOrigin({ user: a.user, project: a.project, plugin: a.plugin, bundled: a.bundled })}${a.failed.length ? ` · ${a.failed.length} skipped` : ""}`,
+		level: a.failed.length ? "warn" : "ok",
+	});
+	const s = compat.skills;
+	lines.push({
+		text: `Skills: ${byOrigin({ user: s.user, project: s.project, plugin: s.plugin, bundled: s.bundled })} · ${countNoun(compat.commands, "command template")}`,
+		level: s.noDescription.length ? "warn" : "ok",
+	});
+	const p = compat.plugins;
+	lines.push({
+		text: `Plugins: ${p.claude.enabled}/${p.claude.total} Claude Code-installed enabled (read-only; toggle in /plugins), ${p.oneCode.enabled}/${p.oneCode.total} installed by ${brand.name}`,
+		level: "ok",
+	});
+	if (compat.hooks.sources.length) {
+		const scopes = compat.hooks.sources.map((s) => (s.pluginName ? `plugin ${s.pluginName}` : s.scope)).join(", ");
+		lines.push({ text: `Hooks: ${countNoun(compat.hooks.commands, "command")} from ${scopes}`, level: compat.hooks.diagnostics.length ? "warn" : "ok" });
+	} else {
+		lines.push({ text: "Hooks: none configured", level: "dim" });
+	}
+	return { title: "Imported configuration", subtitle: `what ${brand.name} reads from your Claude Code and ${brand.name} files`, lines };
+}
+
+export function mcpSection(compat: CompatReport, session: SessionView | undefined, home: string): ReportSection {
+	const lines: ReportLine[] = [];
+	const live = new Map((session?.mcp?.servers ?? []).map((s) => [s.name, s]));
+	if (compat.mcp.servers.length === 0 && compat.mcp.configErrors.length === 0) {
+		lines.push({ text: "No MCP servers configured (.mcp.json, ~/.claude.json, or a plugin's .mcp.json)", level: "dim" });
+	}
+	for (const server of compat.mcp.servers) {
+		const status = live.get(server.name);
+		const disabled = compat.mcp.disabled.has(server.name);
+		const where = shortenHome(server.source, home);
+		const shape = server.kind === "stdio" ? `stdio: ${server.command}` : `http: ${server.url}`;
+		let state: string;
+		let level: ReportLine["level"] = "ok";
+		if (disabled) {
+			state = "disabled (/mcp enable to turn on)";
+			level = "dim";
+		} else if (status) {
+			state = status.status === "connected" ? `connected${status.toolCount !== undefined ? ` · ${status.toolCount} tools` : ""}` : status.status === "authNeeded" ? "needs authentication (/mcp)" : status.status === "connecting" ? "connecting…" : `failed${status.detail ? `: ${status.detail}` : ""}`;
+			level = status.status === "connected" ? "ok" : status.status === "connecting" ? "dim" : "warn";
+		} else {
+			state = server.missingEnv?.length ? `missing ${server.missingEnv.join(", ")}` : "configured (status known once a session connects)";
+			level = server.missingEnv?.length ? "warn" : "dim";
+		}
+		lines.push({ text: `${server.name} — ${shape} · ${state}`, level });
+		lines.push({ text: `from ${where}`, indent: 1, level: "dim" });
+	}
+	for (const error of compat.mcp.configErrors) lines.push({ text: `config error: ${error}`, level: "error" });
+	return { title: "MCP servers", lines };
+}

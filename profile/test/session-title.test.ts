@@ -4,7 +4,7 @@
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { sessionTitleInput as titleInput } from "../../extensions/session-title/title.ts";
+import { sessionTitleInput as titleInput } from "../../extensions/agents/session-title/title.ts";
 import { SESSION_TITLE_LANGUAGE_NOTE, SESSION_TITLE_PROMPT, sessionTitle } from "../text/session-title/index.ts";
 
 /** The naming request's user message in One Code's words. */

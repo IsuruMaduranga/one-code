@@ -54,7 +54,7 @@ describe("kept-thinking's place in the manifest", () => {
 	it("runs its context hook before every extension that captures the request's messages", async () => {
 		const { readFileSync } = await import("node:fs");
 		const manifest: string[] = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")).pi.extensions;
-		const at = (name: string) => manifest.indexOf(`extensions/${name}/index.ts`);
+		const at = (name: string) => manifest.findIndex((entry) => entry.endsWith(`/${name}/index.ts`));
 		expect(at("kept-thinking")).toBeGreaterThanOrEqual(0);
 		for (const later of ["skill", "background", "subagents", "recap", "btw", "compaction"]) {
 			expect(at("kept-thinking"), later).toBeLessThan(at(later));

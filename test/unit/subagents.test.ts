@@ -238,12 +238,12 @@ describe("child tool allowlist (CC agent files)", () => {
 describe("forkTaskMessage", () => {
 	// The framing's wording is One Code's, checked in profile/test/subagents.test.ts.
 	it("hands the profile the task, with no isolation for a fork in the parent's checkout", async () => {
-		const { forkTaskMessage } = await import("../../extensions/subagents/outcome.ts");
+		const { forkTaskMessage } = await import("../../extensions/agents/subagents/outcome.ts");
 		expect(forkTaskMessage("report exactly: DONE")).toBe(requireText("subagents").forkTask({ task: "report exactly: DONE", isolation: undefined }));
 	});
 
 	it("hands it the worktree and the parent's checkout for a worktree-isolated fork", async () => {
-		const { forkTaskMessage } = await import("../../extensions/subagents/outcome.ts");
+		const { forkTaskMessage } = await import("../../extensions/agents/subagents/outcome.ts");
 		const isolation = { worktreePath: "/tmp/cc-wt-x/tree", parentCwd: "/Users/me/repo" };
 		expect(forkTaskMessage("fix the bug", isolation)).toBe(requireText("subagents").forkTask({ task: "fix the bug", isolation }));
 	});
@@ -251,7 +251,7 @@ describe("forkTaskMessage", () => {
 
 describe("finishOutcome", () => {
 	it("surfaces a provider error instead of 'produced no output'", async () => {
-		const { finishOutcome } = await import("../../extensions/subagents/session-turns.ts");
+		const { finishOutcome } = await import("../../extensions/agents/subagents/session-turns.ts");
 		const { emptyUsage } = await import("../../extensions/lib/agents/usage.ts");
 		const outcome = finishOutcome("", "OpenAI API error (401): CreditsError", 0, emptyUsage(), []);
 		expect(outcome.failed).toBe(true);
@@ -259,7 +259,7 @@ describe("finishOutcome", () => {
 	});
 
 	it("appends the error when partial text exists, and stays clean without one", async () => {
-		const { finishOutcome } = await import("../../extensions/subagents/session-turns.ts");
+		const { finishOutcome } = await import("../../extensions/agents/subagents/session-turns.ts");
 		const { emptyUsage } = await import("../../extensions/lib/agents/usage.ts");
 		const partial = finishOutcome("halfway report", "rate limited", 2, emptyUsage(), []);
 		expect(partial.failed).toBe(true);
@@ -273,7 +273,7 @@ describe("finishOutcome", () => {
 	});
 
 	it("an abort reason wins over partial text and over a provider error (M3)", async () => {
-		const { finishOutcome } = await import("../../extensions/subagents/session-turns.ts");
+		const { finishOutcome } = await import("../../extensions/agents/subagents/session-turns.ts");
 		const { emptyUsage } = await import("../../extensions/lib/agents/usage.ts");
 		const cut = finishOutcome("halfway", undefined, 1, emptyUsage(), [], "stopped");
 		expect(cut).toMatchObject({ failed: true, output: words().failure({ kind: "aborted", why: "stopped", output: "halfway" }) });

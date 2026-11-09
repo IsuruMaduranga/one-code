@@ -1,5 +1,5 @@
 /**
- * Workspace directories (permissions/workspace.ts): what one grants in each
+ * Workspace directories (safety/permissions/workspace.ts): what one grants in each
  * mode, where they come from (settings, the repository behind consent,
  * `--add-dir`, `/add-dir`), and what the system prompt is told.
  */
@@ -12,9 +12,9 @@ import { forwardSlashes } from "../../extensions/lib/profile/paths.ts";
 import { MODE_CHANNEL } from "../../extensions/lib/rules/plan-mode-channels.ts";
 import { WORKSPACE_CHANNEL } from "../../extensions/lib/rules/workspace-channel.ts";
 import { decide } from "../../extensions/lib/rules/matcher.ts";
-import permissionsExtension from "../../extensions/permissions/index.ts";
+import permissionsExtension from "../../extensions/safety/permissions/index.ts";
 import { listWorkspaceDirectories } from "../../extensions/lib/rules/settings.ts";
-import { parseAddDirFlag, validateWorkspaceDirectory } from "../../extensions/permissions/workspace.ts";
+import { parseAddDirFlag, validateWorkspaceDirectory } from "../../extensions/safety/permissions/workspace.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { useRepositorySettings, writeRepositorySettings } from "./helpers/settings-files.ts";

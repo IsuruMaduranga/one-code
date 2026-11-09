@@ -1,79 +1,84 @@
-artifacts/gallery.ts
-	"<ul class=\"list\" id=\"list\">\n${…}\n</ul>\n<p class=\"empty\" id=\"no-match\" hidden>No artifact matches that filter.</p>"
-	"<p class=\"empty\">No artifacts yet. Ask ${…} for a page, a report or a small tool, and it lands here.</p>"
-	"<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>${…} Artifacts</title>\n<style>\n${…}\n* { box-sizing: border-box; }\nhtml, body { margin: 0; }\nbody {\n  background: var(--bg);\n  color: var(--text);\n  font: 15px/1.55 system-ui, -apple-system, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif;\n  padding: 0 16px;\n}\n.wrap { max-width: 880px; margin: 0 auto; padding-block: 40px 64px; display: flex; flex-direction: column; gap: 24px; }\nheader { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 16px; }\nh1 { margin: 0; font-size: 26px; line-height: 1.2; letter-spacing: -0.01em; text-wrap: balance; }\n.count { margin: 4px 0 0; color: var(--muted); font-size: 13px; }\ninput[type=\"search\"] {\n  font: inherit; color: var(--text); background: var(--surface);\n  border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; width: min(280px, 100%);\n}\n.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border-top: 1px solid var(--line); }\n.entry {\n  display: grid; grid-template-columns: 1fr auto; gap: 4px 16px; align-items: start;\n  padding: 16px 0; border-bottom: 1px solid var(--line);\n}\n.entry[hidden] { display: none; }\n.main { min-width: 0; display: flex; flex-direction: column; gap: 4px; }\nh2 { margin: 0; font-size: 17px; line-height: 1.3; text-wrap: balance; }\nh2 a { color: var(--text); text-decoration: none; }\nh2 a:hover { color: var(--accent); text-decoration: underline; }\n.desc { margin: 0; max-width: 65ch; }\n.facts { margin: 0; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; display: flex; flex-wrap: wrap; gap: 0 8px; }\n.project { overflow-wrap: anywhere; }\n.id { grid-column: 1 / -1; margin: 0; }\ncode { font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--muted); }\ndetails { font-size: 13px; color: var(--muted); }\nsummary { cursor: pointer; width: fit-content; }\n.versions { margin: 6px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 2px; }\n.versions a { color: var(--accent); }\n.actions { display: flex; gap: 8px; }\n.button {\n  font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: none;\n  border-radius: 6px; padding: 6px 12px; border: 1px solid var(--line);\n  background: var(--surface); color: var(--text);\n}\n.actions a.button { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }\na:focus-visible, button:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }\n.empty { margin: 0; color: var(--muted); }\n@media (max-width: 480px) {\n  .entry { grid-template-columns: 1fr; }\n}\n</style>\n</head>\n<body>\n<div class=\"wrap\">\n<header>\n  <div>\n    <h1>${…} Artifacts</h1>\n    <p class=\"count\">${…} ${…}, newest first. Stored in this folder.</p>\n  </div>\n  ${…}\n</header>\n${…}\n</div>\n<script>\n(function () {\n${…}\n  document.addEventListener(\"click\", function (event) {\n    var button = event.target.closest && event.target.closest(\"[data-download]\");\n    if (!button) return;\n    var script = document.createElement(\"script\");\n    script.src = button.getAttribute(\"data-download\");\n    script.onload = function () { script.remove(); };\n    script.onerror = function () { script.remove(); location.href = button.getAttribute(\"data-fallback\"); };\n    document.head.appendChild(script);\n  });\n  var filter = document.getElementById(\"filter\");\n  if (filter) filter.addEventListener(\"input\", function () {\n    var query = filter.value.trim().toLowerCase();\n    var shown = 0;\n    document.querySelectorAll(\".entry\").forEach(function (entry) {\n      var match = !query || entry.getAttribute(\"data-search\").indexOf(query) !== -1;\n      entry.hidden = !match;\n      if (match) shown++;\n    });\n    document.getElementById(\"no-match\").hidden = shown !== 0;\n  });\n})();\n</script>\n</body>\n</html>\n"
-	"<input type=\"search\" id=\"filter\" placeholder=\"Filter by title or project\" aria-label=\"Filter artifacts\">"
-
-artifacts/index.ts
-	"No browser was opened (${…}): ${…}"
-	"Browse, open, export or delete saved artifacts"
-	"Open the gallery in the browser"
-	"Open in the browser"
-	"Save a copy to Downloads"
-	"Show the file path"
-	"Could not save a copy: ${…}"
-
-artifacts/store.ts
-	"no artifact has the id \"${…}\""
-	"The artifact gallery is locked by another session."
-
-artifacts/viewer.ts
-	"<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>${…}</title>\n<style>\n${…}\n* { box-sizing: border-box; }\nhtml, body { margin: 0; height: 100%; }\nbody {\n  background: var(--bg); color: var(--text);\n  font: 14px/1.4 system-ui, -apple-system, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif;\n  display: flex; flex-direction: column;\n}\n.bar {\n  display: flex; align-items: center; gap: 6px; padding: 6px 16px; min-height: 44px;\n  background: var(--surface); border-bottom: 1px solid var(--line); position: relative; z-index: 2;\n}\n.icon-link, .title-button, .primary, .menu [role=\"menuitem\"] {\n  font: inherit; color: var(--text); background: transparent; border: 0; border-radius: 6px; cursor: pointer; text-decoration: none;\n}\n.icon-link { display: inline-flex; padding: 6px; color: var(--muted); }\n.icon-link:hover, .title-button:hover, .title-button[aria-expanded=\"true\"] { background: var(--hover); color: var(--text); }\n.title-button { display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px; max-width: min(60vw, 480px); }\n.title-button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n.spacer { flex: 1; }\n.primary {\n  display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; font-weight: 600; font-size: 13px;\n  border: 1px solid var(--line);\n}\n.primary:hover { background: var(--hover); }\n.menu {\n  position: absolute; top: calc(100% - 2px); left: 44px; min-width: 250px; max-width: calc(100vw - 32px);\n  background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 6px;\n  box-shadow: 0 8px 24px rgb(0 0 0 / 0.18); display: flex; flex-direction: column;\n}\n.menu[hidden] { display: none; }\n.menu .details { padding: 6px 10px 8px; color: var(--muted); font-size: 13px; display: flex; flex-direction: column; gap: 2px; font-variant-numeric: tabular-nums; }\n.menu .details span:last-child { overflow-wrap: anywhere; }\n.menu [role=\"menuitem\"] { display: block; text-align: left; padding: 7px 10px; }\n.menu [role=\"menuitem\"]:hover, .menu [role=\"menuitem\"]:focus-visible { background: var(--hover); outline: none; }\n.menu [aria-current=\"true\"] { font-weight: 600; }\n.menu .label { padding: 8px 10px 2px; color: var(--muted); font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; }\n.menu hr { border: 0; border-top: 1px solid var(--line); margin: 6px 4px; }\n.versions { max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; }\n.banner { padding: 8px 16px; background: var(--hover); border-bottom: 1px solid var(--line); font-size: 13px; }\n.banner[hidden] { display: none; }\n.banner a { color: var(--accent); }\n.toast {\n  position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 3;\n  background: var(--text); color: var(--bg); padding: 8px 14px; border-radius: 6px; font-size: 13px;\n}\n.toast[hidden] { display: none; }\niframe { flex: 1; width: 100%; border: 0; display: block; background: var(--bg); }\na:focus-visible, button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }\n</style>\n</head>\n<body>\n<header class=\"bar\">\n  <a class=\"icon-link\" href=\"../index.html\" title=\"All artifacts\" aria-label=\"All artifacts\">${…}</a>\n  <button type=\"button\" class=\"title-button\" id=\"title-button\" aria-haspopup=\"menu\" aria-expanded=\"false\" aria-controls=\"menu\"><span>${…}</span>${…}</button>\n  <div class=\"menu\" id=\"menu\" role=\"menu\" hidden>\n    <div class=\"details\">${…}</div>\n    <hr>\n    <button type=\"button\" role=\"menuitem\" data-action=\"download\">Download HTML</button>\n    <button type=\"button\" role=\"menuitem\" data-action=\"copy-path\">Copy file path</button>\n    <button type=\"button\" role=\"menuitem\" data-action=\"reload\">Reload</button>\n    <a role=\"menuitem\" id=\"raw-link\" href=\"index.html\">Open without this bar</a>\n    ${…}\n    <hr>\n    <a role=\"menuitem\" href=\"../index.html\">All artifacts</a>\n  </div>\n  <span class=\"spacer\"></span>\n  <button type=\"button\" class=\"primary\" data-action=\"download\">${…}Download</button>\n</header>\n<div class=\"banner\" id=\"banner\" hidden>You are viewing version <span id=\"banner-version\"></span> of ${…}. <a href=\"#\">Show the latest</a></div>\n<iframe id=\"page\" src=\"index.html\" title=\"${…}\"></iframe>\n<div class=\"toast\" id=\"toast\" role=\"status\" hidden></div>\n<script>\n(function () {\n  var LATEST = ${…};\n  var PATHS = ${…};\n  var SEP = PATHS.latest.indexOf(\"\\\\\") !== -1 ? \"\\\\\" : \"/\";\n  var frame = document.getElementById(\"page\");\n  var menu = document.getElementById(\"menu\");\n  var button = document.getElementById(\"title-button\");\n  var banner = document.getElementById(\"banner\");\n  var toast = document.getElementById(\"toast\");\n  var shown = null;\n\n  function current() {\n    var match = /^#v(\\d+)$/.exec(location.hash);\n    var n = match ? parseInt(match[1], 10) : NaN;\n    return n >= 1 && n < LATEST ? n : null;\n  }\n  function show() {\n    shown = current();\n    var src = shown ? \"versions/v\" + shown + \".html\" : \"index.html\";\n    if (frame.getAttribute(\"src\") !== src) frame.setAttribute(\"src\", src);\n    document.getElementById(\"raw-link\").setAttribute(\"href\", src);\n    banner.hidden = !shown;\n    if (shown) document.getElementById(\"banner-version\").textContent = shown;\n    menu.querySelectorAll(\"[data-version]\").forEach(function (link) {\n      var v = link.getAttribute(\"data-version\");\n      link.setAttribute(\"aria-current\", String(v === \"latest\" ? !shown : Number(v) === shown));\n    });\n  }\n  function note(text) {\n    toast.textContent = text;\n    toast.hidden = false;\n    clearTimeout(note.timer);\n    note.timer = setTimeout(function () { toast.hidden = true; }, 1800);\n  }\n  function setMenu(open) {\n    menu.hidden = !open;\n    button.setAttribute(\"aria-expanded\", String(open));\n  }\n${…}\n  function download() {\n    var script = document.createElement(\"script\");\n    script.src = shown ? \"versions/v\" + shown + \".js\" : \"download.js\";\n    script.onload = function () { script.remove(); };\n    script.onerror = function () { script.remove(); note(\"Download failed. Use Open without this bar, then save the page.\"); };\n    document.head.appendChild(script);\n  }\n  function copyPath() {\n    var path = shown ? PATHS.versions + SEP + \"v\" + shown + \".html\" : PATHS.latest;\n    var done = function () { note(\"Copied \" + path); };\n    var fallback = function () { window.prompt(\"File path\", path); };\n    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(path).then(done, fallback);\n    else fallback();\n  }\n\n  button.addEventListener(\"click\", function () { setMenu(menu.hidden); });\n  document.addEventListener(\"click\", function (event) {\n    var action = event.target.closest && event.target.closest(\"[data-action]\");\n    if (action) {\n      var name = action.getAttribute(\"data-action\");\n      if (name === \"download\") download();\n      else if (name === \"copy-path\") copyPath();\n      else if (name === \"reload\") location.reload();\n      setMenu(false);\n      return;\n    }\n    if (event.target.closest && event.target.closest(\"[data-version], #raw-link\")) { setMenu(false); return; }\n    if (!menu.hidden && !menu.contains(event.target) && !button.contains(event.target)) setMenu(false);\n  });\n  document.addEventListener(\"keydown\", function (event) {\n    if (event.key === \"Escape\" && !menu.hidden) { setMenu(false); button.focus(); }\n  });\n  // A click in the frame never reaches this document; losing focus to it closes the menu.\n  window.addEventListener(\"blur\", function () { setMenu(false); });\n  window.addEventListener(\"hashchange\", show);\n  show();\n})();\n</script>\n</body>\n</html>\n"
-
-ask-user/dialogs.ts
-	"Type my own answer"
-
-ask-user/widget.ts
-	"press n to add notes"
-	"Enter to confirm · Esc to back out"
-	"Enter to submit · Tab/shift+Tab to switch questions · Esc to cancel"
-	"Enter to select · ↑/↓ to navigate · n to add notes · Tab/shift+Tab to switch questions · Esc to cancel"
-	"Enter to select · Tab/shift+Tab or arrow keys to navigate · Esc to cancel"
-	"All questions answered — press Enter to submit."
-	"Some questions are unanswered — Enter jumps to the first one."
-
-background/index.ts
-	"Starting a new session"
-	"with the previous session"
-
-background/switch-guard.ts
-	"Stop them and continue"
-	"Cancel to keep ${…} running; /tasks opens or stops a task."
-	"/clear or quitting, the tasks by /reload too"
-
-branding/compaction-keep.ts
-	"Set compaction.keepRecentTokens to ${…}; /compact works on short sessions from the next start."
-	"Could not remember the answer in ${…}: ${…}. ${…} asks again next start."
-	"Could not set pi's compaction keep window: ${…}. Run /doctor for the settings change."
-
-branding/index.ts
-	"No model provider yet. Run /login to connect one (free options at ${…}/blob/master/docs/guide/providers-and-models.md)."
-
-branding/replaced-builtins.ts
-	"Turned off pi's built-in ${…} in ${…}."
-	"pi's warnings stop from the next start."
-	"This project's settings keep ${…} on, so pi still warns about ${…}; run /doctor for that change."
-	"Could not turn off pi's built-in tool search and MCP: ${…}. Run /doctor for the settings change."
-
-btw/index.ts
+agents/btw/index.ts
 	"No model is configured for this session."
 	"No API key is available for the current model."
 	"The model returned an error."
 	"Ask a one-off side question, answered from the current context while the main agent keeps working"
 	"Ask a side question: /btw <question>"
 
-btw/panel.ts
+agents/btw/panel.ts
 	"x to clear history"
 
-claude-context/index.ts
-	"Could not remember external CLAUDE.md include approval: ${…}"
-	"Configure external CLAUDE.md includes for this project"
-	"/config requires an interactive UI to change external CLAUDE.md include approval."
+agents/subagents/index.ts
+	"Subagent model ${…} is not usable on this account (${…}); automatic selection skips it from now on."
+	"The live subagent panel requires TUI mode. Use /tasks for task status; task_output and task_stop inspect or stop a task."
+	"Could not open the tasks dialog: ${…}"
+	"Cannot fork: this session is not persisted (started with --no-session), so there is no conversation to clone."
+	"The session ended before the fork started."
+	"The session ended before the fork started."
+	"Could not send the message to ${…}: ${…}"
+	"the agent is gone."
+	"Could not send the message: ${…}"
+	"The interactive task viewer requires TUI mode; showing a task snapshot instead."
+	"No background tasks in this session."
+	"Use task_output to inspect a task and task_stop to stop it."
+	"List background tasks: shells, running agents, and the agents you viewed"
+	"Open the live subagent panel, or list available agents"
+	"The live subagent panel requires TUI mode; showing spawned agents instead."
+	"Use /tasks for task status; task_output and task_stop inspect or stop a task."
+	" — not applied: ${…} is another tool's variable, ${…}"
+	"subagentModel: ${…} (from the subagentModel setting)"
+	"Could not save subagent model: "
+	"Subagent default set to the session model (\"inherit\", saved to ${…})."
+	"No available model matches \"${…}\"."
+	"Could not save subagent model: "
+	"Subagent default set to \"${…}\" (saved to ${…})."
+	"Set the default model for subagent/workflow runs: /subagent [provider/model-id|inherit|status|clear]"
+	"Could not update settings: "
+	"subagentModel cleared — the default is ${…} or managed settings when applicable, else ${…}'s automatic same-provider profile."
+	"No models are available — authenticate a provider first."
+	"Select the default subagent model"
+	"Default for subagent/workflow runs unless overridden"
 
-clear/index.ts
+agents/subagents/panel-render.ts
+	"/tasks to see subagents"
+	"List MCP Resource Directory"
+
+agents/subagents/panel-widget.ts
+	"${…} more agents — /tasks to list all"
+
+agents/subagents/runner.ts
+	"the parent's permission bridge is no longer available"
+	"model ${…} not found in the subagent runtime's catalog"
+	"cancelled before the first request was sent"
+
+agents/subagents/shell-panel.ts
+	"· Enter to view tasks"
+
+agents/subagents/tasks-dialog.ts
+	"  No tasks currently running"
+
+agents/workflow/index.ts
+	"Running in background · /workflows to monitor and save · ${…}"
+	"Open the workflow viewer; list, stop, or inspect runs"
+	"Dynamic workflows dialog dismissed"
+	"No workflow runs yet and no saved workflows found (${…}/workflows/)."
+	"The interactive workflow viewer requires TUI mode; listing workflows instead."
+	"workflow is not running"
+
+agents/workflow/viewer.ts
+	"${…} exists and differs — press s again to overwrite"
+	"No agents yet — waiting for the first agent() call…"
+	"No agents yet — waiting for the first agent() call…"
+	"No workflow runs this session."
+	"Start one with the workflow tool (or say \"ultracode\"). esc close"
+
+agents/workflow/widget.ts
+	"${…} more workflows — /workflows to list all"
+
+commands/clear/index.ts
 	"Clear the conversation and start fresh (same as /new)"
 
-doctor/build.ts
+commands/doctor/build.ts
 	"provided by an extension"
 	"key command in models.json"
 	"Running: ${…} ${…} on your own pi${…}"
@@ -96,11 +101,11 @@ doctor/build.ts
 	"${…} need${…} attention (listed at the bottom). ${…} ${…}"
 	"${…} below; none blocks a session."
 
-doctor/cli.ts
+commands/doctor/cli.ts
 	"For a full setup checkup that can also fix issues, run /doctor inside ${…}.\n"
 	"Inside a session, /doctor report shows this report alone.\n"
 
-doctor/compat.ts
+commands/doctor/compat.ts
 	"root must be a JSON object"
 	"allow rules apply after a once-per-config consent"
 	"${…} sets permissions.defaultMode \"${…}\", which ${…} does not read from its own settings files."
@@ -145,7 +150,7 @@ doctor/compat.ts
 	"disabled (/mcp enable to turn on)"
 	"configured (status known once a session connects)"
 
-doctor/dependencies.ts
+commands/doctor/dependencies.ts
 	"the primary shell tool"
 	"the bash tool, alongside PowerShell"
 	"the bash tool (Git for Windows provides one)"
@@ -165,7 +170,7 @@ doctor/dependencies.ts
 	"no provider search and no ${…}/${…}: falls back to Exa's free, rate-limited endpoint (results are labelled)"
 	"needed for this project"
 
-doctor/index.ts
+commands/doctor/index.ts
 	"Model catalogs not refreshed: ${…}. Model tiers keep using the copy on disk."
 	"set for this session"
 	"No model is available, so the checkup cannot run. Connect a provider with /login first; the report already lists what to fix."
@@ -184,7 +189,7 @@ doctor/index.ts
 	"Which preset? /doctor preset <${…}> — /doctor presets shows what each would pick."
 	"No model is available, so the checkup cannot run; showing the setup report instead. Connect a provider with /login, then rerun /doctor."
 
-doctor/models.ts
+commands/doctor/models.ts
 	"frontier tier — terse Claude Code prompt"
 	"workhorse tier — full Claude Code prompt"
 	"cheap tier — full prompt, Haiku register"
@@ -221,7 +226,7 @@ doctor/models.ts
 	"For coding work pick a cheap- or workhorse-tier model with /model; see /doctor presets."
 	"This model carries no price in the catalog, so automatic cost-based choices (cheaper subagents, a cheaper classifier) fall back to the main model."
 
-doctor/presets.ts
+commands/doctor/presets.ts
 	"lowest-cost main model, with subagents inheriting it"
 	"a capable main model, delegated work on the cheapest model at its floor"
 	"the strongest model for the main session and its subagents"
@@ -236,67 +241,42 @@ doctor/presets.ts
 	"Classifier previews use each preset's main model: the cheapest model in its tier or above that is strictly cheaper than the main model, else the main model itself."
 	"subagent default → inherit the main model (undo: /subagent clear)"
 
-doctor/report.ts
+commands/doctor/report.ts
 	"No setup issues found."
 
-doctor/update-lookup.ts
+commands/doctor/update-lookup.ts
 	"no release is a day old yet (Homebrew installs wait that long)"
 
-doctor/viewer.ts
+commands/doctor/viewer.ts
 	"f run the checkup (the model fixes the findings)"
 
-effort/index.ts
-	"Failed to set effort level: ${…}"
-	"Failed to set effort level: ${…}"
-	"Effort: ultracode — ${…} reasoning, workflows armed every turn${…}"
-	"${…} doesn't support reasoning effort."
-	"Set reasoning effort (shift+tab cycles the plain levels): /effort [${…}|auto] — ultracode is ${…} + workflows"
-	"Effort level set to auto${…}"
+commands/init/index.ts
+	"Initialize a new ${…} file with codebase documentation"
 
-effort/settings.ts
-	"Quick, straightforward implementation with minimal overhead"
-	"Balanced approach with standard implementation and testing"
-	"Comprehensive implementation with extensive testing and documentation"
-	"Deeper reasoning than high, just below maximum (on supported models)"
-	"Maximum capability with deepest reasoning. May use excessive tokens resulting in long response times or overthinking. Use sparingly for the hardest tasks."
-	"Set effort level to ${…} (${…}): ${…}"
-	"saved as your default for new sessions"
+context/claude-context/index.ts
+	"Could not remember external CLAUDE.md include approval: ${…}"
+	"Configure external CLAUDE.md includes for this project"
+	"/config requires an interactive UI to change external CLAUDE.md include approval."
 
-file-tracker/results.ts
-	"EISDIR: illegal operation on a directory, read"
-
-hooks/executor.ts
-	"hook needs PowerShell but no pwsh/powershell executable was found on PATH"
-	"hook needs bash but none was found"
-	"hook cannot run under ${…} (a WSL launcher); set ${…} to Git Bash's bash.exe"
-	"no shell available for the hook"
-
-hooks/index.ts
-	"Prompt blocked by UserPromptSubmit hook: ${…}"
-	"Stop hook continuation limit reached (${…}); ending the turn."
-	"Compaction cancelled by PreCompact hook: ${…}"
-
-hooks/plugin-hooks.ts
-	"${…}: unreadable plugin hooks skipped (${…})"
-
-hooks/settings.ts
-	"${…}: \"hooks\" is not an object"
-	"${…}: ${…} is not an array"
-	"${…}: ${…} entry without a hooks array skipped"
-	"${…}: unreadable settings file skipped (${…})"
-	"disableAllHooks in project settings turns off only the project's own hooks"
-
-hooks/trust.ts
-	"Project hooks skipped: not yet approved and no UI to ask (user/managed hooks still run)."
-	"Run this project's hooks?"
-	"This project's .claude settings define ${…}\n\nThey run as shell commands on your machine. Approval is remembered until the hook config changes."
-	"Project hooks disabled for this session (user/managed hooks still run)."
-
-idle-compact/policy.ts
+context/idle-compact/policy.ts
 	"Compacted while idle, before the prompt cache expired"
 
-init/index.ts
-	"Initialize a new ${…} file with codebase documentation"
+context/memory/index.ts
+	"View or edit CLAUDE.md and memory files"
+	"/memory editing is unavailable in RPC; use the TUI or open a listed path in your editor.\n\n"
+	"${…} are set by ${…}. Unset it to switch here."
+	"Auto-memory is set by ${…}. Unset it to switch here."
+	"${…} sets ${…}: ${…}, which outranks your user setting. Change it there."
+	"Couldn't save the auto-memory setting: ${…}"
+
+context/memory/open-external.ts
+	"> ${…} To change editor, set $EDITOR or $VISUAL environment variable."
+	"> To use a different editor, set the $EDITOR or $VISUAL environment variable."
+
+context/memory/panel.ts
+	"; applies from the next start"
+	"Enter to open or toggle · ↑ for auto-memory${…} · Esc to close"
+	"Switch ${…} to ${…}? ${…} will read ${…} instead, from the next start."
 
 lib/app/pi-version.ts
 	"${…} is tested against pi ${…}; you are running pi ${…}. "
@@ -638,118 +618,54 @@ lib/ui/prose.ts
 	"cannot locate @earendil-works/pi-tui next to pi-coding-agent"
 	"pi-tui exports no Markdown component"
 
-lsp/index.ts
-	"${…} ${…}. Allow it only for a project you trust.\n\nThe answer for ${…} is remembered; /lsp trust allows it later."
-	"Plugin LSP config issues (/lsp for the full list):\n${…}"
-	"Show language server status: /lsp [trust]"
-	"let servers that run this project's code start here (rust-analyzer, jdtls)"
-	"Trusted ${…}: rust-analyzer and jdtls may start here. They run this project's build code."
-	"No language servers started."
+request/tool-call-corruption/index.ts
+	"The model streamed over ${…} characters of blank space into a tool call's arguments without finishing it, so the turn was stopped."
+	"${…} Send the request again, or switch models if it repeats."
 
-lsp/install-hints.ts
-	"apt install ripgrep (or your distribution's package manager)"
-	"download from https://download.eclipse.org/jdtls/ and put its bin\\jdtls.bat on PATH"
-	"download from https://download.eclipse.org/jdtls/ and put its bin/jdtls on PATH"
-	"install ${…} and make sure it is on your PATH"
-	"npm install -g typescript-language-server (and in the project: ${…} — the server never uses a global TypeScript)"
-	"rustup component add rust-analyzer"
+request/tool-call-corruption/openrouter-generation.ts
+	"is corrupting tool calls for ${…}"
+	"An OpenRouter upstream provider ${…}; the provider could not be identified."
+	"The call was blocked and the turn stopped."
+	"The turn was stopped."
+	"The reply was cut off and the turn stopped."
+	"${…} ${…} Add the provider to compat.openRouterRouting.ignore for this model in pi's models.json (\"ignore\": ${…}), or switch models."
 
-lsp/plugin-servers.ts
-	"${…}: ${…} must be a JSON object mapping server names to configs"
-	"${…}: manifest lspServers path \"${…}\" escapes the plugin directory — rejected"
-	"config must be an object"
-	"\"command\" must be a non-empty string"
-	"\"command\" must not contain spaces — use the args array for arguments"
-	"extensionToLanguage[\"${…}\"] must be a non-empty language id"
-	"\"extensionToLanguage\" must have at least one mapping"
-	"\"args\" must be an array of strings"
-	"\"startupTimeout\" must be a positive number of milliseconds"
-	"\"workspaceFolder\" must be a string"
-	"\"env\" must be a map of string values"
-	"${user_config.*} placeholders are not supported (plugin user-config prompts are not implemented)"
-	"command still contains an unresolved placeholder after substitution (\"${…}\")"
+request/tool-search/index.ts
+	"Show which tools are deferred (loadable via tool_search)"
+	"tool_search is not registered (a --tools list leaves it out), so no tool is deferred."
+	"No deferred tools registered."
 
-mcp/client.ts
-	"OAuth is only available for http MCP servers; \"${…}\" is stdio."
+safety/file-tracker/results.ts
+	"EISDIR: illegal operation on a directory, read"
 
-mcp/config.ts
-	"a `!command` value in env or headers is not supported"
-	"${…}.pi/mcp.json or the agent dir's mcp.json"
-	"No MCP servers configured. Run /doctor if this is unexpected — it lists MCP config files that failed validation. Otherwise, add servers to ${…}; see ${…} to learn more."
-	"MCP server \"${…}\" in ${…} is overridden by the one in ${…}."
+safety/hooks/executor.ts
+	"hook needs PowerShell but no pwsh/powershell executable was found on PATH"
+	"hook needs bash but none was found"
+	"hook cannot run under ${…} (a WSL launcher); set ${…} to Git Bash's bash.exe"
+	"no shell available for the hook"
 
-mcp/index.ts
-	"An extension changed its MCP servers; run /reload to connect the change."
-	"MCP config could not be parsed (ignored): ${…}"
-	"disabled by disabledMcpjsonServers in Claude Code settings"
-	"not approved this session (project .mcp.json)"
-	"not approved (project .mcp.json; approve in an interactive session)"
-	"List MCP Resource Directory"
-	"List MCP Resource Directory"
-	"${…} not set in the environment"
-	"\"${…}\" was not approved, so it was not reconnected."
-	"Disabled \"${…}\". Its tools stay unavailable until re-enabled."
-	"\"${…}\" is not an http server; OAuth is unavailable."
-	"Manage MCP servers (status, reconnect, authenticate, enable/disable)"
-	"reconnect, authenticate, enable or disable servers"
+safety/hooks/index.ts
+	"Prompt blocked by UserPromptSubmit hook: ${…}"
+	"Stop hook continuation limit reached (${…}); ending the turn."
+	"Compaction cancelled by PreCompact hook: ${…}"
 
-mcp/oauth/browser.ts
-	"it is not a valid URL"
-	"its scheme is ${…} on ${…}; a sign-in URL must be https (or http on a loopback host)"
-	"refusing to open the authorization URL: ${…}"
+safety/hooks/plugin-hooks.ts
+	"${…}: unreadable plugin hooks skipped (${…})"
 
-mcp/oauth/callback.ts
-	"<!doctype html><meta charset=\"utf-8\"><title>${…}</title><body style=\"font-family:system-ui;padding:3rem;text-align:center\"><h2>${…}</h2><p>You can close this tab and return to the terminal.</p><script>setTimeout(()=>window.close(),1500)</script></body>"
-	"could not determine loopback callback port"
-	"timed out after ${…}s waiting for authorization"
+safety/hooks/settings.ts
+	"${…}: \"hooks\" is not an object"
+	"${…}: ${…} is not an array"
+	"${…}: ${…} entry without a hooks array skipped"
+	"${…}: unreadable settings file skipped (${…})"
+	"disableAllHooks in project settings turns off only the project's own hooks"
 
-mcp/oauth/flow.ts
-	"Opened your browser to authorize \"${…}\". If it didn't open, visit:\n${…}"
-	"Open this URL to authorize \"${…}\":\n${…}"
-	"authorization response state mismatch for \"${…}\" — the redirect did not come from this authorization request"
+safety/hooks/trust.ts
+	"Project hooks skipped: not yet approved and no UI to ask (user/managed hooks still run)."
+	"Run this project's hooks?"
+	"This project's .claude settings define ${…}\n\nThey run as shell commands on your machine. Approval is remembered until the hook config changes."
+	"Project hooks disabled for this session (user/managed hooks still run)."
 
-mcp/oauth/provider.ts
-	"no PKCE code verifier saved for this authorization"
-
-mcp/panel/render.ts
-	"  (server no longer available)"
-	"Esc to go back"
-	"  No MCP servers configured. Add them to .mcp.json or ~/.claude.json."
-	"  Servers are configured in .mcp.json or ~/.claude.json."
-
-mcp/trust.ts
-	"\"${…}\" needs ${…} set in the environment. Set ${…} and restart ${…}."
-	"Use this and all future MCP servers in this project"
-	"Use this MCP server"
-	"Use these MCP servers"
-	"New MCP server found in ${…}: ${…}"
-	"${…} new MCP servers found in ${…}"
-	"Skipped ${…} MCP server${…} from ${…} (${…}): not yet approved and no UI to ask. Approve once in an interactive session${…}."
-	", or set enabledMcpjsonServers in ${…}"
-	"${…}\n\n${…}\n\nThese run on your machine."
-
-memory/index.ts
-	"View or edit CLAUDE.md and memory files"
-	"/memory editing is unavailable in RPC; use the TUI or open a listed path in your editor.\n\n"
-	"${…} are set by ${…}. Unset it to switch here."
-	"Auto-memory is set by ${…}. Unset it to switch here."
-	"${…} sets ${…}: ${…}, which outranks your user setting. Change it there."
-	"Couldn't save the auto-memory setting: ${…}"
-
-memory/open-external.ts
-	"> ${…} To change editor, set $EDITOR or $VISUAL environment variable."
-	"> To use a different editor, set the $EDITOR or $VISUAL environment variable."
-
-memory/panel.ts
-	"; applies from the next start"
-	"Enter to open or toggle · ↑ for auto-memory${…} · Esc to close"
-	"Switch ${…} to ${…}? ${…} will read ${…} instead, from the next start."
-
-model-default/index.ts
-	" and saved as your default for new sessions"
-	"Could not save ${…}/${…} as the default model: ${…}"
-
-permissions/auto-mode/classifier.ts
+safety/permissions/auto-mode/classifier.ts
 	"Auto mode has no classifier left: ${…} refused the classifier's prompt as a possible usage-policy violation, and no other eligible model can screen calls.${…} "
 	"Calls are not judged and do not run. Switch to manual approval (${…} cycles permission modes), or choose another classifier with /auto-mode model <provider/id>."
 	"verdict truncated at maxTokens"
@@ -762,16 +678,16 @@ permissions/auto-mode/classifier.ts
 	"Choose another classifier with /auto-mode model <provider/id>."
 	"Auto mode cannot use ${…} as its classifier (${…}); trying another eligible model."
 
-permissions/auto-mode/pause.ts
+safety/permissions/auto-mode/pause.ts
 	"⚠ ${…} will automatically deny this request in ${…}, to avoid blocking progress on an unattended session"
 
-permissions/auto-mode/setup-run.ts
+safety/permissions/auto-mode/setup-run.ts
 	"no model is available to draft the setup"
 	"setup drafting was cancelled"
 	"draft truncated at maxTokens"
 	"no model could draft the setup (last error: ${…})"
 
-permissions/auto-mode/setup.ts
+safety/permissions/auto-mode/setup.ts
 	"draft JSON key \"${…}\" is not an array"
 	"the drafting model returned no JSON object"
 	"the drafting model returned malformed JSON (${…})"
@@ -781,7 +697,7 @@ permissions/auto-mode/setup.ts
 	"grants arbitrary code execution — matching commands never reach auto mode's checks"
 	"pre-approves a fresh agent loop — whatever the delegated agent does is unchecked"
 
-permissions/index.ts
+safety/permissions/index.ts
 	"A permission request is waiting. Close this panel to answer it."
 	"Read outside the working directories"
 	"Allow reads outside the working directories?"
@@ -884,7 +800,7 @@ permissions/index.ts
 	"Persist an allow rule: /allow Bash(npm test:*) [global]"
 	"Could not parse rule: \"${…}\". Format: Tool or Tool(pattern)"
 
-permissions/panel/render.ts
+safety/permissions/panel/render.ts
 	"${…} can read files in the workspace, and make edits when auto-accept edits is on."
 	"Yes, for this session"
 	"Yes, and remember this directory"
@@ -939,16 +855,16 @@ permissions/panel/render.ts
 	"Approvals apply when you close the panel."
 	" Commands recently denied by the auto mode classifier."
 
-permissions/panel/state.ts
+safety/permissions/panel/state.ts
 	"\"$defaults\" is not a rule: the built-in rules always apply."
 
-permissions/session-grant.ts
+safety/permissions/session-grant.ts
 	"Yes, and don't ask again for this exact command this session"
 	"Yes, and allow ${…} anywhere in the working directory this session"
 	"Yes, and don't ask again for ${…} this session"
 	"Yes, and don't ask again for ${…} this session"
 
-permissions/workspace.ts
+safety/permissions/workspace.ts
 	"Enter a directory path."
 	"${…} is not a directory."
 	"${…} is already inside the working directory."
@@ -956,14 +872,147 @@ permissions/workspace.ts
 	"The filesystem root cannot be a workspace directory. Add a narrower directory."
 	"Your home directory, or a directory that contains it, cannot be a workspace directory. Add a narrower directory."
 
-plan-mode/index.ts
+safety/plan-mode/index.ts
 	"Could not copy the plan at ${…} for this fork (${…}); its plan starts empty at ${…}."
 	"Approve — back to ${…} (the mode before planning)"
 
-plan-mode/viewer.ts
+safety/plan-mode/viewer.ts
 	"Tell the agent what to change"
 
-plugins/index.ts
+tools/artifacts/gallery.ts
+	"<ul class=\"list\" id=\"list\">\n${…}\n</ul>\n<p class=\"empty\" id=\"no-match\" hidden>No artifact matches that filter.</p>"
+	"<p class=\"empty\">No artifacts yet. Ask ${…} for a page, a report or a small tool, and it lands here.</p>"
+	"<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>${…} Artifacts</title>\n<style>\n${…}\n* { box-sizing: border-box; }\nhtml, body { margin: 0; }\nbody {\n  background: var(--bg);\n  color: var(--text);\n  font: 15px/1.55 system-ui, -apple-system, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif;\n  padding: 0 16px;\n}\n.wrap { max-width: 880px; margin: 0 auto; padding-block: 40px 64px; display: flex; flex-direction: column; gap: 24px; }\nheader { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 16px; }\nh1 { margin: 0; font-size: 26px; line-height: 1.2; letter-spacing: -0.01em; text-wrap: balance; }\n.count { margin: 4px 0 0; color: var(--muted); font-size: 13px; }\ninput[type=\"search\"] {\n  font: inherit; color: var(--text); background: var(--surface);\n  border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; width: min(280px, 100%);\n}\n.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border-top: 1px solid var(--line); }\n.entry {\n  display: grid; grid-template-columns: 1fr auto; gap: 4px 16px; align-items: start;\n  padding: 16px 0; border-bottom: 1px solid var(--line);\n}\n.entry[hidden] { display: none; }\n.main { min-width: 0; display: flex; flex-direction: column; gap: 4px; }\nh2 { margin: 0; font-size: 17px; line-height: 1.3; text-wrap: balance; }\nh2 a { color: var(--text); text-decoration: none; }\nh2 a:hover { color: var(--accent); text-decoration: underline; }\n.desc { margin: 0; max-width: 65ch; }\n.facts { margin: 0; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; display: flex; flex-wrap: wrap; gap: 0 8px; }\n.project { overflow-wrap: anywhere; }\n.id { grid-column: 1 / -1; margin: 0; }\ncode { font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--muted); }\ndetails { font-size: 13px; color: var(--muted); }\nsummary { cursor: pointer; width: fit-content; }\n.versions { margin: 6px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 2px; }\n.versions a { color: var(--accent); }\n.actions { display: flex; gap: 8px; }\n.button {\n  font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: none;\n  border-radius: 6px; padding: 6px 12px; border: 1px solid var(--line);\n  background: var(--surface); color: var(--text);\n}\n.actions a.button { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }\na:focus-visible, button:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }\n.empty { margin: 0; color: var(--muted); }\n@media (max-width: 480px) {\n  .entry { grid-template-columns: 1fr; }\n}\n</style>\n</head>\n<body>\n<div class=\"wrap\">\n<header>\n  <div>\n    <h1>${…} Artifacts</h1>\n    <p class=\"count\">${…} ${…}, newest first. Stored in this folder.</p>\n  </div>\n  ${…}\n</header>\n${…}\n</div>\n<script>\n(function () {\n${…}\n  document.addEventListener(\"click\", function (event) {\n    var button = event.target.closest && event.target.closest(\"[data-download]\");\n    if (!button) return;\n    var script = document.createElement(\"script\");\n    script.src = button.getAttribute(\"data-download\");\n    script.onload = function () { script.remove(); };\n    script.onerror = function () { script.remove(); location.href = button.getAttribute(\"data-fallback\"); };\n    document.head.appendChild(script);\n  });\n  var filter = document.getElementById(\"filter\");\n  if (filter) filter.addEventListener(\"input\", function () {\n    var query = filter.value.trim().toLowerCase();\n    var shown = 0;\n    document.querySelectorAll(\".entry\").forEach(function (entry) {\n      var match = !query || entry.getAttribute(\"data-search\").indexOf(query) !== -1;\n      entry.hidden = !match;\n      if (match) shown++;\n    });\n    document.getElementById(\"no-match\").hidden = shown !== 0;\n  });\n})();\n</script>\n</body>\n</html>\n"
+	"<input type=\"search\" id=\"filter\" placeholder=\"Filter by title or project\" aria-label=\"Filter artifacts\">"
+
+tools/artifacts/index.ts
+	"No browser was opened (${…}): ${…}"
+	"Browse, open, export or delete saved artifacts"
+	"Open the gallery in the browser"
+	"Open in the browser"
+	"Save a copy to Downloads"
+	"Show the file path"
+	"Could not save a copy: ${…}"
+
+tools/artifacts/store.ts
+	"no artifact has the id \"${…}\""
+	"The artifact gallery is locked by another session."
+
+tools/artifacts/viewer.ts
+	"<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>${…}</title>\n<style>\n${…}\n* { box-sizing: border-box; }\nhtml, body { margin: 0; height: 100%; }\nbody {\n  background: var(--bg); color: var(--text);\n  font: 14px/1.4 system-ui, -apple-system, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif;\n  display: flex; flex-direction: column;\n}\n.bar {\n  display: flex; align-items: center; gap: 6px; padding: 6px 16px; min-height: 44px;\n  background: var(--surface); border-bottom: 1px solid var(--line); position: relative; z-index: 2;\n}\n.icon-link, .title-button, .primary, .menu [role=\"menuitem\"] {\n  font: inherit; color: var(--text); background: transparent; border: 0; border-radius: 6px; cursor: pointer; text-decoration: none;\n}\n.icon-link { display: inline-flex; padding: 6px; color: var(--muted); }\n.icon-link:hover, .title-button:hover, .title-button[aria-expanded=\"true\"] { background: var(--hover); color: var(--text); }\n.title-button { display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px; max-width: min(60vw, 480px); }\n.title-button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n.spacer { flex: 1; }\n.primary {\n  display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; font-weight: 600; font-size: 13px;\n  border: 1px solid var(--line);\n}\n.primary:hover { background: var(--hover); }\n.menu {\n  position: absolute; top: calc(100% - 2px); left: 44px; min-width: 250px; max-width: calc(100vw - 32px);\n  background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 6px;\n  box-shadow: 0 8px 24px rgb(0 0 0 / 0.18); display: flex; flex-direction: column;\n}\n.menu[hidden] { display: none; }\n.menu .details { padding: 6px 10px 8px; color: var(--muted); font-size: 13px; display: flex; flex-direction: column; gap: 2px; font-variant-numeric: tabular-nums; }\n.menu .details span:last-child { overflow-wrap: anywhere; }\n.menu [role=\"menuitem\"] { display: block; text-align: left; padding: 7px 10px; }\n.menu [role=\"menuitem\"]:hover, .menu [role=\"menuitem\"]:focus-visible { background: var(--hover); outline: none; }\n.menu [aria-current=\"true\"] { font-weight: 600; }\n.menu .label { padding: 8px 10px 2px; color: var(--muted); font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; }\n.menu hr { border: 0; border-top: 1px solid var(--line); margin: 6px 4px; }\n.versions { max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; }\n.banner { padding: 8px 16px; background: var(--hover); border-bottom: 1px solid var(--line); font-size: 13px; }\n.banner[hidden] { display: none; }\n.banner a { color: var(--accent); }\n.toast {\n  position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 3;\n  background: var(--text); color: var(--bg); padding: 8px 14px; border-radius: 6px; font-size: 13px;\n}\n.toast[hidden] { display: none; }\niframe { flex: 1; width: 100%; border: 0; display: block; background: var(--bg); }\na:focus-visible, button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }\n</style>\n</head>\n<body>\n<header class=\"bar\">\n  <a class=\"icon-link\" href=\"../index.html\" title=\"All artifacts\" aria-label=\"All artifacts\">${…}</a>\n  <button type=\"button\" class=\"title-button\" id=\"title-button\" aria-haspopup=\"menu\" aria-expanded=\"false\" aria-controls=\"menu\"><span>${…}</span>${…}</button>\n  <div class=\"menu\" id=\"menu\" role=\"menu\" hidden>\n    <div class=\"details\">${…}</div>\n    <hr>\n    <button type=\"button\" role=\"menuitem\" data-action=\"download\">Download HTML</button>\n    <button type=\"button\" role=\"menuitem\" data-action=\"copy-path\">Copy file path</button>\n    <button type=\"button\" role=\"menuitem\" data-action=\"reload\">Reload</button>\n    <a role=\"menuitem\" id=\"raw-link\" href=\"index.html\">Open without this bar</a>\n    ${…}\n    <hr>\n    <a role=\"menuitem\" href=\"../index.html\">All artifacts</a>\n  </div>\n  <span class=\"spacer\"></span>\n  <button type=\"button\" class=\"primary\" data-action=\"download\">${…}Download</button>\n</header>\n<div class=\"banner\" id=\"banner\" hidden>You are viewing version <span id=\"banner-version\"></span> of ${…}. <a href=\"#\">Show the latest</a></div>\n<iframe id=\"page\" src=\"index.html\" title=\"${…}\"></iframe>\n<div class=\"toast\" id=\"toast\" role=\"status\" hidden></div>\n<script>\n(function () {\n  var LATEST = ${…};\n  var PATHS = ${…};\n  var SEP = PATHS.latest.indexOf(\"\\\\\") !== -1 ? \"\\\\\" : \"/\";\n  var frame = document.getElementById(\"page\");\n  var menu = document.getElementById(\"menu\");\n  var button = document.getElementById(\"title-button\");\n  var banner = document.getElementById(\"banner\");\n  var toast = document.getElementById(\"toast\");\n  var shown = null;\n\n  function current() {\n    var match = /^#v(\\d+)$/.exec(location.hash);\n    var n = match ? parseInt(match[1], 10) : NaN;\n    return n >= 1 && n < LATEST ? n : null;\n  }\n  function show() {\n    shown = current();\n    var src = shown ? \"versions/v\" + shown + \".html\" : \"index.html\";\n    if (frame.getAttribute(\"src\") !== src) frame.setAttribute(\"src\", src);\n    document.getElementById(\"raw-link\").setAttribute(\"href\", src);\n    banner.hidden = !shown;\n    if (shown) document.getElementById(\"banner-version\").textContent = shown;\n    menu.querySelectorAll(\"[data-version]\").forEach(function (link) {\n      var v = link.getAttribute(\"data-version\");\n      link.setAttribute(\"aria-current\", String(v === \"latest\" ? !shown : Number(v) === shown));\n    });\n  }\n  function note(text) {\n    toast.textContent = text;\n    toast.hidden = false;\n    clearTimeout(note.timer);\n    note.timer = setTimeout(function () { toast.hidden = true; }, 1800);\n  }\n  function setMenu(open) {\n    menu.hidden = !open;\n    button.setAttribute(\"aria-expanded\", String(open));\n  }\n${…}\n  function download() {\n    var script = document.createElement(\"script\");\n    script.src = shown ? \"versions/v\" + shown + \".js\" : \"download.js\";\n    script.onload = function () { script.remove(); };\n    script.onerror = function () { script.remove(); note(\"Download failed. Use Open without this bar, then save the page.\"); };\n    document.head.appendChild(script);\n  }\n  function copyPath() {\n    var path = shown ? PATHS.versions + SEP + \"v\" + shown + \".html\" : PATHS.latest;\n    var done = function () { note(\"Copied \" + path); };\n    var fallback = function () { window.prompt(\"File path\", path); };\n    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(path).then(done, fallback);\n    else fallback();\n  }\n\n  button.addEventListener(\"click\", function () { setMenu(menu.hidden); });\n  document.addEventListener(\"click\", function (event) {\n    var action = event.target.closest && event.target.closest(\"[data-action]\");\n    if (action) {\n      var name = action.getAttribute(\"data-action\");\n      if (name === \"download\") download();\n      else if (name === \"copy-path\") copyPath();\n      else if (name === \"reload\") location.reload();\n      setMenu(false);\n      return;\n    }\n    if (event.target.closest && event.target.closest(\"[data-version], #raw-link\")) { setMenu(false); return; }\n    if (!menu.hidden && !menu.contains(event.target) && !button.contains(event.target)) setMenu(false);\n  });\n  document.addEventListener(\"keydown\", function (event) {\n    if (event.key === \"Escape\" && !menu.hidden) { setMenu(false); button.focus(); }\n  });\n  // A click in the frame never reaches this document; losing focus to it closes the menu.\n  window.addEventListener(\"blur\", function () { setMenu(false); });\n  window.addEventListener(\"hashchange\", show);\n  show();\n})();\n</script>\n</body>\n</html>\n"
+
+tools/ask-user/dialogs.ts
+	"Type my own answer"
+
+tools/ask-user/widget.ts
+	"press n to add notes"
+	"Enter to confirm · Esc to back out"
+	"Enter to submit · Tab/shift+Tab to switch questions · Esc to cancel"
+	"Enter to select · ↑/↓ to navigate · n to add notes · Tab/shift+Tab to switch questions · Esc to cancel"
+	"Enter to select · Tab/shift+Tab or arrow keys to navigate · Esc to cancel"
+	"All questions answered — press Enter to submit."
+	"Some questions are unanswered — Enter jumps to the first one."
+
+tools/background/index.ts
+	"Starting a new session"
+	"with the previous session"
+
+tools/background/switch-guard.ts
+	"Stop them and continue"
+	"Cancel to keep ${…} running; /tasks opens or stops a task."
+	"/clear or quitting, the tasks by /reload too"
+
+tools/lsp/index.ts
+	"${…} ${…}. Allow it only for a project you trust.\n\nThe answer for ${…} is remembered; /lsp trust allows it later."
+	"Plugin LSP config issues (/lsp for the full list):\n${…}"
+	"Show language server status: /lsp [trust]"
+	"let servers that run this project's code start here (rust-analyzer, jdtls)"
+	"Trusted ${…}: rust-analyzer and jdtls may start here. They run this project's build code."
+	"No language servers started."
+
+tools/lsp/install-hints.ts
+	"apt install ripgrep (or your distribution's package manager)"
+	"download from https://download.eclipse.org/jdtls/ and put its bin\\jdtls.bat on PATH"
+	"download from https://download.eclipse.org/jdtls/ and put its bin/jdtls on PATH"
+	"install ${…} and make sure it is on your PATH"
+	"npm install -g typescript-language-server (and in the project: ${…} — the server never uses a global TypeScript)"
+	"rustup component add rust-analyzer"
+
+tools/lsp/plugin-servers.ts
+	"${…}: ${…} must be a JSON object mapping server names to configs"
+	"${…}: manifest lspServers path \"${…}\" escapes the plugin directory — rejected"
+	"config must be an object"
+	"\"command\" must be a non-empty string"
+	"\"command\" must not contain spaces — use the args array for arguments"
+	"extensionToLanguage[\"${…}\"] must be a non-empty language id"
+	"\"extensionToLanguage\" must have at least one mapping"
+	"\"args\" must be an array of strings"
+	"\"startupTimeout\" must be a positive number of milliseconds"
+	"\"workspaceFolder\" must be a string"
+	"\"env\" must be a map of string values"
+	"${user_config.*} placeholders are not supported (plugin user-config prompts are not implemented)"
+	"command still contains an unresolved placeholder after substitution (\"${…}\")"
+
+tools/mcp/client.ts
+	"OAuth is only available for http MCP servers; \"${…}\" is stdio."
+
+tools/mcp/config.ts
+	"a `!command` value in env or headers is not supported"
+	"${…}.pi/mcp.json or the agent dir's mcp.json"
+	"No MCP servers configured. Run /doctor if this is unexpected — it lists MCP config files that failed validation. Otherwise, add servers to ${…}; see ${…} to learn more."
+	"MCP server \"${…}\" in ${…} is overridden by the one in ${…}."
+
+tools/mcp/index.ts
+	"An extension changed its MCP servers; run /reload to connect the change."
+	"MCP config could not be parsed (ignored): ${…}"
+	"disabled by disabledMcpjsonServers in Claude Code settings"
+	"not approved this session (project .mcp.json)"
+	"not approved (project .mcp.json; approve in an interactive session)"
+	"List MCP Resource Directory"
+	"List MCP Resource Directory"
+	"${…} not set in the environment"
+	"\"${…}\" was not approved, so it was not reconnected."
+	"Disabled \"${…}\". Its tools stay unavailable until re-enabled."
+	"\"${…}\" is not an http server; OAuth is unavailable."
+	"Manage MCP servers (status, reconnect, authenticate, enable/disable)"
+	"reconnect, authenticate, enable or disable servers"
+
+tools/mcp/oauth/browser.ts
+	"it is not a valid URL"
+	"its scheme is ${…} on ${…}; a sign-in URL must be https (or http on a loopback host)"
+	"refusing to open the authorization URL: ${…}"
+
+tools/mcp/oauth/callback.ts
+	"<!doctype html><meta charset=\"utf-8\"><title>${…}</title><body style=\"font-family:system-ui;padding:3rem;text-align:center\"><h2>${…}</h2><p>You can close this tab and return to the terminal.</p><script>setTimeout(()=>window.close(),1500)</script></body>"
+	"could not determine loopback callback port"
+	"timed out after ${…}s waiting for authorization"
+
+tools/mcp/oauth/flow.ts
+	"Opened your browser to authorize \"${…}\". If it didn't open, visit:\n${…}"
+	"Open this URL to authorize \"${…}\":\n${…}"
+	"authorization response state mismatch for \"${…}\" — the redirect did not come from this authorization request"
+
+tools/mcp/oauth/provider.ts
+	"no PKCE code verifier saved for this authorization"
+
+tools/mcp/panel/render.ts
+	"  (server no longer available)"
+	"Esc to go back"
+	"  No MCP servers configured. Add them to .mcp.json or ~/.claude.json."
+	"  Servers are configured in .mcp.json or ~/.claude.json."
+
+tools/mcp/trust.ts
+	"\"${…}\" needs ${…} set in the environment. Set ${…} and restart ${…}."
+	"Use this and all future MCP servers in this project"
+	"Use this MCP server"
+	"Use these MCP servers"
+	"New MCP server found in ${…}: ${…}"
+	"${…} new MCP servers found in ${…}"
+	"Skipped ${…} MCP server${…} from ${…} (${…}): not yet approved and no UI to ask. Approve once in an interactive session${…}."
+	", or set enabledMcpjsonServers in ${…}"
+	"${…}\n\n${…}\n\nThese run on your machine."
+
+tools/plugins/index.ts
 	"${…}: plugin discovery failed, continuing without plugins: ${…}"
 	"${…} was installed by Claude Code — uninstall it there (files are read-only here)."
 	"${…} has no entry named ${…}"
@@ -975,7 +1024,7 @@ plugins/index.ts
 	"Could not read ${…}: ${…}. Restore the command file or reinstall the ${…} plugin, then retry."
 	"The permission gate is unavailable. Load the permissions extension before running shell placeholders."
 
-plugins/install/install.ts
+tools/plugins/install/install.ts
 	"plugin contains a broken symlink: ${…}"
 	"plugin contains a symlink that points outside the plugin: ${…} → ${…}"
 	"${…}: plugin dependencies are not supported yet — install the dependencies manually first"
@@ -989,24 +1038,24 @@ plugins/install/install.ts
 	"${…}: computed install path \"${…}\" escapes the plugin cache directory — refusing to install"
 	"${…}: cache path \"${…}\" is already owned by ${…} — refusing to overwrite it"
 
-plugins/marketplace/git.ts
+tools/plugins/marketplace/git.ts
 	"git is not installed (or not on PATH)"
 
-plugins/marketplace/parse.ts
+tools/plugins/marketplace/parse.ts
 	"Enter a marketplace source."
 	"Not a valid URL: ${…}"
 	"Path does not exist: ${…}"
 	"Not a marketplace: ${…} (expected a directory or a marketplace.json file)"
 	"Could not understand \"${…}\" — try owner/repo, a git URL, an https marketplace.json URL, or a local path."
 
-plugins/marketplace/sync.ts
+tools/plugins/marketplace/sync.ts
 	"${…}: ${…} is not valid JSON"
 
-plugins/marketplace/types.ts
+tools/plugins/marketplace/types.ts
 	"marketplace.json must be a JSON object"
 	"marketplace.json is missing a \"name\""
 
-plugins/panel/render.ts
+tools/plugins/panel/render.ts
 	"Make sure you trust a plugin before installing or enabling it: plugins can run commands, add MCP servers, and start language servers on your machine. ${…} does not review plugin content — check the plugin's homepage and source."
 	"Esc to go back"
 	"u to uninstall · Esc to go back"
@@ -1020,127 +1069,78 @@ plugins/panel/render.ts
 	"Type to search · Enter/Space to toggle · Esc to leave search"
 	"  Some changes (MCP servers, agents, hooks) apply on the next session restart."
 
-powershell/policy.ts
+tools/powershell/policy.ts
 	"No shell available: install Git for Windows (https://git-scm.com/download/win) so the bash tool can run, "
 	"or install PowerShell and set ${…}=1."
 	"${…} is set but no pwsh.exe or powershell.exe was found on PATH; the powershell tool stays off."
 	"${…} is set but no `pwsh` was found on PATH; install PowerShell 7 to use the powershell tool."
 
-send-now/chord.ts
-	"ctrl+x ctrl+s to send now"
-
-skill/index.ts
+tools/skill/index.ts
 	"Skill \"${…}\" is no longer available (its SKILL.md was removed or is unreadable)."
 	"${…} is a plugin skill — manage it from /plugins."
 	"View and manage skills (on / name-only / user-only / off)"
 
-skill/listing.ts
+tools/skill/listing.ts
 	"The following skills provide specialized instructions for specific tasks."
 
-skill/panel/render.ts
+tools/skill/panel/render.ts
 	"  No skills match your search."
 	" Plugin skills are managed via /plugins"
 
-subagents/index.ts
-	"Subagent model ${…} is not usable on this account (${…}); automatic selection skips it from now on."
-	"The live subagent panel requires TUI mode. Use /tasks for task status; task_output and task_stop inspect or stop a task."
-	"Could not open the tasks dialog: ${…}"
-	"Cannot fork: this session is not persisted (started with --no-session), so there is no conversation to clone."
-	"The session ended before the fork started."
-	"The session ended before the fork started."
-	"Could not send the message to ${…}: ${…}"
-	"the agent is gone."
-	"Could not send the message: ${…}"
-	"The interactive task viewer requires TUI mode; showing a task snapshot instead."
-	"No background tasks in this session."
-	"Use task_output to inspect a task and task_stop to stop it."
-	"List background tasks: shells, running agents, and the agents you viewed"
-	"Open the live subagent panel, or list available agents"
-	"The live subagent panel requires TUI mode; showing spawned agents instead."
-	"Use /tasks for task status; task_output and task_stop inspect or stop a task."
-	" — not applied: ${…} is another tool's variable, ${…}"
-	"subagentModel: ${…} (from the subagentModel setting)"
-	"Could not save subagent model: "
-	"Subagent default set to the session model (\"inherit\", saved to ${…})."
-	"No available model matches \"${…}\"."
-	"Could not save subagent model: "
-	"Subagent default set to \"${…}\" (saved to ${…})."
-	"Set the default model for subagent/workflow runs: /subagent [provider/model-id|inherit|status|clear]"
-	"Could not update settings: "
-	"subagentModel cleared — the default is ${…} or managed settings when applicable, else ${…}'s automatic same-provider profile."
-	"No models are available — authenticate a provider first."
-	"Select the default subagent model"
-	"Default for subagent/workflow runs unless overridden"
-
-subagents/panel-render.ts
-	"/tasks to see subagents"
-	"List MCP Resource Directory"
-
-subagents/panel-widget.ts
-	"${…} more agents — /tasks to list all"
-
-subagents/runner.ts
-	"the parent's permission bridge is no longer available"
-	"model ${…} not found in the subagent runtime's catalog"
-	"cancelled before the first request was sent"
-
-subagents/shell-panel.ts
-	"· Enter to view tasks"
-
-subagents/tasks-dialog.ts
-	"  No tasks currently running"
-
-tasks/index.ts
+tools/tasks/index.ts
 	"Show or hide the task list"
 
-tool-call-corruption/index.ts
-	"The model streamed over ${…} characters of blank space into a tool call's arguments without finishing it, so the turn was stopped."
-	"${…} Send the request again, or switch models if it repeats."
-
-tool-call-corruption/openrouter-generation.ts
-	"is corrupting tool calls for ${…}"
-	"An OpenRouter upstream provider ${…}; the provider could not be identified."
-	"The call was blocked and the turn stopped."
-	"The turn was stopped."
-	"The reply was cut off and the turn stopped."
-	"${…} ${…} Add the provider to compat.openRouterRouting.ignore for this model in pi's models.json (\"ignore\": ${…}), or switch models."
-
-tool-search/index.ts
-	"Show which tools are deferred (loadable via tool_search)"
-	"tool_search is not registered (a --tools list leaves it out), so no tool is deferred."
-	"No deferred tools registered."
-
-web-fetch/extract.ts
+tools/web-fetch/extract.ts
 	"Redirects to a different host: ${…}"
 
-web-fetch/index.ts
+tools/web-fetch/index.ts
 	"web_fetch: the reader's credentials did not resolve in time"
 
-web/backends.ts
+tools/web/backends.ts
 	"web_search used Exa's free keyless endpoint (rate-limited, best-effort). "
 	"For reliable results add ${…} (or \"tavily\") to ${…}, or set ${…} / ${…} in the environment. "
 	"Brave and Tavily both have free tiers."
 
-web/index.ts
+tools/web/index.ts
 	"Searching with Anthropic's web search for \"${…}\"..."
 
-web/native-call.ts
+tools/web/native-call.ts
 	"web_search: provider-native search did not resolve in time"
 
-workflow/index.ts
-	"Running in background · /workflows to monitor and save · ${…}"
-	"Open the workflow viewer; list, stop, or inspect runs"
-	"Dynamic workflows dialog dismissed"
-	"No workflow runs yet and no saved workflows found (${…}/workflows/)."
-	"The interactive workflow viewer requires TUI mode; listing workflows instead."
-	"workflow is not running"
+ui/branding/compaction-keep.ts
+	"Set compaction.keepRecentTokens to ${…}; /compact works on short sessions from the next start."
+	"Could not remember the answer in ${…}: ${…}. ${…} asks again next start."
+	"Could not set pi's compaction keep window: ${…}. Run /doctor for the settings change."
 
-workflow/viewer.ts
-	"${…} exists and differs — press s again to overwrite"
-	"No agents yet — waiting for the first agent() call…"
-	"No agents yet — waiting for the first agent() call…"
-	"No workflow runs this session."
-	"Start one with the workflow tool (or say \"ultracode\"). esc close"
+ui/branding/index.ts
+	"No model provider yet. Run /login to connect one (free options at ${…}/blob/master/docs/guide/providers-and-models.md)."
 
-workflow/widget.ts
-	"${…} more workflows — /workflows to list all"
+ui/branding/replaced-builtins.ts
+	"Turned off pi's built-in ${…} in ${…}."
+	"pi's warnings stop from the next start."
+	"This project's settings keep ${…} on, so pi still warns about ${…}; run /doctor for that change."
+	"Could not turn off pi's built-in tool search and MCP: ${…}. Run /doctor for the settings change."
+
+ui/effort/index.ts
+	"Failed to set effort level: ${…}"
+	"Failed to set effort level: ${…}"
+	"Effort: ultracode — ${…} reasoning, workflows armed every turn${…}"
+	"${…} doesn't support reasoning effort."
+	"Set reasoning effort (shift+tab cycles the plain levels): /effort [${…}|auto] — ultracode is ${…} + workflows"
+	"Effort level set to auto${…}"
+
+ui/effort/settings.ts
+	"Quick, straightforward implementation with minimal overhead"
+	"Balanced approach with standard implementation and testing"
+	"Comprehensive implementation with extensive testing and documentation"
+	"Deeper reasoning than high, just below maximum (on supported models)"
+	"Maximum capability with deepest reasoning. May use excessive tokens resulting in long response times or overthinking. Use sparingly for the hardest tasks."
+	"Set effort level to ${…} (${…}): ${…}"
+	"saved as your default for new sessions"
+
+ui/model-default/index.ts
+	" and saved as your default for new sessions"
+	"Could not save ${…}/${…} as the default model: ${…}"
+
+ui/send-now/chord.ts
+	"ctrl+x ctrl+s to send now"

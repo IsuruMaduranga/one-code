@@ -17,7 +17,7 @@
 
 import { brandedId } from "../profile/brand.mjs";
 import { cronToolParameters, RECURRING_MAX_AGE_DAYS } from "./cron.ts";
-import type { CronText } from "../../background/text.ts";
+import type { CronText } from "../../tools/background/text.ts";
 
 export const AGENT_CRON_CHANNEL = brandedId("agent-cron");
 export const AGENT_CRON_FIRE_CHANNEL = brandedId("agent-cron-fire");
@@ -82,7 +82,7 @@ export interface AgentCronOwner {
 /**
  * The three cron tools for a child session, bound to its owner and the MAIN
  * session's bus. Same names, schemas and descriptions as the main session's
- * (background/index.ts), worded by the profile's `background.cron` group. A
+ * (tools/background/index.ts), worded by the profile's `background.cron` group. A
  * run that is not resident keeps all three, as in Claude Code, but its
  * cron_create refuses: a fire reaches only a background agent, and a run to
  * completion (a nested spawn, or any spawn in a one-shot run) ends first.

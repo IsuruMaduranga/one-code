@@ -14,7 +14,7 @@ import {
 	resolveServerConfig,
 	resolveWithinPlugin,
 	substitute,
-} from "../../extensions/lsp/plugin-servers.ts";
+} from "../../extensions/tools/lsp/plugin-servers.ts";
 
 const PLUGIN = { name: "demo", path: "/plugins/demo", dataRoot: "/data-root" };
 

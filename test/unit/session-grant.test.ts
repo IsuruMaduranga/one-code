@@ -7,7 +7,7 @@ import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { toPosixPath } from "../../extensions/lib/profile/paths.ts";
 import { decide } from "../../extensions/lib/rules/matcher.ts";
-import { sessionGrant } from "../../extensions/permissions/session-grant.ts";
+import { sessionGrant } from "../../extensions/safety/permissions/session-grant.ts";
 
 const CWD = "/home/user/project";
 const HOME = "/home/user";

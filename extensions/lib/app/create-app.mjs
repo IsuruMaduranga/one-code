@@ -28,7 +28,7 @@
  *    pi's changelog seen so a pin bump shows no pi release notes.
  *
  * Two subcommands never reach pi: `<bin> --version` (the app's version) and
- * `<bin> doctor` (the setup report, extensions/doctor/cli.ts).
+ * `<bin> doctor` (the setup report, extensions/commands/doctor/cli.ts).
  *
  * Plain JS with node builtins and this package's own .mjs modules only: it
  * runs in plain Node, under node_modules, before pi's TypeScript loader. pi is
@@ -194,7 +194,7 @@ export async function createApp({ appVersion, corePath, argv: processArgv, resol
 	}
 
 	/**
-	 * Load `extensions/doctor/cli.ts` with pi's own jiti and run it. pi's loader
+	 * Load `extensions/commands/doctor/cli.ts` with pi's own jiti and run it. pi's loader
 	 * aliases `@earendil-works/pi-ai` onto its compat entry for extension code;
 	 * mirrored here so the module resolves the same way it does inside a session.
 	 * Any failure prints a plain error and exits 2 — a diagnostic that crashes
@@ -230,7 +230,7 @@ export async function createApp({ appVersion, corePath, argv: processArgv, resol
 				// No compat entry (older pi-ai): plain resolution of the root entry serves.
 			}
 			const jiti = createJiti(import.meta.url, { moduleCache: false, interopDefault: true, alias });
-			const { runDoctorCli: run } = await jiti.import(join(corePath, "extensions", "doctor", "cli.ts"));
+			const { runDoctorCli: run } = await jiti.import(join(corePath, "extensions", "commands", "doctor", "cli.ts"));
 			return await run({
 				agentDir,
 				cwd: process.cwd(),

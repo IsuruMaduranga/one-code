@@ -13,7 +13,7 @@
  * the lead to the next waiter; a leader that is merely slow times out so a
  * stalled first request can never hold a whole fan-out.
  *
- * Pure (no pi imports); wired in subagents/runner.ts and workflow/agent-session.ts.
+ * Pure (no pi imports); wired in agents/subagents/runner.ts and agents/workflow/agent-session.ts.
  */
 
 type Entry =
@@ -22,7 +22,7 @@ type Entry =
 
 /**
  * The gate key for a child run: same prompt identity + cwd + model spec = same
- * request prefix. Both fan-out sites (subagents/runner.ts, workflow/agent-session.ts)
+ * request prefix. Both fan-out sites (agents/subagents/runner.ts, agents/workflow/agent-session.ts)
  * build their key here so the scheme cannot drift between them.
  */
 export function prefixWarmKey(promptIdentity: string, cwd: string, modelSpec: string | undefined): string {

@@ -2,11 +2,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import memoryExtension from "../../extensions/memory/index.ts";
-import effortExtension from "../../extensions/effort/index.ts";
-import permissionsExtension from "../../extensions/permissions/index.ts";
-import pluginsExtension from "../../extensions/plugins/index.ts";
-import skillExtension from "../../extensions/skill/index.ts";
+import memoryExtension from "../../extensions/context/memory/index.ts";
+import effortExtension from "../../extensions/ui/effort/index.ts";
+import permissionsExtension from "../../extensions/safety/permissions/index.ts";
+import pluginsExtension from "../../extensions/tools/plugins/index.ts";
+import skillExtension from "../../extensions/tools/skill/index.ts";
 import { invalidatePluginsCache } from "../../extensions/lib/plugins/plugins.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { productProjectSettingsPath } from "../../extensions/lib/profile/product-settings.ts";

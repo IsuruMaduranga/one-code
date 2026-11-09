@@ -13,7 +13,7 @@ import {
 	WRITE_DIFF_MAX_BYTES,
 	writeDetails,
 	writeResultLines,
-} from "../../extensions/tool-style/write-render.ts";
+} from "../../extensions/tools/tool-style/write-render.ts";
 
 const tagged: ThemeLike = {
 	fg: (color, text) => `<${color}>${text}</>`,
@@ -104,7 +104,7 @@ describe("the write tool's execution", () => {
 		const { tmpdir } = await import("node:os");
 		const { join } = await import("node:path");
 		const { createFakePi } = await import("./helpers/fake-pi.ts");
-		const { default: toolStyleExtension } = await import("../../extensions/tool-style/index.ts");
+		const { default: toolStyleExtension } = await import("../../extensions/tools/tool-style/index.ts");
 		const dir = mkdtempSync(join(tmpdir(), "write-details-"));
 		try {
 			const fake = createFakePi();

@@ -10,16 +10,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../extensions/lib/rules/auto-mode-actions.ts";
-import { CONSECUTIVE_BLOCK_LIMIT } from "../../extensions/permissions/auto-mode/pause.ts";
-import { classify } from "../../extensions/permissions/auto-mode/classifier.ts";
+import { CONSECUTIVE_BLOCK_LIMIT } from "../../extensions/safety/permissions/auto-mode/pause.ts";
+import { classify } from "../../extensions/safety/permissions/auto-mode/classifier.ts";
 import { MODE_CHANNEL } from "../../extensions/lib/rules/plan-mode-channels.ts";
 import { handBackWarning, type HandBackVerdict } from "../../extensions/lib/notify/notifications.ts";
-import permissionsExtension from "../../extensions/permissions/index.ts";
+import permissionsExtension from "../../extensions/safety/permissions/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { brand, envName } from "../../extensions/lib/profile/brand.mjs";
 
-vi.mock("../../extensions/permissions/auto-mode/classifier.ts", async (importOriginal) => ({
-	...(await importOriginal<typeof import("../../extensions/permissions/auto-mode/classifier.ts")>()),
+vi.mock("../../extensions/safety/permissions/auto-mode/classifier.ts", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../extensions/safety/permissions/auto-mode/classifier.ts")>()),
 	classify: vi.fn(async () => ({ decision: "block", reason: "stub: sends a credential off the machine", tier: "stage2" })),
 }));
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { askThroughDialogs, CHAT, DONE, type DialogUI, optionRow, TYPE_OWN } from "../../extensions/ask-user/dialogs.ts";
-import type { Question } from "../../extensions/ask-user/questions.ts";
+import { askThroughDialogs, CHAT, DONE, type DialogUI, optionRow, TYPE_OWN } from "../../extensions/tools/ask-user/dialogs.ts";
+import type { Question } from "../../extensions/tools/ask-user/questions.ts";
 
 /** A scripted RPC client: answers each select/input in order and records what it was shown. */
 function scripted(replies: Array<string | undefined>) {

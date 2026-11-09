@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { deferredAddendumText, stabilizeDeferredTools } from "../../extensions/lib/request/deferred.ts";
 import { wrapReminder } from "../../extensions/lib/request/reminders.ts";
-import { addendumNames, liftAddenda, supportsToolAdditions, withToolAdditions } from "../../extensions/tool-search/tool-additions.ts";
+import { addendumNames, liftAddenda, supportsToolAdditions, withToolAdditions } from "../../extensions/request/tool-search/tool-additions.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const TOOLS_AVAILABLE = requireText("toolSearch").toolsAvailable;

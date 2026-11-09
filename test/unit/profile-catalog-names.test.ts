@@ -9,9 +9,9 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { BUNDLED_SKILLS_DIR } from "../../extensions/lib/plugins/skill-scan.ts";
-import { ARGUMENTS_AND_FLAGS, codeReviewCell, REVIEW_EFFORTS } from "../../extensions/skill/code-review.ts";
+import { ARGUMENTS_AND_FLAGS, codeReviewCell, REVIEW_EFFORTS } from "../../extensions/tools/skill/code-review.ts";
 import { BUNDLED_AGENTS_DIR } from "../../extensions/lib/agents/agent-catalog.ts";
-import { DEFAULT_AGENT } from "../../extensions/subagents/runs.ts";
+import { DEFAULT_AGENT } from "../../extensions/agents/subagents/runs.ts";
 import { PROMPT_TIERS } from "../../extensions/lib/models/model-tier.ts";
 
 

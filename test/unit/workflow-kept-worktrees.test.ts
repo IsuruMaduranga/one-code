@@ -8,11 +8,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
-import { AgentRunner } from "../../extensions/workflow/agent-session.ts";
-import { buildRunReport, WorkflowRunManager } from "../../extensions/workflow/run-manager.ts";
-import { buildDetail } from "../../extensions/workflow/viewer.ts";
+import { AgentRunner } from "../../extensions/agents/workflow/agent-session.ts";
+import { buildRunReport, WorkflowRunManager } from "../../extensions/agents/workflow/run-manager.ts";
+import { buildDetail } from "../../extensions/agents/workflow/viewer.ts";
 
-vi.mock("../../extensions/workflow/agent-session.ts", () => ({ AgentRunner: { create: vi.fn() } }));
+vi.mock("../../extensions/agents/workflow/agent-session.ts", () => ({ AgentRunner: { create: vi.fn() } }));
 
 const META = "export const meta = {name: 'kept', description: 'kept worktrees'}\n";
 

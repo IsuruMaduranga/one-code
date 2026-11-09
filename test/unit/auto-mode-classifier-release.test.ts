@@ -5,7 +5,7 @@ vi.mock("@earendil-works/pi-ai", async (importOriginal) => ({
 	cleanupSessionResources: vi.fn(),
 }));
 import { cleanupSessionResources } from "@earendil-works/pi-ai";
-import { classifierCacheKey, releaseClassifierResources } from "../../extensions/permissions/auto-mode/classifier.ts";
+import { classifierCacheKey, releaseClassifierResources } from "../../extensions/safety/permissions/auto-mode/classifier.ts";
 import { releaseSideCalls } from "../../extensions/lib/side-calls/side-call-run.ts";
 import { SIDE_CALL_KINDS } from "../../extensions/lib/side-calls/side-call-usage.ts";
 

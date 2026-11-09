@@ -7,7 +7,7 @@
  * test/unit/worktree-powershell-guards.test.ts.
  */
 import { describe, expect, it } from "vitest";
-import type { GitTargetProblem, StashRisk } from "../../extensions/worktree/text.ts";
+import type { GitTargetProblem, StashRisk } from "../../extensions/safety/worktree/text.ts";
 import { worktreeGuard } from "../text/worktree/guard.ts";
 
 const WT = "/repo/.claude/worktrees/wt1";

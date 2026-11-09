@@ -1,5 +1,5 @@
 /**
- * mcp/index.ts wiring (M15): adoptConnection (tool registration, resource
+ * tools/mcp/index.ts wiring (M15): adoptConnection (tool registration, resource
  * tools, the onclose failure path), reconnect (through the real /mcp panel),
  * the instructions reminder add/remove, and the MCP_TOOLS_CHANNEL publish.
  *
@@ -16,14 +16,14 @@ import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { type Tool, validateToolArguments } from "@earendil-works/pi-ai";
-import * as mcpClient from "../../extensions/mcp/client.ts";
-import mcpExtension from "../../extensions/mcp/index.ts";
-import { noMcpServersMessage } from "../../extensions/mcp/config.ts";
+import * as mcpClient from "../../extensions/tools/mcp/client.ts";
+import mcpExtension from "../../extensions/tools/mcp/index.ts";
+import { noMcpServersMessage } from "../../extensions/tools/mcp/config.ts";
 import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/plugins/mcp-share.ts";
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../../extensions/lib/plugins/mcp-status.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/request/reminders.ts";
-import { mcpFacts, type McpSnapshot } from "../../extensions/mcp/announce.ts";
-import type { McpFailure } from "../../extensions/mcp/text.ts";
+import { mcpFacts, type McpSnapshot } from "../../extensions/tools/mcp/announce.ts";
+import type { McpFailure } from "../../extensions/tools/mcp/text.ts";
 import { mcp as mcpText } from "../text/mcp/index.ts";
 
 /** Render one request inside an epoch whose message 1 described `told`; the blocks MCP adds to its tail. */
@@ -59,8 +59,8 @@ vi.mock("node:os", async (importOriginal) => {
 	return { ...actual, homedir: () => state.fakeHome, default: { ...actualDefault, homedir: () => state.fakeHome } };
 });
 
-vi.mock("../../extensions/mcp/client.ts", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("../../extensions/mcp/client.ts")>();
+vi.mock("../../extensions/tools/mcp/client.ts", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../extensions/tools/mcp/client.ts")>();
 	return {
 		...actual,
 		connect: vi.fn(async (server: { name: string }) => {
@@ -111,7 +111,7 @@ describe("mcp wiring", () => {
 
 	// User-scope servers (~/.claude.json) never need consent, so session_start
 	// with hasUI:false both skips the trust dialog AND awaits the whole
-	// connect (mcp/index.ts's non-UI path) — deterministic, no polling needed.
+	// connect (tools/mcp/index.ts's non-UI path) — deterministic, no polling needed.
 	const boot = async () => {
 		mcpExtension(fake.pi as never);
 		await fake.fireOne("session_start", { reason: "startup" }, createFakeCtx({ cwd, hasUI: false }));
@@ -627,7 +627,7 @@ describe("mcp wiring", () => {
 		await fake.fireOne("session_start", { reason: "startup" }, createFakeCtx({ cwd, hasUI: true, ui: { select: vi.fn(async () => "Use this MCP server") } }));
 		await vi.waitFor(() => expect(state.connectCalls).toEqual(["p"]));
 		// The approval is gone (the store deleted, a new process): Reconnect must ask again.
-		const { approvalStorePath, resetMcpTrustSessionState } = await import("../../extensions/mcp/trust.ts");
+		const { approvalStorePath, resetMcpTrustSessionState } = await import("../../extensions/tools/mcp/trust.ts");
 		expect(approvalStorePath().startsWith(home)).toBe(true); // never the real store
 		rmSync(approvalStorePath(), { force: true });
 		resetMcpTrustSessionState();

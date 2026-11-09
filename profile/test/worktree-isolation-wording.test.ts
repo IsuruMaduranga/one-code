@@ -7,7 +7,7 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { describeIsolation, worktreeBashWriteGuardReason, worktreeWriteGuardReason } from "../../extensions/lib/agents/worktree-isolation.ts";
-import type { WorktreeGuardRefusal } from "../../extensions/worktree/text.ts";
+import type { WorktreeGuardRefusal } from "../../extensions/safety/worktree/text.ts";
 import { worktreeGuard } from "../text/worktree/guard.ts";
 
 const worded = (refusal: WorktreeGuardRefusal | undefined) => refusal && worktreeGuard.refusal(refusal);

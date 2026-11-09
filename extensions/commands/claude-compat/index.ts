@@ -1,0 +1,58 @@
+/**
+ * claude-compat extension — points pi's resource discovery at Claude Code's
+ * directory layout:
+ *
+ *   ~/.claude/skills, <project>/.claude/skills     → skills (same Agent Skills standard)
+ *   ~/.agents/skills, <project>/.agents/skills     → skills (the cross-tool Agent Skills
+ *                                                    directory, which Claude Code also reads)
+ *   ~/.claude/commands, <project>/.claude/commands → slash commands (prompt templates;
+ *                                                    Claude Code's $ARGUMENTS works as-is)
+ *
+ * It also points discovery at the catalog of skills bundled with this package
+ * (`<package>/profile/skills`) — Claude Code's self-contained built-in skills, which
+ * ship inside its binary rather than on disk, so nothing else would surface
+ * them. See working-docs/decisions/skills-plugins.md and working-docs/findings (the extraction
+ * process is recorded in .claude/skills/extract-cc-skills/).
+ *
+ * CLAUDE.md needs no handling — pi discovers it natively alongside AGENTS.md.
+ */
+
+import { feature } from "../../lib/profile/feature.ts";
+import { existsSync } from "node:fs";
+import os from "node:os";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+import { BUNDLED_SKILLS_DIR, commandDirs, skillSourceDirs } from "../../lib/plugins/skill-scan.ts";
+
+/**
+ * `claudeDir` is Claude Code's config dir (honours CLAUDE_CONFIG_DIR), defaulting
+ * to `home/.claude`; `home` itself is used only for the unrelated
+ * `~/.agents/skills` cross-tool convention, which Claude Code does not relocate
+ * via that env var.
+ */
+export function claudeResourcePaths(cwd: string, home: string, bundledSkillsDir?: string): { skillPaths: string[]; promptPaths: string[] } {
+	// The folders come from the source view (lib/plugins/skill-scan.ts, lib/profile/sources.ts).
+	const candidates = {
+		skillPaths: [
+			...skillSourceDirs(cwd, home).map(({ dir }) => dir),
+			// The bundled catalog is listed LAST so it loses a name collision:
+			// pi keeps the first-loaded skill for a given name, so a user or
+			// project skill of the same name wins and the bundled one is the
+			// fallback (see working-docs/decisions/skills-plugins.md).
+			...(bundledSkillsDir ? [bundledSkillsDir] : []),
+		],
+		promptPaths: commandDirs(cwd, home),
+	};
+	return {
+		skillPaths: candidates.skillPaths.filter((p) => existsSync(p)),
+		promptPaths: candidates.promptPaths.filter((p) => existsSync(p)),
+	};
+}
+
+function claudeCompatExtension(pi: ExtensionAPI) {
+	pi.on("resources_discover", (event) => {
+		return claudeResourcePaths(event.cwd, os.homedir(), BUNDLED_SKILLS_DIR);
+	});
+}
+
+export default feature("claude-compat", claudeCompatExtension);

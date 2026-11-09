@@ -1,5 +1,5 @@
 /**
- * The session a workflow `agent()` call opens (workflow/agent-session.ts
+ * The session a workflow `agent()` call opens (agents/workflow/agent-session.ts
  * AgentRunner.run) is the one a subagent gets
  * (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 H2, H3, M6): the agent file's
  * `tools` keeps `structured_output`, its `disallowedTools` removes tools, an
@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { AgentSession, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { AgentRunner } from "../../extensions/workflow/agent-session.ts";
+import { AgentRunner } from "../../extensions/agents/workflow/agent-session.ts";
 import { persistedFileBlock, PREVIEW_BYTES } from "../../extensions/lib/request/persisted-output.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { projectConfigDirName } from "../../extensions/lib/profile/sources.ts";

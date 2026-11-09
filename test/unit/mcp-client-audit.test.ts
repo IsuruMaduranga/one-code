@@ -7,10 +7,10 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { beginInteractiveAuth, callTool, connect, finishInteractiveAuth, isUnauthorized, readResource, readResourceDir, type Connection } from "../../extensions/mcp/client.ts";
-import { failureOf } from "../../extensions/mcp/failure.ts";
-import { silentProvider } from "../../extensions/mcp/oauth/flow.ts";
-import { McpOAuthProvider } from "../../extensions/mcp/oauth/provider.ts";
+import { beginInteractiveAuth, callTool, connect, finishInteractiveAuth, isUnauthorized, readResource, readResourceDir, type Connection } from "../../extensions/tools/mcp/client.ts";
+import { failureOf } from "../../extensions/tools/mcp/failure.ts";
+import { silentProvider } from "../../extensions/tools/mcp/oauth/flow.ts";
+import { McpOAuthProvider } from "../../extensions/tools/mcp/oauth/provider.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 let home: string;

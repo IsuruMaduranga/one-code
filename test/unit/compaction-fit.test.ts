@@ -19,8 +19,8 @@ import {
 	replayFits,
 	STANDALONE_SUMMARY_TOKENS,
 	withoutUsage,
-} from "../../extensions/compaction/fit.ts";
-import { standaloneRequest } from "../../extensions/compaction/index.ts";
+} from "../../extensions/context/compaction/fit.ts";
+import { standaloneRequest } from "../../extensions/context/compaction/index.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const compaction = requireText("compaction");

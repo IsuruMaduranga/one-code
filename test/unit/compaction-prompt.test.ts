@@ -4,7 +4,7 @@
  * profile/test/profile-compaction-text.test.ts.
  */
 import { describe, expect, it } from "vitest";
-import { extractSummary } from "../../extensions/compaction/prompt.ts";
+import { extractSummary } from "../../extensions/context/compaction/prompt.ts";
 
 describe("extractSummary", () => {
 	it("keeps only the summary block, dropping the analysis scratch work", () => {

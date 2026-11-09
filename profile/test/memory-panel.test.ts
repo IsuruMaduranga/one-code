@@ -2,8 +2,8 @@ import { join } from "node:path";
 import { sources } from "../claude-code/sources.ts";
 import { describe, expect, it } from "vitest";
 import { claudeMdLimitWarning, combinedLimitWarning } from "../../extensions/lib/context/memory.ts";
-import type { MemoryEntry } from "../../extensions/memory/entries.ts";
-import { editorHint, memoryDisplayPath, resolveOpen } from "../../extensions/memory/open-external.ts";
+import type { MemoryEntry } from "../../extensions/context/memory/entries.ts";
+import { editorHint, memoryDisplayPath, resolveOpen } from "../../extensions/context/memory/open-external.ts";
 import {
 	applyMemoryKey,
 	decodeMemoryKey,
@@ -14,7 +14,7 @@ import {
 	settingChanges,
 	type ModeView,
 	type PanelPaint,
-} from "../../extensions/memory/panel.ts";
+} from "../../extensions/context/memory/panel.ts";
 
 const plainPaint: PanelPaint = { fg: (_c, t) => t, bold: (t) => t };
 /** One Code's "Config sources" switch, true for Claude-compatible. */

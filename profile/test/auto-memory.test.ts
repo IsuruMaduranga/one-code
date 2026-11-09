@@ -4,9 +4,9 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { autoMemoryEnabled, autoMemoryFromEnv, readAutoMemory, resetAutoMemoryForTest, savedAutoMemory, savedAutoMemorySource } from "../../extensions/lib/context/auto-memory.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
-import { readMemoryIndex } from "../../extensions/claude-context/memory-index.ts";
+import { readMemoryIndex } from "../../extensions/context/claude-context/memory-index.ts";
 import { projectMemoryDir } from "../../extensions/lib/context/memory.ts";
-import { buildMemoryEntries } from "../../extensions/memory/entries.ts";
+import { buildMemoryEntries } from "../../extensions/context/memory/entries.ts";
 import { stubHome } from "../../test/unit/helpers/home.ts";
 
 let root: string;

@@ -12,7 +12,7 @@
  * resolution applies). It answers about One Code only, and when One Code lacks
  * something it suggests how to add it, down to a custom pi extension. The base
  * gathers the input and filters repository-supplied names
- * (extensions/subagents/guide-agent.ts).
+ * (extensions/agents/subagents/guide-agent.ts).
  */
 
 import type { GuideInput, GuideInstall, GuideSetup, SubagentsText } from "../../../extensions/sdk/profile.ts";

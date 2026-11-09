@@ -6,7 +6,7 @@ import {
 	skillListingBudget,
 	skillListingText,
 	usageScore,
-} from "../../extensions/skill/listing.ts";
+} from "../../extensions/tools/skill/listing.ts";
 
 describe("skillListingText (C4)", () => {
 	it("carries a multi-line description whole, so the 'Use when' trigger survives", () => {

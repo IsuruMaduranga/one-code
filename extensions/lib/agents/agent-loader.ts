@@ -2,7 +2,7 @@
  * Shared in-process agent wiring: the one place that builds a pi
  * `ModelRuntime` and a `DefaultResourceLoader` for an agent session that runs
  * inside this process. Used by both the workflow runner
- * (`extensions/workflow/agent-session.ts`) and the subagent runner.
+ * (`extensions/agents/workflow/agent-session.ts`) and the subagent runner.
  *
  * Loaders are built with `noExtensions: true` so a child never auto-discovers
  * the whole One Code package (which would recurse into the subagent/workflow

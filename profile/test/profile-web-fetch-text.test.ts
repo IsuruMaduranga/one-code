@@ -5,7 +5,7 @@
  * snapshot pins the bytes of every other result.
  */
 import { describe, expect, it } from "vitest";
-import type { ReaderFailure } from "../../extensions/web-fetch/text.ts";
+import type { ReaderFailure } from "../../extensions/tools/web-fetch/text.ts";
 import { webFetchText } from "../text/web-fetch/index.ts";
 import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
 

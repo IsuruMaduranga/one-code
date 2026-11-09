@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { destructiveCategory, gitStatusMeta, gitStatusMetaArgs, reachesIgnoredFiles, wantsGitStatusMeta } from "../../extensions/permissions/auto-mode/git-status-meta.ts";
-import { renderTranscript } from "../../extensions/permissions/auto-mode/transcript.ts";
+import { destructiveCategory, gitStatusMeta, gitStatusMetaArgs, reachesIgnoredFiles, wantsGitStatusMeta } from "../../extensions/safety/permissions/auto-mode/git-status-meta.ts";
+import { renderTranscript } from "../../extensions/safety/permissions/auto-mode/transcript.ts";
 
 describe("the transcript's gitStatus line", () => {
 	it("goes above bash commands that can destroy uncommitted work", () => {

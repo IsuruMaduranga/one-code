@@ -1,19 +1,19 @@
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import compactionExtension from "../../extensions/compaction/index.ts";
-import hooksExtension from "../../extensions/hooks/index.ts";
-import { runHookCommand } from "../../extensions/hooks/executor.ts";
+import compactionExtension from "../../extensions/context/compaction/index.ts";
+import hooksExtension from "../../extensions/safety/hooks/index.ts";
+import { runHookCommand } from "../../extensions/safety/hooks/executor.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
-vi.mock("../../extensions/hooks/executor.ts", () => ({ runHookCommand: vi.fn() }));
-vi.mock("../../extensions/hooks/settings.ts", () => ({
+vi.mock("../../extensions/safety/hooks/executor.ts", () => ({ runHookCommand: vi.fn() }));
+vi.mock("../../extensions/safety/hooks/settings.ts", () => ({
 	loadHookSettings: () => ({
 		diagnostics: [],
 		sources: [{ scope: "user", config: { PreCompact: [{ hooks: [{ type: "command", command: "preserve-context" }] }] } }],
 	}),
 }));
-vi.mock("../../extensions/hooks/plugin-hooks.ts", () => ({ loadPluginHooks: () => [] }));
+vi.mock("../../extensions/safety/hooks/plugin-hooks.ts", () => ({ loadPluginHooks: () => [] }));
 
 const complete = vi.mocked(completeSimple);
 const hook = vi.mocked(runHookCommand);

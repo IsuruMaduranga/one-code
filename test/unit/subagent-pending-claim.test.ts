@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
-import { pendingClaimReminder } from "../../extensions/subagents/pending-claim.ts";
+import { pendingClaimReminder } from "../../extensions/agents/subagents/pending-claim.ts";
 
 describe("pendingClaimReminder", () => {
 	it("says nothing when the turn ended with no run pending", () => {

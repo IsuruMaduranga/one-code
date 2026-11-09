@@ -12,7 +12,7 @@ import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { userConfigDir } from "../../extensions/lib/profile/sources.ts";
 import { BUNDLED_AGENTS_DIR, parseAgentFile } from "../../extensions/lib/agents/agent-catalog.ts";
 import * as defaults from "../../extensions/lib/models/subagent-default.ts";
-import subagentsExtension from "../../extensions/subagents/index.ts";
+import subagentsExtension from "../../extensions/agents/subagents/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 const session = { provider: "openai", id: "gpt-5-main", name: "gpt-5-main", input: ["text"], cost: { input: 2, output: 8 } };

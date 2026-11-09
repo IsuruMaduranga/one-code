@@ -17,7 +17,7 @@ import { decide } from "../../extensions/lib/rules/matcher.ts";
 import { ALLOWLIST_ESSENTIALS, agentToolOptions } from "../../extensions/lib/agents/agent-catalog.ts";
 import { PINNED_TOOLS } from "../../extensions/lib/profile/profile.ts";
 import { WITHHOLD_CHANNEL } from "../../extensions/lib/request/deferred.ts";
-import toolSearchExtension from "../../extensions/tool-search/index.ts";
+import toolSearchExtension from "../../extensions/request/tool-search/index.ts";
 import { createFakePi } from "./helpers/fake-pi.ts";
 import { makeToolSearchFakePi } from "./helpers/tool-search-fake-pi.ts";
 import { envName } from "../../extensions/lib/profile/brand.mjs";
@@ -73,12 +73,12 @@ describe("resolveProfile", () => {
 		use({ childExtensions: ["ballerina/index.ts"] });
 		const paths = childExtensionPaths();
 		expect(paths.at(-1)).toBe("/profile/ballerina/index.ts");
-		expect(endsWith(paths, "notebook/index.ts")).toBe(true);
+		expect(endsWith(paths, "tools/notebook/index.ts")).toBe(true);
 	});
 
 	it("leaves a turned-off feature's entries out of the child list", () => {
 		use({ features: { notebook: false } });
-		expect(endsWith(childExtensionPaths(), "notebook/index.ts")).toBe(false);
+		expect(endsWith(childExtensionPaths(), "tools/notebook/index.ts")).toBe(false);
 	});
 });
 

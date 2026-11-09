@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { htmlToMarkdown, isSameHost, normalizeUrl, paginate } from "../../extensions/web-fetch/extract.ts";
+import { htmlToMarkdown, isSameHost, normalizeUrl, paginate } from "../../extensions/tools/web-fetch/extract.ts";
 
 describe("normalizeUrl", () => {
 	it("upgrades http to https and says so", () => {

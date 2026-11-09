@@ -1,13 +1,13 @@
 /**
  * The PowerShell worktree guard's decisions
- * (extensions/worktree/powershell-guards.ts): which lines a worktree-isolated
+ * (extensions/safety/worktree/powershell-guards.ts): which lines a worktree-isolated
  * session refuses, and why, as the refusal data the profile words. One Code's
  * wording of each refusal is tested in
  * profile/test/worktree-guards-wording.test.ts.
  */
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { worktreePowershellGuardReason } from "../../extensions/worktree/powershell-guards.ts";
+import { worktreePowershellGuardReason } from "../../extensions/safety/worktree/powershell-guards.ts";
 
 const WT = "/repo/.claude/worktrees/wt1";
 const guard = (command: string) => worktreePowershellGuardReason({ command, worktreePath: WT, sharedRoot: "/repo" });

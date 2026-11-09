@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { pinReleaseDates } from "./catalog-fixture.ts";
 import { MODEL_UNUSABLE_CHANNEL } from "../../extensions/lib/models/model-unusable.ts";
 import { productSettingsPath, readSuggestNewerModels } from "../../extensions/lib/profile/product-settings.ts";
-import newerModelExtension from "../../extensions/newer-model/index.ts";
+import newerModelExtension from "../../extensions/ui/newer-model/index.ts";
 import { NOTICE_CHANNEL } from "../../extensions/lib/notify/notices.ts";
 import { createFakeCtx, createFakePi, flushNotices } from "./helpers/fake-pi.ts";
 import { envName } from "../../extensions/lib/profile/brand.mjs";
@@ -132,7 +132,7 @@ describe("newer-model notices", () => {
 	});
 	it("registers the notice extension in the shipped package", () => {
 		const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
-		expect(pkg.pi.extensions).toContain("extensions/newer-model/index.ts");
+		expect(pkg.pi.extensions).toContain("extensions/ui/newer-model/index.ts");
 	});
 });
 

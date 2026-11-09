@@ -3,9 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterAll, describe, expect, it } from "vitest";
-import { exchangeMessages } from "../../extensions/btw/prompt.ts";
+import { exchangeMessages } from "../../extensions/agents/btw/prompt.ts";
 import { BTW_FORK_CHANNEL, btwForkedLine, btwForkName, btwForkRecord, btwForkTaskId, type BtwForkRequest, requestBtwFork } from "../../extensions/lib/side-calls/btw-fork.ts";
-import { newChildSessionManager } from "../../extensions/subagents/runner.ts";
+import { newChildSessionManager } from "../../extensions/agents/subagents/runner.ts";
 
 function bus() {
 	const listeners = new Map<string, ((data: unknown) => void)[]>();

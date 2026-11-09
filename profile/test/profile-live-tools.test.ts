@@ -11,7 +11,7 @@ import { TOOL_FEATURES } from "../../extensions/lib/profile/features.ts";
 import type { LiveTools } from "../../extensions/lib/profile/live-tools.ts";
 import type { DescriptionForm } from "../../extensions/lib/profile/tool-variants.ts";
 import type { ShellBlock } from "../../extensions/lib/shell-run/shell-text.ts";
-import type { FixPromptInput } from "../../extensions/doctor/text.ts";
+import type { FixPromptInput } from "../../extensions/commands/doctor/text.ts";
 import { profile } from "../index.ts";
 import { PROMPT_TIERS } from "../../extensions/lib/models/model-tier.ts";
 

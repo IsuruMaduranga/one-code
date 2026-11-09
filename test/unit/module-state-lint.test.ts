@@ -17,10 +17,10 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 const ALLOWED: Record<string, string> = {
-	"extensions/permissions/auto-mode/history.ts provenanceMemo": "memo of a pure function of the transcript",
-	"extensions/hooks/plugin-hooks.ts cache": "mtime cache of plugin hooks.json files",
-	"extensions/hooks/settings.ts cache": "mtime cache of the hook settings files",
-	"extensions/hooks/trust.ts pendingPrompts": "trust prompts in flight, shared by concurrent dispatches; the decisions are process state",
+	"extensions/safety/permissions/auto-mode/history.ts provenanceMemo": "memo of a pure function of the transcript",
+	"extensions/safety/hooks/plugin-hooks.ts cache": "mtime cache of plugin hooks.json files",
+	"extensions/safety/hooks/settings.ts cache": "mtime cache of the hook settings files",
+	"extensions/safety/hooks/trust.ts pendingPrompts": "trust prompts in flight, shared by concurrent dispatches; the decisions are process state",
 	"extensions/lib/request/anthropic-auth.ts authCache": "auth.json read, keyed by its mtime",
 	"extensions/lib/core/atomic-write.ts sequence": "temp-file name counter, unique within the process",
 	"extensions/lib/context/claude-rules.ts touched": "stat cache of rule files",
@@ -41,14 +41,14 @@ const ALLOWED: Record<string, string> = {
 	"extensions/lib/shell-run/shell-spawn.ts cachedBash": "the resolved bash binary",
 	"extensions/lib/shell-run/shell-spawn.ts cachedPowerShell": "the resolved PowerShell binary",
 	"extensions/lib/agents/worktree-isolation.ts active": "live isolation worktrees, registered and read inside one extension's import graph (file header)",
-	"extensions/mcp/client.ts sdkPromise": "the MCP SDK, imported once",
-	"extensions/mcp/client.ts unauthorizedClass": "a class from the SDK, resolved once",
-	"extensions/mcp/client.ts httpErrorClass": "a class from the SDK, resolved once",
-	"extensions/mcp/client.ts sseErrorClass": "a class from the SDK, resolved once",
-	"extensions/mcp/trust.ts pendingPrompts": "trust prompts in flight, shared by concurrent callers; the decisions are process state",
+	"extensions/tools/mcp/client.ts sdkPromise": "the MCP SDK, imported once",
+	"extensions/tools/mcp/client.ts unauthorizedClass": "a class from the SDK, resolved once",
+	"extensions/tools/mcp/client.ts httpErrorClass": "a class from the SDK, resolved once",
+	"extensions/tools/mcp/client.ts sseErrorClass": "a class from the SDK, resolved once",
+	"extensions/tools/mcp/trust.ts pendingPrompts": "trust prompts in flight, shared by concurrent callers; the decisions are process state",
 	"extensions/lib/shell/powershell-rules.ts lastSplit": "memo of the last parsed line",
 	"extensions/lib/ui/prose.ts ctorPromise": "a renderer class, imported once",
-	"extensions/web-fetch/extract.ts libsPromise": "the reader libraries, imported once",
+	"extensions/tools/web-fetch/extract.ts libsPromise": "the reader libraries, imported once",
 };
 
 function sources(dir: string, out: string[] = []): string[] {

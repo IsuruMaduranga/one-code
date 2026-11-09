@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFER_CHANNEL, deferralEnabled, loaderUnavailableReminderText, WITHHOLD_CHANNEL } from "../../extensions/lib/request/deferred.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
-import toolSearchExtension from "../../extensions/tool-search/index.ts";
+import toolSearchExtension from "../../extensions/request/tool-search/index.ts";
 import { makeToolSearchFakePi } from "./helpers/tool-search-fake-pi.ts";
 
 /**

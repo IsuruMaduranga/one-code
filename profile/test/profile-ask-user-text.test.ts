@@ -4,7 +4,7 @@
  * notes, and the decline that lists the questions back.
  */
 import { describe, expect, it } from "vitest";
-import type { Answer, Question } from "../../extensions/ask-user/questions.ts";
+import type { Answer, Question } from "../../extensions/tools/ask-user/questions.ts";
 import { answerPairs, formatAnswers, formatDecline } from "../text/ask-user/index.ts";
 
 const previewQuestion: Question = {

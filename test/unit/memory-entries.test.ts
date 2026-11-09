@@ -1,5 +1,5 @@
 /**
- * The /memory panel's rows (memory/entries.ts): the instruction files a user
+ * The /memory panel's rows (context/memory/entries.ts): the instruction files a user
  * writes, for the profile in force (lib/context/instructions.ts instructionTargets),
  * always offered; ancestors by path before the project's own; the auto-memory
  * folder last. With One Code's source provider (Claude Code's files):

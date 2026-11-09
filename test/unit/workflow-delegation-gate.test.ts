@@ -5,7 +5,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
-import { judgeWorkflowDelegation } from "../../extensions/workflow/agent-session.ts";
+import { judgeWorkflowDelegation } from "../../extensions/agents/workflow/agent-session.ts";
 
 describe("judgeWorkflowDelegation", () => {
 	const base = { prompt: "delete the prod database", agentType: "general-purpose", label: "cleanup", cwd: "/repo" };

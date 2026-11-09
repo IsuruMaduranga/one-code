@@ -27,7 +27,7 @@ export const HARNESS_GIT_NO_HOOKS: readonly string[] = ["-c", `core.hooksPath=${
  * `git status` output for `cwd` with the given arguments, or undefined when
  * git could not say (not a repo, git missing, timeout). Asynchronous so the
  * tool_call hook it runs from does not stall the event loop; used for the
- * classifier transcript's gitStatus line (permissions/auto-mode/git-status-meta.ts).
+ * classifier transcript's gitStatus line (safety/permissions/auto-mode/git-status-meta.ts).
  */
 export function gitStatusOutput(cwd: string, args: readonly string[]): Promise<string | undefined> {
 	return new Promise((resolvePromise) => {

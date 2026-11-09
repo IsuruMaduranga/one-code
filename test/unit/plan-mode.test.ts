@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { visibleWidth } from "../../extensions/lib/ui/text-width.ts";
 import { wrapProse } from "../../extensions/lib/ui/tui-render.ts";
-import { randomSlug } from "../../extensions/plan-mode/slug.ts";
+import { randomSlug } from "../../extensions/safety/plan-mode/slug.ts";
 import {
 	clampOffset,
 	decodeViewerKey,
@@ -10,7 +10,7 @@ import {
 	renderPlanViewer,
 	runPlanApproval,
 	selectPlanChoice,
-} from "../../extensions/plan-mode/viewer.ts";
+} from "../../extensions/safety/plan-mode/viewer.ts";
 
 /** The dialog's default choice list when auto mode is available (auto mode leads). */
 const CHOICES = [

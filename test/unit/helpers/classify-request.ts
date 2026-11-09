@@ -3,7 +3,7 @@
  * (auto-mode-classifier and One Code's auto-mode-classifier-wording).
  */
 import { loadAutoModeConfig } from "../../../extensions/lib/rules/auto-mode-config.ts";
-import type { ClassifyRequest } from "../../../extensions/permissions/auto-mode/prompt.ts";
+import type { ClassifyRequest } from "../../../extensions/safety/permissions/auto-mode/prompt.ts";
 
 /** The built-in Environment: no settings file at this home, so the profile's default. */
 export const DEFAULT_ENVIRONMENT = loadAutoModeConfig("/nonexistent-home-for-tests").environment;

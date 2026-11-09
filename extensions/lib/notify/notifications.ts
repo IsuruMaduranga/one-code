@@ -15,7 +15,7 @@
  *    that message — CC's two-message split (working-docs/decisions/subagents-workflows.md).
  *
  * Wakeups are neither: CC re-invokes the session with the scheduled prompt
- * verbatim (findings §21), so `background/wakeup.ts` sends the prompt as-is.
+ * verbatim (findings §21), so `tools/background/wakeup.ts` sends the prompt as-is.
  *
  * On the wire every `<task-notification>` still sits under CC's
  * `[SYSTEM NOTIFICATION - NOT USER INPUT]` preamble (a variant when it rides
@@ -606,7 +606,7 @@ export const DEFAULT_COALESCE_MS = 250;
  * with Claude Code's one-line render. Every later notification goes that way. Its turn skips
  * `before_agent_start` too, and pi drops a run's prompt when the run settles,
  * so the system-prompt extension installs the prompt for it from
- * `context_with_system` (`system-prompt/idle-turn.ts`). Upstream ask:
+ * `context_with_system` (`request/system-prompt/idle-turn.ts`). Upstream ask:
  * working-docs/upstream_prs.md #17.
  *
  * pi 1.2.0 fires `before_agent_start` for that run too, so there every

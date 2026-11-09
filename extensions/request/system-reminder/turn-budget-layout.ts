@@ -1,0 +1,178 @@
+/**
+ * Claude Code's per-turn `<total_tokens>` placements (pure). One Code stores
+ * the line the way it always has, so a resumed session rebuilds the same
+ * bytes: a raw marker block after the text of every user message after the
+ * first (context-budget's `sticky-append`), and the countdown as its own
+ * block at the end of every tool result (persisted by system-reminder). Two
+ * steps turn those into Claude Code's shapes:
+ *
+ * - at `context` time, while a tool result's blocks are still separate and
+ *   keyed by its call id (`resolveCountdowns`): on a model that takes a
+ *   mid-conversation system message the countdown block leaves the result and
+ *   its value is kept by call id; elsewhere it is framed, a blank line after
+ *   the output once pi joins the blocks (Claude Code's Haiku shape);
+ * - on the final body (`withTurnBudgetMessages`): on a system-role model a
+ *   system message with the line follows each later prompt and each
+ *   tool-result message (the lowest countdown it carries), and on first-party
+ *   Fable the `clear_at` nudge follows the latter; elsewhere the framed block
+ *   goes before the text of each later prompt, with a trailing newline.
+ *
+ * Nothing is parsed out of joined text, so a tool's own output that contains
+ * such a line is never touched.
+ */
+
+import { reseatMessageMark } from "../../lib/request/anthropic-payload.ts";
+import { wrapReminder } from "../../lib/request/reminders.ts";
+import { messagesKey, type SystemRoleLayout, systemMessage, type WireMessage, type WirePart, byWireCallId, withoutParts } from "../../lib/request/system-role.ts";
+import { totalTokensBlock } from "../../lib/context/budget.ts";
+import { profileText } from "../../lib/profile/profile.ts";
+import type { ContextBudgetText } from "../../context/context-budget/text.ts";
+import { around, fillOf, memoOn } from "../../lib/profile/template-probe.ts";
+
+/** The budget line for `left` tokens, in the profile's words; undefined without context-budget's words (no lines then). */
+function budgetLine(left: number): string | undefined {
+	const words = profileText().contextBudget;
+	return words && totalTokensBlock(words, left);
+}
+
+/** The text around the count in a budget line, per context-budget words object. */
+const budgetFrame = memoOn((words: ContextBudgetText) => around((left) => totalTokensBlock(words, Number(left)), "987654321"));
+
+/** The tokens left in a stored budget line, exactly as `budgetLine` writes it, else undefined. */
+function tokensLeftIn(text: string): number | undefined {
+	const words = profileText().contextBudget;
+	const digits = words && fillOf(text, budgetFrame(words));
+	return digits !== undefined && /^\d+$/.test(digits) ? Number(digits) : undefined;
+}
+
+/** Claude Code's Fable nudge after a tool result's budget message, in the profile's words. */
+export function clearAtNudge(): string {
+	return profileText().contextBudget?.clearAtNudge ?? "";
+}
+
+type StoredBlock = { type?: string; text?: string };
+type StoredMessage = { role: string; toolCallId?: string; content?: unknown };
+
+/**
+ * The context-time step over pi's messages: each tool result's countdown block
+ * (the last whole block that is the line) is lifted out on a system-role model,
+ * its value kept under the call id, or framed elsewhere. Returns the messages
+ * (the input when nothing changed) and the countdowns by call id.
+ */
+export function resolveCountdowns<T extends StoredMessage>(messages: T[], systemRole: boolean): { messages: T[]; left: Map<string, number> } {
+	const left = new Map<string, number>();
+	let changed = false;
+	const out = messages.map((message) => {
+		if (message.role !== "toolResult" || !Array.isArray(message.content) || !message.toolCallId) return message;
+		const blocks = message.content as StoredBlock[];
+		const at = blocks.findLastIndex((block) => block?.type === "text" && typeof block.text === "string" && tokensLeftIn(block.text) !== undefined);
+		if (at === -1) return message;
+		const line = blocks[at].text as string;
+		changed = true;
+		if (systemRole) {
+			left.set(message.toolCallId, tokensLeftIn(line) ?? Number.NaN);
+			return { ...message, content: blocks.filter((_, index) => index !== at) };
+		}
+		return { ...message, content: blocks.map((block, index) => (index === at ? { ...block, text: `\n${wrapReminder(line)}` } : block)) };
+	});
+	return { messages: changed ? out : messages, left };
+}
+
+export interface TurnBudgetOptions {
+	/** The wire shape. */
+	shape: SystemRoleLayout;
+	/** True on a model that takes a mid-conversation system message. */
+	systemRole: boolean;
+	/** The role a system message takes on the OpenAI APIs. */
+	role: "system" | "developer";
+	/** The countdowns `resolveCountdowns` lifted, by call id. */
+	left: ReadonlyMap<string, number>;
+	/** Send Claude Code's `clear_at` nudge after a tool result's budget message (first-party Fable). */
+	nudge?: boolean;
+	/** False when the budget is off: no prompt carries a marker, so a user's own tag stays text. */
+	markers?: boolean;
+	/** False when the list is a request's tail: its first user message is a later prompt, not the stack carrier. Defaults to true. */
+	stackCarrier?: boolean;
+}
+
+/** The call ids a wire message answers: Anthropic `tool_result` blocks, an OpenAI output item or tool message. */
+function answeredCalls(message: WireMessage): string[] {
+	if (message?.role === "user" && Array.isArray(message.content)) {
+		return (message.content as WirePart[]).flatMap((part) => (part?.type === "tool_result" && typeof part.tool_use_id === "string" ? [part.tool_use_id] : []));
+	}
+	if (message?.type === "function_call_output" && typeof message.call_id === "string") return [message.call_id];
+	if (message?.role === "tool" && typeof message.tool_call_id === "string") return [message.tool_call_id];
+	return [];
+}
+
+/** Whether the next message after `index` that is not a system message is a user message. */
+function followedByUser(messages: readonly unknown[], index: number): boolean {
+	for (let i = index + 1; i < messages.length; i++) {
+		const role = (messages[i] as WireMessage | undefined)?.role;
+		if (role === "system" || role === "developer") continue;
+		return role === "user" && !answeredCalls(messages[i] as WireMessage).length;
+	}
+	return false;
+}
+
+export function withTurnBudgetMessages(payload: Record<string, unknown>, opts: TurnBudgetOptions): Record<string, unknown> | undefined {
+	const key = messagesKey(opts.shape);
+	const messages = payload[key];
+	if (!Array.isArray(messages)) return undefined;
+	const out: WireMessage[] = [];
+	let changed = false;
+	/** The lowest countdown of the tool results not yet followed by their message. */
+	let pending: number | undefined;
+	/** The first user message carries the context stack, never a marker (context-budget's `skipStackCarrier`). */
+	let stackCarrierSeen = opts.stackCarrier === false;
+	for (let i = 0; i < messages.length; i++) {
+		let message = messages[i] as WireMessage;
+		const after: WireMessage[] = [];
+		const stackCarrier = !stackCarrierSeen && message?.role === "user";
+		if (stackCarrier) stackCarrierSeen = true;
+		// A later prompt's marker: a system message after it, or the framed block before its text.
+		// The marker comes after the user's text, so the last match is it: a
+		// prompt that is itself such a tag stays the user's, and so does the
+		// first prompt, which has no marker to find.
+		if (opts.markers !== false && !stackCarrier && message?.role === "user" && Array.isArray(message.content)) {
+			const parts = message.content as WirePart[];
+			const at = parts.findLastIndex((part) => typeof part?.text === "string" && tokensLeftIn(part.text) !== undefined);
+			// The marker ends the message, so it carries pi's cache mark; withoutParts keeps it.
+			const rest = at === -1 ? undefined : withoutParts(parts, (_, index) => index === at);
+			if (rest) {
+				const line = parts[at].text as string;
+				// A system message must reach an assistant message: before another
+				// user message (a prompt whose request failed, pi having dropped the
+				// error reply) the line stays on the prompt, framed (findings §52).
+				if (opts.systemRole && !followedByUser(messages, i)) {
+					message = { ...message, content: rest };
+					after.push(systemMessage(opts.shape, opts.role, line));
+				} else {
+					message = { ...message, content: [{ type: opts.shape === "responses" ? "input_text" : "text", text: `${wrapReminder(line)}\n` }, ...rest] };
+				}
+			}
+		}
+		if (opts.systemRole) {
+			for (const id of answeredCalls(message)) {
+				const value = byWireCallId(opts.left, id);
+				if (value !== undefined) pending = pending === undefined ? value : Math.min(pending, value);
+			}
+			// On the OpenAI APIs a batch of results is a run of items; one message follows the run.
+			const next = messages[i + 1] as WireMessage | undefined;
+			const runContinues = opts.shape !== "anthropic" && (next?.type === "function_call_output" || next?.role === "tool");
+			if (pending !== undefined && !runContinues && followedByUser(messages, i)) pending = undefined;
+			if (pending !== undefined && !runContinues) {
+				after.push(systemMessage(opts.shape, opts.role, budgetLine(pending) ?? ""));
+				if (opts.nudge) {
+					const nudge = clearAtNudge();
+					after.push(opts.shape === "anthropic" ? ({ role: "system", content: nudge, clear_at: "next_user_message" } as WireMessage) : systemMessage(opts.shape, opts.role, nudge));
+				}
+				pending = undefined;
+			}
+		}
+		if (message !== messages[i] || after.length > 0) changed = true;
+		out.push(message, ...after);
+	}
+	if (!changed) return undefined;
+	return { ...payload, [key]: opts.shape === "anthropic" ? reseatMessageMark(out) : out };
+}

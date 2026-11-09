@@ -13,7 +13,7 @@ import {
 	loadAutoModeConfigWithDiagnostics,
 	oneCodePermissionAllow,
 } from "../../extensions/lib/rules/auto-mode-config.ts";
-import { defaultEnvironment } from "../../extensions/permissions/auto-mode/classifier-prompt.ts";
+import { defaultEnvironment } from "../../extensions/safety/permissions/auto-mode/classifier-prompt.ts";
 import { tempHome } from "../../test/unit/helpers/temp-home.ts";
 
 let home: string;

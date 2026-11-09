@@ -1,5 +1,5 @@
 /**
- * The base's side of the profile's guide agent (subagents/guide-agent.ts):
+ * The base's side of the profile's guide agent (agents/subagents/guide-agent.ts):
  * the definition built from the profile's guide, its prompt built on first
  * read from a setup with only identifier-shaped names, and the read-only docs
  * roots it depends on (lib/rules/matcher.ts `readOnlyDirs`). The guide here
@@ -17,7 +17,7 @@ import { forwardSlashes } from "../../extensions/lib/profile/paths.ts";
 import { activeProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 import { decide } from "../../extensions/lib/rules/matcher.ts";
 import { discoverAgents } from "../../extensions/lib/agents/agent-catalog.ts";
-import { guideAgentDefinition as definition, guideSystemPrompt as systemPrompt, type GuideInput, listableName, settingsSetup } from "../../extensions/subagents/guide-agent.ts";
+import { guideAgentDefinition as definition, guideSystemPrompt as systemPrompt, type GuideInput, listableName, settingsSetup } from "../../extensions/agents/subagents/guide-agent.ts";
 import { emptySetup, guideInput as input } from "./helpers/guide-input.ts";
 
 /** The inputs the stand-in guide's prompt was built from, in order. */

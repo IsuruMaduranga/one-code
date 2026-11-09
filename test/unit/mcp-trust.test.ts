@@ -1,5 +1,5 @@
 /**
- * MCP project-server approval (mcp/trust.ts): which servers need consent, the
+ * MCP project-server approval (tools/mcp/trust.ts): which servers need consent, the
  * dialog's answers and how they persist, the settings' own answers, and the
  * dialog's preview. Claude Code's settings files as the source provider reads
  * them: profile/test/mcp-trust-claude-settings.test.ts.
@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { primaryFamily, settingsSources } from "../../extensions/lib/profile/claude-settings.ts";
-import type { McpServer, StdioServer } from "../../extensions/mcp/config.ts";
+import type { McpServer, StdioServer } from "../../extensions/tools/mcp/config.ts";
 import {
 	approveMcpServers,
 	CHOICE_ALL,
@@ -22,7 +22,7 @@ import {
 	promptTitle,
 	readStoredApproval,
 	resetMcpTrustSessionState,
-} from "../../extensions/mcp/trust.ts";
+} from "../../extensions/tools/mcp/trust.ts";
 import { makeMcpTrustDirs, stdio, trustDeps } from "./helpers/mcp-trust.ts";
 import { writeUserSettings as writeUserSettingsIn } from "./helpers/settings-files.ts";
 
@@ -155,7 +155,7 @@ describe("approveMcpServers", () => {
 		const d = deps({ choose: undefined });
 		await approveMcpServers([projectServer("a")], new Set(), cwd, home, d.deps);
 		vi.resetModules();
-		const reloaded = await import("../../extensions/mcp/trust.ts");
+		const reloaded = await import("../../extensions/tools/mcp/trust.ts");
 		const again = await reloaded.approveMcpServers([projectServer("a")], new Set(), cwd, home, d.deps);
 		expect(again.withheld[0]).toMatchObject({ reason: "declined" });
 		expect(d.selections).toHaveLength(1);

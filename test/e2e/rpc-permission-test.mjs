@@ -4,7 +4,7 @@
  *
  * Usage: node rpc-permission-test.mjs [answer] [workdir]
  *   answer: "Yes" | the scoped grant label (starts "Yes, and …", see
- *           extensions/permissions/session-grant.ts) | "No, tell the agent what to do differently"
+ *           extensions/safety/permissions/session-grant.ts) | "No, tell the agent what to do differently"
  *   workdir: defaults to a new temp dir. pi runs in default permission mode,
  *           so the write asks.
  *

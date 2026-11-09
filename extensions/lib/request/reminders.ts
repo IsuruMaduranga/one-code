@@ -96,7 +96,7 @@ export const CONTEXT_ORDER = {
 	skills: 40,
 	/** Claude Code's auto-mode note; only in the system message (`systemRoleOnly`). */
 	autoModeNote: 45,
-	/** The `<total_tokens>` line the first prompt carries (later prompts: system-reminder/turn-budget-layout.ts). */
+	/** The `<total_tokens>` line the first prompt carries (later prompts: request/system-reminder/turn-budget-layout.ts). */
 	totalTokens: 46,
 	// CLAUDE.md-family (with AGENTS.md as a per-directory fallback when a directory
 	// has no CLAUDE.md) — CLAUDE.md > AGENTS.md.

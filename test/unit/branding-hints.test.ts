@@ -7,7 +7,7 @@ import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 // The editor itself is not under test: capture the hint renderer it is given.
 let renderHint: ((text: string) => string | undefined) | undefined;
-vi.mock("../../extensions/branding/prompt-editor.ts", () => ({
+vi.mock("../../extensions/ui/branding/prompt-editor.ts", () => ({
 	PROMPT_PADDING: 2,
 	PromptEditor: class {
 		constructor(_tui: unknown, _theme: unknown, _keybindings: unknown, _marker: unknown, hint: (text: string) => string | undefined) {
@@ -15,7 +15,7 @@ vi.mock("../../extensions/branding/prompt-editor.ts", () => ({
 		}
 	},
 }));
-const { default: brandingExtension } = await import("../../extensions/branding/index.ts");
+const { default: brandingExtension } = await import("../../extensions/ui/branding/index.ts");
 
 describe("branding argument hints", () => {
 	const dirs: string[] = [];

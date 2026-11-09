@@ -17,7 +17,7 @@ import {
 	SetupDraftError,
 	type SetupFacts,
 	settingsPatch,
-} from "../../extensions/permissions/auto-mode/setup.ts";
+} from "../../extensions/safety/permissions/auto-mode/setup.ts";
 import { productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 

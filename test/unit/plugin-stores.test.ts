@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readJsonFile, writeJsonAtomic } from "../../extensions/lib/core/atomic-write.ts";
 import { brand } from "../../extensions/lib/profile/brand.mjs";
-import { readFavorites, toggleFavorite } from "../../extensions/plugins/favorites.ts";
+import { readFavorites, toggleFavorite } from "../../extensions/tools/plugins/favorites.ts";
 import { readOverrides, setOverride } from "../../extensions/lib/plugins/plugin-overrides.ts";
 import { pluginRoot } from "../../extensions/lib/plugins/plugin-root.ts";
 import { isSkillEnabled, readSkillStates, setSkillOverride, skillOverrideKey } from "../../extensions/lib/plugins/skill-overrides.ts";
@@ -134,14 +134,14 @@ describe("write-boundary invariant", () => {
 			"extensions/lib/plugins/plugin-overrides.ts",
 			"extensions/lib/plugins/skill-overrides.ts",
 			"extensions/lib/plugins/usage-tracker.ts",
-			"extensions/plugins/favorites.ts",
-			"extensions/plugins/marketplace/registry.ts",
-			"extensions/plugins/marketplace/git.ts",
-			"extensions/plugins/marketplace/sync.ts",
-			"extensions/plugins/install/paths.ts",
-			"extensions/plugins/install/registry.ts",
-			"extensions/plugins/install/install.ts",
-			"extensions/plugins/counts.ts",
+			"extensions/tools/plugins/favorites.ts",
+			"extensions/tools/plugins/marketplace/registry.ts",
+			"extensions/tools/plugins/marketplace/git.ts",
+			"extensions/tools/plugins/marketplace/sync.ts",
+			"extensions/tools/plugins/install/paths.ts",
+			"extensions/tools/plugins/install/registry.ts",
+			"extensions/tools/plugins/install/install.ts",
+			"extensions/tools/plugins/counts.ts",
 		];
 		const stripComments = (source: string) =>
 			source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");

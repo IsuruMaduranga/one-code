@@ -4,7 +4,7 @@ import { tmpdir, uptime } from "node:os";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { DOWNLOAD_GLOBAL, renderDownloadPayload, renderGallery } from "../../extensions/artifacts/gallery.ts";
+import { DOWNLOAD_GLOBAL, renderDownloadPayload, renderGallery } from "../../extensions/tools/artifacts/gallery.ts";
 import {
 	type ArtifactMeta,
 	ArtifactNotFoundError,
@@ -26,8 +26,8 @@ import {
 	LockBusyError,
 	viewerPath,
 	withLock,
-} from "../../extensions/artifacts/store.ts";
-import { renderViewer } from "../../extensions/artifacts/viewer.ts";
+} from "../../extensions/tools/artifacts/store.ts";
+import { renderViewer } from "../../extensions/tools/artifacts/viewer.ts";
 import { noDisplayReason, openerPlan } from "../../extensions/lib/ui/open-browser.ts";
 
 let base: string;

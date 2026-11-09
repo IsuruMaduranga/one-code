@@ -421,7 +421,7 @@ function runSession(config, { cwd, env }) {
  * that is not one of those is cancelled.
  */
 function dialogAnswer(method, title, options = []) {
-	// The plan approval dialog (plan-mode/viewer.ts): approve with the first choice.
+	// The plan approval dialog (safety/plan-mode/viewer.ts): approve with the first choice.
 	if (method === "select" && title.startsWith("Plan (")) return options.find((option) => option.startsWith("Approve"));
 	const header = /^Golden (A|B|C|E1)\b/.exec(title)?.[1];
 	if (!header) return undefined;
@@ -457,19 +457,19 @@ function makeNormalizer({ home, project, root }) {
 		out = out.replace(/\b(recurring job |one-shot task |Cancelled job |with id ')[0-9a-f]{8}\b/g, "$1<JOB_ID>");
 		out = out.replace(/^[0-9a-f]{8}( — )/gm, "<JOB_ID>$1");
 		out = out.replace(/^[0-9a-f]{8}$/, "<JOB_ID>").replace(/("id":")[0-9a-f]{8}"/g, '$1<JOB_ID>"');
-		// An artifact id's random suffix (artifacts/store.ts) and its list line's update time.
+		// An artifact id's random suffix (tools/artifacts/store.ts) and its list line's update time.
 		out = out.replace(/\b(golden-report-)[0-9a-f]{6}\b/g, "$1<SUFFIX>");
 		out = out.replace(/(updated <DATE> )\d{2}:\d{2}( UTC)/g, "$1<HH:MM>$2");
-		// The wakeup's clock time (background/wakeup.ts formatScheduled).
+		// The wakeup's clock time (tools/background/wakeup.ts formatScheduled).
 		out = out.replace(/(Next wakeup scheduled for )\d{2}:\d{2}:\d{2}/g, "$1<CLOCK>");
 		// Background task ids (lib/agents/task-registry.ts generateTaskId): "b" and 7 hex digits.
 		out = out.replace(/\b(task |Monitor |subagents\/|tasks\/|bash\/)b[0-9a-f]{7}\b/g, "$1<TASK_ID>");
 		// pi names a spilled bash output with a random suffix.
 		out = out.replace(/\bpi-bash-[0-9a-f]{16}\.log\b/g, "pi-bash-<SPILL>.log");
-		// A workflow run's id (workflow/run-manager.ts) and the seconds it took.
+		// A workflow run's id (agents/workflow/run-manager.ts) and the seconds it took.
 		out = out.replace(/\bwf_[0-9a-f]{10}\b/g, "wf_<RUN_ID>");
 		out = out.replace(/(output tokens, \$\d+\.\d{4}, )\d+s\b/g, "$1<SECS>s");
-		// Plan files get a random three-word name (plan-mode/slug.ts).
+		// Plan files get a random three-word name (safety/plan-mode/slug.ts).
 		out = out.replace(/(\/plans\/)[a-z]+-[a-z]+-[a-z]+\.md/g, "$1<PLAN_SLUG>.md");
 		// pi's session file names carry the start time: <DATE>T05-01-26-326Z.
 		out = out.replace(/<DATE>T\d{2}-\d{2}-\d{2}-\d{3}Z/g, "<DATE>T<TIME>Z");

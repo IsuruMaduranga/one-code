@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { RESTORE_FILE_MAX_TOKENS, restoreBlocks, restoreCandidates } from "../../extensions/file-tracker/restore.ts";
+import { RESTORE_FILE_MAX_TOKENS, restoreBlocks, restoreCandidates } from "../../extensions/safety/file-tracker/restore.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const fileTracker = requireText("fileTracker");

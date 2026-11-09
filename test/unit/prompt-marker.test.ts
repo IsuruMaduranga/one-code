@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyPromptMarker } from "../../extensions/branding/prompt-marker.ts";
+import { applyPromptMarker } from "../../extensions/ui/branding/prompt-marker.ts";
 
 const MARK = "\x1b[38;5;209m›\x1b[0m "; // colored chevron + space, 2 visible cols
 

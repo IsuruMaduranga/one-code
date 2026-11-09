@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filesSeenOnBranch, keptReadPaths, keptShellReadPaths } from "../../extensions/file-tracker/replay.ts";
+import { filesSeenOnBranch, keptReadPaths, keptShellReadPaths } from "../../extensions/safety/file-tracker/replay.ts";
 import { makeRecord, type PendingRecordData, RECORD } from "../../extensions/lib/request/ledger/records.ts";
 
 const call = (id: string, name: string, args: Record<string, unknown>) => ({ type: "toolCall", id, name, arguments: args });

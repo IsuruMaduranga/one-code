@@ -4,8 +4,8 @@
  * test/unit/subagents.test.ts.
  */
 import { describe, expect, it } from "vitest";
-import { forkTaskMessage } from "../../extensions/subagents/outcome.ts";
-import { finishOutcome } from "../../extensions/subagents/session-turns.ts";
+import { forkTaskMessage } from "../../extensions/agents/subagents/outcome.ts";
+import { finishOutcome } from "../../extensions/agents/subagents/session-turns.ts";
 import { emptyUsage } from "../../extensions/lib/agents/usage.ts";
 
 describe("One Code's fork framing", () => {

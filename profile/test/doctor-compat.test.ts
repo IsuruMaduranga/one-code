@@ -1,12 +1,12 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
-import { collectCompat, importedConfigSection, mcpSection } from "../../extensions/doctor/compat.ts";
-import { checkDependencies, projectLanguages, providerHasNativeSearch, webSearchRoute } from "../../extensions/doctor/dependencies.ts";
+import { collectCompat, importedConfigSection, mcpSection } from "../../extensions/commands/doctor/compat.ts";
+import { checkDependencies, projectLanguages, providerHasNativeSearch, webSearchRoute } from "../../extensions/commands/doctor/dependencies.ts";
 import { whichOnPath } from "../../extensions/lib/shell-run/which.ts";
 import { invalidatePluginsCache } from "../../extensions/lib/plugins/plugins.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
-import { resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
+import { resetHookSettingsCache } from "../../extensions/safety/hooks/settings.ts";
 import { tempHome } from "../../test/unit/helpers/temp-home.ts";
 
 let home: string;

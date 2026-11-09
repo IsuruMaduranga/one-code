@@ -15,7 +15,7 @@ const model = process.argv[3] ?? "anthropic/claude-haiku-4-5";
 const root = resolve(import.meta.dirname, "../..");
 const workdir = resolve(root, ".rpc-lifecycle");
 mkdirSync(workdir, { recursive: true });
-const child = spawn("perl", ["-e", "alarm 150; exec @ARGV", "pi", "--mode", "rpc", "--no-extensions", "-e", resolve(root, "extensions/permissions/index.ts"), "-e", resolve(root, "test/e2e/rpc-lifecycle-fixture.ts"), "--permission-mode", "default", "--no-session", "--model", model], {
+const child = spawn("perl", ["-e", "alarm 150; exec @ARGV", "pi", "--mode", "rpc", "--no-extensions", "-e", resolve(root, "extensions/safety/permissions/index.ts"), "-e", resolve(root, "test/e2e/rpc-lifecycle-fixture.ts"), "--permission-mode", "default", "--no-session", "--model", model], {
 	cwd: workdir,
 	stdio: ["pipe", "pipe", "inherit"],
 	env: { ...process.env, ONECODE_STATE_DIR: resolve(workdir, "state") },

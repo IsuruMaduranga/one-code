@@ -5,7 +5,7 @@
  * One Code — and in auto mode a rule beats the classifier, so a cloned repo
  * shipping `Bash(curl:*)` would exfiltrate unclassified. Project hooks and
  * project `.mcp.json` servers already need a once-per-config consent
- * (hooks/trust.ts, mcp/trust.ts); this is the same shape for allow rules:
+ * (safety/hooks/trust.ts, tools/mcp/trust.ts); this is the same shape for allow rules:
  * approval keyed to a hash of the rule list, persisted under `~/.onecode`, so
  * any change to the rules re-prompts. Deny and ask rules from the same files
  * never prompt — they can only tighten the gate.

@@ -4,7 +4,7 @@
  * profile/test/btw-prompt-wording.test.ts).
  */
 import { describe, expect, it } from "vitest";
-import { exchangeMessages, historyMessages } from "../../extensions/btw/prompt.ts";
+import { exchangeMessages, historyMessages } from "../../extensions/agents/btw/prompt.ts";
 
 describe("exchangeMessages / historyMessages", () => {
 	const model = { api: "anthropic-messages", provider: "anthropic", id: "claude-sonnet-5" };

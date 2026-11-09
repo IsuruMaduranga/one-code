@@ -7,8 +7,8 @@
  * module owns the orchestration: guard → millisecond timeout clamp →
  * foreground delegate, or the background branch (blocking in one-shot modes,
  * detached on the shared background registry with a completion notification
- * otherwise). See extensions/bash/index.ts for why each piece is shaped as
- * it is; extensions/powershell/index.ts is the second consumer.
+ * otherwise). See extensions/tools/bash/index.ts for why each piece is shaped as
+ * it is; extensions/tools/powershell/index.ts is the second consumer.
  */
 
 import { mkdirSync } from "node:fs";

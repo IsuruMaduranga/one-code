@@ -10,7 +10,7 @@ import { resolve } from "node:path";
 import assert from "node:assert/strict";
 
 const child = spawn("perl", ["-e", "alarm 45; exec @ARGV", "pi", "--mode", "rpc", "--no-extensions", "--no-session",
-	"-e", resolve("extensions/subagents/index.ts"), "-e", resolve("extensions/workflow/index.ts"),
+	"-e", resolve("extensions/agents/subagents/index.ts"), "-e", resolve("extensions/agents/workflow/index.ts"),
 	"-e", resolve("test/e2e/fixtures/rpc-agent-widgets.ts")], {
 	stdio: ["pipe", "pipe", "inherit"],
 });

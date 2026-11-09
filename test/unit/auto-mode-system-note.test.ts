@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { autoModeSystemNote } from "../../extensions/permissions/auto-mode/system-note.ts";
+import { autoModeSystemNote } from "../../extensions/safety/permissions/auto-mode/system-note.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const model = (provider: string, id: string, input?: number) =>

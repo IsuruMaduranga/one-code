@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { hashAgentCall } from "../../extensions/workflow/journal.ts";
-import { parseWorkflowScript } from "../../extensions/workflow/script-source.ts";
-import { runWorkflowScript, type WorkflowRuntimeOptions } from "../../extensions/workflow/vm-runtime.ts";
-import { WorkflowScriptError } from "../../extensions/workflow/types.ts";
+import { hashAgentCall } from "../../extensions/agents/workflow/journal.ts";
+import { parseWorkflowScript } from "../../extensions/agents/workflow/script-source.ts";
+import { runWorkflowScript, type WorkflowRuntimeOptions } from "../../extensions/agents/workflow/vm-runtime.ts";
+import { WorkflowScriptError } from "../../extensions/agents/workflow/types.ts";
 import { makeGlobals, type GlobalsOverrides } from "./workflow-test-helpers.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
-import type { RunStop } from "../../extensions/workflow/text.ts";
+import type { RunStop } from "../../extensions/agents/workflow/text.ts";
 
 /** Why a run stopped, as the profile words it: what the runtime rejects with. */
 const runStop = (stop: RunStop) => requireText("workflow").runStop(stop);

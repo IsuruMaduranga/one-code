@@ -20,7 +20,7 @@ import { sessionScratchpadDir } from "../../extensions/lib/core/scratchpad.ts";
 import { whichOnPath } from "../../extensions/lib/shell-run/which.ts";
 import { commandLaunch } from "../../extensions/lib/shell-run/command-launch.ts";
 import { decide, isInsideDir, matchesPathPattern } from "../../extensions/lib/rules/matcher.ts";
-import { sessionGrant } from "../../extensions/permissions/session-grant.ts";
+import { sessionGrant } from "../../extensions/safety/permissions/session-grant.ts";
 
 const win32 = process.platform === "win32";
 const home = homedir();
@@ -134,7 +134,7 @@ describe.skipIf(!win32)("Windows: a .cmd shim on PATH (npm's shape for an LSP se
 	writeFileSync(join(dir, "probe-tool.cmd"), "@echo off\r\necho probe-ok %*\r\n");
 	const env = { ...process.env, PATH: `${dir};${process.env.PATH ?? ""}` };
 
-	/** Spawn and collect stdout with the spawn outcome, the way lsp/client.ts starts a server. */
+	/** Spawn and collect stdout with the spawn outcome, the way tools/lsp/client.ts starts a server. */
 	const run = (command: string, args: string[], extra: { windowsVerbatimArguments?: boolean } = {}) =>
 		new Promise<{ outcome: string; stdout: string; code: number | null }>((done) => {
 			let stdout = "";

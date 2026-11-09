@@ -7,7 +7,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import hooksExtension from "../../extensions/hooks/index.ts";
+import hooksExtension from "../../extensions/safety/hooks/index.ts";
 import { WORKTREE_CHANNEL } from "../../extensions/lib/agents/worktree-channel.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "../../test/unit/helpers/fake-pi.ts";
 import { makeHookWorktreeDirs, readObservations, writeObserverHook } from "../../test/unit/helpers/hook-worktree.ts";

@@ -13,7 +13,7 @@
  * the token estimate (pi-ai-estimate.ts) reads only pi's version.
  */
 
-import { formatTokens } from "../../footer/footer-line.ts";
+import { formatTokens } from "../../ui/footer/footer-line.ts";
 import { estimateTextTokens } from "../models/pi-ai-estimate.ts";
 import { contextWords } from "./context-words.ts";
 import { agentInstructionSections } from "./instructions.ts";

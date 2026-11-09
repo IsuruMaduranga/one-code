@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { vi } from "vitest";
-import bashExtension from "../../extensions/bash/index.ts";
+import bashExtension from "../../extensions/tools/bash/index.ts";
 import {
 	APP_AGENT_DIR_VAR,
 	appAgentDir,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { powershellPathTokens, safetyControlWrite, safetyFloorReason } from "../../extensions/permissions/auto-mode/safety-floor.ts";
+import { powershellPathTokens, safetyControlWrite, safetyFloorReason } from "../../extensions/safety/permissions/auto-mode/safety-floor.ts";
 import { brand } from "../../extensions/lib/profile/brand.mjs";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 

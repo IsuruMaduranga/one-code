@@ -19,7 +19,7 @@ import {
 	subagentModelsReminder,
 	subagentStatusModel,
 } from "../../extensions/lib/models/subagent-model.ts";
-import type { SubagentModelNotice } from "../../extensions/subagents/model-text.ts";
+import type { SubagentModelNotice } from "../../extensions/agents/subagents/model-text.ts";
 import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";

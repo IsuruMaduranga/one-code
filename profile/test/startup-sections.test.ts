@@ -10,7 +10,7 @@ import {
 	skillNames,
 	themeNames,
 	workflowNames,
-} from "../../extensions/branding/startup.ts";
+} from "../../extensions/ui/branding/startup.ts";
 
 const tmp: string[] = [];
 function scratch(): string {

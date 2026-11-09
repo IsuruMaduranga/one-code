@@ -9,7 +9,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { approveMcpServers, readClaudeMcpjsonPolicy } from "../../extensions/mcp/trust.ts";
+import { approveMcpServers, readClaudeMcpjsonPolicy } from "../../extensions/tools/mcp/trust.ts";
 import { makeMcpTrustDirs, stdio, trustDeps } from "../../test/unit/helpers/mcp-trust.ts";
 
 let root: string;

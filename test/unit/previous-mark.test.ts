@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { baseMark, lastMessageMark, withPreviousMark } from "../../extensions/cache-marks/previous-mark.ts";
+import { baseMark, lastMessageMark, withPreviousMark } from "../../extensions/request/cache-marks/previous-mark.ts";
 import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../../extensions/lib/request/ledger/plan.ts";
-import cacheMarksExtension from "../../extensions/cache-marks/index.ts";
+import cacheMarksExtension from "../../extensions/request/cache-marks/index.ts";
 import { createFakePi } from "./helpers/fake-pi.ts";
 
 const mark = { type: "ephemeral", ttl: "1h" };

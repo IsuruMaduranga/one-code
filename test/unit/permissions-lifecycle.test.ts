@@ -18,20 +18,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../extensions/lib/rules/auto-mode-actions.ts";
-import { classify } from "../../extensions/permissions/auto-mode/classifier.ts";
-import { CONSECUTIVE_BLOCK_LIMIT } from "../../extensions/permissions/auto-mode/pause.ts";
+import { classify } from "../../extensions/safety/permissions/auto-mode/classifier.ts";
+import { CONSECUTIVE_BLOCK_LIMIT } from "../../extensions/safety/permissions/auto-mode/pause.ts";
 import { instructionTargets } from "../../extensions/lib/context/instructions.ts";
 import { RECORD } from "../../extensions/lib/request/ledger/records.ts";
 import { MODE_ENV } from "../../extensions/lib/agents/permission-gate.ts";
 import { MODE_CHANNEL } from "../../extensions/lib/rules/plan-mode-channels.ts";
 import { WORKTREE_CHANNEL } from "../../extensions/lib/agents/worktree-channel.ts";
-import permissionsExtension from "../../extensions/permissions/index.ts";
+import permissionsExtension from "../../extensions/safety/permissions/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { stateEntry } from "./helpers/state-entry.ts";
 
-vi.mock("../../extensions/permissions/auto-mode/classifier.ts", async (importOriginal) => ({
-	...(await importOriginal<typeof import("../../extensions/permissions/auto-mode/classifier.ts")>()),
+vi.mock("../../extensions/safety/permissions/auto-mode/classifier.ts", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../extensions/safety/permissions/auto-mode/classifier.ts")>()),
 	classify: vi.fn(async () => ({ decision: "block", reason: "stub: sends data off the machine", tier: "stage2" })),
 }));
 

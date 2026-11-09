@@ -1,0 +1,84 @@
+/**
+ * Shared result/handle contracts for a subagent run, plus the fork framing.
+ * (These outlived child.ts, the retired process-spawning runner; the runner is
+ * now in-process — see runner.ts.)
+ */
+
+import type { ChildAction } from "../../lib/rules/auto-mode-actions.ts";
+import type { FireConversation } from "../../lib/agents/agent-cron.ts";
+import type { UsageTotals } from "../../lib/agents/usage.ts";
+import { subagentWords } from "./words.ts";
+
+export const OUTPUT_CAP = 50_000;
+
+/** A fork running in an isolation worktree: where it is, and where the inherited paths pointed. */
+export interface ForkIsolation {
+	worktreePath: string;
+	parentCwd: string;
+}
+
+/**
+ * Framing wrapped around a fork child's task, in the profile's words. A fork inherits the parent's
+ * entire transcript; without this, a weaker model tends to abandon its assigned
+ * task and continue (or confabulate about) the inherited topic — then its output
+ * returns to the parent looking like independent confirmation. See
+ * working-docs/features/tools/records/tool-ambiguity-hardening.md (fork confabulation).
+ *
+ * With `isolation`, the fork is told that its working directory moved: the
+ * inherited system prompt and transcript name the parent's checkout in every
+ * path, so without this line a worktree fork edits the main tree (the guard in
+ * lib/agents/worktree-isolation.ts then refuses the write, but the model needs to know
+ * where to write instead — SUBAGENT-REVIEW H3).
+ */
+export function forkTaskMessage(task: string, isolation?: ForkIsolation): string {
+	return subagentWords().forkTask({ task, isolation });
+}
+
+export interface ChildOutcome {
+	output: string;
+	toolCalls: number;
+	usage: UsageTotals;
+	failed?: boolean;
+	/**
+	 * What the child actually did, names and short subjects only. Auto mode
+	 * reviews this when the child returns, to catch a sequence whose individual
+	 * steps each passed. Never carries tool output — see lib/rules/auto-mode-actions.ts.
+	 */
+	actions: ChildAction[];
+}
+
+/** A blocking run handle: await the result, or kill/snapshot it while it runs. */
+export interface ChildHandle {
+	result: Promise<ChildOutcome>;
+	kill(): void;
+	snapshot(): { toolCalls: number; text: string; usage: UsageTotals };
+}
+
+/** A resident (background) agent handle: message it live, inspect it, stop it. */
+export interface RpcChildHandle {
+	/**
+	 * Deliver a message. "started" = the agent was idle and this began a new turn
+	 * (resolves as soon as the turn is dispatched, not when it ends); "steered" =
+	 * the agent was mid-turn and the message joined it. Rejects when the message
+	 * could not be queued at all (pi refuses to steer an extension command), so
+	 * the caller never reports a delivery that did not happen.
+	 */
+	send(message: string): Promise<"started" | "steered">;
+	/** The agent's own session: a cron fire's `/loop` sentinel reads and records its delivery there (lib/agents/agent-cron.ts). */
+	conversation: FireConversation;
+	busy(): boolean;
+	exited(): boolean;
+	/**
+	 * Abort any in-flight turn (reported as terminated) and dispose the session.
+	 * Resolves once the abort has settled and the session is disposed (so a
+	 * shutdown can wait for the exit-time cleanup, e.g. worktree removal).
+	 */
+	kill(): Promise<void>;
+	/**
+	 * Dispose an IDLE session quietly — no turn outcome, no notification. A
+	 * no-op mid-turn. Its persisted session file remains, so SendMessage still
+	 * reaches the agent by resuming from disk instead of live.
+	 */
+	release(): void;
+	snapshot(): { toolCalls: number; text: string; usage: UsageTotals };
+}

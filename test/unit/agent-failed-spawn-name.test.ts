@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
-import subagentsExtension from "../../extensions/subagents/index.ts";
+import subagentsExtension from "../../extensions/agents/subagents/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 /**

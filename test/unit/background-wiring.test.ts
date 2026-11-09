@@ -1,5 +1,5 @@
 /**
- * background/index.ts wiring (T15d): the monitor tool's event batching (a real
+ * tools/background/index.ts wiring (T15d): the monitor tool's event batching (a real
  * child process, no fake timers needed — a monitor whose command finishes
  * flushes its pending batch synchronously, so the cap/overflow reporting is
  * observable without waiting out MONITOR_BATCH_IDLE_MS), task_stop/task_output
@@ -34,10 +34,10 @@ vi.mock("../../extensions/lib/app/pi-version.ts", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../../extensions/lib/app/pi-version.ts")>();
 	return { ...actual, piFiresBeforeAgentStartForCustomRuns: (version: string | undefined) => piModel.customRunsFireBeforeAgentStart ?? actual.piFiresBeforeAgentStartForCustomRuns(version) };
 });
-import backgroundExtension from "../../extensions/background/index.ts";
+import backgroundExtension from "../../extensions/tools/background/index.ts";
 import { RECURRING_MAX_AGE_DAYS } from "../../extensions/lib/agents/cron.ts";
 import { STORED_OUTPUT_CAP } from "../../extensions/lib/shell-run/bash-background.ts";
-import { MONITOR_BATCH_MAX_LINES } from "../../extensions/background/monitor-batch.ts";
+import { MONITOR_BATCH_MAX_LINES } from "../../extensions/tools/background/monitor-batch.ts";
 import { TASK_REGISTER_CHANNEL } from "../../extensions/lib/agents/task-registry.ts";
 import { DEFAULT_COALESCE_MS, escapeTaskText, monitorEndedSummary, monitorEventSummary, NOTIFICATION_ID_KEY, oneShotNote } from "../../extensions/lib/notify/notifications.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
@@ -1142,7 +1142,7 @@ describe("background wiring: state across /reload, /tree and compaction", () => 
 		await fake.fire("session_shutdown", { reason: "reload" }, ctx);
 
 		vi.resetModules();
-		const { default: reloadedExtension } = await import("../../extensions/background/index.ts");
+		const { default: reloadedExtension } = await import("../../extensions/tools/background/index.ts");
 		const next = createFakePi();
 		reloadedExtension(next.pi as never);
 		const notify = vi.fn();

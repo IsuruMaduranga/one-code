@@ -10,7 +10,7 @@
  * with (one loader per child session, lib/agents/agent-loader.ts openChildSession).
  * createWorktree/cleanupWorktree (lib/agents/agent-worktree.ts) register and release
  * entries; reconstructed run records re-register kept worktrees after a
- * process restart (subagents/index.ts); the worktree the main session entered
+ * process restart (agents/subagents/index.ts); the worktree the main session entered
  * with `enter_worktree` is registered too (`followEnteredWorktree`), so a child
  * spawned there is guarded like an isolated one; the guard resolves each bash
  * call's cwd against them.
@@ -30,7 +30,7 @@ import { WORKTREE_CHANNEL, type WorktreeLocation } from "./worktree-channel.ts";
 import { isWithin, isWritingTool, pathArgument, resolveForContainment, toAbsolute } from "../shell/paths.ts";
 import { analyzeShellCommand } from "../shell/shell-analysis.ts";
 import { namesGit, unlistedWorktreesReason, worktreeBashGuardReason } from "../rules/worktree-guards.ts";
-import type { WorktreeGuardRefusal } from "../../worktree/text.ts";
+import type { WorktreeGuardRefusal } from "../../safety/worktree/text.ts";
 import { requireText } from "../profile/profile.ts";
 
 export interface WorktreeIsolation {

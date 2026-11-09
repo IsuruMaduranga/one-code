@@ -5,8 +5,8 @@ import { validateToolArguments } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { decide, extractSubject, parseRules } from "../../extensions/lib/rules/matcher.ts";
-import { prepareAgentArguments } from "../../extensions/subagents/agent-args.ts";
-import subagentsExtension from "../../extensions/subagents/index.ts";
+import { prepareAgentArguments } from "../../extensions/agents/subagents/agent-args.ts";
+import subagentsExtension from "../../extensions/agents/subagents/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 /**

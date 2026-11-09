@@ -1,5 +1,5 @@
 /**
- * file-tracker/index.ts wiring (T15a): handler sequencing across tool_call /
+ * safety/file-tracker/index.ts wiring (T15a): handler sequencing across tool_call /
  * tool_result / agent_start, plus the session_start / session_tree
  * replay reconstruction — as opposed to tracker.ts's pure state machine,
  * already covered by file-tracker.test.ts.
@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import fileTrackerExtension from "../../extensions/file-tracker/index.ts";
+import fileTrackerExtension from "../../extensions/safety/file-tracker/index.ts";
 import { CHILD_WROTE_CHANNEL } from "../../extensions/lib/agents/child-writes.ts";
 import { discoverContextFiles } from "../claude-code/instructions.ts";
 import { persistExternalIncludesApproval } from "../../extensions/lib/context/claude-external-includes.ts";

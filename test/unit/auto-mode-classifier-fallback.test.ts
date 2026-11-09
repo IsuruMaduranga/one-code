@@ -23,11 +23,11 @@ import {
 	isTransportFailure,
 	providerErrorSummary,
 	ROTATE_AFTER_TIMEOUTS,
-} from "../../extensions/permissions/auto-mode/classifier.ts";
+} from "../../extensions/safety/permissions/auto-mode/classifier.ts";
 import { loadAutoModeConfig } from "../../extensions/lib/rules/auto-mode-config.ts";
 import { isModelUnavailableError } from "../../extensions/lib/models/classifier-model.ts";
-import type { ClassifierBlock } from "../../extensions/permissions/auto-mode/text.ts";
-import { actionLength, MAX_ACTION_CHARS } from "../../extensions/permissions/auto-mode/transcript.ts";
+import type { ClassifierBlock } from "../../extensions/safety/permissions/auto-mode/text.ts";
+import { actionLength, MAX_ACTION_CHARS } from "../../extensions/safety/permissions/auto-mode/transcript.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { pinCatalog } from "./catalog-fixture.ts";
 

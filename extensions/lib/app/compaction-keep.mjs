@@ -3,7 +3,7 @@
  * One Code.
  *
  * One Code's compaction keeps only the last assistant reply, as Claude Code
- * does (`compaction/cut.ts`), so pi's window of recent tokens kept verbatim
+ * does (`context/compaction/cut.ts`), so pi's window of recent tokens kept verbatim
  * (20,000 by default) no longer decides what stays. It still decides whether
  * a compaction can happen: pi's `prepareCompaction` gives up with "Nothing to
  * compact (session too small)" when the whole session fits in the window,
@@ -12,7 +12,7 @@
  * finished turn compacts (findings §8).
  *
  * The bundled app writes 0 into its own settings unless the user set a value;
- * on the user's own pi, One Code asks once (`branding/compaction-keep.ts`) and
+ * on the user's own pi, One Code asks once (`ui/branding/compaction-keep.ts`) and
  * `/doctor` shows the setting.
  *
  * Plain JS with no pi imports, like replaced-builtins.mjs: app/bin.mjs loads it

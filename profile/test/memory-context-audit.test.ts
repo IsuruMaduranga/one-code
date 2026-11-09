@@ -4,8 +4,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import claudeContextExtension from "../../extensions/claude-context/index.ts";
-import systemReminderExtension from "../../extensions/system-reminder/index.ts";
+import claudeContextExtension from "../../extensions/context/claude-context/index.ts";
+import systemReminderExtension from "../../extensions/request/system-reminder/index.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { projectMemoryDir } from "../../extensions/lib/context/memory.ts";
 import { createFakeCtx, createFakePi } from "../../test/unit/helpers/fake-pi.ts";

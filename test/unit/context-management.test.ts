@@ -7,7 +7,7 @@ import {
 	clearThinkingEnabled,
 	looksLikeAnthropicRequest,
 	withClearThinking,
-} from "../../extensions/context-management/index.ts";
+} from "../../extensions/request/context-management/index.ts";
 
 describe("clearThinkingEnabled", () => {
 	const firstParty = { api: "anthropic-messages", provider: "anthropic", baseUrl: "https://api.anthropic.com" };

@@ -1,5 +1,5 @@
 /**
- * hooks/index.ts wiring (T15b): the PreToolUse/PostToolUse dispatch merge
+ * safety/hooks/index.ts wiring (T15b): the PreToolUse/PostToolUse dispatch merge
  * (block + updatedInput + additionalContext from several hooks combined) and
  * the Stop latch — Stop must fire once per SETTLED turn, not once per
  * internal run (a turn can retry/auto-compact and produce several agent_end
@@ -19,11 +19,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import hooksExtension from "../../extensions/hooks/index.ts";
+import hooksExtension from "../../extensions/safety/hooks/index.ts";
 import type { CcHookEvent } from "../../extensions/lib/rules/hook-protocol.ts";
 import { PRECOMPACT_INSTRUCTIONS_CHANNEL, type PreCompactInstructions } from "../../extensions/lib/request/precompact-instructions.ts";
-import { MAX_HOOK_OUTPUT_BYTES } from "../../extensions/hooks/executor.ts";
-import { resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
+import { MAX_HOOK_OUTPUT_BYTES } from "../../extensions/safety/hooks/executor.ts";
+import { resetHookSettingsCache } from "../../extensions/safety/hooks/settings.ts";
 import { type HookBridge, SUBAGENT_HOOK_CHANNEL } from "../../extensions/lib/agents/hook-bridge.ts";
 import { REMINDER_CHANNEL, wrapReminder } from "../../extensions/lib/request/reminders.ts";
 import { SKILL_INVOCATION_TYPE } from "../../extensions/lib/plugins/skill-invoke.ts";

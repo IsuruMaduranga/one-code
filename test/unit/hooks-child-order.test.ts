@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HookBridge } from "../../extensions/lib/agents/hook-bridge.ts";
 import { openChildSession } from "../../extensions/lib/agents/agent-loader.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
-import { SubagentRuntime } from "../../extensions/subagents/runner.ts";
+import { SubagentRuntime } from "../../extensions/agents/subagents/runner.ts";
 import { registerWorktreeIsolation, releaseWorktreeIsolation } from "../../extensions/lib/agents/worktree-isolation.ts";
 
 describe("child hook and permission order", () => {

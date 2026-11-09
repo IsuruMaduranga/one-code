@@ -3,7 +3,7 @@
  * milliseconds, never pi's "timeout in seconds".
  */
 import { describe, expect, it } from "vitest";
-import bashExtension from "../../extensions/bash/index.ts";
+import bashExtension from "../../extensions/tools/bash/index.ts";
 import { createFakePi } from "../../test/unit/helpers/fake-pi.ts";
 
 describe("bash tool description states milliseconds, not seconds", () => {

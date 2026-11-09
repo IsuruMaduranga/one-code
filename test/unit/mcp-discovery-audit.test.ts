@@ -3,8 +3,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { connect, close, type Connection } from "../../extensions/mcp/client.ts";
-import mcpExtension from "../../extensions/mcp/index.ts";
+import { connect, close, type Connection } from "../../extensions/tools/mcp/client.ts";
+import mcpExtension from "../../extensions/tools/mcp/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 const state = vi.hoisted(() => ({ home: "", servers: [] as Array<{ kind: "http"; name: string; url: string; source: string }> }));
@@ -13,8 +13,8 @@ vi.mock("node:os", async (importOriginal) => {
 	const actualDefault = (actual as unknown as { default?: Record<string, unknown> }).default;
 	return { ...actual, homedir: () => state.home, default: { ...actualDefault, homedir: () => state.home } };
 });
-vi.mock("../../extensions/mcp/config.ts", async (importOriginal) => ({
-	...await importOriginal<typeof import("../../extensions/mcp/config.ts")>(),
+vi.mock("../../extensions/tools/mcp/config.ts", async (importOriginal) => ({
+	...await importOriginal<typeof import("../../extensions/tools/mcp/config.ts")>(),
 	loadServers: () => state.servers,
 }));
 

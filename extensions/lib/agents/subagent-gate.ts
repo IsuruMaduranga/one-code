@@ -22,7 +22,7 @@
 import { brandedId } from "../profile/brand.mjs";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { type BridgeWatchApi, watchBridge } from "../consent/bridge-watch.ts";
-import { refusalText } from "../../permissions/words.ts";
+import { refusalText } from "../../safety/permissions/words.ts";
 
 export const SUBAGENT_GATE_CHANNEL = brandedId("subagent-permission-gate");
 
@@ -52,7 +52,7 @@ export interface ChildToolCall {
 	 * (its Agent call, or a later SendMessage), set by the runner from its own
 	 * state, never from tool input. The classifier reads the main session as far
 	 * as that call, not the rest of a batch still in flight
-	 * (permissions/auto-mode/history.ts childHistoryCursor).
+	 * (safety/permissions/auto-mode/history.ts childHistoryCursor).
 	 */
 	parentToolCallId?: string;
 }

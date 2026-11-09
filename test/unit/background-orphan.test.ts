@@ -2,8 +2,8 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import backgroundExtension from "../../extensions/background/index.ts";
-import bashExtension from "../../extensions/bash/index.ts";
+import backgroundExtension from "../../extensions/tools/background/index.ts";
+import bashExtension from "../../extensions/tools/bash/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 const isAlive = (pid: number) => {

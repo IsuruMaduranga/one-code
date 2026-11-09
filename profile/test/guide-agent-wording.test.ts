@@ -5,7 +5,7 @@
  * base builds any profile's guide: test/unit/guide-agent.test.ts.
  */
 import { describe, expect, it } from "vitest";
-import { guideAgentDefinition as definition, guideSystemPrompt as systemPrompt, type GuideInput } from "../../extensions/subagents/guide-agent.ts";
+import { guideAgentDefinition as definition, guideSystemPrompt as systemPrompt, type GuideInput } from "../../extensions/agents/subagents/guide-agent.ts";
 import { GUIDE_AGENT } from "../text/subagents/guide-agent.ts";
 import { emptySetup, guideInput as input } from "../../test/unit/helpers/guide-input.ts";
 

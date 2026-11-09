@@ -1,8 +1,8 @@
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
-import type { LspDiagnostic } from "../../extensions/lsp/format.ts";
-import type { ShownDiagnostic } from "../../extensions/lsp/text.ts";
+import type { LspDiagnostic } from "../../extensions/tools/lsp/format.ts";
+import type { ShownDiagnostic } from "../../extensions/tools/lsp/text.ts";
 import {
 	computeDelta,
 	DeliveredTracker,
@@ -10,7 +10,7 @@ import {
 	formatNewDiagnostics as formatWith,
 	markDelivered,
 	MAX_CHARS,
-} from "../../extensions/lsp/watcher.ts";
+} from "../../extensions/tools/lsp/watcher.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const lspText = requireText("lsp");

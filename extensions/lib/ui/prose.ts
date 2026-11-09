@@ -26,7 +26,7 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
-import type { ProseRenderer } from "../../subagents/panel-render.ts";
+import type { ProseRenderer } from "../../agents/subagents/panel-render.ts";
 
 interface MarkdownLike {
 	setText(text: string): void;

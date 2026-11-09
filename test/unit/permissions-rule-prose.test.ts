@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { buildRuleset, classifierText, defaultEnvironment } from "../../extensions/permissions/auto-mode/classifier-prompt.ts";
-import { buildCategoryIndex, groundCategory, normalizeName } from "../../extensions/permissions/auto-mode/rules.ts";
-import { denyRuleLines } from "../../extensions/permissions/rule-prose.ts";
+import { buildRuleset, classifierText, defaultEnvironment } from "../../extensions/safety/permissions/auto-mode/classifier-prompt.ts";
+import { buildCategoryIndex, groundCategory, normalizeName } from "../../extensions/safety/permissions/auto-mode/rules.ts";
+import { denyRuleLines } from "../../extensions/safety/permissions/rule-prose.ts";
 
 describe("denyRuleLines", () => {
 	it("hands the profile a scan-safe name and the rule verbatim", () => {

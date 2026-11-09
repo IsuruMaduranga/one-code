@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { formatDoneAt, timeLocale, turnDurationText } from "../../extensions/turn-duration/line.ts";
-import { TurnSpan } from "../../extensions/turn-duration/span.ts";
-import { pickCompletionVerb, TURN_COMPLETION_VERBS } from "../../extensions/turn-duration/verbs.ts";
+import { formatDoneAt, timeLocale, turnDurationText } from "../../extensions/ui/turn-duration/line.ts";
+import { TurnSpan } from "../../extensions/ui/turn-duration/span.ts";
+import { pickCompletionVerb, TURN_COMPLETION_VERBS } from "../../extensions/ui/turn-duration/verbs.ts";
 
 describe("turn-duration verbs", () => {
 	it("has Claude Code's eight completion verbs", () => {

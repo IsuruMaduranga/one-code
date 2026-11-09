@@ -2,8 +2,8 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import webExtension from "../../extensions/web/index.ts";
-import { NATIVE_SEARCH_TIMEOUT_MS } from "../../extensions/web/native-call.ts";
+import webExtension from "../../extensions/tools/web/index.ts";
+import { NATIVE_SEARCH_TIMEOUT_MS } from "../../extensions/tools/web/native-call.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { fellBack } from "./helpers/web-search-fallback.ts";
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Answer, Question } from "../../extensions/ask-user/questions.ts";
+import type { Answer, Question } from "../../extensions/tools/ask-user/questions.ts";
 import {
 	applyWidgetKey,
 	collectAnswers,
@@ -13,7 +13,7 @@ import {
 	rowsFor,
 	type WidgetKey,
 	type WidgetState,
-} from "../../extensions/ask-user/widget.ts";
+} from "../../extensions/tools/ask-user/widget.ts";
 
 const previewQuestion: Question = {
 	question: "Which layout style do you like best?",
@@ -325,7 +325,7 @@ describe("renderWidget", () => {
 describe("ask_user_question in the TUI", () => {
 	it("reports the wait to the terminal as a question (pi 1.5.0's `blocked`)", async () => {
 		const { createFakeCtx, createFakePi } = await import("./helpers/fake-pi.ts");
-		const { default: askUserExtension } = await import("../../extensions/ask-user/index.ts");
+		const { default: askUserExtension } = await import("../../extensions/tools/ask-user/index.ts");
 		const fake = createFakePi();
 		askUserExtension(fake.pi as never);
 		const calls: unknown[][] = [];

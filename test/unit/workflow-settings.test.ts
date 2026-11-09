@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { productProjectSettingsPath, productSettingsPath, readWorkflowSettings, type WorkflowSizeGuideline } from "../../extensions/lib/profile/product-settings.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
-import workflowExtension from "../../extensions/workflow/index.ts";
+import workflowExtension from "../../extensions/agents/workflow/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { envName } from "../../extensions/lib/profile/brand.mjs";
 

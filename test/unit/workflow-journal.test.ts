@@ -2,8 +2,8 @@ import { mkdtempSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { appendJournal, hashAgentCall, readJournal, ReplayCursor } from "../../extensions/workflow/journal.ts";
-import type { JournalEntry } from "../../extensions/workflow/types.ts";
+import { appendJournal, hashAgentCall, readJournal, ReplayCursor } from "../../extensions/agents/workflow/journal.ts";
+import type { JournalEntry } from "../../extensions/agents/workflow/types.ts";
 
 function entry(callIndex: number, hash: string, output = 100): JournalEntry {
 	return {

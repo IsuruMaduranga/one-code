@@ -1,6 +1,6 @@
 import { getEventListeners } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import backgroundExtension from "../../extensions/background/index.ts";
+import backgroundExtension from "../../extensions/tools/background/index.ts";
 import { TASK_REGISTER_CHANNEL, type BackgroundTask } from "../../extensions/lib/agents/task-registry.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 

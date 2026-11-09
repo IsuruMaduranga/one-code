@@ -8,8 +8,8 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { dirname, join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import claudeContextExtension from "../../extensions/claude-context/index.ts";
-import { buildClaudeMdBlock, nestedInstructionText } from "../../extensions/claude-context/claude-context.ts";
+import claudeContextExtension from "../../extensions/context/claude-context/index.ts";
+import { buildClaudeMdBlock, nestedInstructionText } from "../../extensions/context/claude-context/claude-context.ts";
 import { discoverContextFiles, nestedInstructionFiles } from "../claude-code/instructions.ts";
 import { discoverRules, parseRule, readRuleInstructions, ruleMatches, splitRulePaths } from "../../extensions/lib/context/claude-rules.ts";
 import { claudeManagedDir, forwardSlashes, isPathAtOrUnder } from "../../extensions/lib/profile/paths.ts";

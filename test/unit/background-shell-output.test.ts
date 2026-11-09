@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import bashExtension from "../../extensions/bash/index.ts";
+import bashExtension from "../../extensions/tools/bash/index.ts";
 import { startBackgroundBash } from "../../extensions/lib/shell-run/bash-background.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";

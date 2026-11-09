@@ -37,12 +37,12 @@ type Schema = { properties?: Record<string, { description?: string }> };
 
 describe("shell tools in a child session", () => {
 	it("loads both shell tools from their silent child entry files, after skill", () => {
-		const names = CHILD_EXTENSION_PATHS.map((path) => path.split(/[\\/]/).slice(-2).join("/"));
-		for (const entry of ["bash/child.ts", "powershell/child.ts"]) {
+		const names = CHILD_EXTENSION_PATHS.map((path) => path.split(/[\\/]/).slice(-3).join("/"));
+		for (const entry of ["tools/bash/child.ts", "tools/powershell/child.ts"]) {
 			const path = CHILD_EXTENSION_PATHS.find((p) => p.replaceAll("\\", "/").endsWith(entry));
 			expect(path && existsSync(path)).toBe(true);
 		}
-		expect(names.indexOf("bash/child.ts")).toBeGreaterThan(names.indexOf("skill/index.ts"));
+		expect(names.indexOf("tools/bash/child.ts")).toBeGreaterThan(names.indexOf("tools/skill/index.ts"));
 	});
 
 	it("registers the harness's bash, with the profile's timeout parameter and run_in_background", async () => {

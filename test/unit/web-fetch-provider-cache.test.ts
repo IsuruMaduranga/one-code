@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Model } from "@earendil-works/pi-ai";
 import { stream } from "@earendil-works/pi-ai/api/anthropic-messages";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
-import { readerMessages } from "../../extensions/web-fetch/summarize.ts";
+import { readerMessages } from "../../extensions/tools/web-fetch/summarize.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const webFetch = requireText("webFetch");

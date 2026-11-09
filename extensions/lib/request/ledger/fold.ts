@@ -48,7 +48,7 @@ export interface LedgerFold {
 	lastRequest: FoldedRequest | undefined;
 	/** Every element hash already stored on the branch. */
 	knownHashes: Set<string>;
-	/** Every tool the branch's counted requests declared, in the order of its first declaration: the order an epoch renders (ledger/wire.ts). */
+	/** Every tool the branch's counted requests declared, in the order of its first declaration: the order an epoch renders (request/ledger/wire.ts). */
 	toolOrder: string[];
 	/** Told facts in the current epoch: kind ("tools", "skills", `CALLABLE_TOOLS`) to names. */
 	told: Map<string, Set<string>>;

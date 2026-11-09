@@ -6,7 +6,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { brand } from "../../../extensions/lib/profile/brand.mjs";
-import { buildMemoryEntries } from "../../../extensions/memory/entries.ts";
+import { buildMemoryEntries } from "../../../extensions/context/memory/entries.ts";
 
 /** Writes `content` to `<root>/<rel>` and returns the absolute path. */
 export function writeUnder(root: string, rel: string, content = "x"): string {

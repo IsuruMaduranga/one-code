@@ -9,7 +9,7 @@ import {
 	formatTokens,
 	type FooterData,
 	type Paint,
-} from "../../extensions/footer/footer-line.ts";
+} from "../../extensions/ui/footer/footer-line.ts";
 
 /** Identity paint so assertions see the plain line. */
 const plain: Paint = (_color, text) => text;

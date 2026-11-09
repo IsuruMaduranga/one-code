@@ -884,7 +884,7 @@ export interface DecideInput {
 	 */
 	secretPaths?: string[];
 	/**
-	 * The workspace directories in force (permissions/workspace.ts), absolute and
+	 * The workspace directories in force (safety/permissions/workspace.ts), absolute and
 	 * resolved. A read inside one is a working-space read, and acceptEdits may
 	 * write inside one, as in Claude Code; a credential path inside one is not
 	 * working space. Auto mode's unclassified writes stay confined to the working
@@ -1033,7 +1033,7 @@ export function decide(params: DecideInput): Decision {
 	const { toolName, subject, cwd, mode, deny, ask, allow } = params;
 	/**
 	 * The harness's readable session dirs and the workspace directories,
-	 * realpath'd, as the auto-mode pre-gate sees them (permissions/index.ts
+	 * realpath'd, as the auto-mode pre-gate sees them (safety/permissions/index.ts
 	 * `readableRoots`).
 	 */
 	const sessionReadableRoots = () => [
@@ -1084,7 +1084,7 @@ export function decide(params: DecideInput): Decision {
 		// exactly read-only. Anything it cannot vouch for is denied as before.
 		// Without this the frontier tier (no grep/find/ls) was left with `read` alone.
 		// The harness's readable session dirs, as the auto-mode pre-gate sees them
-		// (permissions/index.ts `readableRoots`): a plan-mode read of this project's
+		// (safety/permissions/index.ts `readableRoots`): a plan-mode read of this project's
 		// transcripts is a read like any other.
 		const readableRoots = sessionReadableRoots();
 		if (tool === "bash" && subject) {

@@ -7,7 +7,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { hookSettingsPaths, loadHookSettings, resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
+import { hookSettingsPaths, loadHookSettings, resetHookSettingsCache } from "../../extensions/safety/hooks/settings.ts";
 
 describe("hook settings in Claude Code's files", () => {
 	let root: string;

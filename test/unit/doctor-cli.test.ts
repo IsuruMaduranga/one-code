@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { collectDoctorCliReport, runDoctorCli } from "../../extensions/doctor/cli.ts";
+import { collectDoctorCliReport, runDoctorCli } from "../../extensions/commands/doctor/cli.ts";
 import { brand } from "../../extensions/lib/profile/brand.mjs";
 import { piRoot, repoRoot } from "./helpers/pi-install.ts";
 
@@ -65,7 +65,7 @@ describe("the app launcher (lib/app/create-app.mjs) doctor routing (pin against 
 		const piImportAt = source.indexOf('await import(resolve("@earendil-works/pi-coding-agent"))');
 		expect(doctorAt).toBeGreaterThan(0);
 		expect(piImportAt).toBeGreaterThan(doctorAt);
-		expect(source).toContain('join(corePath, "extensions", "doctor", "cli.ts")');
+		expect(source).toContain('join(corePath, "extensions", "commands", "doctor", "cli.ts")');
 	});
 
 	it("publishes the install method before the doctor fast path exits", () => {

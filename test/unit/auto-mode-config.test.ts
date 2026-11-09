@@ -15,7 +15,7 @@ import {
 	persistClassifierModel,
 	spliceDefaults,
 } from "../../extensions/lib/rules/auto-mode-config.ts";
-import { defaultEnvironment } from "../../extensions/permissions/auto-mode/classifier-prompt.ts";
+import { defaultEnvironment } from "../../extensions/safety/permissions/auto-mode/classifier-prompt.ts";
 import { productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
 import { tempHome } from "./helpers/temp-home.ts";
 

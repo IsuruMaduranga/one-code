@@ -1,5 +1,5 @@
 /**
- * permissions/index.ts wiring for the PERMISSIONS-REVIEW-2026-09-05 medium/low
+ * safety/permissions/index.ts wiring for the PERMISSIONS-REVIEW-2026-09-05 medium/low
  * fixes that live in the gate's session state rather than in `decide()`:
  * scoped "don't ask again" grants (M2), the runtime-protected agent dir (M7),
  * a fresh gate per session (L1), and worktree originals through the prompt
@@ -16,7 +16,7 @@ import { userDenialText } from "../../extensions/lib/consent/user-denial.ts";
 import { MODE_CHANNEL } from "../../extensions/lib/rules/plan-mode-channels.ts";
 import { WORKTREE_CHANNEL } from "../../extensions/lib/agents/worktree-channel.ts";
 import { shellQuote } from "../../extensions/lib/shell/shell-quote.ts";
-import permissionsExtension from "../../extensions/permissions/index.ts";
+import permissionsExtension from "../../extensions/safety/permissions/index.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../../extensions/lib/rules/modes.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { brand, envName } from "../../extensions/lib/profile/brand.mjs";

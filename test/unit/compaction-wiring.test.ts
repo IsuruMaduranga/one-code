@@ -1,6 +1,6 @@
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import compactionExtension from "../../extensions/compaction/index.ts";
+import compactionExtension from "../../extensions/context/compaction/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));

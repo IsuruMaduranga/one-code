@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import claudeContextExtension from "../../extensions/claude-context/index.ts";
-import systemReminderExtension from "../../extensions/system-reminder/index.ts";
+import claudeContextExtension from "../../extensions/context/claude-context/index.ts";
+import systemReminderExtension from "../../extensions/request/system-reminder/index.ts";
 import { discoverOneCodeFiles, openInstructions } from "../../extensions/lib/context/instructions.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";

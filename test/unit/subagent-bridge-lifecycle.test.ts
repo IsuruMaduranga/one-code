@@ -2,10 +2,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { classify } from "../../extensions/permissions/auto-mode/classifier.ts";
+import { classify } from "../../extensions/safety/permissions/auto-mode/classifier.ts";
 import { MODE_CHANNEL } from "../../extensions/lib/rules/plan-mode-channels.ts";
 import { productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
-import permissionsExtension from "../../extensions/permissions/index.ts";
+import permissionsExtension from "../../extensions/safety/permissions/index.ts";
 import { type PermissionBridge, SUBAGENT_GATE_CHANNEL, watchPermissionBridge } from "../../extensions/lib/agents/subagent-gate.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { buildGate } from "./helpers/permission-gate-harness.ts";
@@ -22,8 +22,8 @@ vi.mock("../../extensions/lib/rules/settings.ts", async (importOriginal) => ({
 	outsideReadPromptSeen: () => false,
 }));
 
-vi.mock("../../extensions/permissions/auto-mode/classifier.ts", async (importOriginal) => ({
-	...(await importOriginal<typeof import("../../extensions/permissions/auto-mode/classifier.ts")>()),
+vi.mock("../../extensions/safety/permissions/auto-mode/classifier.ts", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../extensions/safety/permissions/auto-mode/classifier.ts")>()),
 	classify: vi.fn(async () => ({ decision: "allow", reason: "", tier: "allow" })),
 }));
 

@@ -1,9 +1,9 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
-import { buildDoctorReport, summarizeProviders } from "../../extensions/doctor/build.ts";
-import { collectModelFacts, modelsSection } from "../../extensions/doctor/models.ts";
-import { type DoctorEnvironment, type Finding, type RegistryView, renderDoctorReport, renderDoctorText } from "../../extensions/doctor/report.ts";
+import { buildDoctorReport, summarizeProviders } from "../../extensions/commands/doctor/build.ts";
+import { collectModelFacts, modelsSection } from "../../extensions/commands/doctor/models.ts";
+import { type DoctorEnvironment, type Finding, type RegistryView, renderDoctorReport, renderDoctorText } from "../../extensions/commands/doctor/report.ts";
 import { TESTED_PI_MAX_EXCLUSIVE } from "../../extensions/lib/app/pi-version.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { sourceSwitchStatus } from "../../extensions/lib/profile/sources.ts";
@@ -337,7 +337,7 @@ describe("renderDoctorReport", () => {
 
 describe("shortenHome", () => {
 	it("folds only paths under home, never a sibling directory sharing the prefix", async () => {
-		const { shortenHome } = await import("../../extensions/doctor/report.ts");
+		const { shortenHome } = await import("../../extensions/commands/doctor/report.ts");
 		expect(shortenHome("/Users/bob/.claude/settings.json", "/Users/bob")).toBe("~/.claude/settings.json");
 		expect(shortenHome("/Users/bobby/.claude/settings.json", "/Users/bob")).toBe("/Users/bobby/.claude/settings.json");
 		expect(shortenHome("/Users/bob", "/Users/bob")).toBe("~");

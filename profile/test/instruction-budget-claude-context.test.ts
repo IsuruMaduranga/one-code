@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import claudeContextExtension from "../../extensions/claude-context/index.ts";
+import claudeContextExtension from "../../extensions/context/claude-context/index.ts";
 import { restoredInstructionNotice, skippedInstructionNote, skippedInstructionWarning } from "../../extensions/lib/context/instruction-budget.ts";
 import { estimateTextTokens } from "../../extensions/lib/models/pi-ai-estimate.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";

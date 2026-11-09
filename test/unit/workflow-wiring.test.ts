@@ -1,5 +1,5 @@
 /**
- * workflow/index.ts wiring: the "ultracode" keyword arms a turn with a one-shot
+ * agents/workflow/index.ts wiring: the "ultracode" keyword arms a turn with a one-shot
  * reminder, except while `/effort ultracode` already has the standing block on
  * (STEERING-REVIEW-2026-09-05 L3: two instructions for one fact, the weaker one
  * on top).
@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ULTRACODE_MODE_CHANNEL } from "../../extensions/lib/ui/effort-slider.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
-import workflowExtension from "../../extensions/workflow/index.ts";
+import workflowExtension from "../../extensions/agents/workflow/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
 describe("workflow wiring: the ultracode keyword", () => {

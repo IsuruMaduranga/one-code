@@ -12,9 +12,9 @@ import {
 	skillOverrideKey,
 	skillStateFor,
 } from "../../extensions/lib/plugins/skill-overrides.ts";
-import { decodeSkillsKey } from "../../extensions/skill/panel/keys.ts";
-import { renderSkillsPanel } from "../../extensions/skill/panel/render.ts";
-import { applySkillsKey, followRow, initialSkillsState, type SkillsRow, visibleRows } from "../../extensions/skill/panel/state.ts";
+import { decodeSkillsKey } from "../../extensions/tools/skill/panel/keys.ts";
+import { renderSkillsPanel } from "../../extensions/tools/skill/panel/render.ts";
+import { applySkillsKey, followRow, initialSkillsState, type SkillsRow, visibleRows } from "../../extensions/tools/skill/panel/state.ts";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "skills-"));
 

@@ -4,7 +4,7 @@
  * in test/unit/subagent-pending-claim.test.ts.
  */
 import { describe, expect, it } from "vitest";
-import { pendingClaimReminder } from "../../extensions/subagents/pending-claim.ts";
+import { pendingClaimReminder } from "../../extensions/agents/subagents/pending-claim.ts";
 
 describe("One Code's pending-claim reminder", () => {
 	it("names the run and offers both sanctioned ways to get the result", () => {

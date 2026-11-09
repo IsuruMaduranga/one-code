@@ -1,0 +1,672 @@
+/**
+ * The classifier call itself — the one file here that talks to a provider.
+ *
+ * Claude Code's two-stage formula, reproduced (working-docs/decisions/auto-mode.md, P4):
+ *   Stage 1 grades HARM ONLY (maxTokens 64). severity < 50 → allow, no stage 2.
+ *   Stage 2 applies intent + ALLOW (maxTokens 4096, <thinking> CoT) → severity +
+ *   <category> (+ our verified <intent>). Both stages share one system prompt and
+ *   transcript byte-for-byte. Where the request carries explicit breakpoints
+ *   (Anthropic Messages, OpenRouter's Anthropic-format Chat Completions,
+ *   Bedrock Converse), onPayload splits the user text at stable history-entry
+ *   boundaries and moves the user cache marker before the pending action and
+ *   stage instruction (cache.ts). Both stages and later gated calls can read
+ *   that prefix; the system markers stay intact. Other APIs keep the single
+ *   string and their provider's prefix caching.
+ *
+ * A one-shot `completeSimple` per stage rather than an agent session: no tools,
+ * no history beyond the transcript it is handed, nothing to be talked into. Every
+ * failure path — no model, no credentials, timeout, provider error, truncated or
+ * unparseable reply — returns a block; a gate that cannot reach its classifier
+ * has approved nothing.
+ */
+
+import { appendFileSync } from "node:fs";
+import { cleanupSessionResources, isContextOverflow, type Model, type Api, type AssistantMessage, type ThinkingLevel } from "@earendil-works/pi-ai";
+import { completeSimple } from "@earendil-works/pi-ai/compat";
+import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { costRatioText, isNotablyCostlier } from "../../../lib/models/model-choice-warnings.ts";
+import { modeCycleKey } from "../../../lib/ui/keys.ts";
+import { classifierCostRatio, forcedReasoningLevel, isReasoningMandatoryError, modelSpec as spec, reasoningRetryLevel } from "../../../lib/models/model-policy.ts";
+import type { AutoModeConfig } from "../../../lib/rules/auto-mode-config.ts";
+import { CLASSIFIER_CACHE_APIS, cacheClassifierHistory } from "./cache.ts";
+import {
+	buildPayload,
+	type ClassifyRequest,
+	type ClassifyVerdict,
+	parseSeverity,
+	parseStage2,
+	reviewUser,
+	SEVERITY_THRESHOLD,
+	stage1User,
+	stage2User,
+} from "./prompt.ts";
+import {
+	type Candidate,
+	type ClassifierFallback,
+	type ClassifierNotice,
+	classifierCandidates,
+	describeCandidate,
+	isModelUnavailableError,
+	replyText,
+	withAuthBaseUrl,
+} from "../../../lib/models/classifier-model.ts";
+import { actionLength, MAX_ACTION_CHARS } from "./transcript.ts";
+import type { ClassifierBlock, UnusableClassifier } from "./text.ts";
+import { autoModeWords } from "./words.ts";
+
+/** A verdict that blocks without one: the classifier could not judge the call. */
+const noVerdict = (block: ClassifierBlock, extra: Partial<ClassifyVerdict> = {}): ClassifyVerdict => ({
+	decision: "block",
+	reason: autoModeWords().classifierBlock(block),
+	tier: "unmatched",
+	noVerdict: true,
+	...extra,
+});
+
+/** A slow classifier stalls every tool call, so the wait is capped per stage. */
+export const CLASSIFIER_TIMEOUT_MS = 30_000;
+
+/**
+ * Claude Code's default retry count for a rate limit or server error (its
+ * classifier's side query uses it). pi-ai's default is none, so one 429 left
+ * the call unjudged; the stage timeout above still bounds the retries.
+ */
+export const CLASSIFIER_MAX_RETRIES = 10;
+
+/**
+ * Output headroom for a model that cannot turn thinking off, added to both
+ * stages' caps as Claude Code pads its always-on-thinking models: the
+ * reasoning otherwise spends the budget before the verdict is written.
+ */
+export const FORCED_THINKING_PADDING = 2048;
+
+/**
+ * A pinned model that times out this many calls in a row is unpinned, so a model
+ * that was fast when first chosen but has since fallen behind demand does not
+ * stay the session's classifier forever. The next call re-runs selection.
+ */
+export const ROTATE_AFTER_TIMEOUTS = 2;
+
+/**
+ * The provider refused the classifier's prompt as a possible usage-policy
+ * violation ("Invalid prompt: your prompt was flagged as potentially violating
+ * our usage policy"). GPT-6 Luna on Codex did this to about one classifier
+ * prompt in ten, at random, and passed the same prompt on a retry (findings
+ * §59). A refused call is retried once on the same model; a second refusal
+ * drops the model for the rest of the session (decisions/auto-mode.md,
+ * "A classifier that refuses its prompt").
+ */
+export function isPromptPolicyRefusal(message: string): boolean {
+	return /invalid prompt\b[^.\n]{0,80}\bflagged\b[^.\n]{0,80}usage policy/i.test(message);
+}
+
+/**
+ * Whether a failure is our own classifier timeout (or an equivalent abort/stall)
+ * rather than a substantive provider error. A timeout is transient — worth a
+ * retry and worth stepping to another candidate — where a 500 or a bad request
+ * is not. A *user* cancel also aborts, so callers must rule that out first
+ * (`deps.signal?.aborted`) before treating an abort as a timeout.
+ */
+export function isClassifierTimeout(message: string): boolean {
+	return /\babort|\btimed?\s*out\b|\btimeout\b|\betimedout\b|\bdeadline\b/i.test(message);
+}
+
+/**
+ * Whether a failure happened below HTTP: the request never got an answer
+ * (`fetch failed`, a reset or refused connection, a DNS miss). Like a timeout it
+ * says nothing about the call or the model, so it takes the timeout path: one
+ * retry, then a "not judged" block. A provider's own error reply (a 500, a 429)
+ * is not one; it stays a substantive error. Observed 2026-10-04: a few minutes
+ * of `fetch failed` on openai-codex blocked read-only calls as "denied".
+ */
+export function isTransportFailure(message: string): boolean {
+	return /\bfetch failed\b|\beconn(reset|refused|aborted)\b|\benotfound\b|\beai_again\b|\bepipe\b|socket hang up|other side closed|\bund_err_socket\b|network (error|is unreachable)|\bwebsocket (closed|error)\b/i.test(
+		message,
+	);
+}
+
+/**
+ * A provider's error without its advice to the user ("Please try again with a
+ * different prompt", "try rephrasing your request", a link): handed to the
+ * model in a block, that advice invites rephrasing the call past the gate.
+ */
+export function providerErrorSummary(message: string): string {
+	// Advice follows a sentence end, a colon or semicolon, or a line break.
+	const cut = message.search(/(?:[.!:;]\s+|\n\s*)(please\b|if this seems|try\b|you can\b|learn more|see\b)/i);
+	const kept = cut >= 0 ? message.slice(0, cut + 1) : message;
+	return kept.replace(/:?\s*https?:\/\/\S+/g, "").trim().replace(/[:;]$/, "");
+}
+
+/** A provider rejected the input window, not the action's safety or output limit. */
+export function isClassifierTranscriptTooLong(message: string): boolean {
+	// Only pi-ai's error-pattern branch: no catalog window means this never
+	// infers overflow from an estimate or a model's reported usage.
+	return isContextOverflow({ stopReason: "error", errorMessage: message } as AssistantMessage);
+}
+
+/** Pause before retrying after a transport failure, so a brief network drop can clear. */
+export const TRANSPORT_RETRY_DELAY_MS = 1500;
+
+/**
+ * Which model the classifier settled on, and which candidates turned out to be
+ * unusable. Owned by the caller so this module stays stateless, and so the
+ * choice is *pinned*: re-resolving per call would let a registry refresh swap
+ * classifiers mid-session, and would re-try a model already known to be dead.
+ */
+export interface ClassifierState {
+	pinned?: Model<Api>;
+	/** `provider/id` of candidates that failed as unusable. */
+	rejected: Set<string>;
+	/**
+	 * The subset of `rejected` that refused the classifier's prompt twice. Unlike
+	 * another rejection, such a model is not retried when every candidate is
+	 * gone: it would refuse again, so the gate stops and says how to go on.
+	 */
+	refused: Set<string>;
+	/** Notices already delivered, so a per-call warning is not repeated per call. */
+	notified: Set<string>;
+	/**
+	 * Consecutive calls the pinned model has timed out on. Reset by any success;
+	 * at ROTATE_AFTER_TIMEOUTS the pin is released so the session re-picks.
+	 */
+	timeoutStreak: number;
+	/**
+	 * The candidate chain cached for the current session-model/window signature,
+	 * so the O(catalog) ranking is not rebuilt on every gated tool call.
+	 * Invalidated when the session model or its catalog context window changes —
+	 * catalog churn is otherwise deliberately ignored, matching the pin, which
+	 * already commits the session to one classifier. The live `rejected` filter is
+	 * still applied to the cached chain per call, so a model that dies mid-session
+	 * is still stepped over without a rebuild.
+	 */
+	chainCache?: { signature: string; candidates: Candidate[]; notices: ClassifierNotice[]; fallback?: ClassifierFallback };
+	/**
+	 * `provider/id` -> the thinking level a model turned out to REQUIRE (its
+	 * provider rejected the thinking-off request with "reasoning is mandatory").
+	 * Learned once per model via a single retry, then sent on every later call so
+	 * the failed round-trip is never paid again. Only needed when the model's
+	 * catalog entry lacks `thinkingLevelMap.off: null` (that case is handled
+	 * proactively, without an error).
+	 */
+	forcedReasoning: Map<string, ThinkingLevel>;
+	/** Previous history boundary on a breakpoint API, a cache lookup hint only (cache.ts). */
+	cacheHistoryEnd?: number;
+}
+
+export function createClassifierState(): ClassifierState {
+	return { rejected: new Set(), refused: new Set(), notified: new Set(), timeoutStreak: 0, forcedReasoning: new Map() };
+}
+
+/** The `cacheKey` a session's classifier calls pass (`ClassifierDeps.cacheKey`). */
+export function classifierCacheKey(sessionId: string): string {
+	return `${sessionId}:auto-mode`;
+}
+
+/**
+ * Close what pi-ai holds open under the session's classifier key. The key
+ * doubles as pi-ai's `sessionId`, and on openai-codex that keeps one WebSocket
+ * per id with a 5-minute idle timer holding the process; pi's own dispose
+ * closes only the session's id, so without this a `pi -p` run waits out the
+ * timer after its answer (findings §59).
+ */
+export function releaseClassifierResources(sessionId: string): void {
+	cleanupSessionResources(classifierCacheKey(sessionId));
+}
+
+export interface ClassifierDeps {
+	registry: ModelRegistry;
+	sessionModel: Model<Api> | undefined;
+	config: AutoModeConfig;
+	signal?: AbortSignal;
+	state: ClassifierState;
+	/**
+	 * A stable key for this session's classifier calls. pi-ai sends it as
+	 * OpenAI's prompt_cache_key (Codex and the OpenAI APIs), which routes the
+	 * calls to the cache that holds the previous call's prefix; without it
+	 * consecutive calls landed on different cache machines and missed.
+	 */
+	cacheKey?: string;
+	/** Tell the user something once — which model is in use, or that theirs is dead. */
+	onNotice?: (message: string, level: "info" | "warning", notice?: ClassifierNotice) => void;
+	/** Report each classifier reply's usage, for the all-in footer cost. Observer
+	 * only — it never affects the payload sent or the verdict parsed. */
+	onUsage?: (usage: unknown) => void;
+	/**
+	 * A candidate the provider refused as not usable on this account (stepped
+	 * over and recorded in `state.rejected`). The wiring republishes it on
+	 * `lib/models/model-unusable.ts`'s channel so subagent selection — which shares this
+	 * classifier's floor and therefore its first pick — skips it too.
+	 */
+	onModelUnusable?: (model: string, reason: string) => void;
+	/**
+	 * Completed-run subagent review: evaluate the sequence with a single stage-2
+	 * style full-eval call instead of the two-stage gate (there is no harm floor
+	 * to short-circuit, and the whole point is the intent/ALLOW judgment).
+	 */
+	reviewOnly?: boolean;
+}
+
+/** How a single candidate's attempt failed, so the outer loop can react. */
+type StepKind = "timeout" | "cancelled" | "unavailable" | "refused" | "error" | "truncated" | "transcript-too-long";
+class StepError extends Error {
+	constructor(
+		readonly kind: StepKind,
+		message: string,
+	) {
+		super(message);
+	}
+}
+
+/** Signature that must stay equal for the cached chain to be reused (see ClassifierState.chainCache). */
+function selectionSignature(sessionModel: Model<Api> | undefined, config: Pick<AutoModeConfig, "classifierModel" | "classifierModelSetFor">): string {
+	const configured = `${config.classifierModel ?? ""}|${config.classifierModelSetFor ?? ""}`;
+	return sessionModel ? `${sessionModel.provider}/${sessionModel.id}|${sessionModel.contextWindow ?? "unknown"}|${configured}` : `(none)|${configured}`;
+}
+
+/**
+ * The selection chain for this session model and setting, built once per
+ * signature and shared by every reader: the gate, the badge and banner that
+ * name the next classifier, and the announcement. The newer-model warnings
+ * are always in it; a reader that honours `suggestNewerModels` drops them.
+ */
+export function classifierChain(
+	state: ClassifierState,
+	input: { available: () => Model<Api>[]; sessionModel: Model<Api> | undefined; config: Pick<AutoModeConfig, "classifierModel" | "classifierModelSetFor"> },
+): NonNullable<ClassifierState["chainCache"]> {
+	const signature = selectionSignature(input.sessionModel, input.config);
+	const cached = state.chainCache;
+	if (cached && cached.signature === signature) return cached;
+	const built = classifierCandidates({
+		available: input.available(),
+		sessionModel: input.sessionModel,
+		configured: input.config.classifierModel,
+		configuredSetForContainment: input.config.classifierModelSetFor,
+	});
+	const chain = { signature, candidates: built.candidates, notices: built.notices, ...(built.fallback ? { fallback: built.fallback } : {}) };
+	// Don't poison the cache with an empty chain (e.g. a not-yet-populated
+	// registry) — that would permanently block the gate; recompute next call.
+	if (built.candidates.length > 0) state.chainCache = chain;
+	return chain;
+}
+
+/** The candidate chain (minus anything already unusable this session) and its notices. */
+function remainingCandidates(deps: ClassifierDeps): { candidates: Candidate[]; notices: ClassifierNotice[] } {
+	const { candidates: all, notices } = classifierChain(deps.state, { available: () => deps.registry.getAvailable(), sessionModel: deps.sessionModel, config: deps.config });
+	const usable = all.filter((entry) => !deps.state.rejected.has(`${entry.model.provider}/${entry.model.id}`));
+	if (usable.length > 0) return { candidates: usable, notices };
+	// If everything has been rejected, the session model is still worth one more
+	// attempt: a gate that stops asking has stopped gating. It has to be the
+	// session model specifically — the *last* chain entry is the cost-ranked pick,
+	// which nothing price-chosen should lead, let alone be the sole retry. A model
+	// that refused the prompt is not retried: it would refuse again
+	// (`refusalStop`).
+	const session = all.filter((entry) => entry.source === "session");
+	const retry = session.length > 0 ? session : all.slice(-1);
+	return { candidates: retry.filter((entry) => !deps.state.refused.has(`${entry.model.provider}/${entry.model.id}`)), notices };
+}
+
+/**
+ * Every candidate is gone and one refused the classifier's prompt: the call is
+ * not judged, and the user is told once how to go on.
+ */
+function refusalStop(deps: ClassifierDeps, unusable: readonly UnusableClassifier[] = []): ClassifyVerdict {
+	const refused = [...deps.state.refused].join(", ");
+	// A model that failed this call for another cause has its own fix: name it too.
+	const others = unusable.length > 0 ? ` ${unusable.map((u) => `${u.model} cannot be used (${u.error})`).join("; ")}.` : "";
+	notifyOnce(
+		deps,
+		"refusal-stop",
+		`Auto mode has no classifier left: ${refused} refused the classifier's prompt as a possible usage-policy violation, and no other eligible model can screen calls.${others} ` +
+			`Calls are not judged and do not run. Switch to manual approval (${modeCycleKey()} cycles permission modes), or choose another classifier with /auto-mode model <provider/id>.`,
+		"warning",
+	);
+	return noVerdict({ kind: "noClassifierLeft", refused: [...deps.state.refused], unusable: [...unusable] });
+}
+
+function notifyOnce(deps: ClassifierDeps, key: string, message: string, level: "info" | "warning", notice?: ClassifierNotice) {
+	if (deps.state.notified.has(key)) return;
+	deps.state.notified.add(key);
+	deps.onNotice?.(message, level, notice);
+}
+
+/**
+ * Ask the classifier about one tool call (or, with `reviewOnly`, one finished
+ * subagent run). See the module comment for the two-stage flow.
+ */
+export async function classify(request: ClassifyRequest, deps: ClassifierDeps): Promise<ClassifyVerdict> {
+	const { candidates, notices } = remainingCandidates(deps);
+	if (candidates.length === 0) {
+		if (deps.state.refused.size > 0) return refusalStop(deps);
+		return noVerdict({ kind: "noModel" });
+	}
+
+	// Automatic-selection fallback explanations are surfaced once per distinct message.
+	// A newer-model hint about a chosen classifier is the session-start
+	// announcement's to make (it honours suggestNewerModels), not a gated call's.
+	for (const notice of notices) if (notice.choiceWarning !== "newer") notifyOnce(deps, notice.text, notice.text, notice.level, notice);
+
+	// The action is sent whole (transcript.ts MAX_ACTION_CHARS); one too large for
+	// that is refused with its size, never judged from a prefix.
+	const actionChars = deps.reviewOnly ? 0 : actionLength(request.transcript);
+	if (actionChars > MAX_ACTION_CHARS) {
+		return noVerdict({ kind: "actionTooLong", chars: actionChars, max: MAX_ACTION_CHARS });
+	}
+
+	// buildPayload builds the ~110KB ruleset once and returns the grounding index
+	// derived from it, so the ruleset is not rebuilt/re-parsed a second time here.
+	const { system, userPrefix, history, tail, index } = buildPayload(request);
+	const previousHistoryEnd = deps.state.cacheHistoryEnd;
+	const stage1Text = stage1User(userPrefix);
+	// A permission rule refused something this turn, so stage 2 gets the extra
+	// instruction that the user's intent does not excuse an equivalent-effect
+	// retry (the profile's `stage2DenialAddendum`). Stage 1 grades harm only and is
+	// left byte-identical to CC's.
+	const afterRuleDenial = request.transcript.some((entry) => entry.kind === "denied");
+	const debug = process.env.CC_AUTO_MODE_DEBUG;
+	// Probe hook (test/e2e/cache-probe.sh): one JSON line per classifier reply with
+	// its text and pi-ai's normalized usage, whatever the transport (Codex runs
+	// over WebSocket, where a fetch wrapper sees nothing). Opt-in, never read back.
+	const usageLog = process.env.CC_AUTO_MODE_LOG;
+
+	// A model already pinned this session is tried first, so the classifier does
+	// not change under the session while the pin is healthy. The rest of the chain
+	// stays behind it: a pinned model can be withdrawn mid-session, and the same
+	// call must then step onward rather than fail every call forever.
+	const pinned = deps.state.pinned;
+	const attempts = pinned
+		? [
+				{ model: pinned, source: "session" as const },
+				...candidates.filter((entry) => entry.model.provider !== pinned.provider || entry.model.id !== pinned.id),
+			]
+		: candidates;
+
+	// Rejecting a model releases its pin: without that, a model withdrawn
+	// mid-session would stay pinned, be the only candidate tried on every later
+	// call, and turn the gate into a permanent block until restart.
+	const reject = (key: string) => {
+		deps.state.rejected.add(key);
+		if (deps.state.pinned && `${deps.state.pinned.provider}/${deps.state.pinned.id}` === key) {
+			deps.state.pinned = undefined;
+		}
+	};
+
+	let lastError = "";
+	let sawTimeout = false;
+	/** Candidates rejected this call as unusable, with their errors. */
+	const unusable: UnusableClassifier[] = [];
+	let timedOutKey: string | undefined;
+	/** The timed-out candidate's own error: a later candidate's failure must not relabel it. */
+	let timedOutError = "";
+	// Walks `attempts` in order; a candidate that turns out to require thinking is
+	// re-queued at the front for exactly one retry (see the reasoning-mandatory
+	// branch below). The `!== undefined` guard narrows `candidate`, so no cast.
+	const queue = [...attempts];
+	for (let candidate = queue.shift(); candidate !== undefined; candidate = queue.shift()) {
+		const model = candidate.model;
+		const key = `${model.provider}/${model.id}`;
+
+		const auth = await deps.registry.getApiKeyAndHeaders(model);
+		if (!auth.ok) {
+			// No working credentials for this model: a subagent on it would fail the
+			// same way, so it is published like a provider refusal.
+			reject(key);
+			deps.onModelUnusable?.(key, auth.error);
+			lastError = auth.error;
+			continue;
+		}
+		const resolvedModel = withAuthBaseUrl(model, auth);
+
+		// One provider call. `reasoning`/`temperature` are deliberately omitted: pi
+		// turns thinking off entirely when `reasoning` is absent (what a classifier
+		// wants), and `temperature` is deprecated/unsupported on several models and
+		// fails closed. See working-docs/decisions/auto-mode.md. The one exception: a model
+		// that CANNOT disable thinking (catalog-marked, or learned via the
+		// reasoning-mandatory retry below) gets its lowest supported level — the
+		// off-request would 400 and the gate would fail closed on every call.
+		const reasoning = deps.state.forcedReasoning.get(key) ?? forcedReasoningLevel(model);
+		const runCall = (userText: string, maxTokens: number, stage: number) => {
+			if (debug === "2") {
+				process.stderr.write(
+					`\n[auto-mode payload] stage=${stage} model=${key} maxTokens=${maxTokens} systemLen=${system.length} userLen=${userText.length}\n` +
+						`===SYSTEM===\n${system}\n===USER===\n${userText}\n===END===\n`,
+				);
+			}
+			const timeout = AbortSignal.timeout(CLASSIFIER_TIMEOUT_MS);
+			return completeSimple(
+				resolvedModel,
+				{ systemPrompt: system, messages: [{ role: "user", content: userText, timestamp: Date.now() }] },
+				{
+					apiKey: auth.apiKey,
+					headers: auth.headers,
+					env: auth.env,
+					signal: deps.signal ? AbortSignal.any([deps.signal, timeout]) : timeout,
+					maxTokens,
+					maxRetries: CLASSIFIER_MAX_RETRIES,
+					cacheRetention: "long",
+					...(deps.cacheKey ? { sessionId: deps.cacheKey } : {}),
+					...(CLASSIFIER_CACHE_APIS.has(model.api) ? {
+						onPayload: (payload: unknown) => {
+							cacheClassifierHistory(payload, [...history, tail, userText.slice(userPrefix.length)], history.length - 1, previousHistoryEnd);
+							deps.state.cacheHistoryEnd = history.length - 1;
+						},
+					} : {}),
+					...(reasoning ? { reasoning } : {}),
+				},
+			);
+		};
+
+		// Turn one reply into text, or throw a StepError the loop knows how to route.
+		// `big` is the retry cap for a length-truncated reply; a still-truncated reply
+		// at `big` is its own outcome (not a candidate to step past).
+		const padding = reasoning ? FORCED_THINKING_PADDING : 0;
+		const call = async (userText: string, base: number, big: number, stage: number): Promise<string> => {
+			base += padding;
+			big += padding;
+			const inspect = (reply: AssistantMessage): string | "length" => {
+				deps.onUsage?.(reply.usage);
+				if (usageLog) {
+					try {
+						appendFileSync(usageLog, `${JSON.stringify({ model: key, api: model.api, stage, system, user: userText, usage: reply.usage, stopReason: reply.stopReason })}\n`);
+					} catch {
+						// A probe log that cannot be written must not fail the gate.
+					}
+				}
+				if (deps.signal?.aborted) throw new StepError("cancelled", "cancelled");
+				if (reply.stopReason === "error" || reply.stopReason === "aborted") {
+					const msg = reply.errorMessage ?? reply.stopReason ?? "provider error";
+					if (isContextOverflow(reply)) throw new StepError("transcript-too-long", msg);
+					if (isClassifierTimeout(msg) || isTransportFailure(msg)) throw new StepError("timeout", msg);
+					if (isPromptPolicyRefusal(msg)) throw new StepError("refused", msg);
+					throw new StepError(isModelUnavailableError(msg) ? "unavailable" : "error", msg);
+				}
+				if (reply.stopReason === "length") return "length";
+				return replyText(reply);
+			};
+
+			let reply = await runCall(userText, base, stage);
+			let seen: string | "length";
+			try {
+				seen = inspect(reply);
+			} catch (error) {
+				// One retry on a timeout or a usage-policy refusal, before giving up on
+				// this model: a stall under load usually clears on a second try, and a
+				// refused prompt usually passes. The identical request still reads the
+				// session's cached prefix. A user cancel or a substantive error is not
+				// retried.
+				if (error instanceof StepError && (error.kind === "timeout" || error.kind === "refused")) {
+					if (error.kind === "timeout" && isTransportFailure(error.message)) await new Promise((resolve) => setTimeout(resolve, TRANSPORT_RETRY_DELAY_MS));
+					reply = await runCall(userText, base, stage);
+					seen = inspect(reply);
+				} else {
+					throw error;
+				}
+			}
+			if (seen !== "length") return seen;
+			// A cut-off reply voids the verdict, so retry once with real headroom.
+			reply = await runCall(userText, big, stage);
+			const retried = inspect(reply);
+			if (retried === "length") throw new StepError("truncated", "verdict truncated at maxTokens");
+			return retried;
+		};
+
+		try {
+			let verdict: ClassifyVerdict;
+			let stageInfo: string;
+
+			if (deps.reviewOnly) {
+				// A finished run has no harm floor to short-circuit — go straight to the
+				// full stage-2 evaluation, reframed to judge the whole sequence.
+				const text = await call(reviewUser(userPrefix), 4096, 8192, 2);
+				verdict = parseStage2(text, index, request.userMessages);
+				stageInfo = `review sev=${parseSeverity(text) ?? "?"}`;
+			} else {
+				// STAGE 1 — harm only. maxTokens 64 like CC; if the reply overruns 64
+				// without a readable severity, one retry with headroom recovers it.
+				// Stage 2's 4096 is CC's too, with one retry at 8192.
+				const s1 = await call(stage1Text, 64, 1024, 1);
+				const sev1 = parseSeverity(s1);
+				if (sev1 !== null && sev1 < SEVERITY_THRESHOLD) {
+					verdict = { decision: "allow", reason: "", tier: "allow" };
+					stageInfo = `s1=${sev1} (cleared, no stage 2)`;
+				} else {
+					// sev1 >= 50, or unparseable → fall to the fuller stage-2 evaluation.
+					// stage2User is built here (not eagerly) so the common allow case
+					// does not concatenate the transcript prefix a second time.
+					const s2 = await call(stage2User(userPrefix, afterRuleDenial), 4096, 8192, 2);
+					verdict = parseStage2(s2, index, request.userMessages);
+					stageInfo = `s1=${sev1 ?? "?"} s2=${parseSeverity(s2) ?? "?"}`;
+					// Stage 1 flagged the call and stage 2 cleared it without quoting the
+					// user's intent or citing any rule. CC allows here (severity rules),
+					// so this stays an allow — but tagged, so the decision log and debug
+					// trace show a clear that rests on nothing checkable (review P11).
+					if (verdict.decision === "allow" && verdict.tier === "allow" && !verdict.ruleId) {
+						verdict = { ...verdict, ruleId: "unverified-clear" };
+					}
+				}
+			}
+
+			// A verdict came back, so any building timeout streak is over.
+			deps.state.timeoutStreak = 0;
+			// Pin on the first success, so the classifier cannot change under the
+			// session and a working model is not re-litigated per call.
+			if (!deps.state.pinned) {
+				deps.state.pinned = model;
+				notifyOnce(deps, `using:${key}`, `Auto mode is screening calls with ${describeCandidate(candidate)}.`, "info");
+			}
+			if (debug) {
+				process.stderr.write(
+					`[auto-mode] ${key} ${request.toolName} → ${verdict.decision}` +
+						`${verdict.ruleId ? ` (${verdict.ruleId})` : ""} [${stageInfo}]\n` +
+						// An unverified intent quote is printed whole: the next mismatch class
+						// (2026-09-05 H4 was wrapping quotation marks) is only visible in the
+						// exact text the model produced.
+						(verdict.raw ? `  raw: ${verdict.ruleId === "intent-unverified" ? verdict.raw : verdict.raw.slice(0, 300)}\n` : ""),
+				);
+			}
+			return verdict;
+		} catch (error) {
+			// A non-StepError is an unexpected throw; treat it as a substantive
+			// "error" (surface it, don't step past it) — same as StepError("error").
+			const kind: StepKind = error instanceof StepError ? error.kind : "error";
+			lastError = error instanceof Error ? error.message : String(error);
+
+			if (kind === "cancelled") {
+				return noVerdict({ kind: "cancelled" });
+			}
+			// The provider is authoritative about its token window. Do not clip the
+			// history or retry another model: the gate must offer manual approval
+			// interactively, or stop a headless run, rather than invent a verdict.
+			if (kind === "transcript-too-long" || (kind === "error" && isClassifierTranscriptTooLong(lastError))) {
+				return noVerdict({ kind: "transcriptTooLong", model: key }, { transcriptTooLong: true });
+			}
+			if (kind === "truncated") {
+				if (debug) process.stderr.write(`[auto-mode] ${key} ${request.toolName} → verdict truncated at maxTokens\n`);
+				return noVerdict({ kind: "truncated" });
+			}
+			if (kind === "error") {
+				// The provider refused the thinking-off request outright (metadata gap:
+				// no `thinkingLevelMap.off: null` on this catalog entry). Learn the
+				// model's floor once and retry the same candidate with it.
+				if (!reasoning && isReasoningMandatoryError(lastError)) {
+					const level = reasoningRetryLevel(model);
+					deps.state.forcedReasoning.set(key, level);
+					notifyOnce(
+						deps,
+						`forced-reasoning:${key}`,
+						`${key} cannot run with thinking disabled; the classifier now runs it at ${level} thinking.`,
+						"info",
+					);
+					queue.unshift(candidate);
+					continue;
+				}
+				// A substantive, non-transient failure that is not "model unusable here":
+				// surface it rather than papering over something about to clear.
+				return noVerdict({ kind: "providerError", summary: providerErrorSummary(lastError) });
+			}
+			if (kind === "timeout") {
+				// Transient — do NOT reject the model, it may be fine next call. Step to
+				// the next candidate; a pinned model that keeps timing out is unpinned.
+				sawTimeout = true;
+				timedOutKey = key;
+				timedOutError = lastError;
+				if (deps.state.pinned && `${deps.state.pinned.provider}/${deps.state.pinned.id}` === key) {
+					deps.state.timeoutStreak += 1;
+					if (deps.state.timeoutStreak >= ROTATE_AFTER_TIMEOUTS) deps.state.pinned = undefined;
+				}
+				continue;
+			}
+			if (kind === "refused") {
+				// Refused twice in a row: drop the model for the session and pin the next
+				// one, rather than pay a fallback's uncached prefix on every refusal. The
+				// refusal is about the classifier's prompt, not the account, so the
+				// subagent selector is not told.
+				reject(key);
+				deps.state.refused.add(key);
+				const next = queue[0]?.model;
+				// A candidate that timed out on this call is still eligible: end the
+				// chain as a timeout (after the loop), not as "no classifier left".
+				if (!next) {
+					if (sawTimeout) continue;
+					return refusalStop(deps, unusable);
+				}
+				const ratio = classifierCostRatio(next, model);
+				notifyOnce(
+					deps,
+					`refused:${key}`,
+					`${key} refused the auto-mode classifier's prompt twice as a possible usage-policy violation, so auto mode screens calls with ` +
+						`${spec(next)} for the rest of this session${isNotablyCostlier(ratio) ? `, at about ${costRatioText(ratio)} the cost per call` : ""}. ` +
+						"Choose another classifier with /auto-mode model <provider/id>.",
+					"warning",
+				);
+				continue;
+			}
+			// unavailable: this model is not usable here — step over it and record it.
+			reject(key);
+			deps.onModelUnusable?.(key, lastError);
+			unusable.push({ model: key, error: String(lastError) });
+			notifyOnce(
+				deps,
+				`rejected:${key}`,
+				`Auto mode cannot use ${key} as its classifier (${lastError}); trying another eligible model.`,
+				"warning",
+			);
+		}
+	}
+
+	// Every candidate timed out (with a retry each) and none was reachable in time.
+	// This is NOT a judgement that the call is unsafe — it was never screened — so
+	// it is surfaced as its own tier. The gate turns a timeout into a user prompt
+	// where it can, and only blocks outright when running non-interactively.
+	if (sawTimeout) {
+		const model = timedOutKey ? timedOutKey.split("/").pop() : undefined;
+		const network = isTransportFailure(timedOutError);
+		return noVerdict(
+			{ kind: "unavailable", tool: request.toolName, ...(model ? { model } : {}), ...(network ? { networkError: String(timedOutError) } : {}) },
+			{ tier: "timeout" },
+		);
+	}
+
+	if (deps.state.refused.size > 0) return refusalStop(deps, unusable);
+	// Every candidate was unusable — say which knob fixes it.
+	return noVerdict({ kind: "noUsableModel", lastError: String(lastError) });
+}

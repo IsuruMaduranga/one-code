@@ -129,7 +129,7 @@ type LocalCommandOptions<O extends CommandOptions> = Omit<O, "handler"> & { argu
  * or a throw). Only a command that never starts a turn of its own may opt in:
  * a breadcrumb queued after `sendUserMessage` would miss that message. `/clear`
  * is the one exception — it announces from the NEW session's `session_start`
- * (see clear/index.ts) and registers plainly. `argumentHint` is the prompt's
+ * (see commands/clear/index.ts) and registers plainly. `argumentHint` is the prompt's
  * dim placeholder for the command's argument (lib/ui/argument-hints.ts). Its
  * completions leave out an exact match, so a fully typed argument runs on the
  * first Enter (`withoutExactMatch`).

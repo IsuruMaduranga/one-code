@@ -17,8 +17,8 @@ import { toolResultsOnBranch } from "./branch-restore.ts";
 import { parseClaudeId } from "../profile/claude-id.ts";
 import { leadingToolsItem, toolsItemFor } from "./ledger/wire.ts";
 import { RESPONSES_APIS } from "./system-role.ts";
-import { toolSearchWords } from "../../tool-search/words.ts";
-import type { ToolSearchText } from "../../tool-search/text.ts";
+import { toolSearchWords } from "../../request/tool-search/words.ts";
+import type { ToolSearchText } from "../../request/tool-search/text.ts";
 import { around, escapeRegExp, memoOn } from "../profile/template-probe.ts";
 import { normalizeToolName } from "../rules/matcher.ts";
 
@@ -111,7 +111,7 @@ export class DeferredRegistry {
 	}
 }
 
-// The one registry instance is constructed by its owner (tool-search/index.ts):
+// The one registry instance is constructed by its owner (request/tool-search/index.ts):
 // a shared export here would be a distinct object in every other extension's
 // jiti module graph, and a tool deferred through that copy would steer nothing.
 
@@ -321,7 +321,7 @@ function withBreakpointOnLast<T extends Record<string, unknown>>(items: T[], cac
  *   wire and precedes every `tool_use` of the tool; otherwise the tool stays
  *   eager (one accepted cache miss, never a request Anthropic rejects).
  * - A tool the request adds mid-session by `tool_addition` (`additions`,
- *   tool-search/tool-additions.ts) is demoted the same way: its addition block
+ *   request/tool-search/tool-additions.ts) is demoted the same way: its addition block
  *   references it, so it needs no `tool_search` result.
  * - pi's own deferred entries that are not registry tools (its
  *   `__pi_deferred_placeholder__`) stay in place.

@@ -2,10 +2,10 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLASSIFIER_USER_INPUT, userMessageDigest } from "../../extensions/permissions/auto-mode/history.ts";
-import type { TranscriptEntry } from "../../extensions/permissions/auto-mode/transcript.ts";
+import { CLASSIFIER_USER_INPUT, userMessageDigest } from "../../extensions/safety/permissions/auto-mode/history.ts";
+import type { TranscriptEntry } from "../../extensions/safety/permissions/auto-mode/transcript.ts";
 import { TURN_FAILED_CHANNEL } from "../../extensions/lib/notify/interrupt.ts";
-import permissionsExtension from "../../extensions/permissions/index.ts";
+import permissionsExtension from "../../extensions/safety/permissions/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { productStateDir } from "../../extensions/lib/profile/brand.mjs";
@@ -15,8 +15,8 @@ import { requireText } from "../../extensions/lib/profile/profile.ts";
 const seen: TranscriptEntry[][] = [];
 const seenUserMessages: string[][] = [];
 let overflow = false;
-vi.mock("../../extensions/permissions/auto-mode/classifier.ts", async (importOriginal) => ({
-	...(await importOriginal<typeof import("../../extensions/permissions/auto-mode/classifier.ts")>()),
+vi.mock("../../extensions/safety/permissions/auto-mode/classifier.ts", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../extensions/safety/permissions/auto-mode/classifier.ts")>()),
 	classify: vi.fn(async (request: { transcript: TranscriptEntry[]; userMessages: string[] }) => {
 		seen.push(request.transcript);
 		seenUserMessages.push(request.userMessages);

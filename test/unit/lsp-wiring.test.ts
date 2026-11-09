@@ -1,5 +1,5 @@
 /**
- * lsp/index.ts wiring (T15c): the mid-session crash/respawn path in
+ * tools/lsp/index.ts wiring (T15c): the mid-session crash/respawn path in
  * `clientFor` (up to MAX_RESPAWNS, then give up and report once), and
  * `forceDeltaScan` — why an edit's diagnostics resurface even when the
  * server's publish tally didn't move.
@@ -13,9 +13,9 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { LspDiagnostic } from "../../extensions/lsp/format.ts";
-import { pathToUri } from "../../extensions/lsp/client.ts";
-import lspExtension from "../../extensions/lsp/index.ts";
+import type { LspDiagnostic } from "../../extensions/tools/lsp/format.ts";
+import { pathToUri } from "../../extensions/tools/lsp/client.ts";
+import lspExtension from "../../extensions/tools/lsp/index.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
@@ -49,8 +49,8 @@ interface FakeLspClientInstance {
 	error: string | undefined;
 }
 
-vi.mock("../../extensions/lsp/client.ts", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("../../extensions/lsp/client.ts")>();
+vi.mock("../../extensions/tools/lsp/client.ts", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../extensions/tools/lsp/client.ts")>();
 	class FakeLspClient implements FakeLspClientInstance {
 		isRunningValue = true;
 		publishCountValue = 0;

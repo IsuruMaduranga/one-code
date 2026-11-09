@@ -12,7 +12,7 @@ import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { userDenialText } from "../../extensions/lib/consent/user-denial.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../../extensions/lib/rules/modes.ts";
-import planModeExtension from "../../extensions/plan-mode/index.ts";
+import planModeExtension from "../../extensions/safety/plan-mode/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { envName } from "../../extensions/lib/profile/brand.mjs";
 

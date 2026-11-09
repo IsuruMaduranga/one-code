@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { claudeCodeCut, type CutEntry, lastReplyCut, moveCut, spanMessages } from "../../extensions/compaction/cut.ts";
+import { claudeCodeCut, type CutEntry, lastReplyCut, moveCut, spanMessages } from "../../extensions/context/compaction/cut.ts";
 
 type Msg = { role: string; content?: unknown; stopReason?: string };
 const msg = (id: string, role: string, extra: Partial<Msg> = {}): CutEntry & { message: Msg } => ({

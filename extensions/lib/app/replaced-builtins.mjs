@@ -34,7 +34,7 @@ function entriesOf(extensions) {
 
 /**
  * pi's `!` patterns are minimatch globs. Callers that can reach pi's own
- * minimatch pass it as `matches` (doctor/builtins.ts); this port is the
+ * minimatch pass it as `matches` (commands/doctor/builtins.ts); this port is the
  * fallback. A built-in path has no `/`, so it covers `*`, `?`, `[...]`
  * (`[!...]` negated) and `{a,b}` alternatives, nested, but not extglobs such
  * as `@(a|b)`.

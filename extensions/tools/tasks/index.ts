@@ -1,0 +1,262 @@
+/**
+ * tasks extension — Claude Code's stateful Task list:
+ * task_create / task_get / task_list / task_update.
+ *
+ * This is the session's only progress tracker: Claude Code 2.1.233 dropped
+ * TodoWrite and made the TaskCreate family its sole todo surface, so our
+ * todo_write went with it. Tasks are addressable by id and carry owners,
+ * metadata, and dependencies. State rides in tool-result details, so resuming
+ * or branching a session restores the list current at that point. All four
+ * tools are deferred — discovered via tool_search.
+ *
+ * The widget mirrors Claude Code's pinned task list (summary line + ✔/◼/◻
+ * rows). Claude Code toggles it with ctrl+t, but pi reserves that key for
+ * thinking blocks, so alt+t (ctrl+\ on macOS; `taskToggleKey`) and `/tasks
+ * hide` / `/tasks show` toggle it here; the key's hint is always on screen.
+ */
+
+import { feature } from "../../lib/profile/feature.ts";
+import { StringEnum } from "../../lib/core/string-enum.ts";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
+import { restoreLatestDetails } from "../../lib/request/branch-restore.ts";
+import { DEFER_CHANNEL, WITHHOLD_CHANNEL } from "../../lib/request/deferred.ts";
+import { taskToolsEnabled } from "../../lib/models/model-tier.ts";
+import { sessionModelTier } from "../../lib/models/session-model-tier.ts";
+import { ccToolRenderers, linesComponent, safeThemeBold, safeThemePaint, strike } from "../../lib/ui/tui-render.ts";
+import { REMINDER_CHANNEL } from "../../lib/request/reminders.ts";
+import { requireText } from "../../lib/profile/profile.ts";
+import {
+	FINISHED_LIST_CLEAR_MS,
+	formatHiddenTaskWidget,
+
+	formatTaskWidget,
+	normalizeTaskId,
+	taskView,
+	type TaskSnapshot,
+	TaskStore,
+} from "./store.ts";
+import { registerLocalCommand } from "../../lib/ui/local-command.ts";
+import { canShowCustomUi } from "../../lib/notify/headless-output.ts";
+import { taskToggleKey } from "../../lib/ui/keys.ts";
+
+interface TaskDetails {
+	taskSnapshot: TaskSnapshot;
+}
+
+const TASK_TOOLS = new Set(["task_create", "task_get", "task_list", "task_update"]);
+
+function tasksExtension(pi: ExtensionAPI) {
+	const text = requireText("tasks");
+	const requestTier = sessionModelTier(pi);
+	const store = new TaskStore();
+	const toggleKey = taskToggleKey();
+	let widgetHidden = false;
+
+	const updateWidget = (ctx: ExtensionContext) => {
+		if (!ctx.hasUI) return;
+		if (store.list().length === 0) {
+			ctx.ui.setWidget("cc-tasks", undefined);
+			return;
+		}
+		// RPC forwards line arrays only, and has no terminal shortcut to hide it.
+		if (!canShowCustomUi(ctx)) {
+			ctx.ui.setWidget("cc-tasks", formatTaskWidget(store));
+			return;
+		}
+		// Component form so every line passes truncateLine — subjects are
+		// unbounded model text, and pi-tui crashes on an over-wide line.
+		ctx.ui.setWidget("cc-tasks", (_tui, theme) => {
+			const style = { paint: safeThemePaint(theme), bold: safeThemeBold(theme), strike };
+			return linesComponent(() =>
+				widgetHidden
+					? formatHiddenTaskWidget(store, `${toggleKey} to show`, style)
+					: formatTaskWidget(store, 12, style, `${toggleKey} to hide`),
+			);
+		});
+	};
+	const setWidgetHidden = (hidden: boolean, ctx: ExtensionContext) => {
+		widgetHidden = hidden;
+		updateWidget(ctx);
+	};
+
+	// Claude Code clears a finished list (every task completed) 5 s after it
+	// gets there, and the panel goes with it; reopening or adding a task first
+	// cancels the clear. Only where there is a widget: a one-shot run keeps its
+	// list. The timer is unref'd and cancelled on shutdown, so it never holds
+	// the process or fires into a disposed session.
+	let clearTimer: ReturnType<typeof setTimeout> | undefined;
+	const cancelClear = () => {
+		if (clearTimer) clearTimeout(clearTimer);
+		clearTimer = undefined;
+	};
+	const scheduleClear = (ctx: ExtensionContext) => {
+		if (!ctx.hasUI || !store.isFinished()) return cancelClear();
+		if (clearTimer) return;
+		clearTimer = setTimeout(() => {
+			clearTimer = undefined;
+			if (!store.isFinished()) return;
+			store.clear();
+			updateWidget(ctx);
+		}, FINISHED_LIST_CLEAR_MS);
+		clearTimer.unref?.();
+	};
+
+	const reconstructState = (ctx: ExtensionContext) => {
+		cancelClear();
+		const details = restoreLatestDetails<TaskDetails>(ctx.sessionManager.getBranch(), TASK_TOOLS, (d) => Boolean(d?.taskSnapshot));
+		store.restore(details?.taskSnapshot);
+		updateWidget(ctx);
+	};
+
+	// Claude Code's model gate: frontier models and Sonnet 5+ run without the
+	// task tools unless CLAUDE_CODE_ENABLE_TODO_TOOLS is set (lib/models/model-tier.ts
+	// taskToolsEnabled). Re-applied on a model change, so switching to a model
+	// that has them brings them back through the deferred listing.
+	let withheld = false;
+	const applyModelGate = (model: Parameters<typeof taskToolsEnabled>[0]) => {
+		const enabled = taskToolsEnabled(model, process.env, requestTier());
+		if (enabled === !withheld) return;
+		withheld = !enabled;
+		for (const name of TASK_TOOLS) {
+			if (withheld) pi.events.emit(WITHHOLD_CHANNEL, { name });
+			else pi.events.emit(DEFER_CHANNEL, { name, keywords: text.searchKeywords });
+		}
+	};
+
+	pi.on("session_start", (_event, ctx) => {
+		reconstructState(ctx);
+		applyModelGate(ctx.model);
+	});
+	pi.on("session_tree", (_event, ctx) => reconstructState(ctx));
+	pi.on("model_select", (event) => applyModelGate(event.model));
+	pi.on("session_shutdown", () => cancelClear());
+
+	// Claude Code's periodic task_reminder (TODO_REMINDER_CONFIG): a gentle
+	// nudge once the task tools have gone unused for TURNS_SINCE_WRITE turns,
+	// fired no more than once per TURNS_BETWEEN_REMINDERS turns. The two counters
+	// are independent — task use resets the first, a fired reminder resets the
+	// second — so a run of task activity silences the nudge without the cooldown
+	// also suppressing the next legitimate one. The reminder text (the profile's
+	// `tasks.reminder`) carries the current list so the model can clean up completed/stale tasks.
+	const TURNS_SINCE_WRITE = 10;
+	const TURNS_BETWEEN_REMINDERS = 10;
+	let turnsSinceTaskUse = 0;
+	// Start "cooled down" so the first reminder waits only on task inactivity.
+	let turnsSinceReminder = TURNS_BETWEEN_REMINDERS;
+
+	pi.on("turn_end", () => {
+		// Claude Code's reminder needs TaskUpdate in the tool list.
+		if (withheld) return;
+		turnsSinceTaskUse++;
+		turnsSinceReminder++;
+		if (turnsSinceTaskUse < TURNS_SINCE_WRITE || turnsSinceReminder < TURNS_BETWEEN_REMINDERS) return;
+		turnsSinceReminder = 0;
+		pi.events.emit(REMINDER_CHANNEL, { text: text.reminder(store.list()) });
+	});
+
+	// Only the mutating tools count as "using" the tracker — a read must not
+	// suppress the nudge, or polling task_list defeats it.
+	const markUsed = () => {
+		turnsSinceTaskUse = 0;
+	};
+
+	const result = (body: string, ctx: ExtensionContext, isError = false) => {
+		updateWidget(ctx);
+		scheduleClear(ctx);
+		return {
+			content: [{ type: "text" as const, text: body }],
+			details: { taskSnapshot: store.snapshot() } satisfies TaskDetails,
+			isError,
+		};
+	};
+
+	pi.registerTool({
+		name: "task_create",
+		label: "Create Task",
+		...ccToolRenderers("Create Task"),
+		description: text.descriptions.task_create,
+		parameters: Type.Object({
+			subject: Type.String({ description: text.params.create.subject }),
+			description: Type.String({ description: text.params.create.description }),
+			activeForm: Type.Optional(Type.String({ description: text.params.create.activeForm })),
+			metadata: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: text.params.create.metadata })),
+		}),
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			markUsed();
+			const task = store.create(params);
+			return result(text.created(task), ctx);
+		},
+	});
+
+	pi.registerTool({
+		name: "task_get",
+		label: "Get Task",
+		...ccToolRenderers("Get Task"),
+		description: text.descriptions.task_get,
+		parameters: Type.Object({
+			taskId: Type.String({ description: text.params.get.taskId }),
+		}),
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const task = store.get(params.taskId);
+			if (!task) return result(text.notFound(params.taskId), ctx, true);
+			return result(text.details(taskView(store, task)), ctx);
+		},
+	});
+
+	pi.registerTool({
+		name: "task_list",
+		label: "List Tasks",
+		...ccToolRenderers("List Tasks", { maxCollapsedLines: 12 }),
+		description: text.descriptions.task_list,
+		parameters: Type.Object({}),
+		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+			return result(text.list(store.list().map((task) => taskView(store, task))), ctx);
+		},
+	});
+
+	pi.registerTool({
+		name: "task_update",
+		label: "Update Task",
+		...ccToolRenderers("Update Task"),
+		description: text.descriptions.task_update,
+		parameters: Type.Object({
+			taskId: Type.String({ description: text.params.update.taskId }),
+			subject: Type.Optional(Type.String({ description: text.params.update.subject })),
+			description: Type.Optional(Type.String({ description: text.params.update.description })),
+			activeForm: Type.Optional(Type.String({ description: text.params.update.activeForm })),
+			status: Type.Optional(StringEnum(["pending", "in_progress", "completed", "deleted"] as const, { description: text.params.update.status })),
+			addBlocks: Type.Optional(Type.Array(Type.String(), { description: text.params.update.addBlocks })),
+			addBlockedBy: Type.Optional(Type.Array(Type.String(), { description: text.params.update.addBlockedBy })),
+			owner: Type.Optional(Type.String({ description: text.params.update.owner })),
+			metadata: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: text.params.update.metadata })),
+		}),
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const { taskId, ...input } = params;
+			const outcome = store.update(taskId, input as Parameters<TaskStore["update"]>[1]);
+			if (outcome.deleted) {
+				markUsed();
+				return result(text.deleted(normalizeTaskId(taskId)), ctx);
+			}
+			// A failed update (unknown id) is not "using" the tracker — a model
+			// looping on a hallucinated id must not suppress the nudge.
+			if (outcome.notFound || !outcome.task) return result(text.notFound(taskId), ctx, true);
+			markUsed();
+			const problems = outcome.problems ?? [];
+			return result(text.updated({ id: outcome.task.id, fields: outcome.updatedFields ?? [], problems }), ctx, problems.length > 0);
+		},
+	});
+
+	for (const name of TASK_TOOLS) {
+		pi.events.emit(DEFER_CHANNEL, { name, keywords: text.searchKeywords });
+	}
+
+	// `/tasks` is Claude Code's Background dialog (the subagents extension, findings
+	// §40); the task list toggles with its key only, as Claude Code's does.
+	pi.registerShortcut(toggleKey, {
+		description: "Show or hide the task list",
+		handler: (ctx) => setWidgetHidden(!widgetHidden, ctx),
+	});
+}
+
+export default feature("tasks", tasksExtension);

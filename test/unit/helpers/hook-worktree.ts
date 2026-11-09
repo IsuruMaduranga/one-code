@@ -8,8 +8,8 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } fro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { vi } from "vitest";
-import hooksExtension from "../../../extensions/hooks/index.ts";
-import { resetHookSettingsCache } from "../../../extensions/hooks/settings.ts";
+import hooksExtension from "../../../extensions/safety/hooks/index.ts";
+import { resetHookSettingsCache } from "../../../extensions/safety/hooks/settings.ts";
 import { type HookBridge, SUBAGENT_HOOK_CHANNEL } from "../../../extensions/lib/agents/hook-bridge.ts";
 import { envName } from "../../../extensions/lib/profile/brand.mjs";
 import { shellQuote } from "../../../extensions/lib/shell/shell-quote.ts";

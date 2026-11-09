@@ -15,7 +15,7 @@ import { conflictingPathArguments } from "../../extensions/lib/shell/paths.ts";
 import { analyzeShellCommand } from "../../extensions/lib/shell/shell-analysis.ts";
 import { MODE_CHANNEL } from "../../extensions/lib/rules/plan-mode-channels.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
-import permissionsExtension from "../../extensions/permissions/index.ts";
+import permissionsExtension from "../../extensions/safety/permissions/index.ts";
 import { powershellInjectionSyntax } from "../../extensions/lib/shell/powershell-rules.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";

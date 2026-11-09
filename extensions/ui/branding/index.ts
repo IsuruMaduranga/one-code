@@ -1,0 +1,555 @@
+/**
+ * branding extension — replaces pi's startup header.
+ *
+ * pi's own banner ("pi v0.83.0 … Ask it how to use or extend Pi") comes from its
+ * `piConfig`, which resolves from pi's *own* installed package.json and so cannot
+ * be changed by a dependent package. But `ctx.ui.setHeader()` replaces the header
+ * component outright, which gets us the same result without a fork.
+ *
+ * A pi-tui `Component` is small enough to implement inline — `render(width)` plus
+ * a no-op `invalidate()` (we have no cached layout to drop) — so this needs no
+ * new dependency on pi-tui.
+ *
+ * Set `CC_NO_BANNER=1` to keep pi's original header.
+ */
+
+import { brand } from "../../lib/profile/brand.mjs";
+import { feature } from "../../lib/profile/feature.ts";
+import { PROFILE_DIR } from "../../lib/profile/profile.ts";
+import { existsSync, readFileSync } from "node:fs";
+import { ARGUMENT_HINT_CHANNEL, type ArgumentHint, type CommandHint, frontmatterCommandHint, hintForInput, PI_BUILTIN_HINTS } from "../../lib/ui/argument-hints.ts";
+import { parseFrontmatterLoosely } from "../../lib/core/frontmatter.ts";
+import { promptTemplateFiles } from "../../lib/plugins/skill-scan.ts";
+import { modeCycleKey } from "../../lib/ui/keys.ts";
+import os from "node:os";
+import { basename, join } from "node:path";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+// pi's loader maps this import to pi's own module, so keyText reads the keybindings pi loaded.
+import { getAgentDir, keyText as piKeyText, SettingsManager, VERSION as PI_VERSION } from "@earendil-works/pi-coding-agent";
+import { piVersionWarning } from "../../lib/app/pi-version.ts";
+import { handleCompactionKeep } from "./compaction-keep.ts";
+import { handleReplacedBuiltins } from "./replaced-builtins.ts";
+import { extensionVersion } from "../../lib/app/package-version.ts";
+import {
+	formatModel,
+	formatModelSpec,
+	isRealModel,
+	PERMISSION_STATUS_CHANNEL,
+	permissionModeDisplay,
+	type PermissionStatus,
+} from "../../lib/rules/modes.ts";
+import { SUBAGENT_STATUS_CHANNEL, type SubagentStatus } from "../../lib/models/subagent-model.ts";
+import {
+	collectStartupSections,
+	quietStartupEnabled,
+	shouldDefaultFlushOutputPad,
+	shouldDefaultHideThinking,
+	type StartupSection,
+	thinkingLabel,
+} from "./startup.ts";
+import { boundKey, linesComponent, safeThemeInverse, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
+import { AGENT_VIEW_CHANNEL, type AgentViewAnnouncement, type AgentViewTarget } from "../../lib/agents/agent-view.ts";
+import { markAssistantMarkdown } from "./assistant-marker.ts";
+import { PROMPT_PADDING, PromptEditor } from "./prompt-editor.ts";
+import { sanitizeTitle } from "../../lib/ui/terminal-text.ts";
+
+export { truncateLine };
+
+const NAME = brand.name;
+/** Tagline under the wordmark, from the profile's brand. */
+const SUBTITLE = brand.subtitle;
+
+export interface BannerInput {
+	version: string;
+	model?: string;
+	cwd: string;
+	mode: string;
+	/** Effective subagent/workflow default with its selection source. */
+	subagents?: string;
+	/** Compact resource sections, shown when pi's own listing is silenced. */
+	sections?: StartupSection[];
+	/** pi's `keyText`: the user's key for a pi binding, "" when unbound; the defaults without it. */
+	keyText?: (binding: string) => string;
+}
+
+/**
+ * The wordmark (One Code's: "ONE CODE" in figlet "ANSI Shadow"), from the
+ * profile's brand. Rendered as its own block above the text column. Rows are
+ * normalised to a single width at load, so a trailing-space trim in the source
+ * can never misalign the block. Below WORDMARK_WIDTH the product's name
+ * replaces it, so a narrow pane never shows sheared glyphs.
+ */
+const WORDMARK_RAW = brand.wordmark;
+/** Display width every wordmark row is padded to (the widest raw row). */
+export const WORDMARK_WIDTH = Math.max(...WORDMARK_RAW.map((r) => [...r].length));
+export const WORDMARK = WORDMARK_RAW.map((r) => r + " ".repeat(WORDMARK_WIDTH - [...r].length));
+
+/**
+ * One curated hint line, not a keymap dump: only the controls someone cannot
+ * discover on their own — the dials this package renames or hides state behind
+ * (effort, permission mode, collapsed thinking/output) plus the two input
+ * prefixes and the opt-in keyword nobody could guess. Everything else lives in
+ * pi's own /hotkeys listing, which the line points at.
+ */
+/** pi's keyText over a binding named as a string. */
+const userKey = (binding: string): string => piKeyText(binding as Parameters<typeof piKeyText>[0]);
+
+/** The startup hints; a third field names the pi binding whose user key replaces the default. */
+const HINTS: [key: string, what: string, binding?: string][] = [
+	// First so it survives narrow terminals: the pointer to everything else.
+	["/hotkeys", "all keys"],
+	// pi calls this dial "thinking" and reserves shift+tab for it; we present
+	// it as Claude Code's "effort" so the key and /effort agree on the name.
+	["shift+tab", "effort", "app.thinking.cycle"],
+	// Claude Code cycles permission modes on shift+tab; pi owns that key, and
+	// ctrl+q is the one ctrl+letter both pi and terminals leave free — except
+	// on Windows and WSL, where pi takes ctrl+q and the key is alt+m.
+	[modeCycleKey(), "permissions"],
+	["ctrl+t", "thinking", "app.thinking.toggle"],
+	["ctrl+o", "expand output", "app.tools.expand"],
+	["/", "commands"],
+	["!", "bash"],
+	// A keyword rather than a binding — an opt-in feature nobody knows the
+	// word for is invisible.
+	["ultracode", "max effort"],
+];
+
+/**
+ * Keep only whole leading items that fit the budget (measured unpainted, so
+ * ANSI codes don't count), rather than letting truncateLine cut mid-word.
+ * Always keeps at least one item; truncateLine remains the backstop.
+ */
+export function fitItems<T>(items: T[], plainLength: (item: T) => number, budget: number | undefined, sepLength = 3): T[] {
+	if (budget === undefined) return items;
+	const kept: T[] = [];
+	let used = 0;
+	for (const item of items) {
+		const extra = (kept.length ? sepLength : 0) + plainLength(item);
+		if (kept.length > 0 && used + extra > budget) break;
+		kept.push(item);
+		used += extra;
+	}
+	return kept;
+}
+
+/**
+ * Sections compressed to one line: context files and themes are few and short,
+ * so their names carry information; skills/workflows lists are long and get
+ * truncated into noise, so past three items they collapse to a count.
+ */
+export function sectionSummary(sections: StartupSection[], paint: (color: string, text: string) => string): string {
+	return sections
+		.filter((s) => s.items.length > 0)
+		.map((s) =>
+			s.items.length <= 3
+				? `${paint("muted", s.label)} ${paint("dim", s.items.join(", "))}`
+				: `${paint("muted", s.label)} ${paint("dim", String(s.items.length))}`,
+		)
+		.join(paint("muted", " · "));
+}
+
+/** The mode line's words for each permission mode, so the banner never says "default" beside "manual mode on". */
+const MODE_WORDS: Record<string, string> = {
+	default: "manual",
+	acceptEdits: "accept edits",
+	bypassPermissions: "bypass permissions",
+	dontAsk: "don't ask",
+};
+
+/** The banner's mode field: the permission display with the mode named as the mode line names it. */
+export function bannerModeLabel(display: string): string {
+	return MODE_WORDS[display] ?? display;
+}
+
+/**
+ * Banner layout: the wordmark block, then a one-space-indented text column
+ * (tagline + version, context, hints, sections). Kept pure so the layout is
+ * unit-testable without a terminal. Below WORDMARK_WIDTH the wordmark is
+ * replaced by a compact "One Code" title, so a narrow pane never shows sheared
+ * fragments of the art.
+ */
+export function bannerLines(
+	input: BannerInput,
+	paint: (color: string, text: string) => string,
+	width?: number,
+): string[] {
+	const indent = " ";
+	const budget = width === undefined ? undefined : width - indent.length;
+
+	const subtitle = `${paint("dim", SUBTITLE)}${paint("muted", " · ")}${paint("dim", `v${input.version}`)}`;
+	const context = [
+		input.model ? `${paint("muted", "model")} ${input.model}` : undefined,
+		`${paint("muted", "mode")} ${input.mode}`,
+		input.subagents ? `${paint("muted", "subagents")} ${input.subagents}` : undefined,
+	]
+		.filter(Boolean)
+		.join(paint("muted", " · "));
+	// Narrow terminals drop whole trailing hints (the /hotkeys pointer is
+	// first, so it always survives) instead of cutting one mid-word.
+	// A rebound pi key shows as bound; an unbound one drops its hint.
+	const bound = HINTS.flatMap(([key, what, binding]): [string, string][] => {
+		const shown = binding ? boundKey(input.keyText, binding, key) : key;
+		return shown ? [[shown, what]] : [];
+	});
+	const hints = fitItems(bound, ([key, what]) => key.length + 1 + what.length, budget)
+		.map(([key, what]) => `${paint("accent", key)} ${paint("muted", what)}`)
+		.join(paint("muted", " · "));
+	const sections = sectionSummary(input.sections ?? [], paint);
+
+	const textColumn = [subtitle, context, hints, ...(sections ? [sections] : [])].map((line) => `${indent}${line}`);
+
+	// The wordmark is a fixed-width block; if it cannot fit, show a text title
+	// rather than let truncateLine shear the glyphs mid-row.
+	const head =
+		width !== undefined && width < WORDMARK_WIDTH ? [paint("accent", NAME)] : WORDMARK.map((row) => paint("accent", row));
+
+	const assembled = [...head, ...textColumn];
+	return width === undefined ? assembled : assembled.map((line) => truncateLine(line, width));
+}
+
+/** Claude Code-style input marker, painted in the editor's left gutter. A heavy
+ * chevron (U+276F), one column wide so the two-column gutter still aligns. */
+const PROMPT_GLYPH = "❯";
+
+/**
+ * `pi.registerMarkdownTransformer` typed locally: the runtime (pi ≥ 0.84) exposes
+ * it, but the pinned 0.83 type declarations do not, so we cast and feature-detect
+ * — the same "older pi may lack the hook" handling as the prompt marker.
+ */
+interface MarkdownTransformerHost {
+	registerMarkdownTransformer?: (
+		transformer: (
+			markdown: string,
+			context: { messageType: "user" | "assistant" | "assistant-thinking"; isStreaming: boolean; availableWidth: number },
+		) => string,
+	) => void;
+}
+
+/** The slice of the UI context the prompt marker needs (older pi may lack the hook). */
+interface BrandingEditorUI {
+	setEditorComponent?: (factory: (tui: unknown, theme: unknown, keybindings: unknown) => unknown) => void;
+	theme?: unknown;
+}
+
+/**
+ * Replace the core input editor with one that paints a "›" prompt marker, the
+ * way Claude Code does. TUI-only (print/rpc have no editor), skipped when pi is
+ * too old to expose the hook, and disableable with CC_NO_INPUT_MARKER=1 in case
+ * a pi-tui render change ever makes the marker misplace (cosmetic only — typing
+ * is never affected; see prompt-marker.ts).
+ */
+function installPromptMarker(
+	ctx: { hasUI: boolean; mode: string; ui: BrandingEditorUI; isIdle(): boolean; hasPendingMessages(): boolean },
+	argumentHints: ReadonlyMap<string, CommandHint>,
+	agentView: { target?: AgentViewTarget },
+): void {
+	if (process.env.CC_NO_INPUT_MARKER === "1") return;
+	if (!ctx.hasUI || ctx.mode !== "tui") return;
+	const ui = ctx.ui;
+	if (typeof ui.setEditorComponent !== "function") return;
+	// The marker follows live theme changes because it is re-read per render.
+	const renderMarker = () => {
+		// Bold makes the chevron read heavier than the input text beside it.
+		return `\x1b[1m${safeThemePaint(ui.theme)("accent", PROMPT_GLYPH)}\x1b[0m${" ".repeat(PROMPT_PADDING - 1)}`;
+	};
+	const renderHint = (text: string) => {
+		// While an agent is viewed the empty editor addresses it (lib/agents/agent-view.ts).
+		const placeholder = text === "" && agentView.target ? agentView.target.placeholder : hintForInput(text, argumentHints);
+		return placeholder === undefined ? undefined : safeThemePaint(ui.theme)("dim", placeholder);
+	};
+	const badge = () => agentView.target?.badge;
+	const paintBadge = (label: string) => safeThemeInverse(ui.theme)(safeThemePaint(ui.theme)("accent", ` ${label} `));
+	// The editor can outlive this context across a session replacement; a stale
+	// context throws, and ↑ must still reach the editor then.
+	const queued = () => {
+		try {
+			return !ctx.isIdle() && ctx.hasPendingMessages();
+		} catch {
+			return false;
+		}
+	};
+	ui.setEditorComponent(
+		(tui: unknown, theme: unknown, keybindings: unknown) =>
+			new PromptEditor(tui as never, theme as never, keybindings as never, renderMarker, renderHint, badge, paintBadge, queued),
+	);
+}
+
+/**
+ * Default thinking blocks to collapsed, once, respecting any user choice.
+ * pi caches settings in memory at startup, so a write here lands from the
+ * *next* session; the current one keeps whatever the file said at launch
+ * (ctrl+t still works immediately and persists the user's own preference).
+ */
+function applyThinkingDefault(): void {
+	try {
+		const agentDir = getAgentDir();
+		const settingsPath = join(agentDir, "settings.json");
+		const raw = existsSync(settingsPath) ? readFileSync(settingsPath, "utf8") : undefined;
+		if (shouldDefaultHideThinking(raw)) {
+			SettingsManager.create(process.cwd(), agentDir).setHideThinkingBlock(true);
+		}
+	} catch {
+		// Presentation-only default — never let a settings hiccup break startup.
+	}
+}
+
+/**
+ * Default pi's output padding to 0 so the assistant "●" marker sits flush at
+ * column 0, aligned with the tool bullets (which render there). Only when the
+ * user hasn't set `outputPad` themselves; like the thinking default, pi caches
+ * settings at startup, so this lands from the *next* session (the current one
+ * keeps whatever pad it launched with). Skipped when the marker is disabled, so
+ * the two travel together.
+ */
+function applyOutputPadDefault(): void {
+	if (process.env.CC_NO_ASSISTANT_MARKER === "1") return;
+	try {
+		const agentDir = getAgentDir();
+		const settingsPath = join(agentDir, "settings.json");
+		const raw = existsSync(settingsPath) ? readFileSync(settingsPath, "utf8") : undefined;
+		if (shouldDefaultFlushOutputPad(raw)) {
+			SettingsManager.create(process.cwd(), agentDir).setOutputPad(0);
+		}
+	} catch {
+		// Presentation-only default — never let a settings hiccup break startup.
+	}
+}
+
+function brandingExtension(pi: ExtensionAPI) {
+	/**
+	 * pi's merged `quietStartup` (global settings with the project's
+	 * `.pi/settings.json` over them), so the banner and pi agree on whether pi
+	 * lists its own startup sections. `pi.getSettings()` is in pi 1.0.1; a pi
+	 * near the 0.84.3 floor without it falls back to the global file alone.
+	 */
+	const effectiveQuietStartup = (agentDir: string): unknown => {
+		try {
+			if (typeof (pi as { getSettings?: unknown }).getSettings === "function") return pi.getSettings().quietStartup;
+		} catch {
+			// The banner must still install: fall back to the global file.
+		}
+		try {
+			return (JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8")) as { quietStartup?: unknown }).quietStartup;
+		} catch {
+			return undefined;
+		}
+	};
+
+	applyThinkingDefault();
+	applyOutputPadDefault();
+	// Mark each block of assistant prose with Claude Code's "●" bullet. Only
+	// assistant text is transformed (not thinking or user turns); the transformer
+	// runs in markdown rendering, so print/rpc output is untouched.
+	// CC_NO_ASSISTANT_MARKER=1 opts out, mirroring CC_NO_INPUT_MARKER.
+	const transformerHost = pi as unknown as MarkdownTransformerHost;
+	if (process.env.CC_NO_ASSISTANT_MARKER !== "1" && typeof transformerHost.registerMarkdownTransformer === "function") {
+		transformerHost.registerMarkdownTransformer((markdown, context) =>
+			context.messageType === "assistant" ? markAssistantMarkdown(markdown) : markdown,
+		);
+	}
+	// The label and prompt marker apply in every session; CC_NO_BANNER only
+	// disables the header.
+	// The terminal title. pi writes "π - [<session name> - ]<cwd>" at the end of
+	// its startup, on every session replacement and whenever the name changes —
+	// each AFTER our session_start handler ran, so a title set there alone lost
+	// (seen live 2026-09-19: "π - proj"). Re-assert it once the current task
+	// has drained (setTimeout 0, past pi's synchronous tail) and on every
+	// agent_start, and follow the name like pi does, brand first.
+	let lastTitle: string | undefined;
+	// A ctx captured for the deferred write is stale once the runtime is replaced
+	// (a second /clear inside the 0 ms window); pi's stale-ctx guard throws, and a
+	// throw inside a timer is uncaught — so the write is inert after shutdown.
+	let live = false;
+	const retitle = (ctx: { hasUI: boolean; cwd: string; ui: { setTitle(title: string): void } }) => {
+		if (!live || !ctx.hasUI) return;
+		const name = pi.getSessionName?.()?.trim();
+		// pi writes the title inside its OSC 0 and strips only CR and LF; a BEL or
+		// ESC in the session name (any source) or the directory would end it early.
+		const title = sanitizeTitle(name ? `${NAME} - ${name} - ${basename(ctx.cwd)}` : NAME);
+		if (title === lastTitle) return; // agent_start fires every turn; write only on change
+		lastTitle = title;
+		ctx.ui.setTitle(title);
+	};
+	pi.on("session_info_changed", (_event, ctx) => retitle(ctx));
+	pi.on("agent_start", (_event, ctx) => retitle(ctx));
+	pi.on("session_shutdown", () => {
+		live = false;
+	});
+
+	// Commands' argument placeholders (lib/ui/argument-hints.ts), drawn by the prompt editor.
+	// Declared before the CC_NO_BANNER return below: session_start reads it.
+	const argumentHints = new Map<string, CommandHint>(Object.entries(PI_BUILTIN_HINTS).map(([command, hint]) => [command, { hint }]));
+	// The agent the user is viewing, if any: the editor then targets it (lib/agents/agent-view.ts).
+	const agentView: { target?: AgentViewTarget } = {};
+	pi.events.on(AGENT_VIEW_CHANNEL, (data) => {
+		agentView.target = (data as AgentViewAnnouncement | undefined)?.target;
+	});
+	pi.events.on(ARGUMENT_HINT_CHANNEL, (data) => {
+		const { command, ...hint } = data as ArgumentHint;
+		argumentHints.set(command, hint);
+	});
+	// pi's prompt templates and `/skill:` commands carry their file's
+	// `argument-hint` frontmatter. pi lists them only once a turn resolves them,
+	// so the template folders are scanned at session_start (the skill extension
+	// announces `/skill:` hints from its own scan) and pi's list read each turn.
+	// pi runs a built-in or extension command before a command file of the same
+	// name, so such a file's hint is never read.
+	const hintedFiles = new Set<string>();
+	const readFileHints = (files: { name: string; path: string }[], commands = pi.getCommands()) => {
+		const extensionCommands = new Set(commands.filter((c) => c.source === "extension").map((c) => c.name));
+		for (const { name, path } of files) {
+			if (hintedFiles.has(path)) continue;
+			if (Object.hasOwn(PI_BUILTIN_HINTS, name) || extensionCommands.has(name)) continue;
+			try {
+				const hint = frontmatterCommandHint(parseFrontmatterLoosely(readFileSync(path, "utf-8")).frontmatter);
+				if (hint) argumentHints.set(name, hint);
+				hintedFiles.add(path);
+			} catch {
+				// Unreadable (mid-replace, say): no hint now; a later scan retries it.
+			}
+		}
+	};
+	pi.on("before_agent_start", () => {
+		try {
+			const commands = pi.getCommands();
+			readFileHints(
+				commands.filter((c) => c.source !== "extension").map((c) => ({ name: c.name, path: c.sourceInfo.path })),
+				commands,
+			);
+		} catch {
+			// Not bound (a torn-down session): the next turn looks again.
+		}
+	});
+	pi.on("session_start", (event, ctx) => {
+		// pi's own write lands after this handler, so only the deferred write
+		// sticks; a new session may carry a name (resume), so forget the last.
+		lastTitle = undefined;
+		live = true;
+		setTimeout(() => retitle(ctx), 0).unref?.();
+		ctx.ui.setHiddenThinkingLabel(thinkingLabel(userKey));
+		installPromptMarker(ctx as unknown as Parameters<typeof installPromptMarker>[0], argumentHints, agentView);
+		try {
+			readFileHints(promptTemplateFiles(ctx.cwd, os.homedir(), getAgentDir()));
+		} catch {
+			// Commands not bound: nothing was marked read, so the next turn reads pi's list.
+		}
+		// Soft drift guard: warn once at startup when the hosting pi is outside
+		// the range this release was tested against (see lib/app/pi-version.ts).
+		const versionWarning = piVersionWarning(PI_VERSION);
+		if (versionWarning) ctx.ui.notify(versionWarning, "warning");
+		// pi 0.99 skips its built-in tool search and MCP for ours and warns at
+		// every start, advising the user to remove One Code: offer to turn them
+		// off once, else answer with the notice (replaced-builtins.ts). Only
+		// when pi resolves its built-ins again (startup, /reload), not on a
+		// /new, resume or fork, which re-run this handler too. Not awaited: a
+		// dialog must not hold up startup. The compaction keep-window question
+		// (compaction-keep.ts) follows it, so the two dialogs never overlap.
+		const reason = (event as { reason?: string }).reason ?? "startup";
+		if (reason === "startup" || reason === "reload") void handleReplacedBuiltins(ctx).then(() => handleCompactionKeep(ctx));
+	});
+
+	if (process.env.CC_NO_BANNER === "1") return;
+
+	/**
+	 * Mode and classifier arrive over the bus from the permissions extension
+	 * (jiti isolates module state, so this cannot be a shared variable). The
+	 * banner re-renders on every update, so cycling modes or the classifier
+	 * pinning mid-session keeps the header truthful instead of frozen at
+	 * whatever was true at startup.
+	 */
+	let permissionStatus: PermissionStatus | undefined;
+	let subagentStatus: SubagentStatus | undefined;
+	let currentModelId: string | undefined;
+	let currentModelProvider: string | undefined;
+	let requestHeaderRender: (() => void) | undefined;
+	// The model line goes stale the same way the mode line did once the header
+	// re-renders live, so it follows ctrl+p / /model changes too.
+	pi.on("model_select", (event) => {
+		currentModelId = event.model?.id ?? currentModelId;
+		currentModelProvider = event.model?.provider ?? currentModelProvider;
+		requestHeaderRender?.();
+	});
+	pi.events.on(PERMISSION_STATUS_CHANNEL, (data) => {
+		permissionStatus = data as PermissionStatus;
+		requestHeaderRender?.();
+	});
+	pi.events.on(SUBAGENT_STATUS_CHANNEL, (data) => {
+		subagentStatus = data as SubagentStatus;
+		requestHeaderRender?.();
+	});
+
+	pi.on("session_start", (_event, ctx) => {
+		// Only the TUI has a header to replace; rpc/print modes have no chrome.
+		if (!ctx.hasUI || ctx.mode !== "tui") return;
+
+		const version = process.env.CC_VERSION ?? extensionVersion();
+		currentModelId = ctx.model?.id ?? currentModelId;
+		currentModelProvider = ctx.model?.provider ?? currentModelProvider;
+
+		// With pi's own listing silenced, the banner carries compact sections
+		// instead (minus the internal [Extensions] noise).
+		const home = os.homedir();
+		// Resolve pi's live agent dir (honours PI_CODING_AGENT_DIR) so an
+		// isolated one-code app reads its own skills, never ~/.pi.
+		const agentDir = getAgentDir();
+		// Use pi's effective settings, including project overrides, so the two
+		// listings agree on whether quiet startup is enabled.
+		const sections = quietStartupEnabled(effectiveQuietStartup(agentDir))
+			? collectStartupSections(ctx.cwd, home, join(PROFILE_DIR, "themes"), agentDir)
+			: undefined;
+
+		ctx.ui.setHeader((tui: unknown, theme: unknown) => {
+			const paint = safeThemePaint(theme);
+			// Width-memoized (pi-tui renders every mounted component every frame);
+			// the mode/model/subagent lines stay live because each of their
+			// updates invalidates the cache before requesting a repaint.
+			const component = linesComponent((width) => {
+				// Read live each render (model_select invalidates the cache). isRealModel
+				// narrows currentModelId to string; the label is undefined when no
+				// provider is configured, which both fields below render as "none" — a
+				// fresh machine must not show pi's placeholder `(unknown) unknown` (M3).
+				const modelLabel = isRealModel(currentModelId) ? formatModel(currentModelProvider ?? "", currentModelId) : undefined;
+				return [
+					"",
+					...bannerLines(
+						{
+							version,
+							keyText: userKey,
+							model: modelLabel ?? "none",
+							cwd: ctx.cwd,
+							mode: bannerModeLabel(permissionModeDisplay(permissionStatus ?? { mode: "default", paused: false })),
+							subagents:
+								modelLabel === undefined
+									? "none"
+									: subagentStatus?.model
+										? `${formatModelSpec(subagentStatus.model)}${subagentStatus.via ? ` (${subagentStatus.via})` : ""}`
+										: undefined,
+							sections,
+						},
+						paint,
+						width,
+					),
+					"",
+				];
+			});
+			requestHeaderRender = () => {
+				component.invalidate();
+				(tui as { requestRender?: () => void } | undefined)?.requestRender?.();
+			};
+			return component;
+		});
+
+		// A fresh machine has no provider configured; pi's own hint prints two
+		// absolute doc paths inside node_modules. Replace it with a One Code
+		// onboarding line that names the command that actually connects a provider
+		// and points at the guide, not pi's files (distribution review M3).
+		if (!isRealModel(ctx.model?.id)) {
+			ctx.ui.notify(
+				`No model provider yet. Run /login to connect one (free options at ${brand.homepage}/blob/master/docs/guide/providers-and-models.md).`,
+				"warning",
+			);
+		}
+	});
+}
+
+export default feature("branding", brandingExtension);

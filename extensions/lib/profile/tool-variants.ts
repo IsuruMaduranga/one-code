@@ -13,7 +13,7 @@
  * (`registerVariantTool`). This can also move a tool in pi's active tool
  * order, so only a model-tier change may re-register after the first request.
  * The tier changes with the model, which starts a new provider cache anyway.
- * Permission-mode variants freeze at the first request (bash/index.ts); live
+ * Permission-mode variants freeze at the first request (tools/bash/index.ts); live
  * changes ride reminders and the permission gate, never the cached tool list.
  */
 

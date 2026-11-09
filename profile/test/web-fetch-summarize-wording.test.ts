@@ -5,7 +5,7 @@
  * test/unit/web-fetch-summarize.test.ts.
  */
 import { describe, expect, it } from "vitest";
-import { READER_MAX_CHARS, readerMessages } from "../../extensions/web-fetch/summarize.ts";
+import { READER_MAX_CHARS, readerMessages } from "../../extensions/tools/web-fetch/summarize.ts";
 import { webFetchText } from "../text/web-fetch/index.ts";
 import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
 

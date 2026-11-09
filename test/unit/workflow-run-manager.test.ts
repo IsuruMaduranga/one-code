@@ -2,10 +2,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AgentRunner } from "../../extensions/workflow/agent-session.ts";
-import { WorkflowRunManager } from "../../extensions/workflow/run-manager.ts";
+import { AgentRunner } from "../../extensions/agents/workflow/agent-session.ts";
+import { WorkflowRunManager } from "../../extensions/agents/workflow/run-manager.ts";
 
-vi.mock("../../extensions/workflow/agent-session.ts", () => ({ AgentRunner: { create: vi.fn() } }));
+vi.mock("../../extensions/agents/workflow/agent-session.ts", () => ({ AgentRunner: { create: vi.fn() } }));
 
 const META = "export const meta = {name: 'test', description: 'test'}\n";
 

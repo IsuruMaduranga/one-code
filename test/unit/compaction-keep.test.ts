@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { brand } from "../../extensions/lib/profile/brand.mjs";
-import { buildDoctorReport } from "../../extensions/doctor/build.ts";
-import { renderDoctorText } from "../../extensions/doctor/report.ts";
+import { buildDoctorReport } from "../../extensions/commands/doctor/build.ts";
+import { renderDoctorText } from "../../extensions/commands/doctor/report.ts";
 import { compactionKeepView, keepWindowFix, withCompactionKeepBackfilled } from "../../extensions/lib/app/compaction-keep.mjs";
 
 describe("withCompactionKeepBackfilled", () => {

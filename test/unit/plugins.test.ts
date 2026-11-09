@@ -15,7 +15,7 @@ import {
 import { setOverride } from "../../extensions/lib/plugins/plugin-overrides.ts";
 import { setSkillOverride, skillOverrideKey } from "../../extensions/lib/plugins/skill-overrides.ts";
 import { shellQuote } from "../../extensions/lib/shell/shell-quote.ts";
-import { splitShellPlaceholders, substituteArguments } from "../../extensions/plugins/template.ts";
+import { splitShellPlaceholders, substituteArguments } from "../../extensions/tools/plugins/template.ts";
 import { usePluginRoots, writePlugin, writeRegistry as writeRootRegistry } from "./helpers/plugin-roots.ts";
 
 describe("entryAppliesToCwd (review L6)", () => {

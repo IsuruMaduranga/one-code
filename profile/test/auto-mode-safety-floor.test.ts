@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { isSafetyControlTarget, safetyControlWrite, safetyFloorBlockText, safetyFloorReason } from "../../extensions/permissions/auto-mode/safety-floor.ts";
+import { isSafetyControlTarget, safetyControlWrite, safetyFloorBlockText, safetyFloorReason } from "../../extensions/safety/permissions/auto-mode/safety-floor.ts";
 import { analyzeShellCommand } from "../../extensions/lib/shell/shell-analysis.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { productProjectSettingsPath } from "../../extensions/lib/profile/product-settings.ts";

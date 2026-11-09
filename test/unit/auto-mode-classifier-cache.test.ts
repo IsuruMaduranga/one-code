@@ -4,12 +4,12 @@ import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 
 vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
 import { completeSimple } from "@earendil-works/pi-ai/compat";
-import { classify, createClassifierState } from "../../extensions/permissions/auto-mode/classifier.ts";
+import { classify, createClassifierState } from "../../extensions/safety/permissions/auto-mode/classifier.ts";
 import { loadAutoModeConfig } from "../../extensions/lib/rules/auto-mode-config.ts";
-import { buildPayload, type ClassifyRequest, stage1User, stage2User, reviewUser } from "../../extensions/permissions/auto-mode/prompt.ts";
-import { cacheClassifierHistory } from "../../extensions/permissions/auto-mode/cache.ts";
-import { classifierText, instructionsFraming } from "../../extensions/permissions/auto-mode/classifier-prompt.ts";
-import { transcriptBlocks, type TranscriptEntry } from "../../extensions/permissions/auto-mode/transcript.ts";
+import { buildPayload, type ClassifyRequest, stage1User, stage2User, reviewUser } from "../../extensions/safety/permissions/auto-mode/prompt.ts";
+import { cacheClassifierHistory } from "../../extensions/safety/permissions/auto-mode/cache.ts";
+import { classifierText, instructionsFraming } from "../../extensions/safety/permissions/auto-mode/classifier-prompt.ts";
+import { transcriptBlocks, type TranscriptEntry } from "../../extensions/safety/permissions/auto-mode/transcript.ts";
 
 const config = loadAutoModeConfig("/nonexistent-home-for-tests");
 const request: ClassifyRequest = {

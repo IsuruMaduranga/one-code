@@ -5,7 +5,7 @@
  * does is tested in test/unit/web-search-backends.test.ts.
  */
 import { describe, expect, it } from "vitest";
-import { BRAVE_KEY_ENV, type ChainOutcome, runChain } from "../../extensions/web/backends.ts";
+import { BRAVE_KEY_ENV, type ChainOutcome, runChain } from "../../extensions/tools/web/backends.ts";
 import { failureOf, fakeBackend, ONE_RESULT } from "../../test/unit/helpers/web-search.ts";
 import { webSearch } from "../text/web-search/index.ts";
 

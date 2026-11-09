@@ -1,12 +1,12 @@
 /** Model-free status sources; the widgets and RPC UI adapter are real. */
 import { EventEmitter } from "node:events";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import tasksExtension from "../../../extensions/tasks/index.ts";
-import { LiveRunRegistry } from "../../../extensions/subagents/live-runs.ts";
-import { SubagentWidget } from "../../../extensions/subagents/panel-widget.ts";
-import type { RunHandle, WorkflowRunManager } from "../../../extensions/workflow/run-manager.ts";
-import type { ViewerRunSnapshot } from "../../../extensions/workflow/viewer.ts";
-import { WorkflowWidget } from "../../../extensions/workflow/widget.ts";
+import tasksExtension from "../../../extensions/tools/tasks/index.ts";
+import { LiveRunRegistry } from "../../../extensions/agents/subagents/live-runs.ts";
+import { SubagentWidget } from "../../../extensions/agents/subagents/panel-widget.ts";
+import type { RunHandle, WorkflowRunManager } from "../../../extensions/agents/workflow/run-manager.ts";
+import type { ViewerRunSnapshot } from "../../../extensions/agents/workflow/viewer.ts";
+import { WorkflowWidget } from "../../../extensions/agents/workflow/widget.ts";
 
 export default function rpcWidgetProbe(pi: ExtensionAPI) {
 	// Load the real task extension, retaining its tools only to call them from

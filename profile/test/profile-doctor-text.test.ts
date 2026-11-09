@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { doctorText } from "../text/doctor/index.ts";
-import type { FixPromptInput } from "../../extensions/doctor/text.ts";
+import type { FixPromptInput } from "../../extensions/commands/doctor/text.ts";
 import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
 
 const doctor = doctorText(ALL_LIVE);

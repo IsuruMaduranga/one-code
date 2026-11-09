@@ -2,19 +2,19 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import hooksExtension from "../../extensions/hooks/index.ts";
-import { approvalStorePath, resetTrustSessionState } from "../../extensions/hooks/trust.ts";
-import { resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
-import lspExtension from "../../extensions/lsp/index.ts";
-import { lspTrustStorePath } from "../../extensions/lsp/trust.ts";
+import hooksExtension from "../../extensions/safety/hooks/index.ts";
+import { approvalStorePath, resetTrustSessionState } from "../../extensions/safety/hooks/trust.ts";
+import { resetHookSettingsCache } from "../../extensions/safety/hooks/settings.ts";
+import lspExtension from "../../extensions/tools/lsp/index.ts";
+import { lspTrustStorePath } from "../../extensions/tools/lsp/trust.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { useRepositorySettings, writeRepositorySettings } from "./helpers/settings-files.ts";
 
 const state = vi.hoisted(() => ({ runHook: vi.fn(), startServer: vi.fn() }));
-vi.mock("../../extensions/hooks/executor.ts", () => ({ runHookCommand: state.runHook }));
-vi.mock("../../extensions/lsp/client.ts", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("../../extensions/lsp/client.ts")>();
+vi.mock("../../extensions/safety/hooks/executor.ts", () => ({ runHookCommand: state.runHook }));
+vi.mock("../../extensions/tools/lsp/client.ts", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../extensions/tools/lsp/client.ts")>();
 	return { ...actual, LspClient: class {
 		isRunning = true;
 		publishCount = 0;

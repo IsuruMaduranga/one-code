@@ -1,13 +1,13 @@
 /**
  * The shapes the base reads from the profile's classifier ruleset
- * (`ClassifierRuleset` in extensions/permissions/auto-mode/text.ts), checked on the
+ * (`ClassifierRuleset` in extensions/safety/permissions/auto-mode/text.ts), checked on the
  * profile in force. A ruleset that renames a rule-list heading or changes a
  * rule's bullet form still compiles, but every block it cites would match no
  * rule and /permissions would count none; this fails first.
  */
 import { describe, expect, it } from "vitest";
-import { buildRuleset, classifierText, defaultEnvironment, renderSessionContext } from "../../extensions/permissions/auto-mode/classifier-prompt.ts";
-import { buildCategoryIndex, builtinRuleCounts } from "../../extensions/permissions/auto-mode/rules.ts";
+import { buildRuleset, classifierText, defaultEnvironment, renderSessionContext } from "../../extensions/safety/permissions/auto-mode/classifier-prompt.ts";
+import { buildCategoryIndex, builtinRuleCounts } from "../../extensions/safety/permissions/auto-mode/rules.ts";
 
 describe("the profile's classifier ruleset", () => {
 	const ruleset = buildRuleset(defaultEnvironment());

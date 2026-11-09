@@ -16,10 +16,10 @@ import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { oneTurnHandbackSlot, subagentHandbackExtension, subagentHandbackTool } from "../../extensions/lib/agents/subagent-handback.ts";
 import { childToolAllowlist } from "../../extensions/lib/agents/agent-catalog.ts";
-import { forkTaskMessage } from "../../extensions/subagents/outcome.ts";
-import { SubagentRuntime } from "../../extensions/subagents/runner.ts";
-import { SessionTurnTracker } from "../../extensions/subagents/session-turns.ts";
-import { AgentRunner } from "../../extensions/workflow/agent-session.ts";
+import { forkTaskMessage } from "../../extensions/agents/subagents/outcome.ts";
+import { SubagentRuntime } from "../../extensions/agents/subagents/runner.ts";
+import { SessionTurnTracker } from "../../extensions/agents/subagents/session-turns.ts";
+import { AgentRunner } from "../../extensions/agents/workflow/agent-session.ts";
 import { createFakePi } from "./helpers/fake-pi.ts";
 
 type ToolResult = { content: Array<{ text: string }>; isError?: boolean; terminate?: boolean };

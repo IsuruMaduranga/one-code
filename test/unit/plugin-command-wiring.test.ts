@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync }
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import pluginsExtension from "../../extensions/plugins/index.ts";
+import pluginsExtension from "../../extensions/tools/plugins/index.ts";
 import { invalidatePluginsCache } from "../../extensions/lib/plugins/plugins.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";

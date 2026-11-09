@@ -3,7 +3,7 @@ import { createAssistantMessageEventStream, type AssistantMessage, type Message,
 import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
-import toolCallCorruptionExtension from "../../extensions/tool-call-corruption/index.ts";
+import toolCallCorruptionExtension from "../../extensions/request/tool-call-corruption/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 const model: Model<"openai-completions"> = {

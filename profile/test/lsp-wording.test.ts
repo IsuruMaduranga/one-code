@@ -7,9 +7,9 @@
  */
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { formatDiagnostics as formatWith, type LspDiagnostic, shownDiagnostic } from "../../extensions/lsp/format.ts";
-import { describeStartFailure } from "../../extensions/lsp/install-hints.ts";
-import { formatNewDiagnostics as formatNewWith, MAX_CHARS } from "../../extensions/lsp/watcher.ts";
+import { formatDiagnostics as formatWith, type LspDiagnostic, shownDiagnostic } from "../../extensions/tools/lsp/format.ts";
+import { describeStartFailure } from "../../extensions/tools/lsp/install-hints.ts";
+import { formatNewDiagnostics as formatNewWith, MAX_CHARS } from "../../extensions/tools/lsp/watcher.ts";
 import { diag, PROJECT, uri } from "../../test/unit/helpers/lsp-diagnostics.ts";
 import { lsp as lspText } from "../text/lsp/index.ts";
 

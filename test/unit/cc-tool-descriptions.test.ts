@@ -8,13 +8,13 @@
  * locked in profile/test/cc-tool-descriptions-wording.test.ts.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import askUserExtension from "../../extensions/ask-user/index.ts";
-import bashExtension from "../../extensions/bash/index.ts";
+import askUserExtension from "../../extensions/tools/ask-user/index.ts";
+import bashExtension from "../../extensions/tools/bash/index.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../../extensions/lib/rules/modes.ts";
-import toolStyleExtension from "../../extensions/tool-style/index.ts";
-import webSearchExtension from "../../extensions/web/index.ts";
-import webFetchExtension from "../../extensions/web-fetch/index.ts";
+import toolStyleExtension from "../../extensions/tools/tool-style/index.ts";
+import webSearchExtension from "../../extensions/tools/web/index.ts";
+import webFetchExtension from "../../extensions/tools/web-fetch/index.ts";
 import { descriptionForm, registerVariantTool } from "../../extensions/lib/profile/tool-variants.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 

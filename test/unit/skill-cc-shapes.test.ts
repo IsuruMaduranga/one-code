@@ -1,5 +1,5 @@
 /**
- * skill/index.ts against Claude Code's shapes: the listing's order (project
+ * tools/skill/index.ts against Claude Code's shapes: the listing's order (project
  * skills, plugin commands, plugin skills, then the bundled catalog) with
  * `when_to_use`; a typed `/<plugin>:<skill>` expanded in the harness; a model
  * call answered with the profile's launch line and the text beside it; and code-review's
@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import skillExtension from "../../extensions/skill/index.ts";
+import skillExtension from "../../extensions/tools/skill/index.ts";
 import { invalidatePluginsCache } from "../../extensions/lib/plugins/plugins.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { BUNDLED_SKILLS_DIR } from "../../extensions/lib/plugins/skill-scan.ts";

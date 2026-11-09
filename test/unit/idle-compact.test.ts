@@ -9,8 +9,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import compactionExtension from "../../extensions/compaction/index.ts";
-import idleCompactExtension from "../../extensions/idle-compact/index.ts";
+import compactionExtension from "../../extensions/context/compaction/index.ts";
+import idleCompactExtension from "../../extensions/context/idle-compact/index.ts";
 import {
 	type ArmedRequest,
 	DEFAULT_MIN_TOKENS,
@@ -20,7 +20,7 @@ import {
 	idleCompactConfig,
 	idleRefusal,
 	ONE_HOUR_MS,
-} from "../../extensions/idle-compact/policy.ts";
+} from "../../extensions/context/idle-compact/policy.ts";
 import { hasOneHourCache } from "../../extensions/lib/request/anthropic-payload.ts";
 import { brandedId } from "../../extensions/lib/profile/brand.mjs";
 import { unrefTimers } from "../../extensions/lib/core/timer-ops.ts";

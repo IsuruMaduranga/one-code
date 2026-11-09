@@ -6,7 +6,7 @@
  * them gives the run's totals, across every turn of a resident.
  */
 
-import { subagentWords } from "../../subagents/words.ts";
+import { subagentWords } from "../../agents/subagents/words.ts";
 
 export interface UsageTotals {
 	input: number;

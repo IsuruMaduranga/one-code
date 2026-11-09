@@ -9,10 +9,10 @@ import {
 	type LspDiagnostic,
 	severityName,
 	shownDiagnostic,
-} from "../../extensions/lsp/format.ts";
-import { describeStartFailure, INSTALL_HINTS } from "../../extensions/lsp/install-hints.ts";
+} from "../../extensions/tools/lsp/format.ts";
+import { describeStartFailure, INSTALL_HINTS } from "../../extensions/tools/lsp/install-hints.ts";
 import { withKeepAlive } from "../../extensions/lib/core/keep-alive.ts";
-import { createReaderState, encodeMessage, readMessages } from "../../extensions/lsp/protocol.ts";
+import { createReaderState, encodeMessage, readMessages } from "../../extensions/tools/lsp/protocol.ts";
 import {
 	findProjectRoot,
 	languageIdForPath,
@@ -20,7 +20,7 @@ import {
 	SERVERS,
 	typescriptPreflight,
 	findTypescript,
-} from "../../extensions/lsp/servers.ts";
+} from "../../extensions/tools/lsp/servers.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { diag } from "./helpers/lsp-diagnostics.ts";
 

@@ -13,7 +13,7 @@
  * command line quoted the way Node's own `shell: true` does, and the arguments
  * passed verbatim so Node does not quote them a second time. Anything that
  * resolves to a real executable, or does not resolve at all (the caller's
- * ENOENT handling then applies — lsp/install-hints.ts for servers), is spawned
+ * ENOENT handling then applies — tools/lsp/install-hints.ts for servers), is spawned
  * as given. Elsewhere the launch is the command and arguments unchanged.
  */
 

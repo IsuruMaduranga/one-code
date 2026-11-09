@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { computePresets, describePresetChanges, findPreset, presetPool, presetsSection } from "../../extensions/doctor/presets.ts";
+import { computePresets, describePresetChanges, findPreset, presetPool, presetsSection } from "../../extensions/commands/doctor/presets.ts";
 import { setCatalogSourcesForTest } from "../../extensions/lib/models/model-catalog-data.ts";
 import { catalogSources, pinCatalog, pinReleaseDates } from "./catalog-fixture.ts";
 

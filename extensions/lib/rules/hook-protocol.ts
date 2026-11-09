@@ -7,7 +7,7 @@
 
 import { isAppendedReminderText } from "../request/reminders.ts";
 import { emptyToolResultText } from "../request/empty-tool-result.ts";
-import { MAX_HOOK_OUTPUT_BYTES } from "../../hooks/executor.ts";
+import { MAX_HOOK_OUTPUT_BYTES } from "../../safety/hooks/executor.ts";
 import type { SessionBackgroundTask, SessionCron } from "../notify/session-work.ts";
 
 /** The contiguous run of reminder/countdown blocks at the tail of a tool result (review M3). */
@@ -132,7 +132,7 @@ export interface HookOutcome {
 	systemMessage?: string;
 }
 
-/** Every matched hook's outcome merged, a block's reason worded and bounded (hooks/index.ts dispatch). */
+/** Every matched hook's outcome merged, a block's reason worded and bounded (safety/hooks/index.ts dispatch). */
 export interface MergedHookOutcome extends Omit<HookOutcome, "block"> {
 	block?: { reason: string };
 }

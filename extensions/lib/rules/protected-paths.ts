@@ -105,7 +105,7 @@ const PROTECTED_FILES = new Set([
 
 // `isWritingTool` / `WRITING_TOOLS` live in lib/shell/paths.ts (the shared lower
 // layer) so the safety floor and this gate share one source of truth; re-exported
-// here for the existing importers (matcher.ts, permissions/index.ts).
+// here for the existing importers (matcher.ts, safety/permissions/index.ts).
 export { isWritingTool } from "../shell/paths.ts";
 
 /**

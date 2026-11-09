@@ -7,7 +7,7 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { hashProjectHooks, persistApproval, resetTrustSessionState } from "../../extensions/hooks/trust.ts";
+import { hashProjectHooks, persistApproval, resetTrustSessionState } from "../../extensions/safety/hooks/trust.ts";
 import { childHookBridge, makeHookWorktreeDirs, writeHookScript } from "../../test/unit/helpers/hook-worktree.ts";
 
 const state = vi.hoisted(() => ({ home: `/nonexistent/one-code-child-hooks-${Math.random().toString(36).slice(2)}` }));

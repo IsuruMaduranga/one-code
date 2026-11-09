@@ -7,7 +7,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loadServers } from "../../extensions/mcp/config.ts";
+import { loadServers } from "../../extensions/tools/mcp/config.ts";
 import { makeMcpConfigDirs, piMcpConfigs, writeMcpServers as write } from "../../test/unit/helpers/mcp-config.ts";
 
 describe("loadServers with Claude Code's files", () => {

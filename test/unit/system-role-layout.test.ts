@@ -4,7 +4,7 @@
  * right after it; the instructions and context blocks stay.
  */
 import { describe, expect, it } from "vitest";
-import systemReminderExtension from "../../extensions/system-reminder/index.ts";
+import systemReminderExtension from "../../extensions/request/system-reminder/index.ts";
 import { CONTEXT_ORDER, movesToSystemRole, REMINDER_CHANNEL, wrapReminder } from "../../extensions/lib/request/reminders.ts";
 import { reseatMessageMark } from "../../extensions/lib/request/anthropic-payload.ts";
 import { instructionRole, withSystemRoleContext } from "../../extensions/lib/request/system-role.ts";

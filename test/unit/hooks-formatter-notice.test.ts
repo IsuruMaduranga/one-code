@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { changedSince, fileToolTarget, snapshotFile } from "../../extensions/hooks/formatter-notice.ts";
+import { changedSince, fileToolTarget, snapshotFile } from "../../extensions/safety/hooks/formatter-notice.ts";
 
 const dir = () => mkdtempSync(join(tmpdir(), "formatter-notice-"));
 

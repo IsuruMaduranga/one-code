@@ -1,5 +1,5 @@
 /**
- * A shell read that showed a whole file counts as a read (file-tracker/shell-reads.ts):
+ * A shell read that showed a whole file counts as a read (safety/file-tracker/shell-reads.ts):
  * candidate extraction, the full-content check, and the bash tool_result wiring.
  */
 import * as fs from "node:fs";
@@ -7,9 +7,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import fileTrackerExtension from "../../extensions/file-tracker/index.ts";
-import { expandCandidate, shellReadCandidates, shellReadPaths, shownInFull } from "../../extensions/file-tracker/shell-reads.ts";
-import { describeChanges } from "../../extensions/file-tracker/tracker.ts";
+import fileTrackerExtension from "../../extensions/safety/file-tracker/index.ts";
+import { expandCandidate, shellReadCandidates, shellReadPaths, shownInFull } from "../../extensions/safety/file-tracker/shell-reads.ts";
+import { describeChanges } from "../../extensions/safety/file-tracker/tracker.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { WORKTREE_CHANNEL } from "../../extensions/lib/agents/worktree-channel.ts";
 import { CHILD_WROTE_CHANNEL } from "../../extensions/lib/agents/child-writes.ts";

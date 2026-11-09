@@ -39,7 +39,7 @@ export interface SourceView {
 	skillDirs?(base: SkillDir[], opts: { cwd: string }): SkillDir[];
 	/** Another tool's plugin install root, read only (lib/plugins/plugins.ts `DiscoverRoots`). */
 	pluginsDir?: string;
-	/** Another tool's MCP config files, read after pi's own `mcp.json` files, each with its scope (mcp/config.ts). */
+	/** Another tool's MCP config files, read after pi's own `mcp.json` files, each with its scope (tools/mcp/config.ts). */
 	mcpFiles?(opts: { cwd: string }): McpFile[];
 	/** Where a user adds servers in those files, for /mcp's empty message: ".mcp.json in the project, ~/.claude.json". */
 	mcpWhere?: string;

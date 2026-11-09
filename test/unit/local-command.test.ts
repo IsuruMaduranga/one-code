@@ -8,7 +8,7 @@ import {
 	registerLocalCommand,
 } from "../../extensions/lib/ui/local-command.ts";
 import { escapeXml } from "../../extensions/lib/core/xml.ts";
-import { modelSwitchStdout } from "../../extensions/model-default/index.ts";
+import { modelSwitchStdout } from "../../extensions/ui/model-default/index.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { ARGUMENT_HINT_CHANNEL } from "../../extensions/lib/ui/argument-hints.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";

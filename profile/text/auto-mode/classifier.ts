@@ -40,7 +40,7 @@ export const classifier: ClassifierText = {
 		"something the rules forbid — not only the final entry.",
 	// The user's own deny rules, appended at the HARD BLOCK insertion point: a
 	// rule binds only the spelling it names, so the classifier generalizes it by
-	// effect, one-directionally (permissions/rule-prose.ts).
+	// effect, one-directionally (safety/permissions/rule-prose.ts).
 	userDenyRule: (name, spec) =>
 		`User Deny Rule ${name}: the user's own settings deny \`${spec}\`. ` +
 		"That is the user's standing decision about a CLASS of action, made in advance, so user intent does NOT clear it. " +

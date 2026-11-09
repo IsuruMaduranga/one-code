@@ -50,7 +50,7 @@
 import { brandedId } from "../profile/brand.mjs";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { SubagentDefault } from "./subagent-default.ts";
-import type { MenuLabel, SubagentModelNotice, SubagentModelsText } from "../../subagents/model-text.ts";
+import type { MenuLabel, SubagentModelNotice, SubagentModelsText } from "../../agents/subagents/model-text.ts";
 import {
 	crossesProvider,
 	findConfigured,

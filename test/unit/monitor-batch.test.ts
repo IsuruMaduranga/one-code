@@ -8,7 +8,7 @@ import {
 	MONITOR_MAX_LINE_CHARS,
 	MonitorLineSplitter,
 	pushEvent,
-} from "../../extensions/background/monitor-batch.ts";
+} from "../../extensions/tools/background/monitor-batch.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const monitor = requireText("background").monitor;

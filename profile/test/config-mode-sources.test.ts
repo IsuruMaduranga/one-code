@@ -3,18 +3,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { autoModeSettingsPaths } from "../../extensions/lib/rules/auto-mode-config.ts";
-import { readLoopFile } from "../../extensions/background/loop-fire.ts";
-import { claudeResourcePaths } from "../../extensions/claude-compat/index.ts";
-import { hookSettingsPaths } from "../../extensions/hooks/settings.ts";
+import { readLoopFile } from "../../extensions/tools/background/loop-fire.ts";
+import { claudeResourcePaths } from "../../extensions/commands/claude-compat/index.ts";
+import { hookSettingsPaths } from "../../extensions/safety/hooks/settings.ts";
 import { readSettingsEnv } from "../../extensions/lib/profile/claude-settings.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { defaultDiscoverRoots, discoverPlugins, invalidatePluginsCache } from "../../extensions/lib/plugins/plugins.ts";
 import { promptTemplateFiles, scanSkills } from "../../extensions/lib/plugins/skill-scan.ts";
-import { configPaths } from "../../extensions/mcp/config.ts";
-import { buildMemoryEntries } from "../../extensions/memory/entries.ts";
+import { configPaths } from "../../extensions/tools/mcp/config.ts";
+import { buildMemoryEntries } from "../../extensions/context/memory/entries.ts";
 import { loadPermissionSettings } from "../../extensions/lib/rules/settings.ts";
 import { agentDirs } from "../../extensions/lib/agents/agent-catalog.ts";
-import { workflowDirs } from "../../extensions/workflow/saved-workflows.ts";
+import { workflowDirs } from "../../extensions/agents/workflow/saved-workflows.ts";
 
 function scratch(): string {
 	return mkdtempSync(join(tmpdir(), "config-sources-"));

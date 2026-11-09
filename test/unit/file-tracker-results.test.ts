@@ -1,6 +1,6 @@
 /**
  * pi's read, write and edit results, rewritten to the profile's texts
- * (file-tracker/results.ts) and wired through the file-tracker's tool_result
+ * (safety/file-tracker/results.ts) and wired through the file-tracker's tool_result
  * hook. The input strings are pi's exact wording; the expected texts are the
  * profile's, for the outcome the base picks (One Code's wording of them:
  * profile/test/profile-file-tracker-text.test.ts).
@@ -9,8 +9,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import fileTrackerExtension from "../../extensions/file-tracker/index.ts";
-import { fileToolResultContent } from "../../extensions/file-tracker/results.ts";
+import fileTrackerExtension from "../../extensions/safety/file-tracker/index.ts";
+import { fileToolResultContent } from "../../extensions/safety/file-tracker/results.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 

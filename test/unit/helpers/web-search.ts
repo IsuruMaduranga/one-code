@@ -2,7 +2,7 @@
  * Stand-ins for the web_search fallback chain's tests (web-search-backends and
  * One Code's web-search-backends-wording).
  */
-import type { SearchBackend } from "../../../extensions/web/backends.ts";
+import type { SearchBackend } from "../../../extensions/tools/web/backends.ts";
 
 /** The failure data a backend or the chain threw. */
 export async function failureOf(work: Promise<unknown> | (() => unknown)): Promise<unknown> {

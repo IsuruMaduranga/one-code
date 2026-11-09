@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 /**
- * The notebook tool's logic (extensions/notebook/notebook.ts): what an edit
+ * The notebook tool's logic (extensions/tools/notebook/notebook.ts): what an edit
  * does and why it fails, as data. One Code's wording of it is checked in
  * profile-notebook-text.test.ts.
  */
-import { applyEdit, cellRefs, findCellIndex, type Notebook, NotebookError, notebookFailure, parseNotebook, toSourceLines } from "../../extensions/notebook/notebook.ts";
+import { applyEdit, cellRefs, findCellIndex, type Notebook, NotebookError, notebookFailure, parseNotebook, toSourceLines } from "../../extensions/tools/notebook/notebook.ts";
 
 /** The failure an edit throws. */
 const failureOf = (edit: () => unknown) => {

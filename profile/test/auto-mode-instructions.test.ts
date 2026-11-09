@@ -4,8 +4,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loadProjectInstructions } from "../../extensions/permissions/auto-mode/instructions.ts";
-import { buildClaudeMdBlock } from "../../extensions/claude-context/claude-context.ts";
+import { loadProjectInstructions } from "../../extensions/safety/permissions/auto-mode/instructions.ts";
+import { buildClaudeMdBlock } from "../../extensions/context/claude-context/claude-context.ts";
 import { discoverContextFiles } from "../claude-code/instructions.ts";
 import { readInstructionFiles } from "../claude-code/settings.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
@@ -130,7 +130,7 @@ describe("loadProjectInstructions", () => {
 		expect(loaded).toContain("GLOBAL CONTENT");
 	});
 
-	// The agent loads these (claude-context/claude-context.ts); the classifier must see the same restriction.
+	// The agent loads these (context/claude-context/claude-context.ts); the classifier must see the same restriction.
 	it.each([
 		[".claude/CLAUDE.md", join(".claude", "CLAUDE.md")],
 		["an unconditional .claude/rules file", join(".claude", "rules", "safety.md")],

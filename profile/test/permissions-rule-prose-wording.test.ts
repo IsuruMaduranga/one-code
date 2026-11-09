@@ -6,9 +6,9 @@
  * permissions-rule-prose.test.ts checks what it hands the profile.
  */
 import { describe, expect, it } from "vitest";
-import { buildRuleset, defaultEnvironment } from "../../extensions/permissions/auto-mode/classifier-prompt.ts";
-import { buildCategoryIndex, groundCategory } from "../../extensions/permissions/auto-mode/rules.ts";
-import { denyRuleLines } from "../../extensions/permissions/rule-prose.ts";
+import { buildRuleset, defaultEnvironment } from "../../extensions/safety/permissions/auto-mode/classifier-prompt.ts";
+import { buildCategoryIndex, groundCategory } from "../../extensions/safety/permissions/auto-mode/rules.ts";
+import { denyRuleLines } from "../../extensions/safety/permissions/rule-prose.ts";
 
 describe("One Code's deny-rule line", () => {
 	it("describes a deny rule by effect, not by its pattern syntax", () => {

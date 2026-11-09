@@ -2,7 +2,7 @@
  * One Code's system prompt (the profile's `text.systemPrompt`): Claude Code's
  * registers, adapted for One Code, selected by model tier. The base places
  * the computed blocks around and inside these sections
- * (extensions/system-prompt/template.ts).
+ * (extensions/request/system-prompt/template.ts).
  */
 
 import type { LiveTools, PromptTier, SystemPromptText } from "../../../extensions/sdk/profile.ts";

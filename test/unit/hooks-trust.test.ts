@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { HooksSource } from "../../extensions/hooks/settings.ts";
+import type { HooksSource } from "../../extensions/safety/hooks/settings.ts";
 import {
 	describeProjectHooks,
 	hashProjectHooks,
@@ -10,7 +10,7 @@ import {
 	projectHooksApproved,
 	readStoredApproval,
 	resetTrustSessionState,
-} from "../../extensions/hooks/trust.ts";
+} from "../../extensions/safety/hooks/trust.ts";
 
 const source = (command: string, scope: "project" | "local" = "project"): HooksSource => ({
 	scope,
@@ -131,7 +131,7 @@ describe("projectHooksApproved", () => {
 		});
 		expect(await projectHooksApproved("/proj", [source("x")], d)).toBe(false);
 		vi.resetModules();
-		const reloaded = await import("../../extensions/hooks/trust.ts");
+		const reloaded = await import("../../extensions/safety/hooks/trust.ts");
 		expect(await reloaded.projectHooksApproved("/proj", [source("x")], d)).toBe(false);
 		expect(prompts).toBe(1);
 	});

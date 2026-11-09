@@ -6,7 +6,7 @@ import {
 	MAX_BLOCKS,
 	streamingText,
 	type LiveRun,
-} from "../../extensions/subagents/live-runs.ts";
+} from "../../extensions/agents/subagents/live-runs.ts";
 import {
 	buildRows,
 	MAX_STRIP_ROWS,
@@ -18,10 +18,10 @@ import {
 	STRIP_LINGER_MS,
 	TASKS_NOTICE,
 	toolDisplayLabel,
-} from "../../extensions/subagents/panel-render.ts";
+} from "../../extensions/agents/subagents/panel-render.ts";
 import { userMessageForAgent } from "../../extensions/lib/agents/agent-view.ts";
 import { wrapProse } from "../../extensions/lib/ui/tui-render.ts";
-import { decodeStripKey } from "../../extensions/subagents/panel-keys.ts";
+import { decodeStripKey } from "../../extensions/agents/subagents/panel-keys.ts";
 import { resolvePiTuiEntry } from "../../extensions/lib/ui/prose.ts";
 import { existsSync } from "node:fs";
 
@@ -548,7 +548,7 @@ describe("SubagentWidget after dispose", () => {
 		}) as unknown as import("@earendil-works/pi-coding-agent").ExtensionContext;
 
 	it("stops scheduling, ticking and painting once disposed, even when the ctx has gone stale", async () => {
-		const { SubagentWidget } = await import("../../extensions/subagents/panel-widget.ts");
+		const { SubagentWidget } = await import("../../extensions/agents/subagents/panel-widget.ts");
 		vi.useFakeTimers();
 		try {
 			const calls: Array<[string, unknown]> = [];
@@ -577,7 +577,7 @@ describe("SubagentWidget after dispose", () => {
 	});
 
 	it("treats a ctx whose getters throw as no UI even before dispose", async () => {
-		const { SubagentWidget } = await import("../../extensions/subagents/panel-widget.ts");
+		const { SubagentWidget } = await import("../../extensions/agents/subagents/panel-widget.ts");
 		vi.useFakeTimers();
 		try {
 			const state = { stale: true, setWidget: () => {} };

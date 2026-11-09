@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import permissionsExtension from "../../extensions/permissions/index.ts";
+import permissionsExtension from "../../extensions/safety/permissions/index.ts";
 import { brand, brandedId } from "../../extensions/lib/profile/brand.mjs";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import type { PermissionMode } from "../../extensions/lib/rules/matcher.ts";

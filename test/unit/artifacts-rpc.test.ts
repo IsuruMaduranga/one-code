@@ -2,8 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import artifactsExtension from "../../extensions/artifacts/index.ts";
-import { artifactsRoot, getArtifact, publishArtifact } from "../../extensions/artifacts/store.ts";
+import artifactsExtension from "../../extensions/tools/artifacts/index.ts";
+import { artifactsRoot, getArtifact, publishArtifact } from "../../extensions/tools/artifacts/store.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { envName } from "../../extensions/lib/profile/brand.mjs";
 

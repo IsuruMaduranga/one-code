@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { DEFER_CHANNEL, DEFERRED_QUERY_CHANNEL, type DeferredQuery, deferLikeParentExtension, type DeferRequest, injectedByParent } from "../../extensions/lib/request/deferred.ts";
-import toolSearchExtension from "../../extensions/tool-search/index.ts";
+import toolSearchExtension from "../../extensions/request/tool-search/index.ts";
 import { makeToolSearchFakePi } from "./helpers/tool-search-fake-pi.ts";
 
 describe("deferring like the parent", () => {

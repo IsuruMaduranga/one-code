@@ -3,8 +3,8 @@ import { DEFER_CHANNEL, deferredAddendumText, WITHHOLD_CHANNEL } from "../../ext
 import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/plugins/mcp-share.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/request/reminders.ts";
-import toolSearchExtension from "../../extensions/tool-search/index.ts";
-import webExtension from "../../extensions/web/index.ts";
+import toolSearchExtension from "../../extensions/request/tool-search/index.ts";
+import webExtension from "../../extensions/tools/web/index.ts";
 import { createFakeCtx, createFakePi, renderRequest } from "./helpers/fake-pi.ts";
 import type { Reminder } from "./helpers/tool-search-fake-pi.ts";
 

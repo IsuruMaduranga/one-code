@@ -224,7 +224,7 @@ export function catalogCacheDir(stateDir: string): string {
  * The refreshed catalog files and the failure stamp that holds a refresh off.
  * They decide a model's tier, and the tier decides which auto-mode fast paths
  * skip the classifier, so the safety floor guards them like the settings
- * files (permissions/auto-mode/safety-floor.ts).
+ * files (safety/permissions/auto-mode/safety-floor.ts).
  */
 export function catalogCacheFiles(stateDir: string): string[] {
 	return [...Object.values(FILES), FAILURE_FILE].map((file) => join(catalogCacheDir(stateDir), file));

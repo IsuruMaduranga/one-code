@@ -21,7 +21,7 @@ import { parseFrontmatterLoosely } from "../core/frontmatter.ts";
 import { projectConfigDir, userConfigDir } from "../profile/sources.ts";
 import { SUBAGENT_HANDBACK } from "./subagent-handback.ts";
 import { normalizeToolName } from "../rules/matcher.ts";
-import { subagentWords } from "../../subagents/words.ts";
+import { subagentWords } from "../../agents/subagents/words.ts";
 
 export interface AgentDefinition {
 	name: string;

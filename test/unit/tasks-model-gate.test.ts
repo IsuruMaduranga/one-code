@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFER_CHANNEL, WITHHOLD_CHANNEL } from "../../extensions/lib/request/deferred.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
-import tasksExtension from "../../extensions/tasks/index.ts";
+import tasksExtension from "../../extensions/tools/tasks/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 /**

@@ -13,7 +13,7 @@ import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { openInstructions, projectInstructionFiles } from "../../extensions/lib/context/instructions.ts";
 import { resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 import { profile } from "../index.ts";
-import { buildMemoryEntries } from "../../extensions/memory/entries.ts";
+import { buildMemoryEntries } from "../../extensions/context/memory/entries.ts";
 
 let root: string;
 let home: string;

@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import skillExtension from "../../extensions/skill/index.ts";
+import skillExtension from "../../extensions/tools/skill/index.ts";
 import { pluginRoot } from "../../extensions/lib/plugins/plugin-root.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { setSkillState } from "../../extensions/lib/plugins/skill-overrides.ts";

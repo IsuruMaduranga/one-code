@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import claudeContextExtension from "../../extensions/claude-context/index.ts";
+import claudeContextExtension from "../../extensions/context/claude-context/index.ts";
 import { GIT_SNAPSHOT_OWNER_CHANNEL } from "../../extensions/lib/context/git-status.ts";
 import { makeRecord, RECORD } from "../../extensions/lib/request/ledger/records.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";

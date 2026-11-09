@@ -9,7 +9,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resetTrustSessionState } from "../../extensions/hooks/trust.ts";
+import { resetTrustSessionState } from "../../extensions/safety/hooks/trust.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { childHookBridge, makeHookWorktreeDirs, writeHookScript } from "./helpers/hook-worktree.ts";
 import { writeUserSettings } from "./helpers/settings-files.ts";

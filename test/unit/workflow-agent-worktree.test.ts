@@ -10,8 +10,8 @@ import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as agentLoader from "../../extensions/lib/agents/agent-loader.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
-import { AgentRunner } from "../../extensions/workflow/agent-session.ts";
-import { keptWorktreeOf } from "../../extensions/workflow/types.ts";
+import { AgentRunner } from "../../extensions/agents/workflow/agent-session.ts";
+import { keptWorktreeOf } from "../../extensions/agents/workflow/types.ts";
 
 const git = (cwd: string, ...args: string[]) =>
 	execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd, encoding: "utf8" }).trim();

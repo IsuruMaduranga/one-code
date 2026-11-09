@@ -1,13 +1,13 @@
 /** Regressions for the request-shaping steps: the cache mark, call ids after a model switch, and fallbacks. */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import systemReminderExtension from "../../extensions/system-reminder/index.ts";
+import systemReminderExtension from "../../extensions/request/system-reminder/index.ts";
 import { deferredAddendumText } from "../../extensions/lib/request/deferred.ts";
 import { wrapReminder } from "../../extensions/lib/request/reminders.ts";
 import { subagentHandbackExtension } from "../../extensions/lib/agents/subagent-handback.ts";
 import { totalTokensBlock } from "../../extensions/lib/context/budget.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
-import { withToolAdditions } from "../../extensions/tool-search/tool-additions.ts";
-import { withTurnBudgetMessages } from "../../extensions/system-reminder/turn-budget-layout.ts";
+import { withToolAdditions } from "../../extensions/request/tool-search/tool-additions.ts";
+import { withTurnBudgetMessages } from "../../extensions/request/system-reminder/turn-budget-layout.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 

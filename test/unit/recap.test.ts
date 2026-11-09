@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { RECENT_MESSAGE_WINDOW, recapLine, recentForRecap, REFERENCE_MARK } from "../../extensions/recap/prompt.ts";
-import { RecapScheduler, type TimerOps } from "../../extensions/recap/scheduler.ts";
+import { RECENT_MESSAGE_WINDOW, recapLine, recentForRecap, REFERENCE_MARK } from "../../extensions/agents/recap/prompt.ts";
+import { RecapScheduler, type TimerOps } from "../../extensions/agents/recap/scheduler.ts";
 
 describe("recap prompt", () => {
 	it("keeps CC's 30-message recent window and ※ mark", () => {

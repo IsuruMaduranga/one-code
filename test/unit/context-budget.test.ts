@@ -5,8 +5,8 @@ import {
 	TurnBudget,
 	turnTokenBudget,
 } from "../../extensions/lib/context/budget.ts";
-import contextBudgetExtension from "../../extensions/context-budget/index.ts";
-import systemReminderExtension from "../../extensions/system-reminder/index.ts";
+import contextBudgetExtension from "../../extensions/context/context-budget/index.ts";
+import systemReminderExtension from "../../extensions/request/system-reminder/index.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";

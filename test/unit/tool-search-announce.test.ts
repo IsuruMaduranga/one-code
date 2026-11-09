@@ -4,7 +4,7 @@ import { requestIdentity } from "../../extensions/lib/request/anthropic-auth.ts"
 import { makeRecord, RECORD } from "../../extensions/lib/request/ledger/records.ts";
 import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/plugins/mcp-share.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
-import toolSearchExtension from "../../extensions/tool-search/index.ts";
+import toolSearchExtension from "../../extensions/request/tool-search/index.ts";
 import { makeToolSearchFakePi, type Reminder } from "./helpers/tool-search-fake-pi.ts";
 
 /**

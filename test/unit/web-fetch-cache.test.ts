@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
-import webFetchExtension from "../../extensions/web-fetch/index.ts";
-import { readerMessages } from "../../extensions/web-fetch/summarize.ts";
+import webFetchExtension from "../../extensions/tools/web-fetch/index.ts";
+import { readerMessages } from "../../extensions/tools/web-fetch/summarize.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { logSideCallUsage } from "../../extensions/lib/side-calls/side-call-usage.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";

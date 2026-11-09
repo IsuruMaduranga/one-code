@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { claudeResourcePaths } from "../../extensions/claude-compat/index.ts";
+import { claudeResourcePaths } from "../../extensions/commands/claude-compat/index.ts";
 import { userConfigDir } from "../../extensions/lib/profile/sources.ts";
 
 describe("claudeResourcePaths", () => {

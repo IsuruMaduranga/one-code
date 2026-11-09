@@ -13,7 +13,7 @@ import {
 	worktreeWriteGuardReason,
 } from "../../extensions/lib/agents/worktree-isolation.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
-import type { WorktreeGuardRefusal } from "../../extensions/worktree/text.ts";
+import type { WorktreeGuardRefusal } from "../../extensions/safety/worktree/text.ts";
 import { captureToolCallHandler } from "./helpers/permission-gate-harness.ts";
 
 /**

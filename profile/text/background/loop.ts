@@ -8,7 +8,7 @@
  * which becomes task_output (our task_list is the to-do list and shows no
  * monitor; decisions/tools.md, "Session cron"). The base sorts the
  * arguments into a form and decides which tick goes out
- * (extensions/background/loop-skill.ts, loop-fire.ts).
+ * (extensions/tools/background/loop-skill.ts, loop-fire.ts).
  */
 
 import { AUTONOMOUS_LOOP, AUTONOMOUS_LOOP_DYNAMIC, LOOP_FILE_DYNAMIC_SENTINEL, LOOP_FILE_SENTINEL, type LoopFile, type LoopText, type LoopTick } from "../../../extensions/sdk/profile.ts";

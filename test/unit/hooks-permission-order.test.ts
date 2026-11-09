@@ -2,17 +2,17 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { TranscriptEntry } from "../../extensions/permissions/auto-mode/transcript.ts";
-import hooksExtension from "../../extensions/hooks/index.ts";
-import { resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
-import permissionsExtension from "../../extensions/permissions/index.ts";
+import type { TranscriptEntry } from "../../extensions/safety/permissions/auto-mode/transcript.ts";
+import hooksExtension from "../../extensions/safety/hooks/index.ts";
+import { resetHookSettingsCache } from "../../extensions/safety/hooks/settings.ts";
+import permissionsExtension from "../../extensions/safety/permissions/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { writeUserSettings } from "./helpers/settings-files.ts";
 
 const seen: TranscriptEntry[][] = [];
-vi.mock("../../extensions/permissions/auto-mode/classifier.ts", async (importOriginal) => ({
-	...(await importOriginal<typeof import("../../extensions/permissions/auto-mode/classifier.ts")>()),
+vi.mock("../../extensions/safety/permissions/auto-mode/classifier.ts", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../extensions/safety/permissions/auto-mode/classifier.ts")>()),
 	classify: vi.fn(async (request: { transcript: TranscriptEntry[] }) => {
 		seen.push(request.transcript);
 		return { decision: "block", reason: "rewritten action denied", tier: "stage2" };

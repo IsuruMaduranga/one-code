@@ -1,20 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { brand } from "../../extensions/lib/profile/brand.mjs";
-import { decodePanelKey } from "../../extensions/plugins/panel/keys.ts";
-import { renderPanel, type PanelPaint } from "../../extensions/plugins/panel/render.ts";
+import { decodePanelKey } from "../../extensions/tools/plugins/panel/keys.ts";
+import { renderPanel, type PanelPaint } from "../../extensions/tools/plugins/panel/render.ts";
 import {
 	buildDiscoverRows,
 	buildInstalledRows,
 	type DiscoverRow,
 	type InstalledRow,
-} from "../../extensions/plugins/panel/rows.ts";
+} from "../../extensions/tools/plugins/panel/rows.ts";
 import {
 	applyPanelKey,
 	initialPanelState,
 	type PanelState,
 	type PanelView,
-} from "../../extensions/plugins/panel/state.ts";
-import type { MarketplaceSnapshot } from "../../extensions/plugins/marketplace/sync.ts";
+} from "../../extensions/tools/plugins/panel/state.ts";
+import type { MarketplaceSnapshot } from "../../extensions/tools/plugins/marketplace/sync.ts";
 import type { Plugin } from "../../extensions/lib/plugins/plugins.ts";
 
 const paint: PanelPaint = {

@@ -1,7 +1,7 @@
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { expandEnv, loadServers, missingEnvVars, parseServer, referencedEnvVars } from "../../extensions/mcp/config.ts";
+import { expandEnv, loadServers, missingEnvVars, parseServer, referencedEnvVars } from "../../extensions/tools/mcp/config.ts";
 import {
 	capDescription as capWith,
 	DESCRIPTION_CAP,
@@ -12,8 +12,8 @@ import {
 	parseNamespacedToolName,
 	pluginServerName,
 	validateImageData,
-} from "../../extensions/mcp/schema.ts";
-import { createTailBuffer, mcpInstructionsReminder as instructionsWith } from "../../extensions/mcp/client.ts";
+} from "../../extensions/tools/mcp/schema.ts";
+import { createTailBuffer, mcpInstructionsReminder as instructionsWith } from "../../extensions/tools/mcp/client.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { makeMcpConfigDirs, piMcpConfigs, writeMcpServers as write } from "./helpers/mcp-config.ts";
 import { TINY_GIF, TINY_JPEG, TINY_PNG, TINY_WEBP } from "./helpers/tiny-images.ts";

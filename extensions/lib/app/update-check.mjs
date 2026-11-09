@@ -1,7 +1,7 @@
 /**
  * One Code's own update notice and the release facts behind it — shared by
  * the bundled app (app/bin.mjs registers createUpdateCheck as an inline
- * extension) and the doctor (doctor/update-lookup.ts reports the same
+ * extension) and the doctor (commands/doctor/update-lookup.ts reports the same
  * "newest installable version"). Plain JS with no pi imports: the app loads
  * it from the extension package it depends on, so it must run on bare Node.
  *

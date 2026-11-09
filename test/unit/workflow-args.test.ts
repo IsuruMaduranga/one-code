@@ -4,7 +4,7 @@
  * decodes it before the gate and hooks see the call.
  */
 import { describe, expect, it } from "vitest";
-import { prepareWorkflowArguments } from "../../extensions/workflow/args.ts";
+import { prepareWorkflowArguments } from "../../extensions/agents/workflow/args.ts";
 
 describe("prepareWorkflowArguments", () => {
 	it("decodes a JSON-encoded array or object", () => {

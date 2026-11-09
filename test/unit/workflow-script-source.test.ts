@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import vm from "node:vm";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
-import { parseWorkflowScript, wrapScriptBody } from "../../extensions/workflow/script-source.ts";
-import type { ScriptProblem } from "../../extensions/workflow/text.ts";
+import { parseWorkflowScript, wrapScriptBody } from "../../extensions/agents/workflow/script-source.ts";
+import type { ScriptProblem } from "../../extensions/agents/workflow/text.ts";
 
 /** A script problem as the profile words it: what the parser throws. */
 const problem = (p: ScriptProblem) => requireText("workflow").scriptProblem(p);

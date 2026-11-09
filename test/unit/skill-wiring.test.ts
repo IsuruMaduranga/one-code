@@ -1,5 +1,5 @@
 /**
- * skill/index.ts wiring for scheduled work: a session's first skill turn goes
+ * tools/skill/index.ts wiring for scheduled work: a session's first skill turn goes
  * out as a user message (so pi's prompt preamble runs), a generated body
  * replaces the file's (lib/plugins/skill-body.ts, `/loop`), and a fired slash command
  * expands to the skill it names. Every path delivers Claude Code's typed-skill
@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import skillExtension from "../../extensions/skill/index.ts";
+import skillExtension from "../../extensions/tools/skill/index.ts";
 import { SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../../extensions/lib/plugins/skill-body.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";

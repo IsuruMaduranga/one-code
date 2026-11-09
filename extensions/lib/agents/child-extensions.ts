@@ -1,11 +1,11 @@
 /**
  * The curated extensions every in-process child session loads: a subagent
- * (subagents/runner.ts) and a workflow agent (workflow/agent-session.ts) alike.
+ * (agents/subagents/runner.ts) and a workflow agent (agents/workflow/agent-session.ts) alike.
  * They go in through `additionalExtensionPaths`, which the loader loads even
  * under `noExtensions`. Broadly Claude Code's model: a child gets project
  * context, file freshness and a working toolset (search, skills, web, notebook),
  * but NOT the frontier chrome (banner, spinner, recap) or the orchestration
- * extensions. Nested spawning is an injected tool instead (subagents/index.ts).
+ * extensions. Nested spawning is an injected tool instead (agents/subagents/index.ts).
  *
  * `lsp` is deliberately NOT here (matching Claude Code, findings §17.3): a child
  * session is torn down with the raw `AgentSession.dispose()`, which never fires
@@ -46,8 +46,8 @@ const EXTENSIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
 // (mode "print"), so `run_in_background` runs blocking there and nothing a
 // child starts outlives it (Claude Code kills an agent's shells as it exits).
 export const CHILD_EXTENSIONS = [
-	"kept-thinking/index.ts", "ledger/index.ts", "system-reminder/index.ts", "tool-search/index.ts", "context-management/index.ts", "compaction/index.ts", "ledger/wire.ts", "cache-marks/index.ts", "claude-context/index.ts", "tool-call-corruption/child.ts",
-	"file-tracker/index.ts", "search-tools/index.ts", "skill/index.ts", "bash/child.ts", "powershell/child.ts", "web/index.ts", "web-fetch/index.ts", "notebook/index.ts",
+	"request/kept-thinking/index.ts", "request/ledger/index.ts", "request/system-reminder/index.ts", "request/tool-search/index.ts", "request/context-management/index.ts", "context/compaction/index.ts", "request/ledger/wire.ts", "request/cache-marks/index.ts", "context/claude-context/index.ts", "request/tool-call-corruption/child.ts",
+	"safety/file-tracker/index.ts", "tools/search-tools/index.ts", "tools/skill/index.ts", "tools/bash/child.ts", "tools/powershell/child.ts", "tools/web/index.ts", "tools/web-fetch/index.ts", "tools/notebook/index.ts",
 ];
 
 export const CHILD_EXTENSION_PATHS = CHILD_EXTENSIONS.map((entry) => join(EXTENSIONS_DIR, entry));

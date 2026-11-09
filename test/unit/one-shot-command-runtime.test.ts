@@ -9,7 +9,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createUserMessageSender } from "../../extensions/lib/notify/notifications.ts";
 import { ONE_SHOT_COMMAND_FAILED_CHANNEL } from "../../extensions/lib/notify/interrupt.ts";
-import doctorExtension from "../../extensions/doctor/index.ts";
+import doctorExtension from "../../extensions/commands/doctor/index.ts";
 import { brand } from "../../extensions/lib/profile/brand.mjs";
 import { instructionTargets } from "../../extensions/lib/context/instructions.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
@@ -41,7 +41,7 @@ async function setup(extra: ExtensionFactory = () => {}, mode: "print" | "json" 
 	const dir = mkdtempSync(join(tmpdir(), "one-shot-command-runtime-"));
 	dirs.push(dir);
 	const errors: string[] = [];
-	// The sender reports a failed start to the exit extension (exit/index.ts), which sets the code at shutdown.
+	// The sender reports a failed start to the exit extension (commands/exit/index.ts), which sets the code at shutdown.
 	const failures: unknown[] = [];
 	let api!: ExtensionAPI;
 	let send!: ReturnType<typeof createUserMessageSender>;
@@ -139,7 +139,7 @@ describe("one-shot commands against pi's runtime", () => {
 	});
 
 	it.each(["print", "json"] as const)("runs two init commands through pi's extension loader in %s", async (mode) => {
-		const path = fileURLToPath(new URL("../../extensions/init/index.ts", import.meta.url));
+		const path = fileURLToPath(new URL("../../extensions/commands/init/index.ts", import.meta.url));
 		const h = await setup(undefined, mode, [path]);
 		await h.session.prompt("/init");
 		await h.session.prompt("/init");

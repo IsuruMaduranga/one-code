@@ -4,7 +4,7 @@
  * One Code's wording of the note is checked in profile/test/.
  */
 import { describe, expect, it } from "vitest";
-import systemPromptExtension from "../../extensions/system-prompt/index.ts";
+import systemPromptExtension from "../../extensions/request/system-prompt/index.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, toldBlockFact } from "../../extensions/lib/request/reminders.ts";
 import { sessionScratchpadDir } from "../../extensions/lib/core/scratchpad.ts";

@@ -278,7 +278,7 @@ export const subagentsText = (live: LiveTools): SubagentsText => {
 			`The main session's permission mode is now "${mode}", and your tool calls are checked against it from here on.${mode === "plan" ? " Only read-only tools run now: do not edit files or change state." : ""}`,
 		// CONDITIONAL on purpose: the trigger also fires on correct behaviour (a
 		// model that only said "I'm waiting for the agent"), so the text must not
-		// accuse (subagents/pending-claim.ts).
+		// accuse (agents/subagents/pending-claim.ts).
 		pendingClaim: ({ runs }) =>
 			results(
 				`You ended that turn while ${namedRuns(runs)} ${runs.length === 1 ? "was" : "were"} still running. ${runs.length === 1 ? "It has" : "They have"} not reported yet, ` +

@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import doctorExtension from "../../extensions/doctor/index.ts";
+import doctorExtension from "../../extensions/commands/doctor/index.ts";
 import { pinCatalog, pinReleaseDates } from "./catalog-fixture.ts";
 import { MODEL_UNUSABLE_CHANNEL } from "../../extensions/lib/models/model-unusable.ts";
 import { CLASSIFIER_SETTING_CHANGED_CHANNEL, SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../../extensions/lib/rules/settings-channels.ts";

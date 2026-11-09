@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { findSessionFile, freeRunName, nextRunName, resolveRunName, RunRegistry } from "../../extensions/subagents/runs.ts";
+import { findSessionFile, freeRunName, nextRunName, resolveRunName, RunRegistry } from "../../extensions/agents/subagents/runs.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 describe("nextRunName", () => {

@@ -4,7 +4,7 @@
  */
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { LspDiagnostic } from "../../../extensions/lsp/format.ts";
+import type { LspDiagnostic } from "../../../extensions/tools/lsp/format.ts";
 
 /** A diagnostic at a 0-indexed position; `severity` stays unset when not given, as a server may leave it. */
 export const diag = (message: string, severity?: number, line = 0, character = 0, extra?: Partial<LspDiagnostic>): LspDiagnostic => ({

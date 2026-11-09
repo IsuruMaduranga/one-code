@@ -9,7 +9,7 @@ import { foldBranch } from "../../extensions/lib/request/ledger/fold.ts";
 import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../../extensions/lib/request/ledger/plan.ts";
 import { RECORD } from "../../extensions/lib/request/ledger/records.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
-import systemReminderExtension from "../../extensions/system-reminder/index.ts";
+import systemReminderExtension from "../../extensions/request/system-reminder/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 const result = { role: "toolResult", toolCallId: "call-1", toolName: "enter_plan_mode", content: [{ type: "text", text: "entered" }], isError: false, timestamp: 10 };

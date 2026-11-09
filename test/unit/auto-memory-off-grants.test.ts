@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetAutoMemoryForTest } from "../../extensions/lib/context/auto-memory.ts";
 import { projectMemoryDir } from "../../extensions/lib/context/memory.ts";
-import permissionsExtension from "../../extensions/permissions/index.ts";
+import permissionsExtension from "../../extensions/safety/permissions/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { brand } from "../../extensions/lib/profile/brand.mjs";

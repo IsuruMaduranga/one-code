@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { envName } from "../../extensions/lib/profile/brand.mjs";
-import { NO_SHELL_NOTICE, POWERSHELL_KNOB, powerShellSwitch, shellToolPolicy, withShellTools } from "../../extensions/powershell/policy.ts";
+import { NO_SHELL_NOTICE, POWERSHELL_KNOB, powerShellSwitch, shellToolPolicy, withShellTools } from "../../extensions/tools/powershell/policy.ts";
 
 /** The product's own spelling of the switch (One Code: ONECODE_USE_POWERSHELL_TOOL). */
 const KNOB = envName(POWERSHELL_KNOB);

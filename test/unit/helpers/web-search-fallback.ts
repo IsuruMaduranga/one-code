@@ -1,6 +1,6 @@
 import { requireText } from "../../../extensions/lib/profile/profile.ts";
-import type { SearchResult } from "../../../extensions/web/backends.ts";
-import type { ProviderSearchFailure } from "../../../extensions/web/text.ts";
+import type { SearchResult } from "../../../extensions/tools/web/backends.ts";
+import type { ProviderSearchFailure } from "../../../extensions/tools/web/text.ts";
 
 /**
  * The result of a "test search" that `google/gemini-test`'s own search did

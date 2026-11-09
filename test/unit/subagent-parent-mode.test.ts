@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { PERMISSION_MODE_STATE } from "../../extensions/lib/rules/modes.ts";
-import { parentModeExtension } from "../../extensions/subagents/parent-mode.ts";
+import { parentModeExtension } from "../../extensions/agents/subagents/parent-mode.ts";
 import { createFakeCtx, createFakePi, renderRequest } from "./helpers/fake-pi.ts";
 import { stateEntry } from "./helpers/state-entry.ts";
 

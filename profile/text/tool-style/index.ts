@@ -3,7 +3,7 @@
  * Write description, short on frontier and workhorse, long on cheap and tiny
  * (lib/profile/tool-variants.ts), with One Code's tool names. "Overwriting an
  * existing file you haven't read will fail" holds: the file tracker refuses
- * it (file-tracker/tracker.ts). Read and edit keep pi's descriptions,
+ * it (safety/file-tracker/tracker.ts). Read and edit keep pi's descriptions,
  * because Claude Code's describe a different call shape (`file_path`,
  * numbered lines, `old_string`); edit's gets the read rule appended.
  */

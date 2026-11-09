@@ -1,18 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { decodeWidgetKey } from "../../extensions/ask-user/widget.ts";
+import { decodeWidgetKey } from "../../extensions/tools/ask-user/widget.ts";
 import { decodePickerKey } from "../../extensions/lib/models/model-picker.ts";
-import { decodeBtwKey } from "../../extensions/btw/panel.ts";
-import { decodeDoctorKey } from "../../extensions/doctor/viewer.ts";
+import { decodeBtwKey } from "../../extensions/agents/btw/panel.ts";
+import { decodeDoctorKey } from "../../extensions/commands/doctor/viewer.ts";
 import { decodeKey as decodeSliderKey } from "../../extensions/lib/ui/effort-slider.ts";
-import { decodeMcpKey } from "../../extensions/mcp/panel/keys.ts";
-import { decodeMemoryKey } from "../../extensions/memory/panel.ts";
-import { decodePanelKey as decodePermissionsKey } from "../../extensions/permissions/panel/keys.ts";
-import { decodeViewerKey as decodePlanKey } from "../../extensions/plan-mode/viewer.ts";
-import { decodePanelKey as decodePluginsKey } from "../../extensions/plugins/panel/keys.ts";
-import { classifyKey, SendNowChord } from "../../extensions/send-now/chord.ts";
-import { decodeSkillsKey } from "../../extensions/skill/panel/keys.ts";
-import { decodeStripKey, editorYieldsDown, isStripEntryKey } from "../../extensions/subagents/panel-keys.ts";
-import { decodeViewerKey as decodeWorkflowKey } from "../../extensions/workflow/viewer.ts";
+import { decodeMcpKey } from "../../extensions/tools/mcp/panel/keys.ts";
+import { decodeMemoryKey } from "../../extensions/context/memory/panel.ts";
+import { decodePanelKey as decodePermissionsKey } from "../../extensions/safety/permissions/panel/keys.ts";
+import { decodeViewerKey as decodePlanKey } from "../../extensions/safety/plan-mode/viewer.ts";
+import { decodePanelKey as decodePluginsKey } from "../../extensions/tools/plugins/panel/keys.ts";
+import { classifyKey, SendNowChord } from "../../extensions/ui/send-now/chord.ts";
+import { decodeSkillsKey } from "../../extensions/tools/skill/panel/keys.ts";
+import { decodeStripKey, editorYieldsDown, isStripEntryKey } from "../../extensions/agents/subagents/panel-keys.ts";
+import { decodeViewerKey as decodeWorkflowKey } from "../../extensions/agents/workflow/viewer.ts";
 
 // pi-tui turns on the kitty keyboard protocol (flags 7) where the terminal
 // supports it (kitty, Ghostty, WezTerm, VS Code 1.109.5+) and xterm's

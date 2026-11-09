@@ -4,7 +4,7 @@
  * store behind them is tested in test/unit/tasks-store.test.ts.
  */
 import { describe, expect, it } from "vitest";
-import { TaskStore, taskView } from "../../extensions/tasks/store.ts";
+import { TaskStore, taskView } from "../../extensions/tools/tasks/store.ts";
 import { tasks as text } from "../text/tasks/index.ts";
 
 describe("One Code's task texts", () => {

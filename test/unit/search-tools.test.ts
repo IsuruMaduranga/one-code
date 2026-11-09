@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SEARCH_TOOLS, withSearchTools } from "../../extensions/search-tools/tools.ts";
+import { SEARCH_TOOLS, withSearchTools } from "../../extensions/tools/search-tools/tools.ts";
 
 const BASE = ["read", "bash", "edit", "write"];
 

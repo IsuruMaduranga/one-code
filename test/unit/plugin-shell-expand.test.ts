@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
-import { expandTemplate, runPlaceholderCommand } from "../../extensions/plugins/shell-expand.ts";
+import { expandTemplate, runPlaceholderCommand } from "../../extensions/tools/plugins/shell-expand.ts";
 
 const words = requireText("plugins");
 

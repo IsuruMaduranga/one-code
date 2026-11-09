@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ToldFact } from "../../extensions/lib/request/ledger/records.ts";
-import { mcpChangeNotices as changeNotices, mcpDelta as delta, mcpFacts as facts, type McpDelta, type McpSnapshot, mcpStartupNotices } from "../../extensions/mcp/announce.ts";
+import { mcpChangeNotices as changeNotices, mcpDelta as delta, mcpFacts as facts, type McpDelta, type McpSnapshot, mcpStartupNotices } from "../../extensions/tools/mcp/announce.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const mcpText = requireText("mcp");

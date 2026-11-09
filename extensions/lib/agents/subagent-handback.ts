@@ -18,7 +18,7 @@
  * allowlist keeps it.
  *
  * In a fork the tool is deferred: a fork sends the parent's tool list so it
- * reads the parent's prompt cache (subagents/fork-cache.ts), and an eager tool
+ * reads the parent's prompt cache (agents/subagents/fork-cache.ts), and an eager tool
  * of its own would be dropped from that list. A deferred one reaches the
  * request through a `tool_search` load, as the fork's `SendMessage` does.
  */

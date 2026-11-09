@@ -1,10 +1,10 @@
 /**
- * What the base hands a profile's guide agent (subagents/guide-agent.ts
+ * What the base hands a profile's guide agent (agents/subagents/guide-agent.ts
  * `GuideInput`), for guide-agent and its One Code sibling: an app install
  * with every doc folder found and an empty setup.
  */
 import { brand } from "../../../extensions/lib/profile/brand.mjs";
-import type { GuideInput } from "../../../extensions/subagents/guide-agent.ts";
+import type { GuideInput } from "../../../extensions/agents/subagents/guide-agent.ts";
 
 /** A setup with nothing configured. */
 export const emptySetup: GuideInput["setup"] = { skills: [], agents: [], plugins: [], mcpServers: [], packages: [], extensions: [], settingsKeys: [] };

@@ -8,7 +8,7 @@ import { resetProcessStateForTest } from "../../extensions/lib/profile/process-s
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { projectConfigDir } from "../../extensions/lib/profile/sources.ts";
 import { around } from "../../extensions/lib/profile/template-probe.ts";
-import worktreeExtension from "../../extensions/worktree/index.ts";
+import worktreeExtension from "../../extensions/safety/worktree/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
 const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();

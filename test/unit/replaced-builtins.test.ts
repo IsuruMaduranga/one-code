@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
-import { replacedBuiltinsView } from "../../extensions/doctor/builtins.ts";
+import { replacedBuiltinsView } from "../../extensions/commands/doctor/builtins.ts";
 import { brand } from "../../extensions/lib/profile/brand.mjs";
 import { piHasBuiltinExtensions } from "../../extensions/lib/app/pi-version.ts";
 import {

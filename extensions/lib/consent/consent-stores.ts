@@ -7,7 +7,7 @@
  * allow rules and workspace directories, and the language servers that run
  * its build. An entry is standing permission, so a write to a store is a
  * gate-control write: the auto-mode safety floor stops it
- * (`permissions/auto-mode/safety-floor.ts`), and a classifier that was talked around
+ * (`safety/permissions/auto-mode/safety-floor.ts`), and a classifier that was talked around
  * never gets to approve it. One home for the paths, so a new store cannot be
  * left off the floor.
  */

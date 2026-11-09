@@ -7,7 +7,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import hooksExtension from "../../extensions/hooks/index.ts";
+import hooksExtension from "../../extensions/safety/hooks/index.ts";
 import { SUBAGENT_HOOK_CHANNEL, type HookBridge } from "../../extensions/lib/agents/hook-bridge.ts";
 import { WORKTREE_CHANNEL } from "../../extensions/lib/agents/worktree-channel.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";

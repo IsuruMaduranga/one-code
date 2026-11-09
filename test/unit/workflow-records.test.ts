@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ACTIVITY_CAP, AgentRecordStore, previewValue } from "../../extensions/workflow/records.ts";
+import { ACTIVITY_CAP, AgentRecordStore, previewValue } from "../../extensions/agents/workflow/records.ts";
 
 const tick = (() => {
 	let t = 1000;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeGrepWindows } from "../../extensions/search-tools/grep-merge.ts";
+import { mergeGrepWindows } from "../../extensions/tools/search-tools/grep-merge.ts";
 
 // pi's grep prints one window per match, so nearby matches repeated shared lines.
 describe("mergeGrepWindows", () => {

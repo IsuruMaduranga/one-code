@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import tasksExtension from "../../extensions/tasks/index.ts";
+import tasksExtension from "../../extensions/tools/tasks/index.ts";
 import { createFakeCtx, createFakePi } from "../../test/unit/helpers/fake-pi.ts";
 
 /**

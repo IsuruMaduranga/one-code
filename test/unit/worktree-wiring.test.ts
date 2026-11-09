@@ -1,5 +1,5 @@
 /**
- * worktree/index.ts wiring: after enter_worktree, the tool_call hook guards
+ * safety/worktree/index.ts wiring: after enter_worktree, the tool_call hook guards
  * and rewrites every tool that runs a command. The repository lives in a temp
  * directory, never in a real checkout.
  */
@@ -14,7 +14,7 @@ import { REMINDER_CHANNEL, type ReminderPayload } from "../../extensions/lib/req
 import { projectConfigDir, projectConfigDirName } from "../../extensions/lib/profile/sources.ts";
 import { shellQuote } from "../../extensions/lib/shell/shell-quote.ts";
 import { WORKTREE_CHANNEL, type WorktreeLocation } from "../../extensions/lib/agents/worktree-channel.ts";
-import worktreeExtension from "../../extensions/worktree/index.ts";
+import worktreeExtension from "../../extensions/safety/worktree/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
 type GateResult = { block?: boolean; reason?: string } | undefined;

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import memoryExtension from "../../extensions/memory/index.ts";
+import memoryExtension from "../../extensions/context/memory/index.ts";
 import { resolveThroughLinks } from "../../extensions/lib/shell/paths.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { projectMemoryDir } from "../../extensions/lib/context/memory.ts";

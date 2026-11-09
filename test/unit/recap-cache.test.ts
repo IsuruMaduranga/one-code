@@ -9,7 +9,7 @@ const complete = vi.mocked(completeSimple);
 const { logSideCallUsage } = await import("../../extensions/lib/side-calls/side-call-usage.ts");
 const logSideCall = vi.mocked(logSideCallUsage);
 const answer = (text: string) => ({ content: [{ type: "text", text }], stopReason: "stop", usage: {} }) as Awaited<ReturnType<typeof completeSimple>>;
-let recapExtension: typeof import("../../extensions/recap/index.ts").default;
+let recapExtension: typeof import("../../extensions/agents/recap/index.ts").default;
 
 beforeEach(async () => {
 	vi.useFakeTimers();
@@ -17,7 +17,7 @@ beforeEach(async () => {
 	delete process.env.CC_RECAP;
 	complete.mockReset();
 	logSideCall.mockReset();
-	recapExtension = (await import("../../extensions/recap/index.ts")).default;
+	recapExtension = (await import("../../extensions/agents/recap/index.ts")).default;
 });
 
 afterEach(() => {

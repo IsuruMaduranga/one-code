@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { hashAgentCall, ReplayCursor } from "../../extensions/workflow/journal.ts";
-import { createLimiter, createScriptGlobals, createRunAdmission } from "../../extensions/workflow/globals.ts";
-import type { AgentCallFn } from "../../extensions/workflow/types.ts";
+import { hashAgentCall, ReplayCursor } from "../../extensions/agents/workflow/journal.ts";
+import { createLimiter, createScriptGlobals, createRunAdmission } from "../../extensions/agents/workflow/globals.ts";
+import type { AgentCallFn } from "../../extensions/agents/workflow/types.ts";
 import { makeGlobals } from "./workflow-test-helpers.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
-import type { RunStop } from "../../extensions/workflow/text.ts";
+import type { RunStop } from "../../extensions/agents/workflow/text.ts";
 
 /** Why the runtime refused an agent() call, as the profile words it. */
 const runStop = (stop: RunStop) => requireText("workflow").runStop(stop);

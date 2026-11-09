@@ -5,7 +5,7 @@
  * test/unit/mcp-announce.test.ts.
  */
 import { describe, expect, it } from "vitest";
-import { mcpChangeNotices as changeNotices, type McpDelta } from "../../extensions/mcp/announce.ts";
+import { mcpChangeNotices as changeNotices, type McpDelta } from "../../extensions/tools/mcp/announce.ts";
 import { mcp as mcpText } from "../text/mcp/index.ts";
 
 const mcpChangeNotices = (d: McpDelta) => changeNotices(d, mcpText);

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { isOpenRouter, openRouterProviderName, toolCallCorruptionNotice } from "../../extensions/tool-call-corruption/openrouter-generation.ts";
+import { isOpenRouter, openRouterProviderName, toolCallCorruptionNotice } from "../../extensions/request/tool-call-corruption/openrouter-generation.ts";
 
 const response = (provider: unknown = "Morph") => ({ ok: true, status: 200, json: async () => ({ data: { provider_name: provider } }) });
 

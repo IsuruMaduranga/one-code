@@ -10,9 +10,9 @@ import {
 	summarizeArgs,
 	type ThemeLike,
 } from "../../extensions/lib/ui/tui-render.ts";
-import { promptTitle } from "../../extensions/mcp/trust.ts";
-import { parseTitle } from "../../extensions/session-title/title.ts";
-import { LiveRunRegistry } from "../../extensions/subagents/live-runs.ts";
+import { promptTitle } from "../../extensions/tools/mcp/trust.ts";
+import { parseTitle } from "../../extensions/agents/session-title/title.ts";
+import { LiveRunRegistry } from "../../extensions/agents/subagents/live-runs.ts";
 
 // Text One Code did not write, carrying what a hostile or merely noisy source
 // can put in it: a terminal retitle (OSC 0), a clipboard write (OSC 52), a

@@ -4,7 +4,7 @@
  * instruction is profile/test/profile-compaction-text.test.ts.
  */
 import { describe, expect, it } from "vitest";
-import { keptTailOf } from "../../extensions/compaction/index.ts";
+import { keptTailOf } from "../../extensions/context/compaction/index.ts";
 
 const user = (text: string) => ({ role: "user", content: text });
 const assistant = (text = "…") => ({ role: "assistant", content: [{ type: "text", text }] });

@@ -2,14 +2,14 @@ import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import effortExtension from "../../extensions/effort/index.ts";
-import skillExtension from "../../extensions/skill/index.ts";
-import workflowExtension from "../../extensions/workflow/index.ts";
-import memoryExtension from "../../extensions/memory/index.ts";
-import { editorHint } from "../../extensions/memory/open-external.ts";
+import effortExtension from "../../extensions/ui/effort/index.ts";
+import skillExtension from "../../extensions/tools/skill/index.ts";
+import workflowExtension from "../../extensions/agents/workflow/index.ts";
+import memoryExtension from "../../extensions/context/memory/index.ts";
+import { editorHint } from "../../extensions/context/memory/open-external.ts";
 
-vi.mock("../../extensions/memory/open-external.ts", async (importOriginal) => ({
-	...await importOriginal<typeof import("../../extensions/memory/open-external.ts")>(),
+vi.mock("../../extensions/context/memory/open-external.ts", async (importOriginal) => ({
+	...await importOriginal<typeof import("../../extensions/context/memory/open-external.ts")>(),
 	openPath: vi.fn(async () => ({ ok: true })),
 }));
 import { localCommandBlocks } from "../../extensions/lib/ui/local-command.ts";

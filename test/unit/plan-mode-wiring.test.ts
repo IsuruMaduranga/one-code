@@ -1,5 +1,5 @@
 /**
- * plan-mode/index.ts wiring: the standing plan block must be back on the
+ * safety/plan-mode/index.ts wiring: the standing plan block must be back on the
  * reminder queue the moment the mode becomes plan — a ctrl+q during a long turn
  * used to leave every remaining request of that turn without it while edits
  * were denied "see the plan-mode reminder" (STEERING-REVIEW-2026-09-05 M3).
@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { MODE_CHANNEL, PLAN_FILE_CHANNEL } from "../../extensions/lib/rules/plan-mode-channels.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../../extensions/lib/rules/modes.ts";
-import planModeExtension from "../../extensions/plan-mode/index.ts";
+import planModeExtension from "../../extensions/safety/plan-mode/index.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { userDenialText } from "../../extensions/lib/consent/user-denial.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";

@@ -15,7 +15,7 @@ import {
 	parseCodeReviewArgs,
 	REVIEW_EFFORTS,
 	reviewEffortFor,
-} from "../../extensions/skill/code-review.ts";
+} from "../../extensions/tools/skill/code-review.ts";
 
 const read = (...path: string[]) => readFileSync(join(BUNDLED_SKILLS_DIR, ...path), "utf-8").replace(/\r\n/g, "\n");
 const cellsDir = join(BUNDLED_SKILLS_DIR, "code-review", "cells");

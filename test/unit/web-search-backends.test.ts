@@ -16,7 +16,7 @@ import {
 	webSearchSettingsFrom,
 	withSiteOperators,
 	type FetchLike,
-} from "../../extensions/web/backends.ts";
+} from "../../extensions/tools/web/backends.ts";
 import { failureOf, fakeBackend, ONE_RESULT } from "./helpers/web-search.ts";
 
 const jsonResponse = (body: unknown, init: { status?: number; contentType?: string } = {}): Response =>

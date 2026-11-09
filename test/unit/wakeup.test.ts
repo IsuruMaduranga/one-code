@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { CronStore } from "../../extensions/lib/agents/cron.ts";
-import { DynamicLoop, KEEPALIVE_DELAY_SECONDS, keepaliveEnabled, scheduledText } from "../../extensions/background/wakeup.ts";
+import { DynamicLoop, KEEPALIVE_DELAY_SECONDS, keepaliveEnabled, scheduledText } from "../../extensions/tools/background/wakeup.ts";
 
 const at = (h: number, m: number, s = 0) => new Date(2026, 8, 25, h, m, s).getTime();
 const newLoop = () => {

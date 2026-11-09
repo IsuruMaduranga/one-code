@@ -3,9 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
 
 import { completeSimple } from "@earendil-works/pi-ai/compat";
-import { classify, createClassifierState } from "../../extensions/permissions/auto-mode/classifier.ts";
+import { classify, createClassifierState } from "../../extensions/safety/permissions/auto-mode/classifier.ts";
 import { loadAutoModeConfig } from "../../extensions/lib/rules/auto-mode-config.ts";
-import { buildPayload, type ClassifyRequest } from "../../extensions/permissions/auto-mode/prompt.ts";
+import { buildPayload, type ClassifyRequest } from "../../extensions/safety/permissions/auto-mode/prompt.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { pinCatalog } from "./catalog-fixture.ts";
 

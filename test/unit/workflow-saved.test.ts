@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { discoverSavedWorkflows, findSavedWorkflow } from "../../extensions/workflow/saved-workflows.ts";
+import { discoverSavedWorkflows, findSavedWorkflow } from "../../extensions/agents/workflow/saved-workflows.ts";
 import { projectConfigDir, userConfigDir } from "../../extensions/lib/profile/sources.ts";
 import { tempHome } from "./helpers/temp-home.ts";
 

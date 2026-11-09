@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-let btwExtension: typeof import("../../extensions/btw/index.ts").default;
+let btwExtension: typeof import("../../extensions/agents/btw/index.ts").default;
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
@@ -13,7 +13,7 @@ const answer = (text: string) => ({ content: [{ type: "text", text }], stopReaso
 beforeEach(async () => {
 	complete.mockReset();
 	logSideCall.mockReset();
-	btwExtension = (await import("../../extensions/btw/index.ts")).default;
+	btwExtension = (await import("../../extensions/agents/btw/index.ts")).default;
 });
 
 function setup(model = { api: "anthropic-messages", provider: "anthropic", id: "test" }) {

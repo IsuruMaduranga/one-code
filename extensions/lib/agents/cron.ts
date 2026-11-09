@@ -20,7 +20,7 @@ import { brandedId } from "../profile/brand.mjs";
 import { randomUUID } from "node:crypto";
 import { Type } from "typebox";
 import { sliceColumns, visibleWidth } from "../ui/text-width.ts";
-import type { CronCreateFailure, CronText, ShownJob } from "../../background/text.ts";
+import type { CronCreateFailure, CronText, ShownJob } from "../../tools/background/text.ts";
 
 /** Claude Code's per-session job cap. */
 export const MAX_JOBS = 50;

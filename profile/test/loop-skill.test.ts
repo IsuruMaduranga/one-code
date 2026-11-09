@@ -12,10 +12,10 @@ import {
 	LOOP_FILE_SENTINEL,
 	readLoopFile,
 	resolveLoopFire,
-} from "../../extensions/background/loop-fire.ts";
-import { loopPersistent, loopSkillForm } from "../../extensions/background/loop-skill.ts";
+} from "../../extensions/tools/background/loop-fire.ts";
+import { loopPersistent, loopSkillForm } from "../../extensions/tools/background/loop-skill.ts";
 import { RECURRING_MAX_AGE_DAYS } from "../../extensions/lib/agents/cron.ts";
-import type { LoopFile } from "../../extensions/background/text.ts";
+import type { LoopFile } from "../../extensions/tools/background/text.ts";
 import { loop } from "../text/background/loop.ts";
 import { AUTONOMOUS_PREAMBLE, AUTONOMOUS_PREAMBLE_PERSISTENT } from "../text/background/loop-preamble.ts";
 

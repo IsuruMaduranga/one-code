@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { PROMPT_TIERS, type PromptTier } from "../../extensions/lib/models/model-tier.ts";
-import type { EnvironmentInfo } from "../../extensions/system-prompt/environment.ts";
+import type { EnvironmentInfo } from "../../extensions/request/system-prompt/environment.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
-import { buildClaudeCodeSystemPrompt } from "../../extensions/system-prompt/template.ts";
+import { buildClaudeCodeSystemPrompt } from "../../extensions/request/system-prompt/template.ts";
 
 /**
  * Where the base places the profile's system-prompt text: the memory section

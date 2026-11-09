@@ -4,10 +4,10 @@ import { join } from "node:path";
 import { brand } from "../../extensions/lib/profile/brand.mjs";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { startCallbackServer } from "../../extensions/mcp/oauth/callback.ts";
+import { startCallbackServer } from "../../extensions/tools/mcp/oauth/callback.ts";
 import { readDisabledMcpServers, setMcpServerDisabled } from "../../extensions/lib/plugins/mcp-overrides.ts";
-import { hasStoredTokens, readAuth, updateAuth, writeAuth } from "../../extensions/mcp/oauth/store.ts";
-import { McpOAuthProvider } from "../../extensions/mcp/oauth/provider.ts";
+import { hasStoredTokens, readAuth, updateAuth, writeAuth } from "../../extensions/tools/mcp/oauth/store.ts";
+import { McpOAuthProvider } from "../../extensions/tools/mcp/oauth/provider.ts";
 
 let home: string;
 const env: NodeJS.ProcessEnv = {}; // no <envPrefix>_STATE_DIR → <home>/<stateDir>

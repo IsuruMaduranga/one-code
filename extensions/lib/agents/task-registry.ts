@@ -8,7 +8,7 @@
 
 import { brandedId } from "../profile/brand.mjs";
 import { randomBytes } from "node:crypto";
-import type { ShownTask } from "../../background/text.ts";
+import type { ShownTask } from "../../tools/background/text.ts";
 
 /** Runtime event-bus channel other extensions use to register their tasks. */
 export const TASK_REGISTER_CHANNEL = brandedId("background-task");
