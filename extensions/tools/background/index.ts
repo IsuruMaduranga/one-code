@@ -450,7 +450,14 @@ function backgroundExtension(pi: ExtensionAPI) {
 			let log: WriteStream | undefined;
 			let spoolFailed = false;
 			let overflowed = false;
+			// Set by stop(): nothing the command prints while it is torn down is kept,
+			// on stdout or stderr (a shell running the rest of `sleep 30; echo done`
+			// before the SIGKILL grace ends, a TERM trap's goodbye, bash reporting
+			// "Terminated: 15 sleep 30" when the group signal reaches the command
+			// first), so the output and the count say what happened before the stop.
+			let stopRequested = false;
 			const record = (chunk: string) => {
+				if (stopRequested) return;
 				if (stored.length + chunk.length > STORED_OUTPUT_CAP) overflowed = true;
 				stored = tailCap(`${stored}${chunk}`, STORED_OUTPUT_CAP, text.monitor.earlierTruncated);
 				if (!chunk || spoolFailed) return;
@@ -497,10 +504,6 @@ function backgroundExtension(pi: ExtensionAPI) {
 				);
 			};
 
-			// Set by stop(): what the command prints while it is torn down (a shell
-			// running the rest of `sleep 30; echo done` before the SIGKILL grace ends)
-			// is not an event, so the count says what happened before the stop.
-			let stopRequested = false;
 			const onEvent = (line: string) => {
 				if (stopRequested) return;
 				eventCount++;
@@ -584,19 +587,14 @@ function backgroundExtension(pi: ExtensionAPI) {
 				child.stdout?.on("data", (chunk: Buffer) => {
 					for (const line of lines.push(stdoutText.write(chunk))) onEvent(line);
 				});
-				// Stderr after a stop is the shell reporting its own teardown (bash's
-				// "Terminated: 15  sleep 30" when the group signal reaches the command
-				// first), not output of the run being watched, so it is not kept.
 				child.stderr?.on("data", (chunk: Buffer) => {
-					const text = stderrText.write(chunk);
-					if (!stopRequested) record(text);
+					record(stderrText.write(chunk));
 				});
 				// Exit plus a short stdio grace, not `close` (lib/shell-run/process-tree.ts).
 				// The last line may have no newline; it is an event all the same.
 				const drain = () => {
 					for (const line of [...lines.push(stdoutText.end()), ...lines.end()]) onEvent(line);
-					const tail = stderrText.end();
-					if (!stopRequested) record(tail);
+					record(stderrText.end());
 				};
 				waitForChildExit(child).then(
 					({ code }) => {

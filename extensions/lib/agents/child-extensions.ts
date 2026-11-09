@@ -30,15 +30,13 @@
  * loader's `noContextFiles`, because claude-context injects `# claudeMd` itself.
  */
 
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { EXTENSIONS_DIR } from "../core/package-root.ts";
 import { featureOfEntry } from "../profile/features.ts";
 import { activeProfile } from "../profile/profile.ts";
 
-const EXTENSIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-
-// A name with a slash is a child-specific entry file: `tool-call-corruption/child`
-// blocks damaged OpenRouter calls like the main session's, before the hook and
+// Entry files under `extensions/`. A `child.ts` entry is child-specific:
+// `tool-call-corruption/child.ts` blocks damaged OpenRouter calls like the main session's, before the hook and
 // permission gates (which load after these paths), but prints nothing. The
 // shell tools are One Code's, as in the main session: without them a child ran
 // pi's built-in bash (timeout in seconds, no default) while a fork advertised
@@ -50,7 +48,9 @@ export const CHILD_EXTENSIONS = [
 	"safety/file-tracker/index.ts", "tools/search-tools/index.ts", "tools/skill/index.ts", "tools/bash/child.ts", "tools/powershell/child.ts", "tools/web/index.ts", "tools/web-fetch/index.ts", "tools/notebook/index.ts",
 ];
 
-export const CHILD_EXTENSION_PATHS = CHILD_EXTENSIONS.map((entry) => join(EXTENSIONS_DIR, entry));
+const entryPath = (entry: string) => join(EXTENSIONS_DIR, entry);
+
+export const CHILD_EXTENSION_PATHS = CHILD_EXTENSIONS.map(entryPath);
 
 /**
  * What a child session loads under the profile in force: the base entries
@@ -63,6 +63,6 @@ export function childExtensionPaths(): string[] {
 	const base = CHILD_EXTENSIONS.filter((entry) => {
 		const id = featureOfEntry(entry);
 		return id === undefined || profile.features.has(id);
-	}).map((entry) => join(EXTENSIONS_DIR, entry));
+	}).map(entryPath);
 	return [...base, ...profile.childExtensionPaths];
 }

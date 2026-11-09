@@ -13,18 +13,17 @@ import { enabledFeatures, FEATURE_IDS, FEATURES, featureOfEntry, featureProblems
 const repo = join(import.meta.dirname, "../..");
 const manifest = JSON.parse(readFileSync(join(repo, "package.json"), "utf8")) as { pi: { extensions: string[] } };
 const manifestEntries = manifest.pi.extensions.map((path) => path.replace(/^extensions\//, ""));
-const childEntries = CHILD_EXTENSIONS;
 const registered = FEATURE_IDS.flatMap((id) => FEATURES[id].entries.map((entry) => ({ id, entry })));
 
 describe("feature registry", () => {
 	it("covers every entry pi loads, in the main session and in children", () => {
-		for (const entry of [...manifestEntries, ...childEntries]) expect(featureOfEntry(entry), entry).toBeDefined();
+		for (const entry of [...manifestEntries, ...CHILD_EXTENSIONS]) expect(featureOfEntry(entry), entry).toBeDefined();
 	});
 
 	it("names each entry once, and only entries that are loaded", () => {
 		const entries = registered.map((r) => r.entry);
 		expect(new Set(entries).size).toBe(entries.length);
-		const loaded = new Set([...manifestEntries, ...childEntries]);
+		const loaded = new Set([...manifestEntries, ...CHILD_EXTENSIONS]);
 		for (const entry of entries) expect(loaded.has(entry), entry).toBe(true);
 	});
 

@@ -18,15 +18,15 @@
  */
 
 import { brandedId, envName } from "./brand.mjs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, resolve } from "node:path";
+import { PACKAGE_ROOT } from "../core/package-root.ts";
 import { shareModuleForTest, sharedModule } from "./shared-module.ts";
 import { enabledFeatures, type FeatureId, featureProblems, isGuardFeature, TOOL_FEATURES } from "./features.ts";
 import type { LiveTools } from "./live-tools.ts";
 import type { Profile, ProfileText, ToolSwitch } from "./profile-contract.ts";
 import type { SourceProvider } from "./sources.ts";
 
-export const PROFILE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../../profile");
+export const PROFILE_DIR = join(PACKAGE_ROOT, "profile");
 
 /**
  * Tools a profile may neither turn off nor defer: the harness's own plumbing.

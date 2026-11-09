@@ -61,6 +61,7 @@ import { conflictingPathArguments, isWithin, resolveForContainment, toAbsolute }
 import { DenialStore, denialInputKey, permissionGrantedMessage } from "./auto-mode/denials.ts";
 import { PauseTracker, unattendedPromptNotice, unattendedPromptTimeoutMs } from "./auto-mode/pause.ts";
 import { safetyControlWrite, safetyFloorBlockText, safetyFloorReason, sessionSettingsFiles } from "./auto-mode/safety-floor.ts";
+import type { FloorTarget } from "./auto-mode/text.ts";
 import { isExecutionPrimitivePath, isSensitivePath } from "../../lib/shell/sensitive.ts";
 import { analyzeShellCommand } from "../../lib/shell/shell-analysis.ts";
 import { bashParserReady, bashParserUnavailable } from "../../lib/shell/bash-parser.ts";
@@ -608,6 +609,18 @@ function permissionsExtension(pi: ExtensionAPI) {
 		} catch {
 			// Logging must never break the gate.
 		}
+	};
+
+	/**
+	 * The safety floor's verdict, the same for the main session's calls and a
+	 * child's: blocked and returned to the model, never prompted. Auto mode is
+	 * unattended, and an inattentive "Yes" (or a prompt-injected child) would
+	 * defeat the one control the classifier itself can't be trusted to enforce.
+	 */
+	const floorBlock = (ctx: ExtensionContext | undefined, tool: string, subject: string, target: FloorTarget) => {
+		autoConfig ??= loadAutoModeConfig(os.homedir());
+		if (ctx) logDecision(ctx, { tool, subject, outcome: "block", source: "floor", reason: safetyFloorReason(target) });
+		return { block: true as const, reason: safetyFloorBlockText(target) };
 	};
 
 	/**
@@ -1483,14 +1496,8 @@ function permissionsExtension(pi: ExtensionAPI) {
 			return { block: true, reason: denyReason(result) };
 		}
 
-		if (floorReason) {
-			// The floor never reaches the classifier. Auto mode is unattended, so a
-			// block goes back to the model rather than a per-action prompt (a prompt
-			// would hang the session). logDecision reads the auto-mode config.
-			autoConfig ??= loadAutoModeConfig(os.homedir());
-			logDecision(ctx, { tool: event.toolName, subject, outcome: "block", source: "floor", reason: safetyFloorReason(floorReason) });
-			return { block: true, reason: safetyFloorBlockText(floorReason) };
-		}
+		// The floor never reaches the classifier.
+		if (floorReason) return floorBlock(ctx, event.toolName, subject, floorReason);
 		if (result.decision === "classify") {
 			// The exact call the user approved in /permissions after the classifier
 			// denied it runs once without the classifier (safety/permissions/auto-mode/denials.ts). Deny
@@ -1740,6 +1747,9 @@ function permissionsExtension(pi: ExtensionAPI) {
 			return { block: true, reason: denyReason(result) };
 		}
 
+		// The floor never reaches the classifier, for a child as for the main agent.
+		if (floorReason) return floorBlock(ctx, toolName, subject, floorReason);
+
 		// Auto mode: the classifier screens the child's call, exactly as it screens
 		// the main agent's. A block is returned to the child (never a per-action
 		// prompt), so it can find a safe alternative — auto mode runs unattended.
@@ -1747,7 +1757,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		// the call falls through to the resume prompt below, exactly as the main
 		// handler's paused branch does — a pause is a full-session stop awaiting the
 		// user, and child work must not continue through it unattended.
-		if (!floorReason && result.decision === "classify" && !pauseTracker.isPaused()) {
+		if (result.decision === "classify" && !pauseTracker.isPaused()) {
 			if (!ctx) return { block: true, reason: refused({ kind: "nonInteractive" }) };
 			const appendEntry: TranscriptEntry = {
 				kind: "tool",
@@ -1768,16 +1778,6 @@ function permissionsExtension(pi: ExtensionAPI) {
 			if (outcome.decision === "allow") return undefined;
 			if (outcome.transcriptTooLong) return transcriptOverflow(ctx, toolName, subject, call.signal);
 			return { block: true, reason: classifierBlockReason(outcome) };
-		}
-
-		// Safety floor: a write to the gate's own config is NEVER auto-approved and
-		// never prompted — in auto mode it is returned to the model, exactly as the
-		// main handler does (floorReason is only ever set in auto mode). Prompting it
-		// would let an inattentive "Yes" — or a prompt-injected child — defeat the one
-		// control the classifier itself can't be trusted to enforce.
-		if (floorReason) {
-			if (ctx) logDecision(ctx, { tool: toolName, subject, outcome: "block", source: "floor", reason: safetyFloorReason(floorReason) });
-			return { block: true, reason: safetyFloorBlockText(floorReason) };
 		}
 
 		// ask: needs the user. Bubble it to the parent's terminal; no UI → fail closed.

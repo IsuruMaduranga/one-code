@@ -29,7 +29,7 @@ import os from "node:os";
 import { dirname, join } from "node:path";
 import { isPathAtOrUnder } from "../../lib/profile/paths.ts";
 import { createHash } from "node:crypto";
-import { fileURLToPath } from "node:url";
+import { PACKAGE_ROOT } from "../../lib/core/package-root.ts";
 import { StringEnum } from "../../lib/core/string-enum.ts";
 import type { Api, Message, Model } from "@earendil-works/pi-ai";
 import { type AgentToolResult, defineTool, getAgentDir, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -132,8 +132,6 @@ const MCP_STATUS_LABELS: Record<McpStatusKind, string | undefined> = {
 	disabled: "disabled",
 };
 
-/** This package's root (the `one-code-extension` directory). */
-const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
 interface RunRequest {
 	agent: string;

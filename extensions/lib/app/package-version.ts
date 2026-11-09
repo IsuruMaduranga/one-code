@@ -10,18 +10,16 @@
  */
 
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
+import { PACKAGE_ROOT } from "../core/package-root.ts";
 
 /**
- * Version from the extension's package.json (repo root, two levels above this
- * lib file). Returns "0.0.0" only if the file is somehow unreadable, so a bad
+ * Version from the extension's package.json (lib/core/package-root.ts). Returns "0.0.0" only if the file is somehow unreadable, so a bad
  * read is visibly wrong rather than silently masquerading as a real release.
  */
 export function extensionVersion(): string {
 	try {
-		const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
-		const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+		const pkg = JSON.parse(readFileSync(join(PACKAGE_ROOT, "package.json"), "utf8")) as {
 			version?: unknown;
 		};
 		return typeof pkg.version === "string" ? pkg.version : "0.0.0";

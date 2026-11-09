@@ -6,21 +6,14 @@
  * a function`) while `lib/notify/notifications.ts` sat in one. Type-only imports are
  * erased and `import()`/`require()` load on call, so neither counts.
  */
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { valueImports } from "./helpers/import-graph.ts";
+import { sourceFiles, valueImports } from "./helpers/import-graph.ts";
 
 const ROOT = join(import.meta.dirname, "..", "..");
 
-function sources(dir: string, out: string[] = []): string[] {
-	for (const name of readdirSync(dir)) {
-		const path = join(dir, name);
-		if (statSync(path).isDirectory()) sources(path, out);
-		else if (/\.(ts|mts|mjs)$/.test(name) && !/\.(d|test)\.ts$/.test(name)) out.push(path);
-	}
-	return out;
-}
+const sources = (dir: string): string[] => sourceFiles(dir, ROOT).map((file) => join(ROOT, file));
 
 /** The strongly connected groups of more than one module (Tarjan), as repo-relative paths. */
 function cycles(files: string[]): string[][] {

@@ -10,12 +10,12 @@
  */
 
 import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { getDocsPath, getExamplesPath } from "@earendil-works/pi-coding-agent";
+import { PACKAGE_ROOT } from "../core/package-root.ts";
 
 /** One Code's user guide, `<package>/docs/guide`; its `README.md` is the index. */
-export const ONE_CODE_GUIDE_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "docs", "guide");
+export const ONE_CODE_GUIDE_DIR = join(PACKAGE_ROOT, "docs", "guide");
 
 export interface GuideDocs {
 	/** One Code's user guide. */

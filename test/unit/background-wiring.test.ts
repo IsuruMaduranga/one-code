@@ -946,7 +946,7 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 		expect(result.content[0].text).toBe(ranToEnd.mock.results[0].value);
 	});
 
-	it("M3: keeps no stderr the shell writes while an aborted one-shot monitor stops", async () => {
+	it("M3: keeps no stderr the command writes while an aborted one-shot monitor stops", async () => {
 		const fake = mount();
 		const ranToEnd = vi.spyOn(words.monitor, "ranToEnd");
 		const controller = new AbortController();
