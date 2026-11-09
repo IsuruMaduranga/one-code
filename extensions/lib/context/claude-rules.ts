@@ -169,7 +169,7 @@ function ruleImports(content: string, path: string, home: string): string[] {
 	const text = (body: string) => {
 		for (const match of body.matchAll(/(?:^|\s)@((?:[^\s\\]|\\ )+)/g)) {
 			const ref = match[1].split("#")[0].replaceAll("\\ ", " ");
-			if (!ref || !(ref.startsWith("../") || ref.startsWith("~/") || (ref.startsWith("/") && ref !== "/") || /^[a-zA-Z0-9._-]/.test(ref))) continue;
+			if (!ref || !(ref.startsWith("./") || ref.startsWith("~/") || (ref.startsWith("/") && ref !== "/") || /^[a-zA-Z0-9._-]/.test(ref))) continue;
 			found.add(withoutTrailingPunctuation(absoluteFrom(dirname(path), expandTilde(ref, home))));
 		}
 	};
