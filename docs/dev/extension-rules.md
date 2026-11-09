@@ -35,7 +35,7 @@ raise it with pi upstream.
 
 **Tool names are snake_case.** That's pi's convention. Users write Claude
 Code's PascalCase names (`Bash`, `Edit`, `Task`) in permission rules and hook
-matchers, and `extensions/permissions/matcher.ts` maps between the two.
+matchers, and `extensions/lib/rules/matcher.ts` maps between the two.
 `Agent` and `SendMessage` keep their PascalCase names.
 
 **When a feature mirrors Claude Code, match its behavior.** Users bring
@@ -67,7 +67,7 @@ The fixed points:
 | `system-prompt` | Last | It builds the system prompt from what every other extension registered. |
 
 The curated list that child sessions load
-(`extensions/lib/child-extensions.ts`) follows the same order.
+(`extensions/lib/agents/child-extensions.ts`) follows the same order.
 
 Don't reorder the list without reading the header of the extension you're
 moving.
@@ -86,23 +86,23 @@ as a constant. Look for an existing channel before adding one.
 
 The rare piece of state that really must be one per process (a parser that
 takes seconds to load, for example) lives on `globalThis`, as
-`extensions/lib/bash-parser.ts` does.
+`extensions/lib/shell/bash-parser.ts` does.
 
 ## Steering the model
 
 **Steer through the reminder queue, never with a bare message.** To tell the
 model something, emit on `one-code:system-reminder` (the constant is
-`REMINDER_CHANNEL` in `extensions/lib/reminders.ts`). The
+`REMINDER_CHANNEL` in `extensions/lib/request/reminders.ts`). The
 `system-reminder` extension places the block in the request. Pick the
 placement by the kind of fact; `last-append` is the default. The
 [reminder queue](architecture.md#steering-the-model-the-reminder-queue)
 table lists the four placements, what each is for, and where each one
 lands. A local slash command that should leave a
 breadcrumb registers through `registerLocalCommand` in
-`extensions/lib/local-command.ts`.
+`extensions/lib/ui/local-command.ts`.
 
 **Harness notifications go through `createTaskNotifier`** in
-`extensions/lib/notifications.ts`, never a bare `pi.sendMessage`. It frames
+`extensions/lib/notify/notifications.ts`, never a bare `pi.sendMessage`. It frames
 task and agent messages the same way everywhere and serializes them across
 extensions. `test/unit/notification-fidelity.test.ts` locks the frames.
 
@@ -124,10 +124,10 @@ every turn of every session. A cache miss is a bug, not an accepted cost.
 - **Deferred tools never set `promptSnippet` or `promptGuidelines`.** Those
   would put the tool into the system prompt, and loading the tool later
   would rewrite it. Defer a tool by emitting on `one-code:defer-tool`
-  (`DEFER_CHANNEL` in `extensions/lib/deferred.ts`) while extensions load.
+  (`DEFER_CHANNEL` in `extensions/lib/request/deferred.ts`) while extensions load.
 - **Side calls reuse the session's cache.** A fork, a side question or a
   compaction that inherits the conversation is built from the session's last
-  request (`extensions/lib/request-replay.ts`), never from a fresh prompt.
+  request (`extensions/lib/side-calls/request-replay.ts`), never from a fresh prompt.
   Every side call passes a stable per-session cache key and puts its cache
   breakpoint on the reusable prefix.
 - **Check it.** After touching anything that feeds the request, run the
@@ -137,7 +137,7 @@ every turn of every session. A cache miss is a bug, not an accepted cost.
 
 **Never truncate model-facing text.** A tool result, a report or a
 notification that might be large goes through `persistIfLarge` in
-`extensions/lib/persisted-output.ts`. It saves the full text to a file and
+`extensions/lib/request/persisted-output.ts`. It saves the full text to a file and
 gives the model a preview plus the path, so nothing is lost and the model can
 read the rest. A bare `.slice()` drops information the model doesn't know is
 missing. The one exception is a clip Claude Code itself makes on the same
@@ -162,26 +162,26 @@ session is still live and does nothing if it isn't.
 **A tool that detaches work blocks in one-shot runs.** In `-p` and
 `--mode json` the process exits as soon as the turn settles, so a background
 task would be killed half done. Check `sessionOutlivesTurn(ctx.mode)` in
-`extensions/lib/notifications.ts` and wait for the work when it's false.
+`extensions/lib/notify/notifications.ts` and wait for the work when it's false.
 
 **Anything a tool call awaits in a one-shot run holds a ref'd handle.**
 Some helpers unref their child processes so an idle run can exit. If an
 await on such a helper is the only pending work, Node's event loop drains
 and the process exits mid-call with code 0. Wrap the outermost await in
-`withKeepAlive` (`extensions/lsp/keep-alive.ts`).
+`withKeepAlive` (`extensions/lib/core/keep-alive.ts`).
 
 **Never await slow work in `session_start`.** It holds up the first prompt.
 Start the work and let it finish in the background.
 
 **In-process child sessions go through `openChildSession`** in
-`extensions/lib/agent-loader.ts`. It builds one resource loader per session
+`extensions/lib/agents/agent-loader.ts`. It builds one resource loader per session
 and binds the curated child extensions. Subagents and workflow agents both
 use it.
 
 **A child reattaches the permission gate through the parent's bridge.** The
 parent's mode, rules, classifier and prompts judge every child tool call, and
 a bridge that fails to resolve or to answer blocks the call. With no parent
-bridge at all (a headless workflow run), `extensions/lib/permission-gate.ts`
+bridge at all (a headless workflow run), `extensions/lib/agents/permission-gate.ts`
 judges locally: deny rules win, allow rules allow, and anything that would
 ask is refused. The hook bridge loads first and fails open, because a missing
 hook must not stop the agent.
@@ -189,7 +189,7 @@ hook must not stop the agent.
 ## Safety and permissions
 
 Auto mode decides, without asking, what a model may run on someone's
-machine. Treat every change in `extensions/permissions/` and
+machine. Treat every change in `extensions/safety/permissions/` and
 `extensions/auto-mode/` as security-sensitive, and test both the allowed
 and the blocked direction live.
 
@@ -197,7 +197,7 @@ and the blocked direction live.
   it. It exists to skip the classifier for commands it can prove harmless;
   anything it can't prove goes to the classifier.
 - **A command joins the read-only fast path only with an option table.** Add
-  it to `extensions/auto-mode/read-only-options.ts` with every option it
+  it to `extensions/lib/shell/read-only-options.ts` with every option it
   accepts, never by name alone. A "read-only" command with one writing flag
   (`sort -o`, `find -delete`) is not read-only.
 - **`profile/text/auto-mode/ruleset.ts` is generated.** Don't edit it by
@@ -208,7 +208,7 @@ and the blocked direction live.
   off your prompts.
 - **A settings file that grants permissions joins the safety floor.** If you
   add a file that can grant permissions, add it to
-  `extensions/auto-mode/safety-floor.ts`, so the model can't write itself a
+  `extensions/safety/permissions/auto-mode/safety-floor.ts`, so the model can't write itself a
   permission and then use it.
 - **Never trust a side channel through tool input.** The model writes the
   tool input. A field that looks like it came from the harness may not have.
@@ -226,33 +226,33 @@ and the blocked direction live.
 ## Paths, state and shells
 
 - **`~/.claude` is read-only.** Claude Code paths go through
-  `extensions/lib/paths.ts` (`claudeUserDir`, `claudeJsonPath`,
+  `extensions/lib/profile/paths.ts` (`claudeUserDir`, `claudeJsonPath`,
   `claudeConfigDir`, `expandTilde`). The one place One Code writes under
   `~/.claude` is the per-repository auto-memory folder, which both tools
   share.
 - **One Code's own settings go to `~/.onecode`** through
-  `extensions/lib/one-code-settings.ts`.
+  `extensions/lib/profile/product-settings.ts`.
 - **Never hardcode `~/.pi`.** Resolve pi's state through pi's
   `getAgentDir()`, since the app moves it to `~/.onecode/agent`.
 - **Never spawn `/bin/sh`, `$SHELL` or a bare `pwsh`.** Go through
-  `extensions/lib/shell-spawn.ts`, which knows about Git Bash and PowerShell
+  `extensions/lib/shell-run/shell-spawn.ts`, which knows about Git Bash and PowerShell
   on Windows. A user-named command (a language server, `$EDITOR`) goes
-  through `extensions/lib/command-launch.ts`.
-- **Wait for and stop processes with `extensions/lib/process-tree.ts`.**
+  through `extensions/lib/shell-run/command-launch.ts`.
+- **Wait for and stop processes with `extensions/lib/shell-run/process-tree.ts`.**
   Use `waitForChildExit` and `killProcessTree`, which handle process groups
   and Windows.
 - **Write paths that work on Windows.** Use `path.isAbsolute`, match path
   rules against forward-slashed paths, and display paths through
-  `tildify` in `extensions/lib/paths.ts`. Tests build absolute
+  `tildify` in `extensions/lib/profile/paths.ts`. Tests build absolute
   expectations with `join` and `resolve`, never a hardcoded `/`.
 - **PowerShell permission rules go through
-  `extensions/permissions/powershell-rules.ts`.**
+  `extensions/lib/shell/powershell-rules.ts`.**
 
 ## Terminal UI
 
 - **Memoize `render(width)`.** pi re-renders often. A custom component
   should cache its lines per width, as `linesComponent` in
-  `extensions/lib/tui-render.ts` does.
+  `extensions/lib/ui/tui-render.ts` does.
 - **Measure terminal columns, never `.length`.** Wide characters and ANSI
   codes make string length lie. Use pi-tui's `visibleWidth`.
 - **Every panel key ships with an on-screen hint.** Users can't discover a

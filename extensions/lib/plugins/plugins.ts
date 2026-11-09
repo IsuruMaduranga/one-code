@@ -17,7 +17,7 @@
  *   <installPath>/commands/*.md                slash commands
  *   <installPath>/skills/<name>/SKILL.md       skills
  *   <installPath>/.mcp.json                    MCP servers
- *   <installPath>/.lsp.json                    LSP servers (extensions/lsp)
+ *   <installPath>/.lsp.json                    LSP servers (extensions/tools/lsp)
  *
  * Enabled state differs by origin: Claude Code keeps it in settings.json's
  * `enabledPlugins` map (its installed_plugins.json entries have NO enabled
@@ -73,9 +73,9 @@ export interface PluginResources {
 	commandsDir?: string;
 	skillsDir?: string;
 	mcpConfig?: string;
-	/** <plugin>/hooks/hooks.json when present — consumed by extensions/hooks. */
+	/** <plugin>/hooks/hooks.json when present — consumed by extensions/safety/hooks. */
 	hooksConfig?: string;
-	/** <plugin>/.lsp.json when present — consumed by extensions/lsp. */
+	/** <plugin>/.lsp.json when present — consumed by extensions/tools/lsp. */
 	lspConfig?: string;
 }
 

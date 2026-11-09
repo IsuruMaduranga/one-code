@@ -1,7 +1,7 @@
 /**
  * Hand a URL to the desktop's default handler (no dependency, a platform
  * command). Shared by the MCP sign-in flow (`tools/mcp/oauth/browser.ts`, which also
- * screens the URL it is given) and the artifact viewer (`extensions/artifacts`,
+ * screens the URL it is given) and the artifact viewer (`extensions/tools/artifacts`,
  * which only ever opens `file:` URLs it built itself).
  *
  * The child is detached and unref'd once it starts, so the caller never

@@ -17,13 +17,13 @@ on:
   push:
     branches: [master]
     paths:
-      - "extensions/bash/**"
-      - "extensions/powershell/**"
+      - "extensions/tools/bash/**"
+      - "extensions/tools/powershell/**"
       - "extensions/lib/shell-*.ts"
-      - "extensions/lib/process-tree.ts"
-      - "extensions/lib/paths.ts"
+      - "extensions/lib/shell-run/process-tree.ts"
+      - "extensions/lib/profile/paths.ts"
       - "extensions/auto-mode/**"
-      - "extensions/permissions/**"
+      - "extensions/safety/permissions/**"
       - "test/e2e/live-smoke.mjs"
       - ".github/workflows/live-smoke.yml"
 

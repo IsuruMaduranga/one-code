@@ -1,5 +1,5 @@
 /**
- * Idle compaction (extensions/idle-compact): Claude Code 2.1.289's rules for
+ * Idle compaction (extensions/context/idle-compact): Claude Code 2.1.289's rules for
  * compacting an idle session before its one-hour cache expires: the cache TTL
  * read from the request body, the fire at 90% of the hour, the refusal order,
  * and the wiring, which follows the compaction extension's capture of the last

@@ -4,7 +4,7 @@
  *
  * Usage: node rpc-ask-user-test.mjs [model] [-- extra pi args…]
  *   model: defaults to pi's configured model.
- *   extra pi args: e.g. `-- --no-extensions -e ./extensions/ask-user/index.ts`
+ *   extra pi args: e.g. `-- --no-extensions -e ./extensions/tools/ask-user/index.ts`
  *   to test one extension in isolation.
  *
  * The model is asked to put a two-option question with ask_user_question; the

@@ -2,7 +2,7 @@
  * The whole conversation each request covers, as pi built it, for compaction's
  * summarizer. (btw's and recap's standalone fallbacks read the current branch
  * at call time instead: lib/side-calls/side-call.ts `branchMessages`.) Inside an epoch
- * the ledger (extensions/ledger) cuts a request to its tail before every later
+ * the ledger (extensions/request/ledger) cuts a request to its tail before every later
  * `context` hook, so the full list comes with the request's plan instead.
  */
 

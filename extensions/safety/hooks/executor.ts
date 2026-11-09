@@ -1,5 +1,5 @@
 /**
- * Hook command execution — the only file in extensions/hooks that touches
+ * Hook command execution — the only file in extensions/safety/hooks that touches
  * child_process. Everything upstream (matching, payload, envelope, decision)
  * is pure and tested with a fake executor; this file is tested against real
  * /bin/sh children.

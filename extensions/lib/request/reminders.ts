@@ -1,7 +1,7 @@
 /**
  * System reminders: the steering blocks One Code adds to a request, rendered
  * once and then kept as sent (working-docs/features/lifecycle-grid-hunt/design.md
- * section 5). The ledger (extensions/ledger) sends through pi only the
+ * section 5). The ledger (extensions/request/ledger) sends through pi only the
  * messages after the last request's coverage, the tail, and takes everything
  * above it from that request's record. So a reminder is rendered only onto the
  * tail, rides the request that first carried it, and stays in the record

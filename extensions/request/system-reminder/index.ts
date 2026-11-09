@@ -1,6 +1,6 @@
 /**
  * system-reminder extension, the renderer of the record-once request path
- * (lib/request/reminders.ts has the placement contract, extensions/ledger the design).
+ * (lib/request/reminders.ts has the placement contract, extensions/request/ledger the design).
  * It owns the live reminder state every other extension feeds over
  * `one-code:system-reminder`: the `first-prepend` stack and the open sticky
  * states. A one-shot is persisted when emitted, as a `one-code:pending` entry,

@@ -3,7 +3,7 @@
  *
  * The MCP instructions and failed-servers reminders are `first-prepend` blocks
  * on message 1. A request that opens an epoch renders them from live state;
- * inside an epoch message 1 is the record (extensions/ledger), so changes ride
+ * inside an epoch message 1 is the record (extensions/request/ledger), so changes ride
  * notices on the request's tail, decided when the request goes out from what
  * the epoch has told (the same rule as the deferred-tools listing). What was
  * told is a whole-text block fact per server (`mcp-instructed:<name>`,

@@ -16,7 +16,7 @@
  *
  * What the slider adds is the stop past the top: `ultracode`, the top reasoning
  * level *plus* standing multi-agent orchestration. The keyword in a message arms
- * one turn (see `extensions/workflow`); this mode arms every turn until it is
+ * one turn (see `extensions/agents/workflow`); this mode arms every turn until it is
  * switched off, via an `every-turn` reminder keyed so it can be withdrawn — the
  * same shape the permissions extension uses for plan mode.
  */

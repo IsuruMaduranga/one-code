@@ -81,7 +81,7 @@ export function buildClaudeCodeSystemPrompt(
 	// Mirror pi's own custom-prompt assembly: append text, skills, and the
 	// trailing cwd line. CLAUDE.md / AGENTS.md context files are NOT put here —
 	// Claude Code sends them as the instructions <system-reminder> on the first
-	// user message (extensions/claude-context), not in the system prompt.
+	// user message (extensions/context/claude-context), not in the system prompt.
 	if (options.appendSystemPrompt) {
 		prompt += `\n\n${options.appendSystemPrompt}`;
 	}

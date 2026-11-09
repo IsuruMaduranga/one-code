@@ -3,7 +3,7 @@
  *
  * The skills listing is a `first-prepend` reminder on message 1, so once a
  * request has gone out it is the record every later request in the epoch
- * replays (extensions/ledger); rewriting it would also break the binding of
+ * replays (extensions/request/ledger); rewriting it would also break the binding of
  * every earlier signed thinking block (findings §46). As in Claude Code, a
  * skill that becomes listable later is announced on the request's tail under
  * the listing's own header (the profile's), and a skill that leaves the listing is not

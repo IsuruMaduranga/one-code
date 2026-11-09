@@ -25,7 +25,7 @@
  * name per extension (`extension.tools.set(name, …)`), so a second
  * `registerTool` from the same extension replaces the vendor's entry.
  *
- * WebFetch lives in `extensions/web-fetch` (our own); this file only owns search.
+ * WebFetch lives in `extensions/tools/web-fetch` (our own); this file only owns search.
  */
 
 import { feature } from "../../lib/profile/feature.ts";

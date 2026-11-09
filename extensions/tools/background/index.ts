@@ -378,7 +378,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 		}
 		const fold = job.source === "wakeup" ? foldDetails() : {};
 		// A fold removes the tick's messages from the model's context: above the
-		// append point, so the next request opens an epoch (extensions/ledger)
+		// append point, so the next request opens an epoch (extensions/request/ledger)
 		// and renders the folded context whole, once.
 		if (fold.noOpStreak !== undefined) pi.appendEntry(RECORD.epoch, makeRecord("epoch", extensionVersion(), { cause: "fold" }));
 		if (job.source === "wakeup") dynamicLoop.inFlight = job.prompt;

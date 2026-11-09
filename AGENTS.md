@@ -64,16 +64,16 @@ Each of these has caused a real bug. The reasons, and the full list, are in
   `promptGuidelines`. After touching anything that reaches the request, run
   the [cache probe](docs/dev/testing.md#the-prompt-cache-probe).
 - Never truncate model-facing text. Bound it with `persistIfLarge`
-  (`extensions/lib/persisted-output.ts`).
+  (`extensions/lib/request/persisted-output.ts`).
 - Tool `execute()` errors fail loud and name the fix, never a plausible
   success.
 - Auto mode is security-sensitive. The shell pre-gate only proves "safe" and
   never denies; a command joins the read-only fast path only with an option
-  table in `extensions/auto-mode/read-only-options.ts`; don't hand-edit
+  table in `extensions/lib/shell/read-only-options.ts`; don't hand-edit
   `profile/text/auto-mode/ruleset.ts`.
 - `~/.claude` is read-only (except the shared memory folder). One Code's
   settings go to `~/.onecode`; pi's state is resolved with `getAgentDir()`.
-- Spawn shells through `extensions/lib/shell-spawn.ts`, never `/bin/sh`,
+- Spawn shells through `extensions/lib/shell-run/shell-spawn.ts`, never `/bin/sh`,
   `$SHELL` or a bare `pwsh`.
 
 ## Testing

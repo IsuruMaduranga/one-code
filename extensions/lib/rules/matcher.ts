@@ -93,7 +93,7 @@ export function normalizeToolName(name: string): string {
 
 /**
  * Every Claude Code-style spelling that maps to this One Code tool name — the
- * inverse of CC_TOOL_NAMES, used by extensions/hooks to test CC hook matchers
+ * inverse of CC_TOOL_NAMES, used by extensions/safety/hooks to test CC hook matchers
  * ("Glob", "Task", …) against One Code tool names. Extending CC_TOOL_NAMES for
  * a new tool keeps hook matching current automatically.
  */
@@ -819,13 +819,13 @@ export interface DecideInput {
 	 */
 	resolvedSubject?: string;
 	/**
-	 * Plan mode's one writable file (see extensions/plan-mode). Absolute or
+	 * Plan mode's one writable file (see extensions/safety/plan-mode). Absolute or
 	 * ~-prefixed; writes whose subject resolves to it are allowed even in plan
 	 * mode.
 	 */
 	planFilePath?: string;
 	/**
-	 * The session's auto-memory directory (see extensions/memory). Absolute or
+	 * The session's auto-memory directory (see extensions/context/memory). Absolute or
 	 * ~-prefixed; writes landing inside it are allowed — the system prompt
 	 * itself instructs them — though deny and ask rules still win.
 	 */

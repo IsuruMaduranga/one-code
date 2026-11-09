@@ -15,7 +15,7 @@
  *   `tool_result` time and bound to its call's id, so it rides that result on
  *   the next request (pi runs a parallel batch's `tool_result` hooks
  *   concurrently; unbound, every countdown would land on the batch's last
- *   result). The request that carries it records it (extensions/ledger), so no
+ *   result). The request that carries it records it (extensions/request/ledger), so no
  *   later request re-renders it;
  * - the system prompt, before the gitStatus block — appended by the
  *   system-prompt extension from the same pure module.

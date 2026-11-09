@@ -75,7 +75,7 @@ export function bashTool(pi: ExtensionAPI, { announce }: { announce: boolean }) 
 
 	// The description follows the tier and the permission mode. It reaches the
 	// wire only when a request opens an epoch: inside one the ledger keeps the
-	// tools array as recorded (extensions/ledger), so a mode switch never moves
+	// tools array as recorded (extensions/request/ledger), so a mode switch never moves
 	// the tool or re-caches the prefix; mode reminders and the live permission
 	// gate carry the change instead.
 	let form: DescriptionForm = "short";

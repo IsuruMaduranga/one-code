@@ -12,7 +12,7 @@ import { makeToolSearchFakePi, type Reminder } from "./helpers/tool-search-fake-
  * renders on message 1. Inside an epoch message 1 is the ledger's record, so a
  * tool that registered since rides the request's tail, computed when the
  * request goes out from what is loadable then minus what the epoch told
- * (extensions/ledger, lib/request/reminders.ts RENDER_CHANNEL).
+ * (extensions/request/ledger, lib/request/reminders.ts RENDER_CHANNEL).
  */
 
 const makeFakePi = () => makeToolSearchFakePi(["read", "bash"]);

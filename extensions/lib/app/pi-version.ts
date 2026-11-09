@@ -9,7 +9,7 @@
  * never blocking — when outside it. The bundled `one-code` app pins pi inside
  * the range, so it never warns.
  *
- * The minimum is 1.0.0: the record-once request path (extensions/ledger)
+ * The minimum is 1.0.0: the record-once request path (extensions/request/ledger)
  * builds on pi 1.0's session entries, transcript system messages and request
  * pipeline (decisions/distribution.md). The peer range in package.json and the
  * guide name the same floor (pi-version.test.ts), and CI runs

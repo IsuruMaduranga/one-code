@@ -633,7 +633,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 	};
 
 	// The three blocks are live state: what an epoch's message 1 says. Inside an
-	// epoch message 1 is the record (extensions/ledger), so a refused model, a
+	// epoch message 1 is the record (extensions/request/ledger), so a refused model, a
 	// /model or a /subagent change rides the request's tail, decided at render
 	// time from the text the epoch last told, never a rewrite of the menu that
 	// would re-cache the conversation and drop its earlier thinking (findings §46).

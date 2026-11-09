@@ -2,7 +2,7 @@
  * Message 1's capability blocks are live state, rendered when a request opens
  * an epoch; inside an epoch message 1 is the ledger's record, so their owners
  * announce what changed on the request's tail at render time, from what the
- * epoch told (extensions/ledger, lib/request/reminders.ts RENDER_CHANNEL).
+ * epoch told (extensions/request/ledger, lib/request/reminders.ts RENDER_CHANNEL).
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

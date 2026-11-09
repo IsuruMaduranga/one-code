@@ -5,8 +5,8 @@
  * tools — the harness only guarantees the directory exists, describes the
  * format in the system prompt, and injects the index on the first turn.
  *
- * Pure path/text helpers live here; `extensions/memory` does the filesystem
- * wiring and `extensions/system-prompt` embeds the prompt section. Both
+ * Pure path/text helpers live here; `extensions/context/memory` does the filesystem
+ * wiring and `extensions/request/system-prompt` embeds the prompt section. Both
  * re-derive paths from (home, cwd) rather than sharing state, since jiti gives
  * each extension its own module instance.
  *

@@ -3,7 +3,7 @@
  * `powershell` built-in (working-docs/decisions/windows.md, findings §22).
  *
  * Registering a tool named `powershell` overrides pi's built-in (findings §2),
- * exactly as `extensions/bash` overrides `bash`, and the shared body in
+ * exactly as `extensions/tools/bash` overrides `bash`, and the shared body in
  * lib/shell-run/shell-tool.ts supplies the `run_in_background` orchestration for both.
  * The foreground path delegates to pi's real definition
  * (`createPowerShellToolDefinition`) so schema, cwd handling and streaming

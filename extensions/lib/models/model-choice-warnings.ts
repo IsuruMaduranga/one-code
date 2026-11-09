@@ -4,7 +4,7 @@
  * (`/auto-mode model`). Pure: no pi imports. Automatic selection never needs
  * them (it skips superseded models and never goes below the session's tier);
  * a hand choice is honoured, so these say what it costs instead of refusing it.
- * The session model's own newer-model notice lives in `extensions/newer-model`.
+ * The session model's own newer-model notice lives in `extensions/ui/newer-model`.
  *
  * - **Newer model:** the same model line has a newer release at about the same
  *   price (`newerModelSuggestion`).

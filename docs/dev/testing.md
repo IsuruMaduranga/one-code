@@ -44,7 +44,7 @@ hardcodes `/` fails on one of them.
 | `live-smoke.yml` | On demand, and on `master` pushes that touch shell or permission code | A real model drives the bash and PowerShell tools on Windows and the bash tool on Linux (`test/e2e/live-smoke.mjs`). Needs a repository secret, so maintainers run it. |
 
 The supported pi range is `TESTED_PI_MIN` and `TESTED_PI_MAX_EXCLUSIVE` in
-`extensions/lib/pi-version.ts`. If your change uses a pi API that the oldest
+`extensions/lib/app/pi-version.ts`. If your change uses a pi API that the oldest
 version lacks, the pi-floor job fails. Feature-detect the API or raise the
 floor in the same pull request and say why.
 

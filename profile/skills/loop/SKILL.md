@@ -6,6 +6,6 @@ argument-hint: "[interval] [prompt]"
 ---
 
 One Code builds this skill's instructions from its arguments when it runs
-(`extensions/background/loop-skill.ts`, Claude Code's `/loop`). This text shows
+(`extensions/tools/background/loop-skill.ts`, Claude Code's `/loop`). This text shows
 only when the background extension is not loaded: tell the user `/loop` needs
 it, and do not schedule anything.

@@ -186,8 +186,8 @@ Handlers for the same event run in the order the extensions appear in
 ## How a tool call is decided
 
 Every tool call passes the `tool_call` handler in
-`extensions/permissions/index.ts`. The pure decision is `decide()` in
-`extensions/permissions/matcher.ts`. In auto mode, calls the rules do not
+`extensions/safety/permissions/index.ts`. The pure decision is `decide()` in
+`extensions/lib/rules/matcher.ts`. In auto mode, calls the rules do not
 settle go to the classifier in `extensions/auto-mode/`.
 
 ```mermaid
@@ -283,14 +283,14 @@ flowchart LR
 | `user-prepend` | Breadcrumbs from slash commands the user ran | Before the user's text on the next prompt |
 
 The contract and the full rules are in the header of
-`extensions/lib/reminders.ts`.
+`extensions/lib/request/reminders.ts`.
 
 ## Subagents and workflows
 
 Subagents and workflow agents run in the same process as the main session.
 Each one is a separate pi `AgentSession` opened through
-`openChildSession` in `extensions/lib/agent-loader.ts`, with a curated set of
-extensions (`extensions/lib/child-extensions.ts`). Safety and hooks reach the
+`openChildSession` in `extensions/lib/agents/agent-loader.ts`, with a curated set of
+extensions (`extensions/lib/agents/child-extensions.ts`). Safety and hooks reach the
 child through bridges published by the parent, and completions come back to
 the main session as notifications.
 
@@ -304,14 +304,14 @@ flowchart LR
         gates["permissions · hooks"]
         mcpExt["mcp"]
         panel["Agent panel<br/>/agents · /tasks"]
-        notifier["Task notifier<br/>lib/notifications.ts"]
+        notifier["Task notifier<br/>lib/notify/notifications.ts"]
     end
 
     subgraph child["Child session, one per agent"]
         direction TB
         childLoop["AgentSession<br/>own model · own transcript on disk"]
         childExt["Child extensions<br/>system-reminder · tool-search<br/>claude-context · file-tracker<br/>search-tools · skill · bash<br/>powershell · web · web-fetch · notebook"]
-        childGate["Gate bridges<br/>lib/permission-gate.ts<br/>lib/hook-gate.ts"]
+        childGate["Gate bridges<br/>lib/agents/permission-gate.ts<br/>lib/agents/hook-gate.ts"]
     end
 
     wtree[("Optional<br/>Git worktree")]
@@ -368,8 +368,8 @@ flowchart LR
     exts <--> memDir
 ```
 
-The path helpers are `extensions/lib/paths.ts` (Claude Code locations),
-`extensions/lib/one-code-settings.ts` (One Code's own settings) and pi's
+The path helpers are `extensions/lib/profile/paths.ts` (Claude Code locations),
+`extensions/lib/profile/product-settings.ts` (One Code's own settings) and pi's
 `getAgentDir()` (pi state). The rules for using them are in
 [Extension rules](extension-rules.md#paths-state-and-shells), and the
 [configuration guide](../guide/configuration.md#what-is-stored-under-onecode)

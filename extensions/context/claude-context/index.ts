@@ -7,7 +7,7 @@
  * that takes a mid-conversation system message rides that message instead
  * (system-reminder, lib/request/system-role.ts). They are live state: a request that
  * opens an epoch renders them, and every later request in the epoch replays
- * them from the ledger's record (extensions/ledger). The blocks carry ledger
+ * them from the ledger's record (extensions/request/ledger). The blocks carry ledger
  * facts (context/claude-context/context-facts.ts), so the first request of a resumed process says
  * once what changed in the workspace since, and a session that crosses local
  * midnight learns the new date, both on the request's tail.
