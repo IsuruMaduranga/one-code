@@ -1,6 +1,6 @@
 /**
  * What the tool-call-corruption extension needs from a profile (types only):
- * why a call's arguments look damaged (lib/tool-call-corruption.ts decides),
+ * why a call's arguments look damaged (tool-call-corruption/tool-call-corruption.ts decides),
  * and the block the model gets for a suspect call and a corrupt one.
  */
 

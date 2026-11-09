@@ -50,7 +50,7 @@ import { envName } from "../lib/brand.mjs";
 import type { ChildProcess } from "node:child_process";
 import { detachedSpawnOptions, killProcessTree, waitForChildExit } from "../lib/process-tree.ts";
 import { bashSpawn, GIT_BASH_PATH_KNOB, POWERSHELL_UTF8_PREFIX, powerShellSpawn, type ShellSpawn, spawnShellCommand } from "../lib/shell-spawn.ts";
-import type { FinishedRun } from "./protocol.ts";
+import type { FinishedRun } from "../lib/rules/hook-protocol.ts";
 import type { HookShell } from "./settings.ts";
 
 /**

@@ -17,12 +17,12 @@
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { classifierCandidates } from "../auto-mode/model-select.ts";
+import { classifierCandidates } from "../lib/models/classifier-model.ts";
 import { autoSelectable, catalogModelFor } from "../lib/model-catalog.ts";
 import { isDatedDuplicate, isExperimentalBuild, modelsContainedToSession, modelSpec, pricedInput, supportsImageInput } from "../lib/model-policy.ts";
 import { intrinsicTier, type PromptTier, servedCatalogIds } from "../lib/model-tier.ts";
 import { newerModelSuggestion } from "../lib/newer-model.ts";
-import { resolveSubagentModel } from "../subagents/model-select.ts";
+import { resolveSubagentModel } from "../lib/models/subagent-model.ts";
 import type { ReportLine, ReportSection } from "./report.ts";
 
 export type PresetName = "economical" | "balanced" | "quality";

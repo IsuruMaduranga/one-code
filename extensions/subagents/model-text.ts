@@ -6,7 +6,7 @@
  * `provider/id` spec, and prices are dollars per million input tokens.
  */
 
-import type { SubagentModelSource } from "./model-select.ts";
+import type { SubagentModelSource } from "../lib/models/subagent-model.ts";
 
 /** Where a choice in the resolution chain came from, other than the automatic pick and the session. */
 export type ChainSource = "call" | "agent" | "default";

@@ -18,7 +18,7 @@ import { readFileSync, statSync } from "node:fs";
 import os from "node:os";
 import { isRepoFile, primaryFamily, primarySettingsFile, settingsSources } from "../lib/claude-settings.ts";
 import type { SettingsFile } from "../lib/sources.ts";
-import { CC_HOOK_EVENTS, type CcHookEvent } from "./protocol.ts";
+import { CC_HOOK_EVENTS, type CcHookEvent } from "../lib/rules/hook-protocol.ts";
 
 /** Claude Code's per-hook `shell` field: which interpreter runs the command string. */
 export type HookShell = "bash" | "powershell";

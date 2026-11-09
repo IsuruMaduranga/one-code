@@ -25,20 +25,20 @@ import { whenAborted } from "../lib/abort.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { createSharedModelRuntime, disposeChildSession, finalAssistantText, openChildSession } from "../lib/agent-loader.ts";
 import { modelSpec as modelSpecOf, supportsImageInput } from "../lib/model-policy.ts";
-import { isModelUnavailableError } from "../auto-mode/model-select.ts";
+import { isModelUnavailableError } from "../lib/models/classifier-model.ts";
 import { agentPromptIdentity, PrefixWarmGate, prefixWarmKey } from "../lib/prefix-warm-gate.ts";
-import type { PermissionBridge } from "../permissions/subagent-gate.ts";
+import type { PermissionBridge } from "../lib/agents/subagent-gate.ts";
 import { localGateMode, MODE_ENV } from "../lib/permission-gate.ts";
-import type { HookBridge } from "../hooks/subagent-bridge.ts";
+import type { HookBridge } from "../lib/agents/hook-bridge.ts";
 import { summarizeArgs } from "../lib/tui-render.ts";
-import { type AgentDefinition, agentFileSources, agentToolOptions, discoverAgents, unusableAllowlistError } from "../subagents/agents.ts";
+import { type AgentDefinition, agentFileSources, agentToolOptions, discoverAgents, unusableAllowlistError } from "../lib/agents/agent-catalog.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
 import { childExtensionPaths } from "../lib/child-extensions.ts";
 import { oneTurnHandbackSlot, subagentHandbackExtension } from "../lib/subagent-handback.ts";
-import type { SubagentDefault } from "../subagents/default-model.ts";
-import { expensiveModelGate, resolveSubagentModel, subagentModelMenu } from "../subagents/model-select.ts";
+import type { SubagentDefault } from "../lib/models/subagent-default.ts";
+import { expensiveModelGate, resolveSubagentModel, subagentModelMenu } from "../lib/models/subagent-model.ts";
 import { withoutUnusable } from "../lib/model-unusable.ts";
-import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "../subagents/worktree.ts";
+import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "../lib/agents/agent-worktree.ts";
 import type { AgentCallOptions, AgentCallResult, AgentEffort, AgentRunUpdate, KeptWorktree } from "./types.ts";
 import { WorkflowScriptError } from "./types.ts";
 import { workflowWords } from "./words.ts";
@@ -228,7 +228,7 @@ export class AgentRunner {
 	}
 
 	/**
-	 * Same resolution the subagent tool uses (see subagents/model-select.ts):
+	 * Same resolution the subagent tool uses (see lib/models/subagent-model.ts):
 	 * aliases stay within the session's provider/vendor, exact references
 	 * resolve anywhere but a provider crossing is logged, and pi's cross-provider
 	 * fuzzy matcher is never consulted. A trailing ":level" effort suffix

@@ -2,9 +2,9 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { resolveForContainment } from "../../extensions/auto-mode/paths.ts";
-import { analyzeShellCommand, decodeAnsiC, parseCommand } from "../../extensions/auto-mode/shell-analysis.ts";
-import { bashMatchForms } from "../../extensions/permissions/matcher.ts";
+import { resolveForContainment } from "../../extensions/lib/shell/paths.ts";
+import { analyzeShellCommand, decodeAnsiC, parseCommand } from "../../extensions/lib/shell/shell-analysis.ts";
+import { bashMatchForms } from "../../extensions/lib/rules/matcher.ts";
 import { brand } from "../../extensions/lib/brand.mjs";
 import { forwardSlashes as sh, toPosixPath } from "../../extensions/lib/paths.ts";
 

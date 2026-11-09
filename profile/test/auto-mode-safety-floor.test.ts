@@ -2,8 +2,8 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { isSafetyControlTarget, safetyControlWrite, safetyFloorBlockText, safetyFloorReason } from "../../extensions/auto-mode/safety-floor.ts";
-import { analyzeShellCommand } from "../../extensions/auto-mode/shell-analysis.ts";
+import { isSafetyControlTarget, safetyControlWrite, safetyFloorBlockText, safetyFloorReason } from "../../extensions/permissions/auto-mode/safety-floor.ts";
+import { analyzeShellCommand } from "../../extensions/lib/shell/shell-analysis.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { productProjectSettingsPath } from "../../extensions/lib/product-settings.ts";
 import { claudeJsonPath, forwardSlashes, toPosixPath } from "../../extensions/lib/paths.ts";

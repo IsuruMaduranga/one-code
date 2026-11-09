@@ -25,7 +25,7 @@
 import { SETTINGS_DISPLAY } from "../lib/product-settings.ts";
 import { brand } from "../lib/brand.mjs";
 import { readKnob } from "../lib/knobs.ts";
-import { SUBAGENT_MODEL_KNOB } from "../subagents/default-model.ts";
+import { SUBAGENT_MODEL_KNOB } from "../lib/models/subagent-default.ts";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { loadPluginHooks } from "../hooks/plugin-hooks.ts";
@@ -45,9 +45,9 @@ import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
 import { defaultDiscoverRoots, discoverPlugins, type DiscoveredPlugins } from "../lib/plugins.ts";
 import { BUNDLED_SKILLS_DIR, promptTemplateNames, scanSkills } from "../lib/skill-scan.ts";
 import { loadServers, type McpServer, piMcpConfigPaths, type RegisteredServer } from "../mcp/config.ts";
-import type { PermissionMode } from "../permissions/matcher.ts";
-import { MODES_NEVER_FROM_PROJECT } from "../permissions/settings.ts";
-import { agentDirs, parseAgentFile } from "../subagents/agents.ts";
+import type { PermissionMode } from "../lib/rules/matcher.ts";
+import { MODES_NEVER_FROM_PROJECT } from "../lib/rules/settings.ts";
+import { agentDirs, parseAgentFile } from "../lib/agents/agent-catalog.ts";
 import type { Finding, ReportLine, ReportSection, SessionView } from "./report.ts";
 import { countNoun, shortenHome } from "./report.ts";
 
@@ -92,8 +92,8 @@ export interface CompatReport {
 
 /**
  * The top-level keys One Code reads from each settings scope — the policy the
- * loaders implement (permissions/settings.ts, hooks/settings.ts, auto-mode/config.ts,
- * subagents/default-model.ts, mcp/trust.ts, lib/plugins.ts). A repository's own
+ * loaders implement (lib/rules/settings.ts, hooks/settings.ts, lib/rules/auto-mode-config.ts,
+ * lib/models/subagent-default.ts, mcp/trust.ts, lib/plugins.ts). A repository's own
  * files get no `autoMode` (the classifier is what contains the repo) and no `env`
  * (a checked-in env block must not route subagents).
  */
@@ -191,7 +191,7 @@ function permissionsSummary(perms: unknown, file: SettingsFile, primaryPath: str
 	const mode = typeof p.defaultMode === "string" ? p.defaultMode : undefined;
 	if (mode) {
 		const repoFile = isRepoFile(file);
-		// The loader's rule (permissions/settings.ts): the product's files give no defaultMode unless one is the primary user file.
+		// The loader's rule (lib/rules/settings.ts): the product's files give no defaultMode unless one is the primary user file.
 		if (file.owner === "product" && !file.primary) {
 			refused = `permissions.defaultMode "${mode}" — never read from ${brand.name}'s own files`;
 			findings.push({

@@ -30,7 +30,7 @@ import { sessionModelTier } from "../lib/session-model-tier.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, toldBlockFact } from "../lib/reminders.ts";
 import { privateSessionScratchpadDir } from "../lib/scratchpad.ts";
 import { collectEnvironment, type EnvironmentInfo } from "./environment.ts";
-import { totalTokensBlock, turnTokenBudget } from "../context-budget/budget.ts";
+import { totalTokensBlock, turnTokenBudget } from "../lib/context/budget.ts";
 import { featureEnabled, profileText, toolLive } from "../lib/profile.ts";
 import { optionsForIdleTurn, withSystemHead } from "./idle-turn.ts";
 import { buildClaudeCodeSystemPrompt } from "./template.ts";

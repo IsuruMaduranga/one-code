@@ -10,7 +10,7 @@
  * Code starts in it, before any prompt (SECURITY-REVIEW-2026-09-23 M5).
  * `--no-optional-locks` stops `status` rewriting the index, which would run the
  * checkout's `post-index-change` hook. The model's own git commands are judged
- * by the permission gate instead (auto-mode/git-checkout-programs.ts).
+ * by the permission gate instead (lib/shell/git-checkout-programs.ts).
  */
 export const HARNESS_GIT_CONFIG: readonly string[] = ["-c", "core.fsmonitor=false", "--no-optional-locks"];
 
@@ -27,7 +27,7 @@ export const HARNESS_GIT_NO_HOOKS: readonly string[] = ["-c", `core.hooksPath=${
  * `git status` output for `cwd` with the given arguments, or undefined when
  * git could not say (not a repo, git missing, timeout). Asynchronous so the
  * tool_call hook it runs from does not stall the event loop; used for the
- * classifier transcript's gitStatus line (auto-mode/git-status-meta.ts).
+ * classifier transcript's gitStatus line (permissions/auto-mode/git-status-meta.ts).
  */
 export function gitStatusOutput(cwd: string, args: readonly string[]): Promise<string | undefined> {
 	return new Promise((resolvePromise) => {

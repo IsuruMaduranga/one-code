@@ -13,7 +13,7 @@
  */
 
 import { knobValue } from "../lib/knobs.ts";
-import { type CronStore, RECURRING_MAX_AGE_MS } from "./cron.ts";
+import { type CronStore, RECURRING_MAX_AGE_MS } from "../lib/agents/cron.ts";
 
 export const MIN_DELAY_SECONDS = 60;
 export const MAX_DELAY_SECONDS = 3600;

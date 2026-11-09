@@ -1,5 +1,5 @@
 /**
- * The PowerShell pre-gate's tree verdicts (permissions/powershell-tree.ts)
+ * The PowerShell pre-gate's tree verdicts (lib/shell/powershell-tree.ts)
  * against PowerShell's own parse: Claude Code's acceptEdits cmdlets as the
  * contained-edit fast path, the tier and mode it is offered in through
  * decide(), and the read-only verdict's binding and script-block checks.
@@ -9,10 +9,10 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { resolveForContainment } from "../../extensions/auto-mode/paths.ts";
-import { decide } from "../../extensions/permissions/matcher.ts";
-import { applicationArgument } from "../../extensions/permissions/powershell-cmdlets.ts";
-import { powershellTreeContainedEdits, powershellTreeReadOnly } from "../../extensions/permissions/powershell-tree.ts";
+import { resolveForContainment } from "../../extensions/lib/shell/paths.ts";
+import { decide } from "../../extensions/lib/rules/matcher.ts";
+import { applicationArgument } from "../../extensions/lib/shell/powershell-cmdlets.ts";
+import { powershellTreeContainedEdits, powershellTreeReadOnly } from "../../extensions/lib/shell/powershell-tree.ts";
 import { HAVE_POWERSHELL, psParse, POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
 
 const root = resolveForContainment(mkdtempSync(join(tmpdir(), "ps-tree-"))) as string;

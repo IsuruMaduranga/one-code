@@ -11,7 +11,7 @@
  */
 
 import { brandedId } from "./brand.mjs";
-import { isWritingTool, pathArgument } from "../auto-mode/paths.ts";
+import { isWritingTool, pathArgument } from "./shell/paths.ts";
 import { resolveToolPath } from "./tool-path.ts";
 
 export const CHILD_WROTE_CHANNEL = brandedId("child-wrote");

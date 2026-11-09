@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decide, parseRules } from "../../extensions/permissions/matcher.ts";
+import { decide, parseRules } from "../../extensions/lib/rules/matcher.ts";
 
 const base = {
 	toolName: "web_fetch",

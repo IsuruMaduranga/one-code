@@ -5,7 +5,7 @@
  * workaround.
  */
 import { describe, expect, it } from "vitest";
-import { bashGuardReason } from "../../extensions/bash/guards.ts";
+import { bashGuardReason } from "../../extensions/lib/shell/bash-guards.ts";
 
 const fg = (command: string) => bashGuardReason(command, { background: false });
 

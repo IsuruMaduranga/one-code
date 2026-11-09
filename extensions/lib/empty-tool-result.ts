@@ -1,5 +1,5 @@
 /** Claude Code's empty tool_result guard and marker (toolResultStorage). */
-import { ccToolName } from "../hooks/matcher.ts";
+import { ccToolName } from "./rules/hook-matcher.ts";
 import { toolResultWords } from "./tool-results-words.ts";
 
 export function emptyToolResultText(toolName: string): string {

@@ -6,7 +6,7 @@ import {
 	loadAutoModeConfig,
 	persistAutoModeSetup,
 	removeOneCodePermissionAllow,
-} from "../../extensions/auto-mode/config.ts";
+} from "../../extensions/lib/rules/auto-mode-config.ts";
 import {
 	auditPermissionAllow,
 	buildSetupPrompt,
@@ -17,7 +17,7 @@ import {
 	SetupDraftError,
 	type SetupFacts,
 	settingsPatch,
-} from "../../extensions/auto-mode/setup.ts";
+} from "../../extensions/permissions/auto-mode/setup.ts";
 import { productSettingsPath } from "../../extensions/lib/product-settings.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
 

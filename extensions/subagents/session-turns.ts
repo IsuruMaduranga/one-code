@@ -11,11 +11,11 @@
  * from the live `AgentSession` getters, so this only accumulates per-turn stats.
  */
 
-import { recordAction, type ChildAction } from "../auto-mode/actions.ts";
+import { recordAction, type ChildAction } from "../lib/rules/auto-mode-actions.ts";
 import type { HandbackSlot } from "../lib/subagent-handback.ts";
 import type { ChildOutcome } from "./outcome.ts";
 import type { RunFailure } from "./text.ts";
-import { addUsage, emptyUsage, type UsageTotals } from "./usage.ts";
+import { addUsage, emptyUsage, type UsageTotals } from "../lib/agents/usage.ts";
 import { subagentWords } from "./words.ts";
 
 /** Why a turn was cut short: stopped, or the wall-clock cap. */

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { parseCommand } from "../../extensions/auto-mode/shell-analysis.ts";
-import { bashGuardReason } from "../../extensions/bash/guards.ts";
+import { parseCommand } from "../../extensions/lib/shell/shell-analysis.ts";
+import { bashGuardReason } from "../../extensions/lib/shell/bash-guards.ts";
 import type { ShellBlock } from "../../extensions/lib/shell-text.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
 

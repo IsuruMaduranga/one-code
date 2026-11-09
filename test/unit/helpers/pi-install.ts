@@ -9,7 +9,7 @@
  */
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolvePiTuiEntry } from "../../../extensions/subagents/prose.ts";
+import { resolvePiTuiEntry } from "../../../extensions/lib/ui/prose.ts";
 
 /** This repo's root. */
 export const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));

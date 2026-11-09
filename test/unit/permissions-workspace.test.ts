@@ -11,9 +11,9 @@ import { productProjectSettingsPath, productSettingsPath } from "../../extension
 import { forwardSlashes } from "../../extensions/lib/paths.ts";
 import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
 import { WORKSPACE_CHANNEL } from "../../extensions/lib/workspace-channel.ts";
-import { decide } from "../../extensions/permissions/matcher.ts";
+import { decide } from "../../extensions/lib/rules/matcher.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
-import { listWorkspaceDirectories } from "../../extensions/permissions/settings.ts";
+import { listWorkspaceDirectories } from "../../extensions/lib/rules/settings.ts";
 import { parseAddDirFlag, validateWorkspaceDirectory } from "../../extensions/permissions/workspace.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";

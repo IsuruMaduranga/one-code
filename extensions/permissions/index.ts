@@ -23,13 +23,13 @@ import os from "node:os";
 import { join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
-import { type ChildAction, SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-mode/actions.ts";
+import { type ChildAction, SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../lib/rules/auto-mode-actions.ts";
 import { guideDocsDirs } from "../lib/guide-docs.ts";
 import { TURN_FAILED_CHANNEL, type TurnFailedEvent } from "../lib/interrupt.ts";
 import { handBackWarning, type HandBackVerdict } from "../lib/notifications.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent } from "../lib/model-unusable.ts";
 
-import { classifierCacheKey, classifierChain, classify, createClassifierState, releaseClassifierResources } from "../auto-mode/classifier.ts";
+import { classifierCacheKey, classifierChain, classify, createClassifierState, releaseClassifierResources } from "./auto-mode/classifier.ts";
 import {
 	type AutoModeConfig,
 	autoModeSettingsPaths,
@@ -44,33 +44,33 @@ import {
 	persistAutoModeSetup,
 	persistClassifierModel,
 	removeOneCodePermissionAllow,
-} from "../auto-mode/config.ts";
+} from "../lib/rules/auto-mode-config.ts";
 import { modelPickerComponent, type PickerEntry, pickerSpec, toPickerEntries } from "../lib/model-picker.ts";
 import { findConfigured, modelIdentity } from "../lib/model-policy.ts";
 import { CLASSIFIER_SETTING_CHANGED_CHANNEL } from "../lib/settings-channels.ts";
 import { readSuggestNewerModels, SETTINGS_DISPLAY } from "../lib/product-settings.ts";
-import { auditPermissionAllow, autoModeSetupText, renderProposal, settingsPatch } from "../auto-mode/setup.ts";
-import { draftSetup, gatherFacts } from "../auto-mode/setup-run.ts";
-import { buildRuleset, defaultEnvironment } from "../auto-mode/classifier-prompt.ts";
-import type { TranscriptEntry } from "../auto-mode/transcript.ts";
-import { childHistoryCursor, classifierHistory, CLASSIFIER_TOOL_META, CLASSIFIER_USER_INPUT, type HistoryCursor, messageText, userMessageDigest } from "../auto-mode/history.ts";
-import { appendDecision, type DecisionEntry, decisionEntry } from "../auto-mode/decision-log.ts";
-import { loadProjectInstructions } from "../auto-mode/instructions.ts";
-import { describeCandidate } from "../auto-mode/model-select.ts";
-import { conflictingPathArguments, isWithin, resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
-import { DenialStore, denialInputKey, permissionGrantedMessage } from "../auto-mode/denials.ts";
-import { PauseTracker, unattendedPromptNotice, unattendedPromptTimeoutMs } from "../auto-mode/pause.ts";
-import { safetyControlWrite, safetyFloorBlockText, safetyFloorReason, sessionSettingsFiles } from "../auto-mode/safety-floor.ts";
-import { isExecutionPrimitivePath, isSensitivePath } from "../auto-mode/sensitive.ts";
-import { analyzeShellCommand } from "../auto-mode/shell-analysis.ts";
+import { auditPermissionAllow, autoModeSetupText, renderProposal, settingsPatch } from "./auto-mode/setup.ts";
+import { draftSetup, gatherFacts } from "./auto-mode/setup-run.ts";
+import { buildRuleset, defaultEnvironment } from "./auto-mode/classifier-prompt.ts";
+import type { TranscriptEntry } from "./auto-mode/transcript.ts";
+import { childHistoryCursor, classifierHistory, CLASSIFIER_TOOL_META, CLASSIFIER_USER_INPUT, type HistoryCursor, messageText, userMessageDigest } from "./auto-mode/history.ts";
+import { appendDecision, type DecisionEntry, decisionEntry } from "./auto-mode/decision-log.ts";
+import { loadProjectInstructions } from "./auto-mode/instructions.ts";
+import { describeCandidate } from "../lib/models/classifier-model.ts";
+import { conflictingPathArguments, isWithin, resolveForContainment, toAbsolute } from "../lib/shell/paths.ts";
+import { DenialStore, denialInputKey, permissionGrantedMessage } from "./auto-mode/denials.ts";
+import { PauseTracker, unattendedPromptNotice, unattendedPromptTimeoutMs } from "./auto-mode/pause.ts";
+import { safetyControlWrite, safetyFloorBlockText, safetyFloorReason, sessionSettingsFiles } from "./auto-mode/safety-floor.ts";
+import { isExecutionPrimitivePath, isSensitivePath } from "../lib/shell/sensitive.ts";
+import { analyzeShellCommand } from "../lib/shell/shell-analysis.ts";
 import { bashParserReady, bashParserUnavailable } from "../lib/bash-parser.ts";
 import type { PowerShellParse } from "../lib/powershell-parser.ts";
 import { powerShellParser } from "../lib/shell-spawn.ts";
-import { powershellReadOnly } from "./powershell-rules.ts";
-import { isShellTool } from "./matcher.ts";
+import { powershellReadOnly } from "../lib/shell/powershell-rules.ts";
+import { isShellTool } from "../lib/rules/matcher.ts";
 import { gitStatusOutput } from "../lib/git.ts";
-import { gitStatusMeta, gitStatusMetaArgs, reachesIgnoredFiles, wantsGitStatusMeta } from "../auto-mode/git-status-meta.ts";
-import { actionResolvedPaths } from "../auto-mode/resolved-paths-meta.ts";
+import { gitStatusMeta, gitStatusMetaArgs, reachesIgnoredFiles, wantsGitStatusMeta } from "./auto-mode/git-status-meta.ts";
+import { actionResolvedPaths } from "./auto-mode/resolved-paths-meta.ts";
 import { autoMemoryEnabled } from "../lib/auto-memory.ts";
 import { projectMemoryDir } from "../lib/memory.ts";
 import { queueNotice } from "../lib/notices.ts";
@@ -90,15 +90,15 @@ import {
 	type PermissionMode,
 	type PermissionRule,
 	isPathSubjectTool,
-} from "./matcher.ts";
+} from "../lib/rules/matcher.ts";
 import { type SessionGrant, sessionGrant } from "./session-grant.ts";
-import { formatModel, modeBadge, nextMode, PERMISSION_MODE_STATE, PERMISSION_STATUS_CHANNEL, type PermissionStatus, CYCLE_KEY } from "./modes.ts";
+import { formatModel, modeBadge, nextMode, PERMISSION_MODE_STATE, PERMISSION_STATUS_CHANNEL, type PermissionStatus, CYCLE_KEY } from "../lib/rules/modes.ts";
 import { intrinsicTier, usesClaudeCodeFastPaths } from "../lib/model-tier.ts";
-import { type ChildToolCall, type ChildGateDecision, sessionPermissionBridge, SUBAGENT_GATE_CHANNEL } from "./subagent-gate.ts";
+import { type ChildToolCall, type ChildGateDecision, sessionPermissionBridge, SUBAGENT_GATE_CHANNEL } from "../lib/agents/subagent-gate.ts";
 import { trackOriginalCommands } from "../lib/original-command.ts";
 import { followWorkCwd } from "../lib/worktree-channel.ts";
 import { MODE_CHANNEL, PLAN_FILE_CHANNEL } from "../lib/plan-mode-channels.ts";
-import { isWritingTool } from "./protected-paths.ts";
+import { isWritingTool } from "../lib/rules/protected-paths.ts";
 import { denyRuleLines } from "./rule-prose.ts";
 import {
 	listPermissionRules,
@@ -116,11 +116,11 @@ import {
 	removeWorkspaceDirectory,
 	type SourcedDirectory,
 	type SourcedRule,
-} from "./settings.ts";
+} from "../lib/rules/settings.ts";
 import { isRepoFile, sourceId } from "../lib/claude-settings.ts";
 import type { SettingsFile } from "../lib/sources.ts";
 import { MODE_ENV, parsePowerShell, resolvedOrSelf, runtimeProtectedDirs, runtimeSecretPaths } from "../lib/permission-gate.ts";
-import { describeProjectAllow, persistProjectAllowApproval, projectAllowApproved, projectDirectoryConsentEntry, type TrustFiring } from "./project-trust.ts";
+import { describeProjectAllow, persistProjectAllowApproval, projectAllowApproved, projectDirectoryConsentEntry, type TrustFiring } from "../lib/consent/project-trust.ts";
 import { parseAddDirFlag, tooBroadForWorkspace, validateWorkspaceDirectory } from "./workspace.ts";
 import { WORKSPACE_CHANNEL, type WorkspaceAnnouncement } from "../lib/workspace-channel.ts";
 import { findProjectRoot } from "../lib/git.ts";
@@ -143,8 +143,8 @@ import {
 	type RuleTab,
 	type WorkspaceDirRow,
 } from "./panel/state.ts";
-import { builtinRuleCounts } from "../auto-mode/rules.ts";
-import { autoModeSystemNote } from "../auto-mode/system-note.ts";
+import { builtinRuleCounts } from "./auto-mode/rules.ts";
+import { autoModeSystemNote } from "./auto-mode/system-note.ts";
 import { announceArgumentHint } from "../lib/argument-hints.ts";
 import { userDenialText } from "../lib/user-denial.ts";
 import type { PermissionRefusal } from "./text.ts";
@@ -493,7 +493,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 	/**
 	 * The classifier chain for `sessionModel` (the ctx's by default), cached on
 	 * the classifier state by the same signature the gate uses, so a repaint
-	 * does not rank the catalog again (auto-mode/classifier.ts classifierChain).
+	 * does not rank the catalog again (permissions/auto-mode/classifier.ts classifierChain).
 	 */
 	const selectionChain = (ctx: ExtensionContext, sessionModel?: Model<Api>) => {
 		autoConfig ??= loadAutoModeConfig(os.homedir());
@@ -664,7 +664,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 	/**
 	 * The main calls of the turn in flight, in order: pi persists them with their
 	 * assistant message before any runs. Cleared when the turn ends, when every
-	 * one has a result (auto-mode/history.ts childHistoryCursor).
+	 * one has a result (permissions/auto-mode/history.ts childHistoryCursor).
 	 */
 	let inFlightMainCalls: string[] = [];
 	const childCursor = (startedBy: string | undefined) => childHistoryCursor(startedBy, inFlightMainCalls, currentMainToolCallId);
@@ -726,7 +726,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 
 	/**
 	 * Run the deterministic pre-gate, then the classifier. The pre-gate may only
-	 * ever conclude "safe" (see auto-mode/shell-analysis.ts); when it does, the
+	 * ever conclude "safe" (see lib/shell/shell-analysis.ts); when it does, the
 	 * classifier call is skipped entirely. A read-only command never gets here:
 	 * `decide()` allows it as the shell tools' own check, in every mode. What the
 	 * pre-gate still clears here is a safe line that writes inside the project
@@ -1001,7 +1001,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 	};
 
 	// Claude Code's auto-mode note joins the mid-conversation system message
-	// when the conversation opens in auto mode (auto-mode/system-note.ts). It is
+	// when the conversation opens in auto mode (permissions/auto-mode/system-note.ts). It is
 	// live state, rendered only by a request that opens an epoch, so message 1
 	// never changes inside one; a compaction or a model switch decides it again.
 	pi.on("turn_start", (_event, ctx) => {
@@ -1493,7 +1493,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		}
 		if (result.decision === "classify") {
 			// The exact call the user approved in /permissions after the classifier
-			// denied it runs once without the classifier (auto-mode/denials.ts). Deny
+			// denied it runs once without the classifier (permissions/auto-mode/denials.ts). Deny
 			// rules and the safety floor were checked above, so no grant reaches them.
 			const inputKey = denialInputKey(
 				normalizedTool,

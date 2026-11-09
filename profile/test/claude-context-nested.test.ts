@@ -1,14 +1,14 @@
 /**
  * Claude Code's nested instructions: reading a file below the working
  * directory attaches the instruction files of the directories in between,
- * once each (lib/claude-context.ts nestedInstructionFiles, claude-context/index.ts).
+ * once each (claude-context/claude-context.ts nestedInstructionFiles, claude-context/index.ts).
  */
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import claudeContextExtension from "../../extensions/claude-context/index.ts";
-import { nestedInstructionText } from "../../extensions/lib/claude-context.ts";
+import { nestedInstructionText } from "../../extensions/claude-context/claude-context.ts";
 import { nestedInstructionFiles } from "../claude-code/instructions.ts";
 import { openInstructions } from "../../extensions/lib/instructions.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";

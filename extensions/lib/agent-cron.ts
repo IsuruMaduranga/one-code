@@ -16,7 +16,7 @@
  */
 
 import { brandedId } from "./brand.mjs";
-import { cronToolParameters, RECURRING_MAX_AGE_DAYS } from "../background/cron.ts";
+import { cronToolParameters, RECURRING_MAX_AGE_DAYS } from "./agents/cron.ts";
 import type { CronText } from "../background/text.ts";
 
 export const AGENT_CRON_CHANNEL = brandedId("agent-cron");

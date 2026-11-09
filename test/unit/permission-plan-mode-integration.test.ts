@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MODE_CHANNEL, PLAN_FILE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
 import { LiveReminders, REMINDER_CHANNEL, type ReminderPayload } from "../../extensions/lib/reminders.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
-import { CYCLE_KEY } from "../../extensions/permissions/modes.ts";
+import { CYCLE_KEY } from "../../extensions/lib/rules/modes.ts";
 import planModeExtension from "../../extensions/plan-mode/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { brandedId, envName } from "../../extensions/lib/brand.mjs";

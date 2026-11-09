@@ -11,7 +11,7 @@
 
 import type { ArtifactsText } from "../artifacts/text.ts";
 import type { AskUserText } from "../ask-user/text.ts";
-import type { AutoModeSetupText, AutoModeText, ClassifierText } from "../auto-mode/text.ts";
+import type { AutoModeSetupText, AutoModeText, ClassifierText } from "../permissions/auto-mode/text.ts";
 import type { BackgroundText } from "../background/text.ts";
 import type { BtwText } from "../btw/text.ts";
 import type { CompactionText } from "../compaction/text.ts";

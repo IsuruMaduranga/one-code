@@ -44,12 +44,12 @@ import { whenAborted } from "../lib/abort.ts";
 import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, taskNotification, taskStatusOf, workflowSummary } from "../lib/notifications.ts";
 import { QueuedDelivery } from "../lib/queued-delivery.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
-import { ULTRACODE_MODE_CHANNEL } from "../effort/slider.ts";
-import { PERMISSION_STATUS_CHANNEL } from "../permissions/modes.ts";
-import { watchPermissionBridge } from "../permissions/subagent-gate.ts";
-import { watchHookBridge } from "../hooks/subagent-bridge.ts";
+import { ULTRACODE_MODE_CHANNEL } from "../lib/ui/effort-slider.ts";
+import { PERMISSION_STATUS_CHANNEL } from "../lib/rules/modes.ts";
+import { watchPermissionBridge } from "../lib/agents/subagent-gate.ts";
+import { watchHookBridge } from "../lib/agents/hook-bridge.ts";
 import { watchMcpTools } from "../lib/mcp-share.ts";
-import { applicableSubagentDefault, loadSubagentDefault } from "../subagents/default-model.ts";
+import { applicableSubagentDefault, loadSubagentDefault } from "../lib/models/subagent-default.ts";
 import { discoverSavedWorkflows, findSavedWorkflow, workflowDirs } from "./saved-workflows.ts";
 import { buildRunReport, type RunHandle, WorkflowRunManager } from "./run-manager.ts";
 import {

@@ -1,0 +1,171 @@
+/**
+ * Permission-mode cycling and display (pure).
+ *
+ * Mirrors Claude Code v2.1: the cycle is manual (`default`) → acceptEdits →
+ * plan → [bypassPermissions] → [auto]. bypassPermissions joins only when the
+ * session was started with it enabled; `auto` joins when a classifier model is
+ * reachable, mirroring how Claude Code drops auto from the cycle where its
+ * requirements aren't met. `dontAsk` never appears in the cycle in Claude Code
+ * either — it is reachable only via flag or settings.
+ */
+
+import { brandedId } from "../brand.mjs";
+import type { PermissionMode } from "./matcher.ts";
+import { modeCycleKey, pauseGlyph } from "../keys.ts";
+
+/**
+ * Footer badge per mode — Claude Code's exact strings and icons. The pause
+ * icon is swapped for a single-cell glyph on Windows and WSL, where Windows
+ * Terminal draws U+23F8 two cells wide and over the mode name (lib/keys.ts).
+ */
+const PAUSE = pauseGlyph();
+export const MODE_BADGES: Record<PermissionMode, string> = {
+	default: `${PAUSE} manual mode on`,
+	acceptEdits: "⏵⏵ accept edits on",
+	plan: `${PAUSE} plan mode on`,
+	bypassPermissions: "⏵⏵ bypass permissions on",
+	dontAsk: "⏵⏵ don't ask on",
+	auto: "⏵⏵ auto mode on",
+};
+
+const CYCLE: readonly PermissionMode[] = ["default", "acceptEdits", "plan"];
+
+export interface CycleOptions {
+	bypassInCycle: boolean;
+	autoInCycle: boolean;
+}
+
+/** Strip a trailing release-date stamp (`-20250601`), noise in a model id. */
+function stripDateSuffix(id: string): string {
+	return id.replace(/-20\d{6}$/, "");
+}
+
+/**
+ * Shorten a model id for a compact slot. Drops an OpenRouter style `vendor/`
+ * prefix and a trailing date stamp, both of which are noise once the family name
+ * is visible: `anthropic/claude-haiku-4-5-20251001` → `haiku-4-5`.
+ */
+export function shortModelName(id: string): string {
+	const afterSlash = id.slice(id.lastIndexOf("/") + 1);
+	return stripDateSuffix(afterSlash).replace(/^(claude|gpt|gemini|llama|grok|mistral|deepseek|qwen)-/, "");
+}
+
+/**
+ * Model as `(provider) id`, e.g. `(openrouter) google/gemini-3.7-flash`. One
+ * Code runs on any provider, so the provider and the full vendor-qualified id
+ * both matter — a bare short name hides which model an aggregator route points
+ * at. Only the noisy trailing date (`-20250601`) is trimmed. Used by the footer
+ * and the startup banner so both name models the same way.
+ */
+export function formatModel(provider: string, id: string): string {
+	const undated = stripDateSuffix(id);
+	return provider ? `(${provider}) ${undated}` : undated;
+}
+
+/**
+ * Same as `formatModel` for a combined `provider/id` spec (what the subagent
+ * status carries): the first path segment is the provider, the rest is the id
+ * (which may itself contain slashes, e.g. `openrouter/google/gemini-3.7-flash`).
+ */
+export function formatModelSpec(spec: string): string {
+	const slash = spec.indexOf("/");
+	if (slash < 0) return formatModel("", spec);
+	return formatModel(spec.slice(0, slash), spec.slice(slash + 1));
+}
+
+/**
+ * pi's placeholder model id when no provider is configured yet. A fresh machine
+ * with no key reports `{ provider: "unknown", id: "unknown" }`, which
+ * `formatModel` would render as the meaningless `(unknown) unknown`
+ * (distribution review 2026-09-09, M3). The banner and footer show "none"
+ * instead, so the first screen reads as "no provider" rather than a broken model.
+ */
+export const PLACEHOLDER_MODEL = "unknown";
+
+/**
+ * True when `id` names a real selected model, not pi's no-provider placeholder.
+ * A type predicate so callers narrow the id to `string` in the true branch.
+ */
+export function isRealModel(id: string | undefined): id is string {
+	return !!id && id !== PLACEHOLDER_MODEL;
+}
+
+/**
+ * The key that cycles permission modes. Claude Code cycles on shift+tab and
+ * says so in this footer; pi reserves shift+tab for the effort dial, so One Code
+ * cycles on ctrl+q (see working-docs/decisions/modes.md) — alt+m on Windows and WSL,
+ * where pi owns ctrl+q (lib/keys.ts) — and the hint names that key.
+ */
+export const CYCLE_KEY = modeCycleKey();
+export const CYCLE_KEY_HINT = `${CYCLE_KEY} to cycle`;
+
+/**
+ * The footer badge, with auto mode naming the model screening the calls. That
+ * model reads the user's prompts and their CLAUDE.md, so which one it is belongs
+ * on screen rather than buried in a command — and before the first call settles
+ * it, saying nothing is more honest than guessing. Ends with the cycle-key hint,
+ * the way Claude Code's footer does, so the shortcut sits next to the state it
+ * changes.
+ */
+export function modeBadge(
+	mode: PermissionMode,
+	opts?: { paused?: boolean; classifier?: string; streaming?: boolean },
+): string {
+	const base = badgeBase(mode, opts);
+	// Claude Code appends the interrupt hint to this line while the model works.
+	return `${base} (${CYCLE_KEY_HINT})${opts?.streaming ? " · esc to interrupt" : ""}`;
+}
+
+function badgeBase(mode: PermissionMode, opts?: { paused?: boolean; classifier?: string }): string {
+	if (mode !== "auto") return MODE_BADGES[mode];
+	const suffix = opts?.classifier ? ` · ${shortModelName(opts.classifier)}` : "";
+	return opts?.paused ? `${PAUSE} auto mode paused${suffix}` : `${MODE_BADGES.auto}${suffix}`;
+}
+
+/**
+ * Cross-extension channel carrying the current mode and classifier, so the
+ * startup banner can show them live. jiti gives each extension its own module
+ * instance, so this goes over `pi.events` rather than shared state.
+ */
+export const PERMISSION_STATUS_CHANNEL = brandedId("permission-status");
+
+/** The `one-code:state` key the permission mode is recorded under on the branch; a fork's file carries the parent's. */
+export const PERMISSION_MODE_STATE = "permission-mode";
+
+export interface PermissionStatus {
+	mode: string;
+	paused: boolean;
+	/** A tool-driven switch anchors its state/reminders to this result, not a parallel sibling's. */
+	toolCallId?: string;
+	/** `provider/id` of the classifier screening calls (or about to). */
+	classifier?: string;
+	/** Whether `classifier` is pinned by a real call, or still the planned first candidate. */
+	pinned?: boolean;
+	/** Whether this session can enter bypassPermissions (it started in it); a request for it otherwise lands in default. */
+	bypassAvailable?: boolean;
+}
+
+/**
+ * The banner's mode line. In auto mode it names the classifier — that model
+ * reads the user's prompts and CLAUDE.md, so which one it is belongs on screen
+ * — and says when the name is still the plan rather than the settled fact.
+ */
+export function permissionModeDisplay(status: PermissionStatus): string {
+	if (status.mode !== "auto") return status.mode;
+	const name = status.classifier ? shortModelName(status.classifier) : "no model available";
+	if (status.paused) return `auto (paused) · classifier ${name}`;
+	return `auto · classifier ${name}${status.pinned ? "" : " (planned)"}`;
+}
+
+/**
+ * The mode the cycle shortcut lands on next. A mode outside the cycle
+ * (dontAsk, or bypass in a session that didn't start with it) exits to the
+ * cycle's start rather than being unreachable-from.
+ */
+export function nextMode(current: PermissionMode, opts: CycleOptions): PermissionMode {
+	const cycle: PermissionMode[] = [...CYCLE];
+	if (opts.bypassInCycle) cycle.push("bypassPermissions");
+	if (opts.autoInCycle) cycle.push("auto");
+	const index = cycle.indexOf(current);
+	return cycle[(index + 1) % cycle.length];
+}

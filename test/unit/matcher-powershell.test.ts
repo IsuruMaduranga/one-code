@@ -18,7 +18,7 @@ import {
 	ruleMatches,
 	subjectKind,
 	toolTier,
-} from "../../extensions/permissions/matcher.ts";
+} from "../../extensions/lib/rules/matcher.ts";
 import { sessionGrant } from "../../extensions/permissions/session-grant.ts";
 import { HAVE_POWERSHELL, psParse, POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
 

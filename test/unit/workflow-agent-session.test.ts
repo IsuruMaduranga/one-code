@@ -20,7 +20,7 @@ import { AgentRunner } from "../../extensions/workflow/agent-session.ts";
 import { persistedFileBlock, PREVIEW_BYTES } from "../../extensions/lib/persisted-output.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
 import { projectConfigDirName } from "../../extensions/lib/sources.ts";
-import { BUNDLED_AGENTS_DIR } from "../../extensions/subagents/agents.ts";
+import { BUNDLED_AGENTS_DIR } from "../../extensions/lib/agents/agent-catalog.ts";
 
 let agentDir: string;
 let cwd: string;

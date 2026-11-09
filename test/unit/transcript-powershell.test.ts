@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderTranscript } from "../../extensions/auto-mode/transcript.ts";
+import { renderTranscript } from "../../extensions/permissions/auto-mode/transcript.ts";
 
 describe("renderTranscript — PowerShell and the gitStatus meta line", () => {
 	it("renders a powershell call as {\"PowerShell\":\"<command>\"} like Bash", () => {

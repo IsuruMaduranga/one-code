@@ -20,7 +20,7 @@ import { RESPONSES_APIS } from "./system-role.ts";
 import { toolSearchWords } from "../tool-search/words.ts";
 import type { ToolSearchText } from "../tool-search/text.ts";
 import { around, escapeRegExp, memoOn } from "./template-probe.ts";
-import { normalizeToolName } from "../permissions/matcher.ts";
+import { normalizeToolName } from "./rules/matcher.ts";
 
 import { DEFER_CHANNEL, type DeferRequest } from "./deferred-channel.ts";
 
@@ -321,7 +321,7 @@ function withBreakpointOnLast<T extends Record<string, unknown>>(items: T[], cac
  *   wire and precedes every `tool_use` of the tool; otherwise the tool stays
  *   eager (one accepted cache miss, never a request Anthropic rejects).
  * - A tool the request adds mid-session by `tool_addition` (`additions`,
- *   lib/tool-additions.ts) is demoted the same way: its addition block
+ *   tool-search/tool-additions.ts) is demoted the same way: its addition block
  *   references it, so it needs no `tool_search` result.
  * - pi's own deferred entries that are not registry tools (its
  *   `__pi_deferred_placeholder__`) stay in place.

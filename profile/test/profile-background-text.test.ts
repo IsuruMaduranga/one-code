@@ -8,7 +8,7 @@
  * monitor's empty output, its batches and task_output's clip.
  */
 import { describe, expect, it } from "vitest";
-import { shownJob } from "../../extensions/background/cron.ts";
+import { shownJob } from "../../extensions/lib/agents/cron.ts";
 import { background } from "../text/background/index.ts";
 
 const { cron, wakeup, monitor, tasks } = background;

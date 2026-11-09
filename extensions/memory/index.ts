@@ -32,7 +32,7 @@ import { allowedPath, sourceSwitch } from "../lib/sources.ts";
 import { agentSkippedInstructions } from "../lib/instruction-budget.ts";
 import { productSettingsPath, readSettingsForWrite, writeSettings } from "../lib/product-settings.ts";
 import { comparablePath, isPathAtOrUnder, productStateDir, tildify, tryRealpath } from "../lib/paths.ts";
-import { resolveThroughLinks } from "../auto-mode/paths.ts";
+import { resolveThroughLinks } from "../lib/shell/paths.ts";
 import { resolveToolPath } from "../lib/tool-path.ts";
 import { tryReadFile } from "../lib/plugins.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";

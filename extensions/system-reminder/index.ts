@@ -18,7 +18,7 @@
  * On a model that takes a mid-conversation system message (lib/system-role.ts),
  * its `before_provider_request` hook lifts the stack's session-fact blocks off
  * the first user message into one system message after it (an epoch's request
- * only), and shapes the tail's `<total_tokens>` lines (lib/turn-budget-layout.ts).
+ * only), and shapes the tail's `<total_tokens>` lines (system-reminder/turn-budget-layout.ts).
  */
 
 import { feature } from "../lib/feature.ts";
@@ -36,7 +36,7 @@ import { extensionVersion } from "../lib/package-version.ts";
 import { LiveReminders, type OneShot, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, renderReminders, type ReminderPayload, stickyFact } from "../lib/reminders.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { instructionRole, messagesKey, type MovedBlock, systemRoleLayout, wireShape, withSystemRoleContext } from "../lib/system-role.ts";
-import { resolveCountdowns, withTurnBudgetMessages } from "../lib/turn-budget-layout.ts";
+import { resolveCountdowns, withTurnBudgetMessages } from "./turn-budget-layout.ts";
 
 /** Whether requests carry the `<total_tokens>` budget lines (`CC_TOTAL_TOKENS=0` turns them off). */
 const budgetMarkers = () => process.env.CC_TOTAL_TOKENS !== "0";
@@ -146,7 +146,7 @@ function systemReminderExtension(pi: ExtensionAPI) {
 	let moved: MovedBlock[] = [];
 	/** Whether the last `context` pass rendered an epoch: only then does the first user message carry the stack. */
 	let epochRequest = true;
-	/** The tool results' countdowns the last `context` pass lifted, by call id (lib/turn-budget-layout.ts). */
+	/** The tool results' countdowns the last `context` pass lifted, by call id (system-reminder/turn-budget-layout.ts). */
 	let countdowns = new Map<string, number>();
 
 	pi.on("context", (event, ctx) => {
@@ -190,7 +190,7 @@ function systemReminderExtension(pi: ExtensionAPI) {
 		moved = rendered.moved;
 		epochRequest = epoch;
 		// Each tool result's <total_tokens> countdown, lifted for a system message
-		// or framed, while the result's blocks are still separate (lib/turn-budget-layout.ts).
+		// or framed, while the result's blocks are still separate (system-reminder/turn-budget-layout.ts).
 		// With the budget off no result carries one, so a tool's own such line stays its output.
 		countdowns = new Map();
 		const resolved = budgetMarkers() && ctx.model && wireShape(ctx.model.api) ? resolveCountdowns(rendered.messages, layout !== undefined) : undefined;

@@ -26,8 +26,8 @@ import {
 	ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { HookBridge } from "../hooks/subagent-bridge.ts";
-import type { PermissionBridge } from "../permissions/subagent-gate.ts";
+import type { HookBridge } from "./agents/hook-bridge.ts";
+import type { PermissionBridge } from "./agents/subagent-gate.ts";
 import { withShortCacheRetention } from "./cache-retention.ts";
 import { hookGateFactory } from "./hook-gate.ts";
 import { permissionGateFactory } from "./permission-gate.ts";
@@ -86,7 +86,7 @@ export interface AgentLoaderOptions {
 	 */
 	getPermissionBridge?: () => PermissionBridge | undefined;
 	/**
-	 * The parent hooks extension's bridge (hooks/subagent-bridge.ts). When present,
+	 * The parent hooks extension's bridge (lib/agents/hook-bridge.ts). When present,
 	 * the user's PreToolUse/PostToolUse hooks run for the child's tool calls, before
 	 * the guards and the permission gate (Claude Code runs hooks inside subagents).
 	 * A getter, read per call, like the permission bridge.

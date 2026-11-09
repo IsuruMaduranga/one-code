@@ -3,13 +3,13 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resolveForContainment, toAbsolute } from "../../extensions/auto-mode/paths.ts";
+import { resolveForContainment, toAbsolute } from "../../extensions/lib/shell/paths.ts";
 import fileTrackerExtension from "../../extensions/file-tracker/index.ts";
 import { CHILD_WROTE_CHANNEL } from "../../extensions/lib/child-writes.ts";
 import { projectMemoryDir } from "../../extensions/lib/memory.ts";
 import { comparablePath, forwardSlashes } from "../../extensions/lib/paths.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
-import { decide, parseRules, type DecideInput } from "../../extensions/permissions/matcher.ts";
+import { decide, parseRules, type DecideInput } from "../../extensions/lib/rules/matcher.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { describeChanges } from "../../extensions/file-tracker/tracker.ts";

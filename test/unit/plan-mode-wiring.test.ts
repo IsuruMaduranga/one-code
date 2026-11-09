@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MODE_CHANNEL, PLAN_FILE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
-import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts";
+import { PERMISSION_STATUS_CHANNEL } from "../../extensions/lib/rules/modes.ts";
 import planModeExtension from "../../extensions/plan-mode/index.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
 import { userDenialText } from "../../extensions/lib/user-denial.ts";

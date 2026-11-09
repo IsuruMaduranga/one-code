@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { requireText } from "../../extensions/lib/profile.ts";
-import { addUsage, emptyUsage, formatStats, formatTokenCount } from "../../extensions/subagents/usage.ts";
+import { addUsage, emptyUsage, formatStats, formatTokenCount } from "../../extensions/lib/agents/usage.ts";
 
 describe("addUsage", () => {
 	it("sums usage across assistant messages", () => {

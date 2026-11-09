@@ -7,7 +7,7 @@
  */
 
 import { cutPlainText as cut, formatDuration, splitCell, splitRow, visibleWidth, wrapProse } from "../lib/tui-render.ts";
-import { formatTokenCount } from "./usage.ts";
+import { formatTokenCount } from "../lib/agents/usage.ts";
 import { sanitizeDisplayText } from "../lib/terminal-text.ts";
 import { type LiveRun, type LiveStatus, streamingText, type TranscriptBlock } from "./live-runs.ts";
 import { FORK_AGENT } from "./runs.ts";

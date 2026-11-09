@@ -24,8 +24,8 @@
  * as the built-in rules (`rules.ts`), so a verdict citing one grounds.
  */
 
-import { classifierText } from "../auto-mode/classifier-prompt.ts";
-import { parseRule } from "./matcher.ts";
+import { classifierText } from "./auto-mode/classifier-prompt.ts";
+import { parseRule } from "../lib/rules/matcher.ts";
 
 /** Bound on how many rules are described, so a long deny list cannot dominate the ruleset. */
 const MAX_RULES = 25;

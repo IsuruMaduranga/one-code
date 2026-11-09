@@ -51,7 +51,7 @@ import {
 	ULTRACODE_LEVEL,
 	ULTRACODE_MODE_CHANNEL,
 	ULTRACODE_STATUS_KEY,
-} from "./slider.ts";
+} from "../lib/ui/effort-slider.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 import { readWorkflowSettings } from "../lib/product-settings.ts";
 import { panelUi } from "../lib/panel-focus.ts";

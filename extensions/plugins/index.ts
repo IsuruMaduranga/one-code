@@ -23,7 +23,7 @@ import { readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { readFavorites, toggleFavorite } from "../lib/favorites.ts";
+import { readFavorites, toggleFavorite } from "./favorites.ts";
 import { announceArgumentHint, type CommandHint, frontmatterCommandHint } from "../lib/argument-hints.ts";
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../lib/mcp-status.ts";
 import { canShowCustomUi, notifyOrPrint, notifyRpcReadOnly } from "../lib/headless-output.ts";
@@ -68,12 +68,12 @@ import { type DiscoverDetail, renderPanel, type PanelPaint } from "./panel/rende
 import { buildDiscoverRows, buildInstalledRows, buildMarketplaceRows, type DiscoverRow } from "./panel/rows.ts";
 import { applyPanelKey, initialPanelState, type PanelEffect, type PanelView } from "./panel/state.ts";
 import { expandTemplate, runPlaceholderCommand } from "./shell-expand.ts";
-import { watchPermissionBridge } from "../permissions/subagent-gate.ts";
+import { watchPermissionBridge } from "../lib/agents/subagent-gate.ts";
 import { followWorkCwd } from "../lib/worktree-channel.ts";
 import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
-import { promptCommandText } from "../skill/invoke.ts";
+import { promptCommandText } from "../lib/plugins/skill-invoke.ts";
 import { panelUi } from "../lib/panel-focus.ts";
 
 

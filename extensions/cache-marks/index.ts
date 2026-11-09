@@ -1,7 +1,7 @@
 /**
  * cache-marks extension — keeps the previous request's conversation breakpoint
  * on an Anthropic request, so a request that adds many blocks at once still
- * reads the cache the previous one wrote (lib/previous-mark.ts has the why).
+ * reads the cache the previous one wrote (cache-marks/previous-mark.ts has the why).
  *
  * The previous breakpoint comes from the ledger's plan, not from memory: inside
  * an epoch the request extends a recorded base, and the base carried its tail
@@ -20,7 +20,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { looksLikeAnthropicRequest } from "../lib/anthropic-payload.ts";
 import { isFirstPartyAnthropic } from "../lib/anthropic-server-tools.ts";
 import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../lib/ledger/plan.ts";
-import { baseMark, withPreviousMark } from "../lib/previous-mark.ts";
+import { baseMark, withPreviousMark } from "./previous-mark.ts";
 
 function cacheMarksExtension(pi: ExtensionAPI) {
 	if (process.env.CC_CACHE_MARKS === "0") return;

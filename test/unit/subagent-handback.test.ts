@@ -15,7 +15,7 @@ import { DEFER_CHANNEL } from "../../extensions/lib/deferred.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { oneTurnHandbackSlot, subagentHandbackExtension, subagentHandbackTool } from "../../extensions/lib/subagent-handback.ts";
-import { childToolAllowlist } from "../../extensions/subagents/agents.ts";
+import { childToolAllowlist } from "../../extensions/lib/agents/agent-catalog.ts";
 import { forkTaskMessage } from "../../extensions/subagents/outcome.ts";
 import { SubagentRuntime } from "../../extensions/subagents/runner.ts";
 import { SessionTurnTracker } from "../../extensions/subagents/session-turns.ts";

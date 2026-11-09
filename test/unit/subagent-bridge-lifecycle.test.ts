@@ -2,11 +2,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { classify } from "../../extensions/auto-mode/classifier.ts";
+import { classify } from "../../extensions/permissions/auto-mode/classifier.ts";
 import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
 import { productSettingsPath } from "../../extensions/lib/product-settings.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
-import { type PermissionBridge, SUBAGENT_GATE_CHANNEL, watchPermissionBridge } from "../../extensions/permissions/subagent-gate.ts";
+import { type PermissionBridge, SUBAGENT_GATE_CHANNEL, watchPermissionBridge } from "../../extensions/lib/agents/subagent-gate.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { buildGate } from "./helpers/permission-gate-harness.ts";
 import { brand, envName } from "../../extensions/lib/brand.mjs";
@@ -17,13 +17,13 @@ function deferred<T>() {
 	return { promise, resolve };
 }
 
-vi.mock("../../extensions/permissions/settings.ts", async (importOriginal) => ({
-	...(await importOriginal<typeof import("../../extensions/permissions/settings.ts")>()),
+vi.mock("../../extensions/lib/rules/settings.ts", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../extensions/lib/rules/settings.ts")>()),
 	outsideReadPromptSeen: () => false,
 }));
 
-vi.mock("../../extensions/auto-mode/classifier.ts", async (importOriginal) => ({
-	...(await importOriginal<typeof import("../../extensions/auto-mode/classifier.ts")>()),
+vi.mock("../../extensions/permissions/auto-mode/classifier.ts", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../extensions/permissions/auto-mode/classifier.ts")>()),
 	classify: vi.fn(async () => ({ decision: "allow", reason: "", tier: "allow" })),
 }));
 

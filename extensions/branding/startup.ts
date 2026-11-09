@@ -30,7 +30,7 @@ export interface StartupSection {
 /**
  * The project context files One Code actually gathers, from cwd up to the git
  * root (or just cwd outside a repo), nearest directory first, for the startup
- * banner. The same discovery and rule the blocks use (lib/claude-context.ts),
+ * banner. The same discovery and rule the blocks use (claude-context/claude-context.ts),
  * so an AGENTS.md is listed only when it is really in play.
  */
 export function contextFileNames(cwd: string, home: string = os.homedir()): string[] {

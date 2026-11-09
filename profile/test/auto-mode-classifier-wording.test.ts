@@ -4,10 +4,10 @@
  * and the knob alias Claude Code users already set.
  */
 import { describe, expect, it } from "vitest";
-import { buildRuleset } from "../../extensions/auto-mode/classifier-prompt.ts";
-import { unattendedPromptTimeoutMs, UNATTENDED_PROMPT_TIMEOUT_MS } from "../../extensions/auto-mode/pause.ts";
-import { buildPayload, indexFor, parseStage2, stage1User, stage2User } from "../../extensions/auto-mode/prompt.ts";
-import { groundCategory } from "../../extensions/auto-mode/rules.ts";
+import { buildRuleset } from "../../extensions/permissions/auto-mode/classifier-prompt.ts";
+import { unattendedPromptTimeoutMs, UNATTENDED_PROMPT_TIMEOUT_MS } from "../../extensions/permissions/auto-mode/pause.ts";
+import { buildPayload, indexFor, parseStage2, stage1User, stage2User } from "../../extensions/permissions/auto-mode/prompt.ts";
+import { groundCategory } from "../../extensions/permissions/auto-mode/rules.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
 import { CLEAN_UP_REQUEST, DEFAULT_ENVIRONMENT } from "../../test/unit/helpers/classify-request.ts";
 

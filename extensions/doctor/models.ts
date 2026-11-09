@@ -13,8 +13,8 @@
 import { brand } from "../lib/brand.mjs";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { modeCycleKey } from "../lib/keys.ts";
-import { loadAutoModeConfig } from "../auto-mode/config.ts";
-import { classifierCandidates, describeCandidate, type ClassifierNotice } from "../auto-mode/model-select.ts";
+import { loadAutoModeConfig } from "../lib/rules/auto-mode-config.ts";
+import { classifierCandidates, describeCandidate, type ClassifierNotice } from "../lib/models/classifier-model.ts";
 import { chosenModelWarnings, type ChosenModelWarning } from "../lib/model-choice-warnings.ts";
 import { loadCatalogSources, readCatalogRefreshEnabled } from "../lib/model-catalog-data.ts";
 import { autoSelectSkipReason, catalogModelFor } from "../lib/model-catalog.ts";
@@ -31,9 +31,9 @@ import {
 	servedCatalogIds,
 	tierOverride,
 } from "../lib/model-tier.ts";
-import { applicableSubagentDefault, loadSubagentDefault, SUBAGENT_MODEL_KNOB, type SubagentDefault } from "../subagents/default-model.ts";
+import { applicableSubagentDefault, loadSubagentDefault, SUBAGENT_MODEL_KNOB, type SubagentDefault } from "../lib/models/subagent-default.ts";
 import { knobLimit } from "../lib/knobs.ts";
-import { resolveSubagentModel, type SubagentModelResolution } from "../subagents/model-select.ts";
+import { resolveSubagentModel, type SubagentModelResolution } from "../lib/models/subagent-model.ts";
 import { contextLabel, type Finding, priceLabel, type ReportLine, type ReportSection, type SessionView } from "./report.ts";
 
 export interface ModelFacts {

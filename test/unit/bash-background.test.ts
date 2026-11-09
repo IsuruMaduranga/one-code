@@ -8,8 +8,8 @@ import {
 	runBackgroundBashBlocking,
 	startBackgroundBash,
 	tailCap,
-} from "../../extensions/bash/background.ts";
-import type { BackgroundTask } from "../../extensions/background/registry.ts";
+} from "../../extensions/lib/shell-run/bash-background.ts";
+import type { BackgroundTask } from "../../extensions/lib/agents/task-registry.ts";
 import { localPwsh } from "./helpers/local-pwsh.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
 

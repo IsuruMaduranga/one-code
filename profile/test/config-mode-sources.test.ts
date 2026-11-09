@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { autoModeSettingsPaths } from "../../extensions/auto-mode/config.ts";
+import { autoModeSettingsPaths } from "../../extensions/lib/rules/auto-mode-config.ts";
 import { readLoopFile } from "../../extensions/background/loop-fire.ts";
 import { claudeResourcePaths } from "../../extensions/claude-compat/index.ts";
 import { hookSettingsPaths } from "../../extensions/hooks/settings.ts";
@@ -12,8 +12,8 @@ import { defaultDiscoverRoots, discoverPlugins, invalidatePluginsCache } from ".
 import { promptTemplateFiles, scanSkills } from "../../extensions/lib/skill-scan.ts";
 import { configPaths } from "../../extensions/mcp/config.ts";
 import { buildMemoryEntries } from "../../extensions/memory/entries.ts";
-import { loadPermissionSettings } from "../../extensions/permissions/settings.ts";
-import { agentDirs } from "../../extensions/subagents/agents.ts";
+import { loadPermissionSettings } from "../../extensions/lib/rules/settings.ts";
+import { agentDirs } from "../../extensions/lib/agents/agent-catalog.ts";
 import { workflowDirs } from "../../extensions/workflow/saved-workflows.ts";
 
 function scratch(): string {

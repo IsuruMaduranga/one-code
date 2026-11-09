@@ -31,8 +31,8 @@ import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { canShowCustomUi } from "../lib/headless-output.ts";
 import { ccToolRenderers, safeThemePaint } from "../lib/tui-render.ts";
 import { userDenialText } from "../lib/user-denial.ts";
-import type { PermissionMode } from "../permissions/matcher.ts";
-import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../permissions/modes.ts";
+import type { PermissionMode } from "../lib/rules/matcher.ts";
+import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../lib/rules/modes.ts";
 import { requireText } from "../lib/profile.ts";
 import { randomSlug } from "./slug.ts";
 import { readState, recordState } from "../lib/ledger/state.ts";
@@ -41,7 +41,7 @@ import { readState, recordState } from "../lib/ledger/state.ts";
 const PLAN_REFERENCE_CHARS = 40_000;
 
 import { PLAN_ENTRY_STATE, parsePlanRun, type PlanRun } from "./run-state.ts";
-import { createMarkdownProse } from "../subagents/prose.ts";
+import { createMarkdownProse } from "../lib/ui/prose.ts";
 import type { ProseRenderer } from "../subagents/panel-render.ts";
 import {
 	clampOffset,

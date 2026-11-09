@@ -2,7 +2,7 @@
  * The base's side of the profile's guide agent (subagents/guide-agent.ts):
  * the definition built from the profile's guide, its prompt built on first
  * read from a setup with only identifier-shaped names, and the read-only docs
- * roots it depends on (permissions/matcher.ts `readOnlyDirs`). The guide here
+ * roots it depends on (lib/rules/matcher.ts `readOnlyDirs`). The guide here
  * is a stand-in that records what the base passes it, so the tests hold on
  * any profile; One Code's own guide and its prompt:
  * profile/test/guide-agent-wording.test.ts.
@@ -15,8 +15,8 @@ import { brand } from "../../extensions/lib/brand.mjs";
 import { guideDocsDirs, ONE_CODE_GUIDE_DIR } from "../../extensions/lib/guide-docs.ts";
 import { forwardSlashes } from "../../extensions/lib/paths.ts";
 import { activeProfile, setActiveProfileForTest } from "../../extensions/lib/profile.ts";
-import { decide } from "../../extensions/permissions/matcher.ts";
-import { discoverAgents } from "../../extensions/subagents/agents.ts";
+import { decide } from "../../extensions/lib/rules/matcher.ts";
+import { discoverAgents } from "../../extensions/lib/agents/agent-catalog.ts";
 import { guideAgentDefinition as definition, guideSystemPrompt as systemPrompt, type GuideInput, listableName, settingsSetup } from "../../extensions/subagents/guide-agent.ts";
 import { emptySetup, guideInput as input } from "./helpers/guide-input.ts";
 

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { requireText } from "../../extensions/lib/profile.ts";
 import { projectConfigDir, userConfigDir } from "../../extensions/lib/sources.ts";
-import { agentDirs, agentSourcesStamp, childToolAllowlist, discoverAgents, parseAgentFile, parseToolList, usableAllowlistedTools } from "../../extensions/subagents/agents.ts";
+import { agentDirs, agentSourcesStamp, childToolAllowlist, discoverAgents, parseAgentFile, parseToolList, usableAllowlistedTools } from "../../extensions/lib/agents/agent-catalog.ts";
 
 const words = () => requireText("subagents");
 
@@ -252,7 +252,7 @@ describe("forkTaskMessage", () => {
 describe("finishOutcome", () => {
 	it("surfaces a provider error instead of 'produced no output'", async () => {
 		const { finishOutcome } = await import("../../extensions/subagents/session-turns.ts");
-		const { emptyUsage } = await import("../../extensions/subagents/usage.ts");
+		const { emptyUsage } = await import("../../extensions/lib/agents/usage.ts");
 		const outcome = finishOutcome("", "OpenAI API error (401): CreditsError", 0, emptyUsage(), []);
 		expect(outcome.failed).toBe(true);
 		expect(outcome.output).toBe(words().failure({ kind: "providerError", error: "OpenAI API error (401): CreditsError", output: "" }));
@@ -260,7 +260,7 @@ describe("finishOutcome", () => {
 
 	it("appends the error when partial text exists, and stays clean without one", async () => {
 		const { finishOutcome } = await import("../../extensions/subagents/session-turns.ts");
-		const { emptyUsage } = await import("../../extensions/subagents/usage.ts");
+		const { emptyUsage } = await import("../../extensions/lib/agents/usage.ts");
 		const partial = finishOutcome("halfway report", "rate limited", 2, emptyUsage(), []);
 		expect(partial.failed).toBe(true);
 		expect(partial.output).toBe(words().failure({ kind: "providerError", error: "rate limited", output: "halfway report" }));
@@ -274,7 +274,7 @@ describe("finishOutcome", () => {
 
 	it("an abort reason wins over partial text and over a provider error (M3)", async () => {
 		const { finishOutcome } = await import("../../extensions/subagents/session-turns.ts");
-		const { emptyUsage } = await import("../../extensions/subagents/usage.ts");
+		const { emptyUsage } = await import("../../extensions/lib/agents/usage.ts");
 		const cut = finishOutcome("halfway", undefined, 1, emptyUsage(), [], "stopped");
 		expect(cut).toMatchObject({ failed: true, output: words().failure({ kind: "aborted", why: "stopped", output: "halfway" }) });
 		const both = finishOutcome("", "rate limited", 0, emptyUsage(), [], "stopped");

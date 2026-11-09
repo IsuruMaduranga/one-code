@@ -11,7 +11,7 @@ import {
 	substituteSkillArguments,
 	typedSkillContent,
 	withoutDuplicateSkillCommands,
-} from "../../extensions/skill/invoke.ts";
+} from "../../extensions/lib/plugins/skill-invoke.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
 
 describe("parseSkillCommand", () => {

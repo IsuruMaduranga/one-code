@@ -38,7 +38,7 @@ import {
 	type SessionView,
 	shortenHome,
 } from "./report.ts";
-import { BUNDLED_AGENTS_DIR } from "../subagents/agents.ts";
+import { BUNDLED_AGENTS_DIR } from "../lib/agents/agent-catalog.ts";
 
 /** The environment variables a first-time user is most likely to already have; hinted when nothing is configured. */
 export const COMMON_KEY_ENV_VARS = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "OPENCODE_API_KEY"];

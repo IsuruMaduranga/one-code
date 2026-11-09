@@ -452,7 +452,7 @@ function makeNormalizer({ home, project, root }) {
 		for (const [from, to] of replacements) out = out.split(from).join(to);
 		// The scratchpad (lib/scratchpad.ts): <tmp>/onecode-<uid>/<project slug>/<session>/scratchpad.
 		out = out.replace(/\/[^\s`'"]*\/onecode-\d+\/[^/\s]+\/[^/\s]+\/scratchpad/g, "<SCRATCHPAD>");
-		// Cron job ids (background/cron.ts, 8 hex digits) where results name them,
+		// Cron job ids (lib/agents/cron.ts, 8 hex digits) where results name them,
 		// and as cron_delete's input (Anthropic's object, OpenAI's JSON string).
 		out = out.replace(/\b(recurring job |one-shot task |Cancelled job |with id ')[0-9a-f]{8}\b/g, "$1<JOB_ID>");
 		out = out.replace(/^[0-9a-f]{8}( — )/gm, "<JOB_ID>$1");
@@ -462,7 +462,7 @@ function makeNormalizer({ home, project, root }) {
 		out = out.replace(/(updated <DATE> )\d{2}:\d{2}( UTC)/g, "$1<HH:MM>$2");
 		// The wakeup's clock time (background/wakeup.ts formatScheduled).
 		out = out.replace(/(Next wakeup scheduled for )\d{2}:\d{2}:\d{2}/g, "$1<CLOCK>");
-		// Background task ids (background/registry.ts generateTaskId): "b" and 7 hex digits.
+		// Background task ids (lib/agents/task-registry.ts generateTaskId): "b" and 7 hex digits.
 		out = out.replace(/\b(task |Monitor |subagents\/|tasks\/|bash\/)b[0-9a-f]{7}\b/g, "$1<TASK_ID>");
 		// pi names a spilled bash output with a random suffix.
 		out = out.replace(/\bpi-bash-[0-9a-f]{16}\.log\b/g, "pi-bash-<SPILL>.log");

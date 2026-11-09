@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { validateToolArguments } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { requireText } from "../../extensions/lib/profile.ts";
-import { decide, extractSubject, parseRules } from "../../extensions/permissions/matcher.ts";
+import { decide, extractSubject, parseRules } from "../../extensions/lib/rules/matcher.ts";
 import { prepareAgentArguments } from "../../extensions/subagents/agent-args.ts";
 import subagentsExtension from "../../extensions/subagents/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";

@@ -1,6 +1,6 @@
 /** One Code's wording for a subagent's usage line (profile/text/subagents/). The base's part is in test/unit/subagent-usage.test.ts. */
 import { describe, expect, it } from "vitest";
-import { emptyUsage, formatStats } from "../../extensions/subagents/usage.ts";
+import { emptyUsage, formatStats } from "../../extensions/lib/agents/usage.ts";
 
 describe("One Code's subagent usage line", () => {
 	it("renders tools, tokens and cost, omitting a zero cost", () => {

@@ -60,7 +60,7 @@ import {
 	unavailableToolReminderText,
 } from "../lib/deferred.ts";
 import { looksLikeAnthropicRequest, MID_CONVERSATION_SYSTEM_BETA, withBetas } from "../lib/anthropic-payload.ts";
-import { liftAddenda, supportsToolAdditions, TOOL_ADDITION_BETAS, withToolAdditions } from "../lib/tool-additions.ts";
+import { liftAddenda, supportsToolAdditions, TOOL_ADDITION_BETAS, withToolAdditions } from "./tool-additions.ts";
 import { inContextEntries } from "../lib/compaction-boundary.ts";
 import { CALLABLE_TOOLS } from "../lib/ledger/fold.ts";
 import { foldOnce, sameEntries } from "../lib/ledger/fold-memo.ts";
@@ -71,7 +71,7 @@ import type { EntryLike } from "../lib/ledger/records.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../lib/reminders.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
-import { normalizeToolName } from "../permissions/matcher.ts";
+import { normalizeToolName } from "../lib/rules/matcher.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 
 /** The told mode for "this epoch's message 1 lists deferred tools this run cannot load", said once per epoch. */
@@ -191,7 +191,7 @@ function toolSearchExtension(pi: ExtensionAPI) {
 		if (callable.length > 0) request.blocks.push({ text: deferredAddendumText(callable), facts: [{ kind: "tools", names: callable, callable: true }] });
 	});
 
-	/** The addenda the last `context` pass lifted off tool results, by call id (lib/tool-additions.ts). */
+	/** The addenda the last `context` pass lifted off tool results, by call id (tool-search/tool-additions.ts). */
 	let addendaByCall = new Map<string, string[]>();
 	pi.on("context", (event, ctx) => {
 		addendaByCall = new Map();
@@ -312,7 +312,7 @@ function toolSearchExtension(pi: ExtensionAPI) {
 		const original = event.payload as Record<string, unknown>;
 		const additions = supportsToolAdditions(ctx.model) && looksLikeAnthropicRequest(original);
 		// The context step lifted this request's addenda off their tool results;
-		// whatever happens below, they go out (lib/tool-additions.ts).
+		// whatever happens below, they go out (tool-search/tool-additions.ts).
 		const announceAsText = () => {
 			const text = additions ? withToolAdditions(original, addendaByCall, false) : undefined;
 			return text ? withBetas(text.payload, [MID_CONVERSATION_SYSTEM_BETA]) : undefined;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { brand } from "../../extensions/lib/brand.mjs";
-import { decide, isBroadExecutionRule, parseRule, parseRules } from "../../extensions/permissions/matcher.ts";
-import { isProtectedPath, isWritingTool } from "../../extensions/permissions/protected-paths.ts";
+import { decide, isBroadExecutionRule, parseRule, parseRules } from "../../extensions/lib/rules/matcher.ts";
+import { isProtectedPath, isWritingTool } from "../../extensions/lib/rules/protected-paths.ts";
 
 describe("isProtectedPath", () => {
 	it("protects tooling and agent configuration directories", () => {

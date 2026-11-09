@@ -7,7 +7,7 @@ import fileTrackerExtension from "../../extensions/file-tracker/index.ts";
 import toolStyleExtension from "../../extensions/tool-style/index.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { SessionTurnTracker } from "../../extensions/subagents/session-turns.ts";
-import { applyPostToolUseOutcome } from "../../extensions/hooks/protocol.ts";
+import { applyPostToolUseOutcome } from "../../extensions/lib/rules/hook-protocol.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 

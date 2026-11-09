@@ -52,7 +52,7 @@ import { CONVERSATION_CACHE_PLACEMENT } from "../lib/side-call-cache.ts";
 import { releaseSideCalls, runSideCall } from "../lib/side-call-run.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 import type { ProseRenderer } from "../subagents/panel-render.ts";
-import { createMarkdownProse } from "../subagents/prose.ts";
+import { createMarkdownProse } from "../lib/ui/prose.ts";
 import { applyBtwKey, type BtwBody, BTW_MAX_HEIGHT, copyAnswer, decodeBtwKey, initialBtwState, renderBtwPanel } from "./panel.ts";
 import { requireText } from "../lib/profile.ts";
 import { type BtwExchange, exchangeMessages, historyMessages } from "./prompt.ts";

@@ -8,7 +8,7 @@
  * (PERMISSIONS-REVIEW-2026-09-05 M2). Claude Code's equivalents are scoped —
  * "allow all edits during this session" is working-directory-scoped, WebFetch
  * grants a domain — and the option names what it grants. So does this: the
- * grant is scoped by the subject's kind (permissions/matcher.ts `subjectKind`),
+ * grant is scoped by the subject's kind (lib/rules/matcher.ts `subjectKind`),
  * the label says exactly what it covers, and there is no grant at all where a
  * rule could not matter (a protected path, checked before allow rules) or
  * where the classifier is the boundary (auto mode: session allows are never
@@ -16,9 +16,9 @@
  */
 
 import { dirname, resolve } from "node:path";
-import { toAbsolute } from "../auto-mode/paths.ts";
+import { toAbsolute } from "../lib/shell/paths.ts";
 import { tildify, toPosixPath } from "../lib/paths.ts";
-import { escapeLiteral, isAtOrInsideDir, normalizeToolName, parseRule, type PermissionMode, type PermissionRule, subjectKind, urlHost } from "./matcher.ts";
+import { escapeLiteral, isAtOrInsideDir, normalizeToolName, parseRule, type PermissionMode, type PermissionRule, subjectKind, urlHost } from "../lib/rules/matcher.ts";
 
 export interface SessionGrant {
 	/** The rule to add to the session's allow list when the user picks this option. */

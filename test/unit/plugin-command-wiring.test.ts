@@ -8,10 +8,10 @@ import { invalidatePluginsCache } from "../../extensions/lib/plugins.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { captureUserTurns } from "./helpers/user-turn.ts";
-import { SUBAGENT_GATE_CHANNEL } from "../../extensions/permissions/subagent-gate.ts";
+import { SUBAGENT_GATE_CHANNEL } from "../../extensions/lib/agents/subagent-gate.ts";
 import { shellQuote } from "../../extensions/lib/shell-quote.ts";
 import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
-import { promptCommandText } from "../../extensions/skill/invoke.ts";
+import { promptCommandText } from "../../extensions/lib/plugins/skill-invoke.ts";
 
 let home: string;
 let exitCode: typeof process.exitCode;

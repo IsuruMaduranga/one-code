@@ -17,7 +17,7 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 const ALLOWED: Record<string, string> = {
-	"extensions/auto-mode/history.ts provenanceMemo": "memo of a pure function of the transcript",
+	"extensions/permissions/auto-mode/history.ts provenanceMemo": "memo of a pure function of the transcript",
 	"extensions/hooks/plugin-hooks.ts cache": "mtime cache of plugin hooks.json files",
 	"extensions/hooks/settings.ts cache": "mtime cache of the hook settings files",
 	"extensions/hooks/trust.ts pendingPrompts": "trust prompts in flight, shared by concurrent dispatches; the decisions are process state",
@@ -46,8 +46,8 @@ const ALLOWED: Record<string, string> = {
 	"extensions/mcp/client.ts httpErrorClass": "a class from the SDK, resolved once",
 	"extensions/mcp/client.ts sseErrorClass": "a class from the SDK, resolved once",
 	"extensions/mcp/trust.ts pendingPrompts": "trust prompts in flight, shared by concurrent callers; the decisions are process state",
-	"extensions/permissions/powershell-rules.ts lastSplit": "memo of the last parsed line",
-	"extensions/subagents/prose.ts ctorPromise": "a renderer class, imported once",
+	"extensions/lib/shell/powershell-rules.ts lastSplit": "memo of the last parsed line",
+	"extensions/lib/ui/prose.ts ctorPromise": "a renderer class, imported once",
 	"extensions/web-fetch/extract.ts libsPromise": "the reader libraries, imported once",
 };
 

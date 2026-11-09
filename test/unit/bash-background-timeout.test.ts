@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { type BackgroundTask, TASK_REGISTER_CHANNEL } from "../../extensions/background/registry.ts";
+import { type BackgroundTask, TASK_REGISTER_CHANNEL } from "../../extensions/lib/agents/task-registry.ts";
 import bashExtension from "../../extensions/bash/index.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";

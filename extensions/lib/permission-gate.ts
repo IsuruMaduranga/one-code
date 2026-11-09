@@ -9,7 +9,7 @@
  * which is where this inline factory attaches.
  *
  * Primary path: every tool call is routed through the parent's permission
- * BRIDGE (`permissions/subagent-gate.ts`) — the parent's live mode, rules,
+ * BRIDGE (`lib/agents/subagent-gate.ts`) — the parent's live mode, rules,
  * auto-mode classifier and interactive prompts, exactly as the main agent's
  * calls are judged (Claude Code parity, findings §17.1). Resolving or invoking
  * the bridge fails CLOSED.
@@ -30,7 +30,7 @@
  */
 
 import { getAgentDir, type InlineExtension } from "@earendil-works/pi-coding-agent";
-import { withKeepAlive } from "../lsp/keep-alive.ts";
+import { withKeepAlive } from "./core/keep-alive.ts";
 import { bashParserReady } from "./bash-parser.ts";
 import { findProjectRoot } from "./git.ts";
 import { SUBAGENT_HANDBACK } from "./subagent-handback.ts";
@@ -44,12 +44,12 @@ import { claudeConfigDir, claudeJsonPath, productStateDir } from "./paths.ts";
 import { sessionResultsDir } from "./persisted-output.ts";
 import { powerShellParser } from "./shell-spawn.ts";
 import { isPrivateScratchpad, sessionScratchpadDir } from "./scratchpad.ts";
-import { decide, extractSubject, isPathSubjectTool, normalizeToolName, type PermissionMode, parseRules } from "../permissions/matcher.ts";
-import { projectAllowApproved } from "../permissions/project-trust.ts";
-import { loadPermissionSettings, normalizePermissionMode } from "../permissions/settings.ts";
-import type { PermissionBridge } from "../permissions/subagent-gate.ts";
+import { decide, extractSubject, isPathSubjectTool, normalizeToolName, type PermissionMode, parseRules } from "./rules/matcher.ts";
+import { projectAllowApproved } from "./consent/project-trust.ts";
+import { loadPermissionSettings, normalizePermissionMode } from "./rules/settings.ts";
+import type { PermissionBridge } from "./agents/subagent-gate.ts";
 import { refusalText } from "../permissions/words.ts";
-import { resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
+import { resolveForContainment, toAbsolute } from "./shell/paths.ts";
 
 /** A directory's realpath for containment, or the path itself when nothing about it resolves. */
 export const resolvedOrSelf = (dir: string) => resolveForContainment(dir) ?? dir;
@@ -80,7 +80,7 @@ export function runtimeProtectedDirs(): string[] {
  * (web search API keys, the model tiers) and MCP OAuth token store, pi's
  * `models.json` (custom-provider `apiKey` values) and `auth.json`, Claude
  * Code's user settings (`env` keys, `apiKeyHelper`) and `.claude.json`. The
- * basename denylist (`auto-mode/sensitive.ts`) cannot name these without
+ * basename denylist (`lib/shell/sensitive.ts`) cannot name these without
  * flagging every project's `settings.json`. Literal and resolved spelling, as
  * for `runtimeProtectedDirs`; `DecideInput.secretPaths` is the consumer.
  */

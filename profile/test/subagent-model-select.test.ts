@@ -8,7 +8,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
-import { applicableSubagentDefault, loadSubagentDefault } from "../../extensions/subagents/default-model.ts";
+import { applicableSubagentDefault, loadSubagentDefault } from "../../extensions/lib/models/subagent-default.ts";
 import { productSettingsPath } from "../../extensions/lib/product-settings.ts";
 import { subagentModelsText } from "../text/subagent-models/index.ts";
 import { ALL_LIVE } from "../../test/unit/helpers/live.ts";

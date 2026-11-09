@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import askUserExtension from "../../extensions/ask-user/index.ts";
 import bashExtension from "../../extensions/bash/index.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
-import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts";
+import { PERMISSION_STATUS_CHANNEL } from "../../extensions/lib/rules/modes.ts";
 import toolStyleExtension from "../../extensions/tool-style/index.ts";
 import webSearchExtension from "../../extensions/web/index.ts";
 import webFetchExtension from "../../extensions/web-fetch/index.ts";

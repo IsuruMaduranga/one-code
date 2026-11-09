@@ -54,9 +54,9 @@ import { SESSION_WORK_CHANNEL, type SessionWorkQuery } from "../lib/session-work
 import { defaultDiscoverRoots } from "../lib/plugins.ts";
 import { appendHookLog, formatDebugLine, hooksDebugEnabled, hooksLogPath } from "./debug.ts";
 import { runHookCommand } from "./executor.ts";
-import { PRECOMPACT_INSTRUCTIONS_CHANNEL, type PreCompactInstructions } from "./compaction.ts";
+import { PRECOMPACT_INSTRUCTIONS_CHANNEL, type PreCompactInstructions } from "../lib/request/precompact-instructions.ts";
 import { changedSince, type FileSnapshot, fileToolTarget, snapshotFile } from "./formatter-notice.ts";
-import { matcherApplies, ccToolName, toolMatchCandidates, ccToolInput, nativeToolInput } from "./matcher.ts";
+import { matcherApplies, ccToolName, toolMatchCandidates, ccToolInput, nativeToolInput } from "../lib/rules/hook-matcher.ts";
 import { loadPluginHooks } from "./plugin-hooks.ts";
 import {
 	applyPostToolUseOutcome,
@@ -66,14 +66,14 @@ import {
 	type MergedHookOutcome,
 	cancelledOutcome,
 	interpretHookResult,
-} from "./protocol.ts";
+} from "../lib/rules/hook-protocol.ts";
 import { type HookCommand, type HooksSource, loadHookSettings } from "./settings.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { REMINDER_CHANNEL, type ReminderPayload, wrapReminder } from "../lib/reminders.ts";
-import { type ChildHookCall, type ChildHookResult, type HookBridge, SUBAGENT_HOOK_CHANNEL, type SubagentHookPayload } from "./subagent-bridge.ts";
+import { type ChildHookCall, type ChildHookResult, type HookBridge, SUBAGENT_HOOK_CHANNEL, type SubagentHookPayload } from "../lib/agents/hook-bridge.ts";
 import { projectHooksApproved } from "./trust.ts";
 import { PromptContextRouter } from "./prompt-context.ts";
-import { SKILL_INVOCATION_TYPE, type SkillInvocationDetails } from "../skill/invoke.ts";
+import { SKILL_INVOCATION_TYPE, type SkillInvocationDetails } from "../lib/plugins/skill-invoke.ts";
 import { consentDialog } from "../lib/consent-dialogs.ts";
 import { followWorkCwd } from "../lib/worktree-channel.ts";
 import { requireText } from "../lib/profile.ts";

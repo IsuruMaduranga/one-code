@@ -20,8 +20,8 @@ import {
 	type PermissionRule,
 	ruleMatches,
 	unescapeLiteral,
-} from "../../extensions/permissions/matcher.ts";
-import { isProtectedPath } from "../../extensions/permissions/protected-paths.ts";
+} from "../../extensions/lib/rules/matcher.ts";
+import { isProtectedPath } from "../../extensions/lib/rules/protected-paths.ts";
 import { brand } from "../../extensions/lib/brand.mjs";
 import { HAVE_POWERSHELL, psParse, POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
 

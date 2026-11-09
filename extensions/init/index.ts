@@ -16,7 +16,7 @@
 import { feature } from "../lib/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createUserMessageSender } from "../lib/notifications.ts";
-import { promptCommandText } from "../skill/invoke.ts";
+import { promptCommandText } from "../lib/plugins/skill-invoke.ts";
 import { requireText } from "../lib/profile.ts";
 import { instructionTargets } from "../lib/instructions.ts";
 

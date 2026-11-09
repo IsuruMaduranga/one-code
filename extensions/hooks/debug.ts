@@ -3,7 +3,7 @@
  * per-invocation lines, and an opt-in JSONL (`hooks-decisions.jsonl` next to
  * the approval store) for after-the-fact "what fired and what did it decide".
  * Logging must never break a hook's fail-open guarantee, so append failures
- * are swallowed (same stance as auto-mode/decision-log.ts).
+ * are swallowed (same stance as permissions/auto-mode/decision-log.ts).
  */
 
 import { appendFileSync, mkdirSync } from "node:fs";

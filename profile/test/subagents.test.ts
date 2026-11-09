@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { forkTaskMessage } from "../../extensions/subagents/outcome.ts";
 import { finishOutcome } from "../../extensions/subagents/session-turns.ts";
-import { emptyUsage } from "../../extensions/subagents/usage.ts";
+import { emptyUsage } from "../../extensions/lib/agents/usage.ts";
 
 describe("One Code's fork framing", () => {
 	it("frames the task with do-only-this and not-the-inherited-topic instructions", () => {

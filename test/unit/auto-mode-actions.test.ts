@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type ChildAction, recordAction } from "../../extensions/auto-mode/actions.ts";
+import { type ChildAction, recordAction } from "../../extensions/lib/rules/auto-mode-actions.ts";
 
 describe("recordAction", () => {
 	it("records the tool name and its subject", () => {

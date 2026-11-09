@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { wrapReminder } from "../../extensions/lib/reminders.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
-import { clearAtNudge, resolveCountdowns, withTurnBudgetMessages } from "../../extensions/lib/turn-budget-layout.ts";
-import { totalTokensBlock } from "../../extensions/context-budget/budget.ts";
+import { clearAtNudge, resolveCountdowns, withTurnBudgetMessages } from "../../extensions/system-reminder/turn-budget-layout.ts";
+import { totalTokensBlock } from "../../extensions/lib/context/budget.ts";
 
 /** The budget line for `n` tokens as context-budget writes it, in the profile's words. */
 const left = (n: number) => totalTokensBlock(requireText("contextBudget"), n);

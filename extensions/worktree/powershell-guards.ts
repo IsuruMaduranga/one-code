@@ -3,7 +3,7 @@
  * invariants guards.ts enforces for bash (git must verifiably target this
  * session's worktree; shared-stash forms that collide with a concurrent
  * session are refused), judged on PowerShell's statement split
- * (permissions/powershell-rules.ts). On Windows PowerShell is the primary
+ * (lib/shell/powershell-rules.ts). On Windows PowerShell is the primary
  * shell, so without this the invariant did not hold where it matters most.
  *
  * Conservative in the one direction that matters: git in a line the split
@@ -16,10 +16,10 @@
 
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
-import { toAbsolute } from "../auto-mode/paths.ts";
-import { gitSubcommand } from "../auto-mode/shell-analysis.ts";
-import { powershellInjectionSyntax, powershellStatements, statementCommand } from "../permissions/powershell-rules.ts";
-import { containsPath, isolated, sharedRepositoryRoots, stashReason, type WorktreeGuardContext } from "./guards.ts";
+import { toAbsolute } from "../lib/shell/paths.ts";
+import { gitSubcommand } from "../lib/shell/shell-analysis.ts";
+import { powershellInjectionSyntax, powershellStatements, statementCommand } from "../lib/shell/powershell-rules.ts";
+import { containsPath, isolated, sharedRepositoryRoots, stashReason, type WorktreeGuardContext } from "../lib/rules/worktree-guards.ts";
 import type { WorktreeGuardRefusal } from "./text.ts";
 
 /** git as a word (`git`, `GIT`, `git.exe`); PowerShell resolves commands case-insensitively. */

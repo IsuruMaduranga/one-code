@@ -36,7 +36,7 @@ import { ccToolRenderers, cutPlainText } from "../lib/tui-render.ts";
 import { LspClient, type LspClientOptions, pathToUri } from "./client.ts";
 import { filterDiagnostics, formatDiagnostics, type LspDiagnostic, type SeverityFilter } from "./format.ts";
 import { describeStartFailure, INSTALL_HINTS } from "./install-hints.ts";
-import { withKeepAlive } from "./keep-alive.ts";
+import { withKeepAlive } from "../lib/core/keep-alive.ts";
 import {
 	pluginLanguageId,
 	readManifestLspServers,

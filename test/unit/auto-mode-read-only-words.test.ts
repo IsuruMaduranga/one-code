@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { hasReadOnlyShellWords, parseCommand } from "../../extensions/auto-mode/shell-analysis.ts";
+import { hasReadOnlyShellWords, parseCommand } from "../../extensions/lib/shell/shell-analysis.ts";
 
 let cwd: string;
 beforeEach(() => { cwd = mkdtempSync(join(tmpdir(), "cc-read-only-words-")); });

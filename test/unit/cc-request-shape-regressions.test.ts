@@ -4,10 +4,10 @@ import systemReminderExtension from "../../extensions/system-reminder/index.ts";
 import { deferredAddendumText } from "../../extensions/lib/deferred.ts";
 import { wrapReminder } from "../../extensions/lib/reminders.ts";
 import { subagentHandbackExtension } from "../../extensions/lib/subagent-handback.ts";
-import { totalTokensBlock } from "../../extensions/context-budget/budget.ts";
+import { totalTokensBlock } from "../../extensions/lib/context/budget.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
-import { withToolAdditions } from "../../extensions/lib/tool-additions.ts";
-import { withTurnBudgetMessages } from "../../extensions/lib/turn-budget-layout.ts";
+import { withToolAdditions } from "../../extensions/tool-search/tool-additions.ts";
+import { withTurnBudgetMessages } from "../../extensions/system-reminder/turn-budget-layout.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 

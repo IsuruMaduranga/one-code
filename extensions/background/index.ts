@@ -34,7 +34,7 @@ import {
 	generateTaskId,
 	shownTask,
 	TASK_REGISTER_CHANNEL,
-} from "./registry.ts";
+} from "../lib/agents/task-registry.ts";
 import { SWITCH_CANCEL, SWITCH_STOP, switchWarning, workWidgetLine } from "./switch-guard.ts";
 import { DynamicLoop, scheduledText } from "./wakeup.ts";
 import type { MonitorEnd, MonitorStartFailure, TaskToolsText, WakeupMissingField } from "./text.ts";
@@ -60,7 +60,7 @@ import {
 	scheduledJobsOnBranch,
 	shownJob,
 	WAKEUP_ARMED_ENTRY,
-} from "./cron.ts";
+} from "../lib/agents/cron.ts";
 import {
 	createTaskNotifier,
 	monitorEndedSummary,
@@ -100,7 +100,7 @@ import { makeRecord, RECORD } from "../lib/ledger/records.ts";
 import { recordState, stateSinceCompaction } from "../lib/ledger/state.ts";
 import { processState } from "../lib/process-state.ts";
 import { extensionVersion } from "../lib/package-version.ts";
-import { STORED_OUTPUT_CAP, tailCap } from "../bash/background.ts";
+import { STORED_OUTPUT_CAP, tailCap } from "../lib/shell-run/bash-background.ts";
 
 /** Claude Code's `task_output` limit (`TASK_MAX_OUTPUT_DEFAULT`). */
 const TASK_OUTPUT_MAX_CHARS = 32_000;

@@ -16,7 +16,7 @@ const until = async (condition: () => boolean) => {
 
 describe.skipIf(process.platform === "win32")("remembered process groups", () => {
 	it.each(["quit", "natural", "SIGINT", "SIGTERM", "SIGHUP"] as const)("a completed shell's child survives until its owner exits (%s)", async (how) => {
-		const moduleUrl = pathToFileURL(resolve("extensions/bash/background.ts")).href;
+		const moduleUrl = pathToFileURL(resolve("extensions/lib/shell-run/bash-background.ts")).href;
 		const script = [
 			`import { runBackgroundBashBlocking } from ${JSON.stringify(moduleUrl)};`,
 			`const keepAlive = setInterval(() => {}, 1000);`,

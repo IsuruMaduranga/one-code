@@ -22,7 +22,7 @@ import {
 import { userMessageForAgent } from "../../extensions/lib/agent-view.ts";
 import { wrapProse } from "../../extensions/lib/tui-render.ts";
 import { decodeStripKey } from "../../extensions/subagents/panel-keys.ts";
-import { resolvePiTuiEntry } from "../../extensions/subagents/prose.ts";
+import { resolvePiTuiEntry } from "../../extensions/lib/ui/prose.ts";
 import { existsSync } from "node:fs";
 
 /** Paint that tags styled text so tests can strip/inspect it. */

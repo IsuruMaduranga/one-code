@@ -1,6 +1,6 @@
 /**
  * Hook gate for in-process agent sessions (pure), shared by the subagent and
- * workflow runners — the child half of `hooks/subagent-bridge.ts`.
+ * workflow runners — the child half of `lib/agents/hook-bridge.ts`.
  *
  * A child session is built with `noExtensions: true`, so the `hooks` extension
  * never loads inside it. This inline extension forwards the child's
@@ -19,8 +19,8 @@
  */
 
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
-import { applyPostToolUseOutcome } from "../hooks/protocol.ts";
-import type { ChildHookCall, HookBridge } from "../hooks/subagent-bridge.ts";
+import { applyPostToolUseOutcome } from "./rules/hook-protocol.ts";
+import type { ChildHookCall, HookBridge } from "./agents/hook-bridge.ts";
 import { REMINDER_CHANNEL } from "./reminders.ts";
 import { SUBAGENT_HANDBACK } from "./subagent-handback.ts";
 

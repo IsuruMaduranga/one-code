@@ -13,13 +13,13 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { resolveForContainment } from "../../extensions/auto-mode/paths.ts";
+import { resolveForContainment } from "../../extensions/lib/shell/paths.ts";
 import { brand } from "../../extensions/lib/brand.mjs";
 import { forwardSlashes, productStateDir, tildify, toPosixPath } from "../../extensions/lib/paths.ts";
 import { sessionScratchpadDir } from "../../extensions/lib/scratchpad.ts";
 import { whichOnPath } from "../../extensions/lib/which.ts";
 import { commandLaunch } from "../../extensions/lib/command-launch.ts";
-import { decide, isInsideDir, matchesPathPattern } from "../../extensions/permissions/matcher.ts";
+import { decide, isInsideDir, matchesPathPattern } from "../../extensions/lib/rules/matcher.ts";
 import { sessionGrant } from "../../extensions/permissions/session-grant.ts";
 
 const win32 = process.platform === "win32";

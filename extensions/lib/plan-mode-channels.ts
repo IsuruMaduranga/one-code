@@ -2,7 +2,7 @@
  * Bus channels between plan-mode and permissions, and the session entry that
  * records the plan file (also read by the post-compaction file restore). They
  * live here, not in either extension, because permissions cannot import
- * plan-mode (plan-mode already imports `permissions/modes.ts`) and a string
+ * plan-mode (plan-mode already imports `lib/rules/modes.ts`) and a string
  * literal typed in two places is the one way a rename silently disconnects a
  * reader.
  */

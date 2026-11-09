@@ -10,7 +10,7 @@
  */
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { BackgroundTask } from "../background/registry.ts";
+import type { BackgroundTask } from "../lib/agents/task-registry.ts";
 import { canShowCustomUi } from "../lib/headless-output.ts";
 import type { ShellTaskTracker } from "../lib/shell-tasks.ts";
 import { linesComponent, liveUiCtx, safeThemeBold, safeThemeInverse, safeThemePaint } from "../lib/tui-render.ts";

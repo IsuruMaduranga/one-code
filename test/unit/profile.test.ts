@@ -13,8 +13,8 @@ import { autoMemoryEnabled, resetAutoMemoryForTest } from "../../extensions/lib/
 import { DEFER_CHANNEL } from "../../extensions/lib/deferred.ts";
 import { watchMcpTools } from "../../extensions/lib/mcp-share.ts";
 import { scanSkills } from "../../extensions/lib/skill-scan.ts";
-import { decide } from "../../extensions/permissions/matcher.ts";
-import { ALLOWLIST_ESSENTIALS, agentToolOptions } from "../../extensions/subagents/agents.ts";
+import { decide } from "../../extensions/lib/rules/matcher.ts";
+import { ALLOWLIST_ESSENTIALS, agentToolOptions } from "../../extensions/lib/agents/agent-catalog.ts";
 import { PINNED_TOOLS } from "../../extensions/lib/profile.ts";
 import { WITHHOLD_CHANNEL } from "../../extensions/lib/deferred.ts";
 import toolSearchExtension from "../../extensions/tool-search/index.ts";

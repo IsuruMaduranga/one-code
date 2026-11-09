@@ -11,12 +11,12 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { conflictingPathArguments } from "../../extensions/auto-mode/paths.ts";
-import { analyzeShellCommand } from "../../extensions/auto-mode/shell-analysis.ts";
+import { conflictingPathArguments } from "../../extensions/lib/shell/paths.ts";
+import { analyzeShellCommand } from "../../extensions/lib/shell/shell-analysis.ts";
 import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
-import { powershellInjectionSyntax } from "../../extensions/permissions/powershell-rules.ts";
+import { powershellInjectionSyntax } from "../../extensions/lib/shell/powershell-rules.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { HAVE_POWERSHELL, psReadOnly, POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";

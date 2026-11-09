@@ -12,7 +12,7 @@
  */
 
 import { cutPlainText as cut, formatDuration, padPlainText, splitCell, splitRow, visibleWidth, wrapHints, wrapPlainText, wrapProse } from "../lib/tui-render.ts";
-import { formatTokenCount } from "../subagents/usage.ts";
+import { formatTokenCount } from "../lib/agents/usage.ts";
 import type { AgentRecord, RunStatus } from "./types.ts";
 import { keyId, keyText } from "../lib/key-input.ts";
 import { projectConfigDirName } from "../lib/sources.ts";

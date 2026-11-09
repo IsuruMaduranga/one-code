@@ -15,7 +15,7 @@ import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
 import { REMINDER_CHANNEL, type ReminderPayload } from "../../extensions/lib/reminders.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
-import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../extensions/permissions/modes.ts";
+import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../extensions/lib/rules/modes.ts";
 import { MODE_ENV } from "../../extensions/lib/permission-gate.ts";
 import type { ToldFact } from "../../extensions/lib/ledger/records.ts";
 import { createFakeCtx, createFakePi, renderRequest } from "./helpers/fake-pi.ts";

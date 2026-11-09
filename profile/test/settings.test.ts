@@ -10,7 +10,7 @@ import { mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { projectSlug } from "../../extensions/lib/memory.ts";
-import { loadPermissionSettings } from "../../extensions/permissions/settings.ts";
+import { loadPermissionSettings } from "../../extensions/lib/rules/settings.ts";
 import { tempHome } from "../../test/unit/helpers/temp-home.ts";
 
 let home: string;

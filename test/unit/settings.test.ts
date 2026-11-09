@@ -9,7 +9,7 @@ import {
 	persistAllowRule,
 	persistBlockOutsideReads,
 	resolveStartupMode,
-} from "../../extensions/permissions/settings.ts";
+} from "../../extensions/lib/rules/settings.ts";
 import { userSettingsPath, useRepositorySettings, writeRepositorySettings, writeUserSettings } from "./helpers/settings-files.ts";
 import { tempHome } from "./helpers/temp-home.ts";
 

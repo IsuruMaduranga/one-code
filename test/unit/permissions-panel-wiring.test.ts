@@ -22,8 +22,8 @@ import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { brand, brandedId, productStateDir } from "../../extensions/lib/brand.mjs";
 import { requireText } from "../../extensions/lib/profile.ts";
-import { defaultEnvironment } from "../../extensions/auto-mode/classifier-prompt.ts";
-import { indexFor } from "../../extensions/auto-mode/prompt.ts";
+import { defaultEnvironment } from "../../extensions/permissions/auto-mode/classifier-prompt.ts";
+import { indexFor } from "../../extensions/permissions/auto-mode/prompt.ts";
 
 const completeMock = vi.mocked(completeSimple);
 const granted = (display: string) => requireText("autoMode").permissionGranted({ displays: [display] });

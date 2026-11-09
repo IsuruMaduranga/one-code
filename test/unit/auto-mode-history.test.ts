@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { childHistoryCursor, classifierHistory, CLASSIFIER_TOOL_META } from "../../extensions/auto-mode/history.ts";
+import { childHistoryCursor, classifierHistory, CLASSIFIER_TOOL_META } from "../../extensions/permissions/auto-mode/history.ts";
 
 const call = (id: string, name: string, args: Record<string, unknown>) => ({ type: "message", id, message: { role: "assistant", content: [{ type: "toolCall", id, name, arguments: args }] } });
 

@@ -2,24 +2,24 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../extensions/auto-mode/actions.ts";
+import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../extensions/lib/rules/auto-mode-actions.ts";
 import backgroundExtension from "../../extensions/background/index.ts";
-import { type BackgroundTask, TASK_REGISTER_CHANNEL } from "../../extensions/background/registry.ts";
+import { type BackgroundTask, TASK_REGISTER_CHANNEL } from "../../extensions/lib/agents/task-registry.ts";
 import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/mcp-share.ts";
 import { DEFAULT_COALESCE_MS, oneShotNote } from "../../extensions/lib/notifications.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
 import { AGENT_VIEW_CHANNEL } from "../../extensions/lib/agent-view.ts";
-import { SUBAGENT_GATE_CHANNEL } from "../../extensions/permissions/subagent-gate.ts";
-import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts";
+import { SUBAGENT_GATE_CHANNEL } from "../../extensions/lib/agents/subagent-gate.ts";
+import { PERMISSION_STATUS_CHANNEL } from "../../extensions/lib/rules/modes.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
-import * as defaults from "../../extensions/subagents/default-model.ts";
+import * as defaults from "../../extensions/lib/models/subagent-default.ts";
 import subagentsExtension from "../../extensions/subagents/index.ts";
 import type { ChildOutcome } from "../../extensions/subagents/outcome.ts";
 import { SubagentRuntime } from "../../extensions/subagents/runner.ts";
 import type { AgentRunRecord } from "../../extensions/subagents/runs.ts";
-import * as worktrees from "../../extensions/subagents/worktree.ts";
-import type { Worktree } from "../../extensions/subagents/worktree.ts";
-import { emptyUsage } from "../../extensions/subagents/usage.ts";
+import * as worktrees from "../../extensions/lib/agents/agent-worktree.ts";
+import type { Worktree } from "../../extensions/lib/agents/agent-worktree.ts";
+import { emptyUsage } from "../../extensions/lib/agents/usage.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 const model = (id: string, input: string[], cost: number) => ({

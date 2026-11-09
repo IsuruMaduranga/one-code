@@ -8,7 +8,7 @@ import {
 	loadSubagentDefault,
 	persistSubagentModel,
 	type SubagentDefault,
-} from "../../extensions/subagents/default-model.ts";
+} from "../../extensions/lib/models/subagent-default.ts";
 import { crossesProvider, supportsImageInput } from "../../extensions/lib/model-policy.ts";
 import {
 	expensiveModelGate,
@@ -18,7 +18,7 @@ import {
 	refusedModelNote,
 	subagentModelsReminder,
 	subagentStatusModel,
-} from "../../extensions/subagents/model-select.ts";
+} from "../../extensions/lib/models/subagent-model.ts";
 import type { SubagentModelNotice } from "../../extensions/subagents/model-text.ts";
 import { envName } from "../../extensions/lib/brand.mjs";
 import { productSettingsPath } from "../../extensions/lib/product-settings.ts";

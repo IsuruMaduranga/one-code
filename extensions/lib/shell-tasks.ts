@@ -9,7 +9,7 @@
  * its own tracker; multiple bus listeners are fine.
  */
 
-import { TASK_REGISTER_CHANNEL, type BackgroundTask } from "../background/registry.ts";
+import { TASK_REGISTER_CHANNEL, type BackgroundTask } from "./agents/task-registry.ts";
 
 export interface ShellTaskTracker {
 	/** Every bash shell registered this session, registration order. */

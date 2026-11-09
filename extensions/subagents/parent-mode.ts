@@ -15,8 +15,8 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { readState } from "../lib/ledger/state.ts";
 import { RENDER_CHANNEL, type RenderRequest, toldBlockFact } from "../lib/reminders.ts";
-import { PERMISSION_MODE_STATE } from "../permissions/modes.ts";
-import { normalizePermissionMode } from "../permissions/settings.ts";
+import { PERMISSION_MODE_STATE } from "../lib/rules/modes.ts";
+import { normalizePermissionMode } from "../lib/rules/settings.ts";
 
 import { subagentWords } from "./words.ts";
 /** The told fact's key. */

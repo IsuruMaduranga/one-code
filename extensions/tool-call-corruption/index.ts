@@ -5,7 +5,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { notifyOrPrint } from "../lib/headless-output.ts";
 import { TURN_FAILED_CHANNEL, type TurnFailedEvent } from "../lib/interrupt.ts";
 import { sessionOutlivesTurn } from "../lib/notifications.ts";
-import { isOpenRouter, openRouterProviderName, toolCallCorruptionNotice, type UpstreamFailure } from "../lib/openrouter-generation.ts";
+import { isOpenRouter, openRouterProviderName, toolCallCorruptionNotice, type UpstreamFailure } from "./openrouter-generation.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
 import {
 	CONTENT_MARKUP_LIMIT,
@@ -16,8 +16,8 @@ import {
 	type TrailingPadding,
 	toolCallCorruptionReason,
 	trailingPadding,
-} from "../lib/tool-call-corruption.ts";
-import { withKeepAlive } from "../lsp/keep-alive.ts";
+} from "./tool-call-corruption.ts";
+import { withKeepAlive } from "../lib/core/keep-alive.ts";
 
 // Silence allowed inside a stream. Every raw chunk restarts the clock, but
 // OpenRouter's keepalive comments never reach us, so a model thinking

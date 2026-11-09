@@ -3,7 +3,7 @@
  * keeps running, so the session's crons and wakeups come back from the branch.
  */
 import { describe, expect, it } from "vitest";
-import { CronStore, JOB_FIRED_ENTRY, scheduledJobsOnBranch, WAKEUP_ARMED_ENTRY } from "../../extensions/background/cron.ts";
+import { CronStore, JOB_FIRED_ENTRY, scheduledJobsOnBranch, WAKEUP_ARMED_ENTRY } from "../../extensions/lib/agents/cron.ts";
 
 const call = (id: string, name: string, args: Record<string, unknown>) => ({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id, name, arguments: args }] } });
 const result = (toolCallId: string, toolName: string, details: Record<string, unknown>, timestamp = 1_000) => ({ type: "message", message: { role: "toolResult", toolCallId, toolName, content: [], details, timestamp } });

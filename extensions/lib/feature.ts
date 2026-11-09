@@ -18,8 +18,8 @@
  * built-ins included), adopts the tools the profile defers and ignores
  * deferral requests the profile overrides;
  * child sessions exclude disabled tools through pi's own `excludeTools`
- * (subagents/agents.ts `agentToolOptions`); the permission gate denies a call
- * to a disabled tool whatever path it arrived by (permissions/matcher.ts).
+ * (lib/agents/agent-catalog.ts `agentToolOptions`); the permission gate denies a call
+ * to a disabled tool whatever path it arrived by (lib/rules/matcher.ts).
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";

@@ -10,7 +10,7 @@ import {
 	nextMatch,
 	parseCron,
 	RECURRING_MAX_AGE_MS,
-} from "../../extensions/background/cron.ts";
+} from "../../extensions/lib/agents/cron.ts";
 
 // Local-time semantics are the point of these tests, so pin a zone with DST
 // before any Date is built (describe bodies run at collection time).

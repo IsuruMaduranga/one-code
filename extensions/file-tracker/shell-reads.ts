@@ -14,9 +14,9 @@
  */
 
 import { isAbsolute } from "node:path";
-import { toAbsoluteBash } from "../auto-mode/paths.ts";
-import { globComponentRegex, isUnknownTilde, movesDirectory, resolvePayload } from "../auto-mode/shell-analysis.ts";
-import { LOOPS, parseCommand, type ParseResult, scopedTracker, type Segment, type Token } from "../auto-mode/shell-parse.ts";
+import { toAbsoluteBash } from "../lib/shell/paths.ts";
+import { globComponentRegex, isUnknownTilde, movesDirectory, resolvePayload } from "../lib/shell/shell-analysis.ts";
+import { LOOPS, parseCommand, type ParseResult, scopedTracker, type Segment, type Token } from "../lib/shell/shell-parse.ts";
 
 /** Commands whose file arguments may print a whole file. */
 const READERS = new Set(["cat", "head", "tail", "sed"]);

@@ -16,9 +16,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { PermissionBridge } from "../permissions/subagent-gate.ts";
-import type { HookBridge } from "../hooks/subagent-bridge.ts";
-import type { SubagentDefault } from "../subagents/default-model.ts";
+import type { PermissionBridge } from "../lib/agents/subagent-gate.ts";
+import type { HookBridge } from "../lib/agents/hook-bridge.ts";
+import type { SubagentDefault } from "../lib/models/subagent-default.ts";
 import { AgentRunner } from "./agent-session.ts";
 import { createRunAdmission, createScriptGlobals, MAX_CONCURRENCY, type ScriptRunState } from "./globals.ts";
 import { appendJournal, readJournal, ReplayCursor } from "./journal.ts";
@@ -48,7 +48,7 @@ export interface StartRunOptions {
 	defaultEffort?: string;
 	/** Parent permission bridge, threaded into every agent's gate (see AgentRunnerOptions). */
 	getPermissionBridge?: () => PermissionBridge | undefined;
-	/** The parent hooks extension's bridge (hooks/subagent-bridge.ts), threaded into every workflow agent. */
+	/** The parent hooks extension's bridge (lib/agents/hook-bridge.ts), threaded into every workflow agent. */
 	getHookBridge?: () => HookBridge | undefined;
 	/** Each finished agent's dollar cost, for the footer's all-in total (review S13). */
 	onUsage?: (cost: number) => void;

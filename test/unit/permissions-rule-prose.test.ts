@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildRuleset, classifierText, defaultEnvironment } from "../../extensions/auto-mode/classifier-prompt.ts";
-import { buildCategoryIndex, groundCategory, normalizeName } from "../../extensions/auto-mode/rules.ts";
+import { buildRuleset, classifierText, defaultEnvironment } from "../../extensions/permissions/auto-mode/classifier-prompt.ts";
+import { buildCategoryIndex, groundCategory, normalizeName } from "../../extensions/permissions/auto-mode/rules.ts";
 import { denyRuleLines } from "../../extensions/permissions/rule-prose.ts";
 
 describe("denyRuleLines", () => {

@@ -32,7 +32,7 @@ export const PROFILE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../
  * Tools a profile may neither turn off nor defer: the harness's own plumbing.
  * `tool_search` reaches every deferred tool; a child reports through
  * `SendMessage` and `SubagentHandback`, and a workflow agent with a schema
- * through `structured_output` (subagents/agents.ts ALLOWLIST_ESSENTIALS).
+ * through `structured_output` (lib/agents/agent-catalog.ts ALLOWLIST_ESSENTIALS).
  */
 export const PINNED_TOOLS: ReadonlySet<string> = new Set(["tool_search", "SendMessage", "SubagentHandback", "structured_output"]);
 

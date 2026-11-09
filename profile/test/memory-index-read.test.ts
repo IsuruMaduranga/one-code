@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MAX_INSTRUCTION_BYTES } from "../../extensions/lib/claude-rules.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
-import { readMemoryIndex } from "../../extensions/lib/memory-index.ts";
+import { readMemoryIndex } from "../../extensions/claude-context/memory-index.ts";
 import { projectMemoryDir } from "../../extensions/lib/memory.ts";
 import { stubHome } from "../../test/unit/helpers/home.ts";
 

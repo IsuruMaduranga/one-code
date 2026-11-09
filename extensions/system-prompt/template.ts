@@ -5,7 +5,7 @@
  * (SYSTEM_PROMPT_SECTION_CHANNEL, text.ts), appended text, the working
  * directory and the budget line. The environment block, the model line and
  * the git snapshot are not here: they ride the first-message context
- * (lib/environment-block.ts, lib/claude-context.ts), or the mid-conversation
+ * (lib/environment-block.ts, claude-context/claude-context.ts), or the mid-conversation
  * system message on a model that takes one, as in Claude Code.
  *
  * For a fixed tier this function must be pure and deterministic: same inputs,
@@ -52,7 +52,7 @@ export function buildClaudeCodeSystemPrompt(
 	tier: PromptTier,
 	/**
 	 * Claude Code's per-turn budget line (`<total_tokens>N tokens left</total_tokens>`,
-	 * `context-budget/budget.ts`, worded by `text.contextBudget`), placed last, after the cwd line. Constant for
+	 * `lib/context/budget.ts`, worded by `text.contextBudget`), placed last, after the cwd line. Constant for
 	 * the session, so it stays cache-stable.
 	 */
 	totalTokensLine?: string | null,

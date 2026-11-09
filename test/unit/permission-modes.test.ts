@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { brand, brandedId } from "../../extensions/lib/brand.mjs";
 import { requireText } from "../../extensions/lib/profile.ts";
-import type { PermissionMode } from "../../extensions/permissions/matcher.ts";
+import type { PermissionMode } from "../../extensions/lib/rules/matcher.ts";
 import { modeCycleKey, pauseGlyph } from "../../extensions/lib/keys.ts";
 
 // The key and the pause icon follow the platform (alt+m and a single-cell
@@ -21,8 +21,8 @@ import {
 	permissionModeDisplay,
 	type PermissionStatus,
 	shortModelName,
-} from "../../extensions/permissions/modes.ts";
-import { normalizePermissionMode } from "../../extensions/permissions/settings.ts";
+} from "../../extensions/lib/rules/modes.ts";
+import { normalizePermissionMode } from "../../extensions/lib/rules/settings.ts";
 
 describe("nextMode", () => {
 	it("cycles manual → acceptEdits → plan → manual", () => {

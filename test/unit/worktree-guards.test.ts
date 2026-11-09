@@ -1,5 +1,5 @@
 /**
- * The worktree guards' decisions (extensions/worktree/guards.ts): which shell
+ * The worktree guards' decisions (extensions/lib/rules/worktree-guards.ts): which shell
  * lines a worktree-isolated session refuses, and why, as the refusal data the
  * profile words. One Code's wording of each refusal is tested in
  * profile/test/worktree-guards-wording.test.ts.
@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { namesGit, worktreeBashGuardReason } from "../../extensions/worktree/guards.ts";
+import { namesGit, worktreeBashGuardReason } from "../../extensions/lib/rules/worktree-guards.ts";
 
 const WT = "/repo/.claude/worktrees/wt1";
 const guard = (command: string) => worktreeBashGuardReason({ command, worktreePath: WT, sharedRoot: "/repo" });

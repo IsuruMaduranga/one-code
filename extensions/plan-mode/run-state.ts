@@ -3,8 +3,8 @@
  * file's path, whether that file existed when the run began, and the mode the
  * run came from. plan-mode/index.ts reads and writes the record.
  */
-import type { PermissionMode } from "../permissions/matcher.ts";
-import { normalizePermissionMode } from "../permissions/settings.ts";
+import type { PermissionMode } from "../lib/rules/matcher.ts";
+import { normalizePermissionMode } from "../lib/rules/settings.ts";
 
 /** The `one-code:state` key of the current plan-mode run. */
 export const PLAN_ENTRY_STATE = "plan-mode:entry";

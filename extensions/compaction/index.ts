@@ -53,16 +53,16 @@ import {
 	sessionRequestHeaders,
 	withClearThinking,
 } from "../context-management/index.ts";
-import { PRECOMPACT_INSTRUCTIONS_CHANNEL, type PreCompactInstructions } from "../hooks/compaction.ts";
+import { PRECOMPACT_INSTRUCTIONS_CHANNEL, type PreCompactInstructions } from "../lib/request/precompact-instructions.ts";
 import { looksLikeAnthropicRequest } from "../lib/anthropic-payload.ts";
 import { forcedReasoningLevel } from "../lib/model-policy.ts";
 import { captureRequest, extendPayload, LAST_REQUEST_CHANNEL, LastExchange, lastCovered, type RequestCapture, replayOutputCap } from "../lib/request-replay.ts";
 import { withoutSystemMessages } from "../lib/side-call.ts";
-import { followCoveredMessages } from "../lib/covered-messages.ts";
+import { followCoveredMessages } from "./covered-messages.ts";
 import { LEDGER_SENT_CHANNEL, type LedgerSent } from "../lib/ledger/plan.ts";
 import { claudeCodeCut, type CutEntry, doomedMessages } from "./cut.ts";
 import { fitToBudget, replayFits, withoutUsage } from "./fit.ts";
-import { withoutThinking } from "./kept-thinking.ts";
+import { withoutThinking } from "../lib/request/kept-thinking.ts";
 import { COMPACTION_MAX_TOKENS, extractSummary } from "./prompt.ts";
 import type { CompactionText, KeptTail, KeptTailLandmark } from "./text.ts";
 import { requireText } from "../lib/profile.ts";

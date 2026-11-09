@@ -3,7 +3,7 @@
  * 200 ms after the session's first provider request and defers it, so the tool
  * arrives mid-session the way a late MCP server's tools do. tool-search then
  * announces it, as a reference-form `tool_addition` on a model that takes one
- * (lib/tool-additions.ts) and as the deferred-tool addendum elsewhere.
+ * (tool-search/tool-additions.ts) and as the deferred-tool addendum elsewhere.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { withoutKeptThinking, withoutThinking } from "../../extensions/compaction/kept-thinking.ts";
+import { withoutKeptThinking, withoutThinking } from "../../extensions/lib/request/kept-thinking.ts";
 
 const thinking = { type: "thinking", thinking: "plan", thinkingSignature: "sig" };
 const redacted = { type: "thinking", thinking: "", thinkingSignature: "opaque", redacted: true };

@@ -8,7 +8,7 @@
  * base too.
  */
 
-import type { CcHookEvent, HookBlock } from "./protocol.ts";
+import type { CcHookEvent, HookBlock } from "../lib/rules/hook-protocol.ts";
 
 export interface HooksText {
 	/** A hook's added context as the model reads it; the caller wraps it in a system reminder. */

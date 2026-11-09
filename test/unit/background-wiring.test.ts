@@ -35,10 +35,10 @@ vi.mock("../../extensions/lib/pi-version.ts", async (importOriginal) => {
 	return { ...actual, piFiresBeforeAgentStartForCustomRuns: (version: string | undefined) => piModel.customRunsFireBeforeAgentStart ?? actual.piFiresBeforeAgentStartForCustomRuns(version) };
 });
 import backgroundExtension from "../../extensions/background/index.ts";
-import { RECURRING_MAX_AGE_DAYS } from "../../extensions/background/cron.ts";
-import { STORED_OUTPUT_CAP } from "../../extensions/bash/background.ts";
+import { RECURRING_MAX_AGE_DAYS } from "../../extensions/lib/agents/cron.ts";
+import { STORED_OUTPUT_CAP } from "../../extensions/lib/shell-run/bash-background.ts";
 import { MONITOR_BATCH_MAX_LINES } from "../../extensions/background/monitor-batch.ts";
-import { TASK_REGISTER_CHANNEL } from "../../extensions/background/registry.ts";
+import { TASK_REGISTER_CHANNEL } from "../../extensions/lib/agents/task-registry.ts";
 import { DEFAULT_COALESCE_MS, escapeTaskText, monitorEndedSummary, monitorEventSummary, NOTIFICATION_ID_KEY, oneShotNote } from "../../extensions/lib/notifications.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
 import { SESSION_WORK_CHANNEL, type SessionWorkQuery } from "../../extensions/lib/session-work.ts";

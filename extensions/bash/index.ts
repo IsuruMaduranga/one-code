@@ -28,10 +28,10 @@ import { perCwd } from "../lib/per-cwd.ts";
 import { bashSpawn, piShellEnv, withChildProcessEnv } from "../lib/shell-spawn.ts";
 import { registerShellTool } from "../lib/shell-tool.ts";
 import { type DescriptionForm, followDescriptionForm } from "../lib/tool-variants.ts";
-import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../permissions/modes.ts";
+import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../lib/rules/modes.ts";
 import type { ShellParams } from "../lib/shell-text.ts";
 import { requireText } from "../lib/profile.ts";
-import { bashGuardReason } from "./guards.ts";
+import { bashGuardReason } from "../lib/shell/bash-guards.ts";
 
 /** The tool's parameters, described in the profile's words. */
 const bashParams = (d: ShellParams) =>

@@ -7,7 +7,7 @@ import {
 	toolSearchLoads,
 } from "../../extensions/lib/deferred.ts";
 import { type Item, real, toolsItem as headWith } from "./helpers/responses-fixture.ts";
-import { totalTokensBlock } from "../../extensions/context-budget/budget.ts";
+import { totalTokensBlock } from "../../extensions/lib/context/budget.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
 
 const words = requireText("toolSearch");

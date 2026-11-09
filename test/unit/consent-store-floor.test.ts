@@ -8,13 +8,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { safetyControlWrite, safetyFloorReason } from "../../extensions/auto-mode/safety-floor.ts";
+import { safetyControlWrite, safetyFloorReason } from "../../extensions/permissions/auto-mode/safety-floor.ts";
 import { consentStorePath, consentStorePaths } from "../../extensions/lib/consent-stores.ts";
 import { forwardSlashes } from "../../extensions/lib/paths.ts";
 import { approvalStorePath as hooksStore } from "../../extensions/hooks/trust.ts";
 import { lspTrustStorePath } from "../../extensions/lsp/trust.ts";
 import { approvalStorePath as mcpStore } from "../../extensions/mcp/trust.ts";
-import { projectAllowStorePath } from "../../extensions/permissions/project-trust.ts";
+import { projectAllowStorePath } from "../../extensions/lib/consent/project-trust.ts";
 import { brand, envName } from "../../extensions/lib/brand.mjs";
 import { requireText } from "../../extensions/lib/profile.ts";
 

@@ -17,7 +17,7 @@ import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
 import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
 import { shellQuote } from "../../extensions/lib/shell-quote.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
-import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts";
+import { PERMISSION_STATUS_CHANNEL } from "../../extensions/lib/rules/modes.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { brand, envName } from "../../extensions/lib/brand.mjs";
 

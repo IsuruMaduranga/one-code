@@ -4,9 +4,9 @@
  * now in-process — see runner.ts.)
  */
 
-import type { ChildAction } from "../auto-mode/actions.ts";
+import type { ChildAction } from "../lib/rules/auto-mode-actions.ts";
 import type { FireConversation } from "../lib/agent-cron.ts";
-import type { UsageTotals } from "./usage.ts";
+import type { UsageTotals } from "../lib/agents/usage.ts";
 import { subagentWords } from "./words.ts";
 
 export const OUTPUT_CAP = 50_000;
@@ -42,7 +42,7 @@ export interface ChildOutcome {
 	/**
 	 * What the child actually did, names and short subjects only. Auto mode
 	 * reviews this when the child returns, to catch a sequence whose individual
-	 * steps each passed. Never carries tool output — see auto-mode/actions.ts.
+	 * steps each passed. Never carries tool output — see lib/rules/auto-mode-actions.ts.
 	 */
 	actions: ChildAction[];
 }

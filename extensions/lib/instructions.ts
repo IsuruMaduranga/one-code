@@ -18,7 +18,7 @@
  *
  * Every reader goes through `openInstructions`, so the agent's first message,
  * a read's nested files, the classifier, /memory, /doctor and the startup
- * banner judge the same files. Rendering is lib/claude-context.ts.
+ * banner judge the same files. Rendering is claude-context/claude-context.ts.
  *
  * Pure: no pi imports.
  */

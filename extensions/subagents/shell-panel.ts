@@ -12,7 +12,7 @@
  * owns layout and the focus reducer only.
  */
 
-import type { BackgroundTask } from "../background/registry.ts";
+import type { BackgroundTask } from "../lib/agents/task-registry.ts";
 import { countNoun, cutPlainText as cut } from "../lib/tui-render.ts";
 import type { StripKey } from "./panel-keys.ts";
 import { type Paint, STRIP_LINGER_MS } from "./panel-render.ts";

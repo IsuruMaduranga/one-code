@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import claudeContextExtension from "../../extensions/claude-context/index.ts";
-import { contextBlockFacts, contextFingerprints, FACT_KEYS, gitFingerprint, instructionFacts, resumeFactsNotice } from "../../extensions/lib/context-facts.ts";
+import { contextBlockFacts, contextFingerprints, FACT_KEYS, gitFingerprint, instructionFacts, resumeFactsNotice } from "../../extensions/claude-context/context-facts.ts";
 import { GIT_SNAPSHOT_OWNER_CHANNEL } from "../../extensions/lib/git-status.ts";
 import { toldOf } from "../../extensions/lib/ledger/fold.ts";
 import type { ToldFact } from "../../extensions/lib/ledger/records.ts";

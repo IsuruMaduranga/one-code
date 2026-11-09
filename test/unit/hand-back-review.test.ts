@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../extensions/auto-mode/actions.ts";
+import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../extensions/lib/rules/auto-mode-actions.ts";
 import { withReview } from "../../extensions/lib/notifications.ts";
 import { awaitHandBackReview, handBackReviewTimeoutVerdict } from "../../extensions/subagents/hand-back-review.ts";
 

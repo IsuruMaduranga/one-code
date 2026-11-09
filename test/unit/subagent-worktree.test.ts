@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanupWorktree, createWorktree, keptWorktreeNote, type Worktree } from "../../extensions/subagents/worktree.ts";
+import { cleanupWorktree, createWorktree, keptWorktreeNote, type Worktree } from "../../extensions/lib/agents/agent-worktree.ts";
 import { releaseWorktreeIsolation, worktreeIsolationFor } from "../../extensions/lib/worktree-isolation.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
 

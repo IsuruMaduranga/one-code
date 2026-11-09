@@ -20,8 +20,8 @@
 import { feature } from "../lib/feature.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { linesComponent, safeThemePaint } from "../lib/tui-render.ts";
-import { formatModel, isRealModel } from "../permissions/modes.ts";
-import { ULTRACODE_STATUS_KEY } from "../effort/slider.ts";
+import { formatModel, isRealModel } from "../lib/rules/modes.ts";
+import { ULTRACODE_STATUS_KEY } from "../lib/ui/effort-slider.ts";
 import { USAGE_CHANNEL } from "../lib/usage-bus.ts";
 import { buildFooterLines, computeMainUsage, footerLocation, type FooterData } from "./footer-line.ts";
 import { WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";

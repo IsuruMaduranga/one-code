@@ -4,7 +4,7 @@
  * gate) and the profile words what the model hears: why a call was refused,
  * a mode change, auto mode's standing note. Prompts, panels and
  * notifications are the user's and stay in the base. The classifier's own
- * reasons are auto mode's words (auto-mode/text.ts); the user's denial is
+ * reasons are auto mode's words (permissions/auto-mode/text.ts); the user's denial is
  * the shared tool-result text (lib/tool-results-text.ts). Deep modules reach
  * the words through `words.ts`.
  */

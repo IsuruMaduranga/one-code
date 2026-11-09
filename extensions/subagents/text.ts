@@ -11,7 +11,7 @@
  */
 
 import type { DescriptionForm } from "../lib/tool-variants.ts";
-import type { CheckoutProgram } from "../auto-mode/git-checkout-programs.ts";
+import type { CheckoutProgram } from "../lib/shell/git-checkout-programs.ts";
 import type { GuideInput } from "./guide-agent.ts";
 
 /** What an agent may use, as its catalog row says. */

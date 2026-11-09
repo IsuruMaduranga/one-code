@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readJsonFile, writeJsonAtomic } from "../../extensions/lib/atomic-write.ts";
 import { brand } from "../../extensions/lib/brand.mjs";
-import { readFavorites, toggleFavorite } from "../../extensions/lib/favorites.ts";
+import { readFavorites, toggleFavorite } from "../../extensions/plugins/favorites.ts";
 import { readOverrides, setOverride } from "../../extensions/lib/plugin-overrides.ts";
 import { pluginRoot } from "../../extensions/lib/plugin-root.ts";
 import { isSkillEnabled, readSkillStates, setSkillOverride, skillOverrideKey } from "../../extensions/lib/skill-overrides.ts";
@@ -134,7 +134,7 @@ describe("write-boundary invariant", () => {
 			"extensions/lib/plugin-overrides.ts",
 			"extensions/lib/skill-overrides.ts",
 			"extensions/lib/usage-tracker.ts",
-			"extensions/lib/favorites.ts",
+			"extensions/plugins/favorites.ts",
 			"extensions/plugins/marketplace/registry.ts",
 			"extensions/plugins/marketplace/git.ts",
 			"extensions/plugins/marketplace/sync.ts",

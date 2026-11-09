@@ -17,7 +17,7 @@
 
 import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
-import { isWritingTool, pathArgument } from "../auto-mode/paths.ts";
+import { isWritingTool, pathArgument } from "../lib/shell/paths.ts";
 
 /**
  * Reading the whole file twice per edit is fine for source files and wrong for
@@ -35,7 +35,7 @@ export type FileSnapshot = { kind: "content"; value: string } | { kind: "stamp";
 
 /**
  * The absolute path a file tool is acting on, or undefined for any other tool.
- * The tool set and the `path`/`file_path` field names come from `auto-mode/paths.ts`,
+ * The tool set and the `path`/`file_path` field names come from `lib/shell/paths.ts`,
  * the one place that knows them, so a new writing tool is added once.
  */
 export function fileToolTarget(toolName: string, input: unknown, cwd: string): string | undefined {

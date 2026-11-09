@@ -9,8 +9,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Type } from "typebox";
 
 const blocking = vi.hoisted(() => ({ calls: [] as Array<{ id: string; timeoutSeconds?: number }>, timedOut: false }));
-vi.mock("../../extensions/bash/background.ts", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("../../extensions/bash/background.ts")>();
+vi.mock("../../extensions/lib/shell-run/bash-background.ts", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../extensions/lib/shell-run/bash-background.ts")>();
 	return {
 		...actual,
 		runBackgroundBashBlocking: async (options: { id: string; timeoutSeconds?: number }) => {

@@ -1,0 +1,251 @@
+/**
+ * `/auto-mode setup` — the impure half: gathering facts (exec/fs) and the
+ * drafting model call. Parsing, prompts, and validation live in setup.ts; UI
+ * wiring in extensions/permissions/index.ts.
+ *
+ * Gathering is best-effort probe-by-probe: any probe that fails lands in
+ * `gatherNotes` instead of the draft silently pretending it ran (the drafting
+ * prompt's evidence rules key off those notes). The model call mirrors the
+ * classifier's fail-loud shape — no reasoning/temperature, hard timeout, and a
+ * parse failure throws rather than persisting a half-read draft — but tries
+ * the SESSION model first: drafting wants the most capable model available,
+ * where the per-call classifier wants small-and-contained.
+ */
+
+import { execFile } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { basename, join } from "node:path";
+import type { Api, Model } from "@earendil-works/pi-ai";
+import { completeSimple } from "@earendil-works/pi-ai/compat";
+import { readSettingsFile } from "../../lib/claude-settings.ts";
+import { withReasoningFallback } from "../../lib/model-policy.ts";
+import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { type AutoModeConfig, autoModeSettingsFiles } from "../../lib/rules/auto-mode-config.ts";
+import { isBorrowedUserFile } from "../../lib/claude-settings.ts";
+import { classifierCandidates, replyText, withAuthBaseUrl } from "../../lib/models/classifier-model.ts";
+import { autoModeSetupText, buildSetupPrompt, parseGitRemotes, redactSecrets, type SetupDraft, parseSetupDraft, type SetupFacts } from "./setup.ts";
+import { HARNESS_GIT_CONFIG } from "../../lib/git.ts";
+import { instructionTargets } from "../../lib/instructions.ts";
+
+const PROBE_TIMEOUT_MS = 10_000;
+/** Drafting reads a big fact dump and writes a full slot list — give it room. */
+const DRAFT_TIMEOUT_MS = 120_000;
+const DRAFT_MAX_TOKENS = 8192;
+const CLAUDE_MD_LIMIT = 4_000;
+const HISTORY_LINES = 200;
+
+/** The profile's notes on facts that could not be gathered. */
+const setupNotes = () => autoModeSetupText().notes;
+
+/** One probe: run a command, return trimmed stdout, or undefined on any failure. */
+function probe(cmd: string, args: string[], cwd: string, notes: string[], what: string): Promise<string | undefined> {
+	return new Promise((resolve) => {
+		execFile(cmd, args, { cwd, timeout: PROBE_TIMEOUT_MS, maxBuffer: 1024 * 1024 }, (error, stdout) => {
+			if (error) {
+				notes.push(setupNotes().probeFailed(what, cmd, error.message.split("\n")[0]));
+				resolve(undefined);
+			} else {
+				resolve(stdout.trim());
+			}
+		});
+	});
+}
+
+/**
+ * Read a file if it exists, truncated to `limit`. A file that exists but
+ * cannot be read is NOT the same as no file: it lands in `notes` so the
+ * drafting prompt's evidence rules see "present but unreadable" rather than
+ * silently treating it as absent.
+ */
+const readIfPresent = (path: string, limit: number, notes: string[], what: string): string | undefined => {
+	try {
+		if (!existsSync(path)) return undefined;
+		const text = readFileSync(path, "utf-8");
+		return text.length > limit ? `${text.slice(0, limit)}\n…[truncated]` : text;
+	} catch (error) {
+		notes.push(setupNotes().unreadable(what, (error as Error).message.split("\n")[0]));
+		return undefined;
+	}
+};
+
+export interface GatherOptions {
+	cwd: string;
+	home: string;
+	username: string;
+	/** The user's answer to the usage question, verbatim. */
+	usage: string;
+	includeShellHistory: boolean;
+}
+
+export async function gatherFacts(options: GatherOptions): Promise<SetupFacts> {
+	const { cwd, home } = options;
+	const notes: string[] = [];
+
+	const gitRoot = await probe("git", [...HARNESS_GIT_CONFIG, ...["rev-parse", "--show-toplevel"]], cwd, notes, "git root");
+	// The three follow-ups depend only on gitRoot, not on each other — run them
+	// concurrently so a slow `gh` (network) does not stack on the local git calls.
+	const [remotesRaw, branch, ghRaw] = gitRoot
+		? await Promise.all([
+				probe("git", [...HARNESS_GIT_CONFIG, ...["remote", "-v"]], cwd, notes, "git remotes"),
+				probe("git", [...HARNESS_GIT_CONFIG, ...["branch", "--show-current"]], cwd, notes, "current branch"),
+				// gh gives visibility/default branch for the repo the cwd is in; treat
+				// its absence as "unknown", never as "private".
+				probe("gh", ["repo", "view", "--json", "visibility,nameWithOwner,defaultBranchRef"], cwd, notes, "repository visibility (gh)"),
+			])
+		: [undefined, undefined, undefined];
+
+	let repoVisibility: string | undefined;
+	let repoNameWithOwner: string | undefined;
+	let defaultBranch: string | undefined;
+	if (ghRaw) {
+		try {
+			const parsed = JSON.parse(ghRaw) as {
+				visibility?: string;
+				nameWithOwner?: string;
+				defaultBranchRef?: { name?: string };
+			};
+			repoVisibility = parsed.visibility;
+			repoNameWithOwner = parsed.nameWithOwner;
+			defaultBranch = parsed.defaultBranchRef?.name;
+		} catch {
+			notes.push(setupNotes().visibilityUnknown);
+		}
+	}
+
+	let shellHistory: string[] | undefined;
+	if (options.includeShellHistory) {
+		const histFile = [process.env.HISTFILE, join(home, ".zsh_history"), join(home, ".bash_history")]
+			.filter((path): path is string => !!path)
+			.find((path) => existsSync(path));
+		if (histFile) {
+			const raw = readIfPresent(histFile, 1024 * 1024, notes, "shell history") ?? "";
+			shellHistory = raw
+				.split("\n")
+				.slice(-HISTORY_LINES)
+				// zsh extended history stamps "": 1699999999:0;cmd" — keep the command half.
+				.map((line) => redactSecrets(line.replace(/^:\s*\d+:\d+;/, "").trim()))
+				.filter(Boolean);
+		} else {
+			notes.push(setupNotes().noShellHistory);
+		}
+	} else {
+		notes.push(setupNotes().historyDeclined);
+	}
+
+	// User-scope permissions.allow — audit input, and evidence for carve-outs. Both
+	// the borrowed `.claude` file (read-only) and One Code's own file are gathered:
+	// a broad rule in either bypasses the classifier, and the audit later splits
+	// them (One Code's are removable; Claude Code's it can only warn about).
+	// Without One Code's provider (independent mode) only One Code's file is read.
+	const permissionsAllow: string[] = [];
+	for (const source of autoModeSettingsFiles(home).filter((file) => file.scope === "user")) {
+		const { path } = source;
+		const file = readSettingsFile(path) as { permissions?: { allow?: unknown } } | undefined;
+		// Present-but-unreadable is not the same as absent (readIfPresent's rule):
+		// a malformed `.claude` file must land in notes so the drafting evidence
+		// sees "present but unreadable", not silently "no broad rules here".
+		if (file === undefined && isBorrowedUserFile(source) && existsSync(path)) {
+			notes.push(setupNotes().allowUnreadable);
+			continue;
+		}
+		const allow = file?.permissions?.allow;
+		if (Array.isArray(allow)) permissionsAllow.push(...allow.filter((entry): entry is string => typeof entry === "string"));
+	}
+
+	// The instruction files a user writes (CLAUDE.md with One Code's provider
+	// on; the project's AGENTS.md and the global ONECODE.md without it).
+	const targets = instructionTargets(home);
+	const instructions = { project: targets.project, global: targets.user };
+
+	return {
+		cwd,
+		username: options.username,
+		usage: options.usage,
+		gitRoot: gitRoot || undefined,
+		remotes: remotesRaw ? parseGitRemotes(remotesRaw) : [],
+		currentBranch: branch || undefined,
+		repoVisibility,
+		repoNameWithOwner,
+		defaultBranch,
+		claudeMdProject: readIfPresent(join(gitRoot || cwd, instructions.project), CLAUDE_MD_LIMIT, notes, `project ${instructions.project}`),
+		claudeMdGlobal: instructions.global ? readIfPresent(instructions.global, CLAUDE_MD_LIMIT, notes, `global ${basename(instructions.global)}`) : undefined,
+		shellHistory,
+		permissionsAllow,
+		gatherNotes: notes,
+	};
+}
+
+export interface DraftDeps {
+	registry: ModelRegistry;
+	sessionModel: Model<Api> | undefined;
+	config: AutoModeConfig;
+	defaultEnvironment: string[];
+	signal?: AbortSignal;
+	/** Surfaces classifier candidate-chain notices to the user. */
+	onNotice?: (message: string, level: "info" | "warning") => void;
+	/** Reports the drafting call's usage to the all-in footer cost. */
+	onUsage?: (usage: unknown) => void;
+}
+
+/**
+ * Draft the setup with the most capable model reachable: the session model
+ * first, then the classifier candidate chain. Throws on total failure or an
+ * unusable draft — the wizard has a user in front of it; nothing here may
+ * persist silently wrong.
+ */
+export async function draftSetup(facts: SetupFacts, deps: DraftDeps): Promise<SetupDraft> {
+	const built = classifierCandidates({
+		available: deps.registry.getAvailable(),
+		sessionModel: deps.sessionModel,
+	});
+	// Surface the same candidate-chain notices as real gating.
+	for (const notice of built.notices) deps.onNotice?.(notice.text, notice.level);
+	const chain = built.candidates.map((entry) => entry.model);
+	const models: Model<Api>[] = [];
+	for (const model of deps.sessionModel ? [deps.sessionModel, ...chain] : chain) {
+		if (!models.some((seen) => seen.provider === model.provider && seen.id === model.id)) models.push(model);
+	}
+	if (models.length === 0) throw new Error("no model is available to draft the setup");
+
+	const { system, user } = buildSetupPrompt(facts, deps.defaultEnvironment);
+	let lastError = "";
+	for (const model of models) {
+		const auth = await deps.registry.getApiKeyAndHeaders(model);
+		if (!auth.ok) {
+			lastError = auth.error;
+			continue;
+		}
+		const resolved = withAuthBaseUrl(model, auth);
+		// Thinking stays off unless the model cannot disable it (withReasoningFallback
+		// sends a level up front for catalog-marked models and retries on the 400 for
+		// the rest). A rare one-off, so no cross-run memo.
+		const reply = await withReasoningFallback(model, (reasoning) => {
+			const timeout = AbortSignal.timeout(DRAFT_TIMEOUT_MS);
+			return completeSimple(
+				resolved,
+				{ systemPrompt: system, messages: [{ role: "user", content: user, timestamp: Date.now() }] },
+				{
+					apiKey: auth.apiKey,
+					headers: auth.headers,
+					env: auth.env,
+					signal: deps.signal ? AbortSignal.any([deps.signal, timeout]) : timeout,
+					maxTokens: DRAFT_MAX_TOKENS,
+					...(reasoning ? { reasoning } : {}),
+				},
+			);
+		}, undefined, deps.onUsage);
+		if (reply.stopReason === "error" || reply.stopReason === "aborted") {
+			if (deps.signal?.aborted) throw new Error("setup drafting was cancelled");
+			lastError = reply.errorMessage ?? reply.stopReason;
+			continue; // a dead model steps to the next candidate; a bad draft does not
+		}
+		if (reply.stopReason === "length") {
+			lastError = "draft truncated at maxTokens";
+			continue;
+		}
+		// Parse errors are NOT stepped past: the model responded, its output is
+		// unusable, and retrying a different model would hide a prompt bug.
+		return parseSetupDraft(replyText(reply), deps.defaultEnvironment);
+	}
+	throw new Error(`no model could draft the setup (last error: ${lastError})`);
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BackgroundRegistry, type BackgroundTask, generateTaskId } from "../../extensions/background/registry.ts";
+import { BackgroundRegistry, type BackgroundTask, generateTaskId } from "../../extensions/lib/agents/task-registry.ts";
 import { clampDelaySeconds } from "../../extensions/background/wakeup.ts";
 
 function makeTask(id: string, status: BackgroundTask["status"] = "running"): BackgroundTask & { stopped: boolean } {

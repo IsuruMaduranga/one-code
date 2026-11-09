@@ -4,7 +4,7 @@
  * as the parent applies it to its own calls; fail-open without a bridge.
  */
 import { describe, expect, it } from "vitest";
-import type { ChildHookCall, ChildHookResult, HookBridge } from "../../extensions/hooks/subagent-bridge.ts";
+import type { ChildHookCall, ChildHookResult, HookBridge } from "../../extensions/lib/agents/hook-bridge.ts";
 import { hookGateFactory } from "../../extensions/lib/hook-gate.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";

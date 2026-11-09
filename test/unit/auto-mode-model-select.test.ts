@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { classifierCandidates, describeCandidate, isModelUnavailableError } from "../../extensions/auto-mode/model-select.ts";
+import { classifierCandidates, describeCandidate, isModelUnavailableError } from "../../extensions/lib/models/classifier-model.ts";
 import { CLASSIFIER_CALL_TOKENS, classifierCallCost } from "../../extensions/lib/model-policy.ts";
 import { intrinsicTier } from "../../extensions/lib/model-tier.ts";
 import { type FixtureModel, pinCatalog } from "./catalog-fixture.ts";

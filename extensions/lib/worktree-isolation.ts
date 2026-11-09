@@ -2,13 +2,13 @@
  * Worktree isolation for in-process agent runs (`isolation: "worktree"` on the
  * Agent tool and workflow `agent()` calls): a registry of the live isolation
  * worktrees, and the inline-extension guard that applies the same git-isolation
- * bash guard an `enter_worktree` session gets (extensions/worktree/guards.ts).
+ * bash guard an `enter_worktree` session gets (extensions/lib/rules/worktree-guards.ts).
  *
  * The registry exists because the association can only resolve at call time:
  * these worktrees live in tmpdirs (not statically recognizable paths), and the
  * guard judges each call's `ctx.cwd`, not the cwd its child's loader was built
  * with (one loader per child session, lib/agent-loader.ts openChildSession).
- * createWorktree/cleanupWorktree (subagents/worktree.ts) register and release
+ * createWorktree/cleanupWorktree (lib/agents/agent-worktree.ts) register and release
  * entries; reconstructed run records re-register kept worktrees after a
  * process restart (subagents/index.ts); the worktree the main session entered
  * with `enter_worktree` is registered too (`followEnteredWorktree`), so a child
@@ -27,9 +27,9 @@ import { isAbsolute, join, relative } from "node:path";
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import { findProjectRoot, repositoryWorktrees } from "./git.ts";
 import { WORKTREE_CHANNEL, type WorktreeLocation } from "./worktree-channel.ts";
-import { isWithin, isWritingTool, pathArgument, resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
-import { analyzeShellCommand } from "../auto-mode/shell-analysis.ts";
-import { namesGit, unlistedWorktreesReason, worktreeBashGuardReason } from "../worktree/guards.ts";
+import { isWithin, isWritingTool, pathArgument, resolveForContainment, toAbsolute } from "./shell/paths.ts";
+import { analyzeShellCommand } from "./shell/shell-analysis.ts";
+import { namesGit, unlistedWorktreesReason, worktreeBashGuardReason } from "./rules/worktree-guards.ts";
 import type { WorktreeGuardRefusal } from "../worktree/text.ts";
 import { requireText } from "./profile.ts";
 
@@ -158,7 +158,7 @@ export function worktreeWriteGuardReason(input: {
  * may need to look at what it inherited. Interpreters (`sed -i`, `perl`,
  * `python`) are not modelled as writers there, so a write hidden in one reaches
  * the permission gate and, in auto mode, the classifier instead — steering, not
- * a sandbox (same contract as extensions/worktree/guards.ts). Pure; exported for tests.
+ * a sandbox (same contract as extensions/lib/rules/worktree-guards.ts). Pure; exported for tests.
  */
 export function worktreeBashWriteGuardReason(input: { command: string; cwd: string; isolation: WorktreeIsolation; home?: string }): WorktreeGuardRefusal | undefined {
 	const home = input.home ?? homedir();
@@ -177,7 +177,7 @@ export function worktreeBashWriteGuardReason(input: { command: string; cwd: stri
  * guard-before-permissions layering the main session gets from extension load
  * order (worktree before permissions, findings §3). buildAgentLoader places it
  * first in `extensionFactories`; keep it there. Three checks: bash git operations
- * must target the worktree (extensions/worktree/guards.ts), and writes — by file
+ * must target the worktree (extensions/lib/rules/worktree-guards.ts), and writes — by file
  * tool or by shell command — must land in it.
  */
 export function worktreeGuardFactory(cwd: string): InlineExtension {

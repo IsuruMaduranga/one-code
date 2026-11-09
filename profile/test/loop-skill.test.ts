@@ -14,7 +14,7 @@ import {
 	resolveLoopFire,
 } from "../../extensions/background/loop-fire.ts";
 import { loopPersistent, loopSkillForm } from "../../extensions/background/loop-skill.ts";
-import { RECURRING_MAX_AGE_DAYS } from "../../extensions/background/cron.ts";
+import { RECURRING_MAX_AGE_DAYS } from "../../extensions/lib/agents/cron.ts";
 import type { LoopFile } from "../../extensions/background/text.ts";
 import { loop } from "../text/background/loop.ts";
 import { AUTONOMOUS_PREAMBLE, AUTONOMOUS_PREAMBLE_PERSISTENT } from "../text/background/loop-preamble.ts";

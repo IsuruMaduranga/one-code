@@ -19,8 +19,8 @@ const PROTECTIVE: Record<string, string> = {
 	"lib/paths.ts": "defines the helpers the protective lists and the provider use",
 	"lib/claude-settings.ts": "protection: the user and managed settings paths the safety floor guards",
 	"lib/permission-gate.ts": "protection: ~/.claude stays protected and its secrets stay secret",
-	"permissions/protected-paths.ts": "protection: .claude stays a protected directory",
-	"auto-mode/safety-floor.ts": "protection: gate-control files stay on the floor",
+	"lib/rules/protected-paths.ts": "protection: .claude stays a protected directory",
+	"permissions/auto-mode/safety-floor.ts": "protection: gate-control files stay on the floor",
 };
 
 describe("Claude Code locations", () => {

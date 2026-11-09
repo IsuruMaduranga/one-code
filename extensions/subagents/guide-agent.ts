@@ -13,7 +13,7 @@
  */
 
 import { brand } from "../lib/brand.mjs";
-import type { AgentDefinition } from "./agents.ts";
+import type { AgentDefinition } from "../lib/agents/agent-catalog.ts";
 import { subagentWords } from "./words.ts";
 
 export interface GuideInstall {

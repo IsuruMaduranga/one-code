@@ -9,7 +9,7 @@ import { powerShellSpawn } from "../../extensions/lib/shell-spawn.ts";
 import { sessionResultsDir } from "../../extensions/lib/persisted-output.ts";
 import { buildGate as buildGateHarness } from "./helpers/permission-gate-harness.ts";
 import { useRepositorySettings } from "./helpers/settings-files.ts";
-import { persistProjectAllowApproval } from "../../extensions/permissions/project-trust.ts";
+import { persistProjectAllowApproval } from "../../extensions/lib/consent/project-trust.ts";
 import { envName } from "../../extensions/lib/brand.mjs";
 import { stubHome } from "./helpers/home.ts";
 import { POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";

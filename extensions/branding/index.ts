@@ -37,8 +37,8 @@ import {
 	PERMISSION_STATUS_CHANNEL,
 	permissionModeDisplay,
 	type PermissionStatus,
-} from "../permissions/modes.ts";
-import { SUBAGENT_STATUS_CHANNEL, type SubagentStatus } from "../subagents/model-select.ts";
+} from "../lib/rules/modes.ts";
+import { SUBAGENT_STATUS_CHANNEL, type SubagentStatus } from "../lib/models/subagent-model.ts";
 import {
 	collectStartupSections,
 	quietStartupEnabled,

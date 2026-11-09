@@ -32,7 +32,7 @@ import {
 	SettingsManager,
 	VERSION as PI_VERSION,
 } from "@earendil-works/pi-coding-agent";
-import { loadAutoModeConfig, persistClassifierModel } from "../auto-mode/config.ts";
+import { loadAutoModeConfig, persistClassifierModel } from "../lib/rules/auto-mode-config.ts";
 import { catalogRefreshDue, readCatalogRefreshEnabled, refreshModelCatalog } from "../lib/model-catalog-data.ts";
 import { BUILTIN_PROVIDER_POLICIES } from "../lib/model-policy.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../lib/model-unusable.ts";
@@ -45,8 +45,8 @@ import { productProjectSettingsPath, productSettingsPath, SETTINGS_DISPLAY } fro
 import { productStateDir } from "../lib/paths.ts";
 import { CLASSIFIER_SETTING_CHANGED_CHANNEL, SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../lib/settings-channels.ts";
 import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
-import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../permissions/modes.ts";
-import { persistSubagentModel } from "../subagents/default-model.ts";
+import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../lib/rules/modes.ts";
+import { persistSubagentModel } from "../lib/models/subagent-default.ts";
 import { buildDoctorReport, productVersion } from "./build.ts";
 import { installKind, keepView, replacedBuiltinsView } from "./builtins.ts";
 import { requireText } from "../lib/profile.ts";
@@ -60,7 +60,7 @@ import { announceArgumentHint, extendingCompletions } from "../lib/argument-hint
 import { announceLocalCommand } from "../lib/local-command.ts";
 import { registeredMcpServers } from "../mcp/config.ts";
 import { sourceSwitchStatus, sourcesOff } from "../lib/sources.ts";
-import { promptCommandText } from "../skill/invoke.ts";
+import { promptCommandText } from "../lib/plugins/skill-invoke.ts";
 import { panelUi } from "../lib/panel-focus.ts";
 
 /** Rows the panel may take; the terminal's own height caps it (boundedDockHeight). */

@@ -1,6 +1,6 @@
 /**
  * Deterministic pre-execution guards for the powershell tool (pure) — the
- * PowerShell spelling of `bash/guards.ts`'s wait and interactive guards, on
+ * PowerShell spelling of `lib/shell/bash-guards.ts`'s wait and interactive guards, on
  * the same shared `leadingSleepReason` core. Steering, not security: the
  * permission gate and the auto-mode classifier still judge everything that
  * passes. A guard concludes only on a positive parse, so an unparseable line
@@ -15,10 +15,10 @@
  *   already forbids them; the guard makes the refusal instructive.
  */
 
-import { leadingSleepReason } from "../bash/guards.ts";
+import { leadingSleepReason } from "../lib/shell/bash-guards.ts";
 import { shellWords } from "../lib/shell-words.ts";
-import { gitSubcommand } from "../auto-mode/shell-analysis.ts";
-import { powershellStatements, statementCommand } from "../permissions/powershell-rules.ts";
+import { gitSubcommand } from "../lib/shell/shell-analysis.ts";
+import { powershellStatements, statementCommand } from "../lib/shell/powershell-rules.ts";
 
 /** Seconds a `Start-Sleep` statement provably lasts, or undefined when its argument is not a literal. */
 export function startSleepSeconds(statement: string): number | undefined {

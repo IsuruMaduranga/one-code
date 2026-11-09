@@ -14,8 +14,8 @@ import { basename } from "node:path";
 import { unwrapUserMessage } from "../lib/agent-view.ts";
 import { cutPlainText, firstNonEmptyLine } from "../lib/tui-render.ts";
 import { sanitizeDisplayText } from "../lib/terminal-text.ts";
-import { normalizeToolName } from "../permissions/matcher.ts";
-import { emptyUsage, sumUsage, type UsageTotals } from "./usage.ts";
+import { normalizeToolName } from "../lib/rules/matcher.ts";
+import { emptyUsage, sumUsage, type UsageTotals } from "../lib/agents/usage.ts";
 
 export type LiveStatus = "running" | "idle" | "done" | "failed" | "stopped";
 
@@ -97,7 +97,7 @@ export function deriveLabel(task: string, fallback: string): string {
 /**
  * A short present-tense activity from the latest tool call, Claude Code style
  * ("Reading tui-render.ts", "Running tests", "Searching todo"). Tool names go
- * through the canonical CC↔pi alias table (permissions/matcher.ts), so both
+ * through the canonical CC↔pi alias table (lib/rules/matcher.ts), so both
  * spellings resolve without a second table here. Falls back to the first line
  * of the latest assistant text, then a generic "Working…".
  */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decide, extractSubject, parseRules, type PermissionMode } from "../../extensions/permissions/matcher.ts";
+import { decide, extractSubject, parseRules, type PermissionMode } from "../../extensions/lib/rules/matcher.ts";
 
 const request = { subagent_type: "explore", prompt: "Inspect the repository", description: "Inspect files" };
 const rules = (mode: PermissionMode, toolName: string, input: Record<string, unknown>, deny: string[], ask: string[] = []) => decide({

@@ -8,7 +8,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import hooksExtension from "../../extensions/hooks/index.ts";
-import { SUBAGENT_HOOK_CHANNEL, type HookBridge } from "../../extensions/hooks/subagent-bridge.ts";
+import { SUBAGENT_HOOK_CHANNEL, type HookBridge } from "../../extensions/lib/agents/hook-bridge.ts";
 import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";

@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { CLASSIFIER_USER_INPUT, classifierHistory, userMessageDigest } from "../../extensions/auto-mode/history.ts";
+import { CLASSIFIER_USER_INPUT, classifierHistory, userMessageDigest } from "../../extensions/permissions/auto-mode/history.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 

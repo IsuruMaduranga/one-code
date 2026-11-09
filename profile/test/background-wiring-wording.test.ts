@@ -5,8 +5,8 @@
  */
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { RECURRING_MAX_AGE_DAYS as maxAgeDays } from "../../extensions/background/cron.ts";
-import { STORED_OUTPUT_CAP } from "../../extensions/bash/background.ts";
+import { RECURRING_MAX_AGE_DAYS as maxAgeDays } from "../../extensions/lib/agents/cron.ts";
+import { STORED_OUTPUT_CAP } from "../../extensions/lib/shell-run/bash-background.ts";
 import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
 import { background } from "../text/background/index.ts";
 import { notificationsText } from "../text/notifications/index.ts";

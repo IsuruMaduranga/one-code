@@ -14,7 +14,7 @@
  * slow or absent reviewer degrades to "report plus a note", never to a report
  * that waits forever.
  */
-import { SUBAGENT_ACTIONS_CHANNEL, type ChildAction, type SubagentActionsPayload } from "../auto-mode/actions.ts";
+import { SUBAGENT_ACTIONS_CHANNEL, type ChildAction, type SubagentActionsPayload } from "../lib/rules/auto-mode-actions.ts";
 import type { HandBackVerdict } from "../lib/notifications.ts";
 
 import { subagentWords } from "./words.ts";

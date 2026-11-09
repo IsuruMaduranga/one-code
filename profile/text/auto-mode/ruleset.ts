@@ -2,7 +2,7 @@
  * One Code's auto-mode classifier ruleset: Claude Code's classifier prompt,
  * split at the insertion points the base fills (the `## Environment` slot
  * lines, the three rule-list append points, the username, the user's
- * instruction file). The base assembles it (extensions/auto-mode/classifier-prompt.ts)
+ * instruction file). The base assembles it (extensions/permissions/auto-mode/classifier-prompt.ts)
  * so the payload differs from Claude Code's only at those points, the
  * transcript and our own additions (profile/text/auto-mode/classifier.ts;
  * working-docs/decisions/auto-mode.md).

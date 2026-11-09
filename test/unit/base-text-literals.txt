@@ -32,136 +32,6 @@ ask-user/widget.ts
 	"All questions answered — press Enter to submit."
 	"Some questions are unanswered — Enter jumps to the first one."
 
-auto-mode/classifier.ts
-	"Auto mode has no classifier left: ${…} refused the classifier's prompt as a possible usage-policy violation, and no other eligible model can screen calls.${…} "
-	"Calls are not judged and do not run. Switch to manual approval (${…} cycles permission modes), or choose another classifier with /auto-mode model <provider/id>."
-	"verdict truncated at maxTokens"
-	"Auto mode is screening calls with ${…}."
-	"[auto-mode] ${…} ${…} → verdict truncated at maxTokens\n"
-	"${…} cannot run with thinking disabled; the classifier now runs it at ${…} thinking."
-	"${…} refused the auto-mode classifier's prompt twice as a possible usage-policy violation, so auto mode screens calls with "
-	"${…} for the rest of this session${…}. "
-	", at about ${…} the cost per call"
-	"Choose another classifier with /auto-mode model <provider/id>."
-	"Auto mode cannot use ${…} as its classifier (${…}); trying another eligible model."
-
-auto-mode/config.ts
-	"${…}: invalid JSON, autoMode settings in it are ignored (${…})"
-	"${…}: autoMode.${…} must be an array of strings — ignored"
-	"${…}: autoMode.${…}[${…}] is not a non-empty string — dropped"
-	"${…}: autoMode.environment omits \"${…}\", so it REPLACES the built-in environment rather than extending it — built-in slot(s) now missing: ${…}"
-	"omits \"${…}\" — note the built-in rules still apply; these lists only append, never replace"
-	"${…}: autoMode.${…} must be a boolean — ignored"
-	"${…}: autoMode.classifierModel must be a \"provider/model-id\" string — ignored"
-	"${…}: autoMode must be an object — ignored"
-	"${…}: autoMode.classifierModel is ignored here — ${…} reads it from ${…} (set it with /auto-mode model)"
-
-auto-mode/model-select.ts
-	"autoMode.classifierModel ${…} is not an available model (unknown id, or no credentials for its provider); auto mode chooses automatically instead."
-	"autoMode.classifierModel ${…} was set for a different provider than this session (${…}); "
-	"a same-provider model screens calls instead. Re-set it with /auto-mode model on this session to use it here."
-	"autoMode.classifierModel ${…} is a different provider than this session (${…}): "
-	"it reads your messages and CLAUDE.md, so those go to that provider. It was set for this session, so it is used."
-	"Auto mode is screening calls with ${…}, this session's model, because its catalog context window is unknown and no alternate classifier can be verified to contain it."
-	"Auto mode is screening calls with ${…}, this session's model: ${…}'s model pairing table finds no smaller model of its vendor close enough in capability to screen for it."
-	"Auto mode is screening calls with ${…}, this session's model, because no cheaper same-provider/route model in its ${…} tier or above contains its ${…}-token catalog context window."
-	"${…} (paired with the session model in ${…}'s model pairing table)"
-	"${…} (cheapest model within ${…} in the session's tier or above that contains the session catalog context window)"
-
-auto-mode/pause.ts
-	"⚠ ${…} will automatically deny this request in ${…}, to avoid blocking progress on an unattended session"
-
-auto-mode/read-only-options.ts
-	"merge() only merges option tables; set '${…}' on the merged spec itself"
-	"passes ${…}, an option not known to be read-only"
-	"passes a value to ${…}, which takes none"
-	"passes ${…}, an option not known to be read-only"
-	"passes the glob ${…}, which can expand past the ${…} operand(s) it may take and still only read"
-	"follows symbolic links while it recurses, so it can read outside the working directory"
-	"runs a jq program that reads the process environment"
-	"runs a jq program that loads modules from jq's search path"
-	"runs date with an operand, which sets the clock"
-	"runs printf with a %n conversion, which assigns a shell variable"
-	"uses find ${…}, which is not a known read-only primary"
-
-auto-mode/setup-run.ts
-	"no model is available to draft the setup"
-	"setup drafting was cancelled"
-	"draft truncated at maxTokens"
-	"no model could draft the setup (last error: ${…})"
-
-auto-mode/setup.ts
-	"draft JSON key \"${…}\" is not an array"
-	"the drafting model returned no JSON object"
-	"the drafting model returned malformed JSON (${…})"
-	"the drafting model's JSON is not an object"
-	"draft environment is missing built-in slot(s): ${…}"
-	"(none — this should not happen)"
-	"grants arbitrary code execution — matching commands never reach auto mode's checks"
-	"pre-approves a fresh agent loop — whatever the delegated agent does is unchecked"
-
-auto-mode/shell-analysis.ts
-	"reads through symbolic links inside it, which can read outside the working directory"
-	"passes git -c/--config-env, which can turn a read into code execution"
-	"runs git -C ${…}, which points outside the working directory"
-	"runs git ${…} ${…}, which points outside the working directory"
-	"passes git ${…}, which can point git at another repository or configuration"
-	"runs git ${…}, which is not a read-only subcommand"
-	"runs git ${…} with an operand and no --list, which creates a ref"
-	"runs git in a checkout that can run a program (${…}${…})"
-	"could not be parsed: ${…}"
-	"could not be parsed as bash, so nothing about it is known"
-	"writes to ${…}, which bash expands to a path this check cannot resolve"
-	"writes to ${…}, which could not be resolved to a real path"
-	"writes to ${…}, which is outside the working directory"
-	"writes to ${…}, a credential or secret path"
-	"writes to ${…}, whose contents execute later without further approval"
-	"writes to ${…}, a protected tooling or agent configuration path"
-	"which bash expands to a directory outside what this check can see"
-	"a glob whose matches cannot be checked"
-	"reads ${…}, which resolves to a credential or secret path"
-	"which is outside the working directory"
-	"reads ${…} on stdin, which is a credential or secret path"
-	"redirects to or from a path an expansion computes, which cannot be resolved here"
-	"expands a parameter into the command's input, whose value is unknown here"
-	"references a shell special parameter ($1, $@, $$, …), whose value is unknown here"
-	"references environment variables, whose values are unknown here"
-	"sets ${…}, which can change what the command runs or reads"
-	"passes a command substitution's output to ${…}, and its words are unknown here"
-	"passes a <( ) pipe to ${…}, which is not a read-only command"
-	"runs env with no command, which prints the whole process environment"
-	"runs ${…} with no command to wrap"
-	"runs ${…}, a program named by its path, so its name says nothing about what it does"
-	"wraps the real command in ${…}, so ${…} is what actually runs"
-	"runs ${…}, which can reach the network"
-	"names ${…}, which is a credential or secret path"
-	"touches ${…}, whose contents execute later without further approval"
-	"changes directory to ${…}, so later paths in this command resolve elsewhere"
-	"passes the glob ${…}, which can expand to a filename starting with -, read as an option"
-	"runs ${…}, whose script can read and write files this check cannot see"
-	"runs ${…}, which modifies the filesystem"
-	"runs ${…} with the glob ${…} as its first operand, which ${…} does not read as a file, so the other matches go unchecked"
-	"runs ${…} on the glob ${…}, which could name a directory that ${…}"
-	"runs ${…}, which is not on the read-only allowlist"
-	"${…} ${…}, which is a working root, or is or holds a git repository or a protected, credential or execution-primitive path"
-	"copies or moves ${…}, a credential or secret path"
-	"${…} ${…} to ${…}, which puts files on a protected, credential or execution-primitive path"
-	"targets ${…}, a glob whose expansion cannot be checked"
-	"runs sort with -o/--output, which writes a file"
-
-auto-mode/shell-parse.ts
-	"runs commands in a ( … ) subshell"
-	"uses a for loop"
-	"uses a for loop"
-	"uses an if statement"
-	"uses a case statement"
-	"defines a shell function"
-	"declares or exports variables"
-	"uses brace expansion, whose expanded paths cannot be checked"
-	"uses $\"…\" locale quoting, whose translation this check cannot see"
-	"uses ${…}, which this check does not model"
-	"uses a $'…' escape (\\u, \\U or \\c?) whose meaning depends on the bash version"
-
 background/index.ts
 	"Starting a new session"
 	"with the previous session"
@@ -392,9 +262,6 @@ effort/settings.ts
 	"Set effort level to ${…} (${…}): ${…}"
 	"saved as your default for new sessions"
 
-effort/slider.ts
-	"←/→ or h/l adjust · Enter confirm · s for this session only · Esc cancel · shift+tab cycles the plain levels"
-
 file-tracker/results.ts
 	"EISDIR: illegal operation on a directory, read"
 
@@ -411,9 +278,6 @@ hooks/index.ts
 
 hooks/plugin-hooks.ts
 	"${…}: unreadable plugin hooks skipped (${…})"
-
-hooks/protocol.ts
-	"Hook exceeded its output limit; reduce stdout/stderr to at most ${…} bytes per stream."
 
 hooks/settings.ts
 	"${…}: \"hooks\" is not an object"
@@ -462,6 +326,15 @@ lib/claude-external-includes.ts
 	"  Yes covers those too, plus any this project adds later."
 	"This project's CLAUDE.md or .claude/rules imports files outside the current working directory. Never allow this for third-party repositories."
 	"Important: Only use ${…} with files you trust. Accessing untrusted files may pose security risks."
+
+lib/consent/project-trust.ts
+	"add ${…} workspace director${…}, whose files would be read without a prompt and, in accept-edits mode, edited without one:\n${…}"
+	"Trust this repository's permission settings?"
+	"Trust this repository's allow rules?"
+	"The current call ${…} and would run without a prompt"
+	"reads inside the workspace directory ${…}"
+	" (in auto mode, without the classifier). Whoever committed the file granted this, not you."
+	" Approval is remembered until these settings change; declining keeps them off for this session."
 
 lib/empty-tool-result.ts
 	"No files found matching pattern"
@@ -532,6 +405,18 @@ lib/model-tier.ts
 	"unpriced, not in the catalogs"
 	"not in the catalogs"
 
+lib/models/classifier-model.ts
+	"autoMode.classifierModel ${…} is not an available model (unknown id, or no credentials for its provider); auto mode chooses automatically instead."
+	"autoMode.classifierModel ${…} was set for a different provider than this session (${…}); "
+	"a same-provider model screens calls instead. Re-set it with /auto-mode model on this session to use it here."
+	"autoMode.classifierModel ${…} is a different provider than this session (${…}): "
+	"it reads your messages and CLAUDE.md, so those go to that provider. It was set for this session, so it is used."
+	"Auto mode is screening calls with ${…}, this session's model, because its catalog context window is unknown and no alternate classifier can be verified to contain it."
+	"Auto mode is screening calls with ${…}, this session's model: ${…}'s model pairing table finds no smaller model of its vendor close enough in capability to screen for it."
+	"Auto mode is screening calls with ${…}, this session's model, because no cheaper same-provider/route model in its ${…} tier or above contains its ${…}-token catalog context window."
+	"${…} (paired with the session model in ${…}'s model pairing table)"
+	"${…} (cheapest model within ${…} in the session's tier or above that contains the session catalog context window)"
+
 lib/newer-model.ts
 	"costs about the same"
 
@@ -541,14 +426,6 @@ lib/notifications.ts
 	"Session shut down before the command's user turn completed."
 	"Session shut down before the command's user turn completed."
 	"Command's user turn did not start within 30 seconds. Check model authentication and extension input hooks, then retry."
-
-lib/openrouter-generation.ts
-	"is corrupting tool calls for ${…}"
-	"An OpenRouter upstream provider ${…}; the provider could not be identified."
-	"The call was blocked and the turn stopped."
-	"The turn was stopped."
-	"The reply was cut off and the turn stopped."
-	"${…} ${…} Add the provider to compat.openRouterRouting.ignore for this model in pi's models.json (\"ignore\": ${…}), or switch models."
 
 lib/pi-version.ts
 	"${…} is tested against pi ${…}; you are running pi ${…}. "
@@ -586,6 +463,20 @@ lib/profile.ts
 lib/reminders.ts
 	"The conversation history before this point was compacted into the following summary:\n\n<summary>\n"
 
+lib/rules/auto-mode-config.ts
+	"${…}: invalid JSON, autoMode settings in it are ignored (${…})"
+	"${…}: autoMode.${…} must be an array of strings — ignored"
+	"${…}: autoMode.${…}[${…}] is not a non-empty string — dropped"
+	"${…}: autoMode.environment omits \"${…}\", so it REPLACES the built-in environment rather than extending it — built-in slot(s) now missing: ${…}"
+	"omits \"${…}\" — note the built-in rules still apply; these lists only append, never replace"
+	"${…}: autoMode.${…} must be a boolean — ignored"
+	"${…}: autoMode.classifierModel must be a \"provider/model-id\" string — ignored"
+	"${…}: autoMode must be an object — ignored"
+	"${…}: autoMode.classifierModel is ignored here — ${…} reads it from ${…} (set it with /auto-mode model)"
+
+lib/rules/hook-protocol.ts
+	"Hook exceeded its output limit; reduce stdout/stderr to at most ${…} bytes per stream."
+
 lib/scratchpad.ts
 	"it is a symlink"
 	"it is not a directory"
@@ -609,6 +500,143 @@ lib/shell-spawn.ts
 lib/shell-tool.ts
 	"Running in the background (task ${…}${…})"
 	"Running in the background (↓ to manage)"
+
+lib/shell/powershell-paths.ts
+	"a path outside the working directory"
+	"a credential or secret path"
+	"a credential or secret path"
+
+lib/shell/powershell-rules.ts
+	"PowerShell's own parse of the line is not available"
+
+lib/shell/powershell-tree.ts
+	"the line did not parse as a script"
+	"a param block, using statement or named block"
+	"an expression as a pipeline source, whose value this check cannot see"
+	"a script block this check cannot read"
+	"a script block this check cannot read"
+	"a script block with a param or named block"
+	"a script block that runs a command"
+	"a background job (`&`) inside a script block"
+	"a redirection inside a script block"
+	"a variable other than $_ in a script block"
+	"a static or computed member access"
+	"the -${…} operator in a script block"
+	"the ${…} operator in a script block"
+	"${…} in a script block"
+	"a command name computed at run time"
+	"a command name computed at run time"
+	"PATH has a relative entry, so `${…}` may resolve to another program where it runs"
+	"an argument to ${…} this check cannot read"
+	"${…} is not a switch this check clears for ${…}"
+	"`${…}` is not a read-only cmdlet"
+	"`${…}` is not a command this PowerShell knows"
+	"`${…}` is not a cmdlet this check clears here"
+	"PowerShell's parameter binder is not available"
+	"an argument PowerShell cannot bind to ${…}"
+	"-${…} is not a parameter this check clears for ${…}"
+	"-${…} given a value that is not $true or $false"
+	"-${…} given a value computed at run time"
+	"-${…}:$false is not a switch this check clears for ${…}"
+	"a redirection that writes a file"
+	"${…} this check does not model"
+	"PowerShell could not parse the line"
+	"`${…}` after a pipe reads the paths its input names"
+	"a recursive Get-ChildItem over a tree with a link in it, which Windows PowerShell 5.1 follows"
+	"Select-String after `${…}`, whose output can name any file"
+	"Select-String over a recursive Get-ChildItem, which reads through links inside the tree"
+	"Select-String over ${…}, a directory this check cannot resolve"
+	"Select-String over a directory with an entry outside the working directory"
+	"PowerShell could not parse the line"
+	"writes to ${…}, a wildcard whose matches this check does not judge"
+	"writes to ${…}, whose backtick escapes this check does not judge"
+	"writes to ${…}, a path this check cannot resolve"
+	"writes to ${…}, which is outside the working directory"
+	"writes to ${…}, a credential, execution-primitive or protected path"
+	"removes ${…}, which is a working root, or is or holds a git repository or a protected, credential or execution-primitive path"
+	"removes ${…} recursively, and a link inside it would be followed by Windows PowerShell 5.1"
+
+lib/shell/read-only-options.ts
+	"merge() only merges option tables; set '${…}' on the merged spec itself"
+	"passes ${…}, an option not known to be read-only"
+	"passes a value to ${…}, which takes none"
+	"passes ${…}, an option not known to be read-only"
+	"passes the glob ${…}, which can expand past the ${…} operand(s) it may take and still only read"
+	"follows symbolic links while it recurses, so it can read outside the working directory"
+	"runs a jq program that reads the process environment"
+	"runs a jq program that loads modules from jq's search path"
+	"runs date with an operand, which sets the clock"
+	"runs printf with a %n conversion, which assigns a shell variable"
+	"uses find ${…}, which is not a known read-only primary"
+
+lib/shell/shell-analysis.ts
+	"reads through symbolic links inside it, which can read outside the working directory"
+	"passes git -c/--config-env, which can turn a read into code execution"
+	"runs git -C ${…}, which points outside the working directory"
+	"runs git ${…} ${…}, which points outside the working directory"
+	"passes git ${…}, which can point git at another repository or configuration"
+	"runs git ${…}, which is not a read-only subcommand"
+	"runs git ${…} with an operand and no --list, which creates a ref"
+	"runs git in a checkout that can run a program (${…}${…})"
+	"could not be parsed: ${…}"
+	"could not be parsed as bash, so nothing about it is known"
+	"writes to ${…}, which bash expands to a path this check cannot resolve"
+	"writes to ${…}, which could not be resolved to a real path"
+	"writes to ${…}, which is outside the working directory"
+	"writes to ${…}, a credential or secret path"
+	"writes to ${…}, whose contents execute later without further approval"
+	"writes to ${…}, a protected tooling or agent configuration path"
+	"which bash expands to a directory outside what this check can see"
+	"a glob whose matches cannot be checked"
+	"reads ${…}, which resolves to a credential or secret path"
+	"which is outside the working directory"
+	"reads ${…} on stdin, which is a credential or secret path"
+	"redirects to or from a path an expansion computes, which cannot be resolved here"
+	"expands a parameter into the command's input, whose value is unknown here"
+	"references a shell special parameter ($1, $@, $$, …), whose value is unknown here"
+	"references environment variables, whose values are unknown here"
+	"sets ${…}, which can change what the command runs or reads"
+	"passes a command substitution's output to ${…}, and its words are unknown here"
+	"passes a <( ) pipe to ${…}, which is not a read-only command"
+	"runs env with no command, which prints the whole process environment"
+	"runs ${…} with no command to wrap"
+	"runs ${…}, a program named by its path, so its name says nothing about what it does"
+	"wraps the real command in ${…}, so ${…} is what actually runs"
+	"runs ${…}, which can reach the network"
+	"names ${…}, which is a credential or secret path"
+	"touches ${…}, whose contents execute later without further approval"
+	"changes directory to ${…}, so later paths in this command resolve elsewhere"
+	"passes the glob ${…}, which can expand to a filename starting with -, read as an option"
+	"runs ${…}, whose script can read and write files this check cannot see"
+	"runs ${…}, which modifies the filesystem"
+	"runs ${…} with the glob ${…} as its first operand, which ${…} does not read as a file, so the other matches go unchecked"
+	"runs ${…} on the glob ${…}, which could name a directory that ${…}"
+	"runs ${…}, which is not on the read-only allowlist"
+	"${…} ${…}, which is a working root, or is or holds a git repository or a protected, credential or execution-primitive path"
+	"copies or moves ${…}, a credential or secret path"
+	"${…} ${…} to ${…}, which puts files on a protected, credential or execution-primitive path"
+	"targets ${…}, a glob whose expansion cannot be checked"
+	"runs sort with -o/--output, which writes a file"
+
+lib/shell/shell-parse.ts
+	"runs commands in a ( … ) subshell"
+	"uses a for loop"
+	"uses a for loop"
+	"uses an if statement"
+	"uses a case statement"
+	"defines a shell function"
+	"declares or exports variables"
+	"uses brace expansion, whose expanded paths cannot be checked"
+	"uses $\"…\" locale quoting, whose translation this check cannot see"
+	"uses ${…}, which this check does not model"
+	"uses a $'…' escape (\\u, \\U or \\c?) whose meaning depends on the bash version"
+
+lib/ui/effort-slider.ts
+	"←/→ or h/l adjust · Enter confirm · s for this session only · Esc cancel · shift+tab cycles the plain levels"
+
+lib/ui/prose.ts
+	"cannot locate @earendil-works/pi-tui next to pi-coding-agent"
+	"pi-tui exports no Markdown component"
 
 lsp/index.ts
 	"${…} ${…}. Allow it only for a project you trust.\n\nThe answer for ${…} is remembered; /lsp trust allows it later."
@@ -720,6 +748,38 @@ memory/panel.ts
 model-default/index.ts
 	" and saved as your default for new sessions"
 	"Could not save ${…}/${…} as the default model: ${…}"
+
+permissions/auto-mode/classifier.ts
+	"Auto mode has no classifier left: ${…} refused the classifier's prompt as a possible usage-policy violation, and no other eligible model can screen calls.${…} "
+	"Calls are not judged and do not run. Switch to manual approval (${…} cycles permission modes), or choose another classifier with /auto-mode model <provider/id>."
+	"verdict truncated at maxTokens"
+	"Auto mode is screening calls with ${…}."
+	"[auto-mode] ${…} ${…} → verdict truncated at maxTokens\n"
+	"${…} cannot run with thinking disabled; the classifier now runs it at ${…} thinking."
+	"${…} refused the auto-mode classifier's prompt twice as a possible usage-policy violation, so auto mode screens calls with "
+	"${…} for the rest of this session${…}. "
+	", at about ${…} the cost per call"
+	"Choose another classifier with /auto-mode model <provider/id>."
+	"Auto mode cannot use ${…} as its classifier (${…}); trying another eligible model."
+
+permissions/auto-mode/pause.ts
+	"⚠ ${…} will automatically deny this request in ${…}, to avoid blocking progress on an unattended session"
+
+permissions/auto-mode/setup-run.ts
+	"no model is available to draft the setup"
+	"setup drafting was cancelled"
+	"draft truncated at maxTokens"
+	"no model could draft the setup (last error: ${…})"
+
+permissions/auto-mode/setup.ts
+	"draft JSON key \"${…}\" is not an array"
+	"the drafting model returned no JSON object"
+	"the drafting model returned malformed JSON (${…})"
+	"the drafting model's JSON is not an object"
+	"draft environment is missing built-in slot(s): ${…}"
+	"(none — this should not happen)"
+	"grants arbitrary code execution — matching commands never reach auto mode's checks"
+	"pre-approves a fresh agent loop — whatever the delegated agent does is unchecked"
 
 permissions/index.ts
 	"A permission request is waiting. Close this panel to answer it."
@@ -882,70 +942,6 @@ permissions/panel/render.ts
 permissions/panel/state.ts
 	"\"$defaults\" is not a rule: the built-in rules always apply."
 
-permissions/powershell-paths.ts
-	"a path outside the working directory"
-	"a credential or secret path"
-	"a credential or secret path"
-
-permissions/powershell-rules.ts
-	"PowerShell's own parse of the line is not available"
-
-permissions/powershell-tree.ts
-	"the line did not parse as a script"
-	"a param block, using statement or named block"
-	"an expression as a pipeline source, whose value this check cannot see"
-	"a script block this check cannot read"
-	"a script block this check cannot read"
-	"a script block with a param or named block"
-	"a script block that runs a command"
-	"a background job (`&`) inside a script block"
-	"a redirection inside a script block"
-	"a variable other than $_ in a script block"
-	"a static or computed member access"
-	"the -${…} operator in a script block"
-	"the ${…} operator in a script block"
-	"${…} in a script block"
-	"a command name computed at run time"
-	"a command name computed at run time"
-	"PATH has a relative entry, so `${…}` may resolve to another program where it runs"
-	"an argument to ${…} this check cannot read"
-	"${…} is not a switch this check clears for ${…}"
-	"`${…}` is not a read-only cmdlet"
-	"`${…}` is not a command this PowerShell knows"
-	"`${…}` is not a cmdlet this check clears here"
-	"PowerShell's parameter binder is not available"
-	"an argument PowerShell cannot bind to ${…}"
-	"-${…} is not a parameter this check clears for ${…}"
-	"-${…} given a value that is not $true or $false"
-	"-${…} given a value computed at run time"
-	"-${…}:$false is not a switch this check clears for ${…}"
-	"a redirection that writes a file"
-	"${…} this check does not model"
-	"PowerShell could not parse the line"
-	"`${…}` after a pipe reads the paths its input names"
-	"a recursive Get-ChildItem over a tree with a link in it, which Windows PowerShell 5.1 follows"
-	"Select-String after `${…}`, whose output can name any file"
-	"Select-String over a recursive Get-ChildItem, which reads through links inside the tree"
-	"Select-String over ${…}, a directory this check cannot resolve"
-	"Select-String over a directory with an entry outside the working directory"
-	"PowerShell could not parse the line"
-	"writes to ${…}, a wildcard whose matches this check does not judge"
-	"writes to ${…}, whose backtick escapes this check does not judge"
-	"writes to ${…}, a path this check cannot resolve"
-	"writes to ${…}, which is outside the working directory"
-	"writes to ${…}, a credential, execution-primitive or protected path"
-	"removes ${…}, which is a working root, or is or holds a git repository or a protected, credential or execution-primitive path"
-	"removes ${…} recursively, and a link inside it would be followed by Windows PowerShell 5.1"
-
-permissions/project-trust.ts
-	"add ${…} workspace director${…}, whose files would be read without a prompt and, in accept-edits mode, edited without one:\n${…}"
-	"Trust this repository's permission settings?"
-	"Trust this repository's allow rules?"
-	"The current call ${…} and would run without a prompt"
-	"reads inside the workspace directory ${…}"
-	" (in auto mode, without the classifier). Whoever committed the file granted this, not you."
-	" Approval is remembered until these settings change; declining keeps them off for this session."
-
 permissions/session-grant.ts
 	"Yes, and don't ask again for this exact command this session"
 	"Yes, and allow ${…} anywhere in the working directory this session"
@@ -1083,10 +1079,6 @@ subagents/panel-render.ts
 subagents/panel-widget.ts
 	"${…} more agents — /tasks to list all"
 
-subagents/prose.ts
-	"cannot locate @earendil-works/pi-tui next to pi-coding-agent"
-	"pi-tui exports no Markdown component"
-
 subagents/runner.ts
 	"the parent's permission bridge is no longer available"
 	"model ${…} not found in the subagent runtime's catalog"
@@ -1104,6 +1096,14 @@ tasks/index.ts
 tool-call-corruption/index.ts
 	"The model streamed over ${…} characters of blank space into a tool call's arguments without finishing it, so the turn was stopped."
 	"${…} Send the request again, or switch models if it repeats."
+
+tool-call-corruption/openrouter-generation.ts
+	"is corrupting tool calls for ${…}"
+	"An OpenRouter upstream provider ${…}; the provider could not be identified."
+	"The call was blocked and the turn stopped."
+	"The turn was stopped."
+	"The reply was cut off and the turn stopped."
+	"${…} ${…} Add the provider to compat.openRouterRouting.ignore for this model in pi's models.json (\"ignore\": ${…}), or switch models."
 
 tool-search/index.ts
 	"Show which tools are deferred (loadable via tool_search)"

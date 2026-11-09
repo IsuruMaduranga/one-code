@@ -34,11 +34,11 @@ import { StringEnum } from "../lib/string-enum.ts";
 import type { Api, Message, Model } from "@earendil-works/pi-ai";
 import { type AgentToolResult, defineTool, getAgentDir, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
-import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-mode/actions.ts";
-import { type AgentDefinition, agentFileSources, agentSourcesStamp, BUNDLED_AGENTS_DIR, discoverAgents } from "./agents.ts";
+import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../lib/rules/auto-mode-actions.ts";
+import { type AgentDefinition, agentFileSources, agentSourcesStamp, BUNDLED_AGENTS_DIR, discoverAgents } from "../lib/agents/agent-catalog.ts";
 import { findConfigured, modelIdentity, modelSpec, supportsImageInput } from "../lib/model-policy.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../lib/model-unusable.ts";
-import { applicableSubagentDefault, loadSubagentDefault, persistSubagentModel, SUBAGENT_MODEL_KNOB, type SubagentDefault } from "./default-model.ts";
+import { applicableSubagentDefault, loadSubagentDefault, persistSubagentModel, SUBAGENT_MODEL_KNOB, type SubagentDefault } from "../lib/models/subagent-default.ts";
 import {
 	expensiveModelGate,
 	resolveSubagentModel,
@@ -48,7 +48,7 @@ import {
 	refusedModelNote,
 	subagentModelsReminder,
 	subagentStatusModel,
-} from "./model-select.ts";
+} from "../lib/models/subagent-model.ts";
 import { modelPickerComponent, pickerSpec, toPickerEntries, type PickerEntry } from "../lib/model-picker.ts";
 import { chosenModelWarnings } from "../lib/model-choice-warnings.ts";
 import { readSuggestNewerModels, SETTINGS_DISPLAY } from "../lib/product-settings.ts";
@@ -70,16 +70,16 @@ import { prepareAgentArguments } from "./agent-args.ts";
 import { projectConfigDirName } from "../lib/sources.ts";
 import { instructionFileNames } from "../lib/instructions.ts";
 import { pendingClaimReminder, runningAfterCompactionReminder } from "./pending-claim.ts";
-import { watchPermissionBridge } from "../permissions/subagent-gate.ts";
-import { watchHookBridge } from "../hooks/subagent-bridge.ts";
+import { watchPermissionBridge } from "../lib/agents/subagent-gate.ts";
+import { watchHookBridge } from "../lib/agents/hook-bridge.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, type ReminderPayload, toldBlockFact } from "../lib/reminders.ts";
-import { type BackgroundTask, generateTaskId, TASK_REGISTER_CHANNEL } from "../background/registry.ts";
-import { type ChildAction } from "../auto-mode/actions.ts";
+import { type BackgroundTask, generateTaskId, TASK_REGISTER_CHANNEL } from "../lib/agents/task-registry.ts";
+import { type ChildAction } from "../lib/rules/auto-mode-actions.ts";
 import { type ChildOutcome, forkTaskMessage, OUTPUT_CAP, type RpcChildHandle } from "./outcome.ts";
 import { type AgentRunRecord, FORK_AGENT, freeRunName, resolveRunName, RunRegistry } from "./runs.ts";
 import { SubagentRuntime } from "./runner.ts";
-import { emptyUsage, formatStats, type UsageTotals } from "./usage.ts";
-import { cleanupWorktree, createWorktree, isGitRepo, keptWorktreeNote, type Worktree } from "./worktree.ts";
+import { emptyUsage, formatStats, type UsageTotals } from "../lib/agents/usage.ts";
+import { cleanupWorktree, createWorktree, isGitRepo, keptWorktreeNote, type Worktree } from "../lib/agents/agent-worktree.ts";
 import type { AgentTools, LaunchLine, RunStatus, SubagentRefusal, SubagentsText } from "./text.ts";
 import { subagentWords } from "./words.ts";
 import { findProjectRoot } from "../lib/git.ts";
@@ -109,13 +109,13 @@ import { SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../lib/settings-channels.ts";
 import { SubagentWidget } from "./panel-widget.ts";
 import { type ProseRenderer, renderTranscript } from "./panel-render.ts";
 import { decodeStripKey, editorYieldsDown, isStripEntryKey, type StripKey } from "./panel-keys.ts";
-import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../permissions/modes.ts";
+import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../lib/rules/modes.ts";
 import { AGENT_VIEW_CHANNEL, type AgentViewAnnouncement, agentViewTarget, userMessageForAgent } from "../lib/agent-view.ts";
 import { isKeyRelease, keyId, keyText } from "../lib/key-input.ts";
 import { moveTasksSelection, renderShellDetail, renderTasksDialog, settleTasksView, shellDetailKey, tasksItems, type TasksView } from "./tasks-dialog.ts";
 import { reduceShellKey, shellRows } from "./shell-panel.ts";
 import { trackShellTasks } from "../lib/shell-tasks.ts";
-import { createMarkdownProse } from "./prose.ts";
+import { createMarkdownProse } from "../lib/ui/prose.ts";
 import { asScrollableViewport, ViewportMirror } from "./viewport-mirror.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 import { extendingCompletions } from "../lib/argument-hints.ts";
@@ -295,7 +295,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 	 * Task id → the main session's tool call that started the run's current
 	 * turn (its Agent call, or the latest SendMessage to it); a nested run
 	 * answers with its parent's (`parentTaskOf`). The permission gate reads the
-	 * main session only as far as that call (auto-mode/history.ts
+	 * main session only as far as that call (permissions/auto-mode/history.ts
 	 * childHistoryCursor). Ids only, a few per run.
 	 */
 	const mainCallFor = new Map<string, string>();
@@ -389,7 +389,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 	// a child built before then falls back to the fail-closed local gate.
 	const getPermissionBridge = watchPermissionBridge(pi);
 	// Likewise the hooks extension's bridge: the user's PreToolUse/PostToolUse
-	// hooks run for a child's tool calls too (hooks/subagent-bridge.ts).
+	// hooks run for a child's tool calls too (lib/agents/hook-bridge.ts).
 	const getHookBridge = watchHookBridge(pi);
 
 	/**

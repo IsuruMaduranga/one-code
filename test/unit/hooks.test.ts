@@ -3,9 +3,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { envName } from "../../extensions/lib/brand.mjs";
-import { ccToolName, matcherApplies, toolMatchCandidates, ccToolInput, nativeToolInput } from "../../extensions/hooks/matcher.ts";
+import { ccToolName, matcherApplies, toolMatchCandidates, ccToolInput, nativeToolInput } from "../../extensions/lib/rules/hook-matcher.ts";
 import { loadPluginHooks } from "../../extensions/hooks/plugin-hooks.ts";
-import { applyPostToolUseOutcome, type FinishedRun, interpretHookResult, parseEnvelope } from "../../extensions/hooks/protocol.ts";
+import { applyPostToolUseOutcome, type FinishedRun, interpretHookResult, parseEnvelope } from "../../extensions/lib/rules/hook-protocol.ts";
 import { hookSettingsPaths, loadHookSettings, parseHooksBlock, resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
 
 const ok = (stdout: string): FinishedRun => ({ exitCode: 0, timedOut: false, stdout, stderr: "" });

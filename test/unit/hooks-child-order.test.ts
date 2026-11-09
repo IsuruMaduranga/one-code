@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { AgentSession, SessionManager, type ToolCallEventResult, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { HookBridge } from "../../extensions/hooks/subagent-bridge.ts";
+import type { HookBridge } from "../../extensions/lib/agents/hook-bridge.ts";
 import { openChildSession } from "../../extensions/lib/agent-loader.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
 import { SubagentRuntime } from "../../extensions/subagents/runner.ts";

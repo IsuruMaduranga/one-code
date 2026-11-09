@@ -4,7 +4,7 @@
  * The shell guards' refusals are a separate group: subagent worktree isolation
  * uses them too.
  */
-import type { CheckoutProgram } from "../auto-mode/git-checkout-programs.ts";
+import type { CheckoutProgram } from "../lib/shell/git-checkout-programs.ts";
 
 /** The worktree session as the result and reminder texts name it. */
 export interface WorktreeSessionView {
@@ -25,7 +25,7 @@ export type EnterWorktreeFailure =
 	| { kind: "listedMissing"; path: string }
 	| { kind: "alreadyActive"; path: string }
 	| { kind: "invalidName"; name: string; problem: WorktreeNameProblem }
-	/** `program`: what a checkout would run (auto-mode/git-checkout-programs.ts). */
+	/** `program`: what a checkout would run (lib/shell/git-checkout-programs.ts). */
 	| { kind: "checkoutRunsProgram"; program: CheckoutProgram }
 	| { kind: "exists"; path: string }
 	| { kind: "createFailed"; osMessage: string };
@@ -95,7 +95,7 @@ export type GitTargetProblem =
 	/** `target`: the shared checkout or sibling worktree the command reaches. */
 	| { kind: "sharedTarget"; target: string }
 	| { kind: "unfollowedQuoting" }
-	/** `syntax`: what the command uses, as permissions/powershell-rules.ts powershellInjectionSyntax names it. */
+	/** `syntax`: what the command uses, as lib/shell/powershell-rules.ts powershellInjectionSyntax names it. */
 	| { kind: "besideSyntax"; syntax: string }
 	| { kind: "repositoryVariable" }
 	| { kind: "configEnv" };

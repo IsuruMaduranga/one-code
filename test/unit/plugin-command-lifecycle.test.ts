@@ -8,7 +8,7 @@ import { setInstalledEnabled } from "../../extensions/plugins/install/registry.t
 import { ONE_SHOT_COMMAND_FAILED_CHANNEL } from "../../extensions/lib/interrupt.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
-import { promptCommandText } from "../../extensions/skill/invoke.ts";
+import { promptCommandText } from "../../extensions/lib/plugins/skill-invoke.ts";
 
 let home: string;
 let root: string;

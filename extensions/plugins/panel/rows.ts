@@ -13,7 +13,7 @@ import type { Plugin } from "../../lib/plugins.ts";
 import type { ScannedSkill } from "../../lib/skill-scan.ts";
 import { isSkillEnabled, type SkillState, skillOverrideKey } from "../../lib/skill-overrides.ts";
 import { formatRecency, type UsageEntry, usageKey } from "../../lib/usage-tracker.ts";
-import type { Favorites } from "../../lib/favorites.ts";
+import type { Favorites } from "../favorites.ts";
 import type { MarketplaceSnapshot } from "../marketplace/sync.ts";
 import type { KnownMarketplace } from "../marketplace/types.ts";
 import { OFFICIAL_MARKETPLACE_NAME } from "../marketplace/official.ts";

@@ -21,7 +21,7 @@
  * index.ts owns the dialog and what Enter and x do.
  */
 
-import type { BackgroundTask } from "../background/registry.ts";
+import type { BackgroundTask } from "../lib/agents/task-registry.ts";
 import { countNoun, cutPlainText as cut, formatDuration, hintLines, padPlainText } from "../lib/tui-render.ts";
 import { sanitizeDisplayText } from "../lib/terminal-text.ts";
 

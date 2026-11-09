@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, symlin
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { resolveForContainment } from "../../extensions/auto-mode/paths.ts";
+import { resolveForContainment } from "../../extensions/lib/shell/paths.ts";
 import { brand } from "../../extensions/lib/brand.mjs";
 import { comparablePath } from "../../extensions/lib/paths.ts";
 import {
@@ -12,7 +12,7 @@ import {
 	scratchpadDir,
 	sessionScratchpadDir,
 } from "../../extensions/lib/scratchpad.ts";
-import { isInsideDir } from "../../extensions/permissions/matcher.ts";
+import { isInsideDir } from "../../extensions/lib/rules/matcher.ts";
 
 describe("scratchpadDir", () => {
 	it("builds Claude Code's path shape under an owner dir named for the product", () => {

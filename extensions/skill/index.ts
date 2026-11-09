@@ -51,7 +51,7 @@ import {
 	skillPromptText,
 	typedSkillContent,
 	withoutDuplicateSkillCommands,
-} from "./invoke.ts";
+} from "../lib/plugins/skill-invoke.ts";
 import { codeReviewBody } from "./code-review.ts";
 import { decodeSkillsKey } from "./panel/keys.ts";
 import { frontmatterFlag, readableSkillLines, skillListingBudget, skillListingText, usageScore, withoutPiSkillsBlock } from "./listing.ts";

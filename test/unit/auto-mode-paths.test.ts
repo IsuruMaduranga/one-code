@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pathArgument } from "../../extensions/auto-mode/paths.ts";
+import { pathArgument } from "../../extensions/lib/shell/paths.ts";
 
 /**
  * pathArgument is the single place that knows which input field carries a file

@@ -1,7 +1,7 @@
 /**
  * kept-thinking extension — removes thinking from the turns a compaction keeps,
  * on APIs that check a thinking block's signature against the conversation
- * before it (`compaction/kept-thinking.ts` says why and which turns).
+ * before it (`lib/request/kept-thinking.ts` says why and which turns).
  *
  * The boundary comes from the session branch, not from the request's messages:
  * system-reminder rewrites the compaction summary message into a plain user
@@ -14,7 +14,7 @@
 
 import { feature } from "../lib/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { signsThinking, withoutKeptThinking } from "../compaction/kept-thinking.ts";
+import { signsThinking, withoutKeptThinking } from "../lib/request/kept-thinking.ts";
 import { latestCompaction } from "../lib/compaction-boundary.ts";
 
 function keptThinkingExtension(pi: ExtensionAPI) {

@@ -5,7 +5,7 @@
  */
 
 import { formatDuration } from "../lib/tui-render.ts";
-import { formatTokenCount } from "../subagents/usage.ts";
+import { formatTokenCount } from "../lib/agents/usage.ts";
 
 /**
  * CC's spinner glyph frames (Spinner/utils.ts), mirrored forward-then-back.

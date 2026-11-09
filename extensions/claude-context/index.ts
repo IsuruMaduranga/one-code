@@ -1,6 +1,6 @@
 /**
  * claude-context extension — assembles Claude Code's three first-message context
- * reminders and queues them `first-prepend` (lib/claude-context.ts has the
+ * reminders and queues them `first-prepend` (claude-context/claude-context.ts has the
  * formats): the instructions block (CLAUDE.md files + MEMORY.md index) at
  * CONTEXT_ORDER.claudeMd, the context block (userEmail + the git snapshot) at
  * CONTEXT_ORDER.context, and the date at CONTEXT_ORDER.date, which on a model
@@ -8,7 +8,7 @@
  * (system-reminder, lib/system-role.ts). They are live state: a request that
  * opens an epoch renders them, and every later request in the epoch replays
  * them from the ledger's record (extensions/ledger). The blocks carry ledger
- * facts (lib/context-facts.ts), so the first request of a resumed process says
+ * facts (claude-context/context-facts.ts), so the first request of a resumed process says
  * once what changed in the workspace since, and a session that crosses local
  * midnight learns the new date, both on the request's tail.
  *
@@ -28,19 +28,19 @@ import { readFileSync } from "node:fs";
 import os from "node:os";
 import { dirname } from "node:path";
 import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
-import { buildClaudeMdBlock, buildContextBlock, buildOneCodeBlock, dateBlock, dateChangeReminder, localDate, nestedInstructionText } from "../lib/claude-context.ts";
+import { buildClaudeMdBlock, buildContextBlock, buildOneCodeBlock, dateBlock, dateChangeReminder, localDate, nestedInstructionText } from "./claude-context.ts";
 import { collectImportedPaths, openInstructions } from "../lib/instructions.ts";
 import { collectGitStatus, GIT_SNAPSHOT_OWNER_CHANNEL } from "../lib/git-status.ts";
-import { readMemoryIndex } from "../lib/memory-index.ts";
+import { readMemoryIndex } from "./memory-index.ts";
 import { productStateDir, tildify, tryRealpath } from "../lib/paths.ts";
 import { fitToWindow, restoredInstructionNotice, type SkippedInstruction, skippedInstructionWarning } from "../lib/instruction-budget.ts";
 import { queueNotice } from "../lib/notices.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, toldBlockFact } from "../lib/reminders.ts";
 import { inContextEntries } from "../lib/compaction-boundary.ts";
-import { compactionGitStatus, contextBlockFacts, contextFingerprints, dateFingerprint, FACT_KEYS, instructionFacts, liveFingerprints, type LiveFingerprints, resumeFactsNotice } from "../lib/context-facts.ts";
+import { compactionGitStatus, contextBlockFacts, contextFingerprints, dateFingerprint, FACT_KEYS, instructionFacts, liveFingerprints, type LiveFingerprints, resumeFactsNotice } from "./context-facts.ts";
 import { resolveToolPath } from "../lib/tool-path.ts";
 import { sessionWorkCwd, WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
-import { pathArgument } from "../auto-mode/paths.ts";
+import { pathArgument } from "../lib/shell/paths.ts";
 import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
 import { EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_NONE, EXTERNAL_INCLUDES_SETTING, EXTERNAL_INCLUDES_YES, externalIncludesDialog, persistExternalIncludesApproval, readExternalIncludesApproval } from "../lib/claude-external-includes.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";

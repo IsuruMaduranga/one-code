@@ -11,7 +11,7 @@ import {
 	shownDiagnostic,
 } from "../../extensions/lsp/format.ts";
 import { describeStartFailure, INSTALL_HINTS } from "../../extensions/lsp/install-hints.ts";
-import { withKeepAlive } from "../../extensions/lsp/keep-alive.ts";
+import { withKeepAlive } from "../../extensions/lib/core/keep-alive.ts";
 import { createReaderState, encodeMessage, readMessages } from "../../extensions/lsp/protocol.ts";
 import {
 	findProjectRoot,
@@ -239,7 +239,7 @@ describe("withKeepAlive", () => {
 	// nothing but an unref'd timer — the shape of every LspClient await
 	// (unref'd child process, pipes, timeout timers).
 	// working-docs/one-shot-lsp-event-loop-drain.md.
-	const keepAliveUrl = new URL("../../extensions/lsp/keep-alive.ts", import.meta.url).href;
+	const keepAliveUrl = new URL("../../extensions/lib/core/keep-alive.ts", import.meta.url).href;
 	const unrefdWork = `
 		const work = () => new Promise((resolve) => {
 			const timer = setTimeout(() => resolve("settled"), 200);

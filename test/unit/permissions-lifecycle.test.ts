@@ -17,9 +17,9 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../extensions/auto-mode/actions.ts";
-import { classify } from "../../extensions/auto-mode/classifier.ts";
-import { CONSECUTIVE_BLOCK_LIMIT } from "../../extensions/auto-mode/pause.ts";
+import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../extensions/lib/rules/auto-mode-actions.ts";
+import { classify } from "../../extensions/permissions/auto-mode/classifier.ts";
+import { CONSECUTIVE_BLOCK_LIMIT } from "../../extensions/permissions/auto-mode/pause.ts";
 import { instructionTargets } from "../../extensions/lib/instructions.ts";
 import { RECORD } from "../../extensions/lib/ledger/records.ts";
 import { MODE_ENV } from "../../extensions/lib/permission-gate.ts";
@@ -30,8 +30,8 @@ import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { stateEntry } from "./helpers/state-entry.ts";
 
-vi.mock("../../extensions/auto-mode/classifier.ts", async (importOriginal) => ({
-	...(await importOriginal<typeof import("../../extensions/auto-mode/classifier.ts")>()),
+vi.mock("../../extensions/permissions/auto-mode/classifier.ts", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../extensions/permissions/auto-mode/classifier.ts")>()),
 	classify: vi.fn(async () => ({ decision: "block", reason: "stub: sends data off the machine", tier: "stage2" })),
 }));
 

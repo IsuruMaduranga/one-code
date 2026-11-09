@@ -3,7 +3,7 @@
  * line, in the places CC puts it (budget.ts says what the number is). It
  * stores the line in One Code's own way; system-reminder's payload hook turns
  * the stored line into Claude Code's per-model shapes on the wire
- * (lib/turn-budget-layout.ts):
+ * (system-reminder/turn-budget-layout.ts):
  *
  * - the first prompt: the constant budget in the first-message context stack
  *   (CONTEXT_ORDER.totalTokens), so it joins the mid-conversation system
@@ -30,7 +30,7 @@ import { feature } from "../lib/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
 import { requireText } from "../lib/profile.ts";
-import { totalTokensBlock, TurnBudget, turnTokenBudget } from "./budget.ts";
+import { totalTokensBlock, TurnBudget, turnTokenBudget } from "../lib/context/budget.ts";
 
 const USER_MESSAGE_KEY = "total-tokens";
 const FIRST_PROMPT_KEY = "total-tokens-first";

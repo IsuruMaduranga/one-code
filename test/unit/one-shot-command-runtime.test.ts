@@ -13,7 +13,7 @@ import doctorExtension from "../../extensions/doctor/index.ts";
 import { brand } from "../../extensions/lib/brand.mjs";
 import { instructionTargets } from "../../extensions/lib/instructions.ts";
 import { requireText } from "../../extensions/lib/profile.ts";
-import { promptCommandText } from "../../extensions/skill/invoke.ts";
+import { promptCommandText } from "../../extensions/lib/plugins/skill-invoke.ts";
 
 function deferred() {
 	let resolve!: () => void;

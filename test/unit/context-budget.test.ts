@@ -4,7 +4,7 @@ import {
 	totalTokensBlock,
 	TurnBudget,
 	turnTokenBudget,
-} from "../../extensions/context-budget/budget.ts";
+} from "../../extensions/lib/context/budget.ts";
 import contextBudgetExtension from "../../extensions/context-budget/index.ts";
 import systemReminderExtension from "../../extensions/system-reminder/index.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";

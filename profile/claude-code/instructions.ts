@@ -375,7 +375,7 @@ function conditionalRules(cwd: string, home: string, homeClaudeDir: string, incl
  * globs, then the instruction files with AGENTS.md beside CLAUDE.md
  * whatever `instructionFiles` picks for the agent. An instruction there can
  * only tighten, and the block opens the cached classifier prefix, so it must
- * not change as the session touches new paths (auto-mode/instructions.ts).
+ * not change as the session touches new paths (permissions/auto-mode/instructions.ts).
  */
 function classifierInstructionFiles(opts: { cwd: string; home: string; homeClaudeDir?: string; base?: readonly ContextFilePath[] }): ClassifierFile[] {
 	const homeClaudeDir = opts.homeClaudeDir ?? claudeUserDir(opts.home);

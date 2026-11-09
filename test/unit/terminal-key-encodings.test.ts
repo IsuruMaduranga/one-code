@@ -3,7 +3,7 @@ import { decodeWidgetKey } from "../../extensions/ask-user/widget.ts";
 import { decodePickerKey } from "../../extensions/lib/model-picker.ts";
 import { decodeBtwKey } from "../../extensions/btw/panel.ts";
 import { decodeDoctorKey } from "../../extensions/doctor/viewer.ts";
-import { decodeKey as decodeSliderKey } from "../../extensions/effort/slider.ts";
+import { decodeKey as decodeSliderKey } from "../../extensions/lib/ui/effort-slider.ts";
 import { decodeMcpKey } from "../../extensions/mcp/panel/keys.ts";
 import { decodeMemoryKey } from "../../extensions/memory/panel.ts";
 import { decodePanelKey as decodePermissionsKey } from "../../extensions/permissions/panel/keys.ts";

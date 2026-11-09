@@ -4,7 +4,7 @@ import { join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import memoryExtension from "../../extensions/memory/index.ts";
-import { resolveThroughLinks } from "../../extensions/auto-mode/paths.ts";
+import { resolveThroughLinks } from "../../extensions/lib/shell/paths.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { projectMemoryDir } from "../../extensions/lib/memory.ts";
 import { INDEX_MAX_CHARS, INDEX_MAX_LINES } from "../../extensions/lib/memory-content.ts";

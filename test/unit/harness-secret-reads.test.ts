@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { runtimeSecretPaths } from "../../extensions/lib/permission-gate.ts";
-import { decide } from "../../extensions/permissions/matcher.ts";
+import { decide } from "../../extensions/lib/rules/matcher.ts";
 import { envName, productStateDir } from "../../extensions/lib/brand.mjs";
 import { productSettingsPath } from "../../extensions/lib/product-settings.ts";
 import { stubHome } from "./helpers/home.ts";

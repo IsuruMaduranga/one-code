@@ -33,7 +33,7 @@ import { brandedId } from "./brand.mjs";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { type ExtensionAPI, type ExtensionContext, VERSION as PI_VERSION } from "@earendil-works/pi-coding-agent";
-import { withKeepAlive } from "../lsp/keep-alive.ts";
+import { withKeepAlive } from "./core/keep-alive.ts";
 import { ONE_SHOT_COMMAND_FAILED_CHANNEL, RunOutcomeLatch } from "./interrupt.ts";
 import { escapeXml } from "./xml.ts";
 import { piFiresBeforeAgentStartForCustomRuns } from "./pi-version.ts";
