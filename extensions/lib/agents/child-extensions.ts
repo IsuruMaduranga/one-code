@@ -46,16 +46,11 @@ const EXTENSIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
 // (mode "print"), so `run_in_background` runs blocking there and nothing a
 // child starts outlives it (Claude Code kills an agent's shells as it exits).
 export const CHILD_EXTENSIONS = [
-	"kept-thinking", "ledger", "system-reminder", "tool-search", "context-management", "compaction", "ledger/wire", "cache-marks", "claude-context", "tool-call-corruption/child",
-	"file-tracker", "search-tools", "skill", "bash/child", "powershell/child", "web", "web-fetch", "notebook",
+	"kept-thinking/index.ts", "ledger/index.ts", "system-reminder/index.ts", "tool-search/index.ts", "context-management/index.ts", "compaction/index.ts", "ledger/wire.ts", "cache-marks/index.ts", "claude-context/index.ts", "tool-call-corruption/child.ts",
+	"file-tracker/index.ts", "search-tools/index.ts", "skill/index.ts", "bash/child.ts", "powershell/child.ts", "web/index.ts", "web-fetch/index.ts", "notebook/index.ts",
 ];
 
-/** A child extension's entry file under `extensions/`: `bash/child` → `bash/child.ts`, `skill` → `skill/index.ts`. */
-export function childEntry(name: string): string {
-	return name.includes("/") ? `${name}.ts` : `${name}/index.ts`;
-}
-
-export const CHILD_EXTENSION_PATHS = CHILD_EXTENSIONS.map((name) => join(EXTENSIONS_DIR, childEntry(name)));
+export const CHILD_EXTENSION_PATHS = CHILD_EXTENSIONS.map((entry) => join(EXTENSIONS_DIR, entry));
 
 /**
  * What a child session loads under the profile in force: the base entries
@@ -65,9 +60,9 @@ export const CHILD_EXTENSION_PATHS = CHILD_EXTENSIONS.map((name) => join(EXTENSI
  */
 export function childExtensionPaths(): string[] {
 	const profile = activeProfile();
-	const base = CHILD_EXTENSIONS.filter((name) => {
-		const id = featureOfEntry(childEntry(name));
+	const base = CHILD_EXTENSIONS.filter((entry) => {
+		const id = featureOfEntry(entry);
 		return id === undefined || profile.features.has(id);
-	}).map((name) => join(EXTENSIONS_DIR, childEntry(name)));
+	}).map((entry) => join(EXTENSIONS_DIR, entry));
 	return [...base, ...profile.childExtensionPaths];
 }

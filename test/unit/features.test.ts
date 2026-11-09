@@ -7,13 +7,13 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { CHILD_EXTENSIONS, childEntry } from "../../extensions/lib/agents/child-extensions.ts";
+import { CHILD_EXTENSIONS } from "../../extensions/lib/agents/child-extensions.ts";
 import { enabledFeatures, FEATURE_IDS, FEATURES, featureOfEntry, featureProblems, TOOL_FEATURES } from "../../extensions/lib/profile/features.ts";
 
 const repo = join(import.meta.dirname, "../..");
 const manifest = JSON.parse(readFileSync(join(repo, "package.json"), "utf8")) as { pi: { extensions: string[] } };
 const manifestEntries = manifest.pi.extensions.map((path) => path.replace(/^extensions\//, ""));
-const childEntries = CHILD_EXTENSIONS.map(childEntry);
+const childEntries = CHILD_EXTENSIONS;
 const registered = FEATURE_IDS.flatMap((id) => FEATURES[id].entries.map((entry) => ({ id, entry })));
 
 describe("feature registry", () => {
