@@ -1,3 +1,4 @@
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
@@ -13,15 +14,14 @@ let recapExtension: typeof import("../../extensions/agents/recap/index.ts").defa
 
 beforeEach(async () => {
 	vi.useFakeTimers();
-	process.env.CC_RECAP_IDLE_MS = "1000";
-	delete process.env.CC_RECAP;
+	process.env[envName("RECAP_IDLE_MS")] = "1000";
 	complete.mockReset();
 	logSideCall.mockReset();
 	recapExtension = (await import("../../extensions/agents/recap/index.ts")).default;
 });
 
 afterEach(() => {
-	delete process.env.CC_RECAP_IDLE_MS;
+	delete process.env[envName("RECAP_IDLE_MS")];
 	vi.useRealTimers();
 });
 

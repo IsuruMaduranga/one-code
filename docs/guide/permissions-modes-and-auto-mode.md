@@ -612,7 +612,7 @@ It never reads `autoMode` from a project's `.claude/settings.json` or
 `.claude/settings.local.json`, because a checked-in file must not be able
 to loosen the classifier for whoever clones it.
 
-To see the classifier's verdicts while you work, set `CC_AUTO_MODE_DEBUG=1`
+To see the classifier's verdicts while you work, set `ONECODE_AUTO_MODE_DEBUG=1`
 before launching; each decision is printed to stderr with its stage,
 severity, and rule.
 

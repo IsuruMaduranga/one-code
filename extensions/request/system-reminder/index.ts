@@ -21,6 +21,7 @@
  * only), and shapes the tail's `<total_tokens>` lines (request/system-reminder/turn-budget-layout.ts).
  */
 
+import { featureEnabled } from "../../lib/profile/profile.ts";
 import { feature } from "../../lib/profile/feature.ts";
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -39,8 +40,8 @@ import { sessionAlive } from "../../lib/notify/session-lifecycle.ts";
 import { instructionRole, messagesKey, type MovedBlock, systemRoleLayout, wireShape, withSystemRoleContext } from "../../lib/request/system-role.ts";
 import { resolveCountdowns, withTurnBudgetMessages } from "./turn-budget-layout.ts";
 
-/** Whether requests carry the `<total_tokens>` budget lines (`CC_TOTAL_TOKENS=0` turns them off). */
-const budgetMarkers = () => process.env.CC_TOTAL_TOKENS !== "0";
+/** Whether requests carry the `<total_tokens>` budget lines (the `context-budget` feature decides). */
+const budgetMarkers = () => featureEnabled("context-budget");
 
 /** A pending entry as a one-shot to place. */
 function oneShotOf(item: PendingRecordData): OneShot {

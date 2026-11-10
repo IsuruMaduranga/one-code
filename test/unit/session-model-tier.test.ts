@@ -76,7 +76,7 @@ function setup(betweenConsumers?: () => void) {
 }
 
 beforeEach(() => {
-	vi.stubEnv("CC_PROMPT_TIER", "auto");
+	vi.stubEnv(envName("PROMPT_TIER"), "auto");
 });
 afterEach(() => {
 	vi.unstubAllEnvs();
@@ -115,11 +115,11 @@ describe("sessionModelTier ownership", () => {
 	});
 
 	it("applies a changed environment override only at a lifecycle boundary", async () => {
-		vi.stubEnv("CC_PROMPT_TIER", "frontier");
+		vi.stubEnv(envName("PROMPT_TIER"), "frontier");
 		const fake = createFakePi();
 		const tier = sessionModelTier(fake.pi as never);
 		await fake.fire("session_start", {}, createFakeCtx({ model }));
-		vi.stubEnv("CC_PROMPT_TIER", "tiny");
+		vi.stubEnv(envName("PROMPT_TIER"), "tiny");
 		expect(tier()).toBe("frontier");
 		await fake.fire("model_select", { model: otherModel });
 		expect(tier()).toBe("tiny");

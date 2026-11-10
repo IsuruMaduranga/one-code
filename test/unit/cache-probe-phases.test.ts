@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 const fakePi = `
 import { appendFileSync } from 'node:fs';
 if (process.argv.includes('--version')) { console.log('offline-probe-cli'); }
-else { appendFileSync(process.env.PROBE_INVOCATIONS, JSON.stringify({args:process.argv.slice(2),log:process.env.CC_SIDE_CALL_LOG})+'\\n'); }
+else { appendFileSync(process.env.PROBE_INVOCATIONS, JSON.stringify({args:process.argv.slice(2),log:process.env.ONECODE_SIDE_CALL_LOG})+'\\n'); }
 `;
 
 describe("cache-probe reader phase wiring (offline CLI)", () => {

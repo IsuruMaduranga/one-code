@@ -18,10 +18,11 @@
  * here: every request replaces the timer, and only a one-hour request arms one.
  *
  * Claude Code ships it behind a server flag that defaults off; One Code turns
- * it on, with `CC_IDLE_COMPACT=0` to opt out (working-docs/decisions/caching.md,
+ * it on, with the `idle-compact` feature switch to opt out (working-docs/decisions/caching.md,
  * "Idle compaction before the cache expires").
  */
 
+import { knobValue } from "../../lib/profile/knobs.ts";
 import type { TimerOps } from "../../lib/core/timer-ops.ts";
 
 /** The notice Claude Code appends after an idle compaction. */
@@ -38,30 +39,28 @@ export const LATE_MS = 60_000;
 export const PRESENCE_MS = 60_000;
 
 export interface IdleCompactConfig {
-	enabled: boolean;
 	minTokens: number;
 	/** Delay from the request to the fire; undefined means `fireAtFraction` of the hour. */
 	delayMs?: number;
 }
 
 /**
- * The config from the environment: `CC_IDLE_COMPACT=0` turns it off;
- * `CC_IDLE_COMPACT_MIN_TOKENS` and `CC_IDLE_COMPACT_DELAY_MS` override the
+ * The config from the environment: the feature switch turns it off;
+ * `*_IDLE_COMPACT_MIN_TOKENS` and `*_IDLE_COMPACT_DELAY_MS` override the
  * threshold and the fire delay, for live testing (the delay stays under the
  * hour, at least one second).
  */
 export function idleCompactConfig(env: Record<string, string | undefined>): IdleCompactConfig {
-	const minTokens = Number(env.CC_IDLE_COMPACT_MIN_TOKENS);
-	const delayMs = Number(env.CC_IDLE_COMPACT_DELAY_MS);
+	const minTokens = Number(knobValue("IDLE_COMPACT_MIN_TOKENS", env));
+	const delayMs = Number(knobValue("IDLE_COMPACT_DELAY_MS", env));
 	return {
-		enabled: env.CC_IDLE_COMPACT !== "0",
 		minTokens: Number.isFinite(minTokens) && minTokens >= 1 ? minTokens : DEFAULT_MIN_TOKENS,
 		...(Number.isFinite(delayMs) && delayMs >= 1000 && delayMs < ONE_HOUR_MS ? { delayMs } : {}),
 	};
 }
 
 /** Why a fire did not compact. */
-export type IdleRefusal = "disabled" | "compaction_off" | "prefix_changed" | "lapsed" | "small" | "near_limit" | "busy" | "present";
+export type IdleRefusal = "compaction_off" | "prefix_changed" | "lapsed" | "small" | "near_limit" | "busy" | "present";
 
 /** The one-hour main-session request a timer was armed for. */
 export interface ArmedRequest {
@@ -78,7 +77,7 @@ export interface FireProbe {
 	/** When the timer was due. */
 	dueAt: number;
 	config: IdleCompactConfig;
-	/** pi's auto-compaction setting, and One Code's cache-reading compaction (CC_COMPACTION). */
+	/** pi's auto-compaction setting, and the harness's cache-reading compaction (the `compaction` feature). */
 	compactionOn: boolean;
 	model: string | undefined;
 	thinking: string | undefined;
@@ -93,10 +92,9 @@ export interface FireProbe {
 
 /** The first refusal that applies, in Claude Code's order, or null to compact. */
 export function idleRefusal(armed: ArmedRequest, probe: FireProbe): IdleRefusal | null {
-	if (!probe.config.enabled) return "disabled";
 	if (!probe.compactionOn) return "compaction_off";
 	if (probe.model !== armed.model || probe.thinking !== armed.thinking) return "prefix_changed";
-	// The expiry half only trips under a CC_IDLE_COMPACT_DELAY_MS near the hour:
+	// The expiry half only trips under a *_IDLE_COMPACT_DELAY_MS near the hour:
 	// at the default 54 minutes the lateness check trips first.
 	if (probe.now - probe.dueAt > LATE_MS || !probe.warm || probe.now >= armed.at + ONE_HOUR_MS) return "lapsed";
 	if (probe.contextTokens < probe.config.minTokens) return "small";
@@ -124,7 +122,6 @@ export class IdleCompactTimer {
 	arm(request: ArmedRequest): void {
 		this.cancel();
 		const config = this.config();
-		if (!config.enabled) return;
 		const dueAt = request.at + (config.delayMs ?? ONE_HOUR_MS * DEFAULT_FIRE_AT_FRACTION);
 		this.handle = this.timer.set(() => {
 			this.handle = undefined;

@@ -18,7 +18,7 @@
 # A second, classifier phase runs four gated network commands in auto mode and
 # checks that the auto-mode classifier's transcript is a cache read from call
 # to call and from stage 1 to stage 2 (test/e2e/cache-probe-classifier.mjs over
-# the classifier's own CC_AUTO_MODE_LOG). `--no-classifier` skips it.
+# the classifier's own ONECODE_AUTO_MODE_LOG). `--no-classifier` skips it.
 # A third phase repeats a web_fetch reader call against a deterministic page
 # fixture (cache-probe-reader.sh). `--no-reader` skips it.
 # On a first-party Anthropic model a fourth phase registers a tool mid-session
@@ -100,7 +100,7 @@ if [ "$CLASSIFIER" = 1 ]; then
 	CPROMPT='Run each of these four commands in its own separate bash call, one after another (never combine them, never in parallel), then reply with exactly the word done: curl -sI https://example.com ; curl -sI https://example.org ; curl -sI https://www.iana.org ; curl -sI https://httpbin.org/get'
 	(
 		cd "$CPROJECT"
-		CC_AUTO_MODE_LOG="$WORK/classifier.jsonl" node "$PI_BIN" --model "$MODEL" --mode json --permission-mode auto -p "$CPROMPT" > "$WORK/classifier-events.jsonl" 2> "$WORK/classifier-stderr.log"
+		ONECODE_AUTO_MODE_LOG="$WORK/classifier.jsonl" node "$PI_BIN" --model "$MODEL" --mode json --permission-mode auto -p "$CPROMPT" > "$WORK/classifier-events.jsonl" 2> "$WORK/classifier-stderr.log"
 	) || echo "pi exited non-zero in the classifier phase (see $WORK/classifier-stderr.log)"
 	touch "$WORK/classifier.jsonl"
 	node "$REPO/test/e2e/cache-probe-classifier.mjs" "$WORK/classifier.jsonl" || status=1

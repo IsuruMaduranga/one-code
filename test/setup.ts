@@ -41,9 +41,9 @@ process.env[envName("STATE_DIR")] = stateDir;
 afterAll(() => rmSync(stateDir, { recursive: true, force: true }));
 
 // Likewise the live permission mode One Code publishes to child processes:
-// run from a One Code shell, the suite inherited CC_PERMISSION_MODE=auto and
+// run from a One Code shell, the suite inherited *_PERMISSION_MODE=auto and
 // 16 permission-gate and workflow tests failed. A test that wants it stubs it.
-delete process.env.CC_PERMISSION_MODE;
+delete process.env[envName("PERMISSION_MODE")];
 
 // The bash grammar loads asynchronously; every shell parse after this is
 // synchronous, as it is once a session's hooks have awaited it.

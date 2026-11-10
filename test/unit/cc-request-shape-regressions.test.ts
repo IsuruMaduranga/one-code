@@ -1,5 +1,8 @@
 /** Regressions for the request-shaping steps: the cache mark, call ids after a model switch, and fallbacks. */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
+import { useProfile } from "./helpers/profile.ts";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
+import { afterEach, describe, expect, it, vi, onTestFinished } from "vitest";
 import systemReminderExtension from "../../extensions/request/system-reminder/index.ts";
 import { deferredAddendumText } from "../../extensions/lib/request/deferred.ts";
 import { wrapReminder } from "../../extensions/lib/request/reminders.ts";
@@ -105,7 +108,9 @@ describe("text that only looks like a marker stays the user's or the tool's", ()
 	});
 
 	it("leaves a tool result that is exactly the line whole when the budget is off", async () => {
-		vi.stubEnv("CC_TOTAL_TOKENS", "0");
+		// The context-budget feature is the budget's one switch.
+		useProfile({ features: { "context-budget": false } });
+		onTestFinished(() => setActiveProfileForTest(undefined));
 		const fake = createFakePi();
 		systemReminderExtension(fake.pi as never);
 		const model = { id: "claude-opus-5-5", api: "anthropic-messages", provider: "anthropic", compat: { supportsMidConvoSystemMessages: true } };

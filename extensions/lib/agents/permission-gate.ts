@@ -16,7 +16,7 @@
  *
  * Local fallback (no bridge — workflow/headless runs, or a parent without the
  * permissions extension): deny rules always win; explicit allow rules allow;
- * the mode is the parent session's live mode (published as CC_PERMISSION_MODE,
+ * the mode is the parent session's live mode (published as *_PERMISSION_MODE,
  * read per call), else the settings' defaultMode, else acceptEdits (Claude Code
  * runs these agents in acceptEdits); ask rules are honoured; anything that
  * would normally *ask* is denied — there is no interactive prompt inside an
@@ -29,6 +29,7 @@
  * the child-only `SendMessage`-to-main tool) that must never be gated.
  */
 
+import { envName } from "../profile/brand.mjs";
 import { getAgentDir, type InlineExtension } from "@earendil-works/pi-coding-agent";
 import { withKeepAlive } from "../core/keep-alive.ts";
 import { bashParserReady } from "../shell/bash-parser.ts";
@@ -133,7 +134,7 @@ export function runtimeSecretPaths(home: string = homedir()): string[] {
 const DEFAULT_INTERNAL_TOOLS = new Set(["structured_output", SUBAGENT_HANDBACK]);
 
 /** The parent permissions extension publishes its live mode here (in-process children read it). */
-export const MODE_ENV = "CC_PERMISSION_MODE";
+export const MODE_ENV = envName("PERMISSION_MODE");
 
 /**
  * The mode the local gate judges under: the parent's published live mode, else

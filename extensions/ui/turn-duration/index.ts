@@ -7,7 +7,7 @@
  * display-only session entry (`appendEntry` — not part of the LLM context, so
  * the model never sees its own timing line), rendered dim and led by the ✻ mark
  * to match CC's TurnDurationMessage. CC shows it after every response with no
- * threshold and defaults it on; CC_TURN_DURATION=0 opts out. The completion verb
+ * threshold and defaults it on; turning the `turn-duration` feature off opts out. The completion verb
  * is sampled once per turn from CC's 8-verb list. The line ends with CC's
  * `· done <time>` (the entry's timestamp, line.ts formatDoneAt) and, when
  * background shells outlive the turn, `· N shells still running`.
@@ -55,7 +55,6 @@ function turnDurationExtension(pi: ExtensionAPI) {
 	pi.on("agent_settled", (_event, ctx) => {
 		const durationMs = span.settle(Date.now());
 		if (durationMs === undefined) return;
-		if (process.env.CC_TURN_DURATION === "0") return;
 		if (!ctx.hasUI) return;
 		pi.appendEntry<TurnDurationData>(ENTRY_TYPE, {
 			verb: pickCompletionVerb(),

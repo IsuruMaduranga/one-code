@@ -176,24 +176,25 @@ The `CC_` prefix is historical; `ONECODE_`-prefixed aliases are planned.
 
 | Variable | Effect |
 |---|---|
-| `CC_NO_BANNER=1` | Keep pi's header instead of the One Code banner. |
-| `CC_NO_INPUT_MARKER=1` | Remove the `❯` prompt marker. |
-| `CC_NO_ASSISTANT_MARKER=1` | Remove the `●` reply marker. |
-| `CC_FOOTER=0` | Keep pi's footer instead of One Code's status line. |
-| `CC_TURN_DURATION=0` | Remove the post-turn timing line. |
-| `CC_RECAP=0` | Turn off the "while you were away" recap. |
-| `CC_SESSION_TITLE=0` | Turn off the automatic session title. |
-| `CC_RECAP_IDLE_MS` | Idle time before a recap, in milliseconds (default 300000). |
-| `CC_COMPACTION=0` | Use pi's compaction summary instead of Claude Code's. |
-| `CC_IDLE_COMPACT=0` | Turn off compaction of an idle session before its prompt cache expires. |
-| `CC_CLEAR_THINKING=0`, `=1` | Force the thinking-preservation request off or on for Anthropic models. Default: on for `api.anthropic.com` only. |
-| `CC_TOTAL_TOKENS=0` | Remove the `<total_tokens>` budget line. |
-| `CC_TOTAL_TOKENS_BUDGET` | The per-turn budget the line counts down from (default 15000000). |
-| `CC_PROMPT_TIER=frontier\|workhorse\|cheap\|tiny` | Force a system-prompt tier. |
-| `CC_HOOKS_DEBUG=1` | Print hook dispatches to stderr and log decisions. |
-| `CC_AUTO_MODE_DEBUG=1` | Print classifier verdicts to stderr. `2` is more verbose. |
-| `CC_VERSION` | The version shown in the banner (set by the app, and not passed on to the commands it runs). |
-| `CC_PERMISSION_MODE` | Set by One Code to the live mode for child processes. Not an input; use `--permission-mode`. |
+| `ONECODE_NO_BANNER=1` | Keep pi's header instead of the One Code banner. |
+| `ONECODE_NO_INPUT_MARKER=1` | Remove the `❯` prompt marker. |
+| `ONECODE_NO_ASSISTANT_MARKER=1` | Remove the `●` reply marker. |
+| `ONECODE_FEATURES_OFF=<id>[,<id>…]` | Turn optional features off for this run, by id, comma-separated. The rows below name the common ones. |
+| `ONECODE_FEATURES_OFF=footer` | Keep pi's footer instead of One Code's status line. |
+| `ONECODE_FEATURES_OFF=turn-duration` | Remove the post-turn timing line. |
+| `ONECODE_FEATURES_OFF=recap` | Turn off the "while you were away" recap. |
+| `ONECODE_FEATURES_OFF=session-title` | Turn off the automatic session title. |
+| `ONECODE_RECAP_IDLE_MS` | Idle time before a recap, in milliseconds (default 300000). |
+| `ONECODE_FEATURES_OFF=compaction` | Use pi's compaction summary instead of Claude Code's. |
+| `ONECODE_FEATURES_OFF=idle-compact` | Turn off compaction of an idle session before its prompt cache expires. |
+| `ONECODE_CLEAR_THINKING=0`, `=1` | Force the thinking-preservation request off or on for Anthropic models. Default: on for `api.anthropic.com` only. |
+| `ONECODE_FEATURES_OFF=context-budget` | Remove the `<total_tokens>` budget line. |
+| `ONECODE_TOTAL_TOKENS_BUDGET` | The per-turn budget the line counts down from (default 15000000). |
+| `ONECODE_PROMPT_TIER=frontier\|workhorse\|cheap\|tiny` | Force a system-prompt tier. |
+| `ONECODE_HOOKS_DEBUG=1` | Print hook dispatches to stderr and log decisions. |
+| `ONECODE_AUTO_MODE_DEBUG=1` | Print classifier verdicts to stderr. `2` is more verbose. |
+| `ONECODE_VERSION` | The version shown in the banner (set by the app, and not passed on to the commands it runs). |
+| `ONECODE_PERMISSION_MODE` | Set by One Code to the live mode for child processes. Not an input; use `--permission-mode`. |
 
 ### Variables with a Claude Code spelling
 
@@ -226,7 +227,7 @@ mode. When both spellings are set, One Code's wins.
 | Provider keys | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `OPENCODE_API_KEY`, and the rest pi supports. |
 
 Variables One Code sets for hooks and children: `CLAUDE_PROJECT_DIR` in a
-hook's environment, `CC_PERMISSION_MODE` for child tool gates.
+hook's environment, `ONECODE_PERMISSION_MODE` for child tool gates.
 
 ## Files and directories
 

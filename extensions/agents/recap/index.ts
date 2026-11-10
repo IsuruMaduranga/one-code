@@ -23,10 +23,11 @@
  *
  * Deviations from CC, logged in working-docs/decisions: the session-memory block is
  * omitted (decoupling). A failed recap does not retry until the next turn (one
- * attempt per turn, success or not). CC_RECAP=0 opts out; CC_RECAP_IDLE_MS
+ * attempt per turn, success or not). Turning the `recap` feature off opts out; *_RECAP_IDLE_MS
  * overrides the 5-minute delay.
  */
 
+import { knobValue } from "../../lib/profile/knobs.ts";
 import { brandedId } from "../../lib/profile/brand.mjs";
 import { feature } from "../../lib/profile/feature.ts";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -49,9 +50,9 @@ const DEFAULT_IDLE_MS = 5 * 60_000; // CC's BLUR_DELAY_MS
 const RECAP_MAX_TOKENS = 256; // 1-3 short sentences
 const RECAP_TIMEOUT_MS = 30_000;
 
-/** The idle delay before a recap, overridable via CC_RECAP_IDLE_MS (floor 1s). */
+/** The idle delay before a recap, overridable via *_RECAP_IDLE_MS (floor 1s). */
 function idleMs(): number {
-	const raw = Number(process.env.CC_RECAP_IDLE_MS);
+	const raw = Number(knobValue("RECAP_IDLE_MS"));
 	return Number.isFinite(raw) && raw >= 1000 ? raw : DEFAULT_IDLE_MS;
 }
 
@@ -82,7 +83,7 @@ function recapExtension(pi: ExtensionAPI) {
 	const scheduler = new RecapScheduler(
 		unrefTimers,
 		idleMs,
-		() => process.env.CC_RECAP !== "0",
+		() => true,
 		() => void generate(),
 	);
 
@@ -185,7 +186,7 @@ function recapExtension(pi: ExtensionAPI) {
 
 	// Settle, not agent_end: `agent_end` fires per run, and arming the idle
 	// timer there could fire a recap during a retry backoff longer than the
-	// configured idle (CC_RECAP_IDLE_MS floors at 1s), burning the
+	// configured idle (*_RECAP_IDLE_MS floors at 1s), burning the
 	// one-per-turn budget mid-turn.
 	pi.on("agent_settled", (_event, ctx) => {
 		lastCtx = ctx;

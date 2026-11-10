@@ -223,13 +223,13 @@ provider spells it (on OpenRouter that includes the vendor, as in
 ```
 
 This setting is read from your user settings only, never from a project.
-`CC_PROMPT_TIER` forces one tier for the session's prompt when you want to
+`ONECODE_PROMPT_TIER` forces one tier for the session's prompt when you want to
 experiment. `/doctor report` shows the tier in use and the rule that set it.
 
 The tier also decides which permission shortcuts apply in auto and
 accept-edits modes (see [What is approved without a classifier
 call](permissions-modes-and-auto-mode.md#what-is-approved-without-a-classifier-call)).
-`CC_PROMPT_TIER` never changes the permission checks; `modelTiers` does,
+`ONECODE_PROMPT_TIER` never changes the permission checks; `modelTiers` does,
 because it states what the model is.
 
 Like Claude Code, One Code gives frontier models and Sonnet 5 or later no

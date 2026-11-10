@@ -14,7 +14,7 @@
  * after the model reads the live thinking level, and swaps to "✦ ultracode" when
  * the effort extension has published that status.
  *
- * Set CC_FOOTER=0 to keep pi's built-in footer instead.
+ * Turn the `footer` feature off to keep pi's built-in footer instead.
  */
 
 import { feature } from "../../lib/profile/feature.ts";
@@ -28,7 +28,6 @@ import { WORKTREE_CHANNEL, type WorktreeLocation } from "../../lib/agents/worktr
 import { fetchPrNumber, nextPrPollDelay, PR_SLOW_LOOKUP_MS } from "./pr.ts";
 
 function footerExtension(pi: ExtensionAPI) {
-	if (process.env.CC_FOOTER === "0") return;
 
 	// All-in cost + latest cache-hit, recomputed only when the session's entries
 	// change (message_end/agent_end, and a usage entry landing) — an O(n)

@@ -28,7 +28,9 @@ export const LAUNCHER_ENV_VAR = envName("LAUNCHER_ENV");
 /** Where the launcher publishes how the app was installed (lib/app/update-check.mjs reads it). */
 export const INSTALL_METHOD_VAR = envName("INSTALL_METHOD");
 /** The variables the launcher sets for its own process. */
-export const LAUNCHER_VARS = ["PI_CODING_AGENT_DIR", "PI_SKIP_VERSION_CHECK", "CC_VERSION", INSTALL_METHOD_VAR];
+/** The variable the launcher passes the app's version in: its presence is how the base tells the bundled app from a plain pi package. */
+export const VERSION_VAR = envName("VERSION");
+export const LAUNCHER_VARS = ["PI_CODING_AGENT_DIR", "PI_SKIP_VERSION_CHECK", VERSION_VAR, INSTALL_METHOD_VAR];
 
 /** The app's pi agent directory: `ONECODE_AGENT_DIR`, else `~/.onecode/agent`. Never `PI_CODING_AGENT_DIR`. */
 export function appAgentDir(env = process.env, home = homedir()) {
@@ -62,7 +64,7 @@ export function applyLauncherEnv(env, { home = homedir(), appVersion, installMet
 	const agentDir = appAgentDir(env, home);
 	env.PI_CODING_AGENT_DIR = agentDir;
 	env.PI_SKIP_VERSION_CHECK = "1"; // the app ships its own update check
-	env.CC_VERSION = appVersion; // the banner shows the app version
+	env[VERSION_VAR] = appVersion; // the banner shows the app version
 	env[INSTALL_METHOD_VAR] = installMethod;
 	return agentDir;
 }

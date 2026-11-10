@@ -16,6 +16,7 @@
  * children persist their sessions per run to make that possible).
  */
 
+import { VERSION_VAR } from "../../lib/app/app-launch.mjs";
 import { INSTALL_METHOD_VAR } from "../../lib/app/app-launch.mjs";
 import { brand } from "../../lib/profile/brand.mjs";
 import { knobLimit, knobNames } from "../../lib/profile/knobs.ts";
@@ -505,7 +506,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				shape: process.env[INSTALL_METHOD_VAR] ? "app" : "extension",
 				method: process.env[INSTALL_METHOD_VAR],
 				agentDir,
-				version: process.env.CC_VERSION ?? extensionVersion(),
+				version: process.env[VERSION_VAR] ?? extensionVersion(),
 			},
 			setup: {
 				skills: scanSkills(cwd, os.homedir(), agentDir, plugins.skills).map((skill) => skill.name),

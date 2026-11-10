@@ -34,6 +34,7 @@ declare module "*/app-launch.mjs" {
 	export const APP_AGENT_DIR_VAR: string;
 	export const LAUNCHER_ENV_VAR: string;
 	export const INSTALL_METHOD_VAR: string;
+	export const VERSION_VAR: string;
 	export const LAUNCHER_VARS: readonly string[];
 	export function appAgentDir(env?: Record<string, string | undefined>, home?: string): string;
 	export function installMethodFor(binRealPath: string | undefined): "brew" | "npm";

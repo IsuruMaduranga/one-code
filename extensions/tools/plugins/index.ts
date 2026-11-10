@@ -564,7 +564,7 @@ function registerPluginCommand(pi: ExtensionAPI, plugin: Plugin, name: string, p
 				body = parsed.body;
 			} catch (error) {
 				notifyOrPrint(ctx, `Could not read ${path}: ${(error as Error).message}. Restore the command file or reinstall the ${plugin.name} plugin, then retry.`, "error");
-				// A one-shot run must not exit 0 for a command that never ran (commands/exit/index.ts).
+				// A one-shot run must not exit 0 for a command that never ran (request/run-status/index.ts).
 				if (!sessionOutlivesTurn(ctx.mode)) pi.events.emit(ONE_SHOT_COMMAND_FAILED_CHANNEL, {});
 				return;
 			}

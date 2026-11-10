@@ -44,6 +44,7 @@
  * (settings, consent, logging) and a payload naming the child.
  */
 
+import { knobValue } from "../../lib/profile/knobs.ts";
 import { brandedId } from "../../lib/profile/brand.mjs";
 import { feature } from "../../lib/profile/feature.ts";
 import { randomUUID } from "node:crypto";
@@ -265,7 +266,7 @@ function hooksExtension(pi: ExtensionAPI) {
 						durationMs: run.durationMs,
 					};
 					if (hooksDebugEnabled()) process.stderr.write(`${formatDebugLine(logEntry)}\n`);
-					if (process.env.CC_HOOKS_DEBUG === "2") {
+					if (knobValue("HOOKS_DEBUG") === "2") {
 						appendHookLog({ ts: new Date().toISOString(), sessionId: payload.session_id, ...logEntry }, hooksLogPath());
 					}
 					return outcome;

@@ -12,17 +12,18 @@
  * at the cached-prefix positions, variable only on the tail, so it never busts
  * the prefix. One Code approximates the countdown as the growth of the context
  * since the turn started (pi's context-usage estimate), the same quantity to
- * within the estimator's error. `CC_TOTAL_TOKENS_BUDGET` overrides the figure.
+ * within the estimator's error. `*_TOTAL_TOKENS_BUDGET` overrides the figure.
  */
 
+import { knobValue } from "../profile/knobs.ts";
 import type { ContextBudgetText } from "../../context/context-budget/text.ts";
 
 /** Claude Code's per-turn budget as observed; the meaning of the figure is CC's max tokens per turn with compaction. */
 export const DEFAULT_TURN_TOKEN_BUDGET = 15_000_000;
 
-/** The configured budget: `CC_TOTAL_TOKENS_BUDGET` when it is a positive number, else Claude Code's default. */
+/** The configured budget: `*_TOTAL_TOKENS_BUDGET` when it is a positive number, else Claude Code's default. */
 export function turnTokenBudget(env: Record<string, string | undefined> = process.env): number {
-	const raw = env.CC_TOTAL_TOKENS_BUDGET;
+	const raw = knobValue("TOTAL_TOKENS_BUDGET", env);
 	const n = raw === undefined || raw.trim() === "" ? Number.NaN : Number(raw);
 	return Number.isFinite(n) && n > 0 ? Math.round(n) : DEFAULT_TURN_TOKEN_BUDGET;
 }

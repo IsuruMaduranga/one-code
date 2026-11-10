@@ -1268,7 +1268,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		if (!ctx.hasUI || ctx.mode === "print") {
 			const reason = refused({ kind: "classifierOverflowHeadless" });
 			ctx.ui.notify(`${reason}. Compact the session (/compact) and continue.`, "error");
-			// A failed one-shot run, not a user cancel (commands/exit/index.ts).
+			// A failed one-shot run, not a user cancel (request/run-status/index.ts).
 			pi.events.emit(TURN_FAILED_CHANNEL, { reason } satisfies TurnFailedEvent);
 			ctx.abort();
 			return { block: true, reason };

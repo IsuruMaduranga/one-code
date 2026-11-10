@@ -8,7 +8,7 @@
  *
  * This exists because the calibration workflow is real: both regressions this
  * feature has had were caught by reading raw verdicts, and stderr under
- * CC_AUTO_MODE_DEBUG only helps when someone thought to set it *before* the
+ * *_AUTO_MODE_DEBUG only helps when someone thought to set it *before* the
  * session. A standing log makes "what has the gate been deciding, and which
  * direction is drifting" answerable after the fact. The permissive direction
  * especially: allows are invisible in the UI by design, so this file is the

@@ -11,6 +11,7 @@
  * and is never questioned; `/doctor` shows it. The bundled app sets 0 itself.
  */
 
+import { featureEnabled } from "../../lib/profile/profile.ts";
 import { brand } from "../../lib/profile/brand.mjs";
 import os from "node:os";
 import { join } from "node:path";
@@ -34,7 +35,7 @@ export const KEEP_DECLINED_KEY = "compactionKeepDeclined";
 /** Ask once, when nothing sets the keep window. Never throws. */
 export async function handleCompactionKeep(ctx: ExtensionContext): Promise<void> {
 	try {
-		if (installKind() === "app" || !ctx.hasUI || process.env.CC_COMPACTION === "0") return;
+		if (installKind() === "app" || !ctx.hasUI || !featureEnabled("compaction")) return;
 		if (declined(KEEP_DECLINED_KEY)) return;
 		const agentDir = getAgentDir();
 		const manager = SettingsManager.create(ctx.cwd, agentDir);

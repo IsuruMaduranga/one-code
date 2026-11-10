@@ -6,6 +6,9 @@
  * the active profile's. The cases that need Claude Code's instruction files,
  * and One Code's wording, are in profile/test/file-tracker-wiring.test.ts.
  */
+import { setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
+import { useProfile } from "./helpers/profile.ts";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -386,7 +389,7 @@ describe("file-tracker wiring", () => {
 	});
 
 	it("clears discarded reads when pi compacts with the harness's summarizer disabled", async () => {
-		vi.stubEnv("CC_COMPACTION", "0");
+		useProfile({ features: { compaction: false } });
 		try {
 			const file = path("discarded.ts");
 			const kept = path("retained.ts");
@@ -409,6 +412,7 @@ describe("file-tracker wiring", () => {
 			expect(await fake.fireOne("tool_call", { toolName: "write", input: { path: kept } }, ctx())).toBeUndefined();
 			expect(emitted).toEqual([]);
 		} finally {
+			setActiveProfileForTest(undefined);
 			vi.unstubAllEnvs();
 		}
 	});

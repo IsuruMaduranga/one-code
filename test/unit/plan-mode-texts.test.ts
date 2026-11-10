@@ -28,7 +28,7 @@ describe("plan-mode wiring of the texts", () => {
 	beforeEach(() => {
 		stateDir = mkdtempSync(join(tmpdir(), "plan-mode-texts-"));
 		vi.stubEnv(envName("STATE_DIR"), stateDir);
-		vi.stubEnv("CC_PROMPT_TIER", "");
+		vi.stubEnv(envName("PROMPT_TIER"), "");
 		fake = createFakePi();
 		reminders.length = 0;
 		fake.events.on(REMINDER_CHANNEL, (data) => reminders.push(data as never));

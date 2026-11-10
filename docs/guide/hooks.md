@@ -118,7 +118,7 @@ user turn. The ninth block ends the turn with a notice. Hooks still receive
 
 ## Debugging hooks
 
-Set `CC_HOOKS_DEBUG=1` before launching to print each hook dispatch and its
+Set `ONECODE_HOOKS_DEBUG=1` before launching to print each hook dispatch and its
 outcome to stderr. Decisions are also appended to
 `~/.onecode/hooks/hooks-decisions.jsonl` while the variable is set.
 

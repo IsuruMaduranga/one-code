@@ -1018,7 +1018,7 @@ export function createUserMessageSender(pi: Pick<ExtensionAPI, "on" | "sendUserM
 			}
 		}).catch((error) => {
 			// pi logs command-handler rejections but runPrintMode still returns
-			// success. Tell the session's exit extension without touching the
+			// success. Tell the session's run-status extension without touching the
 			// process-wide code here (a later prompt may succeed, or this may be
 			// a child). A shutdown rejection must not act on a disposed session.
 			if (active) pi.events.emit(ONE_SHOT_COMMAND_FAILED_CHANNEL, {});

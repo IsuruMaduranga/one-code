@@ -16,6 +16,7 @@
  * that went through bash and never touched an intercepted tool.
  */
 
+import { featureEnabled } from "../../lib/profile/profile.ts";
 import { feature } from "../../lib/profile/feature.ts";
 import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../../lib/agents/child-writes.ts";
 import { createHash } from "node:crypto";
@@ -455,7 +456,7 @@ function fileTrackerExtension(pi: ExtensionAPI) {
 			touched = new Map([...before].filter(([path]) => shown(path)));
 			// Opting out of One Code's restore does not disable pi's compaction:
 			// reads discarded by either summarizer still need a fresh read.
-			if (process.env.CC_COMPACTION === "0" || before.size === 0) return;
+			if (!featureEnabled("compaction") || before.size === 0) return;
 			const allowed = restoreAllowed(ctx);
 			const candidates = restoreCandidates(before, (path) => shown(path) || !allowed(path));
 			const read = createReadToolDefinition(ctx.cwd);

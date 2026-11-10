@@ -34,10 +34,11 @@
  * api.anthropic.com) — verified there, and Claude Code sends it on every
  * request. OFF everywhere else: Bedrock takes `anthropic_beta` in the body,
  * not the header, and proxies may strip unknown params — a rejected parameter
- * fails every request. `CC_CLEAR_THINKING=0` forces it off; `=1` forces it on
+ * fails every request. `*_CLEAR_THINKING=0` forces it off; `=1` forces it on
  * for an anthropic-messages endpoint you have confirmed accepts it.
  */
 
+import { knobValue } from "../../lib/profile/knobs.ts";
 import { feature } from "../../lib/profile/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { acceptsAnthropicWire } from "../../lib/models/model-policy.ts";
@@ -149,12 +150,12 @@ export function sessionRequestHeaders<H extends Record<string, string | null>>(
 ): H | Record<string, string | null> | undefined {
 	// compat is a provider union; clearThinkingEnabled only passes Anthropic models.
 	const anthropic = model as AnthropicishModel | undefined;
-	if (!clearThinkingEnabled(process.env.CC_CLEAR_THINKING, anthropic)) return headers;
+	if (!clearThinkingEnabled(knobValue("CLEAR_THINKING"), anthropic)) return headers;
 	return { ...headers, "anthropic-beta": anthropicBetas(isAnthropicOAuth(), anthropic?.compat) };
 }
 
 function contextManagementExtension(pi: ExtensionAPI) {
-	const flag = () => process.env.CC_CLEAR_THINKING;
+	const flag = () => knobValue("CLEAR_THINKING");
 
 	// Prompt-cache TTL for the main session: one hour in the interactive modes,
 	// the way Claude Code caches (a pause between turns no longer re-writes the

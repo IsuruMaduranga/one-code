@@ -20,6 +20,7 @@
  * Code's notice. Failures are silent, as in Claude Code.
  */
 
+import { featureEnabled } from "../../lib/profile/profile.ts";
 import { brandedId } from "../../lib/profile/brand.mjs";
 import { feature } from "../../lib/profile/feature.ts";
 import { type ExtensionAPI, type ExtensionContext, getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
@@ -61,7 +62,7 @@ function idleCompactExtension(pi: ExtensionAPI) {
 			now: Date.now(),
 			dueAt,
 			config,
-			compactionOn: process.env.CC_COMPACTION !== "0" && autoCompactionOn(ctx.cwd),
+			compactionOn: featureEnabled("compaction") && autoCompactionOn(ctx.cwd),
 			model: ctx.model ? modelSpec(ctx.model) : undefined,
 			thinking: pi.getThinkingLevel(),
 			warm,

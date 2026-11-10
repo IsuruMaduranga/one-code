@@ -8,7 +8,7 @@
  * per-attempt timeout, key the request to the session (`<session id>:<kind>`,
  * stable across calls, so the provider's prompt cache is reused), apply the
  * caller's cache placement on the APIs it covers, log the attempt
- * (`CC_SIDE_CALL_LOG`), retry with thinking on when the model cannot disable
+ * (`*_SIDE_CALL_LOG`), retry with thinking on when the model cannot disable
  * it, and report usage for the footer cost. The request on the wire is exactly
  * what each extension built inline before (`side-call-run-wire.test.ts`).
  *

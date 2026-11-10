@@ -1,3 +1,4 @@
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import compactionExtension from "../../extensions/context/compaction/index.ts";
@@ -33,7 +34,6 @@ function setup() {
 }
 
 beforeEach(() => {
-	vi.stubEnv("CC_COMPACTION", undefined);
 	complete.mockReset();
 	complete.mockResolvedValue(response() as never);
 });

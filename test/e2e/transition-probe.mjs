@@ -92,8 +92,7 @@ class Pi {
 			...process.env,
 			WIRE_DUMP: WIRE,
 			WIRE_DUMP_META: META,
-			CC_RECAP: "0",
-			CC_SESSION_TITLE: "0",
+			ONECODE_FEATURES_OFF: "recap,session-title",
 			...(KEEP_MCP ? {} : { CLAUDE_CONFIG_DIR: CONFIG }),
 			...envOverrides,
 		};

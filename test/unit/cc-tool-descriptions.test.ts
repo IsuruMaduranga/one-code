@@ -7,6 +7,7 @@
  * tools array byte-stable within a session. One Code's shipped texts are
  * locked in profile/test/cc-tool-descriptions-wording.test.ts.
  */
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import askUserExtension from "../../extensions/tools/ask-user/index.ts";
 import bashExtension from "../../extensions/tools/bash/index.ts";
@@ -34,11 +35,11 @@ describe("description form by tier", () => {
 	});
 });
 
-/** A stand-in session model; CC_PROMPT_TIER picks the tier. */
+/** A stand-in session model; *_PROMPT_TIER picks the tier. */
 const someModel = { provider: "openai", id: "gpt-test", name: "gpt-test", input: ["text"], cost: { input: 1, output: 4 } };
 
 async function switchTier(fake: FakePi, tier: string) {
-	vi.stubEnv("CC_PROMPT_TIER", tier);
+	vi.stubEnv(envName("PROMPT_TIER"), tier);
 	await fake.fire("model_select", { type: "model_select", model: someModel, previousModel: undefined, source: "set" });
 }
 
@@ -55,7 +56,7 @@ function countRegistrations(fake: FakePi): Map<string, number> {
 
 describe("switching forms mid-session", () => {
 	it.each([["plan", "auto"], ["auto", "plan"]])("bash follows a %s → %s switch: an epoch renders the live form, and inside one the ledger keeps the recorded definition", async (from, to) => {
-		vi.stubEnv("CC_PROMPT_TIER", "workhorse");
+		vi.stubEnv(envName("PROMPT_TIER"), "workhorse");
 		const fake = createFakePi();
 		bashExtension(fake.pi as never);
 		fake.events.emit(PERMISSION_STATUS_CHANNEL, { mode: from, paused: false });
@@ -94,7 +95,7 @@ describe("switching forms mid-session", () => {
 	it("the form is applied at session start from the session's model", async () => {
 		const fake = createFakePi();
 		bashExtension(fake.pi as never);
-		vi.stubEnv("CC_PROMPT_TIER", "tiny");
+		vi.stubEnv(envName("PROMPT_TIER"), "tiny");
 		await fake.fire("session_start", { type: "session_start", reason: "startup" }, createFakeCtx({ model: someModel }));
 		expect(fake.tools.get("bash")!.description).toBe(bashText("long", false, true));
 	});

@@ -20,6 +20,7 @@
  * has approved nothing.
  */
 
+import { knobValue } from "../../../lib/profile/knobs.ts";
 import { appendFileSync } from "node:fs";
 import { cleanupSessionResources, isContextOverflow, type Model, type Api, type AssistantMessage, type ThinkingLevel } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
@@ -362,11 +363,11 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 	// retry (the profile's `stage2DenialAddendum`). Stage 1 grades harm only and is
 	// left byte-identical to CC's.
 	const afterRuleDenial = request.transcript.some((entry) => entry.kind === "denied");
-	const debug = process.env.CC_AUTO_MODE_DEBUG;
+	const debug = knobValue("AUTO_MODE_DEBUG");
 	// Probe hook (test/e2e/cache-probe.sh): one JSON line per classifier reply with
 	// its text and pi-ai's normalized usage, whatever the transport (Codex runs
 	// over WebSocket, where a fetch wrapper sees nothing). Opt-in, never read back.
-	const usageLog = process.env.CC_AUTO_MODE_LOG;
+	const usageLog = knobValue("AUTO_MODE_LOG");
 
 	// A model already pinned this session is tried first, so the classifier does
 	// not change under the session while the pin is healthy. The rest of the chain

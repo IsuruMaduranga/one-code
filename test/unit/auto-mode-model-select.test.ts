@@ -1,3 +1,4 @@
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { classifierCandidates, describeCandidate, isModelUnavailableError } from "../../extensions/lib/models/classifier-model.ts";
 import { CLASSIFIER_CALL_TOKENS, classifierCallCost } from "../../extensions/lib/models/model-policy.ts";
@@ -195,7 +196,7 @@ describe("classifierCandidates: containment, tier and context floors", () => {
 	});
 
 	it("ignores a prompt-tier override and retains an unlisted session model", () => {
-		vi.stubEnv("CC_PROMPT_TIER", "tiny");
+		vi.stubEnv(envName("PROMPT_TIER"), "tiny");
 		const session = model("openai", "gpt-x-large", 10, 200_000);
 		const medium = model("openai", "gpt-x-medium", 5, 200_000);
 		expect(pickFull([medium], session).candidates).toEqual([{ model: medium, source: "economical" }, { model: session, source: "session" }]);

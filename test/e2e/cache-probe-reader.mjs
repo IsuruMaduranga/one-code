@@ -1,5 +1,5 @@
 /**
- * Reader side-call cache probe. The driver writes one CC_SIDE_CALL_LOG JSONL
+ * Reader side-call cache probe. The driver writes one ONECODE_SIDE_CALL_LOG JSONL
  * row per completed reader attempt and the pi JSON event stream records the
  * two outer web_fetch calls. The reader's system prompt is intentionally
  * short, so this proves repeated reads of one page only. It does not claim

@@ -86,7 +86,7 @@ allow rules, or use auto mode with a provider that can run the classifier.
 unavailable.** The classifier model couldn't be reached or returned
 nothing usable; the gate fails closed. Check `/auto-mode config` for the
 model in use, and `/doctor report` for provider credentials. Set
-`CC_AUTO_MODE_DEBUG=1` to see each verdict on stderr.
+`ONECODE_AUTO_MODE_DEBUG=1` to see each verdict on stderr.
 
 **The classifier approves or blocks something it shouldn't.** A cheap-tier
 classifier is a measurably weaker boundary than a workhorse- or
@@ -149,7 +149,7 @@ Restart the session and accept, or check
 
 **A hook blocks a call with no message.** A `PreToolUse` or
 `UserPromptSubmit` hook that times out blocks by design. Set
-`CC_HOOKS_DEBUG=1` to see each dispatch and outcome.
+`ONECODE_HOOKS_DEBUG=1` to see each dispatch and outcome.
 
 ## Sessions
 
@@ -171,8 +171,8 @@ different model, a `max` or `ultracode` level, or one picked with **s**
 for its scrollback. Use the keys the panel's footer names (**Space** and
 **b** page in the doctor report, for example).
 
-**I want pi's own banner, footer, or spinner back.** Set `CC_NO_BANNER=1`,
-`CC_FOOTER=0`, or the other toggles listed in
+**I want pi's own banner, footer, or spinner back.** Set `ONECODE_NO_BANNER=1`,
+`ONECODE_FEATURES_OFF=footer`, or the other toggles listed in
 [Environment variables](reference.md#environment-variables).
 
 **On Windows the model has no shell tool, or the wrong one.** With Git for

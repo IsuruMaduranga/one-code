@@ -1,3 +1,4 @@
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	DEFAULT_TURN_TOKEN_BUDGET,
@@ -16,13 +17,13 @@ const contextBudget = requireText("contextBudget");
 const budget = (left: number) => totalTokensBlock(contextBudget, left);
 
 describe("turnTokenBudget", () => {
-	it("is Claude Code's 15,000,000 unless CC_TOTAL_TOKENS_BUDGET names a positive number", () => {
+	it("is Claude Code's 15,000,000 unless the TOTAL_TOKENS_BUDGET knob names a positive number", () => {
 		expect(turnTokenBudget({})).toBe(DEFAULT_TURN_TOKEN_BUDGET);
 		expect(DEFAULT_TURN_TOKEN_BUDGET).toBe(15_000_000);
-		expect(turnTokenBudget({ CC_TOTAL_TOKENS_BUDGET: "2000000" })).toBe(2_000_000);
-		expect(turnTokenBudget({ CC_TOTAL_TOKENS_BUDGET: "0" })).toBe(DEFAULT_TURN_TOKEN_BUDGET);
-		expect(turnTokenBudget({ CC_TOTAL_TOKENS_BUDGET: "lots" })).toBe(DEFAULT_TURN_TOKEN_BUDGET);
-		expect(turnTokenBudget({ CC_TOTAL_TOKENS_BUDGET: " " })).toBe(DEFAULT_TURN_TOKEN_BUDGET);
+		expect(turnTokenBudget({ [envName("TOTAL_TOKENS_BUDGET")]: "2000000" })).toBe(2_000_000);
+		expect(turnTokenBudget({ [envName("TOTAL_TOKENS_BUDGET")]: "0" })).toBe(DEFAULT_TURN_TOKEN_BUDGET);
+		expect(turnTokenBudget({ [envName("TOTAL_TOKENS_BUDGET")]: "lots" })).toBe(DEFAULT_TURN_TOKEN_BUDGET);
+		expect(turnTokenBudget({ [envName("TOTAL_TOKENS_BUDGET")]: " " })).toBe(DEFAULT_TURN_TOKEN_BUDGET);
 	});
 });
 
@@ -180,12 +181,4 @@ describe("context-budget wiring", () => {
 		expect(rendered.messages[2].content.map((c) => c.text)).toEqual(["ran call-b", budget(14_999_800)]);
 	});
 
-	it("is off entirely under CC_TOTAL_TOKENS=0", async () => {
-		vi.stubEnv("CC_TOTAL_TOKENS", "0");
-		const { fake, reminders } = collect();
-		await fake.fireOne("session_start", {}, createFakeCtx());
-		await fake.fireOne("agent_start", {}, createFakeCtx(usage(10)));
-		await fake.fireOne("tool_result", {}, createFakeCtx(usage(20)));
-		expect(reminders).toEqual([]);
-	});
 });

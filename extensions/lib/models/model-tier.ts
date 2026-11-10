@@ -20,6 +20,7 @@
  * alternatives: `working-docs/decisions/model-tiers.md`.
  */
 
+import { envName } from "../profile/brand.mjs";
 import { knobValue } from "../profile/knobs.ts";
 import { statSync } from "node:fs";
 import { homedir } from "node:os";
@@ -60,12 +61,12 @@ export function tiersBelow(tier: PromptTier, reference: PromptTier): number {
 }
 
 /**
- * `CC_PROMPT_TIER=frontier|workhorse|cheap|tiny` forces a register; `auto`/unset
+ * `*_PROMPT_TIER=frontier|workhorse|cheap|tiny` forces a register; `auto`/unset
  * classifies. Env only — a project must not be able to downgrade its own
  * scaffolding, the same reasoning that keeps `autoMode` out of project settings.
  */
 export function tierOverride(env: NodeJS.ProcessEnv = process.env): PromptTier | undefined {
-	const raw = env.CC_PROMPT_TIER?.trim().toLowerCase();
+	const raw = knobValue("PROMPT_TIER", env)?.trim().toLowerCase();
 	return isPromptTier(raw) ? raw : undefined;
 }
 
@@ -148,7 +149,7 @@ export interface TierClassification {
 /**
  * The tier and the rule that produced it. `resolveModelTier` is the plain form.
  * In order:
- *   1. `CC_PROMPT_TIER` (the session's register only; selection ignores it);
+ *   1. `*_PROMPT_TIER` (the session's register only; selection ignores it);
  *   2. the user's `modelTiers` setting for this model;
  *   3. the Claude Code parity gate: first-party Opus ≥ 4.8, Sonnet ≥ 5.5,
  *      Fable, and OpenAI's GPT-6+ Astra and Sol are frontier; for the prompt
@@ -165,7 +166,7 @@ export function classifyModelTier(
 	purpose: TierPurpose = "prompt",
 ): TierClassification {
 	const forced = tierOverride(env);
-	if (forced) return { tier: forced, reason: "CC_PROMPT_TIER" };
+	if (forced) return { tier: forced, reason: envName("PROMPT_TIER") };
 	if (!model) return { tier: "tiny", reason: "no model" }; // unknown model → maximum scaffolding
 	const configured = configuredModelTier(model);
 	if (configured) return { tier: configured, reason: "modelTiers setting" };
@@ -321,7 +322,7 @@ export function economicalContainedCandidates(
 		// reader, presets) names the model the way the user sees it in /model.
 		.filter((model) => !isDatedDuplicate(model, pool))
 		.filter((model) => isAutoSelectable(model, served))
-		// Classify by the model's INTRINSIC tier — never `process.env`: CC_PROMPT_TIER
+		// Classify by the model's INTRINSIC tier — never `process.env`: *_PROMPT_TIER
 		// forces the *session's* prompt-scaffolding register, and honoring it here
 		// would collapse every candidate to one tier and let a `tiny` model through
 		// the security floor. Selection must judge each model on its own merits.
@@ -360,11 +361,11 @@ export function servedCatalogIds(pool: readonly Model<Api>[]): Set<string> {
 	return ids;
 }
 
-/** No CC_PROMPT_TIER override: automatic model *selection* always uses intrinsic tiers. */
+/** No *_PROMPT_TIER override: automatic model *selection* always uses intrinsic tiers. */
 const INTRINSIC_TIER_ENV: NodeJS.ProcessEnv = Object.freeze({}) as NodeJS.ProcessEnv;
 
 /**
- * A model's own capability tier, CC_PROMPT_TIER ignored — what selection, the
+ * A model's own capability tier, *_PROMPT_TIER ignored — what selection, the
  * permission gate and the doctor judge a model by. It differs from the prompt
  * tier only for Haiku 5 and later (`isHaikuWithFrontierForms`).
  */
@@ -381,7 +382,7 @@ export function atLeastTier(tier: PromptTier, floor: PromptTier): boolean {
  * Whether the permission gate gives `model`'s calls Claude Code's fast paths.
  * Frontier and workhorse do; cheap and tiny keep One Code's stricter gate
  * (working-docs/decisions/auto-mode.md, "Two gates by model tier"). Judged on
- * the intrinsic tier, so `CC_PROMPT_TIER` can never loosen the gate; no model
+ * the intrinsic tier, so `*_PROMPT_TIER` can never loosen the gate; no model
  * gets the stricter gate.
  */
 export function usesClaudeCodeFastPaths(model: Model<Api> | undefined): boolean {

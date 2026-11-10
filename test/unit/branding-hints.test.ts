@@ -1,3 +1,4 @@
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -35,7 +36,7 @@ describe("branding argument hints", () => {
 		template("onecode-hint-file", "[mine]");
 		template("model", "[file]");
 		vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
-		vi.stubEnv("CC_NO_BANNER", "1");
+		vi.stubEnv(envName("NO_BANNER"), "1");
 
 		const fake = createFakePi();
 		const extension = (name: string) => ({ name, source: "extension", sourceInfo: { path: `${name}.ts` } });
@@ -60,7 +61,7 @@ describe("branding argument hints", () => {
 		const dir = mkdtempSync(join(tmpdir(), "branding-hints-"));
 		dirs.push(dir);
 		vi.stubEnv("PI_CODING_AGENT_DIR", dir);
-		vi.stubEnv("CC_NO_BANNER", "1");
+		vi.stubEnv(envName("NO_BANNER"), "1");
 		const path = join(dir, "onecode-hint-late.md");
 		const fake = createFakePi();
 		(fake.pi as { getCommands: () => unknown[] }).getCommands = () => [{ name: "onecode-hint-late", source: "prompt", sourceInfo: { path } }];

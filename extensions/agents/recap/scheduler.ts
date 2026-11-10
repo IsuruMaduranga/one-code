@@ -27,7 +27,7 @@ export class RecapScheduler {
 		private readonly timer: TimerOps,
 		/** The idle delay in ms, read at arm time. */
 		private readonly idleMs: () => number,
-		/** Whether the recap is enabled (e.g. CC_RECAP !== "0"). */
+		/** Whether the recap is enabled (the `recap` feature decides; the scheduler keeps the hook for tests). */
 		private readonly enabled: () => boolean,
 		/** Called when the idle timer elapses. */
 		private readonly onFire: () => void,

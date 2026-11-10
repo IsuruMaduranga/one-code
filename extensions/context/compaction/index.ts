@@ -32,9 +32,10 @@
  * standalone shape (the doomed span alone, trimmed to the window) is used.
  *
  * Any failure returns nothing, so pi's own compaction serves — a different
- * summary style, never a broken compaction. CC_COMPACTION=0 opts out.
+ * summary style, never a broken compaction. Turning the `compaction` feature off opts out.
  */
 
+import { knobValue } from "../../lib/profile/knobs.ts";
 import { feature } from "../../lib/profile/feature.ts";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Context, Message, Model, Tool } from "@earendil-works/pi-ai";
@@ -158,7 +159,6 @@ function compactionExtension(pi: ExtensionAPI) {
 		const instructions = hookInstructions.get(event.signal);
 		hookInstructions.delete(event.signal);
 		if (instructions) event = { ...event, customInstructions: [event.customInstructions, instructions].filter(Boolean).join("\n\n") };
-		if (process.env.CC_COMPACTION === "0") return undefined;
 
 		const model = ctx.model;
 		if (!model) return undefined;
@@ -221,7 +221,7 @@ function compactionExtension(pi: ExtensionAPI) {
 			// model.compat is a provider union; the clear_thinking helpers only read
 			// the Anthropic-shaped fields, and are gated to Anthropic anyway.
 			const cmModel = model as { api?: string; provider?: string; baseUrl?: string; compat?: AnthropicModelCompat };
-			const clearThinking = clearThinkingEnabled(process.env.CC_CLEAR_THINKING, cmModel);
+			const clearThinking = clearThinkingEnabled(knobValue("CLEAR_THINKING"), cmModel);
 			const headers = sessionRequestHeaders(cmModel, auth.headers);
 
 			// A replay sends the captured body (which already carries the

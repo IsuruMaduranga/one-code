@@ -7,6 +7,7 @@
  * MCP servers reachable, what external programs are missing — then the issues.
  */
 
+import { VERSION_VAR } from "../../lib/app/app-launch.mjs";
 import { brand } from "../../lib/profile/brand.mjs";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { extensionVersion } from "../../lib/app/package-version.ts";
@@ -272,9 +273,9 @@ function summaryText(input: {
 	return `Ready. ${roles} ${config} ${tail}`;
 }
 
-/** The extension's own version — the app overrides it with CC_VERSION (lockstep releases). */
+/** The extension's own version — the app overrides it with *_VERSION (lockstep releases). */
 export function productVersion(env: NodeJS.ProcessEnv = process.env): string {
-	return env.CC_VERSION ?? extensionVersion();
+	return env[VERSION_VAR] ?? extensionVersion();
 }
 
 /** The shell tools exactly as a session resolves them (tools/bash/index.ts, tools/powershell/index.ts). */

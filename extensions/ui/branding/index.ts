@@ -10,9 +10,11 @@
  * a no-op `invalidate()` (we have no cached layout to drop) — so this needs no
  * new dependency on pi-tui.
  *
- * Set `CC_NO_BANNER=1` to keep pi's original header.
+ * Set `*_NO_BANNER=1` to keep pi's original header.
  */
 
+import { VERSION_VAR } from "../../lib/app/app-launch.mjs";
+import { knobValue } from "../../lib/profile/knobs.ts";
 import { brand } from "../../lib/profile/brand.mjs";
 import { feature } from "../../lib/profile/feature.ts";
 import { PROFILE_DIR } from "../../lib/profile/profile.ts";
@@ -234,7 +236,7 @@ interface BrandingEditorUI {
 /**
  * Replace the core input editor with one that paints a "›" prompt marker, the
  * way Claude Code does. TUI-only (print/rpc have no editor), skipped when pi is
- * too old to expose the hook, and disableable with CC_NO_INPUT_MARKER=1 in case
+ * too old to expose the hook, and disableable with *_NO_INPUT_MARKER=1 in case
  * a pi-tui render change ever makes the marker misplace (cosmetic only — typing
  * is never affected; see prompt-marker.ts).
  */
@@ -243,7 +245,7 @@ function installPromptMarker(
 	argumentHints: ReadonlyMap<string, CommandHint>,
 	agentView: { target?: AgentViewTarget },
 ): void {
-	if (process.env.CC_NO_INPUT_MARKER === "1") return;
+	if (knobValue("NO_INPUT_MARKER") === "1") return;
 	if (!ctx.hasUI || ctx.mode !== "tui") return;
 	const ui = ctx.ui;
 	if (typeof ui.setEditorComponent !== "function") return;
@@ -302,7 +304,7 @@ function applyThinkingDefault(): void {
  * the two travel together.
  */
 function applyOutputPadDefault(): void {
-	if (process.env.CC_NO_ASSISTANT_MARKER === "1") return;
+	if (knobValue("NO_ASSISTANT_MARKER") === "1") return;
 	try {
 		const agentDir = getAgentDir();
 		const settingsPath = join(agentDir, "settings.json");
@@ -340,14 +342,14 @@ function brandingExtension(pi: ExtensionAPI) {
 	// Mark each block of assistant prose with Claude Code's "●" bullet. Only
 	// assistant text is transformed (not thinking or user turns); the transformer
 	// runs in markdown rendering, so print/rpc output is untouched.
-	// CC_NO_ASSISTANT_MARKER=1 opts out, mirroring CC_NO_INPUT_MARKER.
+	// *_NO_ASSISTANT_MARKER=1 opts out, mirroring *_NO_INPUT_MARKER.
 	const transformerHost = pi as unknown as MarkdownTransformerHost;
-	if (process.env.CC_NO_ASSISTANT_MARKER !== "1" && typeof transformerHost.registerMarkdownTransformer === "function") {
+	if (knobValue("NO_ASSISTANT_MARKER") !== "1" && typeof transformerHost.registerMarkdownTransformer === "function") {
 		transformerHost.registerMarkdownTransformer((markdown, context) =>
 			context.messageType === "assistant" ? markAssistantMarkdown(markdown) : markdown,
 		);
 	}
-	// The label and prompt marker apply in every session; CC_NO_BANNER only
+	// The label and prompt marker apply in every session; *_NO_BANNER only
 	// disables the header.
 	// The terminal title. pi writes "π - [<session name> - ]<cwd>" at the end of
 	// its startup, on every session replacement and whenever the name changes —
@@ -377,7 +379,7 @@ function brandingExtension(pi: ExtensionAPI) {
 	});
 
 	// Commands' argument placeholders (lib/ui/argument-hints.ts), drawn by the prompt editor.
-	// Declared before the CC_NO_BANNER return below: session_start reads it.
+	// Declared before the *_NO_BANNER return below: session_start reads it.
 	const argumentHints = new Map<string, CommandHint>(Object.entries(PI_BUILTIN_HINTS).map(([command, hint]) => [command, { hint }]));
 	// The agent the user is viewing, if any: the editor then targets it (lib/agents/agent-view.ts).
 	const agentView: { target?: AgentViewTarget } = {};
@@ -448,7 +450,7 @@ function brandingExtension(pi: ExtensionAPI) {
 		if (reason === "startup" || reason === "reload") void handleReplacedBuiltins(ctx).then(() => handleCompactionKeep(ctx));
 	});
 
-	if (process.env.CC_NO_BANNER === "1") return;
+	if (knobValue("NO_BANNER") === "1") return;
 
 	/**
 	 * Mode and classifier arrive over the bus from the permissions extension
@@ -482,7 +484,7 @@ function brandingExtension(pi: ExtensionAPI) {
 		// Only the TUI has a header to replace; rpc/print modes have no chrome.
 		if (!ctx.hasUI || ctx.mode !== "tui") return;
 
-		const version = process.env.CC_VERSION ?? extensionVersion();
+		const version = process.env[VERSION_VAR] ?? extensionVersion();
 		currentModelId = ctx.model?.id ?? currentModelId;
 		currentModelProvider = ctx.model?.provider ?? currentModelProvider;
 

@@ -2,9 +2,9 @@
  * Reads the one-code-extension package version from its own package.json so the
  * banner never hardcodes (and drifts from) the released version.
  *
- * The bundled app sets CC_VERSION to the app package version, which is kept in
+ * The bundled app sets *_VERSION to the app package version, which is kept in
  * lockstep with this package (working-docs/decisions/distribution.md). When the
- * extension is loaded directly via plain `pi` there is no CC_VERSION, so this
+ * extension is loaded directly via plain `pi` there is no *_VERSION, so this
  * reads the extension's own package.json instead of falling back to a stale
  * literal.
  */

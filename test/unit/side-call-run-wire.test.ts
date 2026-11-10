@@ -7,6 +7,7 @@
  * below as the reference) through pi-ai's real provider adapter, and compares
  * the bytes each would send.
  */
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Api, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
@@ -98,7 +99,7 @@ async function drive(kind: "btw" | "recap" | "reader", model: Model<Api>): Promi
 		await fake.commands.get("btw")!.handler("What did we decide?", ctx);
 	} else if (kind === "recap") {
 		vi.useFakeTimers();
-		process.env.CC_RECAP_IDLE_MS = "1000";
+		process.env[envName("RECAP_IDLE_MS")] = "1000";
 		recapExtension(fake.pi as never);
 		await fake.fire("session_start", {}, ctx);
 		await fake.fire("context", { messages: history }, ctx);
@@ -115,10 +116,9 @@ async function drive(kind: "btw" | "recap" | "reader", model: Model<Api>): Promi
 
 beforeEach(() => {
 	complete.mockReset().mockResolvedValue(answer);
-	delete process.env.CC_RECAP;
 });
 afterEach(() => {
-	delete process.env.CC_RECAP_IDLE_MS;
+	delete process.env[envName("RECAP_IDLE_MS")];
 	vi.useRealTimers();
 	vi.unstubAllGlobals();
 });

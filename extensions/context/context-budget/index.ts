@@ -22,7 +22,7 @@
  *
  * A turn starts at the first `agent_start` after a settle (whoever opened it: a
  * prompt or a harness notification) and its baseline is pi's context estimate
- * at that moment; a compaction rebases it (budget.ts). CC_TOTAL_TOKENS=0 turns
+ * at that moment; a compaction rebases it (budget.ts). Turning the `context-budget` feature off turns
  * all three off.
  */
 
@@ -37,14 +37,12 @@ const FIRST_PROMPT_KEY = "total-tokens-first";
 
 function contextBudgetExtension(pi: ExtensionAPI) {
 	const text = requireText("contextBudget");
-	const enabled = () => process.env.CC_TOTAL_TOKENS !== "0";
 	const budget = new TurnBudget(turnTokenBudget());
 	/** True between the first agent_start of a turn and agent_settled. */
 	let busy = false;
 
 	pi.on("session_start", () => {
 		busy = false;
-		if (!enabled()) return;
 		pi.events.emit(REMINDER_CHANNEL, {
 			text: totalTokensBlock(text, budget.budget),
 			key: FIRST_PROMPT_KEY,
@@ -78,7 +76,6 @@ function contextBudgetExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("tool_result", (event, ctx) => {
-		if (!enabled()) return;
 		pi.events.emit(REMINDER_CHANNEL, {
 			text: totalTokensBlock(text, budget.left(ctx.getContextUsage()?.tokens)),
 			placement: "last-append",

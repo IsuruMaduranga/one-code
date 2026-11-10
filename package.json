@@ -62,6 +62,7 @@
 			"extensions/agents/btw/index.ts",
 			"extensions/agents/session-title/index.ts",
 			"extensions/commands/exit/index.ts",
+			"extensions/request/run-status/index.ts",
 			"extensions/commands/init/index.ts",
 			"extensions/commands/clear/index.ts",
 			"extensions/tools/tasks/index.ts",

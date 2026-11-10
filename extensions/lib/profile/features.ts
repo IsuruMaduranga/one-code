@@ -62,6 +62,8 @@ export const FEATURES = {
 	btw: { entries: ["agents/btw/index.ts"] },
 	"session-title": { entries: ["agents/session-title/index.ts"] },
 	exit: { entries: ["commands/exit/index.ts"] },
+	// Required: a one-shot run's exit code is a contract with scripts and CI, whatever a profile turns off.
+	"run-status": { entries: ["request/run-status/index.ts"], required: true },
 	init: { entries: ["commands/init/index.ts"] },
 	clear: { entries: ["commands/clear/index.ts"] },
 	tasks: { entries: ["tools/tasks/index.ts"] },

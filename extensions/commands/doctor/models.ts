@@ -40,7 +40,7 @@ export interface ModelFacts {
 	session?: Model<Api>;
 	sessionTier?: PromptTier;
 	newerModel?: NewerModelSuggestion;
-	/** The register the system prompt is built in — the tier, or a CC_PROMPT_TIER override. */
+	/** The register the system prompt is built in — the tier, or a *_PROMPT_TIER override. */
 	promptTier: PromptTier;
 	promptTierForced: boolean;
 	subagent: SubagentModelResolution;
@@ -52,7 +52,7 @@ export interface ModelFacts {
 	/** `configured`: the user's `autoMode.classifierModel`, as written. */
 	classifier: { model?: Model<Api>; description?: string; notices: ClassifierNotice[]; configured?: string };
 	reader?: { model: Model<Api>; via: "tier" | "session" };
-	/** The session model's own tier and the rule that decided it (`classifyModelTier`, no CC_PROMPT_TIER). */
+	/** The session model's own tier and the rule that decided it (`classifyModelTier`, no *_PROMPT_TIER). */
 	tierReason?: string;
 	/** Whether the public model catalogs know the session model, and why automatic picks skip it, if they do. */
 	inCatalog: boolean;
@@ -152,7 +152,7 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 		findings.push({ level: "warn", text: facts.newerModel.text, fix: facts.newerModel.fix });
 	}
 	lines.push({
-		text: `Prompt register: ${TIER_LABEL[facts.promptTier]}${facts.promptTierForced ? " (forced by CC_PROMPT_TIER)" : ""}`,
+		text: `Prompt register: ${TIER_LABEL[facts.promptTier]}${facts.promptTierForced ? " (forced by *_PROMPT_TIER)" : ""}`,
 		indent: 1,
 		level: "dim",
 	});

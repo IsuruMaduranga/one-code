@@ -18,7 +18,7 @@
  * here one attempt per session keeps a broken provider from being hit on
  * every prompt), and a user's own `/name` is never overwritten. Skipped in
  * one-shot modes (`-p`, `--mode json`: the process exits at settle, a title
- * has nowhere to show) and under CC_SESSION_TITLE=0.
+ * has nowhere to show) and with the `session-title` feature off.
  */
 
 import { feature } from "../../lib/profile/feature.ts";
@@ -54,7 +54,7 @@ function sessionTitleExtension(pi: ExtensionAPI) {
 	pi.on("session_shutdown", reset);
 
 	pi.on("before_agent_start", (event, ctx) => {
-		if (attempted || process.env.CC_SESSION_TITLE === "0") return;
+		if (attempted) return;
 		if (!sessionOutlivesTurn(ctx.mode)) return;
 		if (pi.getSessionName()) {
 			attempted = true; // the user (or a resume) named it already

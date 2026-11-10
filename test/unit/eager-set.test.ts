@@ -6,6 +6,7 @@
  * from the profile in force, in the form the model's tier calls for (One
  * Code's own forms: profile/test/cc-tool-descriptions-wording.test.ts).
  */
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { describe, expect, it, vi } from "vitest";
 import artifactsExtension from "../../extensions/tools/artifacts/index.ts";
 import backgroundExtension from "../../extensions/tools/background/index.ts";
@@ -47,7 +48,7 @@ describe("eager and deferred tools", () => {
 		const { fake } = deferredBy(backgroundExtension as never, subagentsExtension as never);
 		expect(fake.tools.get("Agent")!.description).toBe(agentDescription("short"));
 		expect(agentDescription("long")).not.toBe(agentDescription("short"));
-		vi.stubEnv("CC_PROMPT_TIER", "cheap");
+		vi.stubEnv(envName("PROMPT_TIER"), "cheap");
 		try {
 			const model = { provider: "openai", id: "gpt-test", input: ["text"], cost: { input: 1, output: 4 } };
 			await fake.fire("model_select", { type: "model_select", model, source: "set" }, createFakeCtx({ model, modelRegistry: { getAvailable: () => [model] } }));

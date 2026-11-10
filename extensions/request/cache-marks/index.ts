@@ -11,10 +11,11 @@
  * Load order: after the ledger's payload hook (extensions/request/ledger/wire.ts), the
  * last extension that edits the messages. First-party Anthropic only: the
  * Messages API is where the look-back was measured, and its four-breakpoint
- * limit is checked here. `CC_CACHE_MARKS=0` turns it off, to compare a run with
+ * limit is checked here. `*_CACHE_MARKS=0` turns it off, to compare a run with
  * and without the mark.
  */
 
+import { knobValue } from "../../lib/profile/knobs.ts";
 import { feature } from "../../lib/profile/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { looksLikeAnthropicRequest } from "../../lib/request/anthropic-payload.ts";
@@ -23,7 +24,7 @@ import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../../lib/request/ledger/
 import { baseMark, withPreviousMark } from "./previous-mark.ts";
 
 function cacheMarksExtension(pi: ExtensionAPI) {
-	if (process.env.CC_CACHE_MARKS === "0") return;
+	if (knobValue("CACHE_MARKS") === "0") return;
 	/** The plan of the request being sent; a warm reuses it. */
 	let plan: RequestPlan | undefined;
 	pi.events.on(LEDGER_PLAN_CHANNEL, (data) => {

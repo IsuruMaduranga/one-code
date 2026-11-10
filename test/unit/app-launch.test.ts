@@ -58,12 +58,12 @@ describe("the app's agent directory", () => {
 		expect(agentDir).toBe(join(home, brand.stateDir, "agent"));
 		expect(env.PI_CODING_AGENT_DIR).toBe(agentDir);
 		expect(env.PI_SKIP_VERSION_CHECK).toBe("1");
-		expect(env.CC_VERSION).toBe("0.4.2");
+		expect(env[envName("VERSION")]).toBe("0.4.2");
 		expect(env[envName("INSTALL_METHOD")]).toBe("npm");
 		expect(JSON.parse(env[LAUNCHER_ENV_VAR] ?? "")).toEqual({
 			PI_CODING_AGENT_DIR: "/home/alice/.config/pi/agent",
 			PI_SKIP_VERSION_CHECK: null,
-			CC_VERSION: null,
+			[envName("VERSION")]: null,
 			[envName("INSTALL_METHOD")]: null,
 		});
 	});
@@ -86,18 +86,18 @@ describe("childProcessEnv", () => {
 	it("puts the user's values back and drops what the app added", () => {
 		const child = childProcessEnv(launched(), "linux");
 		expect(child.PI_CODING_AGENT_DIR).toBe("/user/pi");
-		for (const name of ["PI_SKIP_VERSION_CHECK", "CC_VERSION", envName("INSTALL_METHOD"), LAUNCHER_ENV_VAR]) expect(child).not.toHaveProperty(name);
+		for (const name of ["PI_SKIP_VERSION_CHECK", envName("VERSION"), envName("INSTALL_METHOD"), LAUNCHER_ENV_VAR]) expect(child).not.toHaveProperty(name);
 		expect(child.KEEP).toBe("yes");
 		expect(child.PATH).toBe("/usr/bin");
 	});
 
 	it("leaves the environment untouched outside the app", () => {
-		const env = { PI_CODING_AGENT_DIR: "/user/pi", CC_VERSION: "x" };
+		const env = { PI_CODING_AGENT_DIR: "/user/pi", [envName("VERSION")]: "x" };
 		expect(childProcessEnv(env, "linux")).toBe(env);
 	});
 
 	it("drops every launcher variable when the record does not parse", () => {
-		const child = childProcessEnv({ [LAUNCHER_ENV_VAR]: "{", PI_CODING_AGENT_DIR: "/app/agent", CC_VERSION: "1", OTHER: "1" }, "linux");
+		const child = childProcessEnv({ [LAUNCHER_ENV_VAR]: "{", PI_CODING_AGENT_DIR: "/app/agent", [envName("VERSION")]: "1", OTHER: "1" }, "linux");
 		expect(Object.keys(child)).toEqual(["OTHER"]);
 	});
 
@@ -108,7 +108,7 @@ describe("childProcessEnv", () => {
 	});
 
 	it("covers exactly the variables the launcher sets", () => {
-		expect([...LAUNCHER_VARS].sort()).toEqual(["CC_VERSION", envName("INSTALL_METHOD"), "PI_CODING_AGENT_DIR", "PI_SKIP_VERSION_CHECK"]);
+		expect([...LAUNCHER_VARS].sort()).toEqual([envName("VERSION"), envName("INSTALL_METHOD"), "PI_CODING_AGENT_DIR", "PI_SKIP_VERSION_CHECK"].sort());
 	});
 });
 
@@ -124,7 +124,7 @@ describe("spawned commands under the app get the user's environment", { timeout:
 		const agentDir = applyLauncherEnv(process.env, { home, appVersion: "0.4.2", installMethod: "npm" });
 		expect(process.env.PI_CODING_AGENT_DIR).toBe(agentDir);
 	};
-	const script = `process.stdout.write(JSON.stringify({ dir: process.env.PI_CODING_AGENT_DIR ?? null, cc: process.env.CC_VERSION ?? null, record: process.env.${LAUNCHER_ENV_VAR} ?? null }))`;
+	const script = `process.stdout.write(JSON.stringify({ dir: process.env.PI_CODING_AGENT_DIR ?? null, cc: process.env.${envName("VERSION")} ?? null, record: process.env.${LAUNCHER_ENV_VAR} ?? null }))`;
 	const expected = { dir: "/user/pi", cc: null, record: null };
 
 	it("spawnShellCommand (hooks, background shells, monitor, PowerShell)", async () => {
@@ -150,7 +150,7 @@ describe("spawned commands under the app get the user's environment", { timeout:
 		);
 		await ops.exec("pi list", "/tmp", { onData: () => {} });
 		expect(seen?.PI_CODING_AGENT_DIR).toBe("/user/pi");
-		expect(seen?.CC_VERSION).toBeUndefined();
+		expect(seen?.[envName("VERSION")]).toBeUndefined();
 		expect(seen?.PATH?.split(process.platform === "win32" ? ";" : ":")[0]).toBe("/app/agent/bin");
 	});
 
@@ -162,7 +162,7 @@ describe("spawned commands under the app get the user's environment", { timeout:
 		if (!bash) throw new Error("bash tool not registered");
 		const result = (await bash.execute(
 			"call-1",
-			{ command: `printf "%s|%s|%s" "\${PI_CODING_AGENT_DIR-unset}" "\${CC_VERSION-unset}" "\${${LAUNCHER_ENV_VAR}-unset}"` },
+			{ command: `printf "%s|%s|%s" "\${PI_CODING_AGENT_DIR-unset}" "\${${envName("VERSION")}-unset}" "\${${LAUNCHER_ENV_VAR}-unset}"` },
 			undefined,
 			undefined,
 			createFakeCtx({ mode: "print", cwd: process.cwd() }),
@@ -187,7 +187,7 @@ describe("the app launcher (lib/app/create-app.mjs) applies the launcher environ
 	it("sets it through app-launch.mjs, never inheriting PI_CODING_AGENT_DIR", () => {
 		expect(source).toContain("applyLauncherEnv(process.env,");
 		expect(source).not.toMatch(/PI_CODING_AGENT_DIR\s*\|\|=/);
-		expect(source).not.toMatch(new RegExp(`process\\.env\\.(CC_VERSION|${envName("INSTALL_METHOD")}|PI_SKIP_VERSION_CHECK)\\s*\\|?\\|?=`));
+		expect(source).not.toMatch(new RegExp(`process\\.env\\.(${envName("VERSION")}|${envName("INSTALL_METHOD")}|PI_SKIP_VERSION_CHECK)\\s*\\|?\\|?=`));
 	});
 
 	it("before the doctor fast path exits and before pi is imported", () => {

@@ -59,9 +59,9 @@ beforeEach(() => {
 	stubHome(home);
 	vi.stubEnv("PI_CODING_AGENT_DIR", join(home, brand.stateDir, "agent"));
 	vi.stubEnv(envName("NO_UPDATE_CHECK"), "1");
-	vi.stubEnv("CC_VERSION", "");
+	vi.stubEnv(envName("VERSION"), "");
 	// A clean environment for the checks that read it.
-	for (const key of ["CLAUDE_CODE_SUBAGENT_MODEL", "CC_PROMPT_TIER", "CLAUDE_CONFIG_DIR"]) vi.stubEnv(key, "");
+	for (const key of ["CLAUDE_CODE_SUBAGENT_MODEL", envName("PROMPT_TIER"), "CLAUDE_CONFIG_DIR"]) vi.stubEnv(key, "");
 	sessionStarted = false;
 	fake = createFakePi();
 	startTurn = captureUserTurns(fake);
@@ -215,11 +215,11 @@ describe("/doctor wiring", () => {
 	});
 
 	it("reports the session tier until model_select re-resolves it", async () => {
-		vi.stubEnv("CC_PROMPT_TIER", "workhorse");
+		vi.stubEnv(envName("PROMPT_TIER"), "workhorse");
 		const { ctx, notified } = ctxFor(anthropic[0]);
 		await run("report", ctx);
 		expect(notified[0]).toContain("Prompt register: workhorse");
-		vi.stubEnv("CC_PROMPT_TIER", "tiny");
+		vi.stubEnv(envName("PROMPT_TIER"), "tiny");
 		await run("report", ctx);
 		expect(notified[1]).toContain("Prompt register: workhorse");
 		ctx.model = anthropic[1];

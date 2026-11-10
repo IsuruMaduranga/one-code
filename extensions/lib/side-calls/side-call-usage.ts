@@ -1,4 +1,5 @@
 /** Opt-in side-call cache evidence, independent of the provider's transport. */
+import { knobValue } from "../profile/knobs.ts";
 import { appendFileSync } from "node:fs";
 
 /** Every side-call kind; releaseSideCalls closes each one's pi-ai key. */
@@ -13,13 +14,13 @@ export interface SideCallLogContext {
 }
 
 /**
- * CC_SIDE_CALL_LOG names a JSONL file containing prompt text and normalized
- * usage, never credentials or response text. Like CC_AUTO_MODE_LOG, this is
+ * *_SIDE_CALL_LOG names a JSONL file containing prompt text and normalized
+ * usage, never credentials or response text. Like *_AUTO_MODE_LOG, this is
  * explicitly opt-in and never read back. Log every completed provider attempt,
  * including reasoning retries; a probe must not mistake an error for a hit.
  */
 export function logSideCallUsage(call: SideCallLogContext, reply: { usage?: unknown; stopReason: string }): void {
-	const path = process.env.CC_SIDE_CALL_LOG;
+	const path = knobValue("SIDE_CALL_LOG");
 	if (!path) return;
 	try {
 		appendFileSync(path, `${JSON.stringify({

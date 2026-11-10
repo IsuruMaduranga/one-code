@@ -5,6 +5,7 @@
  * session and from `onecode doctor`.
  */
 
+import { VERSION_VAR } from "../../lib/app/app-launch.mjs";
 import { brand } from "../../lib/profile/brand.mjs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
@@ -74,9 +75,9 @@ export function keepView(
 	}
 }
 
-/** Whether this is the bundled app (its launcher sets `CC_VERSION`) or One Code on the user's own pi. */
+/** Whether this is the bundled app (its launcher sets `*_VERSION`) or One Code on the user's own pi. */
 export function installKind(env: NodeJS.ProcessEnv = process.env): "app" | "pi-package" {
-	return env.CC_VERSION ? "app" : "pi-package";
+	return env[VERSION_VAR] ? "app" : "pi-package";
 }
 
 /** How the user opens pi's config UI: `<bin> config` (`onecode config`) under the bundled app. */

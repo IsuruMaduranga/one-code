@@ -1,11 +1,12 @@
 /**
- * Hook observability, mirroring auto-mode's: CC_HOOKS_DEBUG=1 for live
+ * Hook observability, mirroring auto-mode's: *_HOOKS_DEBUG=1 for live
  * per-invocation lines, and an opt-in JSONL (`hooks-decisions.jsonl` next to
  * the approval store) for after-the-fact "what fired and what did it decide".
  * Logging must never break a hook's fail-open guarantee, so append failures
  * are swallowed (same stance as safety/permissions/auto-mode/decision-log.ts).
  */
 
+import { knobValue } from "../../lib/profile/knobs.ts";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { productStateDir } from "../../lib/profile/paths.ts";
@@ -23,7 +24,7 @@ export interface HookLogEntry {
 }
 
 export function hooksDebugEnabled(): boolean {
-	const value = process.env.CC_HOOKS_DEBUG;
+	const value = knobValue("HOOKS_DEBUG");
 	return value === "1" || value === "2";
 }
 

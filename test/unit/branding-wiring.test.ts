@@ -1,3 +1,4 @@
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -38,11 +39,11 @@ describe("branding session_start", () => {
 		for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 	});
 
-	it("installs the prompt editor with argument hints when the banner is off (CC_NO_BANNER=1)", () => {
+	it("installs the prompt editor with argument hints when the banner is off (*_NO_BANNER=1)", () => {
 		const agentDir = mkdtempSync(join(tmpdir(), "branding-"));
 		dirs.push(agentDir);
 		vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
-		vi.stubEnv("CC_NO_BANNER", "1");
+		vi.stubEnv(envName("NO_BANNER"), "1");
 		const { pi, fire } = fakePi();
 		brandingExtension(pi as never);
 		let factory: unknown;
@@ -87,7 +88,7 @@ describe("branding: merged quietStartup settings", () => {
 		vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
 		stubHome(root);
 		vi.stubEnv("CLAUDE_CONFIG_DIR", join(root, ".claude"));
-		vi.stubEnv("CC_NO_BANNER", "0");
+		vi.stubEnv(envName("NO_BANNER"), "0");
 
 		// Back the extension API with the same merged settings pi uses.
 		const settings = SettingsManager.create(cwd, agentDir);
@@ -134,8 +135,8 @@ describe("branding: pi's built-in tool search and MCP at startup", () => {
 		if (projectExtensions) writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({ extensions: projectExtensions }));
 		vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
 		vi.stubEnv("HOME", root);
-		vi.stubEnv("CC_VERSION", "");
-		vi.stubEnv("CC_NO_BANNER", "1");
+		vi.stubEnv(envName("VERSION"), "");
+		vi.stubEnv(envName("NO_BANNER"), "1");
 		const select = vi.fn(async () => TURN_OFF_YES);
 		const notify = vi.fn();
 		const ctx = { hasUI: true, mode: "tui", cwd, ui: { setHiddenThinkingLabel: () => {}, setEditorComponent: () => {}, notify, setTitle: () => {}, select } };
@@ -183,8 +184,8 @@ describe("branding: pi's compaction keep window at startup", () => {
 		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ extensions: ["-builtin:tool-search", "-builtin:mcp"], ...userSettings }));
 		vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
 		stubHome(root);
-		vi.stubEnv("CC_VERSION", "");
-		vi.stubEnv("CC_NO_BANNER", "1");
+		vi.stubEnv(envName("VERSION"), "");
+		vi.stubEnv(envName("NO_BANNER"), "1");
 		const select = vi.fn(async () => answer);
 		const ctx = { hasUI: true, mode: "tui", cwd, ui: { setHiddenThinkingLabel: () => {}, setEditorComponent: () => {}, notify: vi.fn(), setTitle: () => {}, select } };
 		const { pi, fire } = fakePi();
@@ -220,7 +221,7 @@ describe("branding: pi's compaction keep window at startup", () => {
 		await settled();
 		expect(explicit.select).not.toHaveBeenCalled();
 		const app = setup(KEEP_YES);
-		vi.stubEnv("CC_VERSION", "1.0.0");
+		vi.stubEnv(envName("VERSION"), "1.0.0");
 		app.fire("session_start", app.ctx, { reason: "startup" });
 		await settled();
 		expect(app.select).not.toHaveBeenCalled();

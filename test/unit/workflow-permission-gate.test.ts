@@ -153,7 +153,7 @@ describe("permissionGateFactory — mode and ask rules (P8)", () => {
 	});
 
 	it("honours the parent's live mode: default mode has no one to ask, so an edit is denied", async () => {
-		vi.stubEnv("CC_PERMISSION_MODE", "default");
+		vi.stubEnv(envName("PERMISSION_MODE"), "default");
 		const handler = buildGate({ permissions: {} });
 		const result = await handler({ toolName: "edit", input: { path: "src/a.ts" } });
 		expect(result?.block).toBe(true);
@@ -161,7 +161,7 @@ describe("permissionGateFactory — mode and ask rules (P8)", () => {
 	});
 
 	it("auto mode without a bridge: edits inside the cwd pass, anything else fails closed", async () => {
-		vi.stubEnv("CC_PERMISSION_MODE", "auto");
+		vi.stubEnv(envName("PERMISSION_MODE"), "auto");
 		const { handler, cwd } = buildGateHarness({ permissions: {} });
 		expect(await handler({ toolName: "edit", input: { path: join(cwd, "src", "a.ts") } })).toBeUndefined();
 		const outside = await handler({ toolName: "write", input: { path: join(os.tmpdir(), "elsewhere.txt"), content: "x" } });
@@ -184,7 +184,7 @@ describe.skipIf(!powerShellSpawn())("permissionGateFactory without a bridge judg
 
 	it("allows a read-only line in plan and acceptEdits mode, and still denies what it cannot clear", async () => {
 		for (const mode of ["plan", "acceptEdits"]) {
-			vi.stubEnv("CC_PERMISSION_MODE", mode);
+			vi.stubEnv(envName("PERMISSION_MODE"), mode);
 			const handler = buildGate({ permissions: {} });
 			expect(await handler({ toolName: "powershell", input: { command: "Get-ChildItem" } }), mode).toBeUndefined();
 			expect((await handler({ toolName: "powershell", input: { command: "Remove-Item -Recurse /" } }))?.block, mode).toBe(true);

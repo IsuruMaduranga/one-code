@@ -104,7 +104,7 @@ function systemPromptExtension(pi: ExtensionAPI) {
 		// The same constant the context-budget extension puts on every user
 		// message, and only while that extension runs.
 		const budgetText = featureEnabled("context-budget") ? profileText().contextBudget : undefined;
-		const totalTokensLine = !budgetText || process.env.CC_TOTAL_TOKENS === "0" ? null : totalTokensBlock(budgetText, turnTokenBudget());
+		const totalTokensLine = !budgetText ? null : totalTokensBlock(budgetText, turnTokenBudget());
 		return buildClaudeCodeSystemPrompt(options, environment(ctx.cwd), tier, totalTokensLine, taskToolsEnabled(model, process.env, tier) && toolLive("task_create"), [...extraSections.values()]);
 	};
 

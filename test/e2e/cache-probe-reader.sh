@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Live reader-cache probe. It makes the actual deferred web_fetch tool call the
 # same loopback page twice in one -p session, then checks the reader's own
-# CC_SIDE_CALL_LOG evidence. The test-only fixture intercepts only the fixed
+# ONECODE_SIDE_CALL_LOG evidence. The test-only fixture intercepts only the fixed
 # loopback URLs, so it needs no HTTP server and never lets Anthropic's native
 # server-side fetch path bypass the reader.
 #
@@ -59,7 +59,7 @@ echo "workdir: $WORK"
 status=0
 (
 	cd "$PROJECT"
-	CC_SIDE_CALL_LOG="$WORK/reader.jsonl" node "$PI_BIN" --no-session --no-approve --no-extensions \
+	ONECODE_SIDE_CALL_LOG="$WORK/reader.jsonl" node "$PI_BIN" --no-session --no-approve --no-extensions \
 		-e "$REPO" \
 		-e "$REPO/test/e2e/reader-cache-fetch-fixture.ts" \
 		--model "$MODEL" --mode json -p "$PROMPT" > "$WORK/events.jsonl" 2> "$WORK/stderr.log"

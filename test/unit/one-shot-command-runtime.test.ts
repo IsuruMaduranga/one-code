@@ -41,7 +41,7 @@ async function setup(extra: ExtensionFactory = () => {}, mode: "print" | "json" 
 	const dir = mkdtempSync(join(tmpdir(), "one-shot-command-runtime-"));
 	dirs.push(dir);
 	const errors: string[] = [];
-	// The sender reports a failed start to the exit extension (commands/exit/index.ts), which sets the code at shutdown.
+	// The sender reports a failed start to the run-status extension (request/run-status/index.ts), which sets the code at shutdown.
 	const failures: unknown[] = [];
 	let api!: ExtensionAPI;
 	let send!: ReturnType<typeof createUserMessageSender>;
