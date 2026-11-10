@@ -405,6 +405,7 @@ lib/profile/product-settings.ts
 
 lib/profile/profile.ts
 	"no tool is named \"${…}\": the switch for \"${…}\" is spelled \"${…}\""
+	"\"${…}\" is a base tool and cannot be marked autoAllow: the base decides which of its tools run without a prompt"
 	"it has no text for \"${…}\", which ${…} ${…}"
 	"${…} cannot turn off \"${…}\": it guards tool calls (only a profile can)"
 	"\"${…}\" cannot be turned off"

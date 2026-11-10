@@ -122,7 +122,9 @@ export interface ProfileText {
 export interface ToolSwitch {
 	/**
 	 * false: the tool is never registered, never active, and a call to it is
-	 * denied. The harness's plumbing (`PINNED_TOOLS` in lib/profile/profile.ts) can't be
+	 * denied, so the name is gone for good; to replace a base tool with its
+	 * own, a product turns off the feature that registers it instead. The
+	 * harness's plumbing (`PINNED_TOOLS` in lib/profile/profile.ts) can't be
 	 * turned off or deferred.
 	 */
 	enabled?: boolean;
@@ -130,7 +132,9 @@ export interface ToolSwitch {
 	deferred?: boolean;
 	/**
 	 * true: runs without a permission prompt, like `tool_search` and `skill`.
-	 * Plan mode still holds such a tool to its read-only rules.
+	 * For a product's own tools only: on a base tool it is refused at load,
+	 * since the allow comes before containment and the classifier. Plan mode
+	 * still holds such a tool to its read-only rules.
 	 */
 	autoAllow?: boolean;
 }

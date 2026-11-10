@@ -39,6 +39,9 @@ export const PINNED_TOOLS: ReadonlySet<string> = new Set(["tool_search", "SendMe
 /** pi's built-in tools, which belong to no feature (lib/profile/features.ts TOOL_FEATURES). */
 const BUILTIN_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"];
 
+/** Every tool the base or pi registers under a fixed name. */
+const BASE_TOOLS: ReadonlySet<string> = new Set([...Object.keys(TOOL_FEATURES), ...BUILTIN_TOOLS, ...PINNED_TOOLS]);
+
 /** A tool name without its case and underscores: `WebFetch` and `web_fetch` compare equal. */
 const looseName = (name: string) => name.toLowerCase().replaceAll("_", "");
 
@@ -49,13 +52,24 @@ const looseName = (name: string) => name.toLowerCase().replaceAll("_", "");
  * own or an MCP tool, and passes.
  */
 function misspelledTools(names: Iterable<string>): string[] {
-	const known = new Map([...Object.keys(TOOL_FEATURES), ...BUILTIN_TOOLS, ...PINNED_TOOLS].map((name) => [looseName(name), name]));
+	const known = new Map([...BASE_TOOLS].map((name) => [looseName(name), name]));
 	const problems: string[] = [];
 	for (const name of names) {
 		const match = known.get(looseName(name));
 		if (match !== undefined && match !== name) problems.push(`no tool is named "${name}": the switch for "${match}" is spelled "${match}"`);
 	}
 	return problems;
+}
+
+/**
+ * `autoAllow` on a base tool: refused. The allow sits before containment and
+ * the classifier in the gate, so on `bash` or `write` it would remove the
+ * gate; the base tools that are safe without a prompt are already in the
+ * gate's own set (lib/rules/matcher.ts AUTO_ALLOWED_TOOLS). The switch is for
+ * a product's own tools.
+ */
+function autoAllowedBaseTools(tools: ReadonlyMap<string, ToolSwitch>): string[] {
+	return [...tools].filter(([name, sw]) => sw.autoAllow === true && BASE_TOOLS.has(name)).map(([name]) => `"${name}" is a base tool and cannot be marked autoAllow: the base decides which of its tools run without a prompt`);
 }
 
 /** The text groups the contract marks optional. */
@@ -145,8 +159,9 @@ function envList(env: NodeJS.ProcessEnv, name: string): string[] {
 /**
  * Resolve and check a profile, with the environment's off-switches merged in.
  * Throws, naming every problem at once, when it turns off a required feature,
- * names an unknown feature, misspells a base tool, turns off or defers a
- * pinned tool, or leaves out a text group a feature that is on reads.
+ * names an unknown feature, misspells a base tool, marks one autoAllow, turns
+ * off or defers a pinned tool, or leaves out a text group a feature that is
+ * on reads.
  */
 export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profileDir: string): ResolvedProfile {
 	const featureMap: Partial<Record<string, boolean>> = { ...profile.features };
@@ -157,6 +172,7 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 	const problems = featureProblems(featureMap);
 	for (const id of envOff.filter(isGuardFeature)) problems.push(`${envName("FEATURES_OFF")} cannot turn off "${id}": it guards tool calls (only a profile can)`);
 	problems.push(...misspelledTools(tools.keys()));
+	problems.push(...autoAllowedBaseTools(tools));
 	for (const name of PINNED_TOOLS) {
 		const sw = tools.get(name);
 		if (sw?.enabled === false) problems.push(`"${name}" cannot be turned off`);

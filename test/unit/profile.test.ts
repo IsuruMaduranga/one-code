@@ -67,6 +67,12 @@ describe("resolveProfile", () => {
 		expect(resolved.disabledTools.has("mcp__srv__Read")).toBe(true);
 	});
 
+	it("refuses autoAllow on a base tool, which would remove its gate", () => {
+		expect(() => resolveProfile({ ...empty, tools: { bash: { autoAllow: true }, write: { autoAllow: true } } }, {}, "/p")).toThrow(/"bash" is a base tool and cannot be marked autoAllow.*"write" is a base tool/);
+		expect(() => resolveProfile({ ...empty, tools: { web_fetch: { autoAllow: true } } }, {}, "/p")).toThrow(/"web_fetch" is a base tool/);
+		expect(resolveProfile({ ...empty, tools: { bash: { autoAllow: false, deferred: false } } }, {}, "/p").tools.get("bash")?.autoAllow).toBe(false);
+	});
+
 	it("refuses a profile that leaves out a text group a feature that is on reads", () => {
 		const without = (...groups: string[]): Profile["text"] => (env) => Object.fromEntries(Object.entries(shippedProfile.text(env)).filter(([group]) => !groups.includes(group))) as ReturnType<Profile["text"]>;
 		// The owner off is not enough while another reader is on: an isolated child of subagents is refused through worktreeGuard.
