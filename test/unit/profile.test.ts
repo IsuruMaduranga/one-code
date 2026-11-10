@@ -17,7 +17,7 @@ import { autoMemoryEnabled, resetAutoMemoryForTest } from "../../extensions/lib/
 import { DEFER_CHANNEL } from "../../extensions/lib/request/deferred.ts";
 import { watchMcpTools } from "../../extensions/lib/plugins/mcp-share.ts";
 import { scanSkills } from "../../extensions/lib/plugins/skill-scan.ts";
-import { decide } from "../../extensions/lib/rules/matcher.ts";
+import { decide, parseRules } from "../../extensions/lib/rules/matcher.ts";
 import { ALLOWLIST_ESSENTIALS, agentToolOptions } from "../../extensions/lib/agents/agent-catalog.ts";
 import { PINNED_TOOLS } from "../../extensions/lib/profile/profile.ts";
 import { WITHHOLD_CHANNEL } from "../../extensions/lib/request/deferred.ts";
@@ -234,6 +234,23 @@ describe("permission gate and tool switches", () => {
 		use({ tools: { ballerina_build: { autoAllow: true } } });
 		expect(decide({ ...base, mode: "plan", toolName: "ballerina_build" }).decision).not.toBe("allow");
 		expect(decide({ ...base, mode: "plan", toolName: "tool_search" }).decision).toBe("allow");
+	});
+
+	it("lets plan mode run a tool the profile marks readOnly, and nothing more", () => {
+		use({ tools: { ConfigStatus: { readOnly: true } } });
+		expect(decide({ ...base, mode: "plan", toolName: "ConfigStatus" })).toEqual({ decision: "allow", cause: "plan-readonly" });
+		// The switch is keyed by the registered name: another tool's name does not borrow it.
+		expect(decide({ ...base, mode: "plan", toolName: "config_status" })).toEqual({ decision: "deny", cause: "plan-mode" });
+		// An ask rule still asks, as for the base's own read-only tools.
+		expect(decide({ ...base, mode: "plan", toolName: "ConfigStatus", ask: parseRules(["ConfigStatus"]) }).decision).not.toBe("allow");
+		// Read-only is not a waiver of the prompt outside plan mode.
+		expect(decide({ ...base, mode: "default", toolName: "ConfigStatus" }).decision).toBe("ask");
+		expect(decide({ ...base, mode: "plan", toolName: "config_write" })).toEqual({ decision: "deny", cause: "plan-mode" });
+	});
+
+	it("refuses readOnly on a base tool, which would let plan mode write", () => {
+		expect(() => resolveProfile({ ...empty, tools: { bash: { readOnly: true } } }, {}, "/p")).toThrow(/"bash" is a base tool and cannot be marked readOnly/);
+		expect(() => resolveProfile({ ...empty, tools: { write: { readOnly: true } } }, {}, "/p")).toThrow(/"write" is a base tool/);
 	});
 
 	it("allows a tool the profile marks autoAllow without a prompt", () => {

@@ -71,7 +71,14 @@ function misspelledTools(names: Iterable<string>): string[] {
  * a product's own tools.
  */
 function autoAllowedBaseTools(tools: ReadonlyMap<string, ToolSwitch>): string[] {
-	return [...tools].filter(([name, sw]) => sw.autoAllow === true && BASE_TOOLS.has(name)).map(([name]) => `"${name}" is a base tool and cannot be marked autoAllow: the base decides which of its tools run without a prompt`);
+	const problems: string[] = [];
+	for (const [name, sw] of tools) {
+		if (!BASE_TOOLS.has(name)) continue;
+		if (sw.autoAllow === true) problems.push(`"${name}" is a base tool and cannot be marked autoAllow: the base decides which of its tools run without a prompt`);
+		// Plan mode's read-only set is the base's for its own tools too: `readOnly` on `bash` would let plan mode write.
+		if (sw.readOnly === true) problems.push(`"${name}" is a base tool and cannot be marked readOnly: the base decides which of its tools plan mode allows`);
+	}
+	return problems;
 }
 
 /** The text groups the contract marks optional. */

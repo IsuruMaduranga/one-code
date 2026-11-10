@@ -955,6 +955,15 @@ export interface Decision {
 const PLAN_READ_ONLY_TOOLS = new Set(["web_fetch", "web_search", "list_mcp_resources", "read_mcp_resource", "read_mcp_resource_dir"]);
 
 /**
+ * A custom-tier tool plan mode lets run: the base's set, plus a product's own
+ * tool its profile marks `readOnly` (refused at load on a base tool). Looked
+ * up under both spellings, like `isAutoAllowedTool`.
+ */
+function isPlanReadOnlyTool(rawName: string, tool: string): boolean {
+	return PLAN_READ_ONLY_TOOLS.has(tool) || (toolSwitch(rawName) ?? toolSwitch(tool))?.readOnly === true;
+}
+
+/**
  * Tools that launch a fresh agent loop. In auto mode these are classified
  * rather than auto-allowed, so the delegated task is judged before the child
  * starts — a child cannot be trusted to refuse a task its parent should not have
@@ -1100,7 +1109,7 @@ export function decide(params: DecideInput): Decision {
 		// The PowerShell counterpart: read-only cmdlets on in-project paths,
 		// judged from PowerShell's own parse (powershell-tree.ts).
 		if (tool === "powershell" && subject && powershellReadOnly({ parse: params.powershellParse, cwd, home: homedir(), readableRoots }).readOnly) return { decision: "allow", cause: "plan-readonly" };
-		if (PLAN_READ_ONLY_TOOLS.has(tool)) {
+		if (isPlanReadOnlyTool(toolName, tool)) {
 			const askRule = ask.find((r) => ruleMatches(r, toolName, subject, cwd));
 			return askRule ? askOrDeny(askRule) : { decision: "allow", cause: "plan-readonly" };
 		}

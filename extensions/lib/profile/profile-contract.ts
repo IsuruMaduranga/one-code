@@ -138,6 +138,15 @@ export interface ToolSwitch {
 	 * still holds such a tool to its read-only rules.
 	 */
 	autoAllow?: boolean;
+	/**
+	 * true: the tool changes nothing (it reads the project, a server or the
+	 * network), so plan mode lets it run, as it does the web tools; an ask rule
+	 * still asks. It does not skip the prompt in other modes: that is
+	 * `autoAllow`. For a product's own tools only: refused at load on a base
+	 * tool, whose plan-mode rule the base decides. A tool with a read and a
+	 * write mode is not read-only; a product splits it in two.
+	 */
+	readOnly?: boolean;
 }
 
 export interface Profile {
