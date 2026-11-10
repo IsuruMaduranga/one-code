@@ -9,6 +9,7 @@
 
 import { isToolDisabled, secretFileNames, toolSwitch } from "../profile/profile.ts";
 import { commandNamesSecretFile, isSecretFilePath } from "../profile/secrets.ts";
+import { commandTouchesSecretFile } from "../shell/secret-files.ts";
 import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
@@ -1079,15 +1080,20 @@ export function decide(params: DecideInput): Decision {
 	if (isToolDisabled(toolName) || isToolDisabled(tool)) return { decision: "deny", cause: "profile-disabled" };
 
 	// A secret file is refused in every mode, bypass included, before any rule
-	// can allow it: the product's own tool is the only reader and writer. The
-	// check is by name, so it steers rather than seals; the values themselves
-	// are redacted from results (lib/profile/secrets.ts).
+	// can allow it: the product's own tool is the only reader and writer. A
+	// file tool is judged by its path; a bash command by whether its words or
+	// redirects touch the file (lib/shell/secret-files.ts), so a command that
+	// only mentions the name still runs; PowerShell, with no word-level parse
+	// here, by the mention. The check is by name, so it steers rather than
+	// seals; the values themselves are redacted (lib/profile/secrets.ts).
 	const secretFiles = secretFileNames();
-	if (subject) {
+	if (subject && secretFiles.size > 0) {
 		const kind = subjectKind(toolName);
 		const named =
 			kind === "command"
-				? commandNamesSecretFile(subject, secretFiles)
+				? tool === "powershell"
+					? commandNamesSecretFile(subject, secretFiles)
+					: commandTouchesSecretFile(subject, secretFiles)
 				: kind === "path" && [subject, params.resolvedSubject].some((path) => path !== undefined && isSecretFilePath(path, secretFiles));
 		if (named) return { decision: "deny", cause: "secret-file" };
 	}

@@ -9,13 +9,16 @@
  * program that prints its configuration names no file.
  *
  * Values: the product registers the secret values it knows
- * (`setSecretValues`), and the base replaces each occurrence in every tool
- * result and task notification before it is stored (safety/secret-values,
- * lib/notify/notifications.ts). Text that reaches the model another way is
- * not covered: a reminder (a changed-file excerpt, diagnostics, hook
- * output) or a command the user runs with `!`. A placeholder the model saw
- * must not be written back over the real value, so a file tool whose input
- * carries one is refused (safety/secret-values).
+ * (`setSecretValues`), and the base replaces each occurrence in two places.
+ * In every tool result and task notification before it is stored
+ * (safety/secret-values, lib/notify/notifications.ts), which keeps the
+ * session file clean. And in every request's new tail as the ledger records
+ * it (request/ledger/wire.ts), which catches what reaches the model another
+ * way: a reminder (a changed-file excerpt, diagnostics, hook output), a
+ * command the user runs with `!`, the user's own message. The model's own
+ * messages are left as it wrote them. A placeholder the model saw must not
+ * be written back over the real value, so a file tool whose input carries
+ * one is refused (safety/secret-values).
  *
  * The values are process state: a secret is one in every session of the
  * process, and a child session has its own event bus, so a channel would
@@ -86,6 +89,29 @@ export function setSecretValues(source: string, secrets: readonly SecretValue[])
 export function redactSecretValues(text: string): string {
 	const { pattern, placeholders } = store();
 	return pattern ? text.replace(pattern, (match) => placeholders.get(match) ?? match) : text;
+}
+
+/** A JSON value with every string redacted; the same reference when nothing changed. */
+export function redactSecretValuesIn(value: unknown): unknown {
+	if (typeof value === "string") return redactSecretValues(value);
+	if (Array.isArray(value)) {
+		let next: unknown[] | undefined;
+		value.forEach((item, i) => {
+			const redacted = redactSecretValuesIn(item);
+			if (redacted !== item) (next ??= [...value])[i] = redacted;
+		});
+		return next ?? value;
+	}
+	if (value && typeof value === "object") {
+		let changed = false;
+		const next: Record<string, unknown> = {};
+		for (const [key, item] of Object.entries(value)) {
+			next[key] = redactSecretValuesIn(item);
+			changed ||= next[key] !== item;
+		}
+		return changed ? next : value;
+	}
+	return value;
 }
 
 /** Whether any secret value is registered. */

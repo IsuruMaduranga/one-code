@@ -63,6 +63,40 @@ describe("secret files, by name", () => {
 		expect(decide(call("bash", "ls")).cause).not.toBe("secret-file");
 	});
 
+	it("lets a bash command that only mentions the name run, and refuses one whose words or redirects touch the file", () => {
+		use(["Config.toml"]);
+		const refused = (command: string) => decide(call("bash", command)).cause === "secret-file";
+		for (const command of [
+			"echo Config.toml >> .gitignore",
+			'git commit -m "Ignore Config.toml"',
+			"grep -rl Config.toml docs/",
+			"rg -l 'Config.toml' docs/",
+			"printf '%s\\n' Config.toml",
+			"ls",
+		]) {
+			expect(refused(command), command).toBe(false);
+		}
+		for (const command of [
+			"cat Config.toml",
+			"cat ./tests/Config.toml | head",
+			"head -c 20 < Config.toml",
+			"echo x > Config.toml",
+			"cp Config.toml /tmp/x",
+			"base64 Config.toml",
+			"mytool --config=Config.toml",
+			"grep password Config.toml",
+			'bash -c "cat Config.toml"',
+			"echo $(cat Config.toml)",
+			"git add Config.toml",
+			"env X=1 cat Config.toml",
+			"./Config.toml",
+		]) {
+			expect(refused(command), command).toBe(true);
+		}
+		// PowerShell has no word-level parse here, so the mention still decides.
+		expect(decide(call("powershell", "Write-Output Config.toml")).cause).toBe("secret-file");
+	});
+
 	it("changes nothing for a profile that lists no secret file", () => {
 		expect(decide(call("read", "/work/Config.toml")).decision).toBe("allow");
 	});

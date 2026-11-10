@@ -13,7 +13,9 @@
  *    problem is a bug; it is dropped and reported, so it costs one block,
  *    never a 400. ONECODE_LEDGER_STRICT=1 sends it unrepaired instead, for
  *    the live probes to see.
- * 3. It records the request as a delta against the fold's base (the request
+ * 3. It redacts a product's registered secret values from the new tail
+ *    (lib/request/ledger/redact.ts), leaving the model's own messages alone.
+ * 4. It records the request as a delta against the fold's base (the request
  *    the fold rebuilds it on), with the pending items it carried and what its
  *    new blocks told the model, and publishes it (LEDGER_SENT_CHANNEL) for
  *    the side calls that replay it (compaction's summarizer, btw, recap,
@@ -39,6 +41,8 @@ import { LEDGER_PLAN_CHANNEL, LEDGER_SENT_CHANNEL, type LedgerSent, type Request
 import { makeRecord, RECORD, type ToldFact } from "../../lib/request/ledger/records.ts";
 import { deliveredAfterRepair, repairRequest, validateRequest } from "../../lib/request/ledger/validate.ts";
 import { settlePayload } from "../../lib/request/ledger/layout.ts";
+import { redactTail } from "../../lib/request/ledger/redact.ts";
+import { hasSecretValues, redactSecretValuesIn } from "../../lib/profile/secrets.ts";
 import { appendPoint, encodeRequest, hasWarmCap, listKey, type RecordedRequest, recordedBody, recordedRequest, samePrefix, spliceRequest, type WirePayload, withBranchToolOrder, withRequestFields } from "../../lib/request/ledger/wire.ts";
 import { type AffinityModel, affinityHeaders } from "../../lib/side-calls/request-replay.ts";
 import { extensionVersion } from "../../lib/app/package-version.ts";
@@ -119,6 +123,10 @@ function ledgerWireExtension(pi: ExtensionAPI) {
 		if (base) payload = spliceRequest(base, payload, api);
 		// An epoch renders pi's tools again, in the order the branch first declared them.
 		else payload = withBranchToolOrder(payload, current.fold.toolOrder, api);
+		// A product's secret values leave the new tail here, before it is recorded
+		// (lib/request/ledger/redact.ts): the record, the cache and every side call
+		// that replays it see the redacted bytes. A no-op until a value is registered.
+		if (hasSecretValues()) payload = redactTail(payload, api, end, redactSecretValuesIn);
 		const spliced = payload;
 		// The final layout pass: no system message stranded before a user message (lib/request/ledger/layout.ts).
 		payload = settlePayload(payload, api, listKey(api), end);

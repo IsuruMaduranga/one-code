@@ -16,32 +16,9 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { feature } from "../../lib/profile/feature.ts";
-import { carriesSecretPlaceholder, hasSecretValues, redactSecretValues } from "../../lib/profile/secrets.ts";
+import { carriesSecretPlaceholder, hasSecretValues, redactSecretValues, redactSecretValuesIn } from "../../lib/profile/secrets.ts";
 import { toolResultWords } from "../../lib/request/tool-results-words.ts";
 import { isWritingTool } from "../../lib/shell/paths.ts";
-
-/** A JSON value with every string redacted; the same reference when nothing changed. */
-function redactJson(value: unknown): unknown {
-	if (typeof value === "string") return redactSecretValues(value);
-	if (Array.isArray(value)) {
-		let next: unknown[] | undefined;
-		value.forEach((item, i) => {
-			const redacted = redactJson(item);
-			if (redacted !== item) (next ??= [...value])[i] = redacted;
-		});
-		return next ?? value;
-	}
-	if (value && typeof value === "object") {
-		let changed = false;
-		const next: Record<string, unknown> = {};
-		for (const [key, item] of Object.entries(value)) {
-			next[key] = redactJson(item);
-			changed ||= next[key] !== item;
-		}
-		return changed ? next : value;
-	}
-	return value;
-}
 
 function secretValuesExtension(pi: ExtensionAPI) {
 	pi.on("tool_call", (event) => {
@@ -61,7 +38,7 @@ function secretValuesExtension(pi: ExtensionAPI) {
 			return { ...part, text };
 		});
 		// pi drops structured content that is not replaced along with the text.
-		const structured = event.structuredContent === undefined ? undefined : redactJson(event.structuredContent);
+		const structured = event.structuredContent === undefined ? undefined : redactSecretValuesIn(event.structuredContent);
 		const structuredChanged = structured !== event.structuredContent;
 		if (!changed && !structuredChanged) return undefined;
 		return { content, ...(structured !== undefined ? { structuredContent: structured as never } : {}) };

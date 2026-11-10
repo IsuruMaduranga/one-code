@@ -131,7 +131,7 @@ const READ_ONLY_COMMANDS = new Set(Object.keys(READ_ONLY_SPECS));
  * (`echo a/b`, `which node`) is not a read of that path and is not checked for
  * working-directory containment.
  */
-const NO_FILE_OPERANDS = new Set([
+export const NO_FILE_OPERANDS = new Set([
 	"basename",
 	"date",
 	"dirname",
@@ -155,7 +155,7 @@ const NO_FILE_OPERANDS = new Set([
  * `ag` and `ack` are not fast-pathed at all: both take a pager program, and ack
  * reads a project `.ackrc` this check never sees.
  */
-const PATTERN_FIRST_COMMANDS = new Set(["grep", "egrep", "fgrep", "rg"]);
+export const PATTERN_FIRST_COMMANDS = new Set(["grep", "egrep", "fgrep", "rg"]);
 
 interface WrapperSpec {
 	/** Options whose next word is a harmless value, skipped in both readings. */
