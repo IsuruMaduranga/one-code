@@ -1146,6 +1146,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		// `rg --pre=<prog>`, `tree -o f` and `uniq in out` escalate
 		// (SECURITY-REVIEW-2026-09-23 H1). Its operands, and the files named by
 		// options such as `grep -f`, are then read-checked.
+		const productSubcommands = productReadOnlySubcommands(name);
 		if (name === "find") {
 			const find = checkFind(args);
 			if (!find.ok) escalate(find.reason);
@@ -1194,12 +1195,12 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 					}
 				}
 			}
-		} else if (!isMutation && productReadOnlySubcommands(name)) {
+		} else if (!isMutation && productSubcommands) {
 			// A product's own read-only subcommand (lib/shell/product-read-only.ts):
 			// the subcommand must be the first word, written out, and every option
 			// in its table. Its operands are names, not files, so none is read-checked.
 			const [subcommand, ...rest] = args;
-			const spec = subcommand && !subcommand.glob && !subcommand.dynamic ? productReadOnlySubcommands(name)?.get(subcommand.value) : undefined;
+			const spec = subcommand && !subcommand.glob && !subcommand.dynamic ? productSubcommands.get(subcommand.value) : undefined;
 			if (!spec) {
 				escalate(`runs ${name}${subcommand ? ` ${subcommand.value}` : ""}, which is not on the read-only allowlist`);
 			} else {

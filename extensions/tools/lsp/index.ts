@@ -66,6 +66,8 @@ interface ResolvedTarget {
 	options: LspClientOptions;
 	/** Set when a plugin config (not the built-in table) claimed the extension. */
 	plugin?: ResolvedPluginServer;
+	/** Set when the profile declared the server: trusted product configuration, so it starts without the project-trust prompt whatever its command. */
+	fromProfile?: true;
 }
 
 interface PluginRouting {
@@ -117,6 +119,7 @@ function lspExtension(pi: ExtensionAPI) {
 			command: server.command,
 			args: server.args,
 			options: { env: server.env, initializationOptions: server.initializationOptions, startupTimeoutMs: server.startupTimeoutMs },
+			fromProfile: true,
 		};
 	};
 
@@ -235,7 +238,7 @@ function lspExtension(pi: ExtensionAPI) {
 	 */
 	const trustGate = createLspTrustGate({ projectRoot: (dir) => findRepoRoot(dir) ?? dir });
 	const projectCodeAllowed = async (target: ResolvedTarget, ctx: ExtensionContext): Promise<boolean> => {
-		if (target.plugin || !PROJECT_CODE_SERVERS.has(target.command)) return true;
+		if (target.plugin || target.fromProfile || !PROJECT_CODE_SERVERS.has(target.command)) return true;
 		const why = text.projectCodeReason(target.command);
 		const confirm = ctx.hasUI
 			? async (root: string) =>
@@ -437,22 +440,21 @@ function lspExtension(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		liveCtx = ctx;
 	});
+	const answerRequest = async (request: LspRequestEvent): Promise<unknown> => {
+		const ctx = liveCtx;
+		if (!ctx) throw new Error("The session has not started, so no language server can answer yet.");
+		const server = activeProfile().languageServers.find((candidate) => candidate.name === request.server);
+		if (!server) throw new Error(`The profile declares no language server named "${request.server}".`);
+		const target = productTarget(server, absoluteFrom(ctx.cwd, request.file), ctx.cwd);
+		return withKeepAlive(async () => {
+			const client = await clientFor(target, ctx);
+			if (!client) throw new Error(`The ${server.name} language server is not running: ${text.failure(startFailures.get(target.key) ?? { kind: "exitedQuietly" })}`);
+			return client.request(request.method, request.params, request.timeoutMs);
+		});
+	};
 	pi.events.on(LSP_REQUEST_CHANNEL, (data) => {
 		const request = data as LspRequestEvent;
-		request.reply(
-			(async () => {
-				const ctx = liveCtx;
-				if (!ctx) throw new Error("The session has not started, so no language server can answer yet.");
-				const server = activeProfile().languageServers.find((candidate) => candidate.name === request.server);
-				if (!server) throw new Error(`The profile declares no language server named "${request.server}".`);
-				const target = productTarget(server, absoluteFrom(ctx.cwd, request.file), ctx.cwd);
-				return withKeepAlive(async () => {
-					const client = await clientFor(target, ctx);
-					if (!client) throw new Error(`The ${server.name} language server is not running: ${text.failure(startFailures.get(target.key) ?? { kind: "exitedQuietly" })}`);
-					return client.request(request.method, request.params, request.timeoutMs);
-				});
-			})(),
-		);
+		request.reply(answerRequest(request));
 	});
 
 	registerLocalCommand(pi, "lsp", {

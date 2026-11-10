@@ -84,6 +84,9 @@ export const FEATURES = {
 
 export type FeatureId = keyof typeof FEATURES;
 
+/** The folder, relative to the profile's, that holds every product extension, child entries included. */
+export const PRODUCT_EXTENSIONS_DIR = "extensions";
+
 /**
  * The manifest's last entry: a product's own main-session extensions, one
  * folder each under `profile/extensions/`. pi expands the glob in place,
@@ -93,10 +96,7 @@ export type FeatureId = keyof typeof FEATURES;
  * must not shape the request tail. These entries belong to no feature: the
  * product ships the ones it wants (working-docs/decisions/bi-fork.md).
  */
-export const PRODUCT_EXTENSIONS_ENTRY = "profile/extensions/*/index.ts";
-
-/** The folder, relative to the profile's, that holds every product extension, child entries included. */
-export const PRODUCT_EXTENSIONS_DIR = "extensions";
+export const PRODUCT_EXTENSIONS_ENTRY = `profile/${PRODUCT_EXTENSIONS_DIR}/*/index.ts`;
 
 export const FEATURE_IDS = Object.keys(FEATURES) as FeatureId[];
 

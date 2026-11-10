@@ -19,7 +19,8 @@
 
 import { brandedId, envName } from "./brand.mjs";
 import { existsSync } from "node:fs";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
+import { isRelativeInside } from "./paths.ts";
 import { PACKAGE_ROOT } from "../core/package-root.ts";
 import { shareModuleForTest, sharedModule } from "./shared-module.ts";
 import { enabledFeatures, type FeatureId, featureProblems, isGuardFeature, PRODUCT_EXTENSIONS_DIR, TOOL_FEATURES } from "./features.ts";
@@ -74,7 +75,7 @@ function misspelledTools(names: Iterable<string>): string[] {
  * gate's own set (lib/rules/matcher.ts AUTO_ALLOWED_TOOLS). The switch is for
  * a product's own tools.
  */
-function autoAllowedBaseTools(tools: ReadonlyMap<string, ToolSwitch>): string[] {
+function baseToolSwitchProblems(tools: ReadonlyMap<string, ToolSwitch>): string[] {
 	const problems: string[] = [];
 	for (const [name, sw] of tools) {
 		if (!BASE_TOOLS.has(name)) continue;
@@ -189,7 +190,7 @@ function childExtensionProblems(entries: readonly string[], profileDir: string):
 	for (const entry of entries) {
 		const path = resolve(profileDir, entry);
 		const inside = relative(root, path);
-		if (inside === "" || inside.startsWith("..") || isAbsolute(inside)) {
+		if (!isRelativeInside(inside)) {
 			problems.push(`child extension "${entry}" must be a file under ${PRODUCT_EXTENSIONS_DIR}/ in the profile folder`);
 		} else if (!existsSync(path)) {
 			problems.push(`child extension "${entry}" does not exist (${path})`);
@@ -218,7 +219,7 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 	problems.push(...misspelledTools(Object.keys(profile.tools)));
 	// The user's own list: name the variable, since the fix is theirs to make.
 	problems.push(...misspelledTools(envTools).map((problem) => `${envName("TOOLS_OFF")}: ${problem}`));
-	problems.push(...autoAllowedBaseTools(tools));
+	problems.push(...baseToolSwitchProblems(tools));
 	for (const name of PINNED_TOOLS) {
 		const sw = tools.get(name);
 		if (sw?.enabled === false) problems.push(`"${name}" cannot be turned off`);

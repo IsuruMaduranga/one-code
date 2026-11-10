@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 import { CHILD_EXTENSIONS } from "../../extensions/lib/agents/child-extensions.ts";
 import { PRODUCT_EXTENSIONS_DIR, PRODUCT_EXTENSIONS_ENTRY } from "../../extensions/lib/profile/features.ts";
 import { PROFILE_DIR } from "../../extensions/lib/profile/profile.ts";
-import { redactSecrets } from "../../extensions/lib/profile/secrets.ts";
+import { redactSecretValues } from "../../extensions/lib/profile/secrets.ts";
 import { DEFER_CHANNEL, REMINDER_CHANNEL, SYSTEM_PROMPT_SECTION_CHANNEL, type SystemPromptSection } from "../../extensions/sdk/extension.ts";
 import { createFakePi } from "./helpers/fake-pi.ts";
 
@@ -22,7 +22,7 @@ const probe = join(root, "probe", "index.ts");
 
 describe("a product's own extensions", () => {
 	it("sit where the manifest's product entry looks", () => {
-		expect(PRODUCT_EXTENSIONS_ENTRY).toBe(`profile/${PRODUCT_EXTENSIONS_DIR}/*/index.ts`);
+		expect(PRODUCT_EXTENSIONS_ENTRY).toBe("profile/extensions/*/index.ts");
 		// pi's glob skips dot folders; any other folder without an index.ts
 		// would hold an extension the main session silently never loads.
 		for (const name of folders.filter((name) => !name.startsWith("."))) expect(existsSync(join(root, name, "index.ts")), name).toBe(true);
@@ -48,7 +48,7 @@ describe("a product's own extensions", () => {
 		expect(fake.tools.get(module.PROBE_TOOL)?.renderShell).toBe("self");
 		expect(seen.deferred).toEqual([{ name: module.PROBE_TOOL }]);
 		expect(seen.sections.map((section) => [section.place, section.render({ tier: "cheap", taskTools: false, tools: undefined })])).toEqual([["tail", module.PROBE_SECTION]]);
-		expect(redactSecrets(`out: ${module.PROBE_SECRET}`)).toBe("out: [secret:fixture]");
+		expect(redactSecretValues(`out: ${module.PROBE_SECRET}`)).toBe("out: [secret:fixture]");
 		// The reminder waits for the session: nothing is queued while extensions load.
 		expect(seen.reminders).toEqual([]);
 		for (const handler of fake.handlers.get("session_start") ?? []) await handler({}, {});

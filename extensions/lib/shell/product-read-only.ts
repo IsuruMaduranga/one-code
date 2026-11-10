@@ -35,6 +35,9 @@ const OPTION = /^--?[A-Za-z0-9][A-Za-z0-9-]*$/;
 /** Commands the base judges itself: a profile entry could only weaken that judgement. */
 const BASE_JUDGED = new Set([...Object.keys(READ_ONLY_SPECS), "git", "find"]);
 
+/** A subcommand's option table, parsed the way the pre-gate will read it. */
+const subcommandTable = (options: ReadOnlySubcommand): OptionSpec => table({ none: options.none ?? "", required: options.required ?? "" });
+
 /** The problems in a profile's read-only commands, for the resolver to report with the rest. */
 export function readOnlyCommandProblems(commands: ReadOnlyCommands): string[] {
 	const problems: string[] = [];
@@ -45,7 +48,7 @@ export function readOnlyCommandProblems(commands: ReadOnlyCommands): string[] {
 		if (entries.length === 0) problems.push(`read-only command "${command}" lists no subcommand: a whole command is never read-only by name`);
 		for (const [subcommand, options] of entries) {
 			if (!NAME.test(subcommand)) problems.push(`read-only subcommand "${command} ${subcommand}" must be a bare lowercase name`);
-			for (const option of `${options.none ?? ""} ${options.required ?? ""}`.split(/\s+/).filter(Boolean)) {
+			for (const option of Object.keys(subcommandTable(options).options)) {
 				if (!OPTION.test(option)) problems.push(`"${option}" is not an option of "${command} ${subcommand}"`);
 			}
 		}
@@ -58,7 +61,7 @@ export function readOnlyCommandSpecs(commands: ReadOnlyCommands): ReadonlyMap<st
 	return new Map(
 		Object.entries(commands).map(([command, subcommands]) => [
 			command,
-			new Map(Object.entries(subcommands).map(([subcommand, options]) => [subcommand, table({ none: options.none ?? "", required: options.required ?? "" })])),
+			new Map(Object.entries(subcommands).map(([subcommand, options]) => [subcommand, subcommandTable(options)])),
 		]),
 	);
 }

@@ -36,7 +36,8 @@ export interface ResolvedLanguageServer {
 }
 
 const NAME = /^[a-z][a-z0-9_-]*$/;
-const normalizeExtension = (extension: string) => (extension.startsWith(".") ? extension : `.${extension}`).toLowerCase();
+/** A file extension as the routing tables key it: lowercase, with its leading dot. */
+export const normalizeExtension = (extension: string) => (extension.startsWith(".") ? extension : `.${extension}`).toLowerCase();
 
 /** The problems in a profile's language servers, for the resolver to report with the rest. */
 export function languageServerProblems(servers: Readonly<Record<string, ProductLanguageServer>>): string[] {
@@ -68,7 +69,7 @@ export function resolveLanguageServers(servers: Readonly<Record<string, ProductL
 		languageByExtension: Object.fromEntries(Object.entries(server.extensions).map(([extension, languageId]) => [normalizeExtension(extension), languageId])),
 		rootMarkers: [...(server.rootMarkers ?? [])],
 		env: Object.fromEntries(Object.entries(server.env ?? {}).map(([key, value]) => [key, fill(value)])),
-		...(server.initializationOptions !== undefined ? { initializationOptions: server.initializationOptions } : {}),
-		...(server.startupTimeoutMs !== undefined ? { startupTimeoutMs: server.startupTimeoutMs } : {}),
+		initializationOptions: server.initializationOptions,
+		startupTimeoutMs: server.startupTimeoutMs,
 	}));
 }

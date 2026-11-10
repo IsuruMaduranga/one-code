@@ -29,7 +29,7 @@
  * by test/unit/notification-fidelity.test.ts. The delivery engine
  * (`createTaskNotifier`, further down) is unchanged by the frame shape.
  */
-import { redactSecrets } from "../profile/secrets.ts";
+import { redactSecretValues } from "../profile/secrets.ts";
 import { brandedId } from "../profile/brand.mjs";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
@@ -274,7 +274,7 @@ const TASK_BLOCK_RE = /<task-notification>\n[\s\S]*?\n<\/task-notification>/g;
 export function frameForDelivery(text: string, delivery: Delivery): string {
 	const preamble = notificationWords().preamble;
 	// A task's output tail rides the frame: a product's secret values leave it here, as they leave tool results.
-	return redactSecrets(text).replace(TASK_BLOCK_RE, (block) => {
+	return redactSecretValues(text).replace(TASK_BLOCK_RE, (block) => {
 		if (delivery === "with-user-prompt") return `${preamble.withUserTurn}${block}`;
 		if (delivery === "mid-turn") return `${preamble.alone}${block}`;
 		const safe = block.replaceAll(/<\s*\/\s*system-reminder\s*>/gi, "&lt;/system-reminder&gt;");

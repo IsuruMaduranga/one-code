@@ -7,16 +7,14 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CHILD_EXTENSIONS } from "../../extensions/lib/agents/child-extensions.ts";
 import { frameForDelivery } from "../../extensions/lib/notify/notifications.ts";
 import { resetProcessStateForTest } from "../../extensions/lib/profile/process-state.ts";
-import type { Profile } from "../../extensions/lib/profile/profile-contract.ts";
-import { activeProfile, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
-import { commandNamesSecretFile, isSecretFilePath, MIN_SECRET_LENGTH, redactSecrets, setSecretValues } from "../../extensions/lib/profile/secrets.ts";
+import { setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
+import { commandNamesSecretFile, isSecretFilePath, MIN_SECRET_LENGTH, redactSecretValues, setSecretValues } from "../../extensions/lib/profile/secrets.ts";
 import { decide, type DecideInput } from "../../extensions/lib/rules/matcher.ts";
 import secretValuesExtension from "../../extensions/safety/secret-values/index.ts";
 import { createFakePi } from "./helpers/fake-pi.ts";
+import { useProfile } from "./helpers/profile.ts";
 
-const text = activeProfile().text;
-const use = (secretFiles: string[]) =>
-	setActiveProfileForTest(resolveProfile({ features: {}, tools: {}, childExtensions: [], text: () => text, secretFiles } satisfies Profile, {}, "/p"));
+const use = (secretFiles: string[]) => useProfile({ secretFiles });
 const call = (toolName: string, subject: string, extra: Partial<DecideInput> = {}): DecideInput => ({ toolName, subject, cwd: "/work", mode: "default", deny: [], ask: [], allow: [], ...extra });
 
 beforeEach(() => resetProcessStateForTest());
@@ -73,25 +71,25 @@ describe("secret files, by name", () => {
 describe("secret values", () => {
 	it("replaces every occurrence, longest first, with the value's name", () => {
 		setSecretValues("a", [{ value: "hunter2-token", name: "db_password" }, { value: "hunter2-token-long" }]);
-		expect(redactSecrets("x hunter2-token y hunter2-token-long z hunter2-token")).toBe("x [secret:db_password] y [secret] z [secret:db_password]");
-		expect(redactSecrets("nothing here")).toBe("nothing here");
+		expect(redactSecretValues("x hunter2-token y hunter2-token-long z hunter2-token")).toBe("x [secret:db_password] y [secret] z [secret:db_password]");
+		expect(redactSecretValues("nothing here")).toBe("nothing here");
 	});
 
 	it("also replaces the JSON-escaped spelling", () => {
 		setSecretValues("a", [{ value: 'pa"ss\\word', name: "p" }]);
-		expect(redactSecrets(JSON.stringify({ v: 'pa"ss\\word' }))).toBe('{"v":"[secret:p]"}');
+		expect(redactSecretValues(JSON.stringify({ v: 'pa"ss\\word' }))).toBe('{"v":"[secret:p]"}');
 	});
 
 	it("leaves out a value too short to replace safely, and replaces a source's set whole", () => {
 		expect(setSecretValues("a", [{ value: "8080" }, { value: "x".repeat(MIN_SECRET_LENGTH) }])).toBe(1);
-		expect(redactSecrets("port 8080 xxxxxx")).toBe("port 8080 [secret]");
+		expect(redactSecretValues("port 8080 xxxxxx")).toBe("port 8080 [secret]");
 		setSecretValues("a", []);
-		expect(redactSecrets("port 8080 xxxxxx")).toBe("port 8080 xxxxxx");
+		expect(redactSecretValues("port 8080 xxxxxx")).toBe("port 8080 xxxxxx");
 	});
 
 	it("keeps a placeholder name to safe characters", () => {
 		setSecretValues("a", [{ value: "secret-value", name: "a]\n<b>" }]);
-		expect(redactSecrets("secret-value")).toBe("[secret:ab]");
+		expect(redactSecretValues("secret-value")).toBe("[secret:ab]");
 	});
 
 	it("leave a task notification's frame", () => {

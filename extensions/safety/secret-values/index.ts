@@ -11,14 +11,18 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { feature } from "../../lib/profile/feature.ts";
-import { hasSecretValues, redactSecrets } from "../../lib/profile/secrets.ts";
+import { hasSecretValues, redactSecretValues } from "../../lib/profile/secrets.ts";
 
 /** A JSON value with every string redacted; the same reference when nothing changed. */
 function redactJson(value: unknown): unknown {
-	if (typeof value === "string") return redactSecrets(value);
+	if (typeof value === "string") return redactSecretValues(value);
 	if (Array.isArray(value)) {
-		const next = value.map(redactJson);
-		return next.some((item, i) => item !== value[i]) ? next : value;
+		let next: unknown[] | undefined;
+		value.forEach((item, i) => {
+			const redacted = redactJson(item);
+			if (redacted !== item) (next ??= [...value])[i] = redacted;
+		});
+		return next ?? value;
 	}
 	if (value && typeof value === "object") {
 		let changed = false;
@@ -38,7 +42,7 @@ function secretValuesExtension(pi: ExtensionAPI) {
 		let changed = false;
 		const content = event.content.map((part) => {
 			if (part.type !== "text" || typeof part.text !== "string") return part;
-			const text = redactSecrets(part.text);
+			const text = redactSecretValues(part.text);
 			if (text === part.text) return part;
 			changed = true;
 			return { ...part, text };

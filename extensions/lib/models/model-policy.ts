@@ -129,6 +129,15 @@ export function isKnownProvider(provider: string): boolean {
 }
 
 /**
+ * The provider name a known provider's rows are listed under in the model
+ * catalog: its own for a built-in one (`models-dev` renames aside, which the
+ * catalog applies), the vendor it serves for one the profile declares.
+ */
+export function catalogProviderOf(provider: string): string {
+	return provider in BUILTIN_PROVIDER_POLICIES ? provider : (productProvider(provider)?.serves ?? provider);
+}
+
+/**
  * A built-in provider's policy, else the profile's: a provider the product
  * registers and declares is its vendor's direct provider. Anything else is
  * opaque, so a pi upgrade or a user's own provider fails safe.

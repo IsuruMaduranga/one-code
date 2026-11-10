@@ -25,6 +25,7 @@
 import { readFileSync } from "node:fs";
 import { extname, isAbsolute, join, resolve } from "node:path";
 import { pathWithinBase, sanitizePathSegment } from "../../lib/plugins/plugin-root.ts";
+import { normalizeExtension } from "../../lib/profile/language-servers.ts";
 
 export interface ResolvedPluginServer {
 	/** `plugin:<pluginName>:<serverName>` — the client-map key. */
@@ -211,8 +212,7 @@ export function resolveServerConfig(
 		if (typeof languageId !== "string" || languageId.length === 0) {
 			return reject(`extensionToLanguage["${ext}"] must be a non-empty language id`);
 		}
-		const normalized = (ext.startsWith(".") ? ext : `.${ext}`).toLowerCase();
-		languageByExtension[normalized] = languageId;
+		languageByExtension[normalizeExtension(ext)] = languageId;
 	}
 	if (Object.keys(languageByExtension).length === 0) {
 		return reject('"extensionToLanguage" must have at least one mapping');

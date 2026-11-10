@@ -5,21 +5,19 @@
  */
 import { homedir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import type { Profile } from "../../extensions/lib/profile/profile-contract.ts";
-import { activeProfile, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
+import { setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 import { decide } from "../../extensions/lib/rules/matcher.ts";
 import type { ReadOnlyCommands } from "../../extensions/lib/shell/product-read-only.ts";
 import { analyzeShellCommand } from "../../extensions/lib/shell/shell-analysis.ts";
+import { useProfile } from "./helpers/profile.ts";
 
-const text = activeProfile().text;
 const BAL: ReadOnlyCommands = {
 	bal: {
 		discover: { none: "--refresh", required: "--output --filter --page -m --module --version" },
 		search: {},
 	},
 };
-const use = (readOnlyCommands: ReadOnlyCommands) =>
-	setActiveProfileForTest(resolveProfile({ features: {}, tools: {}, childExtensions: [], text: () => text, readOnlyCommands } satisfies Profile, {}, "/p"));
+const use = (readOnlyCommands: ReadOnlyCommands) => useProfile({ readOnlyCommands });
 const cwd = process.cwd();
 const verdict = (command: string) => analyzeShellCommand({ command, cwd, home: homedir() }).verdict;
 const notes = (command: string) => analyzeShellCommand({ command, cwd, home: homedir() }).notes.join("; ");

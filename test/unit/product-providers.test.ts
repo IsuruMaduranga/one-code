@@ -10,19 +10,16 @@ import { afterEach, describe, expect, it } from "vitest";
 import { catalogModelFor } from "../../extensions/lib/models/model-catalog.ts";
 import { pairedModel } from "../../extensions/lib/models/model-pairings.ts";
 import { pinCatalog } from "./catalog-fixture.ts";
+import { useProfile } from "./helpers/profile.ts";
 import { acceptsAnthropicWire, anthropicModelId, BUILTIN_PROVIDER_POLICIES, modelIdentity, providerPolicy } from "../../extensions/lib/models/model-policy.ts";
 import { classifyModelTier, taskToolsEnabled } from "../../extensions/lib/models/model-tier.ts";
-import type { Profile } from "../../extensions/lib/profile/profile-contract.ts";
 import { PROVIDER_VENDORS, type ProductProvider, WIRE_FEATURES } from "../../extensions/lib/profile/product-providers.ts";
-import { activeProfile, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
+import { setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 import { supportsToolReferences } from "../../extensions/lib/request/deferred.ts";
 import { clearThinkingEnabled } from "../../extensions/request/context-management/index.ts";
 import { supportsToolAdditions } from "../../extensions/request/tool-search/tool-additions.ts";
 
-const base = (): Profile => ({ features: {}, tools: {}, childExtensions: [], text: () => activeProfile().text });
-const text = activeProfile().text;
-const use = (providers: Record<string, ProductProvider>) =>
-	setActiveProfileForTest(resolveProfile({ ...base(), text: () => text, providers }, {}, "/p"));
+const use = (providers: Record<string, ProductProvider>) => useProfile({ providers });
 const model = (provider: string, id: string, extra: Partial<Model<Api>> = {}) =>
 	({ provider, id, api: "anthropic-messages", baseUrl: "https://llm.example.test", cost: { input: 3, output: 15, cacheRead: 0, cacheWrite: 0 }, ...extra }) as Model<Api>;
 const tier = (m: Model<Api>) => classifyModelTier(m, {}).tier;
@@ -120,7 +117,7 @@ describe("a provider the profile declares", () => {
 });
 
 describe("provider entries at load", () => {
-	const load = (providers: Record<string, unknown>) => () => resolveProfile({ ...base(), text: () => text, providers: providers as never }, {}, "/p");
+	const load = (providers: Record<string, unknown>) => () => useProfile({ providers: providers as never });
 
 	it("names every vendor as a built-in direct provider's profile", () => {
 		const profiles = new Set(Object.values(BUILTIN_PROVIDER_POLICIES).filter((policy) => policy.kind === "direct").map((policy) => policy.profile));

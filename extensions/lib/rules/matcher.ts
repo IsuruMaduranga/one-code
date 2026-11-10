@@ -790,6 +790,9 @@ export const AUTO_ALLOWED_TOOLS = new Set<string>([
 	"SendMessage",
 ]);
 
+/** The profile's switch for a tool: it keys tools by their registered name, so the raw and the normalized spelling are both looked up. */
+const switchFor = (rawName: string, tool: string) => toolSwitch(rawName) ?? toolSwitch(tool);
+
 /**
  * A tool that runs without approval: the base's set, plus any the profile
  * marks `autoAllow` (lib/profile/profile.ts). The profile keys tools by their
@@ -798,7 +801,7 @@ export const AUTO_ALLOWED_TOOLS = new Set<string>([
  * a product's auto-allowed tool need not be.
  */
 export function isAutoAllowedTool(rawName: string, tool: string = normalizeToolName(rawName)): boolean {
-	return AUTO_ALLOWED_TOOLS.has(tool) || (toolSwitch(rawName) ?? toolSwitch(tool))?.autoAllow === true;
+	return AUTO_ALLOWED_TOOLS.has(tool) || switchFor(rawName, tool)?.autoAllow === true;
 }
 
 export interface DecideInput {
@@ -963,7 +966,7 @@ const PLAN_READ_ONLY_TOOLS = new Set(["web_fetch", "web_search", "list_mcp_resou
  * up under both spellings, like `isAutoAllowedTool`.
  */
 function isPlanReadOnlyTool(rawName: string, tool: string): boolean {
-	return PLAN_READ_ONLY_TOOLS.has(tool) || (toolSwitch(rawName) ?? toolSwitch(tool))?.readOnly === true;
+	return PLAN_READ_ONLY_TOOLS.has(tool) || switchFor(rawName, tool)?.readOnly === true;
 }
 
 /**
@@ -1080,12 +1083,12 @@ export function decide(params: DecideInput): Decision {
 	// check is by name, so it steers rather than seals; the values themselves
 	// are redacted from results (lib/profile/secrets.ts).
 	const secretFiles = secretFileNames();
-	if (secretFiles.size > 0 && subject) {
+	if (subject) {
 		const kind = subjectKind(toolName);
 		const named =
 			kind === "command"
 				? commandNamesSecretFile(subject, secretFiles)
-				: kind === "path" && (isSecretFilePath(subject, secretFiles) || (params.resolvedSubject !== undefined && isSecretFilePath(params.resolvedSubject, secretFiles)));
+				: kind === "path" && [subject, params.resolvedSubject].some((path) => path !== undefined && isSecretFilePath(path, secretFiles));
 		if (named) return { decision: "deny", cause: "secret-file" };
 	}
 

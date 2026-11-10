@@ -11,11 +11,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { languageServerProblems, resolveLanguageServers } from "../../extensions/lib/profile/language-servers.ts";
-import type { Profile } from "../../extensions/lib/profile/profile-contract.ts";
-import { activeProfile, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
+import { setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 import lspExtension from "../../extensions/tools/lsp/index.ts";
 import { lspRequest } from "../../extensions/tools/lsp/request-channel.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { useProfile } from "./helpers/profile.ts";
 
 const state = vi.hoisted(() => ({
 	instances: [] as Array<{ config: { command: string; args: string[] }; root: string; options: unknown; requests: Array<[string, unknown, number | undefined]> }>,
@@ -58,7 +58,6 @@ vi.mock("../../extensions/tools/lsp/client.ts", async (importOriginal) => {
 	return { ...actual, LspClient: FakeLspClient };
 });
 
-const text = activeProfile().text;
 const SERVERS = {
 	ballerina: {
 		command: "${PROFILE_DIR}/ls/start",
@@ -77,7 +76,7 @@ describe("a profile's language server", () => {
 	beforeEach(() => {
 		dir = mkdtempSync(join(tmpdir(), "lsp-product-"));
 		state.instances.length = 0;
-		setActiveProfileForTest(resolveProfile({ features: {}, tools: {}, childExtensions: [], text: () => text, languageServers: SERVERS } satisfies Profile, {}, "/profile"));
+		useProfile({ languageServers: SERVERS }, "/profile");
 		fake = createFakePi();
 		lspExtension(fake.pi as never);
 	});
@@ -100,6 +99,7 @@ describe("a profile's language server", () => {
 				rootMarkers: ["Ballerina.toml"],
 				env: { LS_HOME: "/profile/ls" },
 				initializationOptions: { lowCode: true },
+				startupTimeoutMs: undefined,
 			},
 		]);
 	});
@@ -115,6 +115,18 @@ describe("a profile's language server", () => {
 		expect(state.instances[0].config).toEqual({ command: "/profile/ls/start", args: ["--jar", "/profile/ls/server.jar"] });
 		expect(state.instances[0].root).toBe(join(dir, "pkg"));
 		expect(state.instances[0].options).toEqual({ env: { LS_HOME: "/profile/ls" }, initializationOptions: { lowCode: true }, startupTimeoutMs: undefined });
+	});
+
+	it("starts without the project-trust prompt even when its command is one the base asks about", async () => {
+		// jdtls from the base's own table runs project code and asks first; declared by the profile it is product configuration.
+		useProfile({ languageServers: { java: { command: "jdtls", extensions: { ".java": "java" } } } }, "/profile");
+		const file = join(dir, "Main.java");
+		writeFileSync(file, "");
+		let asked = false;
+		const ctx = createFakeCtx({ cwd: dir, hasUI: true, ui: { confirm: async () => ((asked = true), false), notify: () => {} } });
+		await run("tool_result", { toolName: "edit", input: { path: file }, isError: false, content: [], toolCallId: "c" }, ctx);
+		expect(asked).toBe(false);
+		expect(state.instances.map((instance) => instance.config.command)).toEqual(["jdtls"]);
 	});
 
 	it("answers a product extension's request on the same connection as the diagnostics", async () => {

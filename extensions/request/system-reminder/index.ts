@@ -211,8 +211,8 @@ function systemReminderExtension(pi: ExtensionAPI) {
 		if (layout) payload = withSystemRoleContext(payload, layout, moved, role) ?? payload;
 		// Claude Code's per-turn <total_tokens> shapes; first-party Fable also
 		// gets its clear_at nudge after each tool result.
-		const firstParty = acceptsAnthropicWire(model, "system-role");
-		const nudge = layout === "anthropic" && firstParty && claudeFamily(anthropicModelId(model) ?? model.id) === "fable";
+		const systemRoleWire = acceptsAnthropicWire(model, "system-role");
+		const nudge = layout === "anthropic" && systemRoleWire && claudeFamily(anthropicModelId(model) ?? model.id) === "fable";
 		payload = withTurnBudgetMessages(payload, { shape, systemRole: layout !== undefined, role, left: countdowns, nudge, markers: budgetMarkers(), stackCarrier: epochRequest }) ?? payload;
 		if (payload !== event.payload && shape === "anthropic") {
 			const key = messagesKey(shape);
@@ -220,7 +220,7 @@ function systemReminderExtension(pi: ExtensionAPI) {
 		}
 		// The betas go on every request of a model that takes the layout: an
 		// earlier request's system messages are part of every later one.
-		if (layout === "anthropic" && firstParty) payload = withBetas(payload, nudge ? [MID_CONVERSATION_SYSTEM_BETA, CLEAR_AT_BETA] : [MID_CONVERSATION_SYSTEM_BETA]);
+		if (layout === "anthropic" && systemRoleWire) payload = withBetas(payload, nudge ? [MID_CONVERSATION_SYSTEM_BETA, CLEAR_AT_BETA] : [MID_CONVERSATION_SYSTEM_BETA]);
 		return payload === event.payload ? undefined : payload;
 	});
 }
