@@ -120,7 +120,7 @@ import {
 } from "../../lib/rules/settings.ts";
 import { isRepoFile, sourceId } from "../../lib/profile/claude-settings.ts";
 import type { SettingsFile } from "../../lib/profile/sources.ts";
-import { MODE_ENV, parsePowerShell, resolvedOrSelf, runtimeProtectedDirs, runtimeSecretPaths } from "../../lib/agents/permission-gate.ts";
+import { MODE_ENV, parsePowerShell, resolvedOrSelf, runtimeProtectedDirs, runtimeProtectedFiles, runtimeSecretPaths } from "../../lib/agents/permission-gate.ts";
 import { describeProjectAllow, persistProjectAllowApproval, projectAllowApproved, projectDirectoryConsentEntry, type TrustFiring } from "../../lib/consent/project-trust.ts";
 import { parseAddDirFlag, tooBroadForWorkspace, validateWorkspaceDirectory } from "./workspace.ts";
 import { WORKSPACE_CHANNEL, type WorkspaceAnnouncement } from "../../lib/rules/workspace-channel.ts";
@@ -1094,7 +1094,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		}
 		resolvedCwd = resolveForContainment(ctx.cwd);
 		sessionSettings = sessionSettingsFiles(ctx.cwd, os.homedir());
-		protectedDirs = runtimeProtectedDirs();
+		protectedDirs = [...runtimeProtectedDirs(), ...runtimeProtectedFiles(ctx.cwd, os.homedir())];
 		secretPaths = runtimeSecretPaths(os.homedir());
 		branchMode = normalizePermissionMode(readState(ctx, PERMISSION_MODE_STATE));
 		requestOnBranch = (ctx.sessionManager.getBranch() as EntryLike[]).some((entry) => readRecord(entry)?.kind === "request");

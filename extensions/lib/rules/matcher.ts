@@ -869,9 +869,11 @@ export interface DecideInput {
 	 * `~/.onecode/agent` bundled), Claude Code's config dir (`claudeConfigDir()`)
 	 * and One Code's state dir (`productStateDir()`). The last two catch a
 	 * relocated `CLAUDE_CONFIG_DIR` / `ONECODE_STATE_DIR`, which the static
-	 * segment list cannot (distribution review 2026-09-09, L2). Absolute paths; a
-	 * write landing inside one is judged like a protected path
-	 * (PERMISSIONS-REVIEW-2026-09-05 M7).
+	 * segment list cannot (distribution review 2026-09-09, L2). The session's
+	 * settings files ride here too (`runtimeProtectedFiles()`): a source
+	 * provider may add one under a name the static list does not know.
+	 * Absolute paths; a write landing at or inside one is judged like a
+	 * protected path (PERMISSIONS-REVIEW-2026-09-05 M7).
 	 */
 	protectedDirs?: string[];
 	/**
@@ -1175,7 +1177,7 @@ export function decide(params: DecideInput): Decision {
 		candidates.some(
 			(candidate) =>
 				candidate &&
-				(isProtectedPath(candidate, cwd) || (params.protectedDirs ?? []).some((dir) => isInsideDir(candidate, dir, cwd))),
+				(isProtectedPath(candidate, cwd) || (params.protectedDirs ?? []).some((dir) => isAtOrInsideDir(candidate, dir, cwd))),
 		);
 	if (isWritingTool(tool) && subject && isProtected(subject, params.resolvedSubject)) {
 		if (mode === "dontAsk") return { decision: "deny", cause: "protected-path" };

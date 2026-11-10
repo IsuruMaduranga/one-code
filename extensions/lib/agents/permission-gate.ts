@@ -41,6 +41,8 @@ import { usesClaudeCodeFastPaths } from "../models/model-tier.ts";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { claudeConfigDir, claudeJsonPath, productStateDir } from "../profile/paths.ts";
+import { settingsSources } from "../profile/claude-settings.ts";
+import { protectedFiles } from "../profile/sources.ts";
 import { sessionResultsDir } from "../request/persisted-output.ts";
 import { powerShellParser } from "../shell-run/shell-spawn.ts";
 import { isPrivateScratchpad, sessionScratchpadDir } from "../core/scratchpad.ts";
@@ -72,6 +74,20 @@ export const resolvedOrSelf = (dir: string) => resolveForContainment(dir) ?? dir
 export function runtimeProtectedDirs(): string[] {
 	const roots = [getAgentDir(), claudeConfigDir(), productStateDir()];
 	return [...new Set(roots.flatMap((dir) => [dir, resolvedOrSelf(dir)]))];
+}
+
+/**
+ * The files that configure the gate for a session in `cwd`: every file of
+ * the settings ladder and the source provider's state files. The static
+ * list knows One Code's and Claude Code's by name; a product's provider may
+ * add a file under any name (`<cwd>/.acme/settings.json`), and a write to it
+ * must be judged like a protected path in every mode, as the auto-mode floor
+ * already judges it. Literal and resolved spelling. They ride
+ * `DecideInput.protectedDirs`, which matches a path at or under an entry.
+ */
+export function runtimeProtectedFiles(cwd: string, home: string): string[] {
+	const files = [...settingsSources(cwd, home).map((file) => file.path), ...protectedFiles(home).map((file) => file.path)];
+	return [...new Set(files.flatMap((file) => [file, resolvedOrSelf(file)]))];
 }
 
 /**
@@ -161,7 +177,7 @@ export function permissionGateFactory(
 	// harness blocks its own feature (same rationale as in decide()). With
 	// auto-memory off the folder gets no grant, as in the parent's gate.
 	const memoryDirPath = autoMemoryEnabled(projectRoot) ? memoryDir(home, projectRoot) : undefined;
-	const protectedDirs = runtimeProtectedDirs();
+	const protectedDirs = [...runtimeProtectedDirs(), ...runtimeProtectedFiles(cwd, home)];
 	const secretPaths = runtimeSecretPaths(home);
 
 	return {
