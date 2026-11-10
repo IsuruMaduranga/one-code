@@ -107,7 +107,7 @@ task and agent messages the same way everywhere and serializes them across
 extensions. `test/unit/notification-fidelity.test.ts` locks the frames.
 
 **Project instructions, memory and skills ride the first user message, not
-the system prompt.** `claude-context`, `memory` and `skill` queue them as
+the system prompt.** `instructions`, `memory` and `skill` queue them as
 `first-prepend` blocks.
 
 ## Keep the prompt cache hitting

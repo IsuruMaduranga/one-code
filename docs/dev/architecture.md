@@ -82,7 +82,7 @@ extension: it is the auto-mode classifier library that `permissions` calls.
 ```mermaid
 flowchart LR
     subgraph ctx["Prompt and context"]
-        c1["system-prompt<br/>claude-context · memory"]
+        c1["system-prompt<br/>instructions · memory"]
         c2["system-reminder<br/>context-budget"]
         c3["tool-search · cache-marks<br/>search-tools"]
         c4["compaction · idle-compact<br/>kept-thinking · context-management"]
@@ -96,7 +96,7 @@ flowchart LR
     end
 
     subgraph eco["Ecosystem"]
-        e1["claude-compat"]
+        e1["resources"]
         e2["plugins"]
         e3["skill"]
         e4["mcp"]
@@ -153,7 +153,7 @@ sequenceDiagram
     pi->>ext: input
     Note right of ext: hooks (UserPromptSubmit),<br/>subagents (message to a viewed agent)
     pi->>ext: before_agent_start
-    Note right of ext: system-prompt builds the tiered prompt,<br/>claude-context queues CLAUDE.md, memory and date,<br/>skill queues the skill listing
+    Note right of ext: system-prompt builds the tiered prompt,<br/>instructions queues CLAUDE.md, memory and date,<br/>skill queues the skill listing
 
     loop until the model stops calling tools
         pi->>ext: context
@@ -246,7 +246,7 @@ the provider's prompt cache keeps hitting.
 ```mermaid
 flowchart LR
     subgraph emitters["Any extension"]
-        e1["claude-context<br/>tool-search · skill · mcp"]
+        e1["instructions<br/>tool-search · skill · mcp"]
         e2["permissions · plan-mode<br/>worktree · effort"]
         e3["file-tracker · lsp<br/>tool-search · context-budget"]
         e4["clear · model-default<br/>panel commands"]
@@ -310,7 +310,7 @@ flowchart LR
     subgraph child["Child session, one per agent"]
         direction TB
         childLoop["AgentSession<br/>own model · own transcript on disk"]
-        childExt["Child extensions<br/>system-reminder · tool-search<br/>claude-context · file-tracker<br/>search-tools · skill · bash<br/>powershell · web · web-fetch · notebook"]
+        childExt["Child extensions<br/>system-reminder · tool-search<br/>instructions · file-tracker<br/>search-tools · skill · bash<br/>powershell · web · web-fetch · notebook"]
         childGate["Gate bridges<br/>lib/agents/permission-gate.ts<br/>lib/agents/hook-gate.ts"]
     end
 
