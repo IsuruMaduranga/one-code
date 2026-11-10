@@ -23,6 +23,9 @@ on:
       - "extensions/lib/shell-run/**"
       - "extensions/lib/profile/paths.ts"
       - "extensions/safety/permissions/**"
+      - "profile/text/shell/**"
+      - "profile/text/auto-mode/**"
+      - "profile/text/permissions/**"
       - "test/e2e/live-smoke.mjs"
       - ".github/workflows/live-smoke.yml"
 
