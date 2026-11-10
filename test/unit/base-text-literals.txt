@@ -400,6 +400,10 @@ lib/profile/features.ts
 lib/profile/knobs.ts
 	"not applied on this model"
 
+lib/profile/language-servers.ts
+	"language server \"${…}\" must have a bare lowercase name"
+	"language server \"${…}\" lists no file extension"
+
 lib/profile/product-providers.ts
 	"provider \"anthropic\" is the base's own and cannot be redeclared"
 	"provider \"${…}\" serves an unknown vendor \"${…}\""
@@ -947,6 +951,9 @@ tools/background/switch-guard.ts
 tools/lsp/index.ts
 	"${…} ${…}. Allow it only for a project you trust.\n\nThe answer for ${…} is remembered; /lsp trust allows it later."
 	"Plugin LSP config issues (/lsp for the full list):\n${…}"
+	"The session has not started, so no language server can answer yet."
+	"The profile declares no language server named \"${…}\"."
+	"The ${…} language server is not running: ${…}"
 	"Show language server status: /lsp [trust]"
 	"let servers that run this project's code start here (rust-analyzer, jdtls)"
 	"Trusted ${…}: rust-analyzer and jdtls may start here. They run this project's build code."
@@ -974,6 +981,9 @@ tools/lsp/plugin-servers.ts
 	"\"env\" must be a map of string values"
 	"${user_config.*} placeholders are not supported (plugin user-config prompts are not implemented)"
 	"command still contains an unresolved placeholder after substitution (\"${…}\")"
+
+tools/lsp/request-channel.ts
+	"No language server can answer: the language-server feature is off, or this is a child session, which loads none."
 
 tools/mcp/client.ts
 	"OAuth is only available for http MCP servers; \"${…}\" is stdio."

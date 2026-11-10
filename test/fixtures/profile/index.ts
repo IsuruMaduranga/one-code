@@ -24,5 +24,6 @@ export const profile: Profile = {
 	providers: { "fixture-llm": { serves: "anthropic", wire: ["tool-references"] } },
 	secretFiles: ["Fixture.secret"],
 	readOnlyCommands: { fixturectl: { show: { none: "--all", required: "--name" } } },
+	languageServers: { fixture: { command: "fixture-language-server", extensions: { ".fixturelang": "fixture" } } },
 	text: () => allGroups,
 };

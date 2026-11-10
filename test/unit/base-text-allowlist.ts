@@ -89,6 +89,8 @@ export const BASE_TEXT_ALLOWLIST: Readonly<Record<string, BaseTextEntry>> = {
 	"lib/profile/product-providers.ts": { reason: "user-error: Profile validation problems for its provider entries." },
 	"lib/profile/secrets.ts": { reason: "user-error: Profile validation problems for its secret file names." },
 	"lib/shell/product-read-only.ts": { reason: "user-error: Profile validation problems for its read-only commands." },
+	"lib/profile/language-servers.ts": { reason: "user-error: Profile validation problems for its language servers." },
+	"tools/lsp/request-channel.ts": { reason: "user-error: Why a product extension's language-server request has no server to answer it; the product's tool words its own result." },
 	"lib/request/reminders.ts": { reason: "format: pi's compaction-summary frame, copied byte for byte so a reminder anchored to a summary matches pi's own." },
 	"lib/core/scratchpad.ts": { reason: "log: Owner-directory problems, only tested for truthiness." },
 	"lib/models/session-model-tier.ts": { reason: "user-error: An internal ordering invariant." },

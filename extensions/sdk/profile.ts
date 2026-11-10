@@ -65,3 +65,4 @@ export type { BackendAttempt, BackendFailure, ChainFailure, ProviderSearchFailur
 export type { AgentFailure, AgentNotice, RunReport, RunStop, ScriptCallProblem, ScriptProblem, WorkflowRefusal, WorkflowText } from "../agents/workflow/text.ts";
 export type { EnterWorktreeFailure, GitTargetProblem, RemoveBlocker, StashRisk, WorktreeGuardRefusal, WorktreeGuardText, WorktreeNameProblem, WorktreeSessionView, WorktreeText } from "../safety/worktree/text.ts";
 export type { ReadOnlyCommands, ReadOnlySubcommand } from "../lib/shell/product-read-only.ts";
+export type { ProductLanguageServer } from "../lib/profile/language-servers.ts";

@@ -50,7 +50,9 @@ import { registerLocalCommand } from "../../lib/ui/local-command.ts";
 import { singleFlight } from "../../lib/core/single-flight.ts";
 import { findProjectRoot as findRepoRoot } from "../../lib/context/git.ts";
 import { createLspTrustGate, PROJECT_CODE_SERVERS } from "./trust.ts";
-import { requireText } from "../../lib/profile/profile.ts";
+import { activeProfile, requireText } from "../../lib/profile/profile.ts";
+import type { ResolvedLanguageServer } from "../../lib/profile/language-servers.ts";
+import { LSP_REQUEST_CHANNEL, type LspRequestEvent } from "./request-channel.ts";
 import { failureOf } from "./failure.ts";
 import type { LspFailure } from "./text.ts";
 
@@ -105,6 +107,19 @@ function lspExtension(pi: ExtensionAPI) {
 		return { byExtension: routed.byExtension, collisions: routed.collisions, diagnostics };
 	}
 
+	/** The target for a file a profile-declared server serves: rooted at the nearest marker, else the session's directory. */
+	const productTarget = (server: ResolvedLanguageServer, path: string, cwd: string): ResolvedTarget => {
+		const root = server.rootMarkers.length > 0 ? findProjectRoot(path, server.rootMarkers, cwd) : cwd;
+		return {
+			key: `profile:${server.name}:${root}`,
+			root,
+			languageId: server.languageByExtension[extname(path).toLowerCase()] ?? server.name,
+			command: server.command,
+			args: server.args,
+			options: { env: server.env, initializationOptions: server.initializationOptions, startupTimeoutMs: server.startupTimeoutMs },
+		};
+	};
+
 	const resolveTarget = (path: string, cwd: string): ResolvedTarget | undefined => {
 		const pluginServer = pluginRouting(cwd).byExtension.get(extname(path).toLowerCase());
 		if (pluginServer) {
@@ -123,6 +138,12 @@ function lspExtension(pi: ExtensionAPI) {
 				plugin: pluginServer,
 			};
 		}
+		// The profile's own servers come before the base's table: a product that
+		// declares one for an extension means it (an installed plugin still wins,
+		// above, as the user's explicit choice).
+		const extension = extname(path).toLowerCase();
+		const productServer = activeProfile().languageServers.find((server) => server.languageByExtension[extension] !== undefined);
+		if (productServer) return productTarget(productServer, path, cwd);
 		const match = serverForPath(path);
 		if (!match) return undefined;
 		const root = findProjectRoot(path, match.config.rootMarkers, cwd);
@@ -407,6 +428,31 @@ function lspExtension(pi: ExtensionAPI) {
 				details: { count: filtered.length, languageId: target.languageId },
 			};
 		},
+	});
+
+	// A product extension's own request on a profile server's connection
+	// (request-channel.ts). It needs a live context to start the server, so it
+	// is refused before the session's first event.
+	let liveCtx: ExtensionContext | undefined;
+	pi.on("session_start", (_event, ctx) => {
+		liveCtx = ctx;
+	});
+	pi.events.on(LSP_REQUEST_CHANNEL, (data) => {
+		const request = data as LspRequestEvent;
+		request.reply(
+			(async () => {
+				const ctx = liveCtx;
+				if (!ctx) throw new Error("The session has not started, so no language server can answer yet.");
+				const server = activeProfile().languageServers.find((candidate) => candidate.name === request.server);
+				if (!server) throw new Error(`The profile declares no language server named "${request.server}".`);
+				const target = productTarget(server, absoluteFrom(ctx.cwd, request.file), ctx.cwd);
+				return withKeepAlive(async () => {
+					const client = await clientFor(target, ctx);
+					if (!client) throw new Error(`The ${server.name} language server is not running: ${text.failure(startFailures.get(target.key) ?? { kind: "exitedQuietly" })}`);
+					return client.request(request.method, request.params, request.timeoutMs);
+				});
+			})(),
+		);
 	});
 
 	registerLocalCommand(pi, "lsp", {

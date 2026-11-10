@@ -10,6 +10,7 @@
  * are folders (agents/, skills/, themes/).
  */
 
+import type { ProductLanguageServer } from "./language-servers.ts";
 import type { ReadOnlyCommands } from "../shell/product-read-only.ts";
 import type { ProductProvider } from "./product-providers.ts";
 import type { ArtifactsText } from "../../tools/artifacts/text.ts";
@@ -197,6 +198,14 @@ export interface Profile {
 	 * escalates as before.
 	 */
 	readOnlyCommands?: ReadOnlyCommands;
+	/**
+	 * The product's own language servers, by name
+	 * (`lib/profile/language-servers.ts`): the base routes a file to one by
+	 * its extension and sends the model its diagnostics after each edit, as
+	 * for any server. A product extension can send its own requests on the
+	 * same connection (`lspRequest`, `extensions/sdk/extension.ts`).
+	 */
+	languageServers?: Readonly<Record<string, ProductLanguageServer>>;
 	/**
 	 * The model-facing text, by owning feature, built once when the profile
 	 * resolves. `live` answers which tools the session can have (the features
