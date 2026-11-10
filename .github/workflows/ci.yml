@@ -55,6 +55,23 @@ jobs:
       - run: npm ci
       - run: scripts/test-base.sh
 
+  # The bundled app loads pi as a library and finds the extension package
+  # through its own package.json, a path no unit test takes: this packs both
+  # tarballs, installs the app into a throwaway prefix and starts it. No
+  # provider key is needed (the run stops at the missing key, after the
+  # extension set has loaded).
+  app-smoke:
+    name: bundled app starts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: NODE_BIN_DIR="$(dirname "$(command -v node)")" test/e2e/app-smoke.sh
+
   # The extension package rides on the user's own pi, so the oldest pi in the
   # tested range (TESTED_PI_MIN, extensions/lib/app/pi-version.ts) must load the
   # whole extension set and run a turn. A local mock model answers, so no
