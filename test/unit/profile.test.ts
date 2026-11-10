@@ -5,7 +5,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { childExtensionPaths } from "../../extensions/lib/agents/child-extensions.ts";
 import { feature, profiledPi } from "../../extensions/lib/profile/feature.ts";
-import { activeProfile, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
+import { activeProfile, resolveProfile, setActiveProfileForTest, TEXT_GROUP_READERS } from "../../extensions/lib/profile/profile.ts";
+import { isFeatureId } from "../../extensions/lib/profile/features.ts";
 import type { Profile } from "../../extensions/lib/profile/profile-contract.ts";
 import { profile as shippedProfile } from "../../profile/index.ts";
 import { discoverPlugins, invalidatePluginsCache } from "../../extensions/lib/plugins/plugins.ts";
@@ -54,6 +55,33 @@ describe("resolveProfile", () => {
 		expect(resolveProfile({ ...empty, features: { hooks: false } }, {}, "/p").features.has("hooks")).toBe(false);
 		expect(() => resolveProfile(empty, { [envName("FEATURES_OFF")]: "hooks" }, "/p")).toThrow(/cannot turn off "hooks": it guards tool calls/);
 		expect(() => resolveProfile(empty, { [envName("FEATURES_OFF")]: "file-tracker" }, "/p")).toThrow(/cannot turn off "file-tracker"/);
+		// Turning plugins off drops the hooks installed plugins bring.
+		expect(() => resolveProfile(empty, { [envName("FEATURES_OFF")]: "plugins" }, "/p")).toThrow(/cannot turn off "plugins"/);
+	});
+
+	it("refuses a switch that misses a base tool by spelling, and passes a product's own tool", () => {
+		expect(() => resolveProfile(empty, { [envName("TOOLS_OFF")]: "Bash,WebFetch" }, "/p")).toThrow(/no tool is named "Bash": the switch for "bash" is spelled "bash"; no tool is named "WebFetch".*"web_fetch"/);
+		expect(() => resolveProfile({ ...empty, tools: { Write: { enabled: false } } }, {}, "/p")).toThrow(/no tool is named "Write"/);
+		expect(() => resolveProfile({ ...empty, tools: { toolsearch: { deferred: false } } }, {}, "/p")).toThrow(/spelled "tool_search"/);
+		const resolved = resolveProfile({ ...empty, tools: { product_tool: { autoAllow: true }, mcp__srv__Read: { enabled: false }, Agent: { deferred: true } } }, {}, "/p");
+		expect(resolved.disabledTools.has("mcp__srv__Read")).toBe(true);
+	});
+
+	it("refuses a profile that leaves out a text group a feature that is on reads", () => {
+		const without = (...groups: string[]): Profile["text"] => (env) => Object.fromEntries(Object.entries(shippedProfile.text(env)).filter(([group]) => !groups.includes(group))) as ReturnType<Profile["text"]>;
+		// The owner off is not enough while another reader is on: an isolated child of subagents is refused through worktreeGuard.
+		expect(() => resolveProfile({ ...empty, features: { worktree: false }, text: without("worktreeGuard") }, {}, "/p")).toThrow(/no text for "worktreeGuard", which "subagents", "workflow" read/);
+		expect(() => resolveProfile({ ...empty, features: { subagents: false, workflow: false }, text: without("subagentModels") }, {}, "/p")).toThrow(/no text for "subagentModels", which "doctor" reads/);
+		expect(() => resolveProfile({ ...empty, text: without("notebook", "shell") }, {}, "/p")).toThrow(/no text for "notebook", which "notebook" reads; it has no text for "shell", which "bash", "powershell" read/);
+		const off = { worktree: false, subagents: false, workflow: false, doctor: false, notebook: false } as const;
+		expect(resolveProfile({ ...empty, features: off, text: without("worktreeGuard", "subagentModels", "handback", "notebook", "worktree", "subagents", "workflow", "doctor") }, {}, "/p").text.notebook).toBeUndefined();
+	});
+
+	it("names a reader for every optional text group, and only features", () => {
+		for (const [group, readers] of Object.entries(TEXT_GROUP_READERS)) {
+			expect(readers.length, group).toBeGreaterThan(0);
+			for (const id of readers) expect(isFeatureId(id), `${group}: ${id}`).toBe(true);
+		}
 	});
 
 	it("refuses turning off or deferring tool_search", () => {

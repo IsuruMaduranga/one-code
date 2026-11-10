@@ -11,8 +11,8 @@
  *
  * `required` marks the safety core and the request pipeline: a profile that
  * turns one off fails at load. `guard` marks a feature that guards tool calls
- * (the user's hooks, read-before-edit): a product's profile may turn it off,
- * the off-only environment variable may not.
+ * (the user's hooks, the hooks installed plugins bring, read-before-edit): a
+ * product's profile may turn it off, the off-only environment variable may not.
  */
 
 export interface FeatureSpec {
@@ -37,7 +37,8 @@ export const FEATURES = {
 	"tool-search": { entries: ["request/tool-search/index.ts"], required: true },
 	"search-tools": { entries: ["tools/search-tools/index.ts"] },
 	"tool-style": { entries: ["tools/tool-style/index.ts"] },
-	plugins: { entries: ["tools/plugins/index.ts"] },
+	// A guard: plugin discovery supplies the hooks of installed plugins (safety/hooks/plugin-hooks.ts).
+	plugins: { entries: ["tools/plugins/index.ts"], guard: true },
 	worktree: { entries: ["safety/worktree/index.ts"] },
 	"file-tracker": { entries: ["safety/file-tracker/index.ts"], guard: true },
 	memory: { entries: ["context/memory/index.ts"] },

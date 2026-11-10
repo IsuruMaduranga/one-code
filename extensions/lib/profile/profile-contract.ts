@@ -4,9 +4,10 @@
  * folder with its own implementation of this contract
  * (working-docs/decisions/bi-fork.md, working-docs/features/profiles/).
  *
- * The contract grows phase by phase as text, brand and catalogs move out of
- * the base. Today it carries the feature and tool switches, the extra
- * extensions child sessions load, and the text groups moved so far.
+ * It carries the feature and tool switches, the extra extensions child
+ * sessions load, the text groups, and the source provider's module. The
+ * brand is `brand.json` beside it (lib/profile/brand.mjs) and the catalogs
+ * are folders (agents/, skills/, themes/).
  */
 
 import type { ArtifactsText } from "../../tools/artifacts/text.ts";
@@ -53,8 +54,8 @@ import type { LiveTools } from "./live-tools.ts";
 
 /**
  * Every text the base shows the model, one group per feature that owns it.
- * A group of an optional feature may be left out when the profile turns that
- * feature off (lib/profile/profile.ts requireText).
+ * An optional group may be left out when every feature that reads it is off
+ * (lib/profile/profile.ts TEXT_GROUP_READERS, checked when the profile resolves).
  */
 export interface ProfileText {
 	systemPrompt: SystemPromptText;

@@ -404,6 +404,8 @@ lib/profile/product-settings.ts
 	"${…}: root must be a JSON object"
 
 lib/profile/profile.ts
+	"no tool is named \"${…}\": the switch for \"${…}\" is spelled \"${…}\""
+	"it has no text for \"${…}\", which ${…} ${…}"
 	"${…} cannot turn off \"${…}\": it guards tool calls (only a profile can)"
 	"\"${…}\" cannot be turned off"
 	"\nThe profile in profile/ is invalid, so the harness will not start: ${…}\n\n"

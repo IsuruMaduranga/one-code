@@ -36,6 +36,88 @@ export const PROFILE_DIR = join(PACKAGE_ROOT, "profile");
  */
 export const PINNED_TOOLS: ReadonlySet<string> = new Set(["tool_search", "SendMessage", "SubagentHandback", "structured_output"]);
 
+/** pi's built-in tools, which belong to no feature (lib/profile/features.ts TOOL_FEATURES). */
+const BUILTIN_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"];
+
+/** A tool name without its case and underscores: `WebFetch` and `web_fetch` compare equal. */
+const looseName = (name: string) => name.toLowerCase().replaceAll("_", "");
+
+/**
+ * Switch keys that miss a base tool only by spelling (`Bash`, `WebFetch`):
+ * a switch is looked up by the registered name, so such a key would leave
+ * the tool on without a word. A name unlike every base tool is a product's
+ * own or an MCP tool, and passes.
+ */
+function misspelledTools(names: Iterable<string>): string[] {
+	const known = new Map([...Object.keys(TOOL_FEATURES), ...BUILTIN_TOOLS, ...PINNED_TOOLS].map((name) => [looseName(name), name]));
+	const problems: string[] = [];
+	for (const name of names) {
+		const match = known.get(looseName(name));
+		if (match !== undefined && match !== name) problems.push(`no tool is named "${name}": the switch for "${match}" is spelled "${match}"`);
+	}
+	return problems;
+}
+
+/** The text groups the contract marks optional. */
+type OptionalGroup = { [K in keyof ProfileText]-?: undefined extends ProfileText[K] ? K : never }[keyof ProfileText];
+
+/**
+ * The features that read each optional text group: its owner, and every
+ * feature that words something through it (an isolated child of `subagents`
+ * or `workflow` is refused through `worktreeGuard`; /doctor resolves the
+ * subagent model). A profile may leave a group out only when all of them are
+ * off; `resolveProfile` checks it at load, because a reader that finds its
+ * group missing can only stop the process, in the middle of a session.
+ * A group read only where it is present (`contextBudget` by the system
+ * prompt, `background.cron` by subagents, `lsp` by /doctor) lists its owner alone.
+ */
+export const TEXT_GROUP_READERS: Readonly<Record<OptionalGroup, readonly FeatureId[]>> = {
+	notebook: ["notebook"],
+	askUser: ["ask-user"],
+	tasks: ["tasks"],
+	worktree: ["worktree"],
+	webFetch: ["web-fetch"],
+	webSearch: ["web"],
+	nativeWeb: ["web", "web-fetch"],
+	sessionTitle: ["session-title"],
+	init: ["init"],
+	btw: ["btw"],
+	recap: ["recap"],
+	effort: ["effort"],
+	planMode: ["plan-mode"],
+	skill: ["skill"],
+	mcp: ["mcp"],
+	lsp: ["lsp"],
+	hooks: ["hooks"],
+	memory: ["memory"],
+	background: ["background"],
+	artifacts: ["artifacts"],
+	toolStyle: ["tool-style"],
+	contextBudget: ["context-budget"],
+	fileTracker: ["file-tracker"],
+	compaction: ["compaction"],
+	workflow: ["workflow"],
+	shell: ["bash", "powershell"],
+	doctor: ["doctor"],
+	toolCallCorruption: ["tool-call-corruption"],
+	handback: ["subagents", "workflow"],
+	subagents: ["subagents"],
+	plugins: ["plugins"],
+	subagentModels: ["subagents", "workflow", "doctor"],
+	worktreeGuard: ["worktree", "subagents", "workflow"],
+};
+
+/** The optional groups `text` lacks although a feature that reads them is on, one sentence each. */
+function missingTextProblems(text: ProfileText, features: ReadonlySet<FeatureId>): string[] {
+	const problems: string[] = [];
+	for (const [group, readers] of Object.entries(TEXT_GROUP_READERS) as Array<[OptionalGroup, readonly FeatureId[]]>) {
+		if (text[group] !== undefined) continue;
+		const on = readers.filter((id) => features.has(id));
+		if (on.length > 0) problems.push(`it has no text for "${group}", which ${on.map((id) => `"${id}"`).join(", ")} ${on.length === 1 ? "reads" : "read"}`);
+	}
+	return problems;
+}
+
 export interface ResolvedProfile {
 	features: ReadonlySet<FeatureId>;
 	tools: ReadonlyMap<string, ToolSwitch>;
@@ -63,7 +145,8 @@ function envList(env: NodeJS.ProcessEnv, name: string): string[] {
 /**
  * Resolve and check a profile, with the environment's off-switches merged in.
  * Throws, naming every problem at once, when it turns off a required feature,
- * names an unknown feature, or turns off or defers a pinned tool.
+ * names an unknown feature, misspells a base tool, turns off or defers a
+ * pinned tool, or leaves out a text group a feature that is on reads.
  */
 export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profileDir: string): ResolvedProfile {
 	const featureMap: Partial<Record<string, boolean>> = { ...profile.features };
@@ -73,6 +156,7 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 	for (const name of envList(env, envName("TOOLS_OFF"))) tools.set(name, { ...tools.get(name), enabled: false });
 	const problems = featureProblems(featureMap);
 	for (const id of envOff.filter(isGuardFeature)) problems.push(`${envName("FEATURES_OFF")} cannot turn off "${id}": it guards tool calls (only a profile can)`);
+	problems.push(...misspelledTools(tools.keys()));
 	for (const name of PINNED_TOOLS) {
 		const sw = tools.get(name);
 		if (sw?.enabled === false) problems.push(`"${name}" cannot be turned off`);
@@ -87,13 +171,16 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 			return !disabledTools.has(name) && (feature === undefined || features.has(feature));
 		},
 	};
+	const text = profile.text({ live });
+	const missing = missingTextProblems(text, features);
+	if (missing.length > 0) throw new Error(`Invalid profile: ${missing.join("; ")}.`);
 	return {
 		features,
 		tools,
 		disabledTools,
 		live,
 		childExtensionPaths: profile.childExtensions.map((entry) => resolve(profileDir, entry)),
-		text: profile.text({ live }),
+		text,
 		...(profile.sources ? { sourcesModule: resolve(profileDir, profile.sources) } : {}),
 		globalAgentsFiles: profile.globalAgentsFiles ?? [],
 	};
@@ -166,9 +253,10 @@ export function failClosed(error: unknown): never {
 }
 
 /**
- * A text group the session reads. A profile may leave out the group of a
- * feature it turns off (the contract marks those optional); a missing group
- * the session reads is invalid and stops the process.
+ * A text group the session reads. A profile may leave out a group only when
+ * every feature that reads it is off (`TEXT_GROUP_READERS`, checked at load);
+ * a reader missing from that table would find its group gone here, and that
+ * stops the process.
  */
 export function requireText<K extends keyof ProfileText>(group: K): NonNullable<ProfileText[K]> {
 	const text = profileText()[group];
