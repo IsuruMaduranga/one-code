@@ -407,6 +407,7 @@ lib/profile/profile.ts
 	"no tool is named \"${…}\": the switch for \"${…}\" is spelled \"${…}\""
 	"\"${…}\" is a base tool and cannot be marked autoAllow: the base decides which of its tools run without a prompt"
 	"it has no text for \"${…}\", which ${…} ${…}"
+	"child extension \"${…}\" must be a file under ${…}/ in the profile folder"
 	"${…} cannot turn off \"${…}\": it guards tool calls (only a profile can)"
 	"\"${…}\" cannot be turned off"
 	"\nThe profile in profile/, or an environment switch over it, is invalid, so the harness will not start: ${…}\n\n"

@@ -78,7 +78,8 @@
 			"extensions/context/idle-compact/index.ts",
 			"extensions/request/ledger/wire.ts",
 			"extensions/request/cache-marks/index.ts",
-			"extensions/request/system-prompt/index.ts"
+			"extensions/request/system-prompt/index.ts",
+			"profile/extensions/*/index.ts"
 		],
 		"themes": [
 			"./profile/themes"

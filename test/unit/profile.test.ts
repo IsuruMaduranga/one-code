@@ -2,6 +2,9 @@
  * The profile in force (lib/profile/profile.ts), the feature() wrapper's view of pi
  * (lib/profile/feature.ts), and the permission gate's use of the tool switches.
  */
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { childExtensionPaths } from "../../extensions/lib/agents/child-extensions.ts";
 import { feature, profiledPi } from "../../extensions/lib/profile/feature.ts";
@@ -106,10 +109,24 @@ describe("resolveProfile", () => {
 	});
 
 	it("resolves child extensions against the profile folder, after the base's", () => {
-		use({ childExtensions: ["ballerina/index.ts"] });
-		const paths = childExtensionPaths();
-		expect(paths.at(-1)).toBe("/profile/ballerina/index.ts");
-		expect(endsWith(paths, "tools/notebook/index.ts")).toBe(true);
+		const dir = mkdtempSync(join(tmpdir(), "profile-child-"));
+		try {
+			mkdirSync(join(dir, "extensions", "ballerina"), { recursive: true });
+			writeFileSync(join(dir, "extensions", "ballerina", "child.ts"), "");
+			setActiveProfileForTest(resolveProfile({ ...empty, childExtensions: ["extensions/ballerina/child.ts"] }, {}, dir));
+			const paths = childExtensionPaths();
+			expect(paths.at(-1)).toBe(join(dir, "extensions", "ballerina", "child.ts"));
+			expect(endsWith(paths, "tools/notebook/index.ts")).toBe(true);
+			expect(() => resolveProfile({ ...empty, childExtensions: ["extensions/ballerina/chlid.ts"] }, {}, dir)).toThrow(/child extension "extensions\/ballerina\/chlid.ts" does not exist/);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("refuses a child extension outside the profile's extensions folder", () => {
+		for (const entry of ["ballerina/index.ts", "extensions/../index.ts", "../extensions/x/index.ts", "extensions"]) {
+			expect(() => resolveProfile({ ...empty, childExtensions: [entry] }, {}, "/p"), entry).toThrow(/must be a file under extensions\/ in the profile folder/);
+		}
 	});
 
 	it("leaves a turned-off feature's entries out of the child list", () => {

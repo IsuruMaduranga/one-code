@@ -8,16 +8,25 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CHILD_EXTENSIONS } from "../../extensions/lib/agents/child-extensions.ts";
-import { enabledFeatures, FEATURE_IDS, FEATURES, featureOfEntry, featureProblems, TOOL_FEATURES } from "../../extensions/lib/profile/features.ts";
+import { enabledFeatures, FEATURE_IDS, FEATURES, featureOfEntry, featureProblems, PRODUCT_EXTENSIONS_ENTRY, TOOL_FEATURES } from "../../extensions/lib/profile/features.ts";
 
 const repo = join(import.meta.dirname, "../..");
 const manifest = JSON.parse(readFileSync(join(repo, "package.json"), "utf8")) as { pi: { extensions: string[] } };
-const manifestEntries = manifest.pi.extensions.map((path) => path.replace(/^extensions\//, ""));
+// The product's entry (a glob over `profile/extensions/`) belongs to no feature.
+const manifestEntries = manifest.pi.extensions.filter((path) => path !== PRODUCT_EXTENSIONS_ENTRY).map((path) => path.replace(/^extensions\//, ""));
 const registered = FEATURE_IDS.flatMap((id) => FEATURES[id].entries.map((entry) => ({ id, entry })));
 
 describe("feature registry", () => {
 	it("covers every entry pi loads, in the main session and in children", () => {
 		for (const entry of [...manifestEntries, ...CHILD_EXTENSIONS]) expect(featureOfEntry(entry), entry).toBeDefined();
+	});
+
+	it("loads a product's own extensions last, after system-prompt", () => {
+		// After every base listener (the bus does not replay) and after the
+		// request pipeline, and the only entry outside `extensions/`.
+		expect(manifest.pi.extensions.at(-1)).toBe(PRODUCT_EXTENSIONS_ENTRY);
+		expect(manifest.pi.extensions.at(-2)).toBe("extensions/request/system-prompt/index.ts");
+		expect(manifest.pi.extensions.filter((path) => !path.startsWith("extensions/"))).toEqual([PRODUCT_EXTENSIONS_ENTRY]);
 	});
 
 	it("names each entry once, and only entries that are loaded", () => {

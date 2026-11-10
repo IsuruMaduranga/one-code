@@ -82,6 +82,20 @@ export const FEATURES = {
 
 export type FeatureId = keyof typeof FEATURES;
 
+/**
+ * The manifest's last entry: a product's own main-session extensions, one
+ * folder each under `profile/extensions/`. pi expands the glob in place,
+ * sorted by path, and loads nothing when no folder matches. It comes after
+ * `system-prompt`, so every base listener exists when a product extension
+ * announces at load, and after the request pipeline, so a product extension
+ * must not shape the request tail. These entries belong to no feature: the
+ * product ships the ones it wants (working-docs/decisions/bi-fork.md).
+ */
+export const PRODUCT_EXTENSIONS_ENTRY = "profile/extensions/*/index.ts";
+
+/** The folder, relative to the profile's, that holds every product extension, child entries included. */
+export const PRODUCT_EXTENSIONS_DIR = "extensions";
+
 export const FEATURE_IDS = Object.keys(FEATURES) as FeatureId[];
 
 export function isFeatureId(value: string): value is FeatureId {

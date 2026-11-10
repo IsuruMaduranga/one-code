@@ -1,0 +1,23 @@
+/**
+ * The one module a product's own extension imports from the base
+ * (working-docs/decisions/bi-fork.md): the channels a product extension
+ * announces on, with their payload types. A product extension lives in
+ * `profile/extensions/<name>/`; the main session loads its `index.ts` after
+ * every base extension, and a child session loads the entries the profile
+ * lists (`Profile.childExtensions`). Everything else in `extensions/` is
+ * internal and may move between releases (`profile-import-surface.test.ts`).
+ *
+ * A product extension loads after the request pipeline, so it never shapes a
+ * request in a `context` or payload hook. It registers tools and commands
+ * through pi, and reaches the request only through these channels:
+ *
+ * - `SYSTEM_PROMPT_SECTION_CHANNEL`: a section of the system prompt, announced
+ *   while the extension loads. A child session ignores it.
+ * - `REMINDER_CHANNEL`: a reminder, placed by the kind of fact it states.
+ * - `DEFER_CHANNEL`: put one of its own tools behind `tool_search`.
+ *
+ * Re-export only what a product extension uses, by name.
+ */
+export { DEFER_CHANNEL, type DeferRequest } from "../lib/request/deferred-channel.ts";
+export { REMINDER_CHANNEL, type ReminderPayload, type ReminderPlacement } from "../lib/request/reminders.ts";
+export { SYSTEM_PROMPT_SECTION_CHANNEL, type SystemPromptSection, type SystemPromptSession } from "../request/system-prompt/text.ts";

@@ -18,10 +18,11 @@
  */
 
 import { brandedId, envName } from "./brand.mjs";
-import { join, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { PACKAGE_ROOT } from "../core/package-root.ts";
 import { shareModuleForTest, sharedModule } from "./shared-module.ts";
-import { enabledFeatures, type FeatureId, featureProblems, isGuardFeature, TOOL_FEATURES } from "./features.ts";
+import { enabledFeatures, type FeatureId, featureProblems, isGuardFeature, PRODUCT_EXTENSIONS_DIR, TOOL_FEATURES } from "./features.ts";
 import type { LiveTools } from "./live-tools.ts";
 import type { Profile, ProfileText, ToolSwitch } from "./profile-contract.ts";
 import type { SourceProvider } from "./sources.ts";
@@ -158,11 +159,32 @@ function envList(env: NodeJS.ProcessEnv, name: string): string[] {
 }
 
 /**
+ * A child extension entry must be a file under the profile's extensions
+ * folder: a misspelled one would otherwise fail only when the first subagent
+ * starts, and one outside the folder escapes the import-surface check.
+ */
+function childExtensionProblems(entries: readonly string[], profileDir: string): string[] {
+	const root = resolve(profileDir, PRODUCT_EXTENSIONS_DIR);
+	const problems: string[] = [];
+	for (const entry of entries) {
+		const path = resolve(profileDir, entry);
+		const inside = relative(root, path);
+		if (inside === "" || inside.startsWith("..") || isAbsolute(inside)) {
+			problems.push(`child extension "${entry}" must be a file under ${PRODUCT_EXTENSIONS_DIR}/ in the profile folder`);
+		} else if (!existsSync(path)) {
+			problems.push(`child extension "${entry}" does not exist (${path})`);
+		}
+	}
+	return problems;
+}
+
+/**
  * Resolve and check a profile, with the environment's off-switches merged in.
  * Throws, naming every problem at once, when it turns off a required feature,
  * names an unknown feature, misspells a base tool, marks one autoAllow, turns
- * off or defers a pinned tool, or leaves out a text group a feature that is
- * on reads.
+ * off or defers a pinned tool, names a child extension that is missing or
+ * outside the profile's extensions folder, or leaves out a text group a
+ * feature that is on reads.
  */
 export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profileDir: string): ResolvedProfile {
 	const featureMap: Partial<Record<string, boolean>> = { ...profile.features };
@@ -182,6 +204,7 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		if (sw?.enabled === false) problems.push(`"${name}" cannot be turned off`);
 		if (sw?.deferred === true) problems.push(`"${name}" cannot be deferred`);
 	}
+	problems.push(...childExtensionProblems(profile.childExtensions, profileDir));
 	if (problems.length > 0) throw new Error(`Invalid profile: ${problems.join("; ")}.`);
 	const features = enabledFeatures(featureMap);
 	const disabledTools = new Set([...tools].filter(([, sw]) => sw.enabled === false).map(([name]) => name));

@@ -1,6 +1,7 @@
 /**
  * A profile imports the base only through `extensions/sdk/` (`profile.ts` for
- * its text, `source-provider.ts` for its source provider), so the base can
+ * its text, `source-provider.ts` for its source provider, `extension.ts` for
+ * its own extensions under `profile/extensions/`), so the base can
  * reorganize its folders without touching a product's profile
  * (working-docs/decisions/bi-fork.md). Type imports count: a moved type file
  * breaks a profile's typecheck as surely as a moved value. The profile's own
@@ -13,6 +14,10 @@ import { imports, sourceFiles } from "./helpers/import-graph.ts";
 
 const ROOT = join(import.meta.dirname, "..", "..");
 const SDK = ["extensions/sdk/profile.ts", "extensions/sdk/source-provider.ts"];
+// A product extension runs as a pi extension, so its module may load the
+// base's loaders; the profile's text and provider must not reach it.
+const EXTENSION_SDK = ["extensions/sdk/extension.ts", "extensions/sdk/profile.ts"];
+const allowed = (file: string) => (file.startsWith("profile/extensions/") ? EXTENSION_SDK : SDK);
 
 /** Every module specifier in `source`, type-only imports and re-exports included. */
 const specifiers = (source: string, path = "x.ts") => imports(source, path).map((found) => found.specifier);
@@ -24,7 +29,9 @@ describe("the profile's imports from the base", () => {
 			for (const spec of specifiers(readFileSync(join(ROOT, file), "utf8"), file)) {
 				if (!spec.startsWith(".")) continue;
 				const target = relative(ROOT, resolve(ROOT, dirname(file), spec)).replaceAll("\\", "/");
-				if (!target.startsWith("profile/") && !SDK.includes(target)) outside.push(`${file} imports ${target}`);
+				// The rest of the profile loads without pi, so it imports no product extension either.
+				if (target.startsWith("profile/extensions/") && !file.startsWith("profile/extensions/")) outside.push(`${file} imports ${target}`);
+				if (!target.startsWith("profile/") && !allowed(file).includes(target)) outside.push(`${file} imports ${target}`);
 			}
 		}
 		expect(outside).toEqual([]);

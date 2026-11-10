@@ -145,13 +145,18 @@ export interface Profile {
 	/** Per-tool switches, keyed by tool name. */
 	tools: Readonly<Record<string, ToolSwitch>>;
 	/**
-	 * Extension entry files, relative to the profile folder, that in-process
-	 * child sessions (subagents, workflow agents) load after the base's own
-	 * child extensions. The main session loads a product's extensions from the
-	 * product's own package, after the base's. Either way they load after the
-	 * request pipeline (`ledger/wire`, cache-marks), so a product extension
-	 * must not shape the request tail in a `context` or payload hook; it adds
-	 * tools, commands, reminders and prompt sections.
+	 * Extension entry files, relative to the profile folder and under its
+	 * `extensions/` folder, that in-process child sessions (subagents, workflow
+	 * agents) load after the base's own child extensions; a missing file fails
+	 * at load. The main session loads `extensions/<name>/index.ts` of every
+	 * folder there, through the manifest's last entry
+	 * (`lib/profile/features.ts PRODUCT_EXTENSIONS_ENTRY`). Either way they load
+	 * after the request pipeline (`ledger/wire`, cache-marks), so a product
+	 * extension must not shape the request tail in a `context` or payload hook;
+	 * it adds tools, commands, reminders and prompt sections, and imports the
+	 * base only through `extensions/sdk/extension.ts`. A prompt section
+	 * announced in a child session is ignored: a child sends its agent's own
+	 * prompt, or as a fork the parent's, which already carries the section.
 	 */
 	childExtensions: readonly string[];
 	/**

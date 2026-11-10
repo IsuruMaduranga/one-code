@@ -15,7 +15,8 @@ describe("the package root", () => {
 		// root's manifest lists the extension entries that sit under EXTENSIONS_DIR.
 		const entries: string[] = JSON.parse(readFileSync(join(PACKAGE_ROOT, "package.json"), "utf8")).pi.extensions;
 		expect(entries.length).toBeGreaterThan(0);
-		for (const entry of entries) expect(existsSync(join(PACKAGE_ROOT, entry)), entry).toBe(true);
+		// The one glob entry (a product's own extensions) may match nothing.
+		for (const entry of entries.filter((entry) => !entry.includes("*"))) expect(existsSync(join(PACKAGE_ROOT, entry)), entry).toBe(true);
 		expect(existsSync(join(EXTENSIONS_DIR, "lib", "core", "package-root.ts"))).toBe(true);
 	});
 
