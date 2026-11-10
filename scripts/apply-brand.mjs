@@ -36,7 +36,12 @@ function listing(pkg, which) {
 	};
 }
 
-/** What the extension package ships besides the product's guide. */
+/**
+ * What the extension package ships besides the product's guide. The list is
+ * fixed here because the previous brand's guide entry cannot be told from
+ * any other folder; `--check` (profile/test/apply-brand-committed.test.ts)
+ * fails when package.json gains an entry this list lacks.
+ */
 const EXTENSION_FILES = ["extensions/", "profile/", "!profile/test/", "types/", "README.md", "LICENSE"];
 
 /** The extension's `files`: the fixed list, then the guide when it sits outside profile/ (which ships whole). */

@@ -33,8 +33,7 @@ import { stateDirPattern } from "../../../lib/profile/brand.mjs";
 import { FIND_PATTERN_TESTS, findNegatedPatterns } from "../../../lib/shell/read-only-options.ts";
 import { analyzeShellCommand, globComponentRegex, hasReadOnlyShellWords, isUnknownTilde, LOOPS, movesDirectory, parseCommand, resolvePayload, scopedTracker } from "../../../lib/shell/shell-analysis.ts";
 import type { Token } from "../../../lib/shell/shell-parse.ts";
-import { claudeUserSettingsPath, managedSettingsPaths, settingsSources } from "../../../lib/profile/claude-settings.ts";
-import { protectedFiles } from "../../../lib/profile/sources.ts";
+import { claudeUserSettingsPath, gateControlFiles, managedSettingsPaths } from "../../../lib/profile/claude-settings.ts";
 import { CONSENT_STORE_TAIL, consentStorePaths } from "../../../lib/consent/consent-stores.ts";
 import { productSettingsPath } from "../../../lib/profile/product-settings.ts";
 import { CATALOG_CACHE_TAIL, catalogCacheFiles } from "../../../lib/models/model-catalog-data.ts";
@@ -213,7 +212,7 @@ const CATALOG_FILE_NAME = /(^|[/\\])(models-dev|openrouter|huggingface|refresh-f
 
 /** The session's settings ladder and state files for the floor: every file a source provider adds is a gate control. */
 export function sessionSettingsFiles(cwd: string, home: string): string[] {
-	return [...settingsSources(cwd, home).map((file) => file.path), ...protectedFiles(home).map((file) => file.path)];
+	return gateControlFiles(cwd, home);
 }
 
 /**

@@ -120,7 +120,7 @@ import {
 } from "../../lib/rules/settings.ts";
 import { isRepoFile, sourceId } from "../../lib/profile/claude-settings.ts";
 import type { SettingsFile } from "../../lib/profile/sources.ts";
-import { MODE_ENV, parsePowerShell, resolvedOrSelf, runtimeProtectedDirs, runtimeProtectedFiles, runtimeSecretPaths } from "../../lib/agents/permission-gate.ts";
+import { MODE_ENV, parsePowerShell, protectedPathsByCwd, resolvedOrSelf, runtimeSecretPaths } from "../../lib/agents/permission-gate.ts";
 import { describeProjectAllow, persistProjectAllowApproval, projectAllowApproved, projectDirectoryConsentEntry, type TrustFiring } from "../../lib/consent/project-trust.ts";
 import { parseAddDirFlag, tooBroadForWorkspace, validateWorkspaceDirectory } from "./workspace.ts";
 import { WORKSPACE_CHANNEL, type WorkspaceAnnouncement } from "../../lib/rules/workspace-channel.ts";
@@ -404,6 +404,8 @@ function permissionsExtension(pi: ExtensionAPI) {
 	let sessionSettings: string[] | undefined;
 	/** pi's own agent directory, protected like the static list (lib/agents/permission-gate.ts runtimeProtectedDirs). */
 	let protectedDirs: string[] = [];
+	/** The protected paths for a call's own cwd: an entered worktree and an isolated child have their own settings files. */
+	let protectedFor: (cwd: string) => string[] = () => protectedDirs;
 	/** The harness's own secret stores, never read unclassified outside the working space (runtimeSecretPaths). */
 	let secretPaths: string[] = [];
 	/** The harness's readable session dirs, resolved at session start; `readableRoots` adds the workspace to them. */
@@ -1094,7 +1096,8 @@ function permissionsExtension(pi: ExtensionAPI) {
 		}
 		resolvedCwd = resolveForContainment(ctx.cwd);
 		sessionSettings = sessionSettingsFiles(ctx.cwd, os.homedir());
-		protectedDirs = [...runtimeProtectedDirs(), ...runtimeProtectedFiles(ctx.cwd, os.homedir())];
+		protectedFor = protectedPathsByCwd(os.homedir());
+		protectedDirs = protectedFor(ctx.cwd);
 		secretPaths = runtimeSecretPaths(os.homedir());
 		branchMode = normalizePermissionMode(readState(ctx, PERMISSION_MODE_STATE));
 		requestOnBranch = (ctx.sessionManager.getBranch() as EntryLike[]).some((entry) => readRecord(entry)?.kind === "request");
@@ -1411,7 +1414,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 				scratchpadDirPath,
 				resultsDirPath,
 				sessionDirPath,
-				protectedDirs,
+				protectedDirs: protectedFor(callCwd),
 				secretPaths,
 				workspaceDirs: dirs,
 				claudeCodeFastPaths: usesClaudeCodeFastPaths(ctx.model),
@@ -1709,7 +1712,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			scratchpadDirPath,
 			resultsDirPath,
 			sessionDirPath,
-			protectedDirs,
+			protectedDirs: protectedFor(cwd),
 			secretPaths,
 			workspaceDirs,
 			// The child's own model: a cheaper subagent gets the stricter gate.

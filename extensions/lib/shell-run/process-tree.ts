@@ -127,16 +127,19 @@ export function killProcessTree(child: ChildProcess, signal: NodeJS.Signals = "S
 	} catch {
 		// The group is gone, or cannot be stopped: signal it as it is.
 	}
+	let signalled = true;
 	try {
 		process.kill(group, signal);
 	} catch {
+		signalled = false;
 		try {
 			child.kill(signal);
 		} catch {
 			// Already gone.
 		}
 	}
-	if (!frozen || signal === "SIGKILL") return;
+	// A group the signal did not reach must not be left stopped, SIGKILL included.
+	if (!frozen || (signalled && signal === "SIGKILL")) return;
 	try {
 		process.kill(group, "SIGCONT");
 	} catch {

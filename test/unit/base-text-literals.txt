@@ -409,7 +409,7 @@ lib/profile/profile.ts
 	"it has no text for \"${…}\", which ${…} ${…}"
 	"${…} cannot turn off \"${…}\": it guards tool calls (only a profile can)"
 	"\"${…}\" cannot be turned off"
-	"\nThe profile in profile/ is invalid, so the harness will not start: ${…}\n\n"
+	"\nThe profile in profile/, or an environment switch over it, is invalid, so the harness will not start: ${…}\n\n"
 	"it has no text for \"${…}\", which this session reads"
 
 lib/request/anthropic-server-call.ts

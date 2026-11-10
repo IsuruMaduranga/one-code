@@ -78,8 +78,9 @@ type OptionalGroup = { [K in keyof ProfileText]-?: undefined extends ProfileText
 /**
  * The features that read each optional text group: its owner, and every
  * feature that words something through it (an isolated child of `subagents`
- * or `workflow` is refused through `worktreeGuard`; /doctor resolves the
- * subagent model). A profile may leave a group out only when all of them are
+ * or `workflow` is refused through `worktreeGuard`; a workflow agent's
+ * worktree and tool-list errors are the `subagents` group's; /doctor resolves
+ * the subagent model). A profile may leave a group out only when all of them are
  * off; `resolveProfile` checks it at load, because a reader that finds its
  * group missing can only stop the process, in the middle of a session.
  * A group read only where it is present (`contextBudget` by the system
@@ -115,7 +116,7 @@ export const TEXT_GROUP_READERS: Readonly<Record<OptionalGroup, readonly Feature
 	doctor: ["doctor"],
 	toolCallCorruption: ["tool-call-corruption"],
 	handback: ["subagents", "workflow"],
-	subagents: ["subagents"],
+	subagents: ["subagents", "workflow"],
 	plugins: ["plugins"],
 	subagentModels: ["subagents", "workflow", "doctor"],
 	worktreeGuard: ["worktree", "subagents", "workflow"],
@@ -171,7 +172,10 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 	for (const name of envList(env, envName("TOOLS_OFF"))) tools.set(name, { ...tools.get(name), enabled: false });
 	const problems = featureProblems(featureMap);
 	for (const id of envOff.filter(isGuardFeature)) problems.push(`${envName("FEATURES_OFF")} cannot turn off "${id}": it guards tool calls (only a profile can)`);
-	problems.push(...misspelledTools(tools.keys()));
+	const envTools = envList(env, envName("TOOLS_OFF"));
+	problems.push(...misspelledTools(Object.keys(profile.tools)));
+	// The user's own list: name the variable, since the fix is theirs to make.
+	problems.push(...misspelledTools(envTools).map((problem) => `${envName("TOOLS_OFF")}: ${problem}`));
 	problems.push(...autoAllowedBaseTools(tools));
 	for (const name of PINNED_TOOLS) {
 		const sw = tools.get(name);
@@ -264,7 +268,7 @@ export function profileText(): ProfileText {
 /** Stop the process: an invalid profile must never run degraded or without its gate. */
 export function failClosed(error: unknown): never {
 	const reason = error instanceof Error ? error.message : String(error);
-	process.stderr.write(`\nThe profile in profile/ is invalid, so the harness will not start: ${reason}\n\n`);
+	process.stderr.write(`\nThe profile in profile/, or an environment switch over it, is invalid, so the harness will not start: ${reason}\n\n`);
 	process.exit(1);
 }
 

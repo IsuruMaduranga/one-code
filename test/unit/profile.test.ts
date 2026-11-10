@@ -60,7 +60,7 @@ describe("resolveProfile", () => {
 	});
 
 	it("refuses a switch that misses a base tool by spelling, and passes a product's own tool", () => {
-		expect(() => resolveProfile(empty, { [envName("TOOLS_OFF")]: "Bash,WebFetch" }, "/p")).toThrow(/no tool is named "Bash": the switch for "bash" is spelled "bash"; no tool is named "WebFetch".*"web_fetch"/);
+		expect(() => resolveProfile(empty, { [envName("TOOLS_OFF")]: "Bash,WebFetch" }, "/p")).toThrow(/_TOOLS_OFF: no tool is named "Bash": the switch for "bash" is spelled "bash"; \w+_TOOLS_OFF: no tool is named "WebFetch".*"web_fetch"/);
 		expect(() => resolveProfile({ ...empty, tools: { Write: { enabled: false } } }, {}, "/p")).toThrow(/no tool is named "Write"/);
 		expect(() => resolveProfile({ ...empty, tools: { toolsearch: { deferred: false } } }, {}, "/p")).toThrow(/spelled "tool_search"/);
 		const resolved = resolveProfile({ ...empty, tools: { product_tool: { autoAllow: true }, mcp__srv__Read: { enabled: false }, Agent: { deferred: true } } }, {}, "/p");
@@ -78,6 +78,8 @@ describe("resolveProfile", () => {
 		// The owner off is not enough while another reader is on: an isolated child of subagents is refused through worktreeGuard.
 		expect(() => resolveProfile({ ...empty, features: { worktree: false }, text: without("worktreeGuard") }, {}, "/p")).toThrow(/no text for "worktreeGuard", which "subagents", "workflow" read/);
 		expect(() => resolveProfile({ ...empty, features: { subagents: false, workflow: false }, text: without("subagentModels") }, {}, "/p")).toThrow(/no text for "subagentModels", which "doctor" reads/);
+		// A workflow agent's worktree and tool-list errors are worded by the subagents group.
+		expect(() => resolveProfile({ ...empty, features: { subagents: false }, text: without("subagents") }, {}, "/p")).toThrow(/no text for "subagents", which "workflow" reads/);
 		expect(() => resolveProfile({ ...empty, text: without("notebook", "shell") }, {}, "/p")).toThrow(/no text for "notebook", which "notebook" reads; it has no text for "shell", which "bash", "powershell" read/);
 		const off = { worktree: false, subagents: false, workflow: false, doctor: false, notebook: false } as const;
 		expect(resolveProfile({ ...empty, features: off, text: without("worktreeGuard", "subagentModels", "handback", "notebook", "worktree", "subagents", "workflow", "doctor") }, {}, "/p").text.notebook).toBeUndefined();

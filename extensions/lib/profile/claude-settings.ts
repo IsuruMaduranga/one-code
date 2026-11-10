@@ -14,7 +14,7 @@
 import { brand } from "./brand.mjs";
 import { existsSync, readFileSync } from "node:fs";
 import { join, posix, win32 } from "node:path";
-import { openSources, type SettingsFile } from "./sources.ts";
+import { openSources, protectedFiles, type SettingsFile } from "./sources.ts";
 import { productProjectSettingsPath, productSettingsPath } from "./product-settings.ts";
 import { claudeManagedDir, claudeUserDir } from "./paths.ts";
 
@@ -139,4 +139,13 @@ export function readEnabledPlugins(cwd: string, home: string): Record<string, bo
 		}
 	}
 	return merged;
+}
+
+/**
+ * The files that configure the permission gate for a session in `cwd`: the
+ * settings ladder and the source provider's state files. The one list the
+ * auto-mode floor and the protected paths share.
+ */
+export function gateControlFiles(cwd: string, home: string): string[] {
+	return [...settingsSources(cwd, home).map((file) => file.path), ...protectedFiles(home).map((file) => file.path)];
 }

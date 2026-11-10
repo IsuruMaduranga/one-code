@@ -41,8 +41,7 @@ import { usesClaudeCodeFastPaths } from "../models/model-tier.ts";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { claudeConfigDir, claudeJsonPath, productStateDir } from "../profile/paths.ts";
-import { settingsSources } from "../profile/claude-settings.ts";
-import { protectedFiles } from "../profile/sources.ts";
+import { gateControlFiles } from "../profile/claude-settings.ts";
 import { sessionResultsDir } from "../request/persisted-output.ts";
 import { powerShellParser } from "../shell-run/shell-spawn.ts";
 import { isPrivateScratchpad, sessionScratchpadDir } from "../core/scratchpad.ts";
@@ -86,8 +85,23 @@ export function runtimeProtectedDirs(): string[] {
  * `DecideInput.protectedDirs`, which matches a path at or under an entry.
  */
 export function runtimeProtectedFiles(cwd: string, home: string): string[] {
-	const files = [...settingsSources(cwd, home).map((file) => file.path), ...protectedFiles(home).map((file) => file.path)];
-	return [...new Set(files.flatMap((file) => [file, resolvedOrSelf(file)]))];
+	return [...new Set(gateControlFiles(cwd, home).flatMap((file) => [file, resolvedOrSelf(file)]))];
+}
+
+/**
+ * `DecideInput.protectedDirs` for a call in `cwd`: the runtime roots plus the
+ * gate's control files for that directory, kept per directory. A call's own
+ * cwd matters: an entered worktree or an isolated child has its own copy of
+ * the project's settings files.
+ */
+export function protectedPathsByCwd(home: string): (cwd: string) => string[] {
+	const roots = runtimeProtectedDirs();
+	const byCwd = new Map<string, string[]>();
+	return (cwd) => {
+		let paths = byCwd.get(cwd);
+		if (!paths) byCwd.set(cwd, (paths = [...roots, ...runtimeProtectedFiles(cwd, home)]));
+		return paths;
+	};
 }
 
 /**
@@ -177,7 +191,7 @@ export function permissionGateFactory(
 	// harness blocks its own feature (same rationale as in decide()). With
 	// auto-memory off the folder gets no grant, as in the parent's gate.
 	const memoryDirPath = autoMemoryEnabled(projectRoot) ? memoryDir(home, projectRoot) : undefined;
-	const protectedDirs = [...runtimeProtectedDirs(), ...runtimeProtectedFiles(cwd, home)];
+	const protectedFor = protectedPathsByCwd(home);
 	const secretPaths = runtimeSecretPaths(home);
 
 	return {
@@ -251,7 +265,7 @@ export function permissionGateFactory(
 					// handed a path to must not be judged an outside read. Resolved like
 					// the subject (the tmpdir fallback sits under a symlinked /var on macOS).
 					resultsDirPath: resolvedOrSelf(sessionResultsDir(ctx)),
-					protectedDirs,
+					protectedDirs: protectedFor(runCwd),
 					secretPaths,
 					claudeCodeFastPaths: usesClaudeCodeFastPaths(ctx?.model),
 					blockReadsOutsideWorkingDirectories: settings.blockReadsOutsideWorkingDirectories,

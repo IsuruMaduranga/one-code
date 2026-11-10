@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runtimeProtectedDirs, runtimeProtectedFiles } from "../../extensions/lib/agents/permission-gate.ts";
+import { protectedPathsByCwd, runtimeProtectedDirs, runtimeProtectedFiles } from "../../extensions/lib/agents/permission-gate.ts";
 import { decide, parseRules } from "../../extensions/lib/rules/matcher.ts";
 import { isProtectedPath } from "../../extensions/lib/rules/protected-paths.ts";
 import { borrowedLadderPaths, useBorrowedLadder } from "./helpers/settings-files.ts";
@@ -31,6 +31,19 @@ describe("runtimeProtectedFiles", () => {
 	it("lists every file of the settings ladder, the provider's included", () => {
 		const files = runtimeProtectedFiles(cwd, home);
 		for (const path of Object.values(borrowedLadderPaths(cwd, home))) expect(files, path).toContain(path);
+	});
+
+	it("follows the call's own directory: a worktree's copy of the project file is protected there", () => {
+		const worktree = join(root, "worktree");
+		mkdirSync(worktree, { recursive: true });
+		const protectedFor = protectedPathsByCwd(home);
+		const copy = borrowedLadderPaths(worktree, home).project;
+		expect(protectedFor(cwd)).not.toContain(copy);
+		expect(protectedFor(worktree)).toContain(copy);
+		expect(protectedFor(worktree)).toBe(protectedFor(worktree));
+		const call = { toolName: "write", subject: copy, cwd: worktree, deny: [], ask: [], allow: [], workspaceDirs: [] as string[], mode: "acceptEdits" as const };
+		expect(decide({ ...call, protectedDirs: protectedFor(cwd) }).decision).toBe("allow");
+		expect(decide({ ...call, protectedDirs: protectedFor(worktree) })).toMatchObject({ decision: "ask", cause: "protected-path" });
 	});
 
 	it("makes a write to a provider's settings file ask where the edit would otherwise be allowed", () => {

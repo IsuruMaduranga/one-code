@@ -107,6 +107,27 @@ describe("killProcessTree", () => {
 		expect(sent).toEqual(["term:SIGSTOP", "term:SIGTERM", "term:SIGCONT", "killed:SIGSTOP", "killed:SIGKILL"]);
 	});
 
+	it.skipIf(win32)("resumes a group it froze when the signal itself could not be sent, SIGKILL included", async () => {
+		const child = spawnShell("sleep 30");
+		await new Promise((r) => setTimeout(r, 100));
+		const real = process.kill.bind(process);
+		const sent: string[] = [];
+		const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+			if (pid === -child.pid!) sent.push(String(signal));
+			if (pid === -child.pid! && signal === "SIGKILL") throw Object.assign(new Error("EPERM"), { code: "EPERM" });
+			return real(pid, signal as NodeJS.Signals);
+		});
+		try {
+			const settled = settledWithin(child, 3000);
+			killProcessTree(child, "SIGKILL");
+			expect(sent).toEqual(["SIGSTOP", "SIGKILL", "SIGCONT"]);
+			await settled; // the leader was still killed directly
+		} finally {
+			kill.mockRestore();
+			killProcessTree(child, "SIGKILL");
+		}
+	});
+
 	it.skipIf(win32)("a shell whose command the kill ended never runs its next command or reports the job", async () => {
 		// Unfrozen, the command can die before its shell is signalled; the shell
 		// then reaps it, prints the job report and runs on (see killProcessTree).
