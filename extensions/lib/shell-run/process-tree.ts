@@ -102,20 +102,45 @@ function taskkillTree(child: ChildProcess): void {
 	}
 }
 
+/**
+ * Signal the whole group, frozen first. A group signal is not delivered to
+ * every member at once: the command can die while its shell has not been
+ * signalled yet, and the shell then reaps it and runs on, to the next command
+ * of a cancelled hook (`sleep 2; touch done`) or to bash's "Terminated: 15"
+ * job report (measured on macOS under load: 6 of 240 SIGKILLed shells ran
+ * their next command, 28 wrote the report; none of 240 once frozen first).
+ * SIGSTOP ends no process, so no parent wakes to act; the signal then lands
+ * on a stopped group, and SIGCONT lets a member with a handler run it (a
+ * stopped process takes its pending signal before any of its own code).
+ */
 export function killProcessTree(child: ChildProcess, signal: NodeJS.Signals = "SIGTERM"): void {
 	if (child.pid == null) return;
 	if (process.platform === "win32") {
 		taskkillTree(child);
 		return;
 	}
+	const group = -child.pid;
+	let frozen = false;
 	try {
-		process.kill(-child.pid, signal);
+		process.kill(group, "SIGSTOP");
+		frozen = true;
+	} catch {
+		// The group is gone, or cannot be stopped: signal it as it is.
+	}
+	try {
+		process.kill(group, signal);
 	} catch {
 		try {
 			child.kill(signal);
 		} catch {
 			// Already gone.
 		}
+	}
+	if (!frozen || signal === "SIGKILL") return;
+	try {
+		process.kill(group, "SIGCONT");
+	} catch {
+		// Every member died of the signal.
 	}
 }
 

@@ -88,6 +88,55 @@ describe("killProcessTree", () => {
 		expect(elapsed).toBeLessThan(EXIT_STDIO_MAX_MS + 1500);
 		killProcessTree(child, "SIGKILL"); // the loop is not the leader's group on Windows; best effort
 	});
+
+	it.skipIf(win32)("freezes the group before signalling it, and resumes it unless the signal was SIGKILL", async () => {
+		const sent: string[] = [];
+		const kill = vi.spyOn(process, "kill");
+		try {
+			const term = spawnShell("sleep 30");
+			const killed = spawnShell("sleep 30");
+			await new Promise((r) => setTimeout(r, 100));
+			const settled = Promise.all([settledWithin(term, 3000), settledWithin(killed, 3000)]);
+			killProcessTree(term);
+			killProcessTree(killed, "SIGKILL");
+			for (const [pid, signal] of kill.mock.calls) sent.push(`${pid === -term.pid! ? "term" : pid === -killed.pid! ? "killed" : "other"}:${signal}`);
+			await settled;
+		} finally {
+			kill.mockRestore();
+		}
+		expect(sent).toEqual(["term:SIGSTOP", "term:SIGTERM", "term:SIGCONT", "killed:SIGSTOP", "killed:SIGKILL"]);
+	});
+
+	it.skipIf(win32)("a shell whose command the kill ended never runs its next command or reports the job", async () => {
+		// Unfrozen, the command can die before its shell is signalled; the shell
+		// then reaps it, prints the job report and runs on (see killProcessTree).
+		const runs = await Promise.all(
+			Array.from({ length: 24 }, async () => {
+				const child = spawn(bash.shell, ["-c", "echo ready; sleep 30; echo ran-on"], { ...detachedSpawnOptions(), stdio: ["ignore", "pipe", "pipe"] });
+				let out = "";
+				let err = "";
+				child.stdout?.on("data", (chunk) => (out += chunk));
+				child.stderr?.on("data", (chunk) => (err += chunk));
+				while (!out.includes("ready")) await new Promise((r) => setTimeout(r, 5));
+				const exited = waitForChildExit(child);
+				killProcessTree(child, "SIGKILL");
+				await exited;
+				return { out: out.trim(), err };
+			}),
+		);
+		expect(runs).toEqual(runs.map(() => ({ out: "ready", err: "" })));
+	});
+
+	it.skipIf(win32)("a frozen group still runs its TERM handler", async () => {
+		const child = spawn(bash.shell, ["-c", "trap 'echo handled; exit 0' TERM; echo ready; sleep 30 & wait"], { ...detachedSpawnOptions(), stdio: ["ignore", "pipe", "pipe"] });
+		let out = "";
+		child.stdout?.on("data", (chunk) => (out += chunk));
+		while (!out.includes("ready")) await new Promise((r) => setTimeout(r, 5));
+		const exited = waitForChildExit(child);
+		killProcessTree(child);
+		expect((await exited).code).toBe(0);
+		expect(out).toContain("handled");
+	});
 });
 
 describe("stopProcessTree", () => {
