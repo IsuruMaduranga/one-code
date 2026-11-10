@@ -39,7 +39,7 @@ import {
 import { BUNDLED_SKILLS_DIR, estimateSkillTokens, promptTemplateNames, scanSkills, scopeIn, userSkillRoots } from "../../lib/plugins/skill-scan.ts";
 import { sessionModelTier } from "../../lib/models/session-model-tier.ts";
 import { readUsage, recordUsage, usageKey } from "../../lib/plugins/usage-tracker.ts";
-import { boundedDockHeight, ccToolRenderers, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
+import { boundedDockHeight, toolRenderers, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
 import {
 	bareSkillMatches,
 	commandDisplayLine,
@@ -406,7 +406,7 @@ function skillExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "skill",
 		label: "Skill",
-		...ccToolRenderers<{ skill?: string; args?: string }>("Skill", {
+		...toolRenderers<{ skill?: string; args?: string }>("Skill", {
 			title: (a) => (a ? [a.skill, a.args].filter(Boolean).join(" ") : undefined),
 			// The skill's text goes to the model; the transcript needs one line.
 			result: (_r, a, isError) => (isError ? undefined : a?.skill ? `Loaded ${a.skill}` : undefined),

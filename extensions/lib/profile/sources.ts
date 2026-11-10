@@ -30,7 +30,7 @@ export interface SourceView {
 	configDirs?: ConfigDirs;
 	/**
 	 * The settings ladder, lowest precedence first: gets the product's own
-	 * files and returns the final list (lib/profile/claude-settings.ts
+	 * files and returns the final list (lib/profile/settings-files.ts
 	 * `settingsSources`). Every file in it joins the auto-mode safety floor.
 	 * Absent: the product's files alone.
 	 */

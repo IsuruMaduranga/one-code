@@ -16,7 +16,7 @@ import { knobValue, readKnob } from "../profile/knobs.ts";
 
 import { featureEnabled } from "../profile/profile.ts";
 import os from "node:os";
-import { readSettingsFile, settingsSources } from "../profile/claude-settings.ts";
+import { readSettingsFile, settingsSources } from "../profile/settings-files.ts";
 
 /** The settings key, as Claude Code spells it. */
 export const AUTO_MEMORY_KEY = "autoMemoryEnabled";

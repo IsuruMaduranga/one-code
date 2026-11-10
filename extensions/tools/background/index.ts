@@ -27,7 +27,7 @@ import { persistedFilePreview, persistIfLarge, sessionResultsDir } from "../../l
 import { detachedSpawnOptions, KILL_GRACE_MS, rememberProcessGroup, stopProcessTree, waitForChildExit } from "../../lib/shell-run/process-tree.ts";
 import { sessionAlive } from "../../lib/notify/session-lifecycle.ts";
 import { bashSpawn, spawnShellCommand } from "../../lib/shell-run/shell-spawn.ts";
-import { ccToolRenderers, customMessageText, expandHintFor, formatFireTime, liveUiCtx, notificationComponent, notificationUserMarkdown, scheduledTaskComponent } from "../../lib/ui/tui-render.ts";
+import { toolRenderers, customMessageText, expandHintFor, formatFireTime, liveUiCtx, notificationComponent, notificationUserMarkdown, scheduledTaskComponent } from "../../lib/ui/tui-render.ts";
 import {
 	type BackgroundTask,
 	BackgroundRegistry,
@@ -412,7 +412,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "monitor",
 		label: "Monitor",
-		...ccToolRenderers("Monitor"),
+		...toolRenderers("Monitor"),
 		description: text.monitor.description,
 		parameters: Type.Object({
 			command: Type.Optional(Type.String({ description: monitorParams.command })),
@@ -702,7 +702,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "task_output",
 		label: "Task Output",
-		...ccToolRenderers("Task Output"),
+		...toolRenderers("Task Output"),
 		description: text.tasks.outputDescription,
 		parameters: Type.Object({
 			task_id: Type.String({ description: text.tasks.outputParams.taskId }),
@@ -749,7 +749,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "task_stop",
 		label: "Stop Task",
-		...ccToolRenderers("Stop Task"),
+		...toolRenderers("Stop Task"),
 		description: text.tasks.stopDescription,
 		parameters: Type.Object({
 			task_id: Type.String({ description: text.tasks.stopParams.taskId }),
@@ -781,7 +781,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "schedule_wakeup",
 		label: "Schedule Wakeup",
-		...ccToolRenderers<{ delaySeconds?: number; stop?: boolean }>("Schedule Wakeup", {
+		...toolRenderers<{ delaySeconds?: number; stop?: boolean }>("Schedule Wakeup", {
 			title: (a) => (a?.stop ? "stop" : a?.delaySeconds !== undefined ? `${a.delaySeconds}s` : undefined),
 		}),
 		description: text.wakeup.description,
@@ -817,7 +817,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "cron_create",
 		label: "Cron Create",
-		...ccToolRenderers<{ cron?: string }>("Cron Create", { title: (a) => a?.cron }),
+		...toolRenderers<{ cron?: string }>("Cron Create", { title: (a) => a?.cron }),
 		description: text.cron.createDescription({ maxAgeDays: RECURRING_MAX_AGE_DAYS }),
 		parameters: cronParameters.create,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -835,7 +835,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "cron_list",
 		label: "Cron List",
-		...ccToolRenderers("Cron List"),
+		...toolRenderers("Cron List"),
 		description: text.cron.listDescription,
 		parameters: cronParameters.list,
 		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
@@ -848,7 +848,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "cron_delete",
 		label: "Cron Delete",
-		...ccToolRenderers<{ id?: string }>("Cron Delete", { title: (a) => a?.id }),
+		...toolRenderers<{ id?: string }>("Cron Delete", { title: (a) => a?.id }),
 		description: text.cron.deleteDescription,
 		parameters: cronParameters.delete,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {

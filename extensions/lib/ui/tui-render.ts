@@ -639,7 +639,7 @@ export function rejectedFileHead(theme: ThemeLike, op: RejectedFileOp, path: str
 	return `${theme.fg("dim", `User rejected ${op} to `)}${theme.bold(theme.fg("dim", sanitizeDisplayText(path)))}`;
 }
 
-export interface CcRenderSpec<TArgs = unknown, TDetails = unknown> {
+export interface ToolRenderSpec<TArgs = unknown, TDetails = unknown> {
 	/** One-line arg summary shown in parentheses. Default: `summarizeArgs`. */
 	title?: (args: TArgs | undefined) => string | undefined;
 	/**
@@ -663,14 +663,14 @@ export interface CcRenderSpec<TArgs = unknown, TDetails = unknown> {
 
 /**
  * renderShell/renderCall/renderResult for `pi.registerTool` — spread into the
- * definition: `...ccToolRenderers("Task Output", { title: (a) => a?.task_id })`.
+ * definition: `...toolRenderers("Task Output", { title: (a) => a?.task_id })`.
  *
  * Renderers must never throw (pi silently swaps in its verbose fallback), so
  * everything user-supplied is guarded.
  */
-export function ccToolRenderers<TArgs = any, TDetails = any>(
+export function toolRenderers<TArgs = any, TDetails = any>(
 	label: string,
-	spec: CcRenderSpec<TArgs, TDetails> = {},
+	spec: ToolRenderSpec<TArgs, TDetails> = {},
 ): {
 	renderShell: "self";
 	renderCall: (args: TArgs, theme: any, context: any) => TuiComponent;

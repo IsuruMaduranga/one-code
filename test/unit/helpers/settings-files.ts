@@ -1,6 +1,6 @@
 /**
  * The settings files of the profile in force, for tests that write one. The
- * paths come from the settings ladder the base reads (lib/profile/claude-settings.ts
+ * paths come from the settings ladder the base reads (lib/profile/settings-files.ts
  * `settingsSources`), so a test writes the file the code under test reads on
  * any profile.
  */
@@ -8,7 +8,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach } from "vitest";
-import { isRepoFile, primarySettingsFile, settingsSources } from "../../../extensions/lib/profile/claude-settings.ts";
+import { isRepoFile, primarySettingsFile, settingsSources } from "../../../extensions/lib/profile/settings-files.ts";
 import { activeProfile, profileModuleKey, setActiveProfileForTest } from "../../../extensions/lib/profile/profile.ts";
 import { shareModuleForTest } from "../../../extensions/lib/profile/shared-module.ts";
 import { projectConfigDir, type SourceProvider } from "../../../extensions/lib/profile/sources.ts";

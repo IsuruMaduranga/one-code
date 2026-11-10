@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { managedSettingsPaths } from "../../extensions/lib/profile/claude-settings.ts";
+import { managedSettingsPaths } from "../../extensions/lib/profile/settings-files.ts";
 
 describe("managedSettingsPaths", () => {
 	// Claude Code reads managed settings and managed instructions from one root

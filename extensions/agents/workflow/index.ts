@@ -53,7 +53,7 @@ import { applicableSubagentDefault, loadSubagentDefault } from "../../lib/models
 import { discoverSavedWorkflows, findSavedWorkflow, workflowDirs } from "./saved-workflows.ts";
 import { buildRunReport, type RunHandle, WorkflowRunManager } from "./run-manager.ts";
 import {
-	ccToolRenderers,
+	toolRenderers,
 	customMessageText,
 	expandHintFor,
 	notificationComponent,
@@ -171,7 +171,7 @@ function workflowExtension(pi: ExtensionAPI) {
 	const workflowTool = defineTool({
 		name: "workflow",
 		label: "Workflow",
-		...ccToolRenderers<
+		...toolRenderers<
 			{ name?: string; scriptPath?: string; script?: string; resumeFromRunId?: string },
 			{ runId?: string; background?: boolean }
 		>("Workflow", {

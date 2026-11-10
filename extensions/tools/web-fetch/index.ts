@@ -31,7 +31,7 @@ import { tryNativeWeb } from "../../lib/request/anthropic-server-call.ts";
 import { fetchOutcome, isPrivateOrLocalUrl, nativeFetchBody, type ThinkingFields } from "../../lib/request/anthropic-server-tools.ts";
 import { persistIfLarge, sessionResultsDir } from "../../lib/request/persisted-output.ts";
 import { requireText } from "../../lib/profile/profile.ts";
-import { ccToolRenderers } from "../../lib/ui/tui-render.ts";
+import { toolRenderers } from "../../lib/ui/tui-render.ts";
 import { registerFormTool } from "../../lib/profile/tool-variants.ts";
 import { readResponseText, WebFetchFailure } from "./response.ts";
 import { pageContent } from "./page-content.ts";
@@ -233,7 +233,7 @@ function webFetchExtension(pi: ExtensionAPI) {
 	const tool = defineTool({
 		name: "web_fetch",
 		label: "Web Fetch",
-		...ccToolRenderers("Web Fetch"),
+		...toolRenderers("Web Fetch"),
 		description: text.description("short"),
 		parameters: Type.Object({
 			url: Type.String({ description: text.params.url }),

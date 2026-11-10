@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { readEnabledPlugins } from "../../extensions/lib/profile/claude-settings.ts";
+import { readEnabledPlugins } from "../../extensions/lib/profile/settings-files.ts";
 import { estimateSkillTokens, scanSkills } from "../../extensions/lib/plugins/skill-scan.ts";
 import { skillScanDirs, writeSkill } from "../../test/unit/helpers/skill-dirs.ts";
 

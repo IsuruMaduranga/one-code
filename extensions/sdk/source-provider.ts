@@ -9,7 +9,7 @@ export { readJsonFile } from "../lib/core/atomic-write.ts";
 export { envName } from "../lib/profile/brand.mjs";
 export { readExternalIncludesApproval } from "../lib/context/claude-external-includes.ts";
 export { discoverRules, readRuleInstructions, type RuleFile, type RuleOptions } from "../lib/context/claude-rules.ts";
-export { claudeUserSettingsPath, managedSettingsPaths, readSettingsFile } from "../lib/profile/claude-settings.ts";
+export { claudeUserSettingsPath, managedSettingsPaths, readSettingsFile } from "../lib/profile/settings-files.ts";
 export type { InstructionSource } from "../lib/context/context-text.ts";
 export { AGENTS_DESCRIPTOR, AGENTS_GLOBAL_DESCRIPTOR, AGENTS_SOURCES, GLOBAL_DESCRIPTOR, GLOBAL_SOURCES, LOCAL_DESCRIPTOR, MANAGED_DESCRIPTOR, PRODUCT_DESCRIPTOR, PRODUCT_GLOBAL_DESCRIPTOR, PROJECT_DESCRIPTOR, ancestorDirs, basePaths, expandWithImports, firstProductFile, importReaders, isPresentFile, nestedDirs, readFileIfPresent, type ClassifierFile, type ContextFile, type ContextFilePath, type InstructionView, type NestedFile } from "../lib/context/instructions.ts";
 export { isClaudeFamilyModel } from "../lib/models/model-family.ts";

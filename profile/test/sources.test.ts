@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { safetyControlWrite } from "../../extensions/safety/permissions/auto-mode/safety-floor.ts";
 import { loadPermissionSettings } from "../../extensions/lib/rules/settings.ts";
-import { settingsSources } from "../../extensions/lib/profile/claude-settings.ts";
+import { settingsSources } from "../../extensions/lib/profile/settings-files.ts";
 import { instructionFileNames, instructionTargets, openInstructions } from "../../extensions/lib/context/instructions.ts";
 import { autoModeSettingsFiles } from "../../extensions/lib/rules/auto-mode-config.ts";
 import { isClaudeLocation } from "../../extensions/lib/profile/paths.ts";

@@ -48,7 +48,7 @@ describe("MCP approval from Claude Code's settings files", () => {
 		const d = trustDeps(storePath);
 		const out = await approveMcpServers([projectServer("yes"), projectServer("no")], new Set(), cwd, home, d.deps);
 		expect(out.approved.map((s) => s.name)).toEqual(["yes"]);
-		expect(out.withheld[0]).toMatchObject({ reason: "disabled-by-claude-settings" });
+		expect(out.withheld[0]).toMatchObject({ reason: "disabled-by-settings" });
 		expect(d.selections).toEqual([]);
 	});
 });

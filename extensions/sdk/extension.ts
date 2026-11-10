@@ -35,4 +35,4 @@ export { SYSTEM_PROMPT_SECTION_CHANNEL, type SystemPromptSection, type SystemPro
 export { MIN_SECRET_LENGTH, type SecretValue, setSecretValues } from "../lib/profile/secrets.ts";
 export { type LspRequest, lspRequest } from "../tools/lsp/request-channel.ts";
 export { type PersistOptions, persistIfLarge, sessionResultsDir } from "../lib/request/persisted-output.ts";
-export { ccToolRenderers as toolRenderers } from "../lib/ui/tui-render.ts";
+export { toolRenderers } from "../lib/ui/tui-render.ts";

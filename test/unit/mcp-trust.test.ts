@@ -8,7 +8,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { envName } from "../../extensions/lib/profile/brand.mjs";
-import { primaryFamily, settingsSources } from "../../extensions/lib/profile/claude-settings.ts";
+import { primaryFamily, settingsSources } from "../../extensions/lib/profile/settings-files.ts";
 import type { McpServer, StdioServer } from "../../extensions/tools/mcp/config.ts";
 import {
 	approveMcpServers,
@@ -184,7 +184,7 @@ describe("approveMcpServers", () => {
 		const d = deps();
 		const out = await approveMcpServers([projectServer("yes"), projectServer("no")], new Set(), cwd, home, d.deps);
 		expect(out.approved.map((s) => s.name)).toEqual(["yes"]);
-		expect(out.withheld[0]).toMatchObject({ reason: "disabled-by-claude-settings" });
+		expect(out.withheld[0]).toMatchObject({ reason: "disabled-by-settings" });
 		expect(d.selections).toEqual([]);
 	});
 

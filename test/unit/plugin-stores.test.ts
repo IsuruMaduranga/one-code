@@ -152,9 +152,9 @@ describe("write-boundary invariant", () => {
 			expect(/\.claude(?!-plugin)/.test(source), `${module} must not reference .claude in code`).toBe(false);
 		}
 		// And the one module that DOES read .claude settings must not write at all.
-		const settings = readFileSync(join(__dirname, "..", "..", "extensions/lib/profile/claude-settings.ts"), "utf-8");
+		const settings = readFileSync(join(__dirname, "..", "..", "extensions/lib/profile/settings-files.ts"), "utf-8");
 		for (const writer of ["writeFileSync", "writeJsonAtomic", "renameSync", "appendFileSync"]) {
-			expect(settings.includes(writer), `claude-settings.ts must stay read-only (${writer})`).toBe(false);
+			expect(settings.includes(writer), `settings-files.ts must stay read-only (${writer})`).toBe(false);
 		}
 	});
 });

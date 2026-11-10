@@ -314,7 +314,7 @@ function blockToLines(block: TranscriptBlock, width: number, paint: Paint, prose
 
 /**
  * Labels the main transcript gives tools whose name does not title-case to it
- * (each tool's `ccToolRenderers` label; `agent-view-tool-labels.test.ts` keeps
+ * (each tool's `toolRenderers` label; `agent-view-tool-labels.test.ts` keeps
  * this table in step with the registrations).
  */
 const TOOL_LABELS: Record<string, string> = {

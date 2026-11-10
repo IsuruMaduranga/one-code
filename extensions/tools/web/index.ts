@@ -44,7 +44,7 @@ import { recordUsage } from "../../lib/notify/usage-bus.ts";
 import { DEFER_CHANNEL, WITHHOLD_CHANNEL } from "../../lib/request/deferred.ts";
 import { productSettingsPath } from "../../lib/profile/product-settings.ts";
 import { persistIfLarge, sessionResultsDir } from "../../lib/request/persisted-output.ts";
-import { ccToolRenderers } from "../../lib/ui/tui-render.ts";
+import { toolRenderers } from "../../lib/ui/tui-render.ts";
 import { registerFormTool } from "../../lib/profile/tool-variants.ts";
 import { nativeSearchResult, ProviderSearchError } from "./native-results.ts";
 import { runNativeSearch } from "./native-call.ts";
@@ -91,7 +91,7 @@ function webExtension(pi: ExtensionAPI) {
 	const tool = defineTool({
 		name: "web_search",
 		label: "Web Search",
-		...ccToolRenderers<{ query?: string }>("Web Search", { title: (args) => args?.query }),
+		...toolRenderers<{ query?: string }>("Web Search", { title: (args) => args?.query }),
 		description: text.description("short"),
 		parameters: Type.Object({
 			query: Type.String({ minLength: 2, description: text.params.query }),

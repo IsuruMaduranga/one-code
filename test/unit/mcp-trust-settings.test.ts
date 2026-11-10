@@ -115,7 +115,7 @@ describe("readClaudeMcpjsonPolicy: which file may approve", () => {
 		const d = trustDeps(storePath);
 		const out = await approveMcpServers([projectServer("yes"), projectServer("no")], new Set(), cwd, home, d.deps);
 		expect(out.approved.map((server) => server.name)).toEqual(["yes"]);
-		expect(out.withheld).toMatchObject([{ server: { name: "no" }, reason: "disabled-by-claude-settings" }]);
+		expect(out.withheld).toMatchObject([{ server: { name: "no" }, reason: "disabled-by-settings" }]);
 		expect(d.selections).toEqual([]);
 	});
 

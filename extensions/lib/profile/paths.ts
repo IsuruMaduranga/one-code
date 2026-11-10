@@ -24,7 +24,7 @@ export function claudeConfigDir(env: Record<string, string | undefined> = proces
 
 /**
  * Claude Code's organization-managed root: `managed-settings.json`
- * (lib/profile/claude-settings.ts) and the managed CLAUDE.md and rules all live here.
+ * (lib/profile/settings-files.ts) and the managed CLAUDE.md and rules all live here.
  * On Windows it is `C:\Program Files\ClaudeCode`, the only Windows path the
  * Claude Code binary names (2.1.292); `C:\ProgramData\ClaudeCode` is not read.
  * The Windows policy registry keys are a separate source, not read here.

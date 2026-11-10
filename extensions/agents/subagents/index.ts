@@ -100,7 +100,7 @@ import {
 	withReview,
 } from "../../lib/notify/notifications.ts";
 import { persistIfLarge, sessionResultsDir } from "../../lib/request/persisted-output.ts";
-import { ccToolRenderers, customMessageText, expandHintFor, liveUiCtx, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
+import { toolRenderers, customMessageText, expandHintFor, liveUiCtx, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
 import { deriveActivity, type FinishOutcome, LiveRunRegistry } from "./live-runs.ts";
 import { awaitHandBackReview } from "./hand-back-review.ts";
 import type { LiveSink } from "./runner.ts";
@@ -2095,7 +2095,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 	const agentTool = defineTool({
 		name: "Agent",
 		label: "Agent",
-		...ccToolRenderers<{ subagent_type?: string; task?: string; prompt?: string; description?: string; action?: string }>("Agent", {
+		...toolRenderers<{ subagent_type?: string; task?: string; prompt?: string; description?: string; action?: string }>("Agent", {
 			title: (a) => (a ? [a.subagent_type, a.description ?? a.task ?? a.prompt ?? a.action].filter(Boolean).join(": ") || undefined : undefined),
 		}),
 		description: words.agentDescription({ form: "short", configDir: projectConfigDirName() }),
@@ -2696,7 +2696,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 	const sendMessageTool = defineTool({
 		name: "SendMessage",
 		label: "Send Message",
-		...ccToolRenderers<{ to?: string; summary?: string; message?: string }>("Send Message", {
+		...toolRenderers<{ to?: string; summary?: string; message?: string }>("Send Message", {
 			title: (a) => (a?.to ? `to ${a.to}${a.summary ? `: ${a.summary}` : ""}` : undefined),
 		}),
 		description: words.sendMessageDescription,
@@ -2897,7 +2897,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "list_agents",
 		label: "List Agents",
-		...ccToolRenderers("List Agents"),
+		...toolRenderers("List Agents"),
 		description: words.listAgentsDescription,
 		parameters: Type.Object({}),
 		async execute() {

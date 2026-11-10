@@ -24,7 +24,7 @@ import { DEFER_CHANNEL } from "../../lib/request/deferred.ts";
 import { MCP_TOOLS_CHANNEL } from "../../lib/plugins/mcp-share.ts";
 import { persistIfLarge, sessionResultsDir } from "../../lib/request/persisted-output.ts";
 import { emptyToolResultContent } from "../../lib/request/empty-tool-result.ts";
-import { ccToolRenderers } from "../../lib/ui/tui-render.ts";
+import { toolRenderers } from "../../lib/ui/tui-render.ts";
 import {
 	callTool,
 	close,
@@ -166,7 +166,7 @@ function mcpExtension(pi: ExtensionAPI) {
 			const def: ToolDefinition = {
 				name,
 				label: `${connection.server.name}: ${tool.name}`,
-				...ccToolRenderers(`${connection.server.name}: ${tool.name}`),
+				...toolRenderers(`${connection.server.name}: ${tool.name}`),
 				description: capDescription(tool.description, text.tool.descriptionCut) ?? text.tool.description({ server: connection.server.name, tool: tool.name }),
 				parameters: jsonSchemaToTypeBox(tool.inputSchema, text.tool.descriptionCut),
 				async execute(toolCallId, params, signal, _onUpdate, ctx) {
@@ -422,7 +422,7 @@ function mcpExtension(pi: ExtensionAPI) {
 		for (const { server, reason } of consent.withheld) {
 			withheldNames.set(
 				server.name,
-				reason === "disabled-by-claude-settings"
+				reason === "disabled-by-settings"
 					? "disabled by disabledMcpjsonServers in Claude Code settings"
 					: reason === "declined"
 						? "not approved this session (project .mcp.json)"
@@ -460,7 +460,7 @@ function mcpExtension(pi: ExtensionAPI) {
 		registerResourceTool({
 			name: "list_mcp_resources",
 			label: "MCP Resources",
-			...ccToolRenderers("MCP Resources"),
+			...toolRenderers("MCP Resources"),
 			description: text.resources.descriptions.list_mcp_resources,
 			parameters: Type.Object({
 				server: Type.Optional(Type.String({ description: text.resources.params.list.server })),
@@ -502,7 +502,7 @@ function mcpExtension(pi: ExtensionAPI) {
 		registerResourceTool({
 			name: "read_mcp_resource",
 			label: "Read MCP Resource",
-			...ccToolRenderers("Read MCP Resource"),
+			...toolRenderers("Read MCP Resource"),
 			description: text.resources.descriptions.read_mcp_resource,
 			parameters: Type.Object({
 				server: Type.String({ description: text.resources.params.read.server }),
@@ -536,7 +536,7 @@ function mcpExtension(pi: ExtensionAPI) {
 		registerResourceTool({
 			name: "read_mcp_resource_dir",
 			label: "List MCP Resource Directory",
-			...ccToolRenderers("List MCP Resource Directory"),
+			...toolRenderers("List MCP Resource Directory"),
 			description: text.resources.descriptions.read_mcp_resource_dir,
 			parameters: Type.Object({
 				server: Type.String({ description: text.resources.params.dir.server }),

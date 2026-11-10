@@ -1,6 +1,6 @@
 /**
  * The agent view labels a call as the main transcript does: for every tool
- * registered with `name: "x"` and `...ccToolRenderers("Label")`, the agent
+ * registered with `name: "x"` and `...toolRenderers("Label")`, the agent
  * view's `toolDisplayLabel("x")` must be that label.
  */
 import { readdirSync, readFileSync } from "node:fs";
@@ -19,7 +19,7 @@ function sources(dir: string): string[] {
 }
 
 // A `name:` line, at most two lines, then the renderer's label.
-const REGISTRATION = /name: "([a-z_]+)",\n(?:[^\n]*\n){0,2}?\s*\.\.\.ccToolRenderers\("([^"]+)"/g;
+const REGISTRATION = /name: "([a-z_]+)",\n(?:[^\n]*\n){0,2}?\s*\.\.\.toolRenderers\("([^"]+)"/g;
 
 describe("agent view tool labels", () => {
 	const pairs = sources(EXTENSIONS).flatMap((file) => [...readFileSync(file, "utf8").replace(/\r\n/g, "\n").matchAll(REGISTRATION)].map((m) => ({ name: m[1], label: m[2] })));

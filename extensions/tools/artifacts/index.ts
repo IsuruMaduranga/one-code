@@ -25,7 +25,7 @@ import { launchOpener, noDisplayReason, openerPlan } from "../../lib/ui/open-bro
 import { tildify } from "../../lib/profile/paths.ts";
 import { sanitizeDisplayText, terminalLink } from "../../lib/ui/terminal-text.ts";
 import { resolveToolPath } from "../../lib/rules/tool-path.ts";
-import { ccToolRenderers } from "../../lib/ui/tui-render.ts";
+import { toolRenderers } from "../../lib/ui/tui-render.ts";
 import { requireText } from "../../lib/profile/profile.ts";
 import type { ArtifactsText, NoBrowser, PublishBrowser, PublishProblem } from "./text.ts";
 import {
@@ -108,7 +108,7 @@ function artifactsExtension(pi: ExtensionAPI) {
 		name: "artifact",
 		label: "Artifact",
 		// Claude Code's shape: `Artifact(page.html)` over `⎿ Published <link>`.
-		...ccToolRenderers<ArtifactArgs, PublishDetails>("Artifact", {
+		...toolRenderers<ArtifactArgs, PublishDetails>("Artifact", {
 			title: (args) => {
 				const action = args?.action ?? "publish";
 				if (action === "publish") return args?.file_path ? basename(args.file_path) : action;

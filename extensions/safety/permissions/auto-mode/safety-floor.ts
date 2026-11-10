@@ -33,7 +33,7 @@ import { stateDirPattern } from "../../../lib/profile/brand.mjs";
 import { FIND_PATTERN_TESTS, findNegatedPatterns } from "../../../lib/shell/read-only-options.ts";
 import { analyzeShellCommand, globComponentRegex, hasReadOnlyShellWords, isUnknownTilde, LOOPS, movesDirectory, parseCommand, resolvePayload, scopedTracker } from "../../../lib/shell/shell-analysis.ts";
 import type { Token } from "../../../lib/shell/shell-parse.ts";
-import { claudeUserSettingsPath, gateControlFiles, managedSettingsPaths } from "../../../lib/profile/claude-settings.ts";
+import { claudeUserSettingsPath, gateControlFiles, managedSettingsPaths } from "../../../lib/profile/settings-files.ts";
 import { CONSENT_STORE_TAIL, consentStorePaths } from "../../../lib/consent/consent-stores.ts";
 import { productSettingsPath } from "../../../lib/profile/product-settings.ts";
 import { CATALOG_CACHE_TAIL, catalogCacheFiles } from "../../../lib/models/model-catalog-data.ts";
@@ -77,7 +77,7 @@ function safetyControlFiles(home: string, sessionFiles: readonly string[] = []):
 		// Claude Code's global state file also carries permission configuration;
 		// claudeJsonPath honours CLAUDE_CONFIG_DIR so a relocated file is still caught.
 		claudeJsonPath(home),
-		// The session's settings ladder (lib/profile/claude-settings.ts settingsSources):
+		// The session's settings ladder (lib/profile/settings-files.ts settingsSources):
 		// every file a source provider adds is a gate control in its own right,
 		// and the per-repo One Code settings file is caught here even when
 		// ONECODE_STATE_DIR relocated the state root, which the tail regex misses

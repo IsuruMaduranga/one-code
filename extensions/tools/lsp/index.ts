@@ -32,7 +32,7 @@ import { DEFER_CHANNEL } from "../../lib/request/deferred.ts";
 import { absoluteFrom } from "../../lib/profile/paths.ts";
 import { defaultDiscoverRoots, discoverPlugins, pluginResources } from "../../lib/plugins/plugins.ts";
 import { REMINDER_CHANNEL, type ReminderPayload } from "../../lib/request/reminders.ts";
-import { ccToolRenderers, cutPlainText } from "../../lib/ui/tui-render.ts";
+import { toolRenderers, cutPlainText } from "../../lib/ui/tui-render.ts";
 import { LspClient, type LspClientOptions, pathToUri } from "./client.ts";
 import { filterDiagnostics, formatDiagnostics, type LspDiagnostic, type SeverityFilter } from "./format.ts";
 import { describeStartFailure, INSTALL_HINTS } from "./install-hints.ts";
@@ -380,7 +380,7 @@ function lspExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "lsp_diagnostics",
 		label: "Diagnostics",
-		...ccToolRenderers("Diagnostics"),
+		...toolRenderers("Diagnostics"),
 		description: text.description,
 		parameters: Type.Object({
 			path: Type.String({ description: text.params.path }),

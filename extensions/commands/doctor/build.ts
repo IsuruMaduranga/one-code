@@ -17,7 +17,7 @@ import { productSettingsPath } from "../../lib/profile/product-settings.ts";
 import { webSearchSettingsFrom } from "../../tools/web/backends.ts";
 import { collectCompat, importedConfigSection, mcpSection } from "./compat.ts";
 import { checkDependencies, dependenciesSection, type ShellsInput } from "./dependencies.ts";
-import { readSettingsEnv } from "../../lib/profile/claude-settings.ts";
+import { readSettingsEnv } from "../../lib/profile/settings-files.ts";
 import { resolveBashSpawn, resolvePowerShellSpawn } from "../../lib/shell-run/shell-spawn.ts";
 import { upgradeCommandFor } from "../../lib/app/update-check.mjs";
 import { replacedBuiltinsFix } from "../../lib/app/replaced-builtins.mjs";

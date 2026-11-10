@@ -35,7 +35,7 @@ import { ORIGINAL_COMMAND_CHANNEL, type OriginalCommandRecord } from "../../lib/
 import { requireText } from "../../lib/profile/profile.ts";
 import type { EnterWorktreeFailure, RemoveBlocker, WorktreeGuardRefusal } from "./text.ts";
 import { rewriteToolInput, validateWorktreeName } from "./rewrite.ts";
-import { ccToolRenderers } from "../../lib/ui/tui-render.ts";
+import { toolRenderers } from "../../lib/ui/tui-render.ts";
 import { findProjectRoot, HARNESS_GIT_CONFIG, HARNESS_GIT_NO_HOOKS, repositoryWorktrees } from "../../lib/context/git.ts";
 import { projectConfigDir, projectConfigDirName } from "../../lib/profile/sources.ts";
 import { readState, readStringsState, recordState } from "../../lib/request/ledger/state.ts";
@@ -203,7 +203,7 @@ function worktreeExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "enter_worktree",
 		label: "Enter Worktree",
-		...ccToolRenderers("Enter Worktree"),
+		...toolRenderers("Enter Worktree"),
 		description: text.descriptions.enter_worktree(projectConfigDirName()),
 		parameters: Type.Object({
 			name: Type.Optional(Type.String({ description: text.params.enter.name })),
@@ -303,7 +303,7 @@ function worktreeExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "exit_worktree",
 		label: "Exit Worktree",
-		...ccToolRenderers("Exit Worktree"),
+		...toolRenderers("Exit Worktree"),
 		description: text.descriptions.exit_worktree,
 		parameters: Type.Object({
 			action: StringEnum(["keep", "remove"] as const, { description: text.params.exit.action }),

@@ -34,7 +34,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import os from "node:os";
 import { basename, join, resolve, sep } from "node:path";
 import { readJsonFile } from "../core/atomic-write.ts";
-import { readEnabledPlugins } from "../profile/claude-settings.ts";
+import { readEnabledPlugins } from "../profile/settings-files.ts";
 import { readOverrides } from "./plugin-overrides.ts";
 import { pluginRoot } from "./plugin-root.ts";
 import { isSkillEnabled, readSkillStates, skillOverrideKey } from "./skill-overrides.ts";

@@ -41,7 +41,7 @@ import { usesClaudeCodeFastPaths } from "../models/model-tier.ts";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { claudeConfigDir, claudeJsonPath, productStateDir } from "../profile/paths.ts";
-import { gateControlFiles } from "../profile/claude-settings.ts";
+import { gateControlFiles } from "../profile/settings-files.ts";
 import { sessionResultsDir } from "../request/persisted-output.ts";
 import { powerShellParser } from "../shell-run/shell-spawn.ts";
 import { isPrivateScratchpad, sessionScratchpadDir } from "../core/scratchpad.ts";

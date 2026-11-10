@@ -47,7 +47,7 @@
 
 import { brand } from "../profile/brand.mjs";
 import { existsSync, readFileSync } from "node:fs";
-import { isBorrowedUserFile, isRepoFile, settingsSources } from "../profile/claude-settings.ts";
+import { isBorrowedUserFile, isRepoFile, settingsSources } from "../profile/settings-files.ts";
 import type { SettingsFile } from "../profile/sources.ts";
 import { productSettingsPath, readSettingsForWrite, SETTINGS_DISPLAY, writeSettings } from "../profile/product-settings.ts";
 import { defaultEnvironment, slotName } from "../../safety/permissions/auto-mode/classifier-prompt.ts";
@@ -104,7 +104,7 @@ export function autoModeSettingsPaths(home: string): string[] {
 }
 
 /**
- * The ladder's user and managed files (lib/profile/claude-settings.ts): with One
+ * The ladder's user and managed files (lib/profile/settings-files.ts): with One
  * Code's provider on, Claude Code's user file, One Code's, then managed
  * policy; without it, One Code's file alone. The built-in rules apply
  * regardless, since settings only append to them. Project files are never

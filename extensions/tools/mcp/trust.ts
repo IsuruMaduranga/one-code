@@ -29,7 +29,7 @@ import { brand } from "../../lib/profile/brand.mjs";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { primaryFamily, primarySettingsFile, readSettingsFile, settingsSources } from "../../lib/profile/claude-settings.ts";
+import { primaryFamily, primarySettingsFile, readSettingsFile, settingsSources } from "../../lib/profile/settings-files.ts";
 import { boundConsentItems } from "../../lib/consent/consent-preview.ts";
 import { consentStorePath } from "../../lib/consent/consent-stores.ts";
 import { processState } from "../../lib/profile/process-state.ts";
@@ -314,7 +314,7 @@ export interface McpTrustOutcome {
 	/** Servers that may connect (includes every non-project-`.mcp.json` server). */
 	approved: McpServer[];
 	/** Project `.mcp.json` servers that must not connect, with why. */
-	withheld: { server: McpServer; reason: "declined" | "not-approved" | "disabled-by-claude-settings" }[];
+	withheld: { server: McpServer; reason: "declined" | "not-approved" | "disabled-by-settings" }[];
 }
 
 /**
@@ -354,7 +354,7 @@ export async function approveMcpServers(
 			continue;
 		}
 		if (claude.disabled.has(server.name)) {
-			withheld.push({ server, reason: "disabled-by-claude-settings" });
+			withheld.push({ server, reason: "disabled-by-settings" });
 			continue;
 		}
 		// Claude Code's own answers approve `.mcp.json` servers only. A server

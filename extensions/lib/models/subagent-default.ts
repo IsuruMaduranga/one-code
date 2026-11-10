@@ -32,7 +32,7 @@
  */
 
 import { type Knob, knobAppliesTo, readKnob } from "../profile/knobs.ts";
-import { isBorrowedUserFile, readSettingsFile } from "../profile/claude-settings.ts";
+import { isBorrowedUserFile, readSettingsFile } from "../profile/settings-files.ts";
 import { productSettingsPath, readSettingsForWrite, writeSettings } from "../profile/product-settings.ts";
 import { autoModeSettingsFiles } from "../rules/auto-mode-config.ts";
 

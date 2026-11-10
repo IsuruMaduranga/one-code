@@ -11,7 +11,7 @@ import { StringEnum } from "../../lib/core/string-enum.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../../lib/request/deferred.ts";
-import { ccToolRenderers } from "../../lib/ui/tui-render.ts";
+import { toolRenderers } from "../../lib/ui/tui-render.ts";
 import { applyEdit, cellRefs, type EditMode, type Notebook, notebookFailure, parseNotebook } from "./notebook.ts";
 import { resolveToolPath } from "../../lib/rules/tool-path.ts";
 import { requireText } from "../../lib/profile/profile.ts";
@@ -21,7 +21,7 @@ function notebookExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "notebook_edit",
 		label: "Notebook Edit",
-		...ccToolRenderers("Notebook Edit"),
+		...toolRenderers("Notebook Edit"),
 		description: text.description,
 		parameters: Type.Object({
 			path: Type.Optional(Type.String({ description: text.params.path })),

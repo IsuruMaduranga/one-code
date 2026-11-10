@@ -15,7 +15,7 @@ import { feature } from "../../lib/profile/feature.ts";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { canShowCustomUi } from "../../lib/notify/headless-output.ts";
-import { ccToolRenderers, safeThemeBold, safeThemeInverse, safeThemePaint } from "../../lib/ui/tui-render.ts";
+import { toolRenderers, safeThemeBold, safeThemeInverse, safeThemePaint } from "../../lib/ui/tui-render.ts";
 import { registerFormTool } from "../../lib/profile/tool-variants.ts";
 import { requireText } from "../../lib/profile/profile.ts";
 import { askThroughDialogs } from "./dialogs.ts";
@@ -52,7 +52,7 @@ function askUserExtension(pi: ExtensionAPI) {
 	const tool = defineTool({
 		name: "ask_user_question",
 		label: "Ask User",
-		...ccToolRenderers<{ questions?: Array<{ question?: string }> }>("Ask User", {
+		...toolRenderers<{ questions?: Array<{ question?: string }> }>("Ask User", {
 			title: (a) => a?.questions?.[0]?.question,
 		}),
 		description: text.description("short"),

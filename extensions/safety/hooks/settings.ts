@@ -16,7 +16,7 @@
 
 import { readFileSync, statSync } from "node:fs";
 import os from "node:os";
-import { isRepoFile, primaryFamily, primarySettingsFile, settingsSources } from "../../lib/profile/claude-settings.ts";
+import { isRepoFile, primaryFamily, primarySettingsFile, settingsSources } from "../../lib/profile/settings-files.ts";
 import type { SettingsFile } from "../../lib/profile/sources.ts";
 import { CC_HOOK_EVENTS, type CcHookEvent } from "../../lib/rules/hook-protocol.ts";
 
@@ -61,7 +61,7 @@ export interface LoadedHooks {
 
 /**
  * The settings files hooks are read from, in collection order: the primary
- * user file's family of the ladder (lib/profile/claude-settings.ts settingsSources),
+ * user file's family of the ladder (lib/profile/settings-files.ts settingsSources),
  * the user files first, then managed policy, then the repository's. With One
  * Code's provider on that is Claude Code's four files; without it, One
  * Code's user file and its per-repo file under `~/.onecode/projects/<slug>/`,

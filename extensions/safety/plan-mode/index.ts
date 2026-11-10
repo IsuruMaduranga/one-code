@@ -29,7 +29,7 @@ import { DEFER_CHANNEL } from "../../lib/request/deferred.ts";
 import { productStateDir } from "../../lib/profile/paths.ts";
 import { REMINDER_CHANNEL } from "../../lib/request/reminders.ts";
 import { canShowCustomUi } from "../../lib/notify/headless-output.ts";
-import { ccToolRenderers, safeThemePaint } from "../../lib/ui/tui-render.ts";
+import { toolRenderers, safeThemePaint } from "../../lib/ui/tui-render.ts";
 import { userDenialText } from "../../lib/consent/user-denial.ts";
 import type { PermissionMode } from "../../lib/rules/matcher.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../lib/rules/modes.ts";
@@ -276,7 +276,7 @@ function planModeExtension(pi: ExtensionAPI) {
 		defineTool({
 			name: "enter_plan_mode",
 			label: "Enter plan mode",
-			...ccToolRenderers("Enter plan mode"),
+			...toolRenderers("Enter plan mode"),
 			description: text.descriptions.enter_plan_mode("short"),
 			parameters: Type.Object({}),
 			async execute(toolCallId, _params, _signal, _onUpdate, ctx) {
@@ -298,7 +298,7 @@ function planModeExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "exit_plan_mode",
 		label: "Exit plan mode",
-		...ccToolRenderers("Exit plan mode"),
+		...toolRenderers("Exit plan mode"),
 		description: text.descriptions.exit_plan_mode,
 		parameters: Type.Object({}),
 		async execute(toolCallId, _params, signal, _onUpdate, ctx) {

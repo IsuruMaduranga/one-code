@@ -33,7 +33,7 @@ import { homedir } from "node:os";
 import { basename, delimiter, join } from "node:path";
 import { getAgentDir, getPowerShellConfig, getShellConfig } from "@earendil-works/pi-coding-agent";
 import { childProcessEnv } from "../app/app-launch.mjs";
-import { readSettingsEnv } from "../profile/claude-settings.ts";
+import { readSettingsEnv } from "../profile/settings-files.ts";
 import { PowerShellParser, sharedPowerShellParser } from "../shell/powershell-parser.ts";
 import { detachedSpawnOptions, killProcessTree, waitForChildExit } from "./process-tree.ts";
 import { whichOnPath } from "./which.ts";
@@ -102,7 +102,7 @@ export function gitBashOverride(
 
 export interface BashResolveInput {
 	env?: NodeJS.ProcessEnv;
-	/** Claude Code's settings `env` block (user scope only — lib/profile/claude-settings.ts `readSettingsEnv`). */
+	/** Claude Code's settings `env` block (user scope only — lib/profile/settings-files.ts `readSettingsEnv`). */
 	settingsEnv?: Record<string, string>;
 	exists?: (path: string) => boolean;
 	/** pi's `getShellConfig`; injectable so tests never depend on this machine's shells. */

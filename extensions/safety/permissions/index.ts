@@ -118,7 +118,7 @@ import {
 	type SourcedDirectory,
 	type SourcedRule,
 } from "../../lib/rules/settings.ts";
-import { isRepoFile, sourceId } from "../../lib/profile/claude-settings.ts";
+import { isRepoFile, sourceId } from "../../lib/profile/settings-files.ts";
 import type { SettingsFile } from "../../lib/profile/sources.ts";
 import { MODE_ENV, parsePowerShell, protectedPathsByCwd, resolvedOrSelf, runtimeSecretPaths } from "../../lib/agents/permission-gate.ts";
 import { describeProjectAllow, persistProjectAllowApproval, projectAllowApproved, projectDirectoryConsentEntry, type TrustFiring } from "../../lib/consent/project-trust.ts";
@@ -257,7 +257,7 @@ const askOptions = (grant: SessionGrant | undefined) => (grant ? [YES, grant.lab
 const approved = (choice: string | undefined, grant: SessionGrant | undefined) =>
 	choice === YES || (grant !== undefined && choice === grant.label);
 
-/** Panel keys for the product's own files (lib/profile/claude-settings.ts sourceId): the only ones it edits. */
+/** Panel keys for the product's own files (lib/profile/settings-files.ts sourceId): the only ones it edits. */
 const PRODUCT_USER = sourceId({ owner: "product", scope: "user" });
 /** The rule dialog's destinations for the product's own two settings files (`onecode-user`, `onecode-project`). */
 const PRODUCT_USER_DESTINATION = `${brand.bin}-user`;

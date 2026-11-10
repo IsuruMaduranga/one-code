@@ -79,7 +79,7 @@ export type ReminderPlacement = "first-prepend" | "sticky-append" | "last-append
  * tools → agent catalog → MCP instructions → skills → the instructions block →
  * the context block → the date (just before the user's text). Gaps leave room
  * for One Code-specific reminders (e.g. subagent models). On a model that takes
- * a mid-conversation system message, everything below `claudeMd`, and the date,
+ * a mid-conversation system message, everything below `instructions`, and the date,
  * moves into that message instead (`movesToSystemRole`, lib/request/system-role.ts).
  */
 export const CONTEXT_ORDER = {
@@ -100,7 +100,7 @@ export const CONTEXT_ORDER = {
 	totalTokens: 46,
 	// CLAUDE.md-family (with AGENTS.md as a per-directory fallback when a directory
 	// has no CLAUDE.md) — CLAUDE.md > AGENTS.md.
-	claudeMd: 50,
+	instructions: 50,
 	// One Code's own instructions ride in their own block AFTER the instructions
 	// block (higher `order` = closer to the user text = higher precedence), so
 	// ONECODE.md takes precedence over CLAUDE.md/AGENTS.md. Not part of CC.
@@ -118,7 +118,7 @@ export const CONTEXT_ORDER = {
  * context block stay in the user message.
  */
 export function movesToSystemRole(order: number): boolean {
-	return order < CONTEXT_ORDER.claudeMd || order === CONTEXT_ORDER.date;
+	return order < CONTEXT_ORDER.instructions || order === CONTEXT_ORDER.date;
 }
 
 export interface ReminderPayload {

@@ -4,7 +4,7 @@ import { agentMessage, frameForDelivery, handBackPointer, taskNotification } fro
 import {
 	bulletColor,
 	callLine,
-	ccToolRenderers,
+	toolRenderers,
 	formatFireTime,
 	scheduledTaskComponent,
 	collapseLines,
@@ -142,8 +142,8 @@ describe("spinnerBulletColor (running-call pulse)", () => {
 	});
 });
 
-describe("ccToolRenderers", () => {
-	const renderers = ccToolRenderers<{ query?: string }>("Tool Search");
+describe("toolRenderers", () => {
+	const renderers = toolRenderers<{ query?: string }>("Tool Search");
 	const context = { args: { query: "select:a" }, isPartial: false, isError: false };
 
 	it("renders the call line via renderCall", () => {
@@ -164,7 +164,7 @@ describe("ccToolRenderers", () => {
 	});
 
 	it("a throwing custom title falls back to the generic summary", () => {
-		const custom = ccToolRenderers<{ query?: string }>("X", {
+		const custom = toolRenderers<{ query?: string }>("X", {
 			title: () => {
 				throw new Error("bad");
 			},
@@ -173,7 +173,7 @@ describe("ccToolRenderers", () => {
 	});
 
 	it("appends a painted link after the sanitized first line, never on an error", () => {
-		const linked = ccToolRenderers<unknown, { path?: string }>("Artifact", {
+		const linked = toolRenderers<unknown, { path?: string }>("Artifact", {
 			result: () => "Published",
 			link: (result, isError) => (isError ? undefined : `<link:${result.details?.path}>`),
 		});
@@ -187,7 +187,7 @@ describe("ccToolRenderers", () => {
 
 	it("puts a link that does not fit in as plain text, so truncation never leaves it open", () => {
 		const osc = "\x1b]8;;file:///a/view.html\x1b\\~/a/view.html\x1b]8;;\x1b\\";
-		const linked = ccToolRenderers<unknown, unknown>("Artifact", { result: () => "Published", link: () => osc });
+		const linked = toolRenderers<unknown, unknown>("Artifact", { result: () => "Published", link: () => osc });
 		const result = { content: [{ type: "text", text: "x" }] };
 		const wide = linked.renderResult(result, { expanded: false, isPartial: false }, theme, context).render(120);
 		expect(wide[0]).toContain(osc);
@@ -443,12 +443,12 @@ describe("a call the user rejected", () => {
 	const opts = { expanded: true, isPartial: false };
 
 	it("shows Claude Code's short line, never the model-facing text", async () => {
-		const { ccToolRenderers, ccWrapBuiltinRenderers } = await import("../../extensions/lib/ui/tui-render.ts");
+		const { toolRenderers, ccWrapBuiltinRenderers } = await import("../../extensions/lib/ui/tui-render.ts");
 		const { userDenialText } = await import("../../extensions/lib/consent/user-denial.ts");
 		const base = { renderResult: () => ({ render: () => ["BASE"], invalidate() {} }) };
 		const bash = ccWrapBuiltinRenderers<{ command?: string }>("Bash", base, { title: (a) => a?.command });
 		const edit = ccWrapBuiltinRenderers<{ path?: string }>("Update", base, { title: (a) => a?.path, rejectedAs: "update" });
-		const task = ccToolRenderers("Task Output");
+		const task = toolRenderers("Task Output");
 		const ctx = (args: unknown) => ({ args, isError: true, cwd: "/w", state: {} });
 
 		for (const text of [userDenialText(), userDenialText("try npm ci")]) {

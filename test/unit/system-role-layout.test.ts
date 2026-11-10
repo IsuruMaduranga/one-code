@@ -19,7 +19,7 @@ describe("movesToSystemRole", () => {
 		for (const order of [CONTEXT_ORDER.environment, CONTEXT_ORDER.modelLine, CONTEXT_ORDER.deferredTools, CONTEXT_ORDER.agents, CONTEXT_ORDER.mcp, CONTEXT_ORDER.skills, CONTEXT_ORDER.autoModeNote, CONTEXT_ORDER.date]) {
 			expect(movesToSystemRole(order), String(order)).toBe(true);
 		}
-		for (const order of [CONTEXT_ORDER.claudeMd, CONTEXT_ORDER.oneCodeMd, CONTEXT_ORDER.context]) {
+		for (const order of [CONTEXT_ORDER.instructions, CONTEXT_ORDER.oneCodeMd, CONTEXT_ORDER.context]) {
 			expect(movesToSystemRole(order), String(order)).toBe(false);
 		}
 	});
@@ -104,7 +104,7 @@ describe("system-reminder's layout hook", () => {
 			fake.events.emit(REMINDER_CHANNEL, { text, key: text, placement: "first-prepend", order, ...extra });
 		emit("# Environment\nx", CONTEXT_ORDER.environment);
 		emit("While auto mode is active:\n\nnote", CONTEXT_ORDER.autoModeNote, { systemRoleOnly: true });
-		emit("Codebase and user instructions are shown below.", CONTEXT_ORDER.claudeMd);
+		emit("Codebase and user instructions are shown below.", CONTEXT_ORDER.instructions);
 		emit("Today's date is 2026-10-04.", CONTEXT_ORDER.date);
 		const ctx = createFakeCtx({ model });
 		const messages = [{ role: "user", content: [{ type: "text", text: "hello" }], timestamp: 1 }];

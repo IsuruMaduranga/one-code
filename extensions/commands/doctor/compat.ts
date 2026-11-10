@@ -4,7 +4,7 @@
  * compatibility report behind "your setup works unchanged".
  *
  * The files are the settings ladder and the source provider's state files
- * (lib/profile/claude-settings.ts settingsSources, lib/profile/sources.ts), each named by its
+ * (lib/profile/settings-files.ts settingsSources, lib/profile/sources.ts), each named by its
  * label and judged by its role: with One Code's provider on, Claude Code's
  * files and One Code's own; without it, One Code's two alone.
  *
@@ -33,7 +33,7 @@ import { type HooksSource, loadHookSettings } from "../../safety/hooks/settings.
 // Claude Code's auto-memory switch, read through the whole settings ladder.
 import { AUTO_MEMORY_KEY as AUTO_MEMORY } from "../../lib/context/auto-memory.ts";
 import { isPathAtOrUnder, productStateDir } from "../../lib/profile/paths.ts";
-import { isBorrowedUserFile, isRepoFile, primaryFamily, primarySettingsFile, settingsSources, type SourceId, sourceId } from "../../lib/profile/claude-settings.ts";
+import { isBorrowedUserFile, isRepoFile, primaryFamily, primarySettingsFile, settingsSources, type SourceId, sourceId } from "../../lib/profile/settings-files.ts";
 import { protectedFiles, type SettingsFile, sourceSwitch } from "../../lib/profile/sources.ts";
 import { agentSkippedInstructions } from "../../lib/context/instruction-budget.ts";
 import { openInstructions } from "../../lib/context/instructions.ts";
@@ -51,7 +51,7 @@ import { agentDirs, parseAgentFile } from "../../lib/agents/agent-catalog.ts";
 import type { Finding, ReportLine, ReportSection, SessionView } from "./report.ts";
 import { countNoun, shortenHome } from "./report.ts";
 
-/** A file's role (lib/profile/claude-settings.ts sourceId), or another tool's state file. */
+/** A file's role (lib/profile/settings-files.ts sourceId), or another tool's state file. */
 export type SettingsScope = SourceId | "borrowed-state";
 
 export interface SettingsFileReport {
@@ -140,9 +140,9 @@ const SCOPE_KEYS: Partial<Record<SettingsScope, ReadonlySet<string>>> = {
 /**
  * The keys One Code reads from a file: its role's (with the source switch's
  * key in the product's user file), plus what the loaders take by family
- * (lib/profile/claude-settings.ts primaryFamily): hooks from every file of the
+ * (lib/profile/settings-files.ts primaryFamily): hooks from every file of the
  * primary's family (safety/hooks/settings.ts), `env` and MCP approvals from the
- * primary file (claude-settings.ts readSettingsEnv, tools/mcp/trust.ts), and the
+ * primary file (settings-files.ts readSettingsEnv, tools/mcp/trust.ts), and the
  * MCP tightening list from the family's local file. With the provider on
  * this adds nothing to Claude Code's rows; without it, One Code's two files
  * are the family.

@@ -70,7 +70,7 @@ import { sessionIdentity } from "../../lib/request/anthropic-auth.ts";
 import type { EntryLike } from "../../lib/request/ledger/records.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../lib/request/reminders.ts";
 import { sessionAlive } from "../../lib/notify/session-lifecycle.ts";
-import { ccToolRenderers } from "../../lib/ui/tui-render.ts";
+import { toolRenderers } from "../../lib/ui/tui-render.ts";
 import { normalizeToolName } from "../../lib/rules/matcher.ts";
 import { registerLocalCommand } from "../../lib/ui/local-command.ts";
 
@@ -450,7 +450,7 @@ function toolSearchExtension(pi: ExtensionAPI) {
 		// A literal, like every registration: agent-view-tool-labels.test.ts reads them from source.
 		name: "tool_search",
 		label: "Tool Search",
-		...ccToolRenderers("Tool Search"),
+		...toolRenderers("Tool Search"),
 		description: words.description,
 		promptSnippet: words.promptSnippet,
 		parameters: Type.Object({

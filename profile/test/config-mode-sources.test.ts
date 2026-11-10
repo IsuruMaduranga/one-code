@@ -6,7 +6,7 @@ import { autoModeSettingsPaths } from "../../extensions/lib/rules/auto-mode-conf
 import { readLoopFile } from "../../extensions/tools/background/loop-fire.ts";
 import { claudeResourcePaths } from "../../extensions/commands/resources/index.ts";
 import { hookSettingsPaths } from "../../extensions/safety/hooks/settings.ts";
-import { readSettingsEnv } from "../../extensions/lib/profile/claude-settings.ts";
+import { readSettingsEnv } from "../../extensions/lib/profile/settings-files.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { defaultDiscoverRoots, discoverPlugins, invalidatePluginsCache } from "../../extensions/lib/plugins/plugins.ts";
 import { promptTemplateFiles, scanSkills } from "../../extensions/lib/plugins/skill-scan.ts";

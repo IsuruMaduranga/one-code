@@ -17,7 +17,7 @@ const ROOT = join(import.meta.dirname, "..", "..", "extensions");
 /** The base files that may name one, and why: protection only, kept in every product. */
 const PROTECTIVE: Record<string, string> = {
 	"lib/profile/paths.ts": "defines the helpers the protective lists and the provider use",
-	"lib/profile/claude-settings.ts": "protection: the user and managed settings paths the safety floor guards",
+	"lib/profile/settings-files.ts": "protection: the user and managed settings paths the safety floor guards",
 	"lib/agents/permission-gate.ts": "protection: ~/.claude stays protected and its secrets stay secret",
 	"lib/rules/protected-paths.ts": "protection: .claude stays a protected directory",
 	"safety/permissions/auto-mode/safety-floor.ts": "protection: gate-control files stay on the floor",

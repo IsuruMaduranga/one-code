@@ -2,7 +2,7 @@
  * instructions extension — assembles Claude Code's three first-message context
  * reminders and queues them `first-prepend` (context/instructions/instructions.ts has the
  * formats): the instructions block (CLAUDE.md files + MEMORY.md index) at
- * CONTEXT_ORDER.claudeMd, the context block (userEmail + the git snapshot) at
+ * CONTEXT_ORDER.instructions, the context block (userEmail + the git snapshot) at
  * CONTEXT_ORDER.context, and the date at CONTEXT_ORDER.date, which on a model
  * that takes a mid-conversation system message rides that message instead
  * (system-reminder, lib/request/system-role.ts). They are live state: a request that
@@ -269,7 +269,7 @@ function instructionsExtension(pi: ExtensionAPI) {
 				text: instructions,
 				key: REMINDER_KEY,
 				placement: "first-prepend",
-				order: CONTEXT_ORDER.claudeMd,
+				order: CONTEXT_ORDER.instructions,
 				facts: instructionFacts(contextFingerprints(current)),
 			});
 		} else pi.events.emit(REMINDER_CHANNEL, { remove: true, key: REMINDER_KEY });

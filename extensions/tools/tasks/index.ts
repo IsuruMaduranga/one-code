@@ -23,7 +23,7 @@ import { restoreLatestDetails } from "../../lib/request/branch-restore.ts";
 import { DEFER_CHANNEL, WITHHOLD_CHANNEL } from "../../lib/request/deferred.ts";
 import { taskToolsEnabled } from "../../lib/models/model-tier.ts";
 import { sessionModelTier } from "../../lib/models/session-model-tier.ts";
-import { ccToolRenderers, linesComponent, safeThemeBold, safeThemePaint, strike } from "../../lib/ui/tui-render.ts";
+import { toolRenderers, linesComponent, safeThemeBold, safeThemePaint, strike } from "../../lib/ui/tui-render.ts";
 import { REMINDER_CHANNEL } from "../../lib/request/reminders.ts";
 import { requireText } from "../../lib/profile/profile.ts";
 import {
@@ -174,7 +174,7 @@ function tasksExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "task_create",
 		label: "Create Task",
-		...ccToolRenderers("Create Task"),
+		...toolRenderers("Create Task"),
 		description: text.descriptions.task_create,
 		parameters: Type.Object({
 			subject: Type.String({ description: text.params.create.subject }),
@@ -192,7 +192,7 @@ function tasksExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "task_get",
 		label: "Get Task",
-		...ccToolRenderers("Get Task"),
+		...toolRenderers("Get Task"),
 		description: text.descriptions.task_get,
 		parameters: Type.Object({
 			taskId: Type.String({ description: text.params.get.taskId }),
@@ -207,7 +207,7 @@ function tasksExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "task_list",
 		label: "List Tasks",
-		...ccToolRenderers("List Tasks", { maxCollapsedLines: 12 }),
+		...toolRenderers("List Tasks", { maxCollapsedLines: 12 }),
 		description: text.descriptions.task_list,
 		parameters: Type.Object({}),
 		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
@@ -218,7 +218,7 @@ function tasksExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "task_update",
 		label: "Update Task",
-		...ccToolRenderers("Update Task"),
+		...toolRenderers("Update Task"),
 		description: text.descriptions.task_update,
 		parameters: Type.Object({
 			taskId: Type.String({ description: text.params.update.taskId }),
