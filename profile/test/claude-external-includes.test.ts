@@ -2,11 +2,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import claudeContextExtension from "../../extensions/context/claude-context/index.ts";
+import instructionsExtension from "../../extensions/context/instructions/index.ts";
 import systemReminderExtension from "../../extensions/request/system-reminder/index.ts";
 import hooksExtension from "../../extensions/safety/hooks/index.ts";
 import mcpExtension from "../../extensions/tools/mcp/index.ts";
-import { buildClaudeMdBlock } from "../../extensions/context/claude-context/claude-context.ts";
+import { buildClaudeMdBlock } from "../../extensions/context/instructions/instructions.ts";
 import { discoverOneCodeFiles, openInstructions } from "../../extensions/lib/context/instructions.ts";
 import { discoverContextFiles, externalInstructionIncludes, nestedInstructionFiles } from "../claude-code/instructions.ts";
 import { EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_NONE, EXTERNAL_INCLUDES_TITLE, EXTERNAL_INCLUDES_YES, externalIncludesDialog, persistExternalIncludesApproval, readExternalIncludesApproval } from "../../extensions/lib/context/claude-external-includes.ts";
@@ -54,12 +54,12 @@ const start = async (choice: string | undefined, hasUI = true) => {
 	const texts: string[] = [];
 	fake.events.on(REMINDER_CHANNEL, (data) => {
 		const payload = data as { key?: string; text?: string };
-		if (payload.key === "claude-context" && payload.text) texts.push(payload.text);
+		if (payload.key === "instructions" && payload.text) texts.push(payload.text);
 	});
 	const select = vi.fn(async (_title: string, _options: string[]): Promise<string | undefined> => choice);
 	const ctx = createFakeCtx({ cwd, hasUI, mode: hasUI ? "rpc" : "print", ui: { select } });
 	systemReminderExtension(fake.pi as never);
-	claudeContextExtension(fake.pi as never);
+	instructionsExtension(fake.pi as never);
 	await fake.fire("session_start", {}, ctx);
 	await fake.fire("before_agent_start", {}, ctx);
 	return { fake, ctx, select, texts };
@@ -139,7 +139,7 @@ describe("external instruction include approval", () => {
 		let answer!: (choice: string) => void;
 		const select = vi.fn(() => new Promise<string>((resolve) => { answer = resolve; }));
 		const fake = createFakePi();
-		claudeContextExtension(fake.pi as never);
+		instructionsExtension(fake.pi as never);
 		const ctx = createFakeCtx({ cwd, hasUI: true, mode: "rpc", ui: { select } });
 		await fake.fire("session_start", {}, ctx);
 		let sent = false;
@@ -155,7 +155,7 @@ describe("external instruction include approval", () => {
 	it("treats a dialog that fails as no answer and still runs the turn", async () => {
 		fixture();
 		const fake = createFakePi();
-		claudeContextExtension(fake.pi as never);
+		instructionsExtension(fake.pi as never);
 		const select = vi.fn(async (): Promise<string> => { throw new Error("dialog failed"); });
 		const ctx = createFakeCtx({ cwd, hasUI: true, mode: "rpc", ui: { select } });
 		await fake.fire("session_start", {}, ctx);
@@ -170,7 +170,7 @@ describe("external instruction include approval", () => {
 		let answer!: (choice: string) => void;
 		const select = vi.fn(() => new Promise<string>((resolve) => { answer = resolve; }));
 		const fake = createFakePi();
-		claudeContextExtension(fake.pi as never);
+		instructionsExtension(fake.pi as never);
 		const ctx = createFakeCtx({ cwd, hasUI: true, mode: "rpc", ui: { select } });
 		await fake.fire("session_start", {}, ctx);
 		startupConsentReady(fake.events);
@@ -186,7 +186,7 @@ describe("external instruction include approval", () => {
 		write(join(cwd, ".claude", "settings.json"), JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: "command", command: "echo fixture" }] }] } }));
 		write(join(cwd, ".mcp.json"), JSON.stringify({ mcpServers: { fixture: { command: "must-not-be-started" } } }));
 		const fake = createFakePi();
-		claudeContextExtension(fake.pi as never);
+		instructionsExtension(fake.pi as never);
 		hooksExtension(fake.pi as never);
 		mcpExtension(fake.pi as never);
 		let active = 0;
@@ -212,7 +212,7 @@ describe("external instruction include approval", () => {
 		vi.stubEnv("GIT_AUTHOR_EMAIL", "fixture@example.test");
 		let answer!: (choice: string) => void;
 		const fake = createFakePi();
-		claudeContextExtension(fake.pi as never);
+		instructionsExtension(fake.pi as never);
 		const ctx = createFakeCtx({ cwd, hasUI: true, mode: "rpc", ui: { select: () => new Promise<string>((resolve) => { answer = resolve; }) } });
 		await fake.fire("session_start", {}, ctx);
 		const turn = fake.fire("turn_start", {}, ctx);
@@ -228,7 +228,7 @@ describe("external instruction include approval", () => {
 	it("does not open config after a shutdown while waiting for startup consent", async () => {
 		fixture();
 		const fake = createFakePi();
-		claudeContextExtension(fake.pi as never);
+		instructionsExtension(fake.pi as never);
 		const select = vi.fn(async (title: string): Promise<string | undefined> => title.startsWith(EXTERNAL_INCLUDES_TITLE) ? new Promise(() => {}) : undefined);
 		const ctx = createFakeCtx({ cwd, hasUI: true, mode: "rpc", ui: { select } });
 		await fake.fire("session_start", {}, ctx);
@@ -242,7 +242,7 @@ describe("external instruction include approval", () => {
 	it("config with no external includes names where the other settings live", async () => {
 		write(join(cwd, "CLAUDE.md"), "Project instructions only.\n");
 		const fake = createFakePi();
-		claudeContextExtension(fake.pi as never);
+		instructionsExtension(fake.pi as never);
 		const select = vi.fn(async (): Promise<string | undefined> => undefined);
 		const notify = vi.fn();
 		const ctx = createFakeCtx({ cwd, hasUI: true, mode: "rpc", ui: { select, notify } });
@@ -337,7 +337,7 @@ describe("startup probe and approved readers", () => {
 			const select = vi.fn(async () => choice);
 			const ctx = createFakeCtx({ cwd, hasUI: true, mode: "rpc", ui: { select } });
 			systemReminderExtension(fake.pi as never);
-			claudeContextExtension(fake.pi as never);
+			instructionsExtension(fake.pi as never);
 			await fake.fire("session_start", {}, ctx);
 			await fake.fire("before_agent_start", {}, ctx);
 			expect(select).toHaveBeenCalledOnce();

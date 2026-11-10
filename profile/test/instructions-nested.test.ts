@@ -1,14 +1,14 @@
 /**
  * Claude Code's nested instructions: reading a file below the working
  * directory attaches the instruction files of the directories in between,
- * once each (context/claude-context/claude-context.ts nestedInstructionFiles, context/claude-context/index.ts).
+ * once each (context/instructions/instructions.ts nestedInstructionFiles, context/instructions/index.ts).
  */
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import claudeContextExtension from "../../extensions/context/claude-context/index.ts";
-import { nestedInstructionText } from "../../extensions/context/claude-context/claude-context.ts";
+import instructionsExtension from "../../extensions/context/instructions/index.ts";
+import { nestedInstructionText } from "../../extensions/context/instructions/instructions.ts";
 import { nestedInstructionFiles } from "../claude-code/instructions.ts";
 import { openInstructions } from "../../extensions/lib/context/instructions.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
@@ -84,10 +84,10 @@ describe("nestedInstructionFiles", () => {
 	});
 });
 
-describe("claude-context: a read attaches nested instructions once", () => {
+describe("instructions: a read attaches nested instructions once", () => {
 	it("queues each file on the first read below it, and not again", async () => {
 		const fake = createFakePi();
-		claudeContextExtension(fake.pi as never);
+		instructionsExtension(fake.pi as never);
 		const texts: string[] = [];
 		const bound: unknown[] = [];
 		fake.events.on(REMINDER_CHANNEL, (data) => {
@@ -112,10 +112,10 @@ describe("claude-context: a read attaches nested instructions once", () => {
 	});
 });
 
-describe("claude-context: nested instructions after a resume or branch switch", () => {
+describe("instructions: nested instructions after a resume or branch switch", () => {
 	it("does not attach again what the branch's own results already carry", async () => {
 		const fake = createFakePi();
-		claudeContextExtension(fake.pi as never);
+		instructionsExtension(fake.pi as never);
 		const texts: string[] = [];
 		fake.events.on(REMINDER_CHANNEL, (data) => {
 			const payload = data as { text?: string; placement?: string };
@@ -143,12 +143,12 @@ describe("claude-context: nested instructions after a resume or branch switch", 
 	});
 });
 
-describe("claude-context: nested instructions not yet sent", () => {
+describe("instructions: nested instructions not yet sent", () => {
 	// The queued text is a pending one-shot on the branch, and the shown record
 	// is written with it: a reload before the request keeps both (round 3, R3-L10).
 	it("does not attach them again after a reload that came before the request went out", async () => {
 		const fake = createFakePi();
-		claudeContextExtension(fake.pi as never);
+		instructionsExtension(fake.pi as never);
 		const texts: string[] = [];
 		fake.events.on(REMINDER_CHANNEL, (data) => {
 			const payload = data as { text?: string; placement?: string };
@@ -167,7 +167,7 @@ describe("claude-context: nested instructions not yet sent", () => {
 	});
 });
 
-describe("claude-context: nested instructions in an entered worktree", () => {
+describe("instructions: nested instructions in an entered worktree", () => {
 	it("attaches the worktree's subdirectory instructions, not its root file", async () => {
 		const worktree = mkdtempSync(join(tmpdir(), "nested-worktree-"));
 		try {
@@ -176,7 +176,7 @@ describe("claude-context: nested instructions in an entered worktree", () => {
 			writeFileSync(join(worktree, "src", "CLAUDE.md"), "Worktree src rules.\n");
 			writeFileSync(join(worktree, "src", "a.ts"), "a\n");
 			const fake = createFakePi();
-			claudeContextExtension(fake.pi as never);
+			instructionsExtension(fake.pi as never);
 			const texts: string[] = [];
 			fake.events.on(REMINDER_CHANNEL, (data) => {
 				const payload = data as { text?: string; placement?: string };

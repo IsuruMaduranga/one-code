@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { autoModeSettingsPaths } from "../../extensions/lib/rules/auto-mode-config.ts";
 import { readLoopFile } from "../../extensions/tools/background/loop-fire.ts";
-import { claudeResourcePaths } from "../../extensions/commands/claude-compat/index.ts";
+import { claudeResourcePaths } from "../../extensions/commands/resources/index.ts";
 import { hookSettingsPaths } from "../../extensions/safety/hooks/settings.ts";
 import { readSettingsEnv } from "../../extensions/lib/profile/claude-settings.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
@@ -35,7 +35,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("independent mode reads no Claude Code folder for skills, commands, agents and workflows", () => {
-	it("claude-compat feeds pi only the cross-tool skills and the .onecode commands", () => {
+	it("resources feeds pi only the cross-tool skills and the .onecode commands", () => {
 		for (const dir of [join(home, ".claude", "skills"), join(cwd, ".claude", "skills"), join(home, ".agents", "skills"), join(cwd, ".agents", "skills")]) mkdirSync(dir, { recursive: true });
 		for (const dir of [join(home, ".claude", "commands"), join(cwd, ".onecode", "commands"), join(home, ".onecode", "commands")]) mkdirSync(dir, { recursive: true });
 		const compatible = claudeResourcePaths(cwd, home);

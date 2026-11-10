@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
-import { compactionGitStatus, resumeFactsNotice } from "../../extensions/context/claude-context/context-facts.ts";
+import { compactionGitStatus, resumeFactsNotice } from "../../extensions/context/instructions/context-facts.ts";
 import { clipGitStatus, formatGitStatus } from "../../extensions/lib/context/git-status.ts";
 import { context } from "../text/context/index.ts";
 

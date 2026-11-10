@@ -1130,7 +1130,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		setMode(onBranch, true);
 	});
 
-	// claude-context re-reads the instruction files at a compaction, and the
+	// instructions re-reads the instruction files at a compaction, and the
 	// summary's epoch renders them, so the classifier judges against the same
 	// set from then on. Unchanged files give the same bytes, so its cache holds;
 	// an edit costs one classifier cache write at this boundary.

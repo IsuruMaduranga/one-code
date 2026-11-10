@@ -8,8 +8,8 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { dirname, join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import claudeContextExtension from "../../extensions/context/claude-context/index.ts";
-import { buildClaudeMdBlock, nestedInstructionText } from "../../extensions/context/claude-context/claude-context.ts";
+import instructionsExtension from "../../extensions/context/instructions/index.ts";
+import { buildClaudeMdBlock, nestedInstructionText } from "../../extensions/context/instructions/instructions.ts";
 import { discoverContextFiles, nestedInstructionFiles } from "../claude-code/instructions.ts";
 import { discoverRules, parseRule, readRuleInstructions, ruleMatches, splitRulePaths } from "../../extensions/lib/context/claude-rules.ts";
 import { claudeManagedDir, forwardSlashes, isPathAtOrUnder } from "../../extensions/lib/profile/paths.ts";
@@ -453,7 +453,7 @@ describe("rules in Claude context discovery", () => {
 	});
 });
 
-describe("claude-context rule attachment wiring", () => {
+describe("instructions rule attachment wiring", () => {
 	it("does not mark a filtered conditional import as shown, and never repeats a startup rule on read", async () => {
 		const home = join(fixture, "home");
 		const cwd = join(fixture, "project");
@@ -464,7 +464,7 @@ describe("claude-context rule attachment wiring", () => {
 		const fake = createFakePi();
 		const emitted: Array<{ text?: string; placement?: string }> = [];
 		fake.events.on(REMINDER_CHANNEL, (data) => emitted.push(data as never));
-		claudeContextExtension(fake.pi as never);
+		instructionsExtension(fake.pi as never);
 		const ctx = createFakeCtx({ cwd });
 		await fake.fireOne("session_start", {}, ctx);
 		expect(emitted.some((entry) => entry.text?.includes("Only source files."))).toBe(false);
@@ -483,10 +483,10 @@ describe("claude-context rule attachment wiring", () => {
 		const fake = createFakePi();
 		const emitted: Array<{ text?: string; key?: string; placement?: string; scope?: string }> = [];
 		fake.events.on(REMINDER_CHANNEL, (data) => emitted.push(data as never));
-		claudeContextExtension(fake.pi as never);
+		instructionsExtension(fake.pi as never);
 		const ctx = createFakeCtx({ cwd });
 		await fake.fireOne("session_start", {}, ctx);
-		const startup = emitted.filter((entry) => entry.key === "claude-context");
+		const startup = emitted.filter((entry) => entry.key === "instructions");
 		expect(startup).toHaveLength(1);
 		expect(startup[0]).toMatchObject({ placement: "first-prepend" });
 		expect(startup[0].text).toContain("startup instruction");
@@ -507,6 +507,6 @@ describe("claude-context rule attachment wiring", () => {
 		await read("src/match/yes.ts");
 		expect(emitted.filter((entry) => entry.key === undefined && entry.text?.includes("matching nested rule"))).toHaveLength(3);
 		// The compaction refreshes the live block for the next epoch; attachment resets leave its text alone.
-		expect(emitted.filter((entry) => entry.key === "claude-context").map((entry) => entry.text)).toEqual([startup[0].text, startup[0].text]);
+		expect(emitted.filter((entry) => entry.key === "instructions").map((entry) => entry.text)).toEqual([startup[0].text, startup[0].text]);
 	});
 });

@@ -1,9 +1,9 @@
-/** Regression probes from the claude-context independent-mode audit. */
+/** Regression probes from the instructions independent-mode audit. */
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import claudeContextExtension from "../../extensions/context/claude-context/index.ts";
+import instructionsExtension from "../../extensions/context/instructions/index.ts";
 import systemReminderExtension from "../../extensions/request/system-reminder/index.ts";
 import { discoverOneCodeFiles, openInstructions } from "../../extensions/lib/context/instructions.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
@@ -13,7 +13,7 @@ import { stubHome } from "../../test/unit/helpers/home.ts";
 
 let root: string;
 beforeEach(() => {
-	root = mkdtempSync(join(tmpdir(), "claude-context-audit-"));
+	root = mkdtempSync(join(tmpdir(), "instructions-audit-"));
 	stubHome(join(root, "home"));
 	vi.stubEnv("ONECODE_STATE_DIR", join(root, "onecode-state"));
 	resetConfigModeForTest("independent");
@@ -24,7 +24,7 @@ afterEach(() => {
 	rmSync(root, { recursive: true, force: true });
 });
 
-describe("claude-context audit", () => {
+describe("instructions audit", () => {
 	it("honors CLAUDE_CONFIG_DIR for startup and conditional user rules, but not in independent mode", async () => {
 		const config = join(root, "relocated-config");
 		mkdirSync(join(config, "rules"), { recursive: true });
@@ -40,7 +40,7 @@ describe("claude-context audit", () => {
 				const payload = data as { text?: string };
 				if (payload.text) text.push(payload.text);
 			});
-			claudeContextExtension(fake.pi as never);
+			instructionsExtension(fake.pi as never);
 			const ctx = createFakeCtx({ cwd: root });
 			await fake.fireOne("session_start", {}, ctx);
 			expect(text.join("\n").includes("RELOCATED STARTUP RULE")).toBe(mode === "claude-compatible");
@@ -60,10 +60,10 @@ describe("claude-context audit", () => {
 		const fake = createFakePi();
 		const reminders: Array<{ key?: string; text?: string }> = [];
 		fake.events.on(REMINDER_CHANNEL, (data) => reminders.push(data as never));
-		claudeContextExtension(fake.pi as never);
+		instructionsExtension(fake.pi as never);
 		await fake.fireOne("session_start", {}, createFakeCtx({ cwd: join(root, "alias", "child") }));
 
-		const startup = reminders.find((reminder) => reminder.key === "claude-context")?.text ?? "";
+		const startup = reminders.find((reminder) => reminder.key === "instructions")?.text ?? "";
 		const oneCode = reminders.find((reminder) => reminder.key === "one-code-context")?.text ?? "";
 		expect([startup.match(/UNIQUE AGENT INSTRUCTION/g)?.length, oneCode.match(/UNIQUE ONECODE INSTRUCTION/g)?.length]).toEqual([1, 1]);
 	});
@@ -82,7 +82,7 @@ describe("claude-context audit", () => {
 			const payload = data as { text?: string; placement?: string };
 			if (!payload.placement && payload.text) attached.push(payload.text);
 		});
-		claudeContextExtension(fake.pi as never);
+		instructionsExtension(fake.pi as never);
 		const ctx = createFakeCtx({ cwd: root });
 		await fake.fireOne("session_start", {}, ctx);
 		await fake.fire("tool_result", { toolName: "read", toolCallId: "partial", input: { path: "src/AGENTS.md", ...input }, details, content: [{ type: "text", text: "Title" }], isError: false }, ctx);
@@ -102,7 +102,7 @@ describe("claude-context audit", () => {
 			const payload = data as { text?: string; placement?: string };
 			if (!payload.placement && payload.text) attached.push(payload.text);
 		});
-		claudeContextExtension(fake.pi as never);
+		instructionsExtension(fake.pi as never);
 		const ctx = createFakeCtx({ cwd: root });
 		await fake.fireOne("session_start", {}, ctx);
 		await fake.fire("tool_result", { toolName: "read", input: { path: "src/source.ts" }, isError: false, content: [] }, ctx);
@@ -121,7 +121,7 @@ describe("claude-context audit", () => {
 			if (!payload.placement && payload.text?.includes("RETAINED NESTED RULE")) attached.push(payload.text);
 		});
 		systemReminderExtension(fake.pi as never);
-		claudeContextExtension(fake.pi as never);
+		instructionsExtension(fake.pi as never);
 		const ctx = createFakeCtx({ cwd: root });
 		const read = (toolCallId = "read-1") => fake.fire("tool_result", { toolName: "read", toolCallId, input: { path: "src/source.ts" }, isError: false, content: [] }, ctx);
 		await fake.fireOne("session_start", {}, ctx);
@@ -167,9 +167,9 @@ describe("claude-context audit", () => {
 		vi.stubEnv("CLAUDE_CONFIG_DIR", claudeConfig);
 		vi.stubEnv("ONECODE_STATE_DIR", oneCodeState);
 		const fake = createFakePi();
-		// The queue must be installed before claude-context, as it is in the extension load order.
+		// The queue must be installed before instructions, as it is in the extension load order.
 		systemReminderExtension(fake.pi as never);
-		claudeContextExtension(fake.pi as never);
+		instructionsExtension(fake.pi as never);
 		const ctx = createFakeCtx({ cwd: "/" });
 		const request = (text: string) => [{ role: "user", content: [{ type: "text", text }], timestamp: 1 }] as never;
 		await fake.fireOne("session_start", {}, ctx);

@@ -2,7 +2,7 @@
  * Claude Code's three first-message context reminders: the instructions block
  * (the instruction files and the MEMORY.md index), the context block (the
  * user's email and the git snapshot) and the date, each its own
- * `<system-reminder>` (see extensions/context/claude-context for the wiring, and
+ * `<system-reminder>` (see extensions/context/instructions for the wiring, and
  * lib/request/reminders.ts for placement; on a model that takes a mid-conversation
  * system message the date moves into it, lib/request/system-role.ts). Which files the
  * instructions block carries is lib/context/instructions.ts.

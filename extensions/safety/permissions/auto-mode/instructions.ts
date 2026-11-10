@@ -39,7 +39,7 @@ import { tryRealpath } from "../../../lib/profile/paths.ts";
  * the classifier reads (path-conditional rules, AGENTS.md beside CLAUDE.md)
  * share what the agent's loaded files leave of the half. A transcript too
  * large for that window is not judged (`decisions/auto-mode.md`). With the
- * claude-context feature off the agent reads no instruction file, and
+ * instructions feature off the agent reads no instruction file, and
  * neither does the classifier (lib/context/instructions.ts). `agentDir`
  * is pi's (`getAgentDir()`), for its global AGENTS.md.
  */

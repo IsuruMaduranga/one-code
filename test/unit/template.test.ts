@@ -65,7 +65,7 @@ describe("buildClaudeCodeSystemPrompt", () => {
 
 	it("does NOT put project context files in the system prompt", () => {
 		// Claude Code injects CLAUDE.md as the `# claudeMd` <system-reminder> on the
-		// first user message (extensions/context/claude-context), never in the system prompt.
+		// first user message (extensions/context/instructions), never in the system prompt.
 		const prompt = buildClaudeCodeSystemPrompt(
 			{ ...baseOptions, contextFiles: [{ path: "/tmp/project/CLAUDE.md", content: "Always use tabs." }] },
 			env,

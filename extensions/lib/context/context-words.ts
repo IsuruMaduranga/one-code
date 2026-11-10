@@ -1,6 +1,6 @@
 /**
  * The profile's first-message context words for the base modules that build
- * it (claude-context.ts, environment-block.ts, git-status.ts,
+ * it (instructions.ts, environment-block.ts, git-status.ts,
  * context-facts.ts, instruction-budget.ts). Fails closed (`requireText`):
  * every session sends this context.
  */

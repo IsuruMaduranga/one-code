@@ -1,5 +1,5 @@
 /**
- * claude-compat extension — points pi's resource discovery at Claude Code's
+ * resources extension — points pi's resource discovery at Claude Code's
  * directory layout:
  *
  *   ~/.claude/skills, <project>/.claude/skills     → skills (same Agent Skills standard)
@@ -49,10 +49,10 @@ export function claudeResourcePaths(cwd: string, home: string, bundledSkillsDir?
 	};
 }
 
-function claudeCompatExtension(pi: ExtensionAPI) {
+function resourcesExtension(pi: ExtensionAPI) {
 	pi.on("resources_discover", (event) => {
 		return claudeResourcePaths(event.cwd, os.homedir(), BUNDLED_SKILLS_DIR);
 	});
 }
 
-export default feature("claude-compat", claudeCompatExtension);
+export default feature("resources", resourcesExtension);

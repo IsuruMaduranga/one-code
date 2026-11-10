@@ -26,12 +26,12 @@ export interface FeatureSpec {
 
 export const FEATURES = {
 	branding: { entries: ["ui/branding/index.ts"] },
-	"claude-compat": { entries: ["commands/claude-compat/index.ts"] },
+	"resources": { entries: ["commands/resources/index.ts"] },
 	"kept-thinking": { entries: ["request/kept-thinking/index.ts"], required: true },
 	ledger: { entries: ["request/ledger/index.ts", "request/ledger/wire.ts"], required: true },
 	"context-budget": { entries: ["context/context-budget/index.ts"] },
 	"system-reminder": { entries: ["request/system-reminder/index.ts"], required: true },
-	"claude-context": { entries: ["context/claude-context/index.ts"] },
+	"instructions": { entries: ["context/instructions/index.ts"] },
 	"tool-call-corruption": { entries: ["request/tool-call-corruption/index.ts", "request/tool-call-corruption/child.ts"] },
 	hooks: { entries: ["safety/hooks/index.ts"], guard: true },
 	"tool-search": { entries: ["request/tool-search/index.ts"], required: true },

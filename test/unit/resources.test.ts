@@ -2,13 +2,13 @@
  * The skill and prompt-template folders the base hands pi: the cross-tool
  * `.agents/skills` folders and the product's config folder's `commands`, plus
  * the bundled catalog last. The folders a source provider adds (One Code's:
- * Claude Code's `.claude`) are its own (profile/test/claude-compat-claude.test.ts).
+ * Claude Code's `.claude`) are its own (profile/test/resources-claude.test.ts).
  */
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { claudeResourcePaths } from "../../extensions/commands/claude-compat/index.ts";
+import { claudeResourcePaths } from "../../extensions/commands/resources/index.ts";
 import { userConfigDir } from "../../extensions/lib/profile/sources.ts";
 
 describe("claudeResourcePaths", () => {

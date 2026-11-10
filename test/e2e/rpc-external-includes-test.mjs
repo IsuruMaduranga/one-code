@@ -23,7 +23,7 @@ async function run(approved) {
 	writeFileSync(join(cwd, "CLAUDE.md"), "Project instructions.\n@../shared.md\n");
 	writeFileSync(join(dir, "shared.md"), `The external instruction marker is ${marker}.\n`);
 	const wire = join(dir, "wire.jsonl");
-	const extensions = ["extensions/request/system-reminder/index.ts", "extensions/context/claude-context/index.ts", "test/e2e/dump-requests.ts"];
+	const extensions = ["extensions/request/system-reminder/index.ts", "extensions/context/instructions/index.ts", "test/e2e/dump-requests.ts"];
 	const child = spawn("perl", ["-e", "alarm 180; exec @ARGV", "pi", "--no-extensions", ...extensions.flatMap((path) => ["-e", join(repo, path)]), "--mode", "rpc", "--no-session", "--no-tools", "--model", model, "--thinking", "off"], {
 		cwd,
 		stdio: ["pipe", "pipe", "pipe"],

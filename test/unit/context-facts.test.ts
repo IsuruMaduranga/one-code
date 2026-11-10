@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import claudeContextExtension from "../../extensions/context/claude-context/index.ts";
-import { contextBlockFacts, contextFingerprints, FACT_KEYS, gitFingerprint, instructionFacts, resumeFactsNotice } from "../../extensions/context/claude-context/context-facts.ts";
+import instructionsExtension from "../../extensions/context/instructions/index.ts";
+import { contextBlockFacts, contextFingerprints, FACT_KEYS, gitFingerprint, instructionFacts, resumeFactsNotice } from "../../extensions/context/instructions/context-facts.ts";
 import { GIT_SNAPSHOT_OWNER_CHANNEL } from "../../extensions/lib/context/git-status.ts";
 import { toldOf } from "../../extensions/lib/request/ledger/fold.ts";
 import type { ToldFact } from "../../extensions/lib/request/ledger/records.ts";
@@ -40,7 +40,7 @@ describe("context fact comparisons", () => {
 	});
 });
 
-describe("claude-context's resumed-session check", () => {
+describe("the instructions extension's resumed-session check", () => {
 	/** Any change notice, whichever changes it names. */
 	const isNotice = (text: string) =>
 		(["git", "memory", "instructions"] as const)
@@ -72,7 +72,7 @@ describe("claude-context's resumed-session check", () => {
 		const fake = createFakePi();
 		const facts: ToldFact[] = [];
 		fake.events.on(REMINDER_CHANNEL, (data) => facts.push(...((data as { facts?: ToldFact[] }).facts ?? [])));
-		claudeContextExtension(fake.pi as never);
+		instructionsExtension(fake.pi as never);
 		fake.events.emit(GIT_SNAPSHOT_OWNER_CHANNEL, {});
 		const ctx = createFakeCtx({ cwd, sessionManager: { getSessionId: () => "s", getBranch: () => [] } });
 		await fake.fire("session_start", { reason: "startup" }, ctx);

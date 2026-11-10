@@ -9,7 +9,7 @@
  * instructions before the model sees the message, as Claude Code does.
  *
  * Skills discovered by pi (which includes `~/.claude/skills` and
- * `.claude/skills` thanks to the claude-compat extension) are read from
+ * `.claude/skills` thanks to the resources extension) are read from
  * `before_agent_start`'s systemPromptOptions rather than rediscovered here.
  */
 

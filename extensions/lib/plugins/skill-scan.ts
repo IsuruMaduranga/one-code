@@ -4,7 +4,7 @@
  * from discoverPlugins directly and no longer calls this.)
  *
  * Scans the SAME directories pi loads, in pi's order — `<agentDir>/skills`
- * (pi's own), then the ones claude-compat feeds it: `~/.claude/skills`,
+ * (pi's own), then the ones the resources extension feeds it: `~/.claude/skills`,
  * `~/.agents/skills`, `<cwd>/.claude/skills`, `<cwd>/.agents/skills`, and the
  * bundled catalog last — and merges the plugin skills the caller resolved.
  * As in pi, a name loads once (the first wins, so the bundled catalog loses a
@@ -121,7 +121,7 @@ export function scanSkills(
 
 /**
  * Names of the `.claude/commands` prompt templates (`<name>.md`) pi will expose
- * as `/<name>` — the same dirs claude-compat feeds pi (`~/.claude/commands`,
+ * as `/<name>` — the same dirs the resources extension feeds pi (`~/.claude/commands`,
  * `<cwd>/.claude/commands`, or their `.onecode` twins in independent mode)
  * plus pi's own `<agentDir>/prompts`. pi resolves
  * templates per turn, after `session_start`, so a bare skill command registered

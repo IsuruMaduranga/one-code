@@ -7,7 +7,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { claudeResourcePaths } from "../../extensions/commands/claude-compat/index.ts";
+import { claudeResourcePaths } from "../../extensions/commands/resources/index.ts";
 
 describe("claudeResourcePaths with Claude Code's folders", () => {
 	let home: string;

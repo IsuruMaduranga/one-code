@@ -296,7 +296,7 @@ export class SubagentRuntime {
 				...(fork && this.getParentMode ? [parentModeExtension(this.getParentMode)] : []),
 				...(fork && spec.parentRequest ? [forkCacheExtension(spec.parentRequest)] : []),
 			],
-			// claude-context (above) injects the CLAUDE.md instructions on the child's session_start;
+			// instructions (above) injects the CLAUDE.md instructions on the child's session_start;
 			// pi must not append the same files to the system prompt as well.
 			noContextFiles: true,
 			getPermissionBridge: this.getPermissionBridge,

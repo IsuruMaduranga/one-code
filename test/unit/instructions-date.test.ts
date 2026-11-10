@@ -7,10 +7,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import claudeContextExtension from "../../extensions/context/claude-context/index.ts";
-import { dateChangeReminder, localDate } from "../../extensions/context/claude-context/claude-context.ts";
+import instructionsExtension from "../../extensions/context/instructions/index.ts";
+import { dateChangeReminder, localDate } from "../../extensions/context/instructions/instructions.ts";
 import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/request/reminders.ts";
-import { dateFingerprint, FACT_KEYS } from "../../extensions/context/claude-context/context-facts.ts";
+import { dateFingerprint, FACT_KEYS } from "../../extensions/context/instructions/context-facts.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { createFakeCtx, createFakePi, type FakePi, renderRequest } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
@@ -35,13 +35,13 @@ describe("localDate", () => {
 	});
 });
 
-describe("claude-context date wiring", () => {
+describe("instructions date wiring", () => {
 	let fake: FakePi;
 	let dir: string;
 	const reminders: Array<{ key?: string; text?: string; placement?: string; scope?: string }> = [];
 
 	beforeEach(() => {
-		dir = mkdtempSync(join(tmpdir(), "claude-context-date-"));
+		dir = mkdtempSync(join(tmpdir(), "instructions-date-"));
 		stubHome(dir);
 		vi.stubEnv("CLAUDE_CONFIG_DIR", join(dir, ".claude"));
 		writeFileSync(join(dir, "AGENTS.md"), "Project rules.\n");
@@ -50,7 +50,7 @@ describe("claude-context date wiring", () => {
 		fake = createFakePi();
 		reminders.length = 0;
 		fake.events.on(REMINDER_CHANNEL, (data) => reminders.push(data as never));
-		claudeContextExtension(fake.pi as never);
+		instructionsExtension(fake.pi as never);
 	});
 	afterEach(() => {
 		vi.useRealTimers();
@@ -58,8 +58,8 @@ describe("claude-context date wiring", () => {
 		rmSync(dir, { recursive: true, force: true });
 	});
 
-	const block = () => reminders.filter((r) => r.key === "claude-context-date");
-	/** Render a request inside an epoch whose message 1 told `toldDate`; the texts claude-context adds. */
+	const block = () => reminders.filter((r) => r.key === "instructions-date");
+	/** Render a request inside an epoch whose message 1 told `toldDate`; the texts instructions adds. */
 	const render = (toldDate: string) => {
 		return renderRequest(fake.events, { facts: [{ kind: "block", key: FACT_KEYS.date, hash: dateFingerprint(toldDate) }] });
 	};
@@ -68,7 +68,7 @@ describe("claude-context date wiring", () => {
 		await fake.fireOne("session_start", {}, createFakeCtx({ cwd: dir }));
 		expect(block()).toHaveLength(1);
 		expect(block()[0]).toMatchObject({ text: requireText("context").date({ date: "2026-09-26" }), facts: [{ kind: "block", key: FACT_KEYS.date, hash: dateFingerprint("2026-09-26") }] });
-		expect(reminders.find((r) => r.key === "claude-context")?.text).toContain("Project rules.");
+		expect(reminders.find((r) => r.key === "instructions")?.text).toContain("Project rules.");
 	});
 
 	it("announces a date change on the tail once the epoch told an older date, and only then", async () => {

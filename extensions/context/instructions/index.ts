@@ -1,6 +1,6 @@
 /**
- * claude-context extension — assembles Claude Code's three first-message context
- * reminders and queues them `first-prepend` (context/claude-context/claude-context.ts has the
+ * instructions extension — assembles Claude Code's three first-message context
+ * reminders and queues them `first-prepend` (context/instructions/instructions.ts has the
  * formats): the instructions block (CLAUDE.md files + MEMORY.md index) at
  * CONTEXT_ORDER.claudeMd, the context block (userEmail + the git snapshot) at
  * CONTEXT_ORDER.context, and the date at CONTEXT_ORDER.date, which on a model
@@ -8,7 +8,7 @@
  * (system-reminder, lib/request/system-role.ts). They are live state: a request that
  * opens an epoch renders them, and every later request in the epoch replays
  * them from the ledger's record (extensions/request/ledger). The blocks carry ledger
- * facts (context/claude-context/context-facts.ts), so the first request of a resumed process says
+ * facts (context/instructions/context-facts.ts), so the first request of a resumed process says
  * once what changed in the workspace since, and a session that crosses local
  * midnight learns the new date, both on the request's tail.
  *
@@ -28,7 +28,7 @@ import { readFileSync } from "node:fs";
 import os from "node:os";
 import { dirname } from "node:path";
 import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
-import { buildClaudeMdBlock, buildContextBlock, buildOneCodeBlock, dateBlock, dateChangeReminder, localDate, nestedInstructionText } from "./claude-context.ts";
+import { buildClaudeMdBlock, buildContextBlock, buildOneCodeBlock, dateBlock, dateChangeReminder, localDate, nestedInstructionText } from "./instructions.ts";
 import { collectImportedPaths, openInstructions } from "../../lib/context/instructions.ts";
 import { collectGitStatus, GIT_SNAPSHOT_OWNER_CHANNEL } from "../../lib/context/git-status.ts";
 import { readMemoryIndex } from "./memory-index.ts";
@@ -49,10 +49,10 @@ import type { ToldFact } from "../../lib/request/ledger/records.ts";
 import { foldSession } from "../../lib/request/ledger/fold-memo.ts";
 import { sessionIdentity } from "../../lib/request/anthropic-auth.ts";
 
-const REMINDER_KEY = "claude-context";
+const REMINDER_KEY = "instructions";
 const PRODUCT_REMINDER_KEY = `${brand.idPrefix}-context`;
-const CONTEXT_REMINDER_KEY = "claude-context-context";
-const DATE_REMINDER_KEY = "claude-context-date";
+const CONTEXT_REMINDER_KEY = "instructions-context";
+const DATE_REMINDER_KEY = "instructions-date";
 
 /** The account email Claude Code stamps as `# userEmail`. git config is our proxy. */
 function resolveEmail(cwd: string): string | null {
@@ -76,7 +76,7 @@ function readOrEmpty(path: string): string {
 /** A tool result and the nested instruction files it carried into context (`remember`). */
 const NESTED_SHOWN_ENTRY = brandedId("nested-instructions-shown");
 
-function claudeContextExtension(pi: ExtensionAPI) {
+function instructionsExtension(pi: ExtensionAPI) {
 	const resetConsentDialogs = installConsentDialogs(pi.events);
 	/** The account email stand-in, resolved at session start. */
 	let email: string | null = null;
@@ -546,4 +546,4 @@ function claudeContextExtension(pi: ExtensionAPI) {
 	});
 }
 
-export default feature("claude-context", claudeContextExtension);
+export default feature("instructions", instructionsExtension);

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadProjectInstructions } from "../../extensions/safety/permissions/auto-mode/instructions.ts";
-import { buildClaudeMdBlock } from "../../extensions/context/claude-context/claude-context.ts";
+import { buildClaudeMdBlock } from "../../extensions/context/instructions/instructions.ts";
 import { discoverContextFiles } from "../claude-code/instructions.ts";
 import { readInstructionFiles } from "../claude-code/settings.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
@@ -39,7 +39,7 @@ describe("loadProjectInstructions", () => {
 	it("returns undefined while the agent's instruction files are off, as the agent then reads none", () => {
 		writeFileSync(join(repo, "CLAUDE.md"), "claude rule");
 		writeFileSync(join(repo, "AGENTS.md"), "never push to main");
-		setActiveProfileForTest(resolveProfile(profile, { ONECODE_FEATURES_OFF: "claude-context" }, "/profile"));
+		setActiveProfileForTest(resolveProfile(profile, { ONECODE_FEATURES_OFF: "instructions" }, "/profile"));
 		try {
 			expect(loadProjectInstructions(repo, home, undefined, undefined)).toBeUndefined();
 		} finally {
@@ -130,7 +130,7 @@ describe("loadProjectInstructions", () => {
 		expect(loaded).toContain("GLOBAL CONTENT");
 	});
 
-	// The agent loads these (context/claude-context/claude-context.ts); the classifier must see the same restriction.
+	// The agent loads these (context/instructions/instructions.ts); the classifier must see the same restriction.
 	it.each([
 		[".claude/CLAUDE.md", join(".claude", "CLAUDE.md")],
 		["an unconditional .claude/rules file", join(".claude", "rules", "safety.md")],

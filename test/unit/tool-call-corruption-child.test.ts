@@ -79,7 +79,7 @@ describe("OpenRouter corruption guard in a child session", () => {
 		expect(entry).toMatch(/tool-call-corruption[\\/]child\.ts$/);
 		expect(existsSync(entry!)).toBe(true);
 		const names = CHILD_EXTENSION_PATHS.map((path) => path.split(/[\\/]/).at(-2));
-		expect(names.indexOf("tool-call-corruption")).toBe(names.indexOf("claude-context") + 1);
+		expect(names.indexOf("tool-call-corruption")).toBe(names.indexOf("instructions") + 1);
 	});
 
 	it("blocks the damaged call and stops only the child, without writing to the parent's terminal", async () => {

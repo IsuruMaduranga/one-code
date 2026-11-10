@@ -27,12 +27,12 @@
 	"pi": {
 		"extensions": [
 			"extensions/ui/branding/index.ts",
-			"extensions/commands/claude-compat/index.ts",
+			"extensions/commands/resources/index.ts",
 			"extensions/request/kept-thinking/index.ts",
 			"extensions/request/ledger/index.ts",
 			"extensions/context/context-budget/index.ts",
 			"extensions/request/system-reminder/index.ts",
-			"extensions/context/claude-context/index.ts",
+			"extensions/context/instructions/index.ts",
 			"extensions/request/tool-call-corruption/index.ts",
 			"extensions/safety/hooks/index.ts",
 			"extensions/request/tool-search/index.ts",

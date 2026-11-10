@@ -1,6 +1,6 @@
 /**
  * Claude Code's `# gitStatus` section — part of the context reminder on the
- * first user message (context/claude-context/claude-context.ts buildContextBlock) in a git repo,
+ * first user message (context/instructions/instructions.ts buildContextBlock) in a git repo,
  * identical across model tiers, and a one-time snapshot:
  * CC states it is "the git status at the start of the conversation" and "will not
  * update during the conversation", so it is computed once per session and frozen.

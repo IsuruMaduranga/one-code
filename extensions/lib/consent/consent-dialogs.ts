@@ -14,7 +14,7 @@ interface Request {
 	result?: Promise<unknown>;
 }
 
-/** The early claude-context extension owns the queue and resets it with its session. */
+/** The early instructions extension owns the queue and resets it with its session. */
 export function installConsentDialogs(events: Events): () => void {
 	let controller = new AbortController();
 	let tail: Promise<unknown> = Promise.resolve();

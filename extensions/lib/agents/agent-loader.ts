@@ -8,7 +8,7 @@
  * the whole One Code package (which would recurse into the subagent/workflow
  * tools and re-init UI/MCP/LSP). Fidelity is added back deliberately:
  * `permissionGateFactory` is always attached (a child has no permission
- * extension otherwise); callers pass `extraFactories` (e.g. claude-context,
+ * extension otherwise); callers pass `extraFactories` (e.g. instructions,
  * file-tracker) and `extraExtensionPaths` (curated stateless tool providers)
  * for what they need. `extensionFactories` and `additionalExtensionPaths` are
  * both loaded even under `noExtensions`.
@@ -71,7 +71,7 @@ export interface AgentLoaderOptions {
 	agentDir: string;
 	/** Per-agent system prompt (an agent's own prompt, or a fork's inherited one). */
 	systemPrompt?: string;
-	/** Inline factories to attach alongside the permission gate (claude-context, file-tracker, injected tools). */
+	/** Inline factories to attach alongside the permission gate (instructions, file-tracker, injected tools). */
 	extraFactories?: InlineExtension[];
 	/** CLI-style extension entrypoints to load (curated stateless tool providers). Loaded even under noExtensions. */
 	extraExtensionPaths?: string[];
@@ -96,7 +96,7 @@ export interface AgentLoaderOptions {
 	agentTypeOf?: (sessionId: string | undefined) => string | undefined;
 	/**
 	 * Stop pi from appending CLAUDE.md/AGENTS.md to the child's system prompt. Set
-	 * by a caller whose child session loads the `claude-context` extension, which
+	 * by a caller whose child session loads the `instructions` extension, which
 	 * injects the `# claudeMd` reminder itself — otherwise the child carried the
 	 * project instructions twice (review S10).
 	 */
@@ -168,7 +168,7 @@ export interface OpenChildSessionOptions {
  * never emits `session_start` — pi emits it only from `bindExtensions`, which the
  * CLI modes call and an SDK caller must call itself (measured, LIFECYCLE-REVIEW
  * H2; identical in 0.84.1 and 0.85.0). Until this helper existed no child ever
- * saw the event, so every child ran without `# claudeMd` (claude-context), with
+ * saw the event, so every child ran without `# claudeMd` (instructions), with
  * its deferred tools eager and unlisted (tool-search), without its tier's search
  * tools (search-tools) and without read-state reconstruction on a resume
  * (file-tracker). Binding also runs the child's `resources_discover` pass, the

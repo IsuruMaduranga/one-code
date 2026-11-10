@@ -1,6 +1,6 @@
 /**
  * One fold per branch state: the extensions that read the ledger's fold
- * (the ledger's `context` hook, its payload hook, tool-search, claude-context)
+ * (the ledger's `context` hook, its payload hook, tool-search, instructions)
  * share the last fold of each session instead of folding the same branch
  * again. `foldBranch` is O(requests × list length), and tool-search folds at
  * every `turn_start`, moments before the ledger's `context` hook folds the

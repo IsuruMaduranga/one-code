@@ -6,7 +6,7 @@
  * hides the whole listing. So when quiet startup is on, the banner shows its
  * own compact versions of the sections that ARE useful. pi's resourceLoader
  * is not exposed to extensions, so these are re-derived the same way our
- * other extensions derive them (claude-compat's skill dirs, pi's git-root
+ * other extensions derive them (the resources extension's skill dirs, pi's git-root
  * context walk); pi-only extras such as the agent dir's skills/ are included
  * for parity (the caller passes the live agent dir, which honours
  * PI_CODING_AGENT_DIR isolation).
@@ -30,7 +30,7 @@ export interface StartupSection {
 /**
  * The project context files One Code actually gathers, from cwd up to the git
  * root (or just cwd outside a repo), nearest directory first, for the startup
- * banner. The same discovery and rule the blocks use (context/claude-context/claude-context.ts),
+ * banner. The same discovery and rule the blocks use (context/instructions/instructions.ts),
  * so an AGENTS.md is listed only when it is really in play.
  */
 export function contextFileNames(cwd: string, home: string = os.homedir()): string[] {

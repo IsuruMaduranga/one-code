@@ -87,7 +87,7 @@ function memoryExtension(pi: ExtensionAPI) {
 		// suppressed if a single file already fired, so a lone big file isn't
 		// reported twice.
 		if (ctx.hasUI) {
-			// A file the agent's window budget skips gets claude-context's warning
+			// A file the agent's window budget skips gets the instructions extension's warning
 			// instead; asked only once a file is over the char limit.
 			let skipped: Set<string> | undefined;
 			const isSkipped = (path: string) =>
@@ -126,7 +126,7 @@ function memoryExtension(pi: ExtensionAPI) {
 		dir = candidate;
 		dirReal = tryRealpath(candidate) ?? candidate;
 
-		// The MEMORY.md index is injected by the claude-context extension, folded
+		// The MEMORY.md index is injected by the instructions extension, folded
 		// into the `# claudeMd` block exactly as Claude Code does — not as a
 		// separate reminder here. This extension owns the directory and the
 		// write-time stamping / limit checks below.

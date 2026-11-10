@@ -18,7 +18,7 @@
  *
  * Every reader goes through `openInstructions`, so the agent's first message,
  * a read's nested files, the classifier, /memory, /doctor and the startup
- * banner judge the same files. Rendering is context/claude-context/claude-context.ts.
+ * banner judge the same files. Rendering is context/instructions/instructions.ts.
  *
  * Pure: no pi imports.
  */
@@ -516,10 +516,10 @@ const NO_INSTRUCTIONS: Instructions = {
  * profile's provider, else the base's). `agentDir` is pi's
  * (`getAgentDir()`, passed by the wiring, since this module has no pi
  * import); `undefined` leaves pi's global AGENTS.md out. Nothing while the
- * claude-context feature, which carries them to the agent, is off.
+ * instructions feature, which carries them to the agent, is off.
  */
 export function openInstructions(home: string, agentDir: string | undefined): Instructions {
-	if (!featureEnabled("claude-context")) return NO_INSTRUCTIONS;
+	if (!featureEnabled("instructions")) return NO_INSTRUCTIONS;
 	const { view, allowPath } = openView(home);
 	const globals = globalAgentsFiles(home, agentDir);
 	const productDir = (dir: string | undefined) => dir ?? productStateDir(process.env, home);
@@ -591,11 +591,11 @@ export function projectInstructionFiles(opts: { cwd: string; home: string; homeO
 }
 
 /**
- * The agent's instruction sections, as claude-context loads them, imports
+ * The agent's instruction sections, as instructions loads them, imports
  * inlined. The one source for every consumer of the window budget
- * (claude-context, /doctor, file-tracker, the memory warning, the classifier),
+ * (instructions, /doctor, file-tracker, the memory warning, the classifier),
  * so they all judge the same set. `includeExternal` defaults to the project's
- * saved approval; claude-context passes the session's own.
+ * saved approval; instructions passes the session's own.
  */
 export function agentInstructionSections(opts: { cwd: string; home: string; agentDir: string | undefined; homeOneCodeDir?: string; includeExternal?: boolean }): { contextFiles: ContextFile[]; oneCodeFiles: ContextFile[] } {
 	return openInstructions(opts.home, opts.agentDir).sections(opts);

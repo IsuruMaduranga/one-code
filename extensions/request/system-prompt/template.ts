@@ -5,7 +5,7 @@
  * (SYSTEM_PROMPT_SECTION_CHANNEL, text.ts), appended text, the working
  * directory and the budget line. The environment block, the model line and
  * the git snapshot are not here: they ride the first-message context
- * (lib/context/environment-block.ts, context/claude-context/claude-context.ts), or the mid-conversation
+ * (lib/context/environment-block.ts, context/instructions/instructions.ts), or the mid-conversation
  * system message on a model that takes one, as in Claude Code.
  *
  * For a fixed tier this function must be pure and deterministic: same inputs,
@@ -81,7 +81,7 @@ export function buildClaudeCodeSystemPrompt(
 	// Mirror pi's own custom-prompt assembly: append text, skills, and the
 	// trailing cwd line. CLAUDE.md / AGENTS.md context files are NOT put here —
 	// Claude Code sends them as the instructions <system-reminder> on the first
-	// user message (extensions/context/claude-context), not in the system prompt.
+	// user message (extensions/context/instructions), not in the system prompt.
 	if (options.appendSystemPrompt) {
 		prompt += `\n\n${options.appendSystemPrompt}`;
 	}

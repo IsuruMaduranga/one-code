@@ -27,7 +27,7 @@
  * resource loader makes one per loader), so its captures never reach the
  * parent's side calls. A fork's file is a copy of the parent's, records included, so
  * its first request extends the parent's last one and reads its cache. A caller that loads these must set the
- * loader's `noContextFiles`, because claude-context injects `# claudeMd` itself.
+ * loader's `noContextFiles`, because instructions injects `# claudeMd` itself.
  */
 
 import { join } from "node:path";
@@ -44,7 +44,7 @@ import { activeProfile } from "../profile/profile.ts";
 // (mode "print"), so `run_in_background` runs blocking there and nothing a
 // child starts outlives it (Claude Code kills an agent's shells as it exits).
 export const CHILD_EXTENSIONS = [
-	"request/kept-thinking/index.ts", "request/ledger/index.ts", "request/system-reminder/index.ts", "request/tool-search/index.ts", "request/context-management/index.ts", "context/compaction/index.ts", "request/ledger/wire.ts", "request/cache-marks/index.ts", "context/claude-context/index.ts", "request/tool-call-corruption/child.ts",
+	"request/kept-thinking/index.ts", "request/ledger/index.ts", "request/system-reminder/index.ts", "request/tool-search/index.ts", "request/context-management/index.ts", "context/compaction/index.ts", "request/ledger/wire.ts", "request/cache-marks/index.ts", "context/instructions/index.ts", "request/tool-call-corruption/child.ts",
 	"safety/file-tracker/index.ts", "tools/search-tools/index.ts", "tools/skill/index.ts", "tools/bash/child.ts", "tools/powershell/child.ts", "tools/web/index.ts", "tools/web-fetch/index.ts", "tools/notebook/index.ts",
 ];
 

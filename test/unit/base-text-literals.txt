@@ -253,13 +253,13 @@ commands/doctor/viewer.ts
 commands/init/index.ts
 	"Initialize a new ${…} file with codebase documentation"
 
-context/claude-context/index.ts
+context/idle-compact/policy.ts
+	"Compacted while idle, before the prompt cache expired"
+
+context/instructions/index.ts
 	"Could not remember external CLAUDE.md include approval: ${…}"
 	"Configure external CLAUDE.md includes for this project"
 	"/config requires an interactive UI to change external CLAUDE.md include approval."
-
-context/idle-compact/policy.ts
-	"Compacted while idle, before the prompt cache expired"
 
 context/memory/index.ts
 	"View or edit CLAUDE.md and memory files"

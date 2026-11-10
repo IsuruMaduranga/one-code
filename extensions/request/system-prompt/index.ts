@@ -82,7 +82,7 @@ function systemPromptExtension(pi: ExtensionAPI) {
 		// on. On a shared /tmp it must also be private to this user
 		// (lib/core/scratchpad.ts ensurePrivateScratchpad); otherwise the line is dropped.
 		scratchpad = privateSessionScratchpadDir(ctx.cwd, ctx.sessionManager.getSessionId());
-		// The main session's context block carries Claude Code's git snapshot (claude-context).
+		// The main session's context block carries Claude Code's git snapshot (instructions).
 		pi.events.emit(GIT_SNAPSHOT_OWNER_CHANNEL, {});
 
 		// Another session's options (a named agent's customPrompt, its tool set)

@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import claudeContextExtension from "../../extensions/context/claude-context/index.ts";
+import instructionsExtension from "../../extensions/context/instructions/index.ts";
 import { GIT_SNAPSHOT_OWNER_CHANNEL } from "../../extensions/lib/context/git-status.ts";
 import { makeRecord, RECORD } from "../../extensions/lib/request/ledger/records.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
@@ -12,10 +12,10 @@ import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 
-describe("claude-context's git snapshot", () => {
+describe("the instructions extension's git snapshot", () => {
 	let dir: string;
 	beforeEach(() => {
-		dir = mkdtempSync(join(tmpdir(), "claude-context-git-"));
+		dir = mkdtempSync(join(tmpdir(), "instructions-git-"));
 		stubHome(dir);
 		vi.stubEnv("CLAUDE_CONFIG_DIR", join(dir, ".claude"));
 		vi.stubEnv("GIT_AUTHOR_EMAIL", "a@b.com");
@@ -32,12 +32,12 @@ describe("claude-context's git snapshot", () => {
 		const fake = createFakePi();
 		const texts: Array<{ key?: string; text?: string }> = [];
 		fake.events.on(REMINDER_CHANNEL, (data) => texts.push(data as never));
-		claudeContextExtension(fake.pi as never);
+		instructionsExtension(fake.pi as never);
 		const ctx = createFakeCtx({ cwd: dir, sessionManager: { getBranch: () => branch } });
 		await fake.fireOne("session_start", {}, ctx);
 		if (owner) fake.events.emit(GIT_SNAPSHOT_OWNER_CHANNEL, {});
 		await fake.fireOne("turn_start", {}, ctx);
-		return texts.find((t) => t.key === "claude-context-context")?.text;
+		return texts.find((t) => t.key === "instructions-context")?.text;
 	}
 
 	/** The context block, the snapshot the base rendered into it, and the email spy. */

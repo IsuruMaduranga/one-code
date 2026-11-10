@@ -150,7 +150,7 @@ function isLink(path: string): boolean {
 }
 
 /**
- * One Code addition, matching the inline expander (claude-context.ts
+ * One Code addition, matching the inline expander (instructions.ts
  * `readImportTarget`): an import ending a sentence (`@docs/x.md.`) names
  * `docs/x.md` when only that is a file. Claude Code reads the literal path,
  * which wins whenever it exists.

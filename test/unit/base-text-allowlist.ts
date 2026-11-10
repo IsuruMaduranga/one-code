@@ -35,7 +35,7 @@ export const BASE_TEXT_ALLOWLIST: Readonly<Record<string, BaseTextEntry>> = {
 	"ui/branding/replaced-builtins.ts": { reason: "ui: Notifications." },
 	"agents/btw/index.ts": { reason: "ui: /btw panel errors and command descriptions." },
 	"agents/btw/panel.ts": { reason: "ui: A key hint." },
-	"context/claude-context/index.ts": { reason: "ui: Notifications and a command description." },
+	"context/instructions/index.ts": { reason: "ui: Notifications and a command description." },
 	"commands/clear/index.ts": { reason: "ui: A command description." },
 	"commands/doctor/build.ts": { reason: "ui: Install, version, update and provider rows of the /doctor report." },
 	"commands/doctor/cli.ts": { reason: "ui: The onecode doctor CLI footer." },

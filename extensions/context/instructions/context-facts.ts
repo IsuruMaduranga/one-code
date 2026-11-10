@@ -1,11 +1,11 @@
 /**
- * What claude-context's message-1 blocks tell, as ledger facts, and the notice
+ * What the instructions extension's message-1 blocks tell, as ledger facts, and the notice
  * for a resumed session whose workspace changed since (pure). The blocks are
  * live state; an epoch records their fingerprints with its request, so the
  * first request of a resumed process compares them with the live files and git
  * status, and says what changed once. The historical blocks stay as sent.
  */
-import { buildClaudeMdBlock } from "./claude-context.ts";
+import { buildClaudeMdBlock } from "./instructions.ts";
 import type { ContextFile } from "../../lib/context/instructions.ts";
 import type { ToldFact } from "../../lib/request/ledger/records.ts";
 import { contentHash } from "../../lib/request/ledger/wire.ts";

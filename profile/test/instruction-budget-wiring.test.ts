@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import claudeContextExtension from "../../extensions/context/claude-context/index.ts";
+import instructionsExtension from "../../extensions/context/instructions/index.ts";
 import { restoredInstructionNotice, skippedInstructionNote, skippedInstructionWarning } from "../../extensions/lib/context/instruction-budget.ts";
 import { estimateTextTokens } from "../../extensions/lib/models/pi-ai-estimate.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
@@ -20,12 +20,12 @@ import { stubHome } from "../../test/unit/helpers/home.ts";
 const BIG = "x".repeat(24_000);
 const T = estimateTextTokens(BIG);
 
-describe("claude-context: an oversized instruction file", () => {
+describe("instructions: an oversized instruction file", () => {
 	let fake: FakePi;
 	let dir: string;
 	const reminders: Array<{ key?: string; text?: string; placement?: string; toolCallId?: string }> = [];
 	const model = (contextWindow: number) => ({ provider: "test", id: `m-${contextWindow}`, api: "test", contextWindow });
-	const block = () => reminders.filter((r) => r.key === "claude-context").at(-1)?.text ?? "";
+	const block = () => reminders.filter((r) => r.key === "instructions").at(-1)?.text ?? "";
 	const body = (marker: string) => `${marker} ${BIG}\n`;
 	/** The estimate for a file written with `body`. */
 	const tokens = (marker: string) => estimateTextTokens(body(marker));
@@ -49,7 +49,7 @@ describe("claude-context: an oversized instruction file", () => {
 		fake = createFakePi();
 		reminders.length = 0;
 		fake.events.on(REMINDER_CHANNEL, (data) => reminders.push(data as never));
-		claudeContextExtension(fake.pi as never);
+		instructionsExtension(fake.pi as never);
 	});
 	afterEach(() => {
 		vi.unstubAllEnvs();
@@ -89,9 +89,9 @@ describe("claude-context: an oversized instruction file", () => {
 	it("does not rebuild the block on a switch that leaves the fit's text the same", async () => {
 		const ctx = createFakeCtx({ cwd: dir, hasUI: true, model: model(LARGE) });
 		await fake.fireOne("session_start", {}, ctx);
-		const emitted = reminders.filter((r) => r.key === "claude-context").length;
+		const emitted = reminders.filter((r) => r.key === "instructions").length;
 		await switchTo(ctx, 8 * T);
-		expect(reminders.filter((r) => r.key === "claude-context")).toHaveLength(emitted);
+		expect(reminders.filter((r) => r.key === "instructions")).toHaveLength(emitted);
 	});
 
 	it("skips the larger of two files that each fit when together they pass the share, warning once", async () => {

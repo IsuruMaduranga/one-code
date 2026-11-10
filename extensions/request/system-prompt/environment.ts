@@ -3,7 +3,7 @@
  * (lib/context/environment-block.ts) and the memory directory the system prompt names.
  * Collected once per cwd and cached so the text stays byte-stable across turns
  * — required for provider prompt caching to pay off. Nothing time-valued
- * belongs here: the date rides its own first-message reminder (claude-context),
+ * belongs here: the date rides its own first-message reminder (instructions),
  * never the system prompt (a cached one went stale at midnight —
  * CACHE-REVIEW-2026-09-04 L2).
  */

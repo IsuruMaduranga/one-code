@@ -3,7 +3,7 @@
  * a product that reads no Claude Code file gets. Each directory's AGENTS.md
  * and the product file, imports confined to the project, the same files on a
  * nested read and for the classifier; One Code's provider is covered by the
- * claude-context and claude-rules tests.
+ * instructions and claude-rules tests.
  */
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -86,7 +86,7 @@ describe("the base's instruction files without a provider", () => {
 	it("gives every reader nothing while the agent's instruction files are off", () => {
 		write(join(cwd, "AGENTS.md"), "agents\n");
 		write(join(cwd, brand.productFile), "product\n");
-		setActiveProfileForTest(resolveProfile(profile, { [envName("FEATURES_OFF")]: "claude-context" }, "/profile"));
+		setActiveProfileForTest(resolveProfile(profile, { [envName("FEATURES_OFF")]: "instructions" }, "/profile"));
 		const instructions = openInstructions(home, undefined);
 		expect(instructions.sections({ cwd, homeOneCodeDir: state })).toEqual({ contextFiles: [], oneCodeFiles: [] });
 		expect(instructions.paths({ cwd, homeOneCodeDir: state })).toEqual([]);

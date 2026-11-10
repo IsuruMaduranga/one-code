@@ -188,7 +188,7 @@ function pathOf(input: unknown, cwd: string): string | undefined {
 
 /**
  * The files the context still shows after a compaction, as comparable paths:
- * the context stack (the CLAUDE.md family as claude-context discovers it, what
+ * the context stack (the CLAUDE.md family as instructions discovers it, what
  * they `@`-import, and the auto-memory index), the plan file, the files a
  * `read` in the kept turns returned (`kept`) and the files a kept bash call
  * showed in full (`keptShell`), both absolute as recorded. Claude Code's

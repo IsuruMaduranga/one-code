@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildClaudeMdBlock, buildContextBlock, dateBlock, buildOneCodeBlock } from "../../extensions/context/claude-context/claude-context.ts";
+import { buildClaudeMdBlock, buildContextBlock, dateBlock, buildOneCodeBlock } from "../../extensions/context/instructions/instructions.ts";
 import { AGENTS_DESCRIPTOR, discoverOneCodeFiles, expandImports, PRODUCT_DESCRIPTOR, PRODUCT_GLOBAL_DESCRIPTOR, openInstructions, PROJECT_DESCRIPTOR } from "../../extensions/lib/context/instructions.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { discoverContextFilePaths, discoverContextFiles } from "../claude-code/instructions.ts";

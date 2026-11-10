@@ -3,7 +3,7 @@
  * the MEMORY.md index's load limits, checked after each write of it. The
  * limits themselves stay in the base (lib/context/memory-content.ts). The index's
  * truncation line belongs to the instruction block that loads it
- * (claude-context), not to this group.
+ * (instructions), not to this group.
  */
 
 /** The index's load limits, as the base enforces them. */
