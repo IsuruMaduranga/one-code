@@ -28,8 +28,7 @@ import { findProjectRoot } from "../context/git.ts";
 import { projectSlug } from "../context/memory.ts";
 import { productStateDir, tryRealpath } from "./paths.ts";
 
-/** The product's user settings file as messages show it: `~/.onecode/settings.json`. */
-export const SETTINGS_DISPLAY = `~/${brand.stateDir}/settings.json`;
+export { SETTINGS_DISPLAY } from "./settings-display.ts";
 
 /** `~/.onecode/settings.json`: the product's user-scope settings (writable). */
 export function productSettingsPath(home: string, env: NodeJS.ProcessEnv = process.env): string {

@@ -7,15 +7,16 @@
  * two files is unaffected (`profile-import-surface.test.ts`).
  *
  * Re-export only what a profile uses, by name. Every value re-exported here
- * loads with the profile's text, so keep it to constants and keep it free of
- * pi value imports (`shared-module-graph.test.ts`).
+ * loads with the profile's text, so re-export constants only from leaf
+ * modules: the text's graph must reach neither a pi package nor the base's
+ * own loaders (`shared-module-graph.test.ts`).
  */
 export type { ArtifactsText, NoBrowser, PublishBrowser, PublishProblem, ShownArtifact } from "../tools/artifacts/text.ts";
 export type { Answer, Question } from "../tools/ask-user/questions.ts";
 export type { AskUserText } from "../tools/ask-user/text.ts";
 export type { CheckoutProgram } from "../lib/shell/git-checkout-programs.ts";
 export type { AutoModeSetupText, AutoModeText, ClassifierBlock, ClassifierRuleset, ClassifierText, FloorTarget } from "../safety/permissions/auto-mode/text.ts";
-export { AUTONOMOUS_LOOP, AUTONOMOUS_LOOP_DYNAMIC, LOOP_FILE_DYNAMIC_SENTINEL, LOOP_FILE_SENTINEL } from "../tools/background/loop-fire.ts";
+export { AUTONOMOUS_LOOP, AUTONOMOUS_LOOP_DYNAMIC, LOOP_FILE_DYNAMIC_SENTINEL, LOOP_FILE_SENTINEL } from "../tools/background/loop-sentinels.ts";
 export type { BackgroundText, CronCreateFailure, CronText, LoopFile, LoopText, LoopTick, MonitorEnd, MonitorStartFailure, MonitorText, ShownJob, ShownTask, TaskToolsText, WakeupMissingField, WakeupText } from "../tools/background/text.ts";
 export type { BtwText } from "../agents/btw/text.ts";
 export type { CompactionReason, CompactionText, KeptTail, KeptTailLandmark } from "../context/compaction/text.ts";
@@ -58,7 +59,7 @@ export type { ArgumentDamage, ToolCallCorruptionText } from "../request/tool-cal
 export type { SearchOutcome, ToolSearchText } from "../request/tool-search/text.ts";
 export type { ToolStyleText } from "../tools/tool-style/text.ts";
 export type { FetchAnswer, FetchFailure, ReaderFailure, UrlProblem, WebFetchText } from "../tools/web-fetch/text.ts";
-export { BRAVE_KEY_ENV, SETTINGS_FILE, SETTINGS_SNIPPET, TAVILY_KEY_ENV } from "../tools/web/backends.ts";
+export { BRAVE_KEY_ENV, SETTINGS_FILE, SETTINGS_SNIPPET, TAVILY_KEY_ENV } from "../tools/web/backend-names.ts";
 export type { BackendAttempt, BackendFailure, ChainFailure, ProviderSearchFailure, WebSearchText } from "../tools/web/text.ts";
 export type { AgentFailure, AgentNotice, RunReport, RunStop, ScriptCallProblem, ScriptProblem, WorkflowRefusal, WorkflowText } from "../agents/workflow/text.ts";
 export type { EnterWorktreeFailure, GitTargetProblem, RemoveBlocker, StashRisk, WorktreeGuardRefusal, WorktreeGuardText, WorktreeNameProblem, WorktreeSessionView, WorktreeText } from "../safety/worktree/text.ts";

@@ -16,7 +16,7 @@
  * Failures are data (text.ts); the profile words them.
  */
 
-import { SETTINGS_DISPLAY } from "../../lib/profile/product-settings.ts";
+import { BRAVE_KEY_ENV, SETTINGS_FILE, SETTINGS_SNIPPET, TAVILY_KEY_ENV } from "./backend-names.ts";
 import type { BackendAttempt, BackendFailure, ChainFailure } from "./text.ts";
 
 /** A backend failed for a reason the profile words. */
@@ -72,8 +72,7 @@ export interface WebSearchSettings {
 	apiKeys?: { brave?: string; tavily?: string };
 }
 
-export const BRAVE_KEY_ENV = "BRAVE_SEARCH_API_KEY";
-export const TAVILY_KEY_ENV = "TAVILY_API_KEY";
+export { BRAVE_KEY_ENV, SETTINGS_FILE, SETTINGS_SNIPPET, TAVILY_KEY_ENV };
 export const DEFAULT_MAX_RESULTS = 10;
 export const BACKEND_TIMEOUT_MS = 30_000;
 
@@ -82,9 +81,6 @@ const TAVILY_URL = "https://api.tavily.com/search";
 export const EXA_MCP_URL = "https://mcp.exa.ai/mcp";
 const BACKEND_NAMES: readonly BackendName[] = ["brave", "tavily", "exa-free"];
 
-/** The one-line settings snippet both warnings point at: the fix, spelled out. */
-export const SETTINGS_SNIPPET = '{ "webSearch": { "apiKeys": { "brave": "<key>" } } }';
-export const SETTINGS_FILE = SETTINGS_DISPLAY;
 /**
  * User-facing one-time notice (TUI) the first time a session searches keyless.
  * The model's own note on every keyless result is the profile's (text.ts chainResults).

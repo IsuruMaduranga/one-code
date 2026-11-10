@@ -16,12 +16,10 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { AUTONOMOUS_LOOP, AUTONOMOUS_LOOP_DYNAMIC, LOOP_FILE_DYNAMIC_SENTINEL, LOOP_FILE_SENTINEL } from "./loop-sentinels.ts";
 import type { LoopFile, LoopText } from "./text.ts";
 
-export const AUTONOMOUS_LOOP = "<<autonomous-loop>>";
-export const AUTONOMOUS_LOOP_DYNAMIC = "<<autonomous-loop-dynamic>>";
-export const LOOP_FILE_SENTINEL = "<<loop.md>>";
-export const LOOP_FILE_DYNAMIC_SENTINEL = "<<loop.md-dynamic>>";
+export { AUTONOMOUS_LOOP, AUTONOMOUS_LOOP_DYNAMIC, LOOP_FILE_DYNAMIC_SENTINEL, LOOP_FILE_SENTINEL };
 /** Claude Code's cap on loop.md, in characters (its text says bytes). */
 export const LOOP_FILE_CAP = 25000;
 /** Marks "the autonomous preamble went out because loop.md was absent". */

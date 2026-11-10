@@ -34,6 +34,19 @@ function piValueImports(entry: string): string[] {
 	return found;
 }
 
+/** Every base module (under `extensions/`) the graph under `entry` loads by value, relative to the repo root. */
+function baseValueModules(entry: string): string[] {
+	const seen = new Set<string>();
+	const walk = (file: string) => {
+		const path = normalize(file);
+		if (seen.has(path) || !existsSync(path)) return;
+		seen.add(path);
+		for (const spec of valueSpecifiers(readFileSync(path, "utf8"), path)) if (spec.startsWith(".")) walk(join(dirname(path), spec));
+	};
+	walk(entry);
+	return [...seen].map((path) => relative(ROOT, path).replaceAll("\\", "/")).filter((path) => path.startsWith("extensions/")).sort();
+}
+
 describe("modules loaded through sharedModule", () => {
 	it("sees value imports the way the compiler does", () => {
 		const specs = valueSpecifiers(
@@ -45,6 +58,15 @@ describe("modules loaded through sharedModule", () => {
 
 	it("import no pi package as a value: the profile", () => {
 		expect(piValueImports(join(ROOT, "profile", "index.ts"))).toEqual([]);
+	});
+
+	it("the profile's text loads only the SDK's leaf constants from the base, never a base loader", () => {
+		// The text is evaluated while the base resolves the profile; a base
+		// module in its graph that read the profile at load would re-enter that.
+		const loaded = baseValueModules(join(ROOT, "profile", "index.ts"));
+		const leaves = ["extensions/lib/profile/brand.mjs", "extensions/lib/profile/settings-display.ts", "extensions/tools/background/loop-sentinels.ts", "extensions/tools/web/backend-names.ts"];
+		// A profile that names none of the constants loads none of them.
+		expect(loaded.filter((path) => !path.startsWith("extensions/sdk/") && !leaves.includes(path))).toEqual([]);
 	});
 
 	it("import no pi package as a value: the profile's source provider, when it has one", () => {
