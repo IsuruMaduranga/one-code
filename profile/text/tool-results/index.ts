@@ -26,4 +26,6 @@ export const toolResults: ToolResultsText = {
 		const next = said ? `To tell you how to proceed, the user said:\n${said}` : "STOP what you are doing and wait for the user to tell you how to proceed.";
 		return `${REJECTED} ${next}\n\n${MEMORY_NOTE}`;
 	},
+	secretPlaceholderWrite:
+		"This write contains a [secret] placeholder. It stands for a real value the file holds, which you were not shown; writing the placeholder would replace that value. Change the file with an edit that leaves the secret's line untouched, or ask the user to make the change.",
 };

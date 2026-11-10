@@ -442,7 +442,7 @@ function lspExtension(pi: ExtensionAPI) {
 	});
 	const answerRequest = async (request: LspRequestEvent): Promise<unknown> => {
 		const ctx = liveCtx;
-		if (!ctx) throw new Error("The session has not started, so no language server can answer yet.");
+		if (!ctx) throw new Error("No session is running, so no language server can answer.");
 		const server = activeProfile().languageServers.find((candidate) => candidate.name === request.server);
 		if (!server) throw new Error(`The profile declares no language server named "${request.server}".`);
 		const target = productTarget(server, absoluteFrom(ctx.cwd, request.file), ctx.cwd);
@@ -488,6 +488,8 @@ function lspExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_shutdown", async () => {
+		// A product's request that settles after this must not start a server nothing will stop.
+		liveCtx = undefined;
 		await Promise.all([...clients.values()].map((client) => client.stop()));
 		clients.clear();
 	});

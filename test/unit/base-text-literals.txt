@@ -425,7 +425,7 @@ lib/profile/profile.ts
 	"it has no text for \"${…}\", which this session reads"
 
 lib/profile/secrets.ts
-	"secret file \"${…}\" must be a bare file name"
+	"secret file \"${…}\" must be a bare file name, with no folder and no wildcard"
 
 lib/request/anthropic-server-call.ts
 	"not an Anthropic session"
@@ -611,6 +611,7 @@ lib/shell/shell-analysis.ts
 	"runs ${…} with the glob ${…} as its first operand, which ${…} does not read as a file, so the other matches go unchecked"
 	"runs ${…} on the glob ${…}, which could name a directory that ${…}"
 	"runs ${…}${…}, which is not on the read-only allowlist"
+	"runs ${…} ${…} with an argument that is not a short name, and the command may send it over the network"
 	"runs ${…}, which is not on the read-only allowlist"
 	"${…} ${…}, which is a working root, or is or holds a git repository or a protected, credential or execution-primitive path"
 	"copies or moves ${…}, a credential or secret path"
@@ -951,7 +952,7 @@ tools/background/switch-guard.ts
 tools/lsp/index.ts
 	"${…} ${…}. Allow it only for a project you trust.\n\nThe answer for ${…} is remembered; /lsp trust allows it later."
 	"Plugin LSP config issues (/lsp for the full list):\n${…}"
-	"The session has not started, so no language server can answer yet."
+	"No session is running, so no language server can answer."
 	"The profile declares no language server named \"${…}\"."
 	"The ${…} language server is not running: ${…}"
 	"Show language server status: /lsp [trust]"

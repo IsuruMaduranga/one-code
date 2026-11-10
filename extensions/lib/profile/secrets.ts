@@ -10,9 +10,12 @@
  *
  * Values: the product registers the secret values it knows
  * (`setSecretValues`), and the base replaces each occurrence in every tool
- * result and task notification before it is stored, so the bytes that reach
- * the model are checked, whatever command produced them
- * (safety/secret-values, lib/notify/notifications.ts).
+ * result and task notification before it is stored (safety/secret-values,
+ * lib/notify/notifications.ts). Text that reaches the model another way is
+ * not covered: a reminder (a changed-file excerpt, diagnostics, hook
+ * output) or a command the user runs with `!`. A placeholder the model saw
+ * must not be written back over the real value, so a file tool whose input
+ * carries one is refused (safety/secret-values).
  *
  * The values are process state: a secret is one in every session of the
  * process, and a child session has its own event bus, so a channel would
@@ -35,19 +38,17 @@ export interface SecretValue {
 	name?: string;
 }
 
-/** One replacement: a spelling of a secret value and the placeholder that takes its place. */
-interface Replacement {
-	spelling: string;
-	placeholder: string;
-}
-
 interface SecretStore {
 	bySource: Map<string, SecretValue[]>;
-	/** Every spelling of every value, longest first, so a value that contains another is replaced whole. Rebuilt when a source changes. */
-	plan: Replacement[];
+	/** Each spelling's placeholder. */
+	placeholders: Map<string, string>;
+	/** One pattern over every spelling, longest first, so a value that contains another is replaced whole and a placeholder is never rewritten. Undefined with no value. */
+	pattern: RegExp | undefined;
 }
 
-const store = (): SecretStore => processState("secrets:values", () => ({ bySource: new Map<string, SecretValue[]>(), plan: [] }));
+const store = (): SecretStore => processState("secrets:values", () => ({ bySource: new Map<string, SecretValue[]>(), placeholders: new Map<string, string>(), pattern: undefined }));
+
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** A name safe inside the placeholder. */
 const placeholderFor = (name: string | undefined): string => {
@@ -71,28 +72,37 @@ export function setSecretValues(source: string, secrets: readonly SecretValue[])
 	const kept = secrets.filter((secret) => typeof secret.value === "string" && secret.value.length >= MIN_SECRET_LENGTH);
 	if (kept.length === 0) bySource.delete(source);
 	else bySource.set(source, kept);
-	store().plan = [...bySource.values()]
-		.flat()
-		.flatMap((secret) => spellings(secret.value).map((spelling) => ({ spelling, placeholder: placeholderFor(secret.name) })))
-		.sort((x, y) => y.spelling.length - x.spelling.length);
+	const placeholders = new Map<string, string>();
+	for (const secret of [...bySource.values()].flat()) {
+		for (const spelling of spellings(secret.value)) if (!placeholders.has(spelling)) placeholders.set(spelling, placeholderFor(secret.name));
+	}
+	const ordered = [...placeholders.keys()].sort((x, y) => y.length - x.length);
+	store().placeholders = placeholders;
+	store().pattern = ordered.length > 0 ? new RegExp(ordered.map(escapeRegExp).join("|"), "g") : undefined;
 	return secrets.length - kept.length;
 }
 
-/** `text` with every registered secret value replaced by its placeholder; the same string when none occurs. */
+/** `text` with every registered secret value replaced by its placeholder, in one pass; the same string when none occurs. */
 export function redactSecretValues(text: string): string {
-	let out = text;
-	for (const { spelling, placeholder } of store().plan) out = out.replaceAll(spelling, placeholder);
-	return out;
+	const { pattern, placeholders } = store();
+	return pattern ? text.replace(pattern, (match) => placeholders.get(match) ?? match) : text;
 }
 
 /** Whether any secret value is registered. */
 export function hasSecretValues(): boolean {
-	return store().plan.length > 0;
+	return store().pattern !== undefined;
+}
+
+/** Whether `text` carries a placeholder that stands for a registered value: writing it to a file would replace the real value with the placeholder. */
+export function carriesSecretPlaceholder(text: string): boolean {
+	for (const placeholder of new Set(store().placeholders.values())) if (text.includes(placeholder)) return true;
+	return false;
 }
 
 /** The problems in a profile's secret file names, for the resolver to report with the rest. */
 export function secretFileProblems(names: readonly string[]): string[] {
-	return names.filter((name) => typeof name !== "string" || name.trim() === "" || /[\\/]/.test(name)).map((name) => `secret file "${name}" must be a bare file name`);
+	// A name is matched literally, so a path or a glob would silently protect nothing.
+	return names.filter((name) => typeof name !== "string" || name.trim() === "" || /[\\/*?[\]]/.test(name)).map((name) => `secret file "${name}" must be a bare file name, with no folder and no wildcard`);
 }
 
 /** A character a file name continues with: a secret file's name is a match only when none sits beside it. */

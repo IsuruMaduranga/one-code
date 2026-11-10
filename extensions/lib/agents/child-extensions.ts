@@ -46,19 +46,21 @@ import { activeProfile } from "../profile/profile.ts";
 export const CHILD_EXTENSIONS = [
 	"request/kept-thinking/index.ts", "request/ledger/index.ts", "request/system-reminder/index.ts", "request/tool-search/index.ts", "request/context-management/index.ts", "context/compaction/index.ts", "request/ledger/wire.ts", "request/cache-marks/index.ts", "context/claude-context/index.ts", "request/tool-call-corruption/child.ts",
 	"safety/file-tracker/index.ts", "tools/search-tools/index.ts", "tools/skill/index.ts", "tools/bash/child.ts", "tools/powershell/child.ts", "tools/web/index.ts", "tools/web-fetch/index.ts", "tools/notebook/index.ts",
-	// Last: its `tool_result` handler redacts what the ones above return.
-	"safety/secret-values/index.ts",
 ];
+
+/** Loaded after everything else a child loads, a product's own child extensions included: its `tool_result` handler redacts what theirs return (safety/secret-values). */
+export const LAST_CHILD_EXTENSION = "safety/secret-values/index.ts";
 
 const entryPath = (entry: string) => join(EXTENSIONS_DIR, entry);
 
-export const CHILD_EXTENSION_PATHS = CHILD_EXTENSIONS.map(entryPath);
+export const CHILD_EXTENSION_PATHS = [...CHILD_EXTENSIONS, LAST_CHILD_EXTENSION].map(entryPath);
 
 /**
  * What a child session loads under the profile in force: the base entries
  * whose feature is on (an off feature's entry would no-op anyway; leaving it
  * out keeps the child's load list honest), then the profile's own child
- * extensions (`Profile.childExtensions`), after every base entry.
+ * extensions (`Profile.childExtensions`), after every base entry, then the
+ * redaction of secret values, last.
  */
 export function childExtensionPaths(): string[] {
 	const profile = activeProfile();
@@ -66,5 +68,5 @@ export function childExtensionPaths(): string[] {
 		const id = featureOfEntry(entry);
 		return id === undefined || profile.features.has(id);
 	}).map(entryPath);
-	return [...base, ...profile.childExtensionPaths];
+	return [...base, ...profile.childExtensionPaths, entryPath(LAST_CHILD_EXTENSION)];
 }

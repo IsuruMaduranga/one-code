@@ -4,12 +4,16 @@
  * are replaced in every tool result and task notification.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { CHILD_EXTENSIONS } from "../../extensions/lib/agents/child-extensions.ts";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { childExtensionPaths, LAST_CHILD_EXTENSION } from "../../extensions/lib/agents/child-extensions.ts";
 import { frameForDelivery } from "../../extensions/lib/notify/notifications.ts";
 import { resetProcessStateForTest } from "../../extensions/lib/profile/process-state.ts";
 import { setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 import { commandNamesSecretFile, isSecretFilePath, MIN_SECRET_LENGTH, redactSecretValues, setSecretValues } from "../../extensions/lib/profile/secrets.ts";
 import { decide, type DecideInput } from "../../extensions/lib/rules/matcher.ts";
+import { toolResultWords } from "../../extensions/lib/request/tool-results-words.ts";
 import secretValuesExtension from "../../extensions/safety/secret-values/index.ts";
 import { createFakePi } from "./helpers/fake-pi.ts";
 import { useProfile } from "./helpers/profile.ts";
@@ -65,6 +69,7 @@ describe("secret files, by name", () => {
 
 	it("refuses a name that is a path", () => {
 		expect(() => use(["tests/Config.toml"])).toThrow(/secret file "tests\/Config.toml" must be a bare file name/);
+		expect(() => use(["*.toml"])).toThrow(/no wildcard/);
 	});
 });
 
@@ -73,6 +78,11 @@ describe("secret values", () => {
 		setSecretValues("a", [{ value: "hunter2-token", name: "db_password" }, { value: "hunter2-token-long" }]);
 		expect(redactSecretValues("x hunter2-token y hunter2-token-long z hunter2-token")).toBe("x [secret:db_password] y [secret] z [secret:db_password]");
 		expect(redactSecretValues("nothing here")).toBe("nothing here");
+	});
+
+	it("never rewrites a placeholder it has just written", () => {
+		setSecretValues("a", [{ value: "s3cr3tPass!", name: "db_password" }, { value: "db_password", name: "key" }]);
+		expect(redactSecretValues("s3cr3tPass! and db_password")).toBe("[secret:db_password] and [secret:key]");
 	});
 
 	it("also replaces the JSON-escaped spelling", () => {
@@ -120,7 +130,33 @@ describe("the secret-values extension", () => {
 		expect(await result({ content: [{ type: "text", text: "clean" }] })).toBeUndefined();
 	});
 
-	it("loads last in a child session, after the tools whose results it rewrites", () => {
-		expect(CHILD_EXTENSIONS.at(-1)).toBe("safety/secret-values/index.ts");
+	it("loads last in a child session, after a product's own child extensions", () => {
+		const dir = mkdtempSync(join(tmpdir(), "secrets-child-"));
+		try {
+			mkdirSync(join(dir, "extensions", "bal"), { recursive: true });
+			writeFileSync(join(dir, "extensions", "bal", "child.ts"), "");
+			useProfile({ childExtensions: ["extensions/bal/child.ts"] }, dir);
+			const paths = childExtensionPaths().map((path) => path.replaceAll("\\", "/"));
+			expect(paths.at(-1)?.endsWith(`extensions/${LAST_CHILD_EXTENSION}`)).toBe(true);
+			expect(paths.at(-2)?.endsWith("extensions/bal/child.ts")).toBe(true);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("refuses a file write whose input carries a placeholder, which would replace the real value", async () => {
+		const fake = createFakePi();
+		secretValuesExtension(fake.pi as never);
+		const [gate] = fake.handlers.get("tool_call") ?? [];
+		const PLACEHOLDER_REFUSAL = toolResultWords().secretPlaceholderWrite;
+		const write = { toolName: "write", input: { path: "settings.json", content: '{"password": "[secret:db_password]"}' } };
+		expect(await gate(write, {})).toBeUndefined();
+		setSecretValues("a", [{ value: "hunter2-token", name: "db_password" }]);
+		expect(await gate(write, {})).toEqual({ block: true, reason: PLACEHOLDER_REFUSAL });
+		expect(await gate({ toolName: "edit", input: { path: "a", edits: [{ oldText: "x", newText: "[secret:db_password]" }] } }, {})).toEqual({ block: true, reason: PLACEHOLDER_REFUSAL });
+		// Another name's placeholder, a clean write and a non-writing tool pass.
+		expect(await gate({ toolName: "write", input: { path: "a", content: "[secret:other]" } }, {})).toBeUndefined();
+		expect(await gate({ toolName: "write", input: { path: "a", content: "ok" } }, {})).toBeUndefined();
+		expect(await gate({ toolName: "bash", input: { command: "echo '[secret:db_password]'" } }, {})).toBeUndefined();
 	});
 });

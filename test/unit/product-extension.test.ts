@@ -9,7 +9,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
-import { CHILD_EXTENSIONS } from "../../extensions/lib/agents/child-extensions.ts";
+import { CHILD_EXTENSIONS, LAST_CHILD_EXTENSION } from "../../extensions/lib/agents/child-extensions.ts";
 import { PRODUCT_EXTENSIONS_DIR, PRODUCT_EXTENSIONS_ENTRY } from "../../extensions/lib/profile/features.ts";
 import { PROFILE_DIR } from "../../extensions/lib/profile/profile.ts";
 import { redactSecretValues } from "../../extensions/lib/profile/secrets.ts";
@@ -32,7 +32,7 @@ describe("a product's own extensions", () => {
 		// A child sends its agent's own prompt, or as a fork the parent's (which
 		// already carries the section), so the system-prompt extension never
 		// loads there and an announcement in a child is ignored.
-		expect(CHILD_EXTENSIONS.some((entry) => entry.startsWith("request/system-prompt/"))).toBe(false);
+		expect([...CHILD_EXTENSIONS, LAST_CHILD_EXTENSION].some((entry) => entry.startsWith("request/system-prompt/"))).toBe(false);
 	});
 
 	it.skipIf(!existsSync(probe))("the fixture's probe reaches the request through the SDK's channels", async () => {

@@ -73,14 +73,14 @@
 			"extensions/tools/lsp/index.ts",
 			"extensions/tools/mcp/index.ts",
 			"extensions/commands/doctor/index.ts",
-			"extensions/safety/secret-values/index.ts",
 			"extensions/request/context-management/index.ts",
 			"extensions/context/compaction/index.ts",
 			"extensions/context/idle-compact/index.ts",
 			"extensions/request/ledger/wire.ts",
 			"extensions/request/cache-marks/index.ts",
 			"extensions/request/system-prompt/index.ts",
-			"profile/extensions/*/index.ts"
+			"profile/extensions/*/index.ts",
+			"extensions/safety/secret-values/index.ts"
 		],
 		"themes": [
 			"./profile/themes"

@@ -11,7 +11,8 @@
  * classifier ruleset, and the pre-gate's rule holds: an option outside the
  * table, another subcommand or a bare command escalates, so a gap costs one
  * classifier call, never a bypass. A declared command's operands are names
- * (a package, a keyword), never read as files.
+ * (a package, a keyword), never read as files; each must be one short word
+ * (`isNameOperand`), since such a command may reach the network.
  *
  * Bash only: the PowerShell pre-gate clears no external program by name.
  */
@@ -30,7 +31,19 @@ export interface ReadOnlySubcommand {
 export type ReadOnlyCommands = Readonly<Record<string, Readonly<Record<string, ReadOnlySubcommand>>>>;
 
 const NAME = /^[a-z][a-z0-9_-]*$/;
-const OPTION = /^--?[A-Za-z0-9][A-Za-z0-9-]*$/;
+/** `-m` or `--module`: the pre-gate reads a single dash followed by letters as a cluster of short options, so `-module` could never match. */
+const OPTION = /^(-[A-Za-z0-9]|--[A-Za-z0-9][A-Za-z0-9-]*)$/;
+
+/**
+ * An operand of a declared subcommand is a name (a package, a keyword, a
+ * selector): one short word. The command may reach the network, so a long
+ * or multi-word operand, which could carry a file's contents out, is not
+ * cleared and goes to the classifier.
+ */
+export const MAX_NAME_OPERAND = 100;
+export function isNameOperand(value: string): boolean {
+	return value.length <= MAX_NAME_OPERAND && !/\s/.test(value);
+}
 
 /** Commands the base judges itself: a profile entry could only weaken that judgement. */
 const BASE_JUDGED = new Set([...Object.keys(READ_ONLY_SPECS), "git", "find"]);

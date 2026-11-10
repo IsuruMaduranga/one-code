@@ -7,7 +7,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { CHILD_EXTENSIONS } from "../../extensions/lib/agents/child-extensions.ts";
+import { CHILD_EXTENSIONS, LAST_CHILD_EXTENSION } from "../../extensions/lib/agents/child-extensions.ts";
 import { enabledFeatures, FEATURE_IDS, FEATURES, featureOfEntry, featureProblems, PRODUCT_EXTENSIONS_ENTRY, TOOL_FEATURES } from "../../extensions/lib/profile/features.ts";
 
 const repo = join(import.meta.dirname, "../..");
@@ -18,14 +18,14 @@ const registered = FEATURE_IDS.flatMap((id) => FEATURES[id].entries.map((entry) 
 
 describe("feature registry", () => {
 	it("covers every entry pi loads, in the main session and in children", () => {
-		for (const entry of [...manifestEntries, ...CHILD_EXTENSIONS]) expect(featureOfEntry(entry), entry).toBeDefined();
+		for (const entry of [...manifestEntries, ...CHILD_EXTENSIONS, LAST_CHILD_EXTENSION]) expect(featureOfEntry(entry), entry).toBeDefined();
 	});
 
-	it("loads a product's own extensions last, after system-prompt", () => {
+	it("loads a product's own extensions after system-prompt, and the secret redaction after them", () => {
 		// After every base listener (the bus does not replay) and after the
-		// request pipeline, and the only entry outside `extensions/`.
-		expect(manifest.pi.extensions.at(-1)).toBe(PRODUCT_EXTENSIONS_ENTRY);
-		expect(manifest.pi.extensions.at(-2)).toBe("extensions/request/system-prompt/index.ts");
+		// request pipeline; then secret-values, whose result handler must run
+		// after a product's own. The glob is the only entry outside `extensions/`.
+		expect(manifest.pi.extensions.slice(-3)).toEqual(["extensions/request/system-prompt/index.ts", PRODUCT_EXTENSIONS_ENTRY, "extensions/safety/secret-values/index.ts"]);
 		expect(manifest.pi.extensions.filter((path) => !path.startsWith("extensions/"))).toEqual([PRODUCT_EXTENSIONS_ENTRY]);
 	});
 

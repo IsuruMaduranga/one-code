@@ -1,8 +1,8 @@
 /**
  * What the base's shared tool-result rewrites need from a profile (types
  * only): the text for a result with no output, pi's empty find, a result too
- * large to send whole (lib/request/persisted-output.ts), and a call the user declined
- * (lib/consent/user-denial.ts). The `<persisted-output>` tags, the size format and
+ * large to send whole (lib/request/persisted-output.ts), a call the user declined
+ * (lib/consent/user-denial.ts), and a write refused for carrying a secret placeholder. The `<persisted-output>` tags, the size format and
  * the preview's length are the base's.
  */
 
@@ -17,4 +17,6 @@ export interface ToolResultsText {
 	previewHeading(p: { kb: number }): string;
 	/** The user declined the call; `feedback` is what they typed, when anything. */
 	userDenial(p: { feedback?: string }): string;
+	/** A file write refused because its input carries a `[secret:…]` placeholder, which would replace the real value it stands for (safety/secret-values). */
+	secretPlaceholderWrite: string;
 }

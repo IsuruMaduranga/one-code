@@ -151,6 +151,13 @@ describe("a profile's language server", () => {
 		expect(state.instances[0].root).toBe(dir);
 	});
 
+	it("starts no server for a request that arrives after the session ended", async () => {
+		await run("session_start", {}, createFakeCtx({ cwd: dir }));
+		await run("session_shutdown", {}, createFakeCtx({ cwd: dir }));
+		await expect(lspRequest(fake.events, { server: "ballerina", file: "main.bal", method: "x/y" })).rejects.toThrow(/No session is running/);
+		expect(state.instances).toHaveLength(0);
+	});
+
 	it("rejects a request for a server the profile does not declare, or with no listener", async () => {
 		await run("session_start", {}, createFakeCtx({ cwd: dir }));
 		await expect(lspRequest(fake.events, { server: "nope", file: "a.bal", method: "x" })).rejects.toThrow(/declares no language server named "nope"/);

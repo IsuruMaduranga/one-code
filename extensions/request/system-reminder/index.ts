@@ -31,7 +31,7 @@ import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../../lib/request/ledger/
 import { type EntryLike, makeRecord, type PendingRecordData, RECORD, stateOnBranch } from "../../lib/request/ledger/records.ts";
 import { recordState } from "../../lib/request/ledger/state.ts";
 import { contentHash } from "../../lib/request/ledger/wire.ts";
-import { acceptsAnthropicWire, anthropicModelId } from "../../lib/models/model-policy.ts";
+import { acceptsAnthropicWire } from "../../lib/models/model-policy.ts";
 import { claudeFamily } from "../../lib/models/model-tier.ts";
 import { extensionVersion } from "../../lib/app/package-version.ts";
 import { LiveReminders, type OneShot, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, renderReminders, type ReminderPayload, stickyFact } from "../../lib/request/reminders.ts";
@@ -212,7 +212,8 @@ function systemReminderExtension(pi: ExtensionAPI) {
 		// Claude Code's per-turn <total_tokens> shapes; first-party Fable also
 		// gets its clear_at nudge after each tool result.
 		const systemRoleWire = acceptsAnthropicWire(model, "system-role");
-		const nudge = layout === "anthropic" && systemRoleWire && claudeFamily(anthropicModelId(model) ?? model.id) === "fable";
+		// The clear_at beta is Anthropic's own provider only: the `system-role` wire feature a product lists covers the system message beta, not this one.
+		const nudge = layout === "anthropic" && model.provider === "anthropic" && claudeFamily(model.id) === "fable";
 		payload = withTurnBudgetMessages(payload, { shape, systemRole: layout !== undefined, role, left: countdowns, nudge, markers: budgetMarkers(), stackCarrier: epochRequest }) ?? payload;
 		if (payload !== event.payload && shape === "anthropic") {
 			const key = messagesKey(shape);

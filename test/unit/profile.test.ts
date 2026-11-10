@@ -115,7 +115,8 @@ describe("resolveProfile", () => {
 			writeFileSync(join(dir, "extensions", "ballerina", "child.ts"), "");
 			setActiveProfileForTest(resolveProfile({ ...empty, childExtensions: ["extensions/ballerina/child.ts"] }, {}, dir));
 			const paths = childExtensionPaths();
-			expect(paths.at(-1)).toBe(join(dir, "extensions", "ballerina", "child.ts"));
+			// Before the secret redaction, which loads last of all (secrets.test.ts).
+			expect(paths.at(-2)).toBe(join(dir, "extensions", "ballerina", "child.ts"));
 			expect(endsWith(paths, "tools/notebook/index.ts")).toBe(true);
 			expect(() => resolveProfile({ ...empty, childExtensions: ["extensions/ballerina/chlid.ts"] }, {}, dir)).toThrow(/child extension "extensions\/ballerina\/chlid.ts" does not exist/);
 		} finally {

@@ -654,6 +654,7 @@ export const toolResults: NonNullable<ProfileText["toolResults"]> = {
 	persisted: (p) => mark("toolResults.persisted", p),
 	previewHeading: (p) => mark("toolResults.previewHeading", p),
 	userDenial: (p) => mark("toolResults.userDenial", p),
+	secretPlaceholderWrite: "[toolResults.secretPlaceholderWrite]",
 };
 
 export const toolCallCorruption: NonNullable<ProfileText["toolCallCorruption"]> = {

@@ -61,6 +61,10 @@ describe("a profile's read-only commands", () => {
 			"bal disc* ballerinax/kafka",
 			"./bal discover ballerinax/kafka",
 			"bal discover ballerinax/kafka > out.txt && rm -rf x",
+			// A command that may reach the network clears only short names, never a sentence or an expansion.
+			`bal search "${"x".repeat(101)}"`,
+			'bal search "the whole contents of a file"',
+			"bal search $QUERY",
 		]) {
 			expect(verdict(command), command).toBe("escalate");
 		}
@@ -80,5 +84,6 @@ describe("a profile's read-only commands", () => {
 		expect(load({ bal: {} })).toThrow(/lists no subcommand/);
 		expect(load({ "./bal": { discover: {} } })).toThrow(/must be a bare lowercase command name/);
 		expect(load({ bal: { discover: { none: "refresh" } } })).toThrow(/"refresh" is not an option of "bal discover"/);
+		expect(load({ bal: { discover: { required: "-filter" } } })).toThrow(/"-filter" is not an option of "bal discover"/);
 	});
 });

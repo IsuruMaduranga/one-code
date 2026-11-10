@@ -31,6 +31,7 @@
  */
 
 import { productReadOnlySubcommands } from "../profile/profile.ts";
+import { isNameOperand } from "./product-read-only.ts";
 import { isProtectedPath } from "../rules/protected-paths.ts";
 import { isExecutionPrimitivePath, isSensitivePath } from "./sensitive.ts";
 import { isWithin, resolveForContainment, toAbsoluteBash, touchesGuardedPath } from "./paths.ts";
@@ -1206,6 +1207,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 			} else {
 				const check = checkOptions(spec, rest);
 				if (!check.ok) escalate(`runs ${name} ${subcommand.value} and ${check.reason}`);
+				else if (!rest.every((word) => !word.dynamic && isNameOperand(word.value))) escalate(`runs ${name} ${subcommand.value} with an argument that is not a short name, and the command may send it over the network`);
 			}
 		} else if (!isMutation) {
 			escalate(`runs ${name}, which is not on the read-only allowlist`);

@@ -88,12 +88,13 @@ export type FeatureId = keyof typeof FEATURES;
 export const PRODUCT_EXTENSIONS_DIR = "extensions";
 
 /**
- * The manifest's last entry: a product's own main-session extensions, one
+ * The manifest's entry after `system-prompt`: a product's own main-session extensions, one
  * folder each under `profile/extensions/`. pi expands the glob in place,
  * sorted by path, and loads nothing when no folder matches. It comes after
  * `system-prompt`, so every base listener exists when a product extension
  * announces at load, and after the request pipeline, so a product extension
- * must not shape the request tail. These entries belong to no feature: the
+ * must not shape the request tail. Only `secret-values` loads after it, to
+ * redact what a product's result handlers add. These entries belong to no feature: the
  * product ships the ones it wants (working-docs/decisions/bi-fork.md).
  */
 export const PRODUCT_EXTENSIONS_ENTRY = `profile/${PRODUCT_EXTENSIONS_DIR}/*/index.ts`;
