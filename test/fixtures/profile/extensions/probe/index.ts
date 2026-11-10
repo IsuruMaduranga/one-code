@@ -8,7 +8,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { DEFER_CHANNEL, type DeferRequest, REMINDER_CHANNEL, type ReminderPayload, setSecretValues, SYSTEM_PROMPT_SECTION_CHANNEL, type SystemPromptSection } from "../../../extensions/sdk/extension.ts";
+import { DEFER_CHANNEL, type DeferRequest, REMINDER_CHANNEL, type ReminderPayload, setSecretValues, SYSTEM_PROMPT_SECTION_CHANNEL, type SystemPromptSection, toolRenderers } from "../../../extensions/sdk/extension.ts";
 
 export const PROBE_TOOL = "fixture_probe";
 export const PROBE_SECTION = "[fixture:product-section]";
@@ -22,6 +22,7 @@ export default function probe(pi: ExtensionAPI) {
 		label: "Fixture probe",
 		description: "[fixture:product-tool]",
 		parameters: Type.Object({}),
+		...toolRenderers("Fixture probe"),
 		execute: async () => ({ content: [{ type: "text", text: "[fixture:product-tool-result]" }], details: undefined }),
 	});
 	pi.events.emit(DEFER_CHANNEL, { name: PROBE_TOOL } satisfies DeferRequest);

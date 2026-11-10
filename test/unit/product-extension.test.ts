@@ -44,6 +44,8 @@ describe("a product's own extensions", () => {
 		fake.events.on(REMINDER_CHANNEL, (data) => seen.reminders.push(data));
 		module.default(fake.pi as never);
 		expect(fake.tools.has(module.PROBE_TOOL)).toBe(true);
+		// The base's rows in the terminal, through the SDK.
+		expect(fake.tools.get(module.PROBE_TOOL)?.renderShell).toBe("self");
 		expect(seen.deferred).toEqual([{ name: module.PROBE_TOOL }]);
 		expect(seen.sections.map((section) => [section.place, section.render({ tier: "cheap", taskTools: false, tools: undefined })])).toEqual([["tail", module.PROBE_SECTION]]);
 		expect(redactSecrets(`out: ${module.PROBE_SECRET}`)).toBe("out: [secret:fixture]");
