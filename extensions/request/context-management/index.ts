@@ -40,6 +40,7 @@
 
 import { feature } from "../../lib/profile/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { acceptsAnthropicWire } from "../../lib/models/model-policy.ts";
 import { isAnthropicOAuth } from "../../lib/request/anthropic-auth.ts";
 import { looksLikeAnthropicRequest } from "../../lib/request/anthropic-payload.ts";
 import { CACHE_RETENTION_ENV, mainSessionCacheRetention } from "../../lib/request/cache-retention.ts";
@@ -124,7 +125,8 @@ interface AnthropicishModel {
 }
 
 /**
- * Default-on only where verified: first-party Anthropic. The env var overrides
+ * Default-on only where verified: first-party Anthropic, or a provider whose
+ * profile entry lists `context-management`. The env var overrides
  * both ways so a proxy user can opt in and anyone can opt out. Checked per
  * request because the model can change mid-session.
  */
@@ -132,7 +134,8 @@ export function clearThinkingEnabled(flag: string | undefined, model: Anthropici
 	if (model?.api !== "anthropic-messages") return false;
 	if (flag === "0") return false;
 	if (flag === "1") return true;
-	return model.provider === "anthropic" && (model.baseUrl ?? "").includes("api.anthropic.com");
+	if (model.provider === "anthropic") return (model.baseUrl ?? "").includes("api.anthropic.com");
+	return acceptsAnthropicWire(model, "context-management");
 }
 
 /**

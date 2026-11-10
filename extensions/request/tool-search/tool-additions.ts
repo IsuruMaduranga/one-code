@@ -15,6 +15,7 @@
  * (a one-shot pinned there).
  */
 
+import { acceptsAnthropicWire } from "../../lib/models/model-policy.ts";
 import { MID_CONVERSATION_SYSTEM_BETA, MID_CONVERSATION_TOOL_CHANGES_BETA, reseatMessageMark } from "../../lib/request/anthropic-payload.ts";
 import { byWireCallId, systemRoleLayout, type WireMessage, type WirePart, withoutParts } from "../../lib/request/system-role.ts";
 import { toolSearchWords } from "./words.ts";
@@ -25,11 +26,12 @@ export const TOOL_ADDITION_BETAS = [MID_CONVERSATION_SYSTEM_BETA, MID_CONVERSATI
 
 /**
  * Whether the model takes Claude Code's reference-form `tool_addition`:
- * first-party Anthropic on the system-role layout, with pi's catalog flag for
+ * first-party Anthropic (or a provider whose profile entry lists
+ * `tool-additions`) on the system-role layout, with pi's catalog flag for
  * mid-conversation tool changes (Opus 5.5, Sonnet 5.5 and Fable 5.1 among them).
  */
 export function supportsToolAdditions(model: { id?: string; provider?: string; api?: string; compat?: unknown } | undefined): boolean {
-	if (!model || model.provider !== "anthropic" || systemRoleLayout({ id: model.id ?? "", api: model.api ?? "", compat: model.compat }) !== "anthropic") return false;
+	if (!model || !acceptsAnthropicWire(model, "tool-additions") || systemRoleLayout({ id: model.id ?? "", api: model.api ?? "", compat: model.compat }) !== "anthropic") return false;
 	return (model.compat as { supportsMidConvoToolChanges?: boolean } | undefined)?.supportsMidConvoToolChanges === true;
 }
 

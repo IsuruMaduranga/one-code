@@ -25,6 +25,7 @@ import { shareModuleForTest, sharedModule } from "./shared-module.ts";
 import { enabledFeatures, type FeatureId, featureProblems, isGuardFeature, PRODUCT_EXTENSIONS_DIR, TOOL_FEATURES } from "./features.ts";
 import type { LiveTools } from "./live-tools.ts";
 import type { Profile, ProfileText, ToolSwitch } from "./profile-contract.ts";
+import { type ProductProvider, providerProblems } from "./product-providers.ts";
 import type { SourceProvider } from "./sources.ts";
 
 export const PROFILE_DIR = join(PACKAGE_ROOT, "profile");
@@ -149,6 +150,8 @@ export interface ResolvedProfile {
 	sourcesModule?: string;
 	/** The user's global AGENTS.md files besides pi's own, `~/` unexpanded. */
 	globalAgentsFiles: readonly string[];
+	/** The profile's provider entries, by pi provider name (lib/profile/product-providers.ts). */
+	providers: ReadonlyMap<string, ProductProvider>;
 }
 
 function envList(env: NodeJS.ProcessEnv, name: string): string[] {
@@ -183,8 +186,8 @@ function childExtensionProblems(entries: readonly string[], profileDir: string):
  * Throws, naming every problem at once, when it turns off a required feature,
  * names an unknown feature, misspells a base tool, marks one autoAllow, turns
  * off or defers a pinned tool, names a child extension that is missing or
- * outside the profile's extensions folder, or leaves out a text group a
- * feature that is on reads.
+ * outside the profile's extensions folder, declares a provider entry the
+ * base cannot read, or leaves out a text group a feature that is on reads.
  */
 export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profileDir: string): ResolvedProfile {
 	const featureMap: Partial<Record<string, boolean>> = { ...profile.features };
@@ -205,6 +208,7 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		if (sw?.deferred === true) problems.push(`"${name}" cannot be deferred`);
 	}
 	problems.push(...childExtensionProblems(profile.childExtensions, profileDir));
+	problems.push(...providerProblems(profile.providers ?? {}));
 	if (problems.length > 0) throw new Error(`Invalid profile: ${problems.join("; ")}.`);
 	const features = enabledFeatures(featureMap);
 	const disabledTools = new Set([...tools].filter(([, sw]) => sw.enabled === false).map(([name]) => name));
@@ -226,6 +230,7 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		text,
 		...(profile.sources ? { sourcesModule: resolve(profileDir, profile.sources) } : {}),
 		globalAgentsFiles: profile.globalAgentsFiles ?? [],
+		providers: new Map(Object.entries(profile.providers ?? {})),
 	};
 }
 

@@ -35,6 +35,7 @@ export type { NativeFallback, NativeWebText } from "../lib/request/native-web-te
 export type { NotificationsText, OneShotWork, TaskSummary } from "../lib/notify/notifications-text.ts";
 export type { WorkflowSizeGuideline } from "../lib/profile/product-settings.ts";
 export type { Profile, ProfileText } from "../lib/profile/profile-contract.ts";
+export type { ProductProvider, ProviderVendor, WireFeature } from "../lib/profile/product-providers.ts";
 export type { PowerShellEditionName, ShellBlock, ShellEnd, ShellText } from "../lib/shell-run/shell-text.ts";
 export type { ToolResultsText } from "../lib/request/tool-results-text.ts";
 export type { DescriptionForm } from "../lib/profile/tool-variants.ts";

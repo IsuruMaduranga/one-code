@@ -27,8 +27,9 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import { readJsonFile } from "../core/atomic-write.ts";
 import { autoSelectable, catalogModelFor, sizeFromName, smallByName, TINY_PARAMS } from "./model-catalog.ts";
 import {
-	BUILTIN_PROVIDER_POLICIES,
+	anthropicModelId,
 	baseModelId,
+	isKnownProvider,
 	isDatedDuplicate,
 	isExperimentalBuild,
 	modelIdentity,
@@ -69,7 +70,8 @@ export function tierOverride(env: NodeJS.ProcessEnv = process.env): PromptTier |
 }
 
 /**
- * Anthropic first-party frontier gate: Opus ≥ 4.8, Sonnet ≥ 5.5 and every
+ * Anthropic first-party frontier gate (Anthropic's provider, or one the
+ * profile says serves Anthropic's models): Opus ≥ 4.8, Sonnet ≥ 5.5 and every
  * Fable — the models Claude Code gives its short prompt and tool forms (Opus
  * 4.7 and Sonnet 5 get the long ones; findings §56). Haiku 5 and later get the
  * short forms too, but only for the prompt (`isHaikuWithFrontierForms`).
@@ -80,8 +82,9 @@ export function tierOverride(env: NodeJS.ProcessEnv = process.env): PromptTier |
  * `opus-4-8`/`opus-5` ($5/M), so cost ranking would misclassify it.
  */
 function isAnthropicFrontier(model: Model<Api>): boolean {
-	if (model.provider !== "anthropic" || model.id.includes("haiku")) return false;
-	const version = parseClaudeVersion(model.id);
+	const id = anthropicModelId(model);
+	if (id === undefined || id.includes("haiku")) return false;
+	const version = parseClaudeVersion(id);
 	if (!version) return false;
 	if (version.family === "fable") return true;
 	if (version.family === "sonnet") return version.major > 5 || (version.major === 5 && version.minor >= 5);
@@ -95,8 +98,7 @@ function isAnthropicFrontier(model: Model<Api>): boolean {
  * tier, so the cost algorithm never offers one as an Opus-class substitute.
  */
 function isHaikuWithFrontierForms(model: Model<Api>): boolean {
-	if (model.provider !== "anthropic") return false;
-	const major = model.id.match(/^claude-haiku-(\d+)(?:-|$)/)?.[1];
+	const major = anthropicModelId(model)?.match(/^claude-haiku-(\d+)(?:-|$)/)?.[1];
 	return major !== undefined && Number(major) >= 5;
 }
 
@@ -176,7 +178,7 @@ export function classifyModelTier(
 	const size = sizeFromName(id);
 	if (size !== undefined && size < TINY_PARAMS) return { tier: "tiny", reason: "not in the catalogs; a small size in its id" };
 	if (size === undefined && smallByName(id)) return { tier: "tiny", reason: "not in the catalogs; a small-model name" };
-	if (modelIdentity(model).confidence === "opaque" && !(model.provider in BUILTIN_PROVIDER_POLICIES)) {
+	if (modelIdentity(model).confidence === "opaque" && !isKnownProvider(model.provider)) {
 		return { tier: "tiny", reason: "custom provider, not in the catalogs" };
 	}
 	if (pricedInput(model) === undefined) return { tier: "tiny", reason: "unpriced, not in the catalogs" };
@@ -257,8 +259,9 @@ export function taskToolsEnabled(
 	if (TRUTHY_ENV.has(knobValue("ENABLE_TODO_TOOLS", env)?.trim().toLowerCase() ?? "")) return true;
 	if (!model) return true;
 	if ((tier ?? resolveModelTier(model, env)) === "frontier") return false;
-	if (model.provider !== "anthropic") return true;
-	const version = parseClaudeVersion(model.id);
+	const id = anthropicModelId(model);
+	if (id === undefined) return true;
+	const version = parseClaudeVersion(id);
 	return !(version?.family === "sonnet" && version.major >= 5);
 }
 

@@ -14,6 +14,7 @@ import { brandedId } from "../profile/brand.mjs";
 import { createHash } from "node:crypto";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { toolResultsOnBranch } from "./branch-restore.ts";
+import { acceptsAnthropicWire, anthropicModelId } from "../models/model-policy.ts";
 import { parseClaudeId } from "../profile/claude-id.ts";
 import { leadingToolsItem, toolsItemFor } from "./ledger/wire.ts";
 import { RESPONSES_APIS } from "./system-role.ts";
@@ -168,7 +169,8 @@ export function deferralEnabled(tools: readonly { name: string }[]): boolean {
 
 /**
  * Whether Anthropic accepts client-side `tool_reference` blocks for this model,
- * with the model's own compat flag winning: first-party Anthropic, Claude 4.5
+ * with the model's own compat flag winning: first-party Anthropic (or a
+ * provider whose profile entry lists `tool-references`), Claude 4.5
  * or newer, Haiku 4.5 and later Haikus included (they take references with no
  * beta, and an eager append there rewrites the whole cache: findings §55 P4
  * for Haiku 4.5, §67 for Haiku 5.5). Older Haikus stay out.
@@ -178,8 +180,9 @@ export function supportsToolReferences(
 ): boolean {
 	if (!model) return false;
 	if (typeof model.compat?.supportsToolReferences === "boolean") return model.compat.supportsToolReferences;
-	if (model.provider !== "anthropic" || !model.id) return false;
-	const version = parseClaudeId(model.id);
+	const id = acceptsAnthropicWire(model, "tool-references") ? anthropicModelId(model) : undefined;
+	if (id === undefined) return false;
+	const version = parseClaudeId(id);
 	return version !== undefined && (version.major > 4 || (version.major === 4 && (version.minor ?? 0) >= 5));
 }
 

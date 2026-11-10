@@ -1,4 +1,6 @@
 import { type Api, clampThinkingLevel, type Model, type ThinkingLevel } from "@earendil-works/pi-ai";
+import type { ProductProvider, WireFeature } from "../profile/product-providers.ts";
+import { activeProfile } from "../profile/profile.ts";
 
 export { isClaudeFamilyModel } from "./model-family.ts";
 
@@ -116,7 +118,27 @@ export interface ModelIdentity {
 	confidence: "exact" | "family" | "opaque";
 }
 
-export const providerPolicy = (provider: string): ProviderPolicy => BUILTIN_PROVIDER_POLICIES[provider] ?? opaque();
+/** The profile's entry for a provider (lib/profile/product-providers.ts), if it declares one. */
+export function productProvider(provider: string | undefined): ProductProvider | undefined {
+	return provider === undefined ? undefined : activeProfile().providers.get(provider);
+}
+
+/** Whether the base or the profile knows the provider: anything else is a custom provider whose ids can name anything. */
+export function isKnownProvider(provider: string): boolean {
+	return provider in BUILTIN_PROVIDER_POLICIES || productProvider(provider) !== undefined;
+}
+
+/**
+ * A built-in provider's policy, else the profile's: a provider the product
+ * registers and declares is its vendor's direct provider. Anything else is
+ * opaque, so a pi upgrade or a user's own provider fails safe.
+ */
+export const providerPolicy = (provider: string): ProviderPolicy => {
+	const builtin = BUILTIN_PROVIDER_POLICIES[provider];
+	if (builtin) return builtin;
+	const product = productProvider(provider);
+	return product ? direct(product.serves) : opaque();
+};
 
 function canonicalVendor(value: string): string | undefined {
 	return VENDOR_ALIASES[value.toLowerCase()];
@@ -228,6 +250,33 @@ export function modelIdentity(model: Model<Api>): ModelIdentity {
 		normalizedId: model.id,
 		confidence: "exact",
 	};
+}
+
+/**
+ * The Claude id of a row that is Anthropic's own model, as Anthropic writes
+ * it (`claude-opus-4-8`), else undefined: a row of Anthropic's provider, or of
+ * a provider the profile says serves Anthropic's models (a built-in host's id
+ * is read through its own parsing, `us.anthropic.claude-…` on Bedrock). A
+ * gateway or host the profile does not vouch for is never one: its copy
+ * cannot be verified.
+ */
+export function anthropicModelId(model: { provider?: string; id?: string } | undefined): string | undefined {
+	if (!model?.provider || !model.id) return undefined;
+	if (model.provider === "anthropic") return model.id;
+	if (productProvider(model.provider)?.serves !== "anthropic") return undefined;
+	const identity = modelIdentity(model as Model<Api>);
+	return identity.profile === "anthropic" ? identity.normalizedId : undefined;
+}
+
+/**
+ * Whether requests for this model may carry an Anthropic wire feature:
+ * always on Anthropic's own provider (each caller keeps its own model and
+ * dialect checks), and on a product's provider only when its entry lists it.
+ */
+export function acceptsAnthropicWire(model: { provider?: string } | undefined, feature: WireFeature): boolean {
+	if (!model?.provider) return false;
+	if (model.provider === "anthropic") return true;
+	return productProvider(model.provider)?.wire?.includes(feature) === true;
 }
 
 const UNSUITABLE_VARIANT = /:(batch|free|online|thinking)$/i;

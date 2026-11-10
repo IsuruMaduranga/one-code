@@ -10,6 +10,7 @@
  * are folders (agents/, skills/, themes/).
  */
 
+import type { ProductProvider } from "./product-providers.ts";
 import type { ArtifactsText } from "../../tools/artifacts/text.ts";
 import type { AskUserText } from "../../tools/ask-user/text.ts";
 import type { AutoModeSetupText, AutoModeText, ClassifierText } from "../../safety/permissions/auto-mode/text.ts";
@@ -159,6 +160,15 @@ export interface Profile {
 	 * prompt, or as a fork the parent's, which already carries the section.
 	 */
 	childExtensions: readonly string[];
+	/**
+	 * The model providers the product registers or vouches for, by pi provider
+	 * name: whose models each serves and which Anthropic wire features its
+	 * endpoint accepts (`lib/profile/product-providers.ts`). A provider with no
+	 * entry and unknown to the base is opaque: the tiny tier and no Anthropic
+	 * wire features. The product registers the provider itself, in one of its
+	 * own extensions.
+	 */
+	providers?: Readonly<Record<string, ProductProvider>>;
 	/**
 	 * The model-facing text, by owning feature, built once when the profile
 	 * resolves. `live` answers which tools the session can have (the features

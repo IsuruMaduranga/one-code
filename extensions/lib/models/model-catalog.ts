@@ -48,7 +48,7 @@
 
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { type CatalogSources, loadCatalogSources, MODELS_DEV_PROVIDER, type ModelsDevModel, type OpenRouterModel } from "./model-catalog-data.ts";
-import { BUILTIN_PROVIDER_POLICIES, baseModelId, DAY_MS, isExperimentalBuild, isMovingAlias, modelIdentity, stripSnapshotDate, vendorProfile } from "./model-policy.ts";
+import { BUILTIN_PROVIDER_POLICIES, baseModelId, DAY_MS, isExperimentalBuild, isKnownProvider, isMovingAlias, modelIdentity, productProvider, stripSnapshotDate, vendorProfile } from "./model-policy.ts";
 import { productStateDir } from "../profile/paths.ts";
 
 export const TINY_PARAMS = 40e9;
@@ -442,12 +442,13 @@ export function currentCatalog(): CatalogIndex {
  * id; a row models.dev does not list (OpenAI Codex, Azure) is matched by
  * vendor and id through its identity; a host that serves open models under
  * their own names (Together, Fireworks, the Qwen plans) by the bare id, when
- * exactly one vendor has it. A custom provider is never matched: its ids can
- * name anything.
+ * exactly one vendor has it. A custom provider the profile does not declare
+ * is never matched: its ids can name anything.
  */
 export function catalogModelFor(model: { provider: string; id: string }, index: CatalogIndex = currentCatalog()): CatalogModel | undefined {
-	if (!(model.provider in BUILTIN_PROVIDER_POLICIES)) return undefined;
-	const provider = MODELS_DEV_PROVIDER[model.provider] ?? model.provider;
+	if (!isKnownProvider(model.provider)) return undefined;
+	// A provider the profile declares is listed under the vendor it serves.
+	const provider = MODELS_DEV_PROVIDER[model.provider] ?? (model.provider in BUILTIN_PROVIDER_POLICIES ? model.provider : (productProvider(model.provider)?.serves ?? model.provider));
 	const listed = index.byProviderRow.get(`${provider}/${model.id}`) ?? index.byProviderRow.get(`${provider}/${baseModelId(model.id)}`);
 	if (listed) return index.models.get(listed);
 	const identity = modelIdentity(model as Model<Api>);

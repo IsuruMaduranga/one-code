@@ -400,6 +400,12 @@ lib/profile/features.ts
 lib/profile/knobs.ts
 	"not applied on this model"
 
+lib/profile/product-providers.ts
+	"provider \"anthropic\" is the base's own and cannot be redeclared"
+	"provider \"${…}\" serves an unknown vendor \"${…}\""
+	"provider \"${…}\" lists an unknown wire feature \"${…}\""
+	"provider \"${…}\" lists wire features but does not serve anthropic"
+
 lib/profile/product-settings.ts
 	"${…}: root must be a JSON object"
 

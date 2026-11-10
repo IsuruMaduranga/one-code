@@ -31,6 +31,7 @@ import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../../lib/request/ledger/
 import { type EntryLike, makeRecord, type PendingRecordData, RECORD, stateOnBranch } from "../../lib/request/ledger/records.ts";
 import { recordState } from "../../lib/request/ledger/state.ts";
 import { contentHash } from "../../lib/request/ledger/wire.ts";
+import { acceptsAnthropicWire, anthropicModelId } from "../../lib/models/model-policy.ts";
 import { claudeFamily } from "../../lib/models/model-tier.ts";
 import { extensionVersion } from "../../lib/app/package-version.ts";
 import { LiveReminders, type OneShot, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, renderReminders, type ReminderPayload, stickyFact } from "../../lib/request/reminders.ts";
@@ -210,8 +211,8 @@ function systemReminderExtension(pi: ExtensionAPI) {
 		if (layout) payload = withSystemRoleContext(payload, layout, moved, role) ?? payload;
 		// Claude Code's per-turn <total_tokens> shapes; first-party Fable also
 		// gets its clear_at nudge after each tool result.
-		const firstParty = model.provider === "anthropic";
-		const nudge = layout === "anthropic" && firstParty && claudeFamily(model.id) === "fable";
+		const firstParty = acceptsAnthropicWire(model, "system-role");
+		const nudge = layout === "anthropic" && firstParty && claudeFamily(anthropicModelId(model) ?? model.id) === "fable";
 		payload = withTurnBudgetMessages(payload, { shape, systemRole: layout !== undefined, role, left: countdowns, nudge, markers: budgetMarkers(), stackCarrier: epochRequest }) ?? payload;
 		if (payload !== event.payload && shape === "anthropic") {
 			const key = messagesKey(shape);
