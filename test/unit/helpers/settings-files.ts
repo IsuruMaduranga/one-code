@@ -81,3 +81,63 @@ export function useRepositorySettings(): void {
 		installed = false;
 	});
 }
+
+const LADDER_PROVIDER = join(import.meta.dirname, "borrowed-ladder-provider");
+
+/** The four files of the borrowed ladder `useBorrowedLadder` installs. */
+export interface LadderPaths {
+	user: string;
+	managed: string;
+	project: string;
+	local: string;
+}
+
+/** Where the borrowed ladder's files sit for `cwd` and `home`. */
+export function borrowedLadderPaths(cwd: string, home: string): LadderPaths {
+	return {
+		user: join(home, ".borrowed", "settings.json"),
+		managed: join(home, ".borrowed-managed", "managed-settings.json"),
+		project: join(cwd, ".borrowed", "settings.json"),
+		local: join(cwd, ".borrowed", "settings.local.json"),
+	};
+}
+
+/**
+ * A source provider with a whole borrowed family, in the order One Code's
+ * lists Claude Code's: the user file (the primary one), the product's user
+ * file, the repository's checked-in and local files, the product's
+ * per-project file, then managed policy.
+ */
+const borrowedLadderProvider: SourceProvider = {
+	open: ({ home }) => ({
+		settings: (base, { cwd }) => {
+			const paths = borrowedLadderPaths(cwd, home);
+			const own = (scope: string) => base.filter((file) => file.scope === scope);
+			return [
+				{ path: paths.user, scope: "user", owner: "borrowed", primary: true, label: "borrowed user settings" },
+				...own("user"),
+				{ path: paths.project, scope: "project", owner: "borrowed", repo: true, label: "project settings (checked in)" },
+				{ path: paths.local, scope: "local", owner: "borrowed", repo: true, label: "project settings (local)" },
+				...own("local"),
+				{ path: paths.managed, scope: "managed", owner: "borrowed", label: "managed settings" },
+			];
+		},
+	}),
+};
+
+/**
+ * For tests of the base's rules about which settings file may supply a key
+ * (a repository's file never approves, managed policy outranks the user's).
+ * Those rules read the ladder's roles, which only a source provider fills
+ * beyond the product's own two files, so this installs a test provider with
+ * a user, a project, a local and a managed file on every profile, in place
+ * of the profile's own provider, for each test of the calling file. Write the
+ * files at `borrowedLadderPaths(cwd, home)`.
+ */
+export function useBorrowedLadder(): void {
+	beforeEach(() => {
+		shareModuleForTest(profileModuleKey(LADDER_PROVIDER), { sources: borrowedLadderProvider });
+		setActiveProfileForTest({ ...activeProfile(), sourcesModule: LADDER_PROVIDER });
+	});
+	afterEach(() => setActiveProfileForTest(undefined));
+}
