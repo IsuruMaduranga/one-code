@@ -15,9 +15,12 @@
  *   while the extension loads. A child session ignores it.
  * - `REMINDER_CHANNEL`: a reminder, placed by the kind of fact it states.
  * - `DEFER_CHANNEL`: put one of its own tools behind `tool_search`.
+ * - `setSecretValues`: register the secret values the product knows, so the
+ *   base redacts them from every tool result and task notification.
  *
  * Re-export only what a product extension uses, by name.
  */
 export { DEFER_CHANNEL, type DeferRequest } from "../lib/request/deferred-channel.ts";
 export { REMINDER_CHANNEL, type ReminderPayload, type ReminderPlacement } from "../lib/request/reminders.ts";
 export { SYSTEM_PROMPT_SECTION_CHANNEL, type SystemPromptSection, type SystemPromptSession } from "../request/system-prompt/text.ts";
+export { MIN_SECRET_LENGTH, type SecretValue, setSecretValues } from "../lib/profile/secrets.ts";

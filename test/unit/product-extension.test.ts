@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import { CHILD_EXTENSIONS } from "../../extensions/lib/agents/child-extensions.ts";
 import { PRODUCT_EXTENSIONS_DIR, PRODUCT_EXTENSIONS_ENTRY } from "../../extensions/lib/profile/features.ts";
 import { PROFILE_DIR } from "../../extensions/lib/profile/profile.ts";
+import { redactSecrets } from "../../extensions/lib/profile/secrets.ts";
 import { DEFER_CHANNEL, REMINDER_CHANNEL, SYSTEM_PROMPT_SECTION_CHANNEL, type SystemPromptSection } from "../../extensions/sdk/extension.ts";
 import { createFakePi } from "./helpers/fake-pi.ts";
 
@@ -35,7 +36,7 @@ describe("a product's own extensions", () => {
 	});
 
 	it.skipIf(!existsSync(probe))("the fixture's probe reaches the request through the SDK's channels", async () => {
-		const module = (await import(pathToFileURL(probe).href)) as { default: (pi: never) => void; PROBE_TOOL: string; PROBE_SECTION: string; PROBE_REMINDER: string };
+		const module = (await import(pathToFileURL(probe).href)) as { default: (pi: never) => void; PROBE_TOOL: string; PROBE_SECTION: string; PROBE_REMINDER: string; PROBE_SECRET: string };
 		const fake = createFakePi();
 		const seen = { deferred: [] as unknown[], sections: [] as SystemPromptSection[], reminders: [] as unknown[] };
 		fake.events.on(DEFER_CHANNEL, (data) => seen.deferred.push(data));
@@ -45,6 +46,7 @@ describe("a product's own extensions", () => {
 		expect(fake.tools.has(module.PROBE_TOOL)).toBe(true);
 		expect(seen.deferred).toEqual([{ name: module.PROBE_TOOL }]);
 		expect(seen.sections.map((section) => [section.place, section.render({ tier: "cheap", taskTools: false, tools: undefined })])).toEqual([["tail", module.PROBE_SECTION]]);
+		expect(redactSecrets(`out: ${module.PROBE_SECRET}`)).toBe("out: [secret:fixture]");
 		// The reminder waits for the session: nothing is queued while extensions load.
 		expect(seen.reminders).toEqual([]);
 		for (const handler of fake.handlers.get("session_start") ?? []) await handler({}, {});

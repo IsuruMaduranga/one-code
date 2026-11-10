@@ -211,6 +211,8 @@ const denyReason = (result: { cause?: string; rule?: { raw?: string } }): string
 			return refused({ kind: "dontAsk" });
 		case "profile-disabled":
 			return refused({ kind: "toolOff" });
+		case "secret-file":
+			return refused({ kind: "secretFile" });
 		default:
 			return refused({ kind: "rule", rule: result.rule?.raw ?? "deny" });
 	}

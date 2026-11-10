@@ -179,6 +179,15 @@ export interface Profile {
 	 */
 	providers?: Readonly<Record<string, ProductProvider>>;
 	/**
+	 * Bare file names that hold secrets (BI's `Config.toml`). In every mode the
+	 * gate refuses a file tool on one and a shell command that names one; the
+	 * refusal's words are the profile's (`permissions.refused`, kind
+	 * `secretFile`), so they can name the product's own tool. The product's
+	 * extension registers the values themselves for redaction
+	 * (`setSecretValues`, `extensions/sdk/extension.ts`).
+	 */
+	secretFiles?: readonly string[];
+	/**
 	 * The model-facing text, by owning feature, built once when the profile
 	 * resolves. `live` answers which tools the session can have (the features
 	 * and tool switches after the environment's off-switches), so text that

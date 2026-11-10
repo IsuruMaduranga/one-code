@@ -17,6 +17,8 @@ export type PermissionRefusal =
 	| { kind: "planMode" }
 	/** A tool the profile turned off. */
 	| { kind: "toolOff" }
+	/** A file tool on a secret file of the profile's, or a command that names one. */
+	| { kind: "secretFile" }
 	/** dontAsk mode denies anything that would prompt. */
 	| { kind: "dontAsk" }
 	/** A write to a path that configures the user's tooling or the harness. */

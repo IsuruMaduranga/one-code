@@ -87,6 +87,7 @@ export const BASE_TEXT_ALLOWLIST: Readonly<Record<string, BaseTextEntry>> = {
 	"lib/shell/powershell-parser.ts": { reason: "log: Parser failure reasons the permission gate drops." },
 	"lib/profile/profile.ts": { reason: "user-error: Profile validation problems and the fail-closed stderr line." },
 	"lib/profile/product-providers.ts": { reason: "user-error: Profile validation problems for its provider entries." },
+	"lib/profile/secrets.ts": { reason: "user-error: Profile validation problems for its secret file names." },
 	"lib/request/reminders.ts": { reason: "format: pi's compaction-summary frame, copied byte for byte so a reminder anchored to a summary matches pi's own." },
 	"lib/core/scratchpad.ts": { reason: "log: Owner-directory problems, only tested for truthiness." },
 	"lib/models/session-model-tier.ts": { reason: "user-error: An internal ordering invariant." },

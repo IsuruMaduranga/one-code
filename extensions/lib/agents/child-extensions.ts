@@ -46,6 +46,8 @@ import { activeProfile } from "../profile/profile.ts";
 export const CHILD_EXTENSIONS = [
 	"request/kept-thinking/index.ts", "request/ledger/index.ts", "request/system-reminder/index.ts", "request/tool-search/index.ts", "request/context-management/index.ts", "context/compaction/index.ts", "request/ledger/wire.ts", "request/cache-marks/index.ts", "context/claude-context/index.ts", "request/tool-call-corruption/child.ts",
 	"safety/file-tracker/index.ts", "tools/search-tools/index.ts", "tools/skill/index.ts", "tools/bash/child.ts", "tools/powershell/child.ts", "tools/web/index.ts", "tools/web-fetch/index.ts", "tools/notebook/index.ts",
+	// Last: its `tool_result` handler redacts what the ones above return.
+	"safety/secret-values/index.ts",
 ];
 
 const entryPath = (entry: string) => join(EXTENSIONS_DIR, entry);

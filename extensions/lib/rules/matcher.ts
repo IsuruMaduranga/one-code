@@ -7,7 +7,8 @@
  * existing ~/.claude/settings.json files work unchanged.
  */
 
-import { isToolDisabled, toolSwitch } from "../profile/profile.ts";
+import { isToolDisabled, secretFileNames, toolSwitch } from "../profile/profile.ts";
+import { commandNamesSecretFile, isSecretFilePath } from "../profile/secrets.ts";
 import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
@@ -944,7 +945,9 @@ export interface Decision {
 		/** A read, or an acceptEdits write, whose path is outside the working directory. */
 		| "working-dir"
 		/** A tool the profile turned off (lib/profile/profile.ts). */
-		| "profile-disabled";
+		| "profile-disabled"
+		/** A file tool on one of the profile's secret files, or a command that names one (lib/profile/secrets.ts). */
+		| "secret-file";
 }
 
 /**
@@ -1071,6 +1074,20 @@ export function decide(params: DecideInput): Decision {
 	// A tool the profile turned off is refused in every mode, bypass included:
 	// it should never have been callable, whatever path it arrived by.
 	if (isToolDisabled(toolName) || isToolDisabled(tool)) return { decision: "deny", cause: "profile-disabled" };
+
+	// A secret file is refused in every mode, bypass included, before any rule
+	// can allow it: the product's own tool is the only reader and writer. The
+	// check is by name, so it steers rather than seals; the values themselves
+	// are redacted from results (lib/profile/secrets.ts).
+	const secretFiles = secretFileNames();
+	if (secretFiles.size > 0 && subject) {
+		const kind = subjectKind(toolName);
+		const named =
+			kind === "command"
+				? commandNamesSecretFile(subject, secretFiles)
+				: kind === "path" && (isSecretFilePath(subject, secretFiles) || (params.resolvedSubject !== undefined && isSecretFilePath(params.resolvedSubject, secretFiles)));
+		if (named) return { decision: "deny", cause: "secret-file" };
+	}
 
 	const denyRule = deny.find((r) => ruleMatches(r, toolName, subject, cwd));
 	if (denyRule) return { decision: "deny", rule: denyRule, cause: "rule" };

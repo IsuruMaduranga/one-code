@@ -73,6 +73,6 @@ describe("feature maps", () => {
 
 	it("keeps the agreed core required", () => {
 		const required = FEATURE_IDS.filter((id) => "required" in FEATURES[id]).sort();
-		expect(required).toEqual(["cache-marks", "kept-thinking", "ledger", "permissions", "system-prompt", "system-reminder", "tool-search"]);
+		expect(required).toEqual(["cache-marks", "kept-thinking", "ledger", "permissions", "secret-values", "system-prompt", "system-reminder", "tool-search"]);
 	});
 });

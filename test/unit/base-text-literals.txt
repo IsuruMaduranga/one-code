@@ -420,6 +420,9 @@ lib/profile/profile.ts
 	"\nThe profile in profile/, or an environment switch over it, is invalid, so the harness will not start: ${…}\n\n"
 	"it has no text for \"${…}\", which this session reads"
 
+lib/profile/secrets.ts
+	"secret file \"${…}\" must be a bare file name"
+
 lib/request/anthropic-server-call.ts
 	"not an Anthropic session"
 	"no model on this provider supports dynamic filtering (Claude 4.6 or later)"

@@ -22,5 +22,6 @@ export const profile: Profile = {
 	childExtensions: [],
 	// A provider of the product's own, as a sign-in proxy would be declared.
 	providers: { "fixture-llm": { serves: "anthropic", wire: ["tool-references"] } },
+	secretFiles: ["Fixture.secret"],
 	text: () => allGroups,
 };

@@ -26,6 +26,7 @@ import { enabledFeatures, type FeatureId, featureProblems, isGuardFeature, PRODU
 import type { LiveTools } from "./live-tools.ts";
 import type { Profile, ProfileText, ToolSwitch } from "./profile-contract.ts";
 import { type ProductProvider, providerProblems } from "./product-providers.ts";
+import { secretFileProblems } from "./secrets.ts";
 import type { SourceProvider } from "./sources.ts";
 
 export const PROFILE_DIR = join(PACKAGE_ROOT, "profile");
@@ -159,6 +160,8 @@ export interface ResolvedProfile {
 	globalAgentsFiles: readonly string[];
 	/** The profile's provider entries, by pi provider name (lib/profile/product-providers.ts). */
 	providers: ReadonlyMap<string, ProductProvider>;
+	/** The profile's secret file names, lowercased (lib/profile/secrets.ts). */
+	secretFiles: ReadonlySet<string>;
 }
 
 function envList(env: NodeJS.ProcessEnv, name: string): string[] {
@@ -216,6 +219,7 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 	}
 	problems.push(...childExtensionProblems(profile.childExtensions, profileDir));
 	problems.push(...providerProblems(profile.providers ?? {}));
+	problems.push(...secretFileProblems(profile.secretFiles ?? []));
 	if (problems.length > 0) throw new Error(`Invalid profile: ${problems.join("; ")}.`);
 	const features = enabledFeatures(featureMap);
 	const disabledTools = new Set([...tools].filter(([, sw]) => sw.enabled === false).map(([name]) => name));
@@ -238,6 +242,7 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		...(profile.sources ? { sourcesModule: resolve(profileDir, profile.sources) } : {}),
 		globalAgentsFiles: profile.globalAgentsFiles ?? [],
 		providers: new Map(Object.entries(profile.providers ?? {})),
+		secretFiles: new Set((profile.secretFiles ?? []).map((name) => name.toLowerCase())),
 	};
 }
 
@@ -321,6 +326,11 @@ export function requireText<K extends keyof ProfileText>(group: K): NonNullable<
 
 export function toolSwitch(name: string): ToolSwitch | undefined {
 	return activeProfile().tools.get(name);
+}
+
+/** The profile's secret file names, lowercased; empty for a profile that lists none. */
+export function secretFileNames(): ReadonlySet<string> {
+	return activeProfile().secretFiles;
 }
 
 /** The profile turned this tool off: never registered, never active, denied if called. */

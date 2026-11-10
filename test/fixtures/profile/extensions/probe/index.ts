@@ -1,18 +1,20 @@
 /**
  * A minimal product extension for the base's own tests: it uses every seam
  * `extensions/sdk/extension.ts` offers (a prompt section, a reminder, a
- * deferred tool of its own) the way a product's extension would. The base
+ * deferred tool of its own, a secret value) the way a product's extension would. The base
  * suite copies this profile into place, so the manifest's product entry loads
  * it there (`product-extension.test.ts`).
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { DEFER_CHANNEL, type DeferRequest, REMINDER_CHANNEL, type ReminderPayload, SYSTEM_PROMPT_SECTION_CHANNEL, type SystemPromptSection } from "../../../extensions/sdk/extension.ts";
+import { DEFER_CHANNEL, type DeferRequest, REMINDER_CHANNEL, type ReminderPayload, setSecretValues, SYSTEM_PROMPT_SECTION_CHANNEL, type SystemPromptSection } from "../../../extensions/sdk/extension.ts";
 
 export const PROBE_TOOL = "fixture_probe";
 export const PROBE_SECTION = "[fixture:product-section]";
 export const PROBE_REMINDER = "[fixture:product-reminder]";
+/** A value the probe registers as secret; a tool result that carries it shows `[secret:fixture]` instead. */
+export const PROBE_SECRET = "fixture-secret-value";
 
 export default function probe(pi: ExtensionAPI) {
 	pi.registerTool({
@@ -24,6 +26,7 @@ export default function probe(pi: ExtensionAPI) {
 	});
 	pi.events.emit(DEFER_CHANNEL, { name: PROBE_TOOL } satisfies DeferRequest);
 	pi.events.emit(SYSTEM_PROMPT_SECTION_CHANNEL, { id: "fixture-probe", place: "tail", render: () => PROBE_SECTION } satisfies SystemPromptSection);
+	setSecretValues("fixture-probe", [{ value: PROBE_SECRET, name: "fixture" }]);
 	pi.on("session_start", () => {
 		pi.events.emit(REMINDER_CHANNEL, { key: "fixture-probe", text: PROBE_REMINDER, placement: "last-append" } satisfies ReminderPayload);
 	});

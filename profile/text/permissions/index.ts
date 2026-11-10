@@ -44,6 +44,8 @@ function refused(refusal: PermissionRefusal): string {
 			return PLAN_MODE;
 		case "toolOff":
 			return "That tool is not available in this harness, so the call was blocked. Continue with the tools you have.";
+		case "secretFile":
+			return "That file holds secrets the user manages, so it cannot be read, written or named in a command here. Continue without its contents; if you need to know whether a value is set, ask the user.";
 		case "dontAsk":
 			return "Permission mode is dontAsk: anything that would normally prompt the user is denied instead. Only pre-approved tools can run; work within those, or tell the user which allow rule would unblock you.";
 		case "protectedPath":
