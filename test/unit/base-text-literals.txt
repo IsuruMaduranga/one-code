@@ -544,6 +544,13 @@ lib/shell/powershell-tree.ts
 	"removes ${…}, which is a working root, or is or holds a git repository or a protected, credential or execution-primitive path"
 	"removes ${…} recursively, and a link inside it would be followed by Windows PowerShell 5.1"
 
+lib/shell/product-read-only.ts
+	"read-only command \"${…}\" must be a bare lowercase command name"
+	"read-only command \"${…}\" is one the base judges itself"
+	"read-only command \"${…}\" lists no subcommand: a whole command is never read-only by name"
+	"read-only subcommand \"${…} ${…}\" must be a bare lowercase name"
+	"\"${…}\" is not an option of \"${…} ${…}\""
+
 lib/shell/read-only-options.ts
 	"merge() only merges option tables; set '${…}' on the merged spec itself"
 	"passes ${…}, an option not known to be read-only"
@@ -599,6 +606,7 @@ lib/shell/shell-analysis.ts
 	"runs ${…}, which modifies the filesystem"
 	"runs ${…} with the glob ${…} as its first operand, which ${…} does not read as a file, so the other matches go unchecked"
 	"runs ${…} on the glob ${…}, which could name a directory that ${…}"
+	"runs ${…}${…}, which is not on the read-only allowlist"
 	"runs ${…}, which is not on the read-only allowlist"
 	"${…} ${…}, which is a working root, or is or holds a git repository or a protected, credential or execution-primitive path"
 	"copies or moves ${…}, a credential or secret path"

@@ -27,6 +27,8 @@ import type { LiveTools } from "./live-tools.ts";
 import type { Profile, ProfileText, ToolSwitch } from "./profile-contract.ts";
 import { type ProductProvider, providerProblems } from "./product-providers.ts";
 import { secretFileProblems } from "./secrets.ts";
+import type { OptionSpec } from "../shell/read-only-options.ts";
+import { readOnlyCommandProblems, readOnlyCommandSpecs } from "../shell/product-read-only.ts";
 import type { SourceProvider } from "./sources.ts";
 
 export const PROFILE_DIR = join(PACKAGE_ROOT, "profile");
@@ -162,6 +164,8 @@ export interface ResolvedProfile {
 	providers: ReadonlyMap<string, ProductProvider>;
 	/** The profile's secret file names, lowercased (lib/profile/secrets.ts). */
 	secretFiles: ReadonlySet<string>;
+	/** The option table of each read-only subcommand the profile declares (lib/shell/product-read-only.ts). */
+	readOnlyCommands: ReadonlyMap<string, ReadonlyMap<string, OptionSpec>>;
 }
 
 function envList(env: NodeJS.ProcessEnv, name: string): string[] {
@@ -220,6 +224,7 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 	problems.push(...childExtensionProblems(profile.childExtensions, profileDir));
 	problems.push(...providerProblems(profile.providers ?? {}));
 	problems.push(...secretFileProblems(profile.secretFiles ?? []));
+	problems.push(...readOnlyCommandProblems(profile.readOnlyCommands ?? {}));
 	if (problems.length > 0) throw new Error(`Invalid profile: ${problems.join("; ")}.`);
 	const features = enabledFeatures(featureMap);
 	const disabledTools = new Set([...tools].filter(([, sw]) => sw.enabled === false).map(([name]) => name));
@@ -243,6 +248,7 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		globalAgentsFiles: profile.globalAgentsFiles ?? [],
 		providers: new Map(Object.entries(profile.providers ?? {})),
 		secretFiles: new Set((profile.secretFiles ?? []).map((name) => name.toLowerCase())),
+		readOnlyCommands: readOnlyCommandSpecs(profile.readOnlyCommands ?? {}),
 	};
 }
 
@@ -326,6 +332,11 @@ export function requireText<K extends keyof ProfileText>(group: K): NonNullable<
 
 export function toolSwitch(name: string): ToolSwitch | undefined {
 	return activeProfile().tools.get(name);
+}
+
+/** The read-only subcommands the profile declares for `command`, with their option tables. */
+export function productReadOnlySubcommands(command: string): ReadonlyMap<string, OptionSpec> | undefined {
+	return activeProfile().readOnlyCommands.get(command);
 }
 
 /** The profile's secret file names, lowercased; empty for a profile that lists none. */

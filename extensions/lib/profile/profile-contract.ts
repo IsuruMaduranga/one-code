@@ -10,6 +10,7 @@
  * are folders (agents/, skills/, themes/).
  */
 
+import type { ReadOnlyCommands } from "../shell/product-read-only.ts";
 import type { ProductProvider } from "./product-providers.ts";
 import type { ArtifactsText } from "../../tools/artifacts/text.ts";
 import type { AskUserText } from "../../tools/ask-user/text.ts";
@@ -187,6 +188,15 @@ export interface Profile {
 	 * (`setSecretValues`, `extensions/sdk/extension.ts`).
 	 */
 	secretFiles?: readonly string[];
+	/**
+	 * Read-only subcommands of the product's own command-line tools, with the
+	 * options each may carry (`lib/shell/product-read-only.ts`):
+	 * `{ bal: { discover: { none: "--refresh", required: "--filter" } } }`.
+	 * The shell pre-gate treats such a command as a read: it runs in plan mode
+	 * and skips the classifier in auto mode. Anything outside the table
+	 * escalates as before.
+	 */
+	readOnlyCommands?: ReadOnlyCommands;
 	/**
 	 * The model-facing text, by owning feature, built once when the profile
 	 * resolves. `live` answers which tools the session can have (the features

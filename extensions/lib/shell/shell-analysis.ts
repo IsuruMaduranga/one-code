@@ -30,6 +30,7 @@
  * denylist — see `sensitive.ts`), F1 (git global flags).
  */
 
+import { productReadOnlySubcommands } from "../profile/profile.ts";
 import { isProtectedPath } from "../rules/protected-paths.ts";
 import { isExecutionPrimitivePath, isSensitivePath } from "./sensitive.ts";
 import { isWithin, resolveForContainment, toAbsoluteBash, touchesGuardedPath } from "./paths.ts";
@@ -1192,6 +1193,18 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 						}
 					}
 				}
+			}
+		} else if (!isMutation && productReadOnlySubcommands(name)) {
+			// A product's own read-only subcommand (lib/shell/product-read-only.ts):
+			// the subcommand must be the first word, written out, and every option
+			// in its table. Its operands are names, not files, so none is read-checked.
+			const [subcommand, ...rest] = args;
+			const spec = subcommand && !subcommand.glob && !subcommand.dynamic ? productReadOnlySubcommands(name)?.get(subcommand.value) : undefined;
+			if (!spec) {
+				escalate(`runs ${name}${subcommand ? ` ${subcommand.value}` : ""}, which is not on the read-only allowlist`);
+			} else {
+				const check = checkOptions(spec, rest);
+				if (!check.ok) escalate(`runs ${name} ${subcommand.value} and ${check.reason}`);
 			}
 		} else if (!isMutation) {
 			escalate(`runs ${name}, which is not on the read-only allowlist`);

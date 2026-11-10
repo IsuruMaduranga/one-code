@@ -64,3 +64,4 @@ export { BRAVE_KEY_ENV, SETTINGS_FILE, SETTINGS_SNIPPET, TAVILY_KEY_ENV } from "
 export type { BackendAttempt, BackendFailure, ChainFailure, ProviderSearchFailure, WebSearchText } from "../tools/web/text.ts";
 export type { AgentFailure, AgentNotice, RunReport, RunStop, ScriptCallProblem, ScriptProblem, WorkflowRefusal, WorkflowText } from "../agents/workflow/text.ts";
 export type { EnterWorktreeFailure, GitTargetProblem, RemoveBlocker, StashRisk, WorktreeGuardRefusal, WorktreeGuardText, WorktreeNameProblem, WorktreeSessionView, WorktreeText } from "../safety/worktree/text.ts";
+export type { ReadOnlyCommands, ReadOnlySubcommand } from "../lib/shell/product-read-only.ts";
