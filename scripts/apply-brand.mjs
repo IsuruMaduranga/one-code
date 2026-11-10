@@ -4,7 +4,9 @@
  * (working-docs/decisions/bi-fork.md, "The brand is one static data file"), so
  * a product's copy differs from One Code's release only in profile/:
  *
- * - package.json: `name` is the extension package;
+ * - package.json: `name` is the extension package, and `files` ends with the
+ *   product's guide folder (the brand's `guideDir`) when it sits outside
+ *   profile/, so one product's guide never ships in another;
  * - app/package.json: `name` is the app package, `bin` the command, and
  *   `productExtension` plus the dependency key name the extension package
  *   (app/bin.mjs finds it through that field). The dependency keeps its version;
@@ -18,7 +20,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { brand } from "../extensions/lib/profile/brand.mjs";
+import { brand, guideDir } from "../extensions/lib/profile/brand.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -34,9 +36,17 @@ function listing(pkg, which) {
 	};
 }
 
-/** The root package with the brand's extension name and listing. */
+/** What the extension package ships besides the product's guide. */
+const EXTENSION_FILES = ["extensions/", "profile/", "!profile/test/", "types/", "README.md", "LICENSE"];
+
+/** The extension's `files`: the fixed list, then the guide when it sits outside profile/ (which ships whole). */
+function extensionFiles() {
+	return guideDir.startsWith("profile/") ? EXTENSION_FILES : [...EXTENSION_FILES, `${guideDir}/`];
+}
+
+/** The root package with the brand's extension name and listing, and the files it ships (when it lists them). */
 export function stampExtension(pkg) {
-	return { ...pkg, name: brand.packages.extension, ...listing(pkg, "extension") };
+	return { ...pkg, name: brand.packages.extension, ...(pkg.files ? { files: extensionFiles() } : {}), ...listing(pkg, "extension") };
 }
 
 /**

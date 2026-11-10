@@ -20,6 +20,8 @@ describe("brand", () => {
 		expect(() => checkBrand({ ...data, idPrefix: "One Code" })).toThrow(/"idPrefix" must be lower-case/);
 		expect(() => checkBrand({ ...data, stateDir: ".BICopilot" })).toThrow(/"stateDir" must be one lower-case folder name/);
 		expect(() => checkBrand({ ...data, stateDir: "a/b" })).toThrow(/"stateDir"/);
+		// A plain word would be a protected path segment in every project.
+		expect(() => checkBrand({ ...data, stateDir: "agent" })).toThrow(/starting with "\."/);
 		expect(() => checkBrand({ ...data, packages: { app: "a" } })).toThrow(/"packages.extension"/);
 		expect(() => checkBrand({ ...data, packageInfo: { app: data.packageInfo.app } })).toThrow(/"packageInfo.extension.description"/);
 		expect(() => checkBrand({ ...data, packageInfo: { ...data.packageInfo, app: { description: "a", keywords: [1] } } })).toThrow(/"packageInfo.app.keywords"/);

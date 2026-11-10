@@ -7,12 +7,12 @@
  * any profile; One Code's own guide and its prompt:
  * profile/test/guide-agent-wording.test.ts.
  */
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { brand } from "../../extensions/lib/profile/brand.mjs";
-import { guideDocsDirs, ONE_CODE_GUIDE_DIR } from "../../extensions/lib/agents/guide-docs.ts";
+import { guideDocsDirs, GUIDE_DIR } from "../../extensions/lib/agents/guide-docs.ts";
 import { forwardSlashes } from "../../extensions/lib/profile/paths.ts";
 import { activeProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 import { decide } from "../../extensions/lib/rules/matcher.ts";
@@ -156,8 +156,9 @@ describe("settingsSetup", () => {
 });
 
 describe("guideDocsDirs", () => {
-	it("includes the user guide shipped in this package", () => {
-		expect(guideDocsDirs()).toContain(ONE_CODE_GUIDE_DIR);
+	it("includes the user guide exactly when this package ships one", () => {
+		expect(guideDocsDirs().includes(GUIDE_DIR)).toBe(existsSync(GUIDE_DIR));
+		expect(guideDocsDirs({ guide: join(tmpdir(), "no-such-guide") })).toEqual([]);
 	});
 });
 

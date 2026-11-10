@@ -1,7 +1,7 @@
 /**
- * Where the documentation the `one-code-guide` agent reads lives on this
- * machine: One Code's own user guide (`docs/guide/`, shipped in the npm
- * package next to `extensions/`) and the running pi's `docs/` and `examples/`
+ * Where the documentation the profile's guide agent reads lives on this
+ * machine: the product's own user guide (the brand's `guideDir`, shipped in
+ * the npm package) and the running pi's `docs/` and `examples/`
  * (pi's `getDocsPath()`/`getExamplesPath()`, which name the host pi's copies in
  * both install shapes; findings §6).
  *
@@ -13,12 +13,13 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { getDocsPath, getExamplesPath } from "@earendil-works/pi-coding-agent";
 import { PACKAGE_ROOT } from "../core/package-root.ts";
+import { guideDir } from "../profile/brand.mjs";
 
-/** One Code's user guide, `<package>/docs/guide`; its `README.md` is the index. */
-export const ONE_CODE_GUIDE_DIR = join(PACKAGE_ROOT, "docs", "guide");
+/** The product's user guide (the brand's `guideDir`; One Code's is `<package>/docs/guide`); its `README.md` is the index. A product may ship none. */
+export const GUIDE_DIR = join(PACKAGE_ROOT, ...guideDir.split("/"));
 
 export interface GuideDocs {
-	/** One Code's user guide. */
+	/** The product's user guide; the folder is missing when the product ships none. */
 	guide: string;
 	/** The running pi's docs (extensions, packages, settings, …); undefined when not found. */
 	piDocs?: string;
@@ -36,7 +37,7 @@ function existing(read: () => string): string | undefined {
 }
 
 export function guideDocs(): GuideDocs {
-	return { guide: ONE_CODE_GUIDE_DIR, piDocs: existing(getDocsPath), piExamples: existing(getExamplesPath) };
+	return { guide: GUIDE_DIR, piDocs: existing(getDocsPath), piExamples: existing(getExamplesPath) };
 }
 
 /** The directories that exist, for the permission gate's read-only roots. */

@@ -4,7 +4,7 @@
  * (profile/test/apply-brand-committed.test.ts).
  */
 import { describe, expect, it } from "vitest";
-import { brand } from "../../extensions/lib/profile/brand.mjs";
+import { brand, guideDir } from "../../extensions/lib/profile/brand.mjs";
 import { stampApp, stampExtension } from "../../scripts/apply-brand.mjs";
 
 describe("apply-brand", () => {
@@ -49,6 +49,13 @@ describe("apply-brand", () => {
 		expect(extension.description).toBe(brand.packageInfo.extension.description);
 		expect(extension.repository).toEqual({ type: "git", url: `git+${brand.homepage}.git` });
 		expect(Object.keys(extension).slice(0, 3)).toEqual(["name", "description", "version"]);
+	});
+
+	it("lists the product's guide in the extension's files only when it sits outside profile/", () => {
+		const files = stampExtension({ name: "other-extension", files: ["extensions/", "other-docs/"] }).files as string[];
+		expect(files.slice(0, 6)).toEqual(["extensions/", "profile/", "!profile/test/", "types/", "README.md", "LICENSE"]);
+		expect(files.slice(6)).toEqual(guideDir.startsWith("profile/") ? [] : [`${guideDir}/`]);
+		expect(files).not.toContain("other-docs/");
 	});
 
 	it("fails loud when the app names no extension dependency", () => {

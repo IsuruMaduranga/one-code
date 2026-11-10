@@ -5,7 +5,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ONE_CODE_GUIDE_DIR } from "../../extensions/lib/agents/guide-docs.ts";
+import { GUIDE_DIR } from "../../extensions/lib/agents/guide-docs.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
 import { EXTENSIONS_DIR, PACKAGE_ROOT } from "../../extensions/lib/core/package-root.ts";
 
 describe("the package root", () => {
@@ -29,7 +30,9 @@ describe("the package root", () => {
 		expect(launcher).not.toMatch(/dirname\(dirname\(/);
 	});
 
-	it("holds the user guide the guide agent reads", () => {
-		expect(existsSync(join(ONE_CODE_GUIDE_DIR, "README.md"))).toBe(true);
+	it("holds the user guide the brand names, when the product ships one", () => {
+		// A brand that sets `guideDir` promises the folder; the default `profile/guide` may be absent.
+		if (brand.guideDir !== undefined) expect(existsSync(join(GUIDE_DIR, "README.md"))).toBe(true);
+		expect(GUIDE_DIR).toBe(join(PACKAGE_ROOT, ...(brand.guideDir ?? "profile/guide").split("/")));
 	});
 });

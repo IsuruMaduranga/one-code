@@ -106,6 +106,8 @@ declare module "*/brand.mjs" {
 		readonly theme: string;
 		/** The product's repository web URL (`https://github.com/<owner>/<repo>`): user agents, doc links under `/blob/master/`, and package.json's repository, homepage and bugs fields. */
 		readonly homepage: string;
+		/** The product's user guide, a folder inside the package, when it is not `profile/guide`: "docs/guide". Listed in package.json `files` (scripts/apply-brand.mjs). */
+		readonly guideDir?: string;
 		/** The banner's tagline. */
 		readonly subtitle: string;
 		/** The banner's wordmark rows. */
@@ -130,6 +132,8 @@ declare module "*/brand.mjs" {
 	}
 	export function checkBrand(value: unknown): Brand;
 	export const brand: Brand;
+	/** The product's user guide, relative to the package root: the brand's `guideDir`, else `profile/guide`. */
+	export const guideDir: string;
 	export function brandedId(name: string): string;
 	export function envName(suffix: string): string;
 	export function productStateDir(env?: Record<string, string | undefined>, home?: string): string;
