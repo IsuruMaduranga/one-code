@@ -33,9 +33,13 @@ if (major < 22 || (major === 22 && minor < 19)) {
 // The launcher lives in the extension package; an install that lacks it (a
 // missing or older extension copy) gets the fix, not a module-not-found trace.
 const require = createRequire(import.meta.url);
+let corePath;
 let createAppPath;
 try {
-	createAppPath = join(dirname(require.resolve(`${app.productExtension}/package.json`)), "extensions", "lib", "app", "create-app.mjs");
+	// The package root comes from its own package.json, never from counting
+	// folders up from the launcher, which moves when the folders do.
+	corePath = dirname(require.resolve(`${app.productExtension}/package.json`));
+	createAppPath = join(corePath, "extensions", "lib", "app", "create-app.mjs");
 } catch {}
 if (!createAppPath || !existsSync(createAppPath)) {
 	process.stderr.write(
@@ -44,6 +48,5 @@ if (!createAppPath || !existsSync(createAppPath)) {
 	);
 	process.exit(1);
 }
-const corePath = dirname(dirname(dirname(createAppPath)));
 const { createApp } = await import(pathToFileURL(createAppPath).href);
 await createApp({ appVersion: app.version, corePath, argv: process.argv, resolve: (specifier) => import.meta.resolve(specifier) });

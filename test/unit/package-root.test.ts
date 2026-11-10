@@ -18,6 +18,17 @@ describe("the package root", () => {
 		expect(existsSync(join(EXTENSIONS_DIR, "lib", "core", "package-root.ts"))).toBe(true);
 	});
 
+	it("is what the app's launcher hands createApp, however deep the launcher module sits", () => {
+		// The launcher once counted folders up from create-app.mjs; a folder move
+		// then pointed the app at `extensions/` and no unit test noticed.
+		const launcher = readFileSync(join(PACKAGE_ROOT, "app", "bin.mjs"), "utf8");
+		const segments = launcher.match(/createAppPath = join\(corePath, ([^)]+)\)/)?.[1].split(",").map((part) => part.trim().replace(/^"|"$/g, ""));
+		expect(segments, "bin.mjs builds createAppPath from corePath").toBeDefined();
+		expect(existsSync(join(PACKAGE_ROOT, ...segments!))).toBe(true);
+		expect(launcher).toMatch(/corePath = dirname\(require\.resolve\(`\$\{app\.productExtension\}\/package\.json`\)\)/);
+		expect(launcher).not.toMatch(/dirname\(dirname\(/);
+	});
+
 	it("holds the user guide the guide agent reads", () => {
 		expect(existsSync(join(ONE_CODE_GUIDE_DIR, "README.md"))).toBe(true);
 	});
