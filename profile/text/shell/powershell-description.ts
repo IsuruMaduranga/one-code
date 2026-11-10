@@ -149,10 +149,9 @@ export const ONE_CODE_CWD_SENTENCE =
 /**
  * Claude Code's PowerShell prompt names Glob and Grep even in its native
  * builds, which ship neither (their Bash prompt drops the same two lines).
- * One Code ships no search tools outside the tiny tier, so the lines would
+ * One Code ships no search tools, so the lines would
  * forbid the only search route left (`Get-ChildItem -Recurse`,
- * `Select-String`); they are dropped on every tier. A tiny model still sees
- * `find` and `grep` in its tool list.
+ * `Select-String`); they are dropped on every tier.
  */
 export const CC_SEARCH_LINES =
 	"    - File search: Use Glob (NOT Get-ChildItem -Recurse)\n    - Content search: Use Grep (NOT Select-String)\n";

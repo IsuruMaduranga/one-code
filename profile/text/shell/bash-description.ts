@@ -10,10 +10,10 @@
  * and the working-directory sentence says what this tool does, since each
  * command starts in the session's working directory and a `cd` does not carry
  * over (lib/shell-run/shell-tool.ts), where Claude Code tracks the directory between
- * calls. The parameter texts are Claude Code's. On the tiny tier, the one
- * with dedicated grep, find and ls tools (tools/search-tools/tools.ts), the long
- * form's two shell-`find` bullets give way to a pointer at those tools, as
- * tiny's system prompt says (system-prompt/tiers/low.ts).
+ * calls. The parameter texts are Claude Code's. When the session has the
+ * dedicated grep, find and ls tools (the base says so: `searchTools`), the
+ * long form's two shell-`find` bullets give way to a pointer at those tools.
+ * One Code turns the three off, so its sessions keep the shell-`find` bullets.
  */
 
 import type { DescriptionForm } from "../../../extensions/sdk/profile.ts";
@@ -151,14 +151,14 @@ Important:
 # Other common operations
 - View comments on a Github PR: gh api repos/foo/bar/pulls/123/comments`;
 
-/** The long form's shell-`find` advice, which the tiny tier's search tools replace. */
+/** The long form's shell-`find` advice, which the search tools replace in a session that has them. */
 const SHELL_FIND_LINES = ` - When running \`find\`, search from \`.\` (or a specific path), not \`/\` — scanning the full filesystem can exhaust system resources on large trees.
  - When using \`find -regex\` with alternation, put the longest alternative first. Example: use \`'.*\\.\\(tsx\\|ts\\)'\` not \`'.*\\.\\(ts\\|tsx\\)'\` — the second form silently skips \`.tsx\` files.
 `;
 const SEARCH_TOOLS_LINE = ` - Search with the dedicated tools, not this shell: the find tool for files, the grep tool for content, the ls tool to list a directory.
 `;
 
-/** The long form on the tiny tier, whose grep, find and ls tools replace shell searches. */
+/** The long form for a session with the grep, find and ls tools, which replace shell searches. */
 export const BASH_LONG_SEARCH_TOOLS_DESCRIPTION = BASH_LONG_DESCRIPTION.replace(SHELL_FIND_LINES, SEARCH_TOOLS_LINE);
 
 /** The description for a form and permission mode; `searchTools` when the session has the dedicated search tools. */

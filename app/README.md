@@ -128,7 +128,7 @@ One Code builds that adaptation into the harness:
 - **Prompts matched to the model.** Changing the endpoint does not change
   the instructions sent to the model. One Code uses four capability tiers
   to adjust prompting and tool guidance. Smaller and local models receive
-  more explicit playbooks and structured search tools.
+  more explicit playbooks.
 - **Native caching support.** Providers use different caching mechanisms.
   An API-compatible response alone does not establish that a gateway
   preserves caching behavior. One Code uses native provider integrations,

@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { useShippedProfileWithAllTools } from "./helpers/profile.ts";
 import { foldsCase, forwardSlashes, toPosixPath } from "../../extensions/lib/profile/paths.ts";
 import {
 	bashSubcommands,
@@ -24,6 +25,9 @@ import {
 import { isProtectedPath } from "../../extensions/lib/rules/protected-paths.ts";
 import { brand } from "../../extensions/lib/profile/brand.mjs";
 import { HAVE_POWERSHELL, psParse, POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
+
+// This file covers the base's handling of grep, find and ls, which a profile may turn off.
+useShippedProfileWithAllTools();
 
 const CWD = "/home/user/project";
 

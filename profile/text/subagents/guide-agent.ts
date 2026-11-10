@@ -24,7 +24,7 @@ const REPO_URL = "https://github.com/IsuruMaduranga/one-code";
 /**
  * Claude Code's guide tools where search runs through the shell (its
  * embedded-search shape): bash for `grep`/`find`, read, and the web tools.
- * pi's own grep/find/ls are active only on the tiny tier (search-tools), so an
+ * pi's own grep/find/ls are off in this profile, so an
  * allowlist naming them left the child without search.
  */
 export const GUIDE_TOOLS = ["bash", "read", "web_fetch", "web_search"];

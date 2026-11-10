@@ -19,6 +19,7 @@
  */
 
 import { feature } from "../../lib/profile/feature.ts";
+import { searchToolsEnabled } from "../../lib/models/model-tier.ts";
 import { join } from "node:path";
 import type { BashSpawnContext, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createBashToolDefinition, createLocalBashOperations, getAgentDir } from "@earendil-works/pi-coding-agent";
@@ -80,7 +81,7 @@ export function bashTool(pi: ExtensionAPI, { announce }: { announce: boolean }) 
 	// the tool or re-caches the prefix; mode reminders and the live permission
 	// gate carry the change instead.
 	let form: DescriptionForm = "short";
-	// Tiny's dedicated search tools replace the long form's shell-find advice.
+	// In a session with the dedicated search tools, they replace the long form's shell-find advice.
 	let searchTools = false;
 	let autoMode = false;
 	// A child's words name only the tools every child has (lib/agents/child-extensions.ts).
@@ -100,7 +101,7 @@ export function bashTool(pi: ExtensionAPI, { announce }: { announce: boolean }) 
 	});
 	followDescriptionForm(pi, (next, tier) => {
 		form = next;
-		searchTools = tier === "tiny";
+		searchTools = searchToolsEnabled(tier, (tool) => view.live.has(tool));
 		setDescription(describe());
 	});
 	pi.events.on(PERMISSION_STATUS_CHANNEL, (data) => {

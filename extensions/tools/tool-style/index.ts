@@ -23,9 +23,10 @@
  * diff afterwards, its execution reads the old file first and records the diff
  * on the result's details, which never reach the model.
  *
- * grep/find/ls stay tier-gated: registering them does not bypass the
+ * grep/find/ls stay gated: registering them does not bypass the
  * search-tools extension, which reconciles the active-tool list on
- * session_start/model_select and removes them for frontier models.
+ * session_start/model_select and keeps them only where the session has the
+ * search tools (`searchToolsEnabled`, lib/models/model-tier.ts).
  */
 
 import { feature } from "../../lib/profile/feature.ts";

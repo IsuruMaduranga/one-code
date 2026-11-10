@@ -18,9 +18,13 @@ import webSearchExtension from "../../extensions/tools/web/index.ts";
 import webFetchExtension from "../../extensions/tools/web-fetch/index.ts";
 import { descriptionForm, registerVariantTool } from "../../extensions/lib/profile/tool-variants.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { useProfile, useShippedProfileWithAllTools } from "./helpers/profile.ts";
 
 /** The profile's bash description for a form, the permission mode and the search-tools pointer. */
 const bashText = (form: "short" | "long", autoMode: boolean, searchTools = false) => requireText("shell").bashDescription({ form, autoMode, searchTools });
+
+// The search-tools pointer below needs grep, find and ls in the session, whatever the shipped profile turns off.
+useShippedProfileWithAllTools();
 
 afterEach(() => {
 	vi.unstubAllEnvs();
@@ -106,6 +110,14 @@ describe("switching forms mid-session", () => {
 		await switchTier(fake, "tiny");
 		expect(fake.tools.get("bash")!.description).toBe(bashText("long", false, true));
 		await switchTier(fake, "cheap");
+		expect(fake.tools.get("bash")!.description).toBe(bashText("long", false));
+	});
+
+	it("on tiny with a search tool turned off, the long form asks for no pointer", async () => {
+		useProfile({ tools: { find: { enabled: false } } });
+		const fake = createFakePi();
+		bashExtension(fake.pi as never);
+		await switchTier(fake, "tiny");
 		expect(fake.tools.get("bash")!.description).toBe(bashText("long", false));
 	});
 

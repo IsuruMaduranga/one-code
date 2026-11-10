@@ -37,12 +37,6 @@ const endsWith = (paths: string[], entry: string) => paths.some((p) => p.replace
 const tool = (name: string) => ({ name, label: name, description: name, parameters: {}, execute: async () => ({ content: [], details: {} }) });
 
 describe("resolveProfile", () => {
-	it("One Code's shipped profile turns nothing off and sets no tool switch", () => {
-		const shipped = activeProfile();
-		expect(shipped.tools.size).toBe(0);
-		expect(shipped.childExtensionPaths).toEqual([]);
-	});
-
 	it("ONECODE_TOOLS_OFF only turns tools off", () => {
 		const resolved = resolveProfile({ ...empty, tools: { web_fetch: { deferred: false } } }, { [envName("TOOLS_OFF")]: "web_fetch, notebook_edit" }, "/p");
 		expect(resolved.tools.get("web_fetch")).toEqual({ deferred: false, enabled: false });
@@ -281,7 +275,8 @@ describe("child sessions and the tool switches", () => {
 		use({ tools: { web_fetch: { enabled: false } } });
 		expect(agentToolOptions({ excludeTools: ["edit"] } as never).excludeTools).toEqual(["edit", "web_fetch"]);
 		setActiveProfileForTest(undefined);
-		expect(agentToolOptions({ excludeTools: ["edit"] } as never).excludeTools).toEqual(["edit"]);
+		// The shipped profile's own switches, whatever the product turns off.
+		expect(agentToolOptions({ excludeTools: ["edit"] } as never).excludeTools).toEqual(["edit", ...activeProfile().disabledTools]);
 	});
 });
 

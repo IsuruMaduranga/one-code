@@ -13,6 +13,7 @@
 import { brand, envName } from "../../lib/profile/brand.mjs";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { modeCycleKey } from "../../lib/ui/keys.ts";
+import { toolLive } from "../../lib/profile/profile.ts";
 import { loadAutoModeConfig } from "../../lib/rules/auto-mode-config.ts";
 import { classifierCandidates, describeCandidate, type ClassifierNotice } from "../../lib/models/classifier-model.ts";
 import { chosenModelWarnings, type ChosenModelWarning } from "../../lib/models/model-choice-warnings.ts";
@@ -30,6 +31,7 @@ import {
 	resolveModelTier,
 	servedCatalogIds,
 	tierOverride,
+	searchToolsEnabled,
 } from "../../lib/models/model-tier.ts";
 import { applicableSubagentDefault, loadSubagentDefault, SUBAGENT_MODEL_KNOB, type SubagentDefault } from "../../lib/models/subagent-default.ts";
 import { knobLimit } from "../../lib/profile/knobs.ts";
@@ -61,12 +63,17 @@ export interface ModelFacts {
 	catalog: { fetchedAt: string; refreshed: boolean; refreshEnabled: boolean };
 }
 
-export const TIER_LABEL: Record<PromptTier, string> = {
+const TIER_LABEL: Record<PromptTier, string> = {
 	frontier: "frontier tier — terse prompt",
 	workhorse: "workhorse tier — full prompt",
 	cheap: "cheap tier — full prompt, Haiku register",
-	tiny: "tiny tier — full prompt plus weak-model scaffolding and grep/find/ls",
+	tiny: "tiny tier — full prompt plus weak-model scaffolding",
 };
+
+/** The tier's label; the search tools are named only for a session that has them. */
+export function tierLabel(tier: PromptTier, live: (tool: string) => boolean = toolLive): string {
+	return searchToolsEnabled(tier, live) ? `${TIER_LABEL[tier]} and grep/find/ls` : TIER_LABEL[tier];
+}
 
 export function collectModelFacts(available: Model<Api>[], session: SessionView, home: string, env: NodeJS.ProcessEnv): ModelFacts {
 	const sessionModel = session.model;
@@ -152,7 +159,7 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 		findings.push({ level: "warn", text: facts.newerModel.text, fix: facts.newerModel.fix });
 	}
 	lines.push({
-		text: `Prompt register: ${TIER_LABEL[facts.promptTier]}${facts.promptTierForced ? ` (forced by ${envName("PROMPT_TIER")})` : ""}`,
+		text: `Prompt register: ${tierLabel(facts.promptTier)}${facts.promptTierForced ? ` (forced by ${envName("PROMPT_TIER")})` : ""}`,
 		indent: 1,
 		level: "dim",
 	});

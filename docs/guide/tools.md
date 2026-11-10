@@ -35,7 +35,9 @@ is announced to the model separately.
 | `write` | Creates or overwrites a file. The model must have read an existing file in this conversation before writing it. |
 | `edit` | Replaces an exact string in a file. Shown as `● Update(path)`. The same read-before-write rule applies, and the edit is refused if the file changed on disk since the model last read it. |
 | `notebook_edit` | Edits a Jupyter notebook cell: replace, insert, append, or delete. Editing a code cell clears its outputs. Deferred. |
-| `grep`, `find`, `ls` | pi's search tools. Active only for the smallest model tier; on other tiers, searching goes through `bash`, as in Claude Code. |
+
+There are no dedicated search tools. The model searches files and their
+contents through `bash` on every tier, as in Claude Code.
 
 The read-before-write and stale-edit guards track file **content**, not tool
 calls, so a file the model changed through a shell command is tracked too.
