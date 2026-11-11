@@ -15,7 +15,7 @@ import type { McpServer } from "./config.ts";
 import { collectPages } from "./discovery.ts";
 import { failureOf, McpFailureError, shownStderr } from "./failure.ts";
 import { McpAuthenticationRequiredError } from "./oauth/provider.ts";
-import type { McpFailure, McpStep, McpText } from "./text.ts";
+import type { McpFailure, McpStep, McpResultText } from "./text.ts";
 
 /**
  * The MCP SDK costs ~70-80ms to load (findings §15), so it is imported on the
@@ -410,7 +410,7 @@ const INSTRUCTIONS_CAP = 3000;
  */
 export function mcpInstructionsReminder(
 	connections: Array<{ server: { name: string }; instructions?: string }>,
-	text: McpText,
+	text: McpResultText,
 ): string | undefined {
 	const withInstructions = connections.filter((c) => c.instructions);
 	if (withInstructions.length === 0) return undefined;
@@ -418,7 +418,7 @@ export function mcpInstructionsReminder(
 }
 
 /** A server's instructions as the reminder shows them: cut at the cap, with the profile's label. */
-export function shownInstructions(instructions: string, text: McpText): string {
+export function shownInstructions(instructions: string, text: McpResultText): string {
 	return instructions.length > INSTRUCTIONS_CAP ? text.instructionsCut(instructions.slice(0, INSTRUCTIONS_CAP)) : instructions;
 }
 
@@ -432,7 +432,7 @@ export function shownFailure(error: string): string {
  * error, then tells the model to treat it as a connection failure and the
  * quoted error as unvalidated data.
  */
-export function mcpFailuresReminder(failed: Array<{ name: string; error: string }>, text: McpText): string {
+export function mcpFailuresReminder(failed: Array<{ name: string; error: string }>, text: McpResultText): string {
 	return text.failed(failed.map((f) => ({ name: f.name, error: shownFailure(f.error) })));
 }
 

@@ -26,6 +26,7 @@ import { profileText } from "../../lib/profile/profile.ts";
 import type { McpServer } from "../../tools/mcp/config.ts";
 import { BRAVE_KEY_ENV, resolveChain, TAVILY_KEY_ENV, type WebSearchSettings } from "../../tools/web/backends.ts";
 import type { Finding, ReportLine, ReportSection } from "./report.ts";
+import { lspResultText } from "../../tools/lsp/text.ts";
 
 export type DependencyNeed = "required" | "project" | "optional" | "unused";
 
@@ -206,7 +207,7 @@ export function checkDependencies(input: DependencyInput): DependencyReport {
 			// Worded by the language-server text, which is there whenever that feature is on.
 			const preflight = typescriptPreflight(cwd);
 			const words = profileText().lsp;
-			if (preflight && words) findings.push({ level: "warn", text: words.failure(preflight) });
+			if (preflight && words) findings.push({ level: "warn", text: lspResultText.failure(preflight) });
 		}
 	}
 

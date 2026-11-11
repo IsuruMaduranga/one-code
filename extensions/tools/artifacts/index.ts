@@ -46,6 +46,7 @@ import {
 	viewerPath,
 	writeGallery,
 } from "./store.ts";
+import { artifactsResultText } from "./text.ts";
 
 interface ArtifactArgs {
 	action?: string;
@@ -79,7 +80,7 @@ async function showInBrowser(path: string): Promise<NoBrowser | undefined> {
 /** The /artifacts status line after opening `path`. */
 async function notifyOpened(ctx: ExtensionContext, path: string, name: string, text: ArtifactsText): Promise<void> {
 	const failed = await showInBrowser(path);
-	if (failed) ctx.ui.notify(`No browser was opened (${text.noBrowserReason(failed)}): ${path}`, "warning");
+	if (failed) ctx.ui.notify(`No browser was opened (${artifactsResultText.noBrowserReason(failed)}): ${path}`, "warning");
 	else ctx.ui.notify(`Opened ${name}`, "info");
 }
 
@@ -143,38 +144,38 @@ function artifactsExtension(pi: ExtensionAPI) {
 			const ref = params.id ?? params.url;
 			const resolved = ref === undefined ? undefined : resolveArtifactRef(root, ref);
 			if (ref !== undefined && !resolved) {
-				return textResult(text.noMatch({ ref }), {}, true);
+				return textResult(artifactsResultText.noMatch({ ref }), {}, true);
 			}
 
 			if (action === "list") {
 				const all = listArtifacts(root);
-				if (all.length === 0) return textResult(text.emptyList);
+				if (all.length === 0) return textResult(artifactsResultText.emptyList);
 				const limit = Math.max(1, Math.floor(params.limit ?? 25));
 				const shown = all.slice(0, limit).map((meta) => shownArtifact(root, meta, homedir()));
-				return textResult(text.list({ total: all.length, shown, galleryUrl: fileUrl(galleryPath(root)) }));
+				return textResult(artifactsResultText.list({ total: all.length, shown, galleryUrl: fileUrl(galleryPath(root)) }));
 			}
 
 			if (action === "open") {
 				if (!resolved) {
 					writeGallery(root);
-					return textResult(text.openedGallery({ url: fileUrl(galleryPath(root)), failed: await showInBrowser(galleryPath(root)) }));
+					return textResult(artifactsResultText.openedGallery({ url: fileUrl(galleryPath(root)), failed: await showInBrowser(galleryPath(root)) }));
 				}
-				return textResult(text.opened({ url: fileUrl(viewerPath(root, resolved)), failed: await showInBrowser(viewerPath(root, resolved)) }));
+				return textResult(artifactsResultText.opened({ url: fileUrl(viewerPath(root, resolved)), failed: await showInBrowser(viewerPath(root, resolved)) }));
 			}
 
 			if (action === "delete") {
-				if (!resolved) return textResult(text.deleteNeedsId, {}, true);
+				if (!resolved) return textResult(artifactsResultText.deleteNeedsId, {}, true);
 				const meta = getArtifact(root, resolved);
-				if (!meta) return textResult(text.unknownForDelete({ id: resolved }), {}, true);
-				if (!ctx.hasUI) return textResult(text.deleteNeedsUser, {}, true);
+				if (!meta) return textResult(artifactsResultText.unknownForDelete({ id: resolved }), {}, true);
+				if (!ctx.hasUI) return textResult(artifactsResultText.deleteNeedsUser, {}, true);
 				const approved = await confirmDelete(ctx, meta, signal);
-				if (signal?.aborted) return textResult(text.deleteAborted, {}, true);
-				if (!approved) return textResult(text.deleteDeclined, {}, true);
+				if (signal?.aborted) return textResult(artifactsResultText.deleteAborted, {}, true);
+				if (!approved) return textResult(artifactsResultText.deleteDeclined, {}, true);
 				deleteArtifact(root, resolved);
-				return textResult(text.deleted({ id: meta.id, title: meta.title }));
+				return textResult(artifactsResultText.deleted({ id: meta.id, title: meta.title }));
 			}
 
-			const refuse = (problem: PublishProblem) => textResult(text.publishProblem(problem), {}, true);
+			const refuse = (problem: PublishProblem) => textResult(artifactsResultText.publishProblem(problem), {}, true);
 			if (!params.file_path) return refuse({ kind: "noPath" });
 			const sourcePath = resolveToolPath(params.file_path, ctx.cwd);
 			let bytes: number;
@@ -213,7 +214,7 @@ function artifactsExtension(pi: ExtensionAPI) {
 					: { kind: "tried", failed: await showInBrowser(viewer) };
 			const details: PublishDetails = { id: meta.id, version: meta.version, path: viewer, created };
 			return textResult(
-				text.published({ id: meta.id, title: meta.title, version: meta.version, created, url, file: pagePath(root, meta.id), galleryUrl: fileUrl(galleryPath(root)), browser }),
+				artifactsResultText.published({ id: meta.id, title: meta.title, version: meta.version, created, url, file: pagePath(root, meta.id), galleryUrl: fileUrl(galleryPath(root)), browser }),
 				details,
 			);
 		},
@@ -227,7 +228,7 @@ function artifactsExtension(pi: ExtensionAPI) {
 			const root = artifactsRoot();
 			const all = listArtifacts(root);
 			if (!ctx.hasUI) {
-				ctx.ui.notify(all.length ? all.map((meta) => text.listLine(shownArtifact(root, meta, homedir()))).join("\n") : text.emptyList, "info");
+				ctx.ui.notify(all.length ? all.map((meta) => artifactsResultText.listLine(shownArtifact(root, meta, homedir()))).join("\n") : artifactsResultText.emptyList, "info");
 				return;
 			}
 			const GALLERY = "Open the gallery in the browser";

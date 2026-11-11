@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { classify } from "../../extensions/safety/permissions/auto-mode/classifier.ts";
 import { classifierHistory, messageText } from "../../extensions/safety/permissions/auto-mode/history.ts";
 import { invalidatePluginsCache } from "../../extensions/lib/plugins/plugins.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { shellQuote } from "../../extensions/lib/shell/shell-quote.ts";
 import permissionsExtension from "../../extensions/safety/permissions/index.ts";
 import pluginsExtension from "../../extensions/tools/plugins/index.ts";
@@ -14,6 +13,7 @@ import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { brand } from "../../extensions/lib/profile/brand.mjs";
 import { productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
+import { withBaseDir } from "../../extensions/lib/plugins/skill-invoke.ts";
 
 vi.mock("../../extensions/safety/permissions/auto-mode/classifier.ts", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../../extensions/safety/permissions/auto-mode/classifier.ts")>()),
@@ -100,7 +100,7 @@ describe("skill and plugin permission provenance", () => {
 		await mount(deny);
 		await fake.fire("before_agent_start", { systemPromptOptions: { skills: [{ name: "demo", filePath: skillPath }] } }, ctx);
 		const result = await fake.tools.get("skill")!.execute("load-skill", { skill: "demo" }, undefined, undefined, ctx) as { content: unknown };
-		expect(messageText(result.content)).toContain(requireText("skill").withBaseDir({ dir: skillDir, text: BODY }));
+		expect(messageText(result.content)).toContain(withBaseDir({ dir: skillDir, text: BODY }));
 		branch.push({ type: "message", id: "skill-result", message: { role: "toolResult", toolCallId: "load-skill", content: result.content } });
 		expect((await pushAttempt())?.block).toBe(true);
 		if (deny) expect(classify).not.toHaveBeenCalled();
@@ -131,7 +131,7 @@ describe("skill and plugin permission provenance", () => {
 		await mount();
 		const results = await fake.fire<{ action?: string; text?: string } | undefined>("input", { text: "/skill:demo staging", source: "interactive" }, ctx);
 		const transformed = results.find((result) => result?.action === "transform");
-		expect(transformed?.text).toContain(requireText("skill").withBaseDir({ dir: skillDir, text: `${BODY}\n\nARGUMENTS: staging` }));
+		expect(transformed?.text).toContain(withBaseDir({ dir: skillDir, text: `${BODY}\n\nARGUMENTS: staging` }));
 		await persistUser(transformed!.text);
 		expect(classifierHistory(branch).userMessages).toEqual([]);
 		await fake.fire("session_start", { reason: "resume" }, ctx);
@@ -144,7 +144,7 @@ describe("skill and plugin permission provenance", () => {
 		await fake.fire("before_agent_start", { systemPromptOptions: { skills: [{ name: "demo", filePath: skillPath }] } }, ctx);
 		await fake.fire("input", { text: "/skill:demo staging", source: "interactive" }, ctx);
 		const delivered = fake.sentMessages.at(-1)!.message;
-		expect(messageText(delivered.content)).toContain(requireText("skill").withBaseDir({ dir: skillDir, text: `${BODY}\n\nARGUMENTS: staging` }));
+		expect(messageText(delivered.content)).toContain(withBaseDir({ dir: skillDir, text: `${BODY}\n\nARGUMENTS: staging` }));
 		branch.push({ type: "message", id: "skill-custom", message: { role: "custom", ...delivered } });
 		expect((await pushAttempt())?.block).toBe(true);
 		expect(vi.mocked(classify).mock.calls.at(-1)![0].userMessages).toEqual([]);

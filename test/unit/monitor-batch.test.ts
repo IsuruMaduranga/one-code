@@ -10,8 +10,9 @@ import {
 	pushEvent,
 } from "../../extensions/tools/background/monitor-batch.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { backgroundWords } from "../../extensions/tools/background/text.ts";
 
-const monitor = requireText("background").monitor;
+const monitor = backgroundWords(requireText("background")).monitor;
 
 describe("monitor batching", () => {
 	it("keeps at most MAX_LINES lines and counts the rest", () => {

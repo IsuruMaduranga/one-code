@@ -34,7 +34,7 @@ import {
 	type Segment,
 	type Token,
 } from "./shell-analysis.ts";
-import { shellWords } from "./shell-words.ts";
+import { shellResultText } from "../shell-run/shell-text.ts";
 
 export const clip = (text: string, max = 200): string => (text.length > max ? `${text.slice(0, max)}…` : text);
 
@@ -96,7 +96,7 @@ export function leadingSleepReason<T>(
 	if (leadSleeps === 1 && total !== undefined && total < 2) return undefined;
 	const rest = statements.slice(leadSleeps).map(raw).filter(Boolean).join("; ");
 	const shown = statements.slice(0, leadSleeps).map(raw).join(opts.joiner);
-	return shellWords().blocked({ kind: "sleep", shown, ...(rest ? { rest: clip(rest) } : {}), sleepName: opts.sleepName, untilExample: opts.untilExample });
+	return shellResultText().blocked({ kind: "sleep", shown, ...(rest ? { rest: clip(rest) } : {}), sleepName: opts.sleepName, untilExample: opts.untilExample });
 }
 
 function waitReason(segments: Segment[]): string | undefined {
@@ -122,14 +122,14 @@ function pollLoopReason(command: string, segments: Segment[]): string | undefine
 	// as a command inside the loop: `echo sleep` is data.
 	const sleeps = segments.some((seg) => inLoop(seg) && resolvePayload(leadTokens(seg)).command === "sleep");
 	if (!sleeps) return undefined;
-	return shellWords().blocked({ kind: "pollingLoop", command: clip(command, 160) });
+	return shellResultText().blocked({ kind: "pollingLoop", command: clip(command, 160) });
 }
 
 // ---------------------------------------------------------------------------
 // Orphan guard
 
 function orphanReason(background: boolean, segments: Segment[]): string | undefined {
-	const message = (via: string) => shellWords().blocked({ kind: "detach", via });
+	const message = (via: string) => shellResultText().blocked({ kind: "detach", via });
 
 	for (const seg of segments) {
 		const { peeled } = resolvePayload(leadTokens(seg));
@@ -153,19 +153,19 @@ function interactiveReason(segments: Segment[]): string | undefined {
 		const { command: cmd, args } = resolvePayload(leadTokens(seg));
 		if (EDITORS.has(cmd)) {
 			if (cmd === "emacs" && args.some((a) => ["--batch", "-batch", "--script"].includes(a.value))) continue;
-			return shellWords().blocked({ kind: "editor", command: cmd });
+			return shellResultText().blocked({ kind: "editor", command: cmd });
 		}
 		if (cmd === "watch") {
-			return shellWords().blocked({ kind: "watch" });
+			return shellResultText().blocked({ kind: "watch" });
 		}
 		if (cmd !== "git") continue;
 		const { sub, rest } = gitSubcommand(args);
 		const flags = new Set(rest.map((t) => t.value));
 		if (sub === "rebase" && (flags.has("-i") || flags.has("--interactive"))) {
-			return shellWords().blocked({ kind: "rebaseInteractive", shell: "bash" });
+			return shellResultText().blocked({ kind: "rebaseInteractive", shell: "bash" });
 		}
 		if (sub === "add" && ["-i", "--interactive", "-p", "--patch"].some((f) => flags.has(f))) {
-			return shellWords().blocked({ kind: "addInteractive" });
+			return shellResultText().blocked({ kind: "addInteractive" });
 		}
 	}
 	return undefined;

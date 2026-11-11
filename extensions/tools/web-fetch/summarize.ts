@@ -15,8 +15,8 @@
 
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { type EconomicalModelChoice, pickEconomicalContainedModel } from "../../lib/models/model-tier.ts";
-import { pageContent, pageText } from "./page-content.ts";
-import type { WebFetchText } from "./text.ts";
+import { pageContent, type PageWords, pageText } from "./page-content.ts";
+import { type WebFetchText, webFetchResultText } from "./text.ts";
 
 /**
  * How much of the page the reader sees. Far past the 30k-char window the main
@@ -47,10 +47,10 @@ export interface ReaderMessages {
 
 /**
  * The reader's request: the page rides in the user message as data, framed
- * (page-content.ts) and cut to the reader's limit, in the profile's words.
+ * (page-content.ts) and cut to the reader's limit, in the profile's prompt.
  */
 export function readerMessages(
-	words: Pick<WebFetchText, "page" | "reader">,
+	words: Pick<WebFetchText, "reader"> & { page?: PageWords },
 	input: {
 		prompt: string;
 		markdown: string;
@@ -58,9 +58,11 @@ export function readerMessages(
 		title?: string;
 	},
 ): ReaderMessages {
-	const content = pageText(words.page, input.markdown, input.title);
+	// The frame around the page is the base's; a test may pass its own.
+	const frame = words.page ?? webFetchResultText().page;
+	const content = pageText(frame, input.markdown, input.title);
 	const truncated = content.length > READER_MAX_CHARS;
 	const page = truncated ? content.slice(0, READER_MAX_CHARS) : content;
-	const user = words.reader.user({ url: input.url, cutAt: truncated ? READER_MAX_CHARS : undefined, page: pageContent(words.page, page), question: input.prompt });
+	const user = words.reader.user({ url: input.url, cutAt: truncated ? READER_MAX_CHARS : undefined, page: pageContent(frame, page), question: input.prompt });
 	return { system: words.reader.system, user, truncated };
 }

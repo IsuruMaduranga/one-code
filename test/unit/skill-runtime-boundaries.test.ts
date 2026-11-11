@@ -4,11 +4,12 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import skillExtension from "../../extensions/tools/skill/index.ts";
 import { pluginRoot } from "../../extensions/lib/plugins/plugin-root.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { setSkillState } from "../../extensions/lib/plugins/skill-overrides.ts";
 import { scopeForPath } from "../../extensions/lib/plugins/skill-scan.ts";
 import { SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../../extensions/lib/plugins/skill-body.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { skillResultText } from "../../extensions/tools/skill/text.ts";
+import { withBaseDir } from "../../extensions/lib/plugins/skill-invoke.ts";
 
 let root: string;
 let cwd: string;
@@ -58,7 +59,7 @@ describe("skill runtime boundaries", () => {
 		await fake.fire("before_agent_start", { systemPromptOptions: { skills: [{ name: "demo", filePath: file }] } }, ctx);
 		const result = await call("demo");
 		expect(result.isError).toBe(true);
-		expect(result.content[0].text).toBe(requireText("skill").off({ name: "demo", manager: "/skills" }));
+		expect(result.content[0].text).toBe(skillResultText.off({ name: "demo", manager: "/skills" }));
 	});
 
 	it("classifies only descendants of user skill directories as user scope", () => {
@@ -91,7 +92,7 @@ describe("skill runtime boundaries", () => {
 		utimesSync(file, later, later);
 		const result = await call("demo");
 		expect(result.isError).toBe(true);
-		expect(result.content[0].text).toBe(requireText("skill").manualOnly("demo"));
+		expect(result.content[0].text).toBe(skillResultText.manualOnly("demo"));
 	});
 
 	it("preserves large bodies and leaves outside-file references as text", async () => {
@@ -103,7 +104,7 @@ describe("skill runtime boundaries", () => {
 		const { fake, ctx, call } = await mount();
 		await fake.fire("before_agent_start", { systemPromptOptions: { skills: [{ name: "demo", filePath: file }] } }, ctx);
 		const result = await call("demo");
-		expect(result.content[1].text).toBe(requireText("skill").withBaseDir({ dir, text: body }));
+		expect(result.content[1].text).toBe(withBaseDir({ dir, text: body }));
 		expect(result.content[1].text).not.toContain("PRIVATE_OUTSIDE_SENTINEL");
 	});
 

@@ -21,13 +21,12 @@ import {
 	typescriptPreflight,
 	findTypescript,
 } from "../../extensions/tools/lsp/servers.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { diag } from "./helpers/lsp-diagnostics.ts";
+import { lspResultText } from "../../extensions/tools/lsp/text.ts";
 
-const lspText = requireText("lsp");
 
 /** The tool's result with the profile's words, as the extension passes them. */
-const formatDiagnostics = (path: string, list: LspDiagnostic[], limit?: number) => formatWith(path, list, lspText.diagnostics, limit);
+const formatDiagnostics = (path: string, list: LspDiagnostic[], limit?: number) => formatWith(path, list, lspResultText.diagnostics, limit);
 
 describe("protocol framing", () => {
 	it("round-trips a message", () => {
@@ -216,18 +215,18 @@ describe("diagnostic formatting", () => {
 
 	it("summarises counts and truncates long lists", () => {
 		const many = Array.from({ length: 25 }, (_, i) => diag(`e${i}`, 1, i));
-		const words = lspText.diagnostics;
+		const words = lspResultText.diagnostics;
 		const lines = many.slice(0, 10).map((d) => words.line({ path: "a.ts", diagnostic: shownDiagnostic(d) }));
 		expect(formatDiagnostics("a.ts", many, 10)).toBe(`${words.summary({ errors: 25, warnings: 0, total: 25 })}\n\n${[...lines, words.more(15)].join("\n")}`);
 	});
 
 	it("reports a clean file", () => {
-		expect(formatDiagnostics("a.ts", [])).toBe(lspText.diagnostics.none);
+		expect(formatDiagnostics("a.ts", [])).toBe(lspResultText.diagnostics.none);
 	});
 
 	it("counts errors and warnings separately", () => {
 		const list = [diag("e", 1), diag("w", 2), diag("w2", 2)];
-		const words = lspText.diagnostics;
+		const words = lspResultText.diagnostics;
 		const lines = list.map((d) => words.line({ path: "a.ts", diagnostic: shownDiagnostic(d) }));
 		expect(formatDiagnostics("a.ts", list)).toBe(`${words.summary({ errors: 1, warnings: 2, total: 3 })}\n\n${lines.join("\n")}`);
 	});

@@ -2,12 +2,12 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { brand } from "../../extensions/lib/profile/brand.mjs";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { startCallbackServer } from "../../extensions/tools/mcp/oauth/callback.ts";
 import { readDisabledMcpServers, setMcpServerDisabled } from "../../extensions/lib/plugins/mcp-overrides.ts";
 import { hasStoredTokens, readAuth, updateAuth, writeAuth } from "../../extensions/tools/mcp/oauth/store.ts";
 import { McpOAuthProvider } from "../../extensions/tools/mcp/oauth/provider.ts";
+import { mcpResultText } from "../../extensions/tools/mcp/text.ts";
 
 let home: string;
 const env: NodeJS.ProcessEnv = {}; // no <envPrefix>_STATE_DIR → <home>/<stateDir>
@@ -173,7 +173,7 @@ describe("McpOAuthProvider", () => {
 	});
 
 	it("throws when asked to redirect without an opener (silent reconnect)", () => {
-		expect(() => make().redirectToAuthorization(new URL("https://auth.example/authorize"))).toThrow(requireText("mcp").needsAuthentication({ server: "srv" }));
+		expect(() => make().redirectToAuthorization(new URL("https://auth.example/authorize"))).toThrow(mcpResultText.needsAuthentication({ server: "srv" }));
 	});
 
 	it("opens the authorization URL when an opener is provided", () => {

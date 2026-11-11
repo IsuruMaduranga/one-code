@@ -53,11 +53,12 @@ import { WORKTREE_CHANNEL } from "../../extensions/lib/agents/worktree-channel.t
 import { createFakeCtx, createFakePi, type FakePi, flushNotices } from "./helpers/fake-pi.ts";
 import { resetProcessStateForTest } from "../../extensions/lib/profile/process-state.ts";
 import { toolResultsText } from "../../extensions/lib/request/tool-results-text.ts";
+import { backgroundWords } from "../../extensions/tools/background/text.ts";
 
 // The profile's words: each test checks that the base hands them the right
 // facts and places what they return (One Code's wording is
 // profile/test/background-wiring-wording.test.ts).
-const words = requireText("background");
+const words = backgroundWords(requireText("background"));
 const toolResultWords = toolResultsText;
 const maxAgeDays = RECURRING_MAX_AGE_DAYS;
 /** A `<summary>` line of a task notification, as the base frames the profile's summary. */

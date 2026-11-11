@@ -5,22 +5,7 @@
  * jitter sentence is Claude Code's own, understating its code.
  */
 
-import type { CronCreateFailure, CronText, ShownJob } from "../../../extensions/sdk/profile.ts";
-
-const SESSION_ONLY = "Session-only (not written to disk, dies when this session ends)";
-
-const jobLine = (job: ShownJob) => `${job.id} — ${job.cadence} (${job.recurring ? "recurring" : "one-shot"}) [session-only]: ${job.prompt}`;
-
-function createFailed(failure: CronCreateFailure): string {
-	switch (failure.kind) {
-		case "invalid":
-			return `Invalid cron expression '${failure.cron}'. Expected 5 fields: M H DoM Mon DoW.`;
-		case "neverMatches":
-			return `Cron expression '${failure.cron}' does not match any calendar date in the next year.`;
-		case "tooMany":
-			return `Too many scheduled jobs (max ${failure.max}). Cancel one first.`;
-	}
-}
+import type { CronText } from "../../../extensions/sdk/profile.ts";
 
 export const cron: CronText = {
 	createDescription: ({ maxAgeDays }) => `Schedule a prompt to be enqueued at a future time. Use for both recurring schedules and one-shot reminders.
@@ -73,17 +58,4 @@ Returns a job ID you can pass to cron_delete.`,
 	listDescription: "List all cron jobs scheduled via cron_create in this session.",
 	deleteDescription: "Cancel a cron job previously scheduled with cron_create. Removes it from the in-memory session store.",
 	deleteIdParam: "Job ID returned by cron_create.",
-	created: ({ job, maxAgeDays }) =>
-		job.recurring
-			? `Scheduled recurring job ${job.id} (${job.cadence}). ${SESSION_ONLY}. Auto-expires after ${maxAgeDays} days. Use cron_delete to cancel sooner.`
-			: `Scheduled one-shot task ${job.id} (${job.cadence}). ${SESSION_ONLY}. It will fire once then auto-delete.`,
-	createFailed,
-	list: ({ jobs }) => (jobs.length ? jobs.map(jobLine).join("\n") : "No scheduled jobs."),
-	deleted: ({ id }) => `Cancelled job ${id}.`,
-	unknownJob: ({ id }) => `No scheduled job with id '${id}'`,
-	neverFires: "This is a one-shot session: it ends when this turn does, so the job will never fire.",
-	notOwner: ({ id }) => `Cannot delete cron job '${id}': owned by another agent`,
-	blockingRunRefusal:
-		"Nothing was scheduled: this agent runs until its task is done and then ends, so a job it schedules could never fire. Do the work now, or report back so the main session can schedule it.",
-	storeMissing: "The session's cron store is not loaded; nothing was scheduled.",
 };

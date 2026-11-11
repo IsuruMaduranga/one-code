@@ -10,7 +10,6 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import skillExtension from "../../extensions/tools/skill/index.ts";
 import { withoutPiSkillsBlock } from "../../extensions/tools/skill/listing.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { pluginRoot } from "../../extensions/lib/plugins/plugin-root.ts";
 import { setSkillState } from "../../extensions/lib/plugins/skill-overrides.ts";
@@ -18,6 +17,7 @@ import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 // pi's own renderer, by file: the strip must match what the installed pi produces.
 import { buildSystemPrompt } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/system-prompt.js";
+import { skillResultText } from "../../extensions/tools/skill/text.ts";
 
 const PI_SECTION =
 	"\n\nThe following skills provide specialized instructions for specific tasks.\nUse the read tool to load a skill's file when the task matches its description.\n\n<available_skills>\n  <skill>\n    <name>demo</name>\n  </skill>\n</available_skills>";
@@ -77,14 +77,14 @@ describe("skill extension: one skills instruction per session", () => {
 
 	it("with the skill tool: lists skills for it and strips pi's section", async () => {
 		const { listings, result } = await turn(["read", "skill"]);
-		expect(listings).toEqual([`${requireText("skill").listingHeader}\n\n- demo: A demo skill`]);
+		expect(listings).toEqual([`${skillResultText.listingHeader}\n\n- demo: A demo skill`]);
 		expect(result?.systemPrompt).toBe("You are an agent.");
 	});
 
 	it("without the skill tool: strips pi's section and lists each skill's file to read", async () => {
 		const { listings, result, cwd } = await turn(["read", "bash"]);
 		expect(result?.systemPrompt).toBe("You are an agent.");
-		expect(listings).toEqual([requireText("skill").readableListing({ lines: [`- demo: A demo skill (${join(cwd, "demo", "SKILL.md")})`], reader: "read" })]);
+		expect(listings).toEqual([skillResultText.readableListing({ lines: [`- demo: A demo skill (${join(cwd, "demo", "SKILL.md")})`], reader: "read" })]);
 	});
 
 	it("without the skill tool: hides user-only and off skills, and a name-only skill's description", async () => {

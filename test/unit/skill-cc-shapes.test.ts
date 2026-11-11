@@ -15,9 +15,10 @@ import type { PromptTier } from "../../extensions/lib/models/model-tier.ts";
 import { invalidatePluginsCache } from "../../extensions/lib/plugins/plugins.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { BUNDLED_SKILLS_DIR } from "../../extensions/lib/plugins/skill-scan.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
+import { skillResultText } from "../../extensions/tools/skill/text.ts";
+import { withBaseDir } from "../../extensions/lib/plugins/skill-invoke.ts";
 
 const root = mkdtempSync(join(tmpdir(), "skill-cc-shapes-"));
 const cwd = join(root, "project");
@@ -112,7 +113,7 @@ describe("typed skills expand in the harness", () => {
 		expect(outcome.action).toBe("transform");
 		expect(outcome.text).toBe(
 			"<command-message>kit:tip</command-message>\n<command-name>/kit:tip</command-name>\n<command-args>do it</command-args>\n\n" +
-				`${requireText("skill").withBaseDir({ dir: join(pluginDir, "skills", "tip"), text: "Tip body.\n\nARGUMENTS: do it" })}\n`,
+				`${withBaseDir({ dir: join(pluginDir, "skills", "tip"), text: "Tip body.\n\nARGUMENTS: do it" })}\n`,
 		);
 		expect(fake.sentUserMessages).toHaveLength(0);
 	});
@@ -133,14 +134,14 @@ describe("skill tool: Claude Code's result", () => {
 		const { turn, call } = await mount();
 		await turn();
 		const result = await call({ skill: "kit:go", args: "prod" });
-		expect(result.content.map((block) => block.text)).toEqual([requireText("skill").launching("kit:go"), "Run go for prod."]);
+		expect(result.content.map((block) => block.text)).toEqual([skillResultText.launching("kit:go"), "Run go for prod."]);
 	});
 
 	it("gives a frontier session at medium effort the minimal prompt, with no folder named", async () => {
 		const { turn, call } = await mount(frontier, "medium");
 		await turn();
 		const result = await call({ skill: "code-review", args: "123" });
-		expect(result.content[0].text).toBe(requireText("skill").launching("code-review"));
+		expect(result.content[0].text).toBe(skillResultText.launching("code-review"));
 		expect(result.content[1].text).toBe(`${body("frontier", "medium")}\n\nARGUMENTS: 123`);
 	});
 

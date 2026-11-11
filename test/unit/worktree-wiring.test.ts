@@ -17,10 +17,11 @@ import { WORKTREE_CHANNEL, type WorktreeLocation } from "../../extensions/lib/ag
 import worktreeExtension from "../../extensions/safety/worktree/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { worktreeGuardText } from "../../extensions/lib/rules/worktree-guard-text.ts";
+import { worktreeResultText } from "../../extensions/safety/worktree/text.ts";
 
 type GateResult = { block?: boolean; reason?: string } | undefined;
 /** The worktree session a tool recorded (the state its texts name). */
-type Session = Parameters<ReturnType<typeof words>["reminder"]>[0];
+type Session = Parameters<(typeof worktreeResultText)["reminder"]>[0];
 
 const words = () => requireText("worktree");
 /** A guard's refusal of git aimed at `target`, in the profile's words. */
@@ -63,7 +64,7 @@ beforeEach(async () => {
 	expect(entered.isError).toBeUndefined();
 	session = entered.details.worktreeState;
 	// One Code's wording announces the git-isolation guard here: profile/test/profile-worktree-text.test.ts.
-	expect(entered.content[0]?.text).toBe(words().enter.created({ session, baseCommit: session.baseCommit }));
+	expect(entered.content[0]?.text).toBe(worktreeResultText.enter.created({ session, baseCommit: session.baseCommit }));
 	worktree = join(projectConfigDir(repo), "worktrees", "feature");
 	expect(location).toEqual({ path: worktree, branch: "feature", sharedRoot: repo });
 });
@@ -74,12 +75,12 @@ const toolCall = async (toolName: string, input: Record<string, unknown>, toolCa
 
 describe("worktree state announcements", () => {
 	it("binds created and existing-worktree activation to the entering tool result", async () => {
-		expect(stateReminders.find((entry) => entry.text === words().reminder(session))).toMatchObject({ toolCallId: "e1" });
+		expect(stateReminders.find((entry) => entry.text === worktreeResultText.reminder(session))).toMatchObject({ toolCallId: "e1" });
 		stateReminders.length = 0;
 		const switched = (await fake.tools.get("enter_worktree")!.execute("e2", { path: worktree }, undefined, undefined, createFakeCtx({ cwd: repo }))) as {
 			details: { worktreeState: Session };
 		};
-		expect(stateReminders.find((entry) => entry.text === words().reminder(switched.details.worktreeState))).toMatchObject({ toolCallId: "e2" });
+		expect(stateReminders.find((entry) => entry.text === worktreeResultText.reminder(switched.details.worktreeState))).toMatchObject({ toolCallId: "e2" });
 	});
 
 	it("enters a listed worktree whatever its spelling (git lists C:/… on Windows)", async () => {
@@ -92,7 +93,7 @@ describe("worktree state announcements", () => {
 			};
 			expect(result.isError, path).toBeUndefined();
 			expect(result.details.worktreeState.path).toBe(worktree);
-			expect(result.content[0]?.text).toBe(words().enter.switched({ session: result.details.worktreeState }));
+			expect(result.content[0]?.text).toBe(worktreeResultText.enter.switched({ session: result.details.worktreeState }));
 		}
 	});
 
@@ -116,11 +117,11 @@ describe("worktree state announcements", () => {
 		await resumed.fire("session_start", {}, ctx);
 		expect(reminders).toContainEqual({ key: "cc-worktree-session", remove: true });
 		const notice = reminders.find((entry) => entry.text && entry.placement === undefined);
-		expect(notice?.text).toBe(words().missingOnRestore(missing));
+		expect(notice?.text).toBe(worktreeResultText.missingOnRestore(missing));
 
 		// Said once per branch, recorded on it: a reload (a new instance), a
 		// re-start and a tree navigation of the same branch do not repeat it.
-		const notices = () => reminders.filter((entry) => entry.text === words().missingOnRestore(missing)).length;
+		const notices = () => reminders.filter((entry) => entry.text === worktreeResultText.missingOnRestore(missing)).length;
 		await resumed.fire("session_tree", {}, ctx);
 		await resumed.fire("session_start", { reason: "reload" }, ctx);
 		reloaded = createFakePi();
@@ -136,7 +137,7 @@ describe("worktree state announcements", () => {
 		};
 		expect(result.isError).toBeUndefined();
 		expect(result.details.worktreeState).toBeNull();
-		expect(result.content[0].text).toBe(action === "keep" ? words().exit.kept({ session, exists: true }) : words().exit.removed(session));
+		expect(result.content[0].text).toBe(action === "keep" ? worktreeResultText.exit.kept({ session, exists: true }) : worktreeResultText.exit.removed(session));
 	});
 });
 

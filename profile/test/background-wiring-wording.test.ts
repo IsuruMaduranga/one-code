@@ -12,8 +12,9 @@ import { background } from "../text/background/index.ts";
 import { notificationText } from "../../extensions/lib/notify/notifications-text.ts";
 import { notifications as notificationsPart } from "../text/notifications/index.ts";
 import { toolResultsText as toolResults } from "../../extensions/lib/request/tool-results-text.ts";
+import { backgroundWords } from "../../extensions/tools/background/text.ts";
 
-const { cron, wakeup, monitor, tasks, loop } = background;
+const { cron, wakeup, monitor, tasks, loop } = backgroundWords(background);
 const notifications = notificationText(ALL_LIVE, notificationsPart);
 
 describe("monitor notifications", () => {

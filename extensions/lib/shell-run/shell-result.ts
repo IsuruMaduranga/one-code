@@ -11,7 +11,7 @@
 
 import { emptyToolResultText } from "../request/empty-tool-result.ts";
 import { bashExitOneIsSuccess, powershellExitIsSuccess } from "./shell-exit-semantics.ts";
-import { shellWords } from "../shell/shell-words.ts";
+import { shellResultText } from "./shell-text.ts";
 
 type Block = { type: string; text?: string };
 type ShellResult = { content?: Block[]; structuredContent?: unknown; isError?: boolean };
@@ -33,7 +33,7 @@ function failureOutput(text: string, exitCode: number): string | undefined {
 
 /** Claude Code's failure text: `Exit code N`, then the output on its own lines. */
 function failureText(output: string, exitCode: number): string {
-	return shellWords().exitCode({ code: exitCode, output: output === PI_NO_OUTPUT ? "" : output });
+	return shellResultText().exitCode({ code: exitCode, output: output === PI_NO_OUTPUT ? "" : output });
 }
 
 /** Claude Code's text for one foreground result, or undefined to keep pi's. */

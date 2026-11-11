@@ -23,6 +23,7 @@ import type { Answer, Question } from "./questions.ts";
 import type { AskUserText } from "./text.ts";
 import { applyWidgetKey, createWidgetState, decodeWidgetKey, renderWidget, type WidgetResult } from "./widget.ts";
 import { panelUi } from "../../lib/ui/panel-focus.ts";
+import { askUserResultText } from "./text.ts";
 
 /** The tool's parameters, documented in the profile's words. */
 const askParams = (params: AskUserText["params"]) =>
@@ -60,7 +61,7 @@ function askUserExtension(pi: ExtensionAPI) {
 		parameters: askParams(text.params),
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			if (!ctx.hasUI) {
-				return { content: [{ type: "text", text: text.noInteractiveUi }], details: {}, isError: true };
+				return { content: [{ type: "text", text: askUserResultText.noInteractiveUi }], details: {}, isError: true };
 			}
 
 			const questions = params.questions as Question[];
@@ -101,20 +102,20 @@ function askUserExtension(pi: ExtensionAPI) {
 			if (!outcome || outcome.kind === "cancel") {
 				const partial = outcome?.kind === "cancel" ? outcome.answers : [];
 				return {
-					content: [{ type: "text", text: text.cancelled(partial) }],
+					content: [{ type: "text", text: askUserResultText.cancelled(partial) }],
 					details: { answers: partial, cancelled: true },
 				};
 			}
 
 			if (outcome.kind === "chat") {
 				return {
-					content: [{ type: "text", text: text.declined(questions) }],
+					content: [{ type: "text", text: askUserResultText.declined(questions) }],
 					details: { answers: [] as Answer[], declined: true },
 				};
 			}
 
 			return {
-				content: [{ type: "text", text: text.answered(outcome.answers) }],
+				content: [{ type: "text", text: askUserResultText.answered(outcome.answers) }],
 				details: { answers: outcome.answers },
 			};
 		},

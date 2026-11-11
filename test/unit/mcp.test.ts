@@ -14,18 +14,17 @@ import {
 	validateImageData,
 } from "../../extensions/tools/mcp/schema.ts";
 import { createTailBuffer, mcpInstructionsReminder as instructionsWith } from "../../extensions/tools/mcp/client.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { makeMcpConfigDirs, piMcpConfigs, writeMcpServers as write } from "./helpers/mcp-config.ts";
 import { TINY_GIF, TINY_JPEG, TINY_PNG, TINY_WEBP } from "./helpers/tiny-images.ts";
+import { mcpResultText } from "../../extensions/tools/mcp/text.ts";
 
-const mcpText = requireText("mcp");
 
 /** The pure functions with the profile's text, as the extension passes it. */
-const capDescription = (text: string | undefined) => capWith(text, mcpText.tool.descriptionCut);
-const jsonSchemaToTypeBox = (schema: Parameters<typeof convertSchema>[0]) => convertSchema(schema, mcpText.tool.descriptionCut);
-const describeContent = (blocks: Parameters<typeof describeWith>[0], server?: string) => describeWith(blocks, mcpText.content, server);
-const describeResourceContents = (contents: Parameters<typeof describeResourceWith>[0]) => describeResourceWith(contents, mcpText.content);
-const mcpInstructionsReminder = (connections: Parameters<typeof instructionsWith>[0]) => instructionsWith(connections, mcpText);
+const capDescription = (text: string | undefined) => capWith(text, mcpResultText.tool.descriptionCut);
+const jsonSchemaToTypeBox = (schema: Parameters<typeof convertSchema>[0]) => convertSchema(schema, mcpResultText.tool.descriptionCut);
+const describeContent = (blocks: Parameters<typeof describeWith>[0], server?: string) => describeWith(blocks, mcpResultText.content, server);
+const describeResourceContents = (contents: Parameters<typeof describeResourceWith>[0]) => describeResourceWith(contents, mcpResultText.content);
+const mcpInstructionsReminder = (connections: Parameters<typeof instructionsWith>[0]) => instructionsWith(connections, mcpResultText);
 
 describe("expandEnv", () => {
 	it("expands both $VAR and ${VAR}", () => {
@@ -201,13 +200,13 @@ describe("describeContent", () => {
 		const junk = Buffer.from("this is not an image at all").toString("base64");
 		const result = describeContent([{ type: "image", data: junk, mimeType: "image/png" }], "stub");
 		expect(result.images).toEqual([]);
-		expect(result.text).toBe(mcpText.content.imageUndecodable({ server: "stub", problem: { kind: "unrecognised", claimed: "image/png" }, bytes: 27 }));
+		expect(result.text).toBe(mcpResultText.content.imageUndecodable({ server: "stub", problem: { kind: "unrecognised", claimed: "image/png" }, bytes: 27 }));
 	});
 
 	it("renders embedded resources and unknown block types", () => {
 		expect(describeContent([{ type: "resource", resource: { text: "body" } }]).text).toBe("body");
-		expect(describeContent([{ type: "resource", resource: { uri: "file://x" } }]).text).toBe(mcpText.content.resource("file://x"));
-		expect(describeContent([{ type: "audio" }]).text).toBe(mcpText.content.other("audio"));
+		expect(describeContent([{ type: "resource", resource: { uri: "file://x" } }]).text).toBe(mcpResultText.content.resource("file://x"));
+		expect(describeContent([{ type: "audio" }]).text).toBe(mcpResultText.content.other("audio"));
 	});
 
 	it("handles missing content", () => {
@@ -249,7 +248,7 @@ describe("validateImageData", () => {
 		const withGarbage = Buffer.concat([Buffer.from(TINY_PNG, "base64").subarray(0, 8), Buffer.from("garbage")]).toString("base64");
 		const result = describeContent([{ type: "image", data: withGarbage, mimeType: "image/png" }], "stub");
 		expect(result.images).toEqual([]);
-		expect(result.text).toBe(mcpText.content.imageUndecodable({ server: "stub", problem: { kind: "png", defect: "noEnd" }, bytes: 15 }));
+		expect(result.text).toBe(mcpResultText.content.imageUndecodable({ server: "stub", problem: { kind: "png", defect: "noEnd" }, bytes: 15 }));
 	});
 	it("rejects unrecognised and empty data", () => {
 		expect(validateImageData(Buffer.from("nope").toString("base64"), "image/png").ok).toBe(false);
@@ -269,7 +268,7 @@ describe("capDescription (review L2)", () => {
 		expect(capDescription("short")).toBe("short");
 		expect(capDescription(undefined)).toBeUndefined();
 		const big = "z".repeat(DESCRIPTION_CAP + 500);
-		expect(capDescription(big)).toBe(mcpText.tool.descriptionCut({ head: big.slice(0, DESCRIPTION_CAP), chars: big.length }));
+		expect(capDescription(big)).toBe(mcpResultText.tool.descriptionCut({ head: big.slice(0, DESCRIPTION_CAP), chars: big.length }));
 	});
 
 	it("caps a parameter description inside a converted schema", () => {
@@ -277,7 +276,7 @@ describe("capDescription (review L2)", () => {
 		const schema = jsonSchemaToTypeBox({ type: "object", properties: { q: { type: "string", description: big } } }) as {
 			properties: { q: { description: string } };
 		};
-		expect(schema.properties.q.description).toBe(mcpText.tool.descriptionCut({ head: big.slice(0, DESCRIPTION_CAP), chars: big.length }));
+		expect(schema.properties.q.description).toBe(mcpResultText.tool.descriptionCut({ head: big.slice(0, DESCRIPTION_CAP), chars: big.length }));
 	});
 });
 
@@ -293,7 +292,7 @@ describe("describeResourceContents", () => {
 	it("summarises a binary blob instead of dumping base64", () => {
 		const out = describeResourceContents([{ uri: "x://img", mimeType: "image/png", blob: "A".repeat(4096) }]);
 		// 4096 base64 characters are 3 KB.
-		expect(out).toBe(mcpText.content.binaryResource({ uri: "x://img", mimeType: "image/png", kb: 3 }));
+		expect(out).toBe(mcpResultText.content.binaryResource({ uri: "x://img", mimeType: "image/png", kb: 3 }));
 	});
 
 	it("handles missing or empty contents", () => {
@@ -336,14 +335,14 @@ describe("mcpInstructionsReminder", () => {
 			{ server: { name: "deepwiki" }, instructions: "Ask questions about repos." },
 			{ server: { name: "silent" } },
 		]);
-		expect(text).toBe(mcpText.instructions([{ name: "deepwiki", text: "Ask questions about repos." }]));
+		expect(text).toBe(mcpResultText.instructions([{ name: "deepwiki", text: "Ask questions about repos." }]));
 	});
 
 	it("returns undefined when no server has instructions, truncates long ones", async () => {
 		expect(mcpInstructionsReminder([{ server: { name: "s" } }])).toBeUndefined();
 		const long = mcpInstructionsReminder([{ server: { name: "s" }, instructions: "x".repeat(5000) }]);
 		// Instructions are cut at 3,000 characters and the kept head handed to the profile's cut label.
-		expect(long).toBe(mcpText.instructions([{ name: "s", text: mcpText.instructionsCut("x".repeat(3000)) }]));
+		expect(long).toBe(mcpResultText.instructions([{ name: "s", text: mcpResultText.instructionsCut("x".repeat(3000)) }]));
 	});
 });
 

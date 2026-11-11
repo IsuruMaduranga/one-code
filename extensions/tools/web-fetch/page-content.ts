@@ -1,7 +1,7 @@
-import type { WebFetchText } from "./text.ts";
+import type { WebFetchResultText } from "./text.ts";
 
-/** The profile's words around a fetched page (text.ts `page`). */
-export type PageWords = WebFetchText["page"];
+/** The words around a fetched page (text.ts `page`). */
+export type PageWords = WebFetchResultText["page"];
 
 /** The title is page content too; include it when applying a reader's input limit. */
 export function pageText(words: PageWords, text: string, title?: string): string {

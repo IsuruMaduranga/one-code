@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { powershellGuardReason, startSleepSeconds } from "../../extensions/tools/powershell/guards.ts";
+import { shellResultText } from "../../extensions/lib/shell-run/shell-text.ts";
 
 describe("startSleepSeconds", () => {
 	it("reads positional, -Seconds, -s and -Milliseconds forms", () => {
@@ -21,7 +22,7 @@ describe("powershellGuardReason", () => {
 	const fg = { background: false };
 	const shell = requireText("shell");
 	const sleep = (shown: string, rest?: string) =>
-		shell.blocked({ kind: "sleep", shown, ...(rest ? { rest } : {}), sleepName: "Start-Sleep", untilExample: "while (-not (<check>)) { Start-Sleep 2 }" });
+		shellResultText().blocked({ kind: "sleep", shown, ...(rest ? { rest } : {}), sleepName: "Start-Sleep", untilExample: "while (-not (<check>)) { Start-Sleep 2 }" });
 	it("blocks a leading Start-Sleep (and the sleep alias) that is not provably short", () => {
 		expect(powershellGuardReason("Start-Sleep -Seconds 30", fg)).toBe(sleep("Start-Sleep -Seconds 30"));
 		expect(powershellGuardReason("sleep 10; npm test", fg)).toBe(sleep("sleep 10", "npm test"));
@@ -34,10 +35,10 @@ describe("powershellGuardReason", () => {
 		expect(powershellGuardReason("Start-Sleep 60", { background: true })).toBeUndefined();
 	});
 	it("blocks interactive cmdlets and interactive git in either mode", () => {
-		expect(powershellGuardReason("Read-Host 'name'", fg)).toBe(shell.blocked({ kind: "consolePrompt", command: "read-host" }));
-		expect(powershellGuardReason("ls | Out-GridView", { background: true })).toBe(shell.blocked({ kind: "consolePrompt", command: "out-gridview" }));
-		const rebase = shell.blocked({ kind: "rebaseInteractive", shell: "powershell" });
-		const add = shell.blocked({ kind: "addInteractive" });
+		expect(powershellGuardReason("Read-Host 'name'", fg)).toBe(shellResultText().blocked({ kind: "consolePrompt", command: "read-host" }));
+		expect(powershellGuardReason("ls | Out-GridView", { background: true })).toBe(shellResultText().blocked({ kind: "consolePrompt", command: "out-gridview" }));
+		const rebase = shellResultText().blocked({ kind: "rebaseInteractive", shell: "powershell" });
+		const add = shellResultText().blocked({ kind: "addInteractive" });
 		expect(powershellGuardReason("git rebase -i HEAD~3", fg)).toBe(rebase);
 		expect(powershellGuardReason("git add -p", fg)).toBe(add);
 		// git's value-taking global flags precede the subcommand (code-review fix).

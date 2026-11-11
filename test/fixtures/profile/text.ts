@@ -25,6 +25,7 @@ export const systemPrompt: NonNullable<ProfileText["systemPrompt"]> = {
 };
 
 export const notebook: NonNullable<ProfileText["notebook"]> = {
+	pathAlias: "[notebook.pathAlias]",
 	description: "[notebook.description]",
 	searchKeywords: ["[notebook.searchKeywords]"],
 	params: {
@@ -35,8 +36,6 @@ export const notebook: NonNullable<ProfileText["notebook"]> = {
 		new_source: "[notebook.params.new_source]",
 		cell_type: "[notebook.params.cell_type]",
 	},
-	edited: (p) => mark("notebook.edited", p),
-	failed: (p) => mark("notebook.failed", p),
 };
 
 export const askUser: NonNullable<ProfileText["askUser"]> = {
@@ -52,10 +51,6 @@ export const askUser: NonNullable<ProfileText["askUser"]> = {
 		optionDescription: "[askUser.params.optionDescription]",
 		preview: "[askUser.params.preview]",
 	},
-	noInteractiveUi: "[askUser.noInteractiveUi]",
-	answered: (answers) => mark("askUser.answered", answers),
-	cancelled: (partial) => mark("askUser.cancelled", partial),
-	declined: (questions) => mark("askUser.declined", questions),
 };
 
 export const tasks: NonNullable<ProfileText["tasks"]> = {
@@ -88,13 +83,6 @@ export const tasks: NonNullable<ProfileText["tasks"]> = {
 		},
 	},
 	searchKeywords: ["[tasks.searchKeywords]"],
-	created: (task) => mark("tasks.created", task),
-	details: (view) => mark("tasks.details", view),
-	list: (views) => mark("tasks.list", views),
-	notFound: (rawId) => mark("tasks.notFound", rawId),
-	updated: (p) => mark("tasks.updated", p),
-	deleted: (id) => mark("tasks.deleted", id),
-	reminder: (tasks) => mark("tasks.reminder", tasks),
 };
 
 export const worktree: NonNullable<ProfileText["worktree"]> = {
@@ -116,23 +104,6 @@ export const worktree: NonNullable<ProfileText["worktree"]> = {
 		enter_worktree: ["[worktree.searchKeywords.enter_worktree]"],
 		exit_worktree: ["[worktree.searchKeywords.exit_worktree]"],
 	},
-	reminder: (session) => mark("worktree.reminder", session),
-	missingOnRestore: (session) => mark("worktree.missingOnRestore", session),
-	activeMissing: (session) => mark("worktree.activeMissing", session),
-	enter: {
-		failed: (failure) => mark("worktree.enter.failed", failure),
-		switched: (p) => mark("worktree.enter.switched", p),
-		created: (p) => mark("worktree.enter.created", p),
-	},
-	exit: {
-		noSession: "[worktree.exit.noSession]",
-		kept: (p) => mark("worktree.exit.kept", p),
-		notCreatedHere: (session) => mark("worktree.exit.notCreatedHere", session),
-		removeRefused: (p) => mark("worktree.exit.removeRefused", p),
-		removeFailed: (osMessage) => mark("worktree.exit.removeFailed", osMessage),
-		branchDeleteFailed: (p) => mark("worktree.exit.branchDeleteFailed", p),
-		removed: (session) => mark("worktree.exit.removed", session),
-	},
 };
 
 export const webFetch: NonNullable<ProfileText["webFetch"]> = {
@@ -144,16 +115,6 @@ export const webFetch: NonNullable<ProfileText["webFetch"]> = {
 		max_chars: (defaultChars) => mark("webFetch.params.max_chars", defaultChars),
 	},
 	searchKeywords: ["[webFetch.searchKeywords]"],
-	urlRejected: (problem) => mark("webFetch.urlRejected", problem),
-	cancelled: (url) => mark("webFetch.cancelled", url),
-	failed: (p) => mark("webFetch.failed", p),
-	redirect: (p) => mark("webFetch.redirect", p),
-	header: (p) => mark("webFetch.header", p),
-	page: {
-		before: "[webFetch.page.before]",
-		after: "[webFetch.page.after]",
-		title: (title) => mark("webFetch.page.title", title),
-	},
 	reader: {
 		system: "[webFetch.reader.system]",
 		user: (p) => mark("webFetch.reader.user", p),
@@ -168,14 +129,6 @@ export const webSearch: NonNullable<ProfileText["webSearch"]> = {
 		blocked_domains: "[webSearch.params.blocked_domains]",
 	},
 	searchKeywords: ["[webSearch.searchKeywords]"],
-	cancelled: (query) => mark("webSearch.cancelled", query),
-	nativeAnswer: (p) => mark("webSearch.nativeAnswer", p),
-	providerAnswer: (p) => mark("webSearch.providerAnswer", p),
-	chainResults: (p) => mark("webSearch.chainResults", p),
-	attempt: (attempt) => mark("webSearch.attempt", attempt),
-	failed: (p) => mark("webSearch.failed", p),
-	nativeFellBack: (reason) => mark("webSearch.nativeFellBack", reason),
-	providerFailed: (p) => mark("webSearch.providerFailed", p),
 };
 
 export const nativeWeb: NonNullable<ProfileText["nativeWeb"]> = {
@@ -184,7 +137,6 @@ export const nativeWeb: NonNullable<ProfileText["nativeWeb"]> = {
 		user: (p) => mark("nativeWeb.fetch.user", p),
 	},
 	searchSystem: "[nativeWeb.searchSystem]",
-	fallback: (fallback) => mark("nativeWeb.fallback", fallback),
 };
 
 export const sessionTitle: NonNullable<ProfileText["sessionTitle"]> = {
@@ -227,7 +179,6 @@ export const planMode: NonNullable<ProfileText["planMode"]> = {
 };
 
 export const skill: NonNullable<ProfileText["skill"]> = {
-	withBaseDir: (p) => mark("skill.withBaseDir", p),
 	description: "[skill.description]",
 	promptSnippet: "[skill.promptSnippet]",
 	params: {
@@ -235,50 +186,9 @@ export const skill: NonNullable<ProfileText["skill"]> = {
 		args: "[skill.params.args]",
 		list: "[skill.params.list]",
 	},
-	listingHeader: "[skill.listingHeader]",
-	readableListing: (p) => mark("skill.readableListing", p),
-	available: (listing) => mark("skill.available", listing),
-	noName: (listing) => mark("skill.noName", listing),
-	notFound: (p) => mark("skill.notFound", p),
-	ambiguous: (p) => mark("skill.ambiguous", p),
-	off: (p) => mark("skill.off", p),
-	userOnly: (name) => mark("skill.userOnly", name),
-	manualOnly: (name) => mark("skill.manualOnly", name),
-	readFailed: (p) => mark("skill.readFailed", p),
-	launching: (name) => mark("skill.launching", name),
-	missingArguments: (hint) => ({
-		before: mark("skill.missingArguments.before", hint),
-		after: mark("skill.missingArguments.after", hint),
-	}),
 };
 
 export const mcp: NonNullable<ProfileText["mcp"]> = {
-	needsAuthentication: (p) => mark("mcp.needsAuthentication", p),
-	instructions: (servers) => mark("mcp.instructions", servers),
-	instructionsCut: (head) => mark("mcp.instructionsCut", head),
-	failed: (servers) => mark("mcp.failed", servers),
-	failure: (failure) => mark("mcp.failure", failure),
-	notices: {
-		recovered: (names) => mark("mcp.notices.recovered", names),
-		connected: (servers) => mark("mcp.notices.connected", servers),
-		dropped: (names) => mark("mcp.notices.dropped", names),
-		refreshFailed: (p) => mark("mcp.notices.refreshFailed", p),
-		toolsChanged: (p) => mark("mcp.notices.toolsChanged", p),
-	},
-	tool: {
-		description: (p) => mark("mcp.tool.description", p),
-		descriptionCut: (p) => mark("mcp.tool.descriptionCut", p),
-		notConnected: (server) => mark("mcp.tool.notConnected", server),
-		gone: (p) => mark("mcp.tool.gone", p),
-		schemaChanged: (name) => mark("mcp.tool.schemaChanged", name),
-		callFailed: (osMessage) => mark("mcp.tool.callFailed", osMessage),
-	},
-	content: {
-		imageUndecodable: (p) => mark("mcp.content.imageUndecodable", p),
-		resource: (uri) => mark("mcp.content.resource", uri),
-		other: (type) => mark("mcp.content.other", type),
-		binaryResource: (p) => mark("mcp.content.binaryResource", p),
-	},
 	resources: {
 		descriptions: {
 			list_mcp_resources: "[mcp.resources.descriptions.list_mcp_resources]",
@@ -299,13 +209,6 @@ export const mcp: NonNullable<ProfileText["mcp"]> = {
 			},
 		},
 		searchKeywords: ["[mcp.resources.searchKeywords]"],
-		unknownServer: (p) => mark("mcp.resources.unknownServer", p),
-		line: (p) => mark("mcp.resources.line", p),
-		none: "[mcp.resources.none]",
-		readFailed: (p) => mark("mcp.resources.readFailed", p),
-		directoryEntry: (p) => mark("mcp.resources.directoryEntry", p),
-		directoryEmpty: "[mcp.resources.directoryEmpty]",
-		directoryFailed: (p) => mark("mcp.resources.directoryFailed", p),
 	},
 };
 
@@ -314,24 +217,6 @@ export const lsp: NonNullable<ProfileText["lsp"]> = {
 	params: {
 		path: "[lsp.params.path]",
 		severity: "[lsp.params.severity]",
-	},
-	projectCodeReason: (command) => mark("lsp.projectCodeReason", command),
-	cancelled: "[lsp.cancelled]",
-	noServer: (p) => mark("lsp.noServer", p),
-	notConfigured: "[lsp.notConfigured]",
-	failure: (failure) => mark("lsp.failure", failure),
-	diagnostics: {
-		none: "[lsp.diagnostics.none]",
-		summary: (p) => mark("lsp.diagnostics.summary", p),
-		line: (p) => mark("lsp.diagnostics.line", p),
-		more: (count) => mark("lsp.diagnostics.more", count),
-	},
-	newDiagnostics: {
-		entry: (diagnostic) => mark("lsp.newDiagnostics.entry", diagnostic),
-		section: (p) => mark("lsp.newDiagnostics.section", p),
-		more: (count) => mark("lsp.newDiagnostics.more", count),
-		cut: (head) => mark("lsp.newDiagnostics.cut", head),
-		block: (body) => mark("lsp.newDiagnostics.block", body),
 	},
 };
 
@@ -347,15 +232,6 @@ export const background: NonNullable<ProfileText["background"]> = {
 		listDescription: "[background.cron.listDescription]",
 		deleteDescription: "[background.cron.deleteDescription]",
 		deleteIdParam: "[background.cron.deleteIdParam]",
-		created: (p) => mark("background.cron.created", p),
-		createFailed: (failure) => mark("background.cron.createFailed", failure),
-		list: (p) => mark("background.cron.list", p),
-		deleted: (p) => mark("background.cron.deleted", p),
-		unknownJob: (p) => mark("background.cron.unknownJob", p),
-		neverFires: "[background.cron.neverFires]",
-		notOwner: (p) => mark("background.cron.notOwner", p),
-		blockingRunRefusal: "[background.cron.blockingRunRefusal]",
-		storeMissing: "[background.cron.storeMissing]",
 	},
 	wakeup: {
 		description: "[background.wakeup.description]",
@@ -366,10 +242,6 @@ export const background: NonNullable<ProfileText["background"]> = {
 			stop: "[background.wakeup.params.stop]",
 			noop: "[background.wakeup.params.noop]",
 		},
-		scheduled: (p) => mark("background.wakeup.scheduled", p),
-		missing: (field) => mark("background.wakeup.missing", field),
-		agedOut: "[background.wakeup.agedOut]",
-		stopped: (p) => mark("background.wakeup.stopped", p),
 	},
 	monitor: {
 		description: "[background.monitor.description]",
@@ -380,14 +252,6 @@ export const background: NonNullable<ProfileText["background"]> = {
 			timeoutMs: mark("background.monitor.params.timeoutMs", p),
 			ws: mark("background.monitor.params.ws", p),
 		}),
-		startFailed: (failure) => mark("background.monitor.startFailed", failure),
-		started: (p) => mark("background.monitor.started", p),
-		ranToEnd: (p) => mark("background.monitor.ranToEnd", p),
-		noEvents: "[background.monitor.noEvents]",
-		noOutput: "[background.monitor.noOutput]",
-		spoolLost: (p) => mark("background.monitor.spoolLost", p),
-		earlierTruncated: "[background.monitor.earlierTruncated]",
-		moreLines: (p) => mark("background.monitor.moreLines", p),
 	},
 	tasks: {
 		outputDescription: "[background.tasks.outputDescription]",
@@ -400,13 +264,6 @@ export const background: NonNullable<ProfileText["background"]> = {
 		stopParams: {
 			taskId: "[background.tasks.stopParams.taskId]",
 		},
-		unknownTask: (p) => mark("background.tasks.unknownTask", p),
-		taskLine: (task) => mark("background.tasks.taskLine", task),
-		noOutputYet: "[background.tasks.noOutputYet]",
-		clippedHeader: (p) => mark("background.tasks.clippedHeader", p),
-		alreadyEnded: (p) => mark("background.tasks.alreadyEnded", p),
-		residentEnded: (p) => mark("background.tasks.residentEnded", p),
-		stopRequested: (p) => mark("background.tasks.stopRequested", p),
 	},
 	loop: {
 		skillBody: (p) => mark("background.loop.skillBody", p),
@@ -418,7 +275,6 @@ export const background: NonNullable<ProfileText["background"]> = {
 };
 
 export const artifacts: NonNullable<ProfileText["artifacts"]> = {
-	storeBusy: (busy) => mark("artifacts.storeBusy", busy),
 	description: "[artifacts.description]",
 	params: {
 		action: "[artifacts.params.action]",
@@ -429,21 +285,6 @@ export const artifacts: NonNullable<ProfileText["artifacts"]> = {
 		url: "[artifacts.params.url]",
 		limit: "[artifacts.params.limit]",
 	},
-	noMatch: (p) => mark("artifacts.noMatch", p),
-	emptyList: "[artifacts.emptyList]",
-	listLine: (artifact) => mark("artifacts.listLine", artifact),
-	list: (p) => mark("artifacts.list", p),
-	noBrowserReason: (reason) => mark("artifacts.noBrowserReason", reason),
-	openedGallery: (p) => mark("artifacts.openedGallery", p),
-	opened: (p) => mark("artifacts.opened", p),
-	deleteNeedsId: "[artifacts.deleteNeedsId]",
-	unknownForDelete: (p) => mark("artifacts.unknownForDelete", p),
-	deleteNeedsUser: "[artifacts.deleteNeedsUser]",
-	deleteAborted: "[artifacts.deleteAborted]",
-	deleteDeclined: "[artifacts.deleteDeclined]",
-	deleted: (p) => mark("artifacts.deleted", p),
-	publishProblem: (problem) => mark("artifacts.publishProblem", problem),
-	published: (p) => mark("artifacts.published", p),
 };
 
 export const toolStyle: NonNullable<ProfileText["toolStyle"]> = {
@@ -560,16 +401,6 @@ export const shell: NonNullable<ProfileText["shell"]> = {
 		description: "[shell.powershellParams.description]",
 		run_in_background: "[shell.powershellParams.run_in_background]",
 	},
-	blocked: (block) => mark("shell.blocked", block),
-	exitCode: (p) => mark("shell.exitCode", p),
-	noBackgroundShell: (p) => mark("shell.noBackgroundShell", p),
-	backgroundStarted: (p) => mark("shell.backgroundStarted", p),
-	finish: (end) => mark("shell.finish", end),
-	failureDetail: (end) => mark("shell.failureDetail", end),
-	ranToEnd: (p) => mark("shell.ranToEnd", p),
-	emptyOutput: "[shell.emptyOutput]",
-	earlierTruncated: "[shell.earlierTruncated]",
-	spoolLost: (p) => mark("shell.spoolLost", p),
 };
 
 export const doctor: NonNullable<ProfileText["doctor"]> = {

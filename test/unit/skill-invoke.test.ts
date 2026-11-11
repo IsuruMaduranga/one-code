@@ -10,9 +10,9 @@ import {
 	skillPromptText,
 	substituteSkillArguments,
 	typedSkillContent,
+	withBaseDir,
 	withoutDuplicateSkillCommands,
 } from "../../extensions/lib/plugins/skill-invoke.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 describe("parseSkillCommand", () => {
 	it("returns undefined for non-skill input", () => {
@@ -84,7 +84,7 @@ describe("Claude Code's skill message", () => {
 
 	it("names the skill's folder before its text in the profile's words, and nothing for the bundled catalog", () => {
 		expect(skillPromptText("Body of skill 02.", "", "/p/skills/kit-skill-02")).toBe(
-			requireText("skill").withBaseDir({ dir: "/p/skills/kit-skill-02", text: "Body of skill 02." }),
+			withBaseDir({ dir: "/p/skills/kit-skill-02", text: "Body of skill 02." }),
 		);
 		expect(skillPromptText("Review it.", "", undefined)).toBe("Review it.");
 	});
@@ -92,7 +92,7 @@ describe("Claude Code's skill message", () => {
 	it("builds the typed message as two blocks, each ending in a newline", () => {
 		const [breadcrumb, text] = typedSkillContent("kit-skill-02", "", skillPromptText("Body of skill 02.", "", "/d"));
 		expect(breadcrumb).toBe("<command-message>kit-skill-02</command-message>\n<command-name>/kit-skill-02</command-name>\n");
-		expect(text).toBe(`${requireText("skill").withBaseDir({ dir: "/d", text: "Body of skill 02." })}\n`);
+		expect(text).toBe(`${withBaseDir({ dir: "/d", text: "Body of skill 02." })}\n`);
 		expect(typedSkillContent("x", "", "ends\n")[1]).toBe("ends\n");
 	});
 });

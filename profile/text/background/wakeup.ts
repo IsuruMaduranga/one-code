@@ -6,13 +6,7 @@
  * Anthropic billing, never apply as such.
  */
 
-import type { WakeupMissingField, WakeupText } from "../../../extensions/sdk/profile.ts";
-
-const MISSING: Record<WakeupMissingField, string> = {
-	delayAndReason: "`delaySeconds` and `reason` are required when `stop` is not true.",
-	prompt: "`prompt` is required when `stop` is not true.",
-	noop: "`noop` is required when `stop` is not true.",
-};
+import type { WakeupText } from "../../../extensions/sdk/profile.ts";
 
 export const wakeup: WakeupText = {
 	description: `Schedule when to resume work in /loop dynamic mode — the user invoked /loop without an interval, asking you to self-pace iterations of a specific task.
@@ -44,17 +38,5 @@ One short sentence on what you chose and why. Goes to telemetry and is shown bac
 			"The /loop input to fire on wake-up. Pass the same /loop input verbatim each turn so the next firing re-enters the skill and continues the loop. For autonomous /loop (no user prompt), pass the literal sentinel `<<autonomous-loop-dynamic>>` instead (the dynamic-pacing variant, not the cron_create-mode `<<autonomous-loop>>`). Required unless `stop` is true.",
 		stop: "Set to true to end the dynamic loop immediately instead of scheduling another wakeup. When true, all other fields are ignored and no further wakeups fire.",
 		noop: "true = nothing changed (you checked and there is nothing to report). false = something happened worth keeping (edited a file, posted a message, advanced state, surfaced a finding). Consecutive noop:true ticks are collapsed in the user's terminal view and tracked as a streak. Required unless `stop` is true.",
-	},
-	scheduled: ({ clock, inSeconds, clampedTo }) => {
-		const clamped = clampedTo !== undefined ? ` (clamped to ${clampedTo}s from your requested value)` : "";
-		return `Next wakeup scheduled for ${clock} (in ${inSeconds}s)${clamped}. Nothing more to do this turn — the harness re-invokes you when the wakeup fires or a task-notification arrives.`;
-	},
-	missing: (field) => MISSING[field],
-	agedOut: "Wakeup not scheduled. The loop reached its maximum duration — the loop has ended; do not re-issue.",
-	stopped: ({ cancelled }) => {
-		const monitor = "If you armed a monitor for this loop, task_stop it now; otherwise nothing more to do this turn.";
-		if (cancelled === 0)
-			return `Loop stopped — any dynamic loop in this session is ended; there was no pending wakeup to cancel. If you are running a fixed-interval /loop (a recurring cron), it is NOT stopped by this call — cancel it with cron_delete. ${monitor}`;
-		return `Loop stopped — cancelled ${cancelled} pending wakeup(s); no further dynamic-loop wakeups scheduled. ${monitor}`;
 	},
 };

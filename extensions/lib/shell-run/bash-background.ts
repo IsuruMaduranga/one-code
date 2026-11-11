@@ -18,7 +18,7 @@ import type { BackgroundTask } from "../agents/task-registry.ts";
 import { whenAborted } from "../core/abort.ts";
 import { detachedSpawnOptions, KILL_GRACE_MS, rememberProcessGroup, stopProcessTree, waitForChildExit } from "./process-tree.ts";
 import { bashSpawnOrThrow, type ShellSpawn, spawnShellCommand } from "./shell-spawn.ts";
-import type { ShellText } from "./shell-text.ts";
+import type { ShellResultText } from "./shell-text.ts";
 
 export const STORED_OUTPUT_CAP = 200_000;
 
@@ -59,7 +59,7 @@ export interface StartBackgroundBashOptions {
 	 * profile, so this module loads in a plain Node process (the process-group
 	 * test runs it there).
 	 */
-	text: Pick<ShellText, "earlierTruncated" | "spoolLost" | "emptyOutput">;
+	text: Pick<ShellResultText, "earlierTruncated" | "spoolLost" | "emptyOutput">;
 	onFinished(task: BackgroundTask, summary: BashFinishSummary): void;
 }
 

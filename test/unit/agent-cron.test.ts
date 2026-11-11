@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { AGENT_CRON_CHANNEL, type AgentCronRequest, agentCronTools } from "../../extensions/lib/agents/agent-cron.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { backgroundWords } from "../../extensions/tools/background/text.ts";
 
-const { cron } = requireText("background");
+const { cron } = backgroundWords(requireText("background"));
 
 /** A bus whose background extension schedules every create. */
 function bus() {

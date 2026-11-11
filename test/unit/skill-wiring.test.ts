@@ -12,11 +12,12 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import skillExtension from "../../extensions/tools/skill/index.ts";
 import { SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../../extensions/lib/plugins/skill-body.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { skillResultText } from "../../extensions/tools/skill/text.ts";
+import { withBaseDir } from "../../extensions/lib/plugins/skill-invoke.ts";
 
 /** A skill's text with its folder named first, in the profile's words. */
-const withDir = (dir: string, text: string) => requireText("skill").withBaseDir({ dir, text });
+const withDir = (dir: string, text: string) => withBaseDir({ dir, text });
 
 const root = mkdtempSync(join(tmpdir(), "skill-wiring-"));
 // Project skills sit in the base's own folder, `.agents/skills`, which every profile reads.
@@ -149,18 +150,18 @@ describe("skill tool: a skill that takes arguments, called without any", () => {
 		const skills = ["demo", "every"].map((name) => ({ name, filePath: join(cwd, ".agents", "skills", name, "SKILL.md") }));
 		await fake.fire("before_agent_start", { systemPromptOptions: { skills } }, ctx);
 		const result = (await fake.tools.get("skill")!.execute("t1", params, undefined, undefined, ctx)) as { content: { text: string }[] };
-		expect(result.content[0].text).toBe(requireText("skill").launching(params.skill));
+		expect(result.content[0].text).toBe(skillResultText.launching(params.skill));
 		return result.content[1].text;
 	}
 
 	it("opens the result with a note naming the arguments", async () => {
-		const note = requireText("skill").missingArguments("[interval] [prompt]");
+		const note = skillResultText.missingArguments("[interval] [prompt]");
 		expect(await call({ skill: "every" })).toBe(`${note.before}\n\n${withDir(argsSkillDir, "Repeat it.")}\n\n${note.after}`);
 	});
 
 	it("adds no note when arguments are passed or the skill declares none", async () => {
 		expect(await call({ skill: "every", args: "5m ping" })).toBe(withDir(argsSkillDir, "Repeat it.\n\nARGUMENTS: 5m ping"));
-		const note = requireText("skill").missingArguments("[interval] [prompt]");
+		const note = skillResultText.missingArguments("[interval] [prompt]");
 		expect(await call({ skill: "every", args: "  " })).toBe(`${note.before}\n\n${withDir(argsSkillDir, "Repeat it.")}\n\n${note.after}`);
 		expect(await call({ skill: "demo" })).toBe(withDir(skillDir, "Do the demo."));
 	});
@@ -208,7 +209,7 @@ describe("skill tool: disable-model-invocation", () => {
 		for (const name of ["deploy", "release", "/deploy"]) {
 			const result = await call({ skill: name });
 			expect(result.isError, name).toBe(true);
-			expect(result.content[0].text).toBe(requireText("skill").manualOnly(name.replace(/^\//, "")));
+			expect(result.content[0].text).toBe(skillResultText.manualOnly(name.replace(/^\//, "")));
 			expect(result.content[0].text).not.toContain("Deploy it.");
 		}
 	});
@@ -228,7 +229,7 @@ describe("skill tool: disable-model-invocation", () => {
 		utimesSync(file, later, later);
 		// The next turn re-reads the flag (the old cache kept the first read for the session).
 		await fake.fire("before_agent_start", { systemPromptOptions: { skills: [{ name: "late", filePath: file }] } }, ctx);
-		expect((await call()).content[0].text).toBe(requireText("skill").manualOnly("late"));
+		expect((await call()).content[0].text).toBe(skillResultText.manualOnly("late"));
 	});
 
 	it("still runs when the user types the command", async () => {

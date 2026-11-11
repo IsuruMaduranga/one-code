@@ -10,8 +10,9 @@
 import { describe, expect, it } from "vitest";
 import { shownJob } from "../../extensions/lib/agents/cron.ts";
 import { background } from "../text/background/index.ts";
+import { backgroundWords } from "../../extensions/tools/background/text.ts";
 
-const { cron, wakeup, monitor, tasks } = background;
+const { cron, wakeup, monitor, tasks } = backgroundWords(background);
 
 describe("One Code's cron text", () => {
 	it("words a full store and a subagent's refusals", () => {

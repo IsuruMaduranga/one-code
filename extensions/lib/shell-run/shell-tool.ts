@@ -22,12 +22,12 @@ import { commandToEvaluate, trackOriginalCommands } from "../shell/original-comm
 import { persistedFilePreview, persistIfLarge, sessionResultsDir } from "../request/persisted-output.ts";
 import { withClaudeCodeShellText } from "./shell-result.ts";
 import type { ShellEnd } from "./shell-text.ts";
-import { shellWords } from "../shell/shell-words.ts";
 import { bashParserReady } from "../shell/bash-parser.ts";
 import type { ShellSpawn } from "./shell-spawn.ts";
 import { keepSpillReadable } from "./spill-file.ts";
 import { ccWrapBuiltinRenderers, expandHintFor, linesComponent, resultLines } from "../ui/tui-render.ts";
 import { registerVariantTool } from "../profile/tool-variants.ts";
+import { shellResultText } from "./shell-text.ts";
 
 // The completion notification carries status + exit code + where the output is,
 // plus only a short tail: a finished build used to push 30 KB (~8k tokens) into
@@ -107,7 +107,7 @@ export function shellFinish(summary: BashFinishSummary, timeoutSeconds?: number)
 	const end = shellEnd(summary, timeoutSeconds);
 	if (end.kind === "stopped") return { status: "killed" };
 	if (end.kind === "completed") return { status: "completed" };
-	return { status: "failed", detail: shellWords().failureDetail(end) };
+	return { status: "failed", detail: shellResultText().failureDetail(end) };
 }
 
 /** `<sessionDir>/bash/<taskId>/output.log` — one spool location for every shell tool (the shell panel reads it). */
@@ -203,7 +203,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 			const shell = spec.backgroundShell();
 			if (!shell) {
 				return {
-					content: [{ type: "text" as const, text: shellWords().noBackgroundShell({ label: spec.ccLabel }) }],
+					content: [{ type: "text" as const, text: shellResultText().noBackgroundShell({ label: spec.ccLabel }) }],
 					isError: true,
 					details: {},
 				};
@@ -223,7 +223,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 			// server started this way hung the run forever. A detached shell below
 			// keeps having no deadline (findings §31).
 			if (!sessionOutlivesTurn(ctx.mode)) {
-				const summary = await runBackgroundBashBlocking({ id, command, description, cwd: ctx.cwd, timeoutSeconds, logPath, shell, text: shellWords() }, signal);
+				const summary = await runBackgroundBashBlocking({ id, command, description, cwd: ctx.cwd, timeoutSeconds, logPath, shell, text: shellResultText() }, signal);
 				const spool = summary.logPath && Buffer.byteLength(summary.output, "utf8") > INLINE_OUTPUT_CAP
 					? persistedFilePreview(summary.logPath)
 					: undefined;
@@ -232,7 +232,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 					content: [
 						{
 							type: "text" as const,
-							text: shellWords().ranToEnd({
+							text: shellResultText().ranToEnd({
 								label: spec.ccLabel,
 								id,
 								description,
@@ -258,7 +258,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 			// exactly 10 minutes. The one-shot path above keeps the timeout
 			// because there the command holds the turn.
 			const task = startBackgroundBash({
-				text: shellWords(),
+				text: shellResultText(),
 				id,
 				command,
 				description,
@@ -278,7 +278,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 							outputFile: finishedTask.logPath,
 							status,
 							summary: shellSummary(description, status, summary.exitCode, detail),
-							result: finishedTask.logPath ? undefined : tailCap(summary.output, NOTIFY_OUTPUT_CAP, shellWords().earlierTruncated).trim() || undefined,
+							result: finishedTask.logPath ? undefined : tailCap(summary.output, NOTIFY_OUTPUT_CAP, shellResultText().earlierTruncated).trim() || undefined,
 						}),
 						{ taskId: id, status: finishedTask.status, exitCode: summary.exitCode, logPath: finishedTask.logPath },
 					);
@@ -292,7 +292,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 				content: [
 					{
 						type: "text" as const,
-						text: shellWords().backgroundStarted({ label: spec.ccLabel, id, description, ...(logPath ? { logPath } : {}) }),
+						text: shellResultText().backgroundStarted({ label: spec.ccLabel, id, description, ...(logPath ? { logPath } : {}) }),
 					},
 				],
 				details: { taskId: id, logPath },

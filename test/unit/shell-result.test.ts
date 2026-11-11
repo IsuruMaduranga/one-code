@@ -8,12 +8,12 @@ import { describe, expect, it, vi } from "vitest";
 import { Type } from "typebox";
 import { claudeCodeShellText } from "../../extensions/lib/shell-run/shell-result.ts";
 import { registerShellTool } from "../../extensions/lib/shell-run/shell-tool.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { toolResultsText } from "../../extensions/lib/request/tool-results-text.ts";
+import { shellResultText } from "../../extensions/lib/shell-run/shell-text.ts";
 
 /** The profile's failure text for exit `code`, given the output the base passes (pi's, without its trailer). */
-const exitText = (code: number, output = "") => requireText("shell").exitCode({ code, output });
+const exitText = (code: number, output = "") => shellResultText().exitCode({ code, output });
 /** The profile's text for an empty result of the tool Claude Code calls `tool`. */
 const emptyText = (tool: "Bash" | "PowerShell") => toolResultsText.empty({ tool });
 

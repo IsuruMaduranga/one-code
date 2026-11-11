@@ -16,9 +16,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LspDiagnostic } from "../../extensions/tools/lsp/format.ts";
 import { pathToUri } from "../../extensions/tools/lsp/client.ts";
 import lspExtension from "../../extensions/tools/lsp/index.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { lspResultText } from "../../extensions/tools/lsp/text.ts";
 
 const state = vi.hoisted(() => ({
 	instances: [] as FakeLspClientInstance[],
@@ -137,7 +137,7 @@ describe("lsp wiring", () => {
 		await fake.fireOne("tool_result", editEvent(file), ctx);
 		expect(state.instances).toHaveLength(3);
 		expect(notify).toHaveBeenCalledTimes(1);
-		expect(notify.mock.calls[0][0]).toContain(requireText("lsp").failure({ kind: "gaveUp", restarts: 2 }));
+		expect(notify.mock.calls[0][0]).toContain(lspResultText.failure({ kind: "gaveUp", restarts: 2 }));
 
 		// A further edit must not spam the warning a second time (warned-once).
 		await fake.fireOne("tool_result", editEvent(file), ctx);
@@ -165,7 +165,7 @@ describe("lsp wiring", () => {
 		expect(delivered).toHaveLength(1);
 		// Claude Code's shape: the bare new-diagnostics block inside the tool
 		// result, no <system-reminder> frame, never a message of its own.
-		const words = requireText("lsp").newDiagnostics;
+		const words = lspResultText.newDiagnostics;
 		const block = words.block(words.section({ path: "b.py", entries: [words.entry({ line: 1, column: 1, severity: "error", message: "unresolved name x" })] }));
 		expect(delivered[0].text).toBe(block);
 		expect(delivered[0]).toMatchObject({ placement: "last-append", raw: true });

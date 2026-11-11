@@ -123,6 +123,7 @@ import { extendingCompletions } from "../../lib/ui/argument-hints.ts";
 import { readStringsState, recordState } from "../../lib/request/ledger/state.ts";
 import { panelUi } from "../../lib/ui/panel-focus.ts";
 import { dockRowsReporter, trackDockRows } from "../../lib/ui/dock-rows.ts";
+import { cronWords } from "../../lib/agents/cron-text.ts";
 
 /** How the guide's setup list names a server that is not connected. */
 const MCP_STATUS_LABELS: Record<McpStatusKind, string | undefined> = {
@@ -1648,7 +1649,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		// The child's cron tools reach this session's store (lib/agents/agent-cron.ts);
 		// none when the background feature is off (no store answers them).
 		const cronText = toolLive("cron_create") ? profileText().background?.cron : undefined;
-		const cron = cronText ? (agentCronTools(pi.events, { agentId: record.taskId, cwd: record.cwd, resident }, cronText) as unknown as ToolDefinition[]) : [];
+		const cron = cronText ? (agentCronTools(pi.events, { agentId: record.taskId, cwd: record.cwd, resident }, cronWords(cronText)) as unknown as ToolDefinition[]) : [];
 		return depth < MAX_SPAWN_DEPTH ? [childAgentTool(record, depth), ...cron] : cron;
 	};
 

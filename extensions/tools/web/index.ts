@@ -59,6 +59,8 @@ import {
 	type WebSearchSettings,
 } from "./backends.ts";
 import type { ChainFailure, ProviderSearchFailure } from "./text.ts";
+import { webSearchResultText } from "./text.ts";
+import { nativeWebResultText } from "../../lib/request/native-web-text.ts";
 
 /** `webSearch` from ~/.onecode/settings.json, read leniently — a bad file skips the setting, never breaks the tool. */
 function readWebSearchSettings(): WebSearchSettings {
@@ -102,7 +104,7 @@ function webExtension(pi: ExtensionAPI) {
 			const filters = { allowed: params.allowed_domains, blocked: params.blocked_domains };
 			const filtered = Boolean(params.allowed_domains?.length || params.blocked_domains?.length);
 			const cancelled = () => ({
-				content: [{ type: "text" as const, text: text.cancelled(params.query) }],
+				content: [{ type: "text" as const, text: webSearchResultText.cancelled(params.query) }],
 				details: { query: params.query } as SearchDetails,
 				isError: true,
 			});
@@ -133,13 +135,13 @@ function webExtension(pi: ExtensionAPI) {
 				if (native.kind === "cancelled") return cancelled();
 				if (native.kind === "answered") {
 					const sources = searchSources(native.result);
-					const answer = text.nativeAnswer({ answer: native.text, cutOff: native.cutOff, sourceLines: sources.map(sourceLine), spec: native.spec, filtered });
+					const answer = webSearchResultText.nativeAnswer({ answer: native.text, cutOff: native.cutOff, sourceLines: sources.map(sourceLine), spec: native.spec, filtered });
 					return {
 						content: [{ type: "text", text: persistIfLarge(answer, { dir: sessionResultsDir(ctx), id: toolCallId }) }],
 						details: { query: params.query, native: true, backend: `anthropic web_search via ${native.spec}`, resultCount: sources.length } as SearchDetails,
 					};
 				}
-				if (native.kind === "fell-back") notes.unshift(text.nativeFellBack(nativeWords.fallback(native.fallback)));
+				if (native.kind === "fell-back") notes.unshift(webSearchResultText.nativeFellBack(nativeWebResultText.fallback(native.fallback)));
 			}
 
 			// 1. Reuse pi-web-search's transport, not its tool wrapper: that wrapper
@@ -155,7 +157,7 @@ function webExtension(pi: ExtensionAPI) {
 					}, (update) => { if (!nativeSignal.aborted) onUpdate?.(update); }, nativeSignal), signal);
 					const result = nativeSearchResult(response);
 					// This route returns a synthesized answer, not rows we can filter (`filtered`: `site:` operators).
-					const answer = withNotes(text.providerAnswer({ answer: result.answer, sources: result.sources, extra: result.extra, backend, filtered }));
+					const answer = withNotes(webSearchResultText.providerAnswer({ answer: result.answer, sources: result.sources, extra: result.extra, backend, filtered }));
 					return {
 						content: [{ type: "text", text: persistIfLarge(answer, { dir: sessionResultsDir(ctx), id: toolCallId }) }],
 						details: { ...result.details, query: params.query, native: true, backend } as SearchDetails,
@@ -168,7 +170,7 @@ function webExtension(pi: ExtensionAPI) {
 							: error instanceof DeadlineError
 								? { kind: "timedOut", seconds: error.timeoutMs / 1000 }
 								: { kind: "other", osMessage: error instanceof Error ? error.message : String(error) };
-					notes.unshift(text.providerFailed({ backend, failure }));
+					notes.unshift(webSearchResultText.providerFailed({ backend, failure }));
 				}
 			}
 
@@ -186,7 +188,7 @@ function webExtension(pi: ExtensionAPI) {
 				}
 				// Bounded by result count, but a provider's error body (quoted in
 				// "Fell back after") or long snippets can still be large: persist, never slice.
-				const results = text.chainResults({
+				const results = webSearchResultText.chainResults({
 					query: params.query,
 					label: outcome.backend.label,
 					attempts: outcome.attempts,
@@ -200,12 +202,12 @@ function webExtension(pi: ExtensionAPI) {
 						backend: outcome.backend.name,
 						keyless: outcome.backend.keyless,
 						resultCount: outcome.results.length,
-						failures: outcome.attempts.length ? outcome.attempts.map(text.attempt) : undefined,
+						failures: outcome.attempts.length ? outcome.attempts.map(webSearchResultText.attempt) : undefined,
 					} as SearchDetails,
 				};
 			} catch (error) {
 				const failure: ChainFailure = error instanceof SearchChainError ? error.failure : { kind: "other", osMessage: (error as Error).message };
-				const message = text.failed({ model: `${ctx.model?.provider}/${ctx.model?.id}`, failure });
+				const message = webSearchResultText.failed({ model: `${ctx.model?.provider}/${ctx.model?.id}`, failure });
 				return {
 					content: [{ type: "text", text: persistIfLarge(withNotes(message), { dir: sessionResultsDir(ctx), id: toolCallId }) }],
 					details: { query: params.query, error: message } as SearchDetails,

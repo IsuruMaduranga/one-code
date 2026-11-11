@@ -15,6 +15,7 @@ import { toolRenderers } from "../../lib/ui/tui-render.ts";
 import { applyEdit, cellRefs, type EditMode, type Notebook, notebookFailure, parseNotebook } from "./notebook.ts";
 import { resolveToolPath } from "../../lib/rules/tool-path.ts";
 import { requireText } from "../../lib/profile/profile.ts";
+import { notebookResultText } from "./text.ts";
 
 function notebookExtension(pi: ExtensionAPI) {
 	const text = requireText("notebook");
@@ -39,7 +40,7 @@ function notebookExtension(pi: ExtensionAPI) {
 			const rawPath = params.path ?? params.notebook_path;
 			if (!rawPath) {
 				return {
-					content: [{ type: "text", text: text.failed({ failure: { kind: "missingPath" } }) }],
+					content: [{ type: "text", text: notebookResultText.failed({ failure: { kind: "missingPath", alias: text.pathAlias } }) }],
 					details: {},
 					isError: true,
 				};
@@ -65,12 +66,12 @@ function notebookExtension(pi: ExtensionAPI) {
 				);
 				writeFileSync(path, `${JSON.stringify(updated, null, 1)}\n`);
 				return {
-					content: [{ type: "text", text: text.edited({ outcome, path: rawPath, cellCount: updated.cells.length }) }],
+					content: [{ type: "text", text: notebookResultText.edited({ outcome, path: rawPath, cellCount: updated.cells.length }) }],
 					details: { path, cellCount: updated.cells.length },
 				};
 			} catch (error) {
 				return {
-					content: [{ type: "text", text: text.failed({ failure: notebookFailure(error), ...(parsed ? { cells: cellRefs(parsed) } : {}) }) }],
+					content: [{ type: "text", text: notebookResultText.failed({ failure: notebookFailure(error), ...(parsed ? { cells: cellRefs(parsed) } : {}) }) }],
 					details: {},
 					isError: true,
 				};

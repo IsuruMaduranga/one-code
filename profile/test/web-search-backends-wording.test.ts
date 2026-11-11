@@ -8,21 +8,22 @@ import { describe, expect, it } from "vitest";
 import { BRAVE_KEY_ENV, type ChainOutcome, runChain } from "../../extensions/tools/web/backends.ts";
 import { failureOf, fakeBackend, ONE_RESULT } from "../../test/unit/helpers/web-search.ts";
 import { webSearch } from "../text/web-search/index.ts";
+import { webSearchResultText } from "../../extensions/tools/web/text.ts";
 
 
 /** The chain's result in One Code's words. */
 const formatSearchResults = (query: string, outcome: ChainOutcome) =>
-	webSearch.chainResults({ query, label: outcome.backend.label, attempts: outcome.attempts, keyless: outcome.backend.keyless, results: outcome.results });
+	webSearchResultText.chainResults({ query, label: outcome.backend.label, attempts: outcome.attempts, keyless: outcome.backend.keyless, results: outcome.results });
 const KEYLESS_NOTE_START = "Note: these results came from Exa's free keyless endpoint";
 
 describe("a backend's failure in One Code's words", () => {
 	it("names the env var on an auth failure", () => {
 		const failure = { kind: "http", api: "Brave Search API", status: 401, keyEnv: BRAVE_KEY_ENV, body: "Unauthorized" } as const;
-		expect(webSearch.attempt({ label: "Brave Search", failure })).toBe(`Brave Search: Brave Search API HTTP 401 (check ${BRAVE_KEY_ENV}): Unauthorized`);
+		expect(webSearchResultText.attempt({ label: "Brave Search", failure })).toBe(`Brave Search: Brave Search API HTTP 401 (check ${BRAVE_KEY_ENV}): Unauthorized`);
 	});
 
 	it("words a JSON-RPC error", () => {
-		expect(webSearch.attempt({ label: "Exa", failure: { kind: "rpcError", api: "Exa MCP", message: "boom" } })).toBe("Exa: Exa MCP error: boom");
+		expect(webSearchResultText.attempt({ label: "Exa", failure: { kind: "rpcError", api: "Exa MCP", message: "boom" } })).toBe("Exa: Exa MCP error: boom");
 	});
 });
 
@@ -57,6 +58,6 @@ describe("runChain + formatSearchResults", () => {
 	it("names every backend when all fail", async () => {
 		const chain = [fakeBackend("brave", false, async () => { throw new Error("a"); }), fakeBackend("exa-free", true, async () => { throw new Error("b"); })];
 		const failure = await failureOf(runChain(chain, "q", {}, 10, undefined));
-		expect(webSearch.failed({ model: "p/m", failure: failure as never })).toBe("web_search failed on p/m.\nEvery search backend failed:\n- brave: a\n- exa-free: b");
+		expect(webSearchResultText.failed({ model: "p/m", failure: failure as never })).toBe("web_search failed on p/m.\nEvery search backend failed:\n- brave: a\n- exa-free: b");
 	});
 });

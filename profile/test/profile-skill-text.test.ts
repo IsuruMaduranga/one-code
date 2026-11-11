@@ -6,28 +6,28 @@
  * other text.
  */
 import { describe, expect, it } from "vitest";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { skill } from "../text/skill/index.ts";
+import { skillResultText } from "../../extensions/tools/skill/text.ts";
 
 describe("One Code's skill text", () => {
 	it("asks for the full name when plugins share a skill name", () => {
-		expect(skill.ambiguous({ query: "review", wanted: "review", matches: ["a:review", "b:review"] })).toBe(
+		expect(skillResultText.ambiguous({ query: "review", wanted: "review", matches: ["a:review", "b:review"] })).toBe(
 			'"review" is ambiguous — it matches a:review, b:review. Use the full `<plugin>:review` name.',
 		);
 	});
 
 	it("tells the model a user-only skill is the user's to run", () => {
-		expect(requireText("skill").userOnly("beta")).toContain("only the user can run it, by typing /beta");
+		expect(skillResultText.userOnly("beta")).toContain("only the user can run it, by typing /beta");
 	});
 
 	it("reports an unreadable skill with the system's reason", () => {
-		expect(skill.readFailed({ name: "x", osMessage: "EACCES" })).toBe('Could not read skill "x": EACCES');
+		expect(skillResultText.readFailed({ name: "x", osMessage: "EACCES" })).toBe('Could not read skill "x": EACCES');
 	});
 
 	it("frames the file listing for the reader the session has", () => {
-		expect(skill.readableListing({ lines: ["- a (/s/a/SKILL.md)"], reader: "shell" })).toBe(
+		expect(skillResultText.readableListing({ lines: ["- a (/s/a/SKILL.md)"], reader: "shell" })).toBe(
 			"The following skills provide specialized instructions for specific tasks. Read a skill's file with the shell when the task matches its description:\n\n- a (/s/a/SKILL.md)",
 		);
-		expect(skill.readableListing({ lines: ["- a"], reader: "read" })).toContain("with the read tool when");
+		expect(skillResultText.readableListing({ lines: ["- a"], reader: "read" })).toContain("with the read tool when");
 	});
 });

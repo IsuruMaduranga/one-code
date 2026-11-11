@@ -3,6 +3,7 @@ import tasksExtension from "../../extensions/tools/tasks/index.ts";
 import { TaskStore } from "../../extensions/tools/tasks/store.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { tasksResultText } from "../../extensions/tools/tasks/text.ts";
 
 /**
  * The task tools answer with the profile's text for what happened: the
@@ -27,20 +28,20 @@ describe("tasks: result texts", () => {
 		const t = setup();
 		// The same store code builds the task the tool created.
 		const expected = new TaskStore().create({ subject: "Read app.py", description: "" });
-		expect((await t.create({ subject: "Read app.py", description: "" })).text).toBe(text().created(expected));
+		expect((await t.create({ subject: "Read app.py", description: "" })).text).toBe(tasksResultText.created(expected));
 	});
 
 	it("task_update names the changed fields, and a deletion", async () => {
 		const t = setup();
 		await t.create({ subject: "A", description: "" });
 		await t.create({ subject: "B", description: "" });
-		expect((await t.update({ taskId: "#1", status: "in_progress" })).text).toBe(text().updated({ id: "1", fields: ["status"], problems: [] }));
-		expect((await t.update({ taskId: "2", subject: "B2", addBlockedBy: ["1"] })).text).toBe(text().updated({ id: "2", fields: ["subject", "blockedBy"], problems: [] }));
-		expect((await t.update({ taskId: "2", status: "deleted" })).text).toBe(text().deleted("2"));
+		expect((await t.update({ taskId: "#1", status: "in_progress" })).text).toBe(tasksResultText.updated({ id: "1", fields: ["status"], problems: [] }));
+		expect((await t.update({ taskId: "2", subject: "B2", addBlockedBy: ["1"] })).text).toBe(tasksResultText.updated({ id: "2", fields: ["subject", "blockedBy"], problems: [] }));
+		expect((await t.update({ taskId: "2", status: "deleted" })).text).toBe(tasksResultText.deleted("2"));
 	});
 
 	it("keeps the fail-loud errors: an unknown id is an error", async () => {
 		const t = setup();
-		expect(await t.update({ taskId: "9", status: "completed" })).toEqual({ text: text().notFound("9"), isError: true });
+		expect(await t.update({ taskId: "9", status: "completed" })).toEqual({ text: tasksResultText.notFound("9"), isError: true });
 	});
 });

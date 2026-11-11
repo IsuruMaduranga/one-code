@@ -22,7 +22,7 @@ import type {
 import { randomBytes } from "node:crypto";
 import type { OAuthClientProvider, OAuthDiscoveryState } from "@modelcontextprotocol/sdk/client/auth.js";
 import { type OAuthServer, readAuth, type StoredAuth, writeAuth } from "./store.ts";
-import { requireText } from "../../../lib/profile/profile.ts";
+import { mcpResultText } from "../text.ts";
 
 export class McpAuthenticationRequiredError extends Error {}
 
@@ -121,7 +121,7 @@ export class McpOAuthProvider implements OAuthClientProvider {
 
 	redirectToAuthorization(authorizationUrl: URL): void {
 		if (!this.openAuthorization) {
-			throw new McpAuthenticationRequiredError(requireText("mcp").needsAuthentication({ server: this.server.name }));
+			throw new McpAuthenticationRequiredError(mcpResultText.needsAuthentication({ server: this.server.name }));
 		}
 		this.openAuthorization(authorizationUrl);
 	}

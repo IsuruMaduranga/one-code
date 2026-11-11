@@ -65,6 +65,7 @@ import { parseSlashCommand, SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAN
 import { parseFrontmatterLoosely } from "../../lib/core/frontmatter.ts";
 import { registerLocalCommand } from "../../lib/ui/local-command.ts";
 import { panelUi } from "../../lib/ui/panel-focus.ts";
+import { skillResultText } from "./text.ts";
 
 interface IndexedSkill {
 	name: string;
@@ -204,10 +205,10 @@ function skillExtension(pi: ExtensionAPI) {
 		const tools = pi.getActiveTools();
 		if (!tools.includes("skill")) {
 			const lines = readableSkillLines(skills);
-			return lines && text.readableListing({ lines, reader: tools.includes("read") ? "read" : "shell" });
+			return lines && skillResultText.readableListing({ lines, reader: tools.includes("read") ? "read" : "shell" });
 		}
 		const listing = describe(skills);
-		return listing === undefined ? undefined : `${text.listingHeader}\n\n${listing}`;
+		return listing === undefined ? undefined : `${skillResultText.listingHeader}\n\n${listing}`;
 	};
 	const listableNow = (skills: IndexedSkill[]) => listableSkillNames(skills, !pi.getActiveTools().includes("skill"));
 	/** The listing as live state: what an epoch's message 1 says (the render step above announces later skills). */
@@ -427,7 +428,7 @@ function skillExtension(pi: ExtensionAPI) {
 			const all = index();
 			if (params.list || (!params.skill && params.args == null)) {
 				return {
-					content: [{ type: "text", text: text.available(skillListingText(all)) }],
+					content: [{ type: "text", text: skillResultText.available(skillListingText(all)) }],
 					details: { skills: all.map((s) => s.name) } as Record<string, unknown>,
 				};
 			}
@@ -436,7 +437,7 @@ function skillExtension(pi: ExtensionAPI) {
 					content: [
 						{
 							type: "text",
-							text: text.noName(skillListingText(all)),
+							text: skillResultText.noName(skillListingText(all)),
 						},
 					],
 					details: {} as Record<string, unknown>,
@@ -454,8 +455,8 @@ function skillExtension(pi: ExtensionAPI) {
 			if (!found) {
 				const ambiguous = bareMatches.length > 1;
 				const refusal = ambiguous
-					? text.ambiguous({ query: params.skill, wanted, matches: bareMatches.map((s) => s.name) })
-					: text.notFound({ query: params.skill, listing: skillListingText(all) });
+					? skillResultText.ambiguous({ query: params.skill, wanted, matches: bareMatches.map((s) => s.name) })
+					: skillResultText.notFound({ query: params.skill, listing: skillListingText(all) });
 				return {
 					content: [{ type: "text", text: refusal }],
 					details: {} as Record<string, unknown>,
@@ -471,14 +472,14 @@ function skillExtension(pi: ExtensionAPI) {
 			if (found.state === "off") {
 				const manager = found.source === "plugin" ? "/plugins" : "/skills";
 				return {
-					content: [{ type: "text", text: text.off({ name: found.name, manager }) }],
+					content: [{ type: "text", text: skillResultText.off({ name: found.name, manager }) }],
 					details: { skill: found.name, state: found.state } as Record<string, unknown>,
 					isError: true,
 				};
 			}
 			if (found.state === "user-only") {
 				return {
-					content: [{ type: "text", text: text.userOnly(found.name) }],
+					content: [{ type: "text", text: skillResultText.userOnly(found.name) }],
 					details: { skill: found.name, state: found.state } as Record<string, unknown>,
 					isError: true,
 				};
@@ -488,7 +489,7 @@ function skillExtension(pi: ExtensionAPI) {
 			// (a typed `/<name>` runs through deliverSkill, not this tool).
 			if (found.disableModelInvocation || readModelInvocationDisabled(found.path)) {
 				return {
-					content: [{ type: "text", text: text.manualOnly(wanted) }],
+					content: [{ type: "text", text: skillResultText.manualOnly(wanted) }],
 					details: { skill: found.name } as Record<string, unknown>,
 					isError: true,
 				};
@@ -501,7 +502,7 @@ function skillExtension(pi: ExtensionAPI) {
 				promptText = skillPromptText(body, args, baseDirFor(found));
 			} catch (error) {
 				return {
-					content: [{ type: "text", text: text.readFailed({ name: found.name, osMessage: (error as Error).message }) }],
+					content: [{ type: "text", text: skillResultText.readFailed({ name: found.name, osMessage: (error as Error).message }) }],
 					details: {} as Record<string, unknown>,
 					isError: true,
 				};
@@ -514,13 +515,13 @@ function skillExtension(pi: ExtensionAPI) {
 			// otherwise follow it (the profile's missingArguments).
 			const hint = params.args?.trim() ? undefined : readArgumentHint(found.path);
 			const hintText = hint?.hint ?? hint?.argNames?.map((name) => `<${name}>`).join(" ");
-			const note = hintText ? text.missingArguments(hintText) : undefined;
+			const note = hintText ? skillResultText.missingArguments(hintText) : undefined;
 
 			// Claude Code's shape: the result says the skill is launching, and its
 			// text follows as a block of its own.
 			return {
 				content: [
-					{ type: "text", text: text.launching(found.name) },
+					{ type: "text", text: skillResultText.launching(found.name) },
 					{ type: "text", text: note ? `${note.before}\n\n${promptText}\n\n${note.after}` : promptText },
 				],
 				details: { skill: found.name, path: found.path } as Record<string, unknown>,

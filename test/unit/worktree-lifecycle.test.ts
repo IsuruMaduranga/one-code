@@ -9,6 +9,7 @@ import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { projectConfigDir } from "../../extensions/lib/profile/sources.ts";
 import worktreeExtension from "../../extensions/safety/worktree/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { worktreeResultText } from "../../extensions/safety/worktree/text.ts";
 
 const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 type Result = { isError?: boolean; content: { text: string }[]; details: { worktreeState?: unknown } };
@@ -87,7 +88,7 @@ describe("worktree lifecycle safety", () => {
 		git(repo, "config", "filter.fixture.smudge", "printf executed > filter-ran.txt; cat");
 		const result = await enter({ name: "feature" });
 		expect(result.isError).toBe(true);
-		expect(result.content[0].text).toBe(words().enter.failed({ kind: "checkoutRunsProgram", program: { kind: "configSetsProgram", key: "filter.smudge" } }));
+		expect(result.content[0].text).toBe(worktreeResultText.enter.failed({ kind: "checkoutRunsProgram", program: { kind: "configSetsProgram", key: "filter.smudge" } }));
 		expect(existsSync(join(projectConfigDir(repo), "worktrees", "feature", "filter-ran.txt"))).toBe(false);
 	});
 
@@ -137,7 +138,7 @@ describe("worktree lifecycle safety", () => {
 		const result = await exit({ action: "remove" });
 		expect(result.isError).toBe(true);
 		expect(existsSync(path)).toBe(true);
-		expect(result.content[0].text).toBe(words().exit.removeRefused({ session: session as never, blockers: [{ kind: "commitsAhead", count: "1", branch: "feature" }] }));
+		expect(result.content[0].text).toBe(worktreeResultText.exit.removeRefused({ session: session as never, blockers: [{ kind: "commitsAhead", count: "1", branch: "feature" }] }));
 	});
 
 	it("refuses to remove commits left on its branch after HEAD moves back", async () => {
@@ -159,7 +160,7 @@ describe("worktree lifecycle safety", () => {
 		expect(result.isError).toBeUndefined();
 		// The re-entry hint names the real argument, not a `{path}` placeholder.
 		expect(session?.path).toBe(path);
-		expect(result.content[0].text).toBe(words().exit.kept({ session: session as never, exists: true }));
+		expect(result.content[0].text).toBe(worktreeResultText.exit.kept({ session: session as never, exists: true }));
 		expect(existsSync(join(path, "new.txt"))).toBe(true);
 		expect(location).toBeNull();
 		const input = { command: "pwd" };
@@ -175,7 +176,7 @@ describe("worktree lifecycle safety", () => {
 		expect(location).toBeNull();
 		expect(result.details.worktreeState).toBeNull();
 		// git's own message sits in the middle of the profile's words.
-		const [before, after] = words().exit.branchDeleteFailed({ session: session as never, branch: "feature", osMessage: "GITSAYS" }).split("GITSAYS");
+		const [before, after] = worktreeResultText.exit.branchDeleteFailed({ session: session as never, branch: "feature", osMessage: "GITSAYS" }).split("GITSAYS");
 		expect(after).toBeDefined();
 		expect(result.content[0].text.startsWith(before)).toBe(true);
 		expect(result.content[0].text.endsWith(after)).toBe(true);
@@ -197,7 +198,7 @@ describe("worktree lifecycle safety", () => {
 		for (const toolName of ["Agent", "workflow", "bash", "read"]) {
 			const result = await fake.fireOne<{ block?: boolean; reason?: string }>("tool_call", { toolName, toolCallId: toolName, input: { command: "pwd", path: "a.txt" } }, ctx());
 			expect(result?.block, toolName).toBe(true);
-			expect(result?.reason).toBe(words().activeMissing(session as never));
+			expect(result?.reason).toBe(worktreeResultText.activeMissing(session as never));
 		}
 		expect((await exit({ action: "keep" })).details.worktreeState).toBeNull();
 	}, 20_000); // four gated tool calls plus git on a Windows runner take over 5 s

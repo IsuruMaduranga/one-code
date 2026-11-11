@@ -34,7 +34,7 @@ import { sanitizeDisplayText } from "../../lib/ui/terminal-text.ts";
 import { renderDownloadPayload, renderGallery } from "./gallery.ts";
 import type { PublishProblem, ShownArtifact, StoreBusy } from "./text.ts";
 import { renderViewer } from "./viewer.ts";
-import { requireText } from "../../lib/profile/profile.ts";
+import { artifactsResultText } from "./text.ts";
 
 export interface ArtifactMeta {
 	id: string;
@@ -52,7 +52,7 @@ export interface ArtifactMeta {
 
 
 /** Why another session blocked the store, in the profile's words. */
-const busy = (b: StoreBusy): string => requireText("artifacts").storeBusy(b);
+const busy = (b: StoreBusy): string => artifactsResultText.storeBusy(b);
 /** Claude Code's page size limit for a published artifact. */
 export const MAX_ARTIFACT_BYTES = 16 * 1024 * 1024;
 

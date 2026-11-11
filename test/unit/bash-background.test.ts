@@ -11,9 +11,9 @@ import {
 } from "../../extensions/lib/shell-run/bash-background.ts";
 import type { BackgroundTask } from "../../extensions/lib/agents/task-registry.ts";
 import { localPwsh } from "./helpers/local-pwsh.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { shellResultText } from "../../extensions/lib/shell-run/shell-text.ts";
 
-const text = requireText("shell");
+const text = shellResultText();
 
 function start(command: string, extra?: { timeoutSeconds?: number; logPath?: string }) {
 	let summary: BashFinishSummary | undefined;
@@ -69,8 +69,8 @@ describe("startBackgroundBash", () => {
 		const { task, summary } = start("true");
 		await task.finished;
 		expect(task.status).toBe("completed");
-		expect(task.output()).toBe(text.emptyOutput);
-		expect(summary()?.output).toBe(text.emptyOutput);
+		expect(task.output()).toBe(shellResultText().emptyOutput);
+		expect(summary()?.output).toBe(shellResultText().emptyOutput);
 	});
 
 	it("stop() ends the run with status stopped", async () => {
@@ -118,9 +118,9 @@ describe("startBackgroundBash", () => {
 
 describe("tailCap", () => {
 	it("keeps short text and truncates long text with a marker", () => {
-		expect(tailCap("short", 100, text.earlierTruncated)).toBe("short");
-		const capped = tailCap("x".repeat(500), 100, text.earlierTruncated);
-		expect(capped).toBe(`${text.earlierTruncated}${"x".repeat(100)}`);
+		expect(tailCap("short", 100, shellResultText().earlierTruncated)).toBe("short");
+		const capped = tailCap("x".repeat(500), 100, shellResultText().earlierTruncated);
+		expect(capped).toBe(`${shellResultText().earlierTruncated}${"x".repeat(100)}`);
 	});
 });
 

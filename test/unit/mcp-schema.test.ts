@@ -2,7 +2,6 @@ import { validateToolArguments } from "@earendil-works/pi-ai";
 import { Value } from "typebox/value";
 import { describe, expect, it } from "vitest";
 import { jsonSchemaToTypeBox as convertSchema } from "../../extensions/tools/mcp/schema.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import {
 	githubCustomPropertyAllowedValues,
 	githubCustomPropertyDescription,
@@ -10,11 +9,11 @@ import {
 	gitLabProjectId,
 	onceHubCustomFields,
 } from "./fixtures/mcp-server-schemas.ts";
+import { mcpResultText } from "../../extensions/tools/mcp/text.ts";
 
-const mcpText = requireText("mcp");
 
 /** The profile's description-cut label, as the extension passes it. */
-const jsonSchemaToTypeBox = (schema: Parameters<typeof convertSchema>[0]) => convertSchema(schema, mcpText.tool.descriptionCut);
+const jsonSchemaToTypeBox = (schema: Parameters<typeof convertSchema>[0]) => convertSchema(schema, mcpResultText.tool.descriptionCut);
 
 describe("real MCP server schema fragments", () => {
 	it.each([

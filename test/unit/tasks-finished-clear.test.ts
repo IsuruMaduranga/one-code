@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import tasksExtension from "../../extensions/tools/tasks/index.ts";
 import { FINISHED_LIST_CLEAR_MS } from "../../extensions/tools/tasks/store.ts";
 import { taskToggleKey } from "../../extensions/lib/ui/keys.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { tasksResultText } from "../../extensions/tools/tasks/text.ts";
 
 /**
  * The finished task list (every task completed) clears itself 5 s later, with
@@ -39,7 +39,7 @@ describe("tasks: the finished list clears after 5 s", () => {
 		vi.advanceTimersByTime(FINISHED_LIST_CLEAR_MS - 1);
 		expect(await t.has("2")).toBe(true);
 		vi.advanceTimersByTime(1);
-		expect(await t.list()).toBe(requireText("tasks").list([]));
+		expect(await t.list()).toBe(tasksResultText.list([]));
 		expect(await t.has("1")).toBe(false);
 		expect(t.setWidget).toHaveBeenLastCalledWith("cc-tasks", undefined);
 		// Ids continue after the clear.

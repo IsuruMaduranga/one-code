@@ -11,9 +11,8 @@ import {
 	markDelivered,
 	MAX_CHARS,
 } from "../../extensions/tools/lsp/watcher.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { lspResultText } from "../../extensions/tools/lsp/text.ts";
 
-const lspText = requireText("lsp");
 
 const diag = (message: string, severity?: number, line = 0, character = 0, extra?: Partial<LspDiagnostic>): LspDiagnostic => ({
 	message,
@@ -28,7 +27,7 @@ const uri = (name: string) => pathToFileURL(join(PROJECT, name)).href;
 
 
 /** The block with the profile's words, as the extension passes them (One Code's: profile/test/lsp-wording.test.ts). */
-const formatNewDiagnostics = (delta: Map<string, LspDiagnostic[]>, cwd: string) => formatWith(delta, cwd, lspText.newDiagnostics);
+const formatNewDiagnostics = (delta: Map<string, LspDiagnostic[]>, cwd: string) => formatWith(delta, cwd, lspResultText.newDiagnostics);
 
 describe("fingerprintDiagnostic", () => {
 	it("is stable for identical content and differs when any field changes", () => {
@@ -88,7 +87,7 @@ describe("delta and tracker", () => {
 });
 
 describe("formatNewDiagnostics", () => {
-	const words = lspText.newDiagnostics;
+	const words = lspResultText.newDiagnostics;
 	/** One shown entry: 1-indexed position, the severity's name. */
 	const entry = (message: string, severity: ShownDiagnostic["severity"], line = 1, column = 1, extra: Partial<ShownDiagnostic> = {}) =>
 		words.entry({ line, column, severity, message, ...extra });

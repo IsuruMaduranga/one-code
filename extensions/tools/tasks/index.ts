@@ -39,6 +39,7 @@ import {
 import { registerLocalCommand } from "../../lib/ui/local-command.ts";
 import { canShowCustomUi } from "../../lib/notify/headless-output.ts";
 import { taskToggleKey } from "../../lib/ui/keys.ts";
+import { tasksResultText } from "./text.ts";
 
 interface TaskDetails {
 	taskSnapshot: TaskSnapshot;
@@ -152,7 +153,7 @@ function tasksExtension(pi: ExtensionAPI) {
 		turnsSinceReminder++;
 		if (turnsSinceTaskUse < TURNS_SINCE_WRITE || turnsSinceReminder < TURNS_BETWEEN_REMINDERS) return;
 		turnsSinceReminder = 0;
-		pi.events.emit(REMINDER_CHANNEL, { text: text.reminder(store.list()) });
+		pi.events.emit(REMINDER_CHANNEL, { text: tasksResultText.reminder(store.list()) });
 	});
 
 	// Only the mutating tools count as "using" the tracker — a read must not
@@ -185,7 +186,7 @@ function tasksExtension(pi: ExtensionAPI) {
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			markUsed();
 			const task = store.create(params);
-			return result(text.created(task), ctx);
+			return result(tasksResultText.created(task), ctx);
 		},
 	});
 
@@ -199,8 +200,8 @@ function tasksExtension(pi: ExtensionAPI) {
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const task = store.get(params.taskId);
-			if (!task) return result(text.notFound(params.taskId), ctx, true);
-			return result(text.details(taskView(store, task)), ctx);
+			if (!task) return result(tasksResultText.notFound(params.taskId), ctx, true);
+			return result(tasksResultText.details(taskView(store, task)), ctx);
 		},
 	});
 
@@ -211,7 +212,7 @@ function tasksExtension(pi: ExtensionAPI) {
 		description: text.descriptions.task_list,
 		parameters: Type.Object({}),
 		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-			return result(text.list(store.list().map((task) => taskView(store, task))), ctx);
+			return result(tasksResultText.list(store.list().map((task) => taskView(store, task))), ctx);
 		},
 	});
 
@@ -236,14 +237,14 @@ function tasksExtension(pi: ExtensionAPI) {
 			const outcome = store.update(taskId, input as Parameters<TaskStore["update"]>[1]);
 			if (outcome.deleted) {
 				markUsed();
-				return result(text.deleted(normalizeTaskId(taskId)), ctx);
+				return result(tasksResultText.deleted(normalizeTaskId(taskId)), ctx);
 			}
 			// A failed update (unknown id) is not "using" the tracker — a model
 			// looping on a hallucinated id must not suppress the nudge.
-			if (outcome.notFound || !outcome.task) return result(text.notFound(taskId), ctx, true);
+			if (outcome.notFound || !outcome.task) return result(tasksResultText.notFound(taskId), ctx, true);
 			markUsed();
 			const problems = outcome.problems ?? [];
-			return result(text.updated({ id: outcome.task.id, fields: outcome.updatedFields ?? [], problems }), ctx, problems.length > 0);
+			return result(tasksResultText.updated({ id: outcome.task.id, fields: outcome.updatedFields ?? [], problems }), ctx, problems.length > 0);
 		},
 	});
 

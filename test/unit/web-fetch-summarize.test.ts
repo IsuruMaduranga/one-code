@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { pinCatalog } from "./catalog-fixture.ts";
 import { pickReaderModel, READER_MAX_CHARS, readerMessages } from "../../extensions/tools/web-fetch/summarize.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { webFetchResultText } from "../../extensions/tools/web-fetch/text.ts";
 
 const webFetch = requireText("webFetch");
 
@@ -50,7 +51,7 @@ describe("pickReaderModel", () => {
 function recordingWords() {
 	type UserInput = Parameters<typeof webFetch.reader.user>[0];
 	const calls: UserInput[] = [];
-	const words = { page: webFetch.page, reader: { system: webFetch.reader.system, user: (p: UserInput) => (calls.push(p), webFetch.reader.user(p)) } };
+	const words = { page: webFetchResultText().page, reader: { system: webFetch.reader.system, user: (p: UserInput) => (calls.push(p), webFetch.reader.user(p)) } };
 	return { words, calls };
 }
 
@@ -63,7 +64,7 @@ describe("readerMessages", () => {
 			url: "https://example.com/release",
 			title: "Release notes",
 		});
-		const page = [webFetch.page.before, "<page>", `${webFetch.page.title("Release notes")}\n\nThe version is 3.2.`, "</page>", webFetch.page.after].join("\n");
+		const page = [webFetchResultText().page.before, "<page>", `${webFetchResultText().page.title("Release notes")}\n\nThe version is 3.2.`, "</page>", webFetchResultText().page.after].join("\n");
 		expect(calls).toEqual([{ url: "https://example.com/release", cutAt: undefined, page, question: "What is the version?" }]);
 		expect(messages).toEqual({ system: webFetch.reader.system, user: webFetch.reader.user(calls[0]), truncated: false });
 	});

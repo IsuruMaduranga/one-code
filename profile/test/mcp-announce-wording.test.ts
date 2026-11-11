@@ -6,9 +6,9 @@
  */
 import { describe, expect, it } from "vitest";
 import { mcpChangeNotices as changeNotices, type McpDelta } from "../../extensions/tools/mcp/announce.ts";
-import { mcp as mcpText } from "../text/mcp/index.ts";
+import { mcpResultText } from "../../extensions/tools/mcp/text.ts";
 
-const mcpChangeNotices = (d: McpDelta) => changeNotices(d, mcpText);
+const mcpChangeNotices = (d: McpDelta) => changeNotices(d, mcpResultText);
 
 describe("One Code's MCP change notices", () => {
 	it("renders one notice per kind of change, instructions in Claude Code's frame", () => {

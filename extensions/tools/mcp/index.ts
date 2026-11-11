@@ -76,6 +76,7 @@ import { panelUi } from "../../lib/ui/panel-focus.ts";
 import { requireText } from "../../lib/profile/profile.ts";
 import { failureOf } from "./failure.ts";
 import type { McpText } from "./text.ts";
+import { mcpResultText, mcpResourcesResultText } from "./text.ts";
 
 /** Anthropic's hard limit on a tool name; a longer one fails the whole request. */
 const MAX_TOOL_NAME_LENGTH = 128;
@@ -83,7 +84,7 @@ const MAX_TOOL_NAME_LENGTH = 128;
 /** Shared "server name not found" tool result for the resource read/list-dir tools. */
 function unknownServerError(name: string, text: McpText) {
 	return {
-		content: [{ type: "text" as const, text: text.resources.unknownServer({ name }) }],
+		content: [{ type: "text" as const, text: mcpResourcesResultText.unknownServer({ name }) }],
 		details: {} as { server?: string; uri?: string },
 		isError: true,
 	};
@@ -142,7 +143,7 @@ function mcpExtension(pi: ExtensionAPI) {
 			if (name.length > MAX_TOOL_NAME_LENGTH) {
 				failures.push({
 					server: connection.server,
-					error: text.failure({ kind: "nameTooLong", tool: tool.name, length: name.length, max: MAX_TOOL_NAME_LENGTH }),
+					error: mcpResultText.failure({ kind: "nameTooLong", tool: tool.name, length: name.length, max: MAX_TOOL_NAME_LENGTH }),
 				});
 				continue;
 			}
@@ -157,7 +158,7 @@ function mcpExtension(pi: ExtensionAPI) {
 				// the connection summary reports it.
 				failures.push({
 					server: connection.server,
-					error: text.failure({ kind: "nameTaken", tool: tool.name, name }),
+					error: mcpResultText.failure({ kind: "nameTaken", tool: tool.name, name }),
 				});
 				continue;
 			}
@@ -167,13 +168,13 @@ function mcpExtension(pi: ExtensionAPI) {
 				name,
 				label: `${connection.server.name}: ${tool.name}`,
 				...toolRenderers(`${connection.server.name}: ${tool.name}`),
-				description: capDescription(tool.description, text.tool.descriptionCut) ?? text.tool.description({ server: connection.server.name, tool: tool.name }),
-				parameters: jsonSchemaToTypeBox(tool.inputSchema, text.tool.descriptionCut),
+				description: capDescription(tool.description, mcpResultText.tool.descriptionCut) ?? mcpResultText.tool.description({ server: connection.server.name, tool: tool.name }),
+				parameters: jsonSchemaToTypeBox(tool.inputSchema, mcpResultText.tool.descriptionCut),
 				async execute(toolCallId, params, signal, _onUpdate, ctx) {
 					const live = connections.get(connection.server.name);
 					if (!live) {
 						return {
-							content: [{ type: "text", text: text.tool.notConnected(connection.server.name) }],
+							content: [{ type: "text", text: mcpResultText.tool.notConnected(connection.server.name) }],
 							details: {} as Record<string, unknown>,
 							isError: true,
 						};
@@ -181,14 +182,14 @@ function mcpExtension(pi: ExtensionAPI) {
 					const current = live.tools.find((candidate) => candidate.name === tool.name);
 					if (!current || !isDeepStrictEqual(current.inputSchema, tool.inputSchema)) {
 						return {
-							content: [{ type: "text", text: !current ? text.tool.gone({ server: connection.server.name, tool: tool.name }) : text.tool.schemaChanged(name) }],
+							content: [{ type: "text", text: !current ? mcpResultText.tool.gone({ server: connection.server.name, tool: tool.name }) : mcpResultText.tool.schemaChanged(name) }],
 							details: {} as Record<string, unknown>,
 							isError: true,
 						};
 					}
 					try {
 						const result = await callTool(live, tool.name, (params ?? {}) as Record<string, unknown>, signal);
-						const { text: contentText, images } = describeContent(result.content as McpContentBlock[] | undefined, text.content, connection.server.name);
+						const { text: contentText, images } = describeContent(result.content as McpContentBlock[] | undefined, mcpResultText.content, connection.server.name);
 						const structuredText = result.structuredContent !== undefined ? JSON.stringify(result.structuredContent, null, 2) : "";
 						const body = [contentText, structuredText].filter(Boolean).join("\n");
 						const content = [
@@ -202,7 +203,7 @@ function mcpExtension(pi: ExtensionAPI) {
 						};
 					} catch (error) {
 						return {
-							content: [{ type: "text", text: text.tool.callFailed((error as Error).message) }],
+							content: [{ type: "text", text: mcpResultText.tool.callFailed((error as Error).message) }],
 							details: { server: connection.server.name, tool: tool.name } as Record<string, unknown>,
 							isError: true,
 						};
@@ -256,16 +257,16 @@ function mcpExtension(pi: ExtensionAPI) {
 			if (connections.get(server.name) !== connection) return;
 			connections.delete(server.name);
 			const tail = connection.stderrTail();
-			failures.push({ server, error: text.failure({ kind: "closedByServer", ...(tail ? { stderr: tail.slice(-1_000) } : {}) }) });
+			failures.push({ server, error: mcpResultText.failure({ kind: "closedByServer", ...(tail ? { stderr: tail.slice(-1_000) } : {}) }) });
 			emitInstructions();
 		};
 		let previousTools = connection.tools;
 		connection.onToolsChanged = (failure) => {
 			if (!alive() || connection.closing || connections.get(server.name) !== connection) return;
 			if (failure) {
-				const error = text.failure(failure);
+				const error = mcpResultText.failure(failure);
 				failures.push({ server, error });
-				pi.events.emit(REMINDER_CHANNEL, { text: text.notices.refreshFailed({ server: server.name, failure: error }) });
+				pi.events.emit(REMINDER_CHANNEL, { text: mcpResultText.notices.refreshFailed({ server: server.name, failure: error }) });
 				return;
 			}
 			const unavailable = previousTools.filter((old) => {
@@ -276,12 +277,12 @@ function mcpExtension(pi: ExtensionAPI) {
 			registerToolsFor(connection);
 			if (unavailable.length > 0) {
 				pi.events.emit(REMINDER_CHANNEL, {
-					text: text.notices.toolsChanged({ server: server.name, tools: unavailable.map((tool) => namespacedToolName(server.name, tool.name)) }),
+					text: mcpResultText.notices.toolsChanged({ server: server.name, tools: unavailable.map((tool) => namespacedToolName(server.name, tool.name)) }),
 				});
 			}
 		};
 		registerToolsFor(connection);
-		for (const warning of connection.warnings) failures.push({ server, error: text.failure(warning) });
+		for (const warning of connection.warnings) failures.push({ server, error: mcpResultText.failure(warning) });
 		if (connection.resources.length > 0 || connection.resourceTemplates?.length) registerResourceTools();
 	};
 
@@ -302,7 +303,7 @@ function mcpExtension(pi: ExtensionAPI) {
 		} catch (error) {
 			if (!alive()) return;
 			if (server.kind === "http" && isUnauthorized(error)) oauthNeeded.add(server.name);
-			else failures.push({ server, error: text.failure(failureOf(error)) });
+			else failures.push({ server, error: mcpResultText.failure(failureOf(error)) });
 		} finally {
 			connectingNames.delete(server.name);
 		}
@@ -330,20 +331,20 @@ function mcpExtension(pi: ExtensionAPI) {
 		} else {
 			pi.events.emit(REMINDER_CHANNEL, {
 				key: "mcp-failures",
-				text: mcpFailuresReminder(snapshot.failed, text),
+				text: mcpFailuresReminder(snapshot.failed, mcpResultText),
 				placement: "first-prepend",
 				order: CONTEXT_ORDER.mcp + 1,
-				facts: mcpFacts({ connected: [], failed: snapshot.failed }, text),
+				facts: mcpFacts({ connected: [], failed: snapshot.failed }, mcpResultText),
 			});
 		}
-		const instructions = mcpInstructionsReminder(live, text);
+		const instructions = mcpInstructionsReminder(live, mcpResultText);
 		if (instructions) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				key: "mcp-instructions",
 				text: instructions,
 				placement: "first-prepend",
 				order: CONTEXT_ORDER.mcp,
-				facts: mcpFacts({ connected: snapshot.connected, failed: [] }, text),
+				facts: mcpFacts({ connected: snapshot.connected, failed: [] }, mcpResultText),
 			});
 		} else {
 			// No server has instructions anymore (e.g. the last one was disabled or
@@ -357,8 +358,8 @@ function mcpExtension(pi: ExtensionAPI) {
 	pi.events.on(RENDER_CHANNEL, (data) => {
 		const request = data as RenderRequest;
 		if (request.epoch) return;
-		const delta = mcpDelta(request.toldBlocks, liveSnapshot(), text, !connectSettled, connectingNames);
-		const notices = mcpChangeNotices(delta, text);
+		const delta = mcpDelta(request.toldBlocks, liveSnapshot(), mcpResultText, !connectSettled, connectingNames);
+		const notices = mcpChangeNotices(delta, mcpResultText);
 		notices.forEach((text, i) => request.blocks.push({ text, ...(i === 0 ? { facts: delta.facts } : {}) }));
 	});
 
@@ -471,7 +472,7 @@ function mcpExtension(pi: ExtensionAPI) {
 				// looks like an empty (but real) server.
 				if (params.server && !connections.has(params.server)) {
 					return {
-						content: [{ type: "text", text: text.resources.unknownServer({ name: params.server, connected: [...connections.keys()] }) }],
+						content: [{ type: "text", text: mcpResourcesResultText.unknownServer({ name: params.server, connected: [...connections.keys()] }) }],
 						details: { count: 0 },
 						isError: true,
 					};
@@ -481,17 +482,17 @@ function mcpExtension(pi: ExtensionAPI) {
 					if (params.server && connection.server.name !== params.server) continue;
 					const server = connection.server.name;
 					for (const resource of connection.resources) {
-						lines.push(text.resources.line({ server, uri: resource.uri, name: resource.name, description: resource.description, template: false }));
+						lines.push(mcpResourcesResultText.line({ server, uri: resource.uri, name: resource.name, description: resource.description, template: false }));
 					}
 					for (const template of connection.resourceTemplates ?? []) {
-						lines.push(text.resources.line({ server, uri: template.uriTemplate, name: template.name, description: template.description, template: true }));
+						lines.push(mcpResourcesResultText.line({ server, uri: template.uriTemplate, name: template.name, description: template.description, template: true }));
 					}
 				}
 				return {
 					content: [
 						{
 							type: "text",
-							text: lines.length ? persistIfLarge(lines.join("\n"), { dir: resultsDir(ctx), id: toolCallId }) : text.resources.none,
+							text: lines.length ? persistIfLarge(lines.join("\n"), { dir: resultsDir(ctx), id: toolCallId }) : mcpResourcesResultText.none,
 						},
 					],
 					details: { count: lines.length },
@@ -513,7 +514,7 @@ function mcpExtension(pi: ExtensionAPI) {
 				if (!connection) return unknownServerError(params.server, text);
 				try {
 					const result = await readResource(connection, params.uri, signal);
-					const body = describeResourceContents(result.contents as McpResourceContents[] | undefined, text.content) || JSON.stringify({ contents: result.contents ?? [] });
+					const body = describeResourceContents(result.contents as McpResourceContents[] | undefined, mcpResultText.content) || JSON.stringify({ contents: result.contents ?? [] });
 					return {
 						content: [
 							{
@@ -525,7 +526,7 @@ function mcpExtension(pi: ExtensionAPI) {
 					};
 				} catch (error) {
 					return {
-						content: [{ type: "text", text: text.resources.readFailed({ uri: params.uri, osMessage: (error as Error).message }) }],
+						content: [{ type: "text", text: mcpResourcesResultText.readFailed({ uri: params.uri, osMessage: (error as Error).message }) }],
 						details: { server: params.server, uri: params.uri },
 						isError: true,
 					};
@@ -548,19 +549,19 @@ function mcpExtension(pi: ExtensionAPI) {
 				try {
 					const result = await readResourceDir(connection, params.uri, signal);
 					const entries = (result.resources ?? result.entries ?? []) as Array<{ uri?: string; name?: string; mimeType?: string }>;
-					const lines = entries.map((e) => text.resources.directoryEntry({ uri: e.uri, name: e.name, mimeType: e.mimeType }));
+					const lines = entries.map((e) => mcpResourcesResultText.directoryEntry({ uri: e.uri, name: e.name, mimeType: e.mimeType }));
 					return {
 						content: [
 							{
 								type: "text",
-								text: lines.length ? persistIfLarge(lines.join("\n"), { dir: resultsDir(ctx), id: toolCallId }) : text.resources.directoryEmpty,
+								text: lines.length ? persistIfLarge(lines.join("\n"), { dir: resultsDir(ctx), id: toolCallId }) : mcpResourcesResultText.directoryEmpty,
 							},
 						],
 						details: { server: params.server, uri: params.uri },
 					};
 				} catch (error) {
 					return {
-						content: [{ type: "text", text: text.resources.directoryFailed({ uri: params.uri, osMessage: (error as Error).message }) }],
+						content: [{ type: "text", text: mcpResourcesResultText.directoryFailed({ uri: params.uri, osMessage: (error as Error).message }) }],
 						details: { server: params.server, uri: params.uri },
 						isError: true,
 					};
@@ -867,7 +868,7 @@ function mcpExtension(pi: ExtensionAPI) {
 					emitInstructions();
 					notices = [`Authenticated "${entry.name}".`];
 				} catch (error) {
-					notices = [`Authentication failed: ${text.failure(failureOf(error))}`];
+					notices = [`Authentication failed: ${mcpResultText.failure(failureOf(error))}`];
 				} finally {
 					busy.delete(entry.name);
 					syncRepaint();

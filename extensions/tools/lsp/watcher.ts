@@ -20,7 +20,7 @@
 import { relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type LspDiagnostic, shownDiagnostic } from "./format.ts";
-import type { LspText } from "./text.ts";
+import type { LspResultText } from "./text.ts";
 
 export const MAX_PER_FILE = 10;
 export const MAX_TOTAL = 30;
@@ -108,7 +108,7 @@ function displayPath(uri: string, cwd: string): string {
  * opening tag runs straight into the preamble, one blank line before the
  * first file section and between sections, entries two-space indented.
  */
-export function formatNewDiagnostics(delta: Map<string, LspDiagnostic[]>, cwd: string, text: LspText["newDiagnostics"]): string | undefined {
+export function formatNewDiagnostics(delta: Map<string, LspDiagnostic[]>, cwd: string, text: LspResultText["newDiagnostics"]): string | undefined {
 	if (delta.size === 0) return undefined;
 
 	interface FileSection {

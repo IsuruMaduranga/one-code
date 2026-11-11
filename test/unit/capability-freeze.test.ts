@@ -21,8 +21,9 @@ import subagentsExtension from "../../extensions/agents/subagents/index.ts";
 import { createFakeCtx, createFakePi, type FakePi, renderRequest } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import type { Reminder } from "./helpers/tool-search-fake-pi.ts";
+import { skillResultText } from "../../extensions/tools/skill/text.ts";
 
-const SKILL_LISTING_HEADER = requireText("skill").listingHeader;
+const SKILL_LISTING_HEADER = skillResultText.listingHeader;
 
 /** Render one request inside an epoch that told `facts`; the blocks owners add. */
 const render = (fake: FakePi, facts: readonly ToldFact[], model?: RenderRequest["model"]) => renderRequest(fake.events, { facts, model });
@@ -102,7 +103,7 @@ describe("skills listing", () => {
 		try {
 			const result = (await fake.tools.get("skill")!.execute("call", { skill: "beta" }, undefined, undefined, ctx)) as { isError?: boolean; content: Array<{ text: string }> };
 			expect(result.isError).toBe(true);
-			expect(result.content[0].text).toBe(requireText("skill").userOnly("beta"));
+			expect(result.content[0].text).toBe(skillResultText.userOnly("beta"));
 		} finally {
 			setSkillState(pluginRoot(join(root, "agent")), "project:beta", "on");
 		}

@@ -36,6 +36,8 @@ import { registerFormTool } from "../../lib/profile/tool-variants.ts";
 import { readResponseText, WebFetchFailure } from "./response.ts";
 import { pageContent } from "./page-content.ts";
 import type { FetchAnswer, ReaderFailure, WebFetchText } from "./text.ts";
+import { webFetchResultText } from "./text.ts";
+import { nativeWebResultText } from "../../lib/request/native-web-text.ts";
 
 const DEFAULT_MAX_CHARS = 30_000;
 const CACHE_TTL_MS = 15 * 60 * 1000;
@@ -245,7 +247,7 @@ function webFetchExtension(pi: ExtensionAPI) {
 			const normalized = normalizeUrl(params.url);
 			if ("problem" in normalized) {
 				return {
-					content: [{ type: "text", text: text.urlRejected(normalized.problem) }],
+					content: [{ type: "text", text: webFetchResultText().urlRejected(normalized.problem) }],
 					details: {} as FetchDetails,
 					isError: true,
 				};
@@ -254,10 +256,10 @@ function webFetchExtension(pi: ExtensionAPI) {
 			const upgraded = normalized.upgraded === true;
 			/** Why Anthropic's server-side fetch did not answer `prompt`, when it was asked and fell back. */
 			let nativeFallback: string | undefined;
-			const cancelled = () => ({ content: [{ type: "text" as const, text: text.cancelled(target) }], details: { url: target }, isError: true });
+			const cancelled = () => ({ content: [{ type: "text" as const, text: webFetchResultText().cancelled(target) }], details: { url: target }, isError: true });
 			/** The header and the framed page, bounded for the model. */
 			const resultText = (answer: FetchAnswer, page: { body: string; title?: string }, noArticle = false) =>
-				persistIfLarge(`${text.header({ url: target, upgraded, nativeFallback, noArticle, answer })}\n\n${pageContent(text.page, page.body, page.title)}`, {
+				persistIfLarge(`${webFetchResultText().header({ url: target, upgraded, nativeFallback, noArticle, answer })}\n\n${pageContent(webFetchResultText().page, page.body, page.title)}`, {
 					dir: sessionResultsDir(ctx),
 					id: toolCallId,
 				});
@@ -284,7 +286,7 @@ function webFetchExtension(pi: ExtensionAPI) {
 					const answer: FetchAnswer = { kind: "native", reader: native.spec, cutOff: native.cutOff };
 					return { content: [{ type: "text", text: resultText(answer, { body: native.text }) }], details: { url: target, reader: native.spec, path: "native" } };
 				}
-				if (native.kind === "fell-back") nativeFallback = nativeWords.fallback(native.fallback);
+				if (native.kind === "fell-back") nativeFallback = nativeWebResultText.fallback(native.fallback);
 			}
 
 			try {
@@ -336,7 +338,7 @@ function webFetchExtension(pi: ExtensionAPI) {
 				// name alone. Unpack all three so the model sees what actually failed
 				// and what to try next.
 				if (error instanceof CrossHostRedirect) {
-					const redirect = text.redirect({ originalUrl: target, redirectUrl: error.redirectUrl, status: error.status, prompt: params.prompt });
+					const redirect = webFetchResultText().redirect({ originalUrl: target, redirectUrl: error.redirectUrl, status: error.status, prompt: params.prompt });
 					return { content: [{ type: "text", text: redirect }], details: { url: target } };
 				}
 				const err = error as Error & { cause?: unknown };
@@ -348,7 +350,7 @@ function webFetchExtension(pi: ExtensionAPI) {
 						: aborted
 							? ({ kind: "timedOut", seconds: FETCH_TIMEOUT_MS / 1000 } as const)
 							: ({ kind: "network", osMessage: err.cause instanceof Error ? `${err.message}: ${err.cause.message}` : err.message } as const);
-				return { content: [{ type: "text", text: text.failed({ url: target, failure }) }], details: { url: target }, isError: true };
+				return { content: [{ type: "text", text: webFetchResultText().failed({ url: target, failure }) }], details: { url: target }, isError: true };
 			}
 		},
 	});

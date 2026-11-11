@@ -22,12 +22,12 @@ vi.mock("../../extensions/lib/shell-run/bash-background.ts", async (importOrigin
 
 import { DEFAULT_TIMEOUT_MS, registerShellTool } from "../../extensions/lib/shell-run/shell-tool.ts";
 import { oneShotNote } from "../../extensions/lib/notify/notifications.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { shellResultText } from "../../extensions/lib/shell-run/shell-text.ts";
 
 /** The profile's report of a one-shot background run the default or the model's timeout stopped. */
 const timedOutReport = (p: { id: string; description: string; seconds: number; explicit: boolean }) =>
-	requireText("shell").ranToEnd({
+	shellResultText().ranToEnd({
 		label: "Bash",
 		id: p.id,
 		description: p.description,
@@ -98,7 +98,7 @@ describe("shell tools: the default timeout (A6-M3, A3-M3)", () => {
 		};
 		// A run that finished carries no deadline for the profile to explain.
 		expect(finished.content[0].text).toBe(
-			requireText("shell").ranToEnd({
+			shellResultText().ranToEnd({
 				label: "Bash",
 				id: blocking.calls[1].id,
 				description: "true",

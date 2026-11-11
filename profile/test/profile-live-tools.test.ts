@@ -13,6 +13,8 @@ import type { DescriptionForm } from "../../extensions/lib/profile/tool-variants
 import type { ShellBlock } from "../../extensions/lib/shell-run/shell-text.ts";
 import type { FixPromptInput } from "../../extensions/commands/doctor/text.ts";
 import { notificationText } from "../../extensions/lib/notify/notifications-text.ts";
+import { webFetchResultWords } from "../../extensions/tools/web-fetch/text.ts";
+import { shellResultWords } from "../../extensions/lib/shell-run/shell-text.ts";
 import { permissionWords } from "../../extensions/lib/rules/permission-text.ts";
 import { subagentModelWords } from "../../extensions/lib/models/subagent-model-text.ts";
 import { profile } from "../index.ts";
@@ -87,8 +89,8 @@ function texts(live: LiveTools): [string, string | undefined, string][] {
 		{ kind: "addInteractive" },
 		{ kind: "consolePrompt", command: "Read-Host" },
 	];
-	for (const block of blocks) push(`shell blocked ${block.kind}`, "bash", shell.blocked(block));
-	push("shell background started", "bash", shell.backgroundStarted({ label: "Bash", id: "b1", description: "d", logPath: "/l" }));
+	for (const block of blocks) push(`shell blocked ${block.kind}`, "bash", shellResultWords(live).blocked(block));
+	push("shell background started", "bash", shellResultWords(live).backgroundStarted({ label: "Bash", id: "b1", description: "d", logPath: "/l" }));
 	for (const edition of ["core", "desktop", "unknown"] as const) push(`powershell ${edition}`, "bash", shell.powershellDescription({ edition }));
 	const runs = [{ name: "a", taskId: "t1" }];
 	push("Agent launched", "subagents", subagents.launched({ lines: ["x"] }));
@@ -101,7 +103,7 @@ function texts(live: LiveTools): [string, string | undefined, string][] {
 	push("plan mode entered", "plan-mode", planMode.entered("/p.md"));
 	for (const planExists of [true, false]) push("plan mode reminder", "plan-mode", planMode.reminder({ planFile: "/p.md", planExists }));
 	push("plan mode refusal", undefined, permissions.refused({ kind: "planMode" }));
-	push("web_fetch failed", "web-fetch", webFetch.failed({ url: "u", failure: { kind: "httpStatus", status: 500, statusText: "x" } }));
+	push("web_fetch failed", "web-fetch", webFetchResultWords(live).failed({ url: "u", failure: { kind: "httpStatus", status: 500, statusText: "x" } }));
 	return out;
 }
 

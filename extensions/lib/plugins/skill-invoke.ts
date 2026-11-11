@@ -14,7 +14,6 @@
  */
 
 import { brandedId } from "../profile/brand.mjs";
-import { requireText } from "../profile/profile.ts";
 
 const SKILL_PREFIX = "/skill:";
 
@@ -96,6 +95,9 @@ export function substituteSkillArguments(text: string, args: string): string {
 	return used ? out : `${out}\n\nARGUMENTS: ${args}`;
 }
 
+/** A skill's text under the line that names its folder. */
+export const withBaseDir = ({ dir, text }: { dir: string; text: string }): string => `Base directory for this skill: ${dir}\n\n${text}`;
+
 /**
  * The text a skill hands the model, as Claude Code builds it: the skill's
  * folder first (`Base directory for this skill: …`, so relative `references/`
@@ -104,7 +106,7 @@ export function substituteSkillArguments(text: string, args: string): string {
  */
 export function skillPromptText(body: string, args: string, baseDir: string | undefined): string {
 	const text = substituteSkillArguments(body, args);
-	return baseDir ? requireText("skill").withBaseDir({ dir: baseDir, text }) : text;
+	return baseDir ? withBaseDir({ dir: baseDir, text }) : text;
 }
 
 /**

@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import type { ReaderFailure } from "../../extensions/tools/web-fetch/text.ts";
 import { webFetchText } from "../text/web-fetch/index.ts";
 import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
+import { webFetchResultText } from "../../extensions/tools/web-fetch/text.ts";
 
 const webFetch = webFetchText(ALL_LIVE);
 
@@ -16,7 +17,7 @@ const base = { url, upgraded: false, noArticle: false };
 
 describe("One Code's web_fetch text", () => {
 	it("reports a cross-host redirect in Claude Code's shape, with the prompt line only when there was a prompt", () => {
-		expect(webFetch.redirect({ originalUrl: "https://httpbin.org/redirect-to", redirectUrl: "https://example.com/", status: 302, prompt: "What is it?" })).toBe(
+		expect(webFetchResultText().redirect({ originalUrl: "https://httpbin.org/redirect-to", redirectUrl: "https://example.com/", status: 302, prompt: "What is it?" })).toBe(
 			[
 				"REDIRECT DETECTED: The URL redirects to a different host.",
 				"",
@@ -29,17 +30,17 @@ describe("One Code's web_fetch text", () => {
 				'- prompt: "What is it?"',
 			].join("\n"),
 		);
-		const permanent = webFetch.redirect({ originalUrl: "https://a.com", redirectUrl: "https://b.com/", status: 301 });
+		const permanent = webFetchResultText().redirect({ originalUrl: "https://a.com", redirectUrl: "https://b.com/", status: 301 });
 		expect(permanent).not.toContain("prompt:");
 		expect(permanent).toContain("Status: 301 Moved Permanently");
-		expect(webFetch.redirect({ originalUrl: "https://a.com", redirectUrl: "https://b.com/", status: 308 })).toContain("Status: 308 Permanent Redirect");
+		expect(webFetchResultText().redirect({ originalUrl: "https://a.com", redirectUrl: "https://b.com/", status: 308 })).toContain("Status: 308 Permanent Redirect");
 	});
 
 	it("says which model answered and whether its answer is whole", () => {
-		expect(webFetch.header({ ...base, answer: { kind: "native", reader: "anthropic/m", cutOff: true } })).toBe(
+		expect(webFetchResultText().header({ ...base, answer: { kind: "native", reader: "anthropic/m", cutOff: true } })).toBe(
 			`Source: ${url}\nAnswered by anthropic/m with Anthropic's server-side web fetch (dynamic filtering). Refetch without \`prompt\` for the raw content.\n(The answer was cut off at the output limit and may be incomplete.)`,
 		);
-		expect(webFetch.header({ ...base, noArticle: true, answer: { kind: "reader", reader: "p/r", pageChars: 200_000, readChars: 100_000, cutOff: true } })).toBe(
+		expect(webFetchResultText().header({ ...base, noArticle: true, answer: { kind: "reader", reader: "p/r", pageChars: 200_000, readChars: 100_000, cutOff: true } })).toBe(
 			[
 				`Source: ${url}`,
 				"No article structure found; converted the whole page.",
@@ -50,7 +51,7 @@ describe("One Code's web_fetch text", () => {
 	});
 
 	it("falls back to the raw page loudly when the reader fails", () => {
-		expect(webFetch.header({ ...base, upgraded: true, nativeFallback: "the call failed: 500", answer: { kind: "raw", readerFailure: { kind: "noText", reader: "p/r" } } })).toBe(
+		expect(webFetchResultText().header({ ...base, upgraded: true, nativeFallback: "the call failed: 500", answer: { kind: "raw", readerFailure: { kind: "noText", reader: "p/r" } } })).toBe(
 			[
 				`Source: ${url}`,
 				"Upgraded http to https.",
@@ -62,7 +63,7 @@ describe("One Code's web_fetch text", () => {
 
 	it("words each reader failure", () => {
 		const line = (failure: ReaderFailure) =>
-			webFetch.header({ ...base, answer: { kind: "raw", readerFailure: failure } }).split("\n")[1];
+			webFetchResultText().header({ ...base, answer: { kind: "raw", readerFailure: failure } }).split("\n")[1];
 		expect(line({ kind: "noModel" })).toBe("Could not answer `prompt` (no model available to read the page); returning the raw page content instead.");
 		expect(line({ kind: "credentialsTimeout", reader: "p/r", seconds: 60 })).toContain("(p/r: The reader's credentials did not resolve within 60 seconds.)");
 		expect(line({ kind: "stoppedEarly", reader: "p/r", stopReason: "error" })).toContain("(p/r: the call stopped early (error))");
@@ -70,11 +71,11 @@ describe("One Code's web_fetch text", () => {
 	});
 
 	it("names the failure and the next step", () => {
-		expect(webFetch.failed({ url, failure: { kind: "timedOut", seconds: 30 } })).toBe(
+		expect(webFetchResultText().failed({ url, failure: { kind: "timedOut", seconds: 30 } })).toBe(
 			`Could not fetch ${url}: timed out after 30s — the site may be slow, unreachable, or blocking automated requests. Verify the URL and host, retry, or use web_search instead.`,
 		);
-		expect(webFetch.failed({ url, failure: { kind: "network", osMessage: "fetch failed: getaddrinfo ENOTFOUND" } })).toContain(": fetch failed: getaddrinfo ENOTFOUND. Verify");
-		expect(webFetch.failed({ url, failure: { kind: "tooLarge", limitMiB: 10 } })).toContain("Response exceeds the 10 MiB download limit; use bash to download the file instead.");
+		expect(webFetchResultText().failed({ url, failure: { kind: "network", osMessage: "fetch failed: getaddrinfo ENOTFOUND" } })).toContain(": fetch failed: getaddrinfo ENOTFOUND. Verify");
+		expect(webFetchResultText().failed({ url, failure: { kind: "tooLarge", limitMiB: 10 } })).toContain("Response exceeds the 10 MiB download limit; use bash to download the file instead.");
 	});
 
 	it("tells the reader where the page was cut", () => {

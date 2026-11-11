@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Answer, Question } from "../../extensions/tools/ask-user/questions.ts";
-import { answerPairs, formatAnswers, formatDecline } from "../text/ask-user/index.ts";
+import { answerPairs, formatAnswers, formatDecline } from "../../extensions/tools/ask-user/text.ts";
 
 const previewQuestion: Question = {
 	question: "Which layout style do you like best?",

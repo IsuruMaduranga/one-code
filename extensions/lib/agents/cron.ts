@@ -20,7 +20,8 @@ import { brandedId } from "../profile/brand.mjs";
 import { randomUUID } from "node:crypto";
 import { Type } from "typebox";
 import { sliceColumns, visibleWidth } from "../ui/text-width.ts";
-import type { CronCreateFailure, CronText, ShownJob } from "../../tools/background/text.ts";
+import type { CronCreateFailure, ShownJob } from "../../tools/background/text.ts";
+import type { CronWords } from "./cron-text.ts";
 
 /** Claude Code's per-session job cap. */
 export const MAX_JOBS = 50;
@@ -549,7 +550,7 @@ export function shownJob(job: CronJob): ShownJob {
  * (deepseek sends `query` to an empty schema; decisions/tools.md, "Session
  * cron").
  */
-export function cronToolParameters(text: CronText) {
+export function cronToolParameters(text: CronWords) {
 	const params = text.createParams({ maxAgeDays: RECURRING_MAX_AGE_DAYS });
 	return {
 		create: Type.Object(

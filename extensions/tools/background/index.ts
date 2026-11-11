@@ -37,7 +37,7 @@ import {
 } from "../../lib/agents/task-registry.ts";
 import { SWITCH_CANCEL, SWITCH_STOP, switchWarning, workWidgetLine } from "./switch-guard.ts";
 import { DynamicLoop, scheduledText } from "./wakeup.ts";
-import type { MonitorEnd, MonitorStartFailure, TaskToolsText, WakeupMissingField } from "./text.ts";
+import { backgroundWords, type MonitorEnd, type MonitorStartFailure, type TaskToolsWords, type WakeupMissingField } from "./text.ts";
 import {
 	deliveryFromState,
 	isAutonomousSentinel,
@@ -146,7 +146,7 @@ function monitorLogPath(ctx: ExtensionContext, taskId: string): string | undefin
  * subagent's report) is persisted whole to the session's tool-results
  * folder, never cut (decisions/tools.md).
  */
-function taskOutputBody(task: BackgroundTask, ctx: ExtensionContext, text: TaskToolsText): string {
+function taskOutputBody(task: BackgroundTask, ctx: ExtensionContext, text: TaskToolsWords): string {
 	const output = task.output();
 	if (output.length <= TASK_OUTPUT_MAX_CHARS) return output;
 	if (task.logPath) {
@@ -176,7 +176,7 @@ function foldEntry(entry: { type: string; timestamp?: string; customType?: strin
 }
 
 function backgroundExtension(pi: ExtensionAPI) {
-	const text = requireText("background");
+	const text = backgroundWords(requireText("background"));
 	const cronParameters = cronToolParameters(text.cron);
 	const created = (job: CronJob) => text.cron.created({ job: shownJob(job), maxAgeDays: RECURRING_MAX_AGE_DAYS });
 	const jobList = (jobs: CronJob[]) => text.cron.list({ jobs: jobs.map(shownJob) });

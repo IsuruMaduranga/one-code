@@ -55,6 +55,7 @@ import type { ResolvedLanguageServer } from "../../lib/profile/language-servers.
 import { LSP_REQUEST_CHANNEL, type LspRequestEvent } from "./request-channel.ts";
 import { failureOf } from "./failure.ts";
 import type { LspFailure } from "./text.ts";
+import { lspResultText } from "./text.ts";
 
 /** Everything needed to spawn/reuse the server responsible for a path. */
 interface ResolvedTarget {
@@ -239,7 +240,7 @@ function lspExtension(pi: ExtensionAPI) {
 	const trustGate = createLspTrustGate({ projectRoot: (dir) => findRepoRoot(dir) ?? dir });
 	const projectCodeAllowed = async (target: ResolvedTarget, ctx: ExtensionContext): Promise<boolean> => {
 		if (target.plugin || target.fromProfile || !PROJECT_CODE_SERVERS.has(target.command)) return true;
-		const why = text.projectCodeReason(target.command);
+		const why = lspResultText.projectCodeReason(target.command);
 		const confirm = ctx.hasUI
 			? async (root: string) =>
 					(await ctx.ui.confirm(
@@ -264,7 +265,7 @@ function lspExtension(pi: ExtensionAPI) {
 			// Server errors run to paragraphs; the transcript gets one line and
 			// /lsp keeps the full status. The cap leaves room for a full
 			// missing-binary line including its install command.
-			const brief = text.failure(failure).split("\n")[0].replace(/\s+/g, " ").trim();
+			const brief = lspResultText.failure(failure).split("\n")[0].replace(/\s+/g, " ").trim();
 			const capped = cutPlainText(brief, 160);
 			notify(`LSP unavailable for ${target.languageId}: ${capped} (/lsp for status)`);
 		}
@@ -308,7 +309,7 @@ function lspExtension(pi: ExtensionAPI) {
 		if (tally === lastPublishTally) return undefined;
 		lastPublishTally = tally;
 		const delta = computeDelta(mergedDiagnostics(), tracker);
-		const block = formatNewDiagnostics(delta, cwd, text.newDiagnostics);
+		const block = formatNewDiagnostics(delta, cwd, lspResultText.newDiagnostics);
 		if (!block) return undefined;
 		markDelivered(delta, tracker);
 		return block;
@@ -397,7 +398,7 @@ function lspExtension(pi: ExtensionAPI) {
 					})
 				: undefined;
 			if (ctx.signal?.aborted) {
-				return { content: [{ type: "text", text: text.cancelled }], details: { available: false }, isError: true };
+				return { content: [{ type: "text", text: lspResultText.cancelled }], details: { available: false }, isError: true };
 			}
 			if (!target || !fetched) {
 				const failure = target ? startFailures.get(target.key) : undefined;
@@ -406,10 +407,10 @@ function lspExtension(pi: ExtensionAPI) {
 						{
 							type: "text",
 							text: failure
-								? text.failure(failure)
+								? lspResultText.failure(failure)
 								: target
-									? text.noServer({ languageId: target.languageId, command: target.command, installHint: INSTALL_HINTS[target.command] })
-									: text.notConfigured,
+									? lspResultText.noServer({ languageId: target.languageId, command: target.command, installHint: INSTALL_HINTS[target.command] })
+									: lspResultText.notConfigured,
 						},
 					],
 					details: { available: false },
@@ -427,7 +428,7 @@ function lspExtension(pi: ExtensionAPI) {
 			const filtered = filterDiagnostics(all, (params.severity ?? "all") as SeverityFilter);
 			const relPath = relative(ctx.cwd, path) || path;
 			return {
-				content: [{ type: "text", text: formatDiagnostics(relPath, filtered, text.diagnostics) }],
+				content: [{ type: "text", text: formatDiagnostics(relPath, filtered, lspResultText.diagnostics) }],
 				details: { count: filtered.length, languageId: target.languageId },
 			};
 		},
@@ -448,7 +449,7 @@ function lspExtension(pi: ExtensionAPI) {
 		const target = productTarget(server, absoluteFrom(ctx.cwd, request.file), ctx.cwd);
 		return withKeepAlive(async () => {
 			const client = await clientFor(target, ctx);
-			if (!client) throw new Error(`The ${server.name} language server is not running: ${text.failure(startFailures.get(target.key) ?? { kind: "exitedQuietly" })}`);
+			if (!client) throw new Error(`The ${server.name} language server is not running: ${lspResultText.failure(startFailures.get(target.key) ?? { kind: "exitedQuietly" })}`);
 			return client.request(request.method, request.params, request.timeoutMs);
 		});
 	};
@@ -478,7 +479,7 @@ function lspExtension(pi: ExtensionAPI) {
 			const lines = [...clients.entries()].map(
 				([key, client]) => `${client.isRunning ? "running" : "stopped"} ${key} (${client.diagnosticsCount} diagnostics)`,
 			);
-			for (const [key, failure] of startFailures) lines.push(`failed  ${key}: ${text.failure(failure)}`);
+			for (const [key, failure] of startFailures) lines.push(`failed  ${key}: ${lspResultText.failure(failure)}`);
 			if (routing) {
 				for (const line of routing.diagnostics) lines.push(`config  ${line}`);
 				for (const line of routing.collisions) lines.push(`routing ${line}`);

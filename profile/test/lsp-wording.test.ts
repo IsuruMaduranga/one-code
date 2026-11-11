@@ -11,16 +11,16 @@ import { formatDiagnostics as formatWith, type LspDiagnostic, shownDiagnostic } 
 import { describeStartFailure } from "../../extensions/tools/lsp/install-hints.ts";
 import { formatNewDiagnostics as formatNewWith, MAX_CHARS } from "../../extensions/tools/lsp/watcher.ts";
 import { diag, PROJECT, uri } from "../../test/unit/helpers/lsp-diagnostics.ts";
-import { lsp as lspText } from "../text/lsp/index.ts";
+import { lspResultText } from "../../extensions/tools/lsp/text.ts";
 
 /** The tool's result with One Code's words, as the extension passes them. */
-const formatDiagnostics = (path: string, list: LspDiagnostic[], limit?: number) => formatWith(path, list, lspText.diagnostics, limit);
+const formatDiagnostics = (path: string, list: LspDiagnostic[], limit?: number) => formatWith(path, list, lspResultText.diagnostics, limit);
 /** The new-diagnostics block with One Code's words, as the extension passes them. */
-const formatNewDiagnostics = (delta: Map<string, LspDiagnostic[]>, cwd: string) => formatNewWith(delta, cwd, lspText.newDiagnostics);
+const formatNewDiagnostics = (delta: Map<string, LspDiagnostic[]>, cwd: string) => formatNewWith(delta, cwd, lspResultText.newDiagnostics);
 
 describe("start-failure messages", () => {
 	const enoent = (command: string) => ({ kind: "spawnFailed" as const, command, osMessage: `spawn ${command} ENOENT` });
-	const worded = (...args: Parameters<typeof describeStartFailure>) => lspText.failure(describeStartFailure(...args));
+	const worded = (...args: Parameters<typeof describeStartFailure>) => lspResultText.failure(describeStartFailure(...args));
 
 	it("names the install command for a missing built-in server", () => {
 		expect(worded(enoent("pyright-langserver"), "pyright-langserver")).toBe("pyright-langserver is not installed. Install it with: npm install -g pyright");
@@ -55,7 +55,7 @@ describe("the tool's diagnostics result", () => {
 			source: "typescript",
 			message: "Argument of type 'number' is not assignable to parameter of type 'string'.",
 		};
-		expect(lspText.diagnostics.line({ path: "src/index.ts", diagnostic: shownDiagnostic(d) })).toBe(
+		expect(lspResultText.diagnostics.line({ path: "src/index.ts", diagnostic: shownDiagnostic(d) })).toBe(
 			"src/index.ts:5:30 error: Argument of type 'number' is not assignable to parameter of type 'string'. (2345) [typescript]",
 		);
 	});

@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type BackgroundTask, TASK_REGISTER_CHANNEL } from "../../extensions/lib/agents/task-registry.ts";
 import bashExtension from "../../extensions/tools/bash/index.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { shellResultText } from "../../extensions/lib/shell-run/shell-text.ts";
 
 /**
  * A detached background shell has no deadline, whatever `timeout` the model
@@ -39,7 +39,7 @@ describe("bash run_in_background and timeout", { timeout: 20_000 }, () => {
 	it("still times out a one-shot background run, which holds the turn", async () => {
 		const bash = setup();
 		const ctx = createFakeCtx({ mode: "print" });
-		const ranToEnd = vi.spyOn(requireText("shell"), "ranToEnd");
+		const ranToEnd = vi.spyOn(shellResultText(), "ranToEnd");
 		const result = (await bash.execute("call-2", { command: "sleep 10", run_in_background: true, timeout: 500 }, undefined, undefined, ctx)) as {
 			content: Array<{ text: string }>;
 		};

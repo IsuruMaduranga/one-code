@@ -42,6 +42,7 @@ import { projectConfigDir, projectConfigDirName } from "../../lib/profile/source
 import { readState, readStringsState, recordState } from "../../lib/request/ledger/state.ts";
 import { processState } from "../../lib/profile/process-state.ts";
 import { worktreeGuardText } from "../../lib/rules/worktree-guard-text.ts";
+import { worktreeResultText } from "./text.ts";
 
 const run = promisify(execFile);
 const REMINDER_KEY = "cc-worktree-session";
@@ -107,7 +108,7 @@ function worktreeExtension(pi: ExtensionAPI) {
 		pi.events.emit(WORKTREE_CHANNEL, location);
 		if (next) {
 			pi.events.emit(REMINDER_CHANNEL, {
-				text: text.reminder(next),
+				text: worktreeResultText.reminder(next),
 				key: REMINDER_KEY,
 				placement: "sticky-append",
 				toolCallId,
@@ -147,7 +148,7 @@ function worktreeExtension(pi: ExtensionAPI) {
 			if (!reported.includes(restored.path)) {
 				recordState(pi, MISSING_REPORTED_STATE, [...reported, restored.path]);
 				pi.events.emit(REMINDER_CHANNEL, {
-					text: text.missingOnRestore(restored),
+					text: worktreeResultText.missingOnRestore(restored),
 				});
 			}
 			restored = undefined;
@@ -168,7 +169,7 @@ function worktreeExtension(pi: ExtensionAPI) {
 		if (!state) return;
 		if (WORKTREE_TOOLS.has(event.toolName)) return;
 		if (!existsSync(state.path)) {
-			return { block: true, reason: text.activeMissing(state) };
+			return { block: true, reason: worktreeResultText.activeMissing(state) };
 		}
 		if (["Agent", "SendMessage", "workflow"].includes(event.toolName)) return;
 		if (event.toolName === "bash" || event.toolName === "monitor") {
@@ -212,7 +213,7 @@ function worktreeExtension(pi: ExtensionAPI) {
 			path: Type.Optional(Type.String({ description: text.params.enter.path })),
 		}),
 		async execute(toolCallId, params, _signal, _onUpdate, ctx) {
-			const fail = (failure: EnterWorktreeFailure) => ({ content: [{ type: "text" as const, text: text.enter.failed(failure) }], details: {} as WorktreeDetails, isError: true });
+			const fail = (failure: EnterWorktreeFailure) => ({ content: [{ type: "text" as const, text: worktreeResultText.enter.failed(failure) }], details: {} as WorktreeDetails, isError: true });
 
 			if (params.name && params.path) return fail({ kind: "nameAndPath" });
 			// An empty `path` string is falsy, so without this it would fall through
@@ -253,7 +254,7 @@ function worktreeExtension(pi: ExtensionAPI) {
 				const next: WorktreeState = { path: target, branch, createdByUs: false, originalCwd: ctx.cwd, sharedRoot };
 				applyState(next, toolCallId);
 				return {
-					content: [{ type: "text", text: text.enter.switched({ session: next, branchError }) }],
+					content: [{ type: "text", text: worktreeResultText.enter.switched({ session: next, branchError }) }],
 					details: { worktreeState: next } satisfies WorktreeDetails,
 				};
 			}
@@ -296,7 +297,7 @@ function worktreeExtension(pi: ExtensionAPI) {
 			const next: WorktreeState = { path, branch, baseCommit, createdByUs: true, originalCwd: ctx.cwd, sharedRoot };
 			applyState(next, toolCallId);
 			return {
-				content: [{ type: "text", text: text.enter.created({ session: next, baseCommit }) }],
+				content: [{ type: "text", text: worktreeResultText.enter.created({ session: next, baseCommit }) }],
 				details: { worktreeState: next } satisfies WorktreeDetails,
 			};
 		},
@@ -314,7 +315,7 @@ function worktreeExtension(pi: ExtensionAPI) {
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			if (!state) {
 				return {
-					content: [{ type: "text", text: text.exit.noSession }],
+					content: [{ type: "text", text: worktreeResultText.exit.noSession }],
 					details: {} satisfies WorktreeDetails,
 				};
 			}
@@ -323,14 +324,14 @@ function worktreeExtension(pi: ExtensionAPI) {
 			if (params.action === "keep") {
 				applyState(undefined);
 				return {
-					content: [{ type: "text", text: text.exit.kept({ session: current, exists: existsSync(current.path) }) }],
+					content: [{ type: "text", text: worktreeResultText.exit.kept({ session: current, exists: existsSync(current.path) }) }],
 					details: { worktreeState: null } satisfies WorktreeDetails,
 				};
 			}
 
 			if (!current.createdByUs) {
 				return {
-					content: [{ type: "text", text: text.exit.notCreatedHere(current) }],
+					content: [{ type: "text", text: worktreeResultText.exit.notCreatedHere(current) }],
 					details: {} satisfies WorktreeDetails,
 					isError: true,
 				};
@@ -352,7 +353,7 @@ function worktreeExtension(pi: ExtensionAPI) {
 				}
 				if (blockers.length > 0) {
 					return {
-						content: [{ type: "text", text: text.exit.removeRefused({ session: current, blockers }) }],
+						content: [{ type: "text", text: worktreeResultText.exit.removeRefused({ session: current, blockers }) }],
 						details: {} satisfies WorktreeDetails,
 						isError: true,
 					};
@@ -363,7 +364,7 @@ function worktreeExtension(pi: ExtensionAPI) {
 				await git(["worktree", "remove", ...(params.discard_changes ? ["--force"] : []), current.path], current.originalCwd);
 			} catch (error) {
 				return {
-					content: [{ type: "text", text: text.exit.removeFailed((error as Error).message) }],
+					content: [{ type: "text", text: worktreeResultText.exit.removeFailed((error as Error).message) }],
 					details: {} satisfies WorktreeDetails,
 					isError: true,
 				};
@@ -376,14 +377,14 @@ function worktreeExtension(pi: ExtensionAPI) {
 					await git(["branch", "-D", current.branch], current.originalCwd);
 				} catch (error) {
 					return {
-						content: [{ type: "text", text: text.exit.branchDeleteFailed({ session: current, branch: current.branch, osMessage: (error as Error).message }) }],
+						content: [{ type: "text", text: worktreeResultText.exit.branchDeleteFailed({ session: current, branch: current.branch, osMessage: (error as Error).message }) }],
 						details: { worktreeState: null } satisfies WorktreeDetails,
 						isError: true,
 					};
 				}
 			}
 			return {
-				content: [{ type: "text", text: text.exit.removed(current) }],
+				content: [{ type: "text", text: worktreeResultText.exit.removed(current) }],
 				details: { worktreeState: null } satisfies WorktreeDetails,
 			};
 		},

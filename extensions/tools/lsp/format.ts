@@ -3,7 +3,7 @@
  * the lines (text.ts).
  */
 
-import type { LspText, ShownDiagnostic } from "./text.ts";
+import type { LspResultText, ShownDiagnostic } from "./text.ts";
 
 export interface LspDiagnostic {
 	range: { start: { line: number; character: number }; end?: { line: number; character: number } };
@@ -41,7 +41,7 @@ export function filterDiagnostics(diagnostics: LspDiagnostic[], filter: Severity
 }
 
 /** The tool's result: a summary line, then up to `limit` diagnostics. */
-export function formatDiagnostics(relPath: string, diagnostics: LspDiagnostic[], text: LspText["diagnostics"], limit = 20): string {
+export function formatDiagnostics(relPath: string, diagnostics: LspDiagnostic[], text: LspResultText["diagnostics"], limit = 20): string {
 	if (diagnostics.length === 0) return text.none;
 	const shown = diagnostics.slice(0, limit).map((d) => text.line({ path: relPath, diagnostic: shownDiagnostic(d) }));
 	if (diagnostics.length > limit) shown.push(text.more(diagnostics.length - limit));

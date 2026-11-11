@@ -17,7 +17,7 @@
 
 import { brandedId } from "../profile/brand.mjs";
 import { cronToolParameters, RECURRING_MAX_AGE_DAYS } from "./cron.ts";
-import type { CronText } from "../../tools/background/text.ts";
+import type { CronWords } from "./cron-text.ts";
 
 export const AGENT_CRON_CHANNEL = brandedId("agent-cron");
 export const AGENT_CRON_FIRE_CHANNEL = brandedId("agent-cron-fire");
@@ -87,7 +87,7 @@ export interface AgentCronOwner {
  * cron_create refuses: a fire reaches only a background agent, and a run to
  * completion (a nested spawn, or any spawn in a one-shot run) ends first.
  */
-export function agentCronTools(events: Emitter, { agentId, cwd, resident }: AgentCronOwner, text: CronText) {
+export function agentCronTools(events: Emitter, { agentId, cwd, resident }: AgentCronOwner, text: CronWords) {
 	const parameters = cronToolParameters(text);
 	const toolResult = (result: AgentCronResult) => ({
 		content: [{ type: "text" as const, text: result.text }],

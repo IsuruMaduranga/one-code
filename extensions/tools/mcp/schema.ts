@@ -9,10 +9,10 @@
 
 import { crc32 } from "node:zlib";
 import { type TSchema, Type } from "typebox";
-import type { ImageProblem, McpText } from "./text.ts";
+import type { ImageProblem, McpResultText } from "./text.ts";
 
 /** The profile's label for a description past the cap (text.ts `tool.descriptionCut`). */
-export type DescriptionCut = McpText["tool"]["descriptionCut"];
+export type DescriptionCut = McpResultText["tool"]["descriptionCut"];
 
 /**
  * Claude Code's namespacing: `mcp__<server>__<tool>`. Hyphens are KEPT (CC's
@@ -168,7 +168,7 @@ export interface McpResourceContents {
 	blob?: string;
 }
 
-export function describeResourceContents(contents: McpResourceContents[] | undefined, text: McpText["content"]): string {
+export function describeResourceContents(contents: McpResourceContents[] | undefined, text: McpResultText["content"]): string {
 	const parts: string[] = [];
 	for (const entry of contents ?? []) {
 		if (typeof entry.text === "string") {
@@ -319,7 +319,7 @@ function sniffImageMime(buf: Buffer): string | undefined {
 
 export function describeContent(
 	blocks: McpContentBlock[] | undefined,
-	text: McpText["content"],
+	text: McpResultText["content"],
 	serverName?: string,
 ): {
 	text: string;

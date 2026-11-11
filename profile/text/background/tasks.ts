@@ -5,7 +5,7 @@
  * stopped by its id here. The clipped-output header is Claude Code's.
  */
 
-import type { ShownTask, TaskToolsText } from "../../../extensions/sdk/profile.ts";
+import type { TaskToolsText } from "../../../extensions/sdk/profile.ts";
 
 export const tasks: TaskToolsText = {
 	outputDescription:
@@ -18,13 +18,4 @@ export const tasks: TaskToolsText = {
 	stopDescription:
 		"\n- Stops a running background task by its ID\n- Takes a task_id parameter identifying the task to stop\n- Returns a success or failure status\n- Use this tool when you need to terminate a long-running task\n",
 	stopParams: { taskId: "The ID of the background task to stop." },
-	unknownTask: ({ id, known }) => `No background task "${id}". Known tasks: ${known.join(", ") || "(none)"}`,
-	taskLine: (task: ShownTask) =>
-		`${task.id} [${task.kind}] ${task.status} · ${task.description} · started ${task.finished ? `${task.seconds}s` : `${task.seconds}s ago`}`,
-	noOutputYet: "(no output yet)",
-	clippedHeader: ({ path }) => `[Truncated. Full output: ${path}]\n\n`,
-	alreadyEnded: ({ id, status }) => `Task ${id} is already ${status}.`,
-	residentEnded: ({ id, description }) =>
-		`Terminated the resident agent behind ${id} (${description}); it can no longer be messaged live (SendMessage will resume it from its session file).`,
-	stopRequested: ({ id, description }) => `Stop requested for ${id} (${description}).`,
 };

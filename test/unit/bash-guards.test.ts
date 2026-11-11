@@ -2,14 +2,14 @@ import { describe, expect, it } from "vitest";
 import { parseCommand } from "../../extensions/lib/shell/shell-analysis.ts";
 import { bashGuardReason } from "../../extensions/lib/shell/bash-guards.ts";
 import type { ShellBlock } from "../../extensions/lib/shell-run/shell-text.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { shellResultText } from "../../extensions/lib/shell-run/shell-text.ts";
 
 /**
  * Which shell calls the guards block, and what they tell the profile about
  * each block. The words themselves are the profile's (One Code's:
  * profile/test/bash-guards-wording.test.ts).
  */
-const blocked = (block: ShellBlock) => requireText("shell").blocked(block);
+const blocked = (block: ShellBlock) => shellResultText().blocked(block);
 /** The bash tool's sleep command and until-loop, as it passes them. */
 const sleepBlock = (shown: string, rest?: string): ShellBlock => ({ kind: "sleep", shown, ...(rest ? { rest } : {}), sleepName: "sleep", untilExample: "until <check>; do sleep 2; done" });
 

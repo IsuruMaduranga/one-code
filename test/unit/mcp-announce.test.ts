@@ -1,15 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { ToldFact } from "../../extensions/lib/request/ledger/records.ts";
 import { mcpChangeNotices as changeNotices, mcpDelta as delta, mcpFacts as facts, type McpDelta, type McpSnapshot, mcpStartupNotices } from "../../extensions/tools/mcp/announce.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { mcpResultText } from "../../extensions/tools/mcp/text.ts";
 
-const mcpText = requireText("mcp");
 
 /** The pure functions with the profile's text, as the extension passes it. */
-const mcpFacts = (snapshot: McpSnapshot) => facts(snapshot, mcpText);
+const mcpFacts = (snapshot: McpSnapshot) => facts(snapshot, mcpResultText);
 const mcpDelta = (told: ReadonlyMap<string, string>, snapshot: McpSnapshot, settling?: boolean, connecting?: ReadonlySet<string>) =>
-	delta(told, snapshot, mcpText, settling, connecting);
-const mcpChangeNotices = (d: McpDelta) => changeNotices(d, mcpText);
+	delta(told, snapshot, mcpResultText, settling, connecting);
+const mcpChangeNotices = (d: McpDelta) => changeNotices(d, mcpResultText);
 
 /** What an epoch has told, as the ledger folds it: the latest hash per whole-text block key. */
 type Told = Map<string, string>;
@@ -121,10 +120,10 @@ describe("mcpChangeNotices", () => {
 			facts: [],
 		});
 		expect(texts).toEqual([
-			mcpText.notices.recovered(["ctx7"]),
-			mcpText.notices.connected([{ name: "deepwiki", text: "Use ask_question." }]),
-			mcpText.failed([{ name: "gh", error: "401 bad token" }]),
-			mcpText.notices.dropped(["old"]),
+			mcpResultText.notices.recovered(["ctx7"]),
+			mcpResultText.notices.connected([{ name: "deepwiki", text: "Use ask_question." }]),
+			mcpResultText.failed([{ name: "gh", error: "401 bad token" }]),
+			mcpResultText.notices.dropped(["old"]),
 		]);
 	});
 });
