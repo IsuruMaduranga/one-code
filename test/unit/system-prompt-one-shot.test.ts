@@ -1,7 +1,7 @@
 /**
  * A one-shot session (`-p`, `--mode json`) gets the profile's note up front
  * (lib/notify/notifications.ts oneShotSessionNote); an interactive session does not.
- * One Code's wording of the note is checked in profile/test/.
+ * The note's wording is checked in system-prompt-one-shot-wording.test.ts.
  */
 import { describe, expect, it } from "vitest";
 import systemPromptExtension from "../../extensions/request/system-prompt/index.ts";

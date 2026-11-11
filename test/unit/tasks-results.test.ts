@@ -6,10 +6,9 @@ import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { tasksResultText } from "../../extensions/tools/tasks/text.ts";
 
 /**
- * The task tools answer with the profile's text for what happened: the
- * created task, the fields an update changed (ids normalized), a deletion,
- * and an unknown id as an error. One Code's wording of them is tested in
- * profile/test/tasks-results-wording.test.ts.
+ * The task tools answer with what happened: the created task, the fields an
+ * update changed (ids normalized), a deletion, and an unknown id as an error.
+ * The wording is tested in tasks-results-wording.test.ts.
  */
 describe("tasks: result texts", () => {
 	const text = () => requireText("tasks");

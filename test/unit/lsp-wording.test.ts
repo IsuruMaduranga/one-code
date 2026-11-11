@@ -1,21 +1,20 @@
 /**
- * One Code's language-server text as the base fills it: the start-failure
- * messages, the tool's diagnostics result, and the block new diagnostics ride
- * in after a tool round (Claude Code's layout and severity symbols). What the
- * base decides (which failure, which diagnostics, the caps):
- * test/unit/lsp.test.ts and test/unit/lsp-watcher.test.ts.
+ * The language-server text: the start-failure messages, the tool's
+ * diagnostics result, and the block new diagnostics ride in after a tool round
+ * (Claude Code's layout and severity symbols). What the base decides (which
+ * failure, which diagnostics, the caps): lsp.test.ts and lsp-watcher.test.ts.
  */
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { formatDiagnostics as formatWith, type LspDiagnostic, shownDiagnostic } from "../../extensions/tools/lsp/format.ts";
 import { describeStartFailure } from "../../extensions/tools/lsp/install-hints.ts";
 import { formatNewDiagnostics as formatNewWith, MAX_CHARS } from "../../extensions/tools/lsp/watcher.ts";
-import { diag, PROJECT, uri } from "../../test/unit/helpers/lsp-diagnostics.ts";
+import { diag, PROJECT, uri } from "./helpers/lsp-diagnostics.ts";
 import { lspResultText } from "../../extensions/tools/lsp/text.ts";
 
-/** The tool's result with One Code's words, as the extension passes them. */
+/** The tool's result with the base's words, as the extension passes them. */
 const formatDiagnostics = (path: string, list: LspDiagnostic[], limit?: number) => formatWith(path, list, lspResultText.diagnostics, limit);
-/** The new-diagnostics block with One Code's words, as the extension passes them. */
+/** The new-diagnostics block with the base's words, as the extension passes them. */
 const formatNewDiagnostics = (delta: Map<string, LspDiagnostic[]>, cwd: string) => formatNewWith(delta, cwd, lspResultText.newDiagnostics);
 
 describe("start-failure messages", () => {

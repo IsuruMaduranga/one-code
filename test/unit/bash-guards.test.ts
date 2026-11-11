@@ -5,9 +5,8 @@ import type { ShellBlock } from "../../extensions/lib/shell-run/shell-text.ts";
 import { shellResultText } from "../../extensions/lib/shell-run/shell-text.ts";
 
 /**
- * Which shell calls the guards block, and what they tell the profile about
- * each block. The words themselves are the profile's (One Code's:
- * profile/test/bash-guards-wording.test.ts).
+ * Which shell calls the guards block, and what each block reports. The
+ * words themselves: bash-guards-wording.test.ts.
  */
 const blocked = (block: ShellBlock) => shellResultText().blocked(block);
 /** The bash tool's sleep command and until-loop, as it passes them. */

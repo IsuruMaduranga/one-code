@@ -4,26 +4,19 @@
  * name it. The golden sweep checks the same on a real frontier request
  * (test/e2e/golden-requests.mjs --sweep); this covers every tier and form.
  * The English words some tool names share ("a skill", "git workflow") are
- * listed in ENGLISH with the phrase that uses them.
+ * listed in ENGLISH with the phrase that uses them. The base's own words:
+ * test/unit/base-live-tools.test.ts.
  */
 import { describe, expect, it } from "vitest";
-import { TOOL_FEATURES } from "../../extensions/lib/profile/features.ts";
 import type { LiveTools } from "../../extensions/lib/profile/live-tools.ts";
 import type { DescriptionForm } from "../../extensions/lib/profile/tool-variants.ts";
-import type { ShellBlock } from "../../extensions/lib/shell-run/shell-text.ts";
 import type { FixPromptInput } from "../../extensions/commands/doctor/text.ts";
-import { notificationText } from "../../extensions/lib/notify/notifications-text.ts";
-import { webFetchResultWords } from "../../extensions/tools/web-fetch/text.ts";
-import { shellResultWords } from "../../extensions/lib/shell-run/shell-text.ts";
-import { planModeResultWords } from "../../extensions/safety/plan-mode/text.ts";
-import { subagentResultWords } from "../../extensions/lib/agents/subagent-text.ts";
-import { permissionWords } from "../../extensions/lib/rules/permission-text.ts";
-import { subagentModelWords } from "../../extensions/lib/models/subagent-model-text.ts";
 import { profile } from "../index.ts";
 import { PROMPT_TIERS } from "../../extensions/lib/models/model-tier.ts";
+import { type EnglishPhrases, type NamedText, toolLeaks } from "../../test/unit/helpers/tool-mentions.ts";
 
 /** Phrases where a tool's name is an English word, not the tool. */
-const ENGLISH: Readonly<Record<string, readonly RegExp[]>> = {
+const ENGLISH: EnglishPhrases = {
 	edit: [/about to edit \(an edit needs a read first\)/, /a shell edit/, /edit that file/, /write or edit any files/, /allowed to edit/, /the only file you can edit/],
 	monitor: [/monitor for regressions/],
 	skill: [/a skill or slash command/],
@@ -45,15 +38,11 @@ const FIX_INPUT: FixPromptInput = {
 	upgradeCommands: { npm: "npm i", brew: "brew upgrade", "pi-package": "pi update" },
 };
 
-/** Every text that names another tool: its label, the feature that owns it (its own tools may name each other), and the text. */
-function texts(live: LiveTools): [string, string | undefined, string][] {
+/** Every text of One Code's that names another tool. */
+function texts(live: LiveTools): NamedText[] {
 	const t = profile.text({ live });
-	const { systemPrompt, planMode, askUser, subagents, toolStyle, shell, workflow, artifacts, toolSearch, autoMode, webFetch } = t as Required<typeof t>;
-	// The base's own words that name a tool follow the same rule.
-	const subagentModels = subagentModelWords(live, t.subagentModels!);
-	const permissions = permissionWords(live);
-	const notifications = notificationText(live, t.notifications);
-	const out: [string, string | undefined, string][] = [];
+	const { systemPrompt, planMode, askUser, subagents, toolStyle, shell, workflow, artifacts, toolSearch, autoMode } = t as Required<typeof t>;
+	const out: NamedText[] = [];
 	const push = (label: string, owner: string | undefined, text: string) => out.push([label, owner, text]);
 	for (const tier of PROMPT_TIERS) {
 		for (const taskTools of [true, false]) {
@@ -71,71 +60,20 @@ function texts(live: LiveTools): [string, string | undefined, string][] {
 		}
 	}
 	push("exit_plan_mode", "plan-mode", planMode.descriptions.exit_plan_mode);
-	push("one-shot note", undefined, notifications.oneShotSession);
 	push("workflow", "workflow", workflow.description({ guideline: "medium", configured: false }));
 	push("workflow params", "workflow", JSON.stringify(workflow.params({ configDir: ".claude" })));
 	push("artifact", "artifacts", artifacts.description);
 	push("tool_search", "tool-search", toolSearch.description);
-	push("model menu", undefined, subagentModels.menu({ lines: [], notes: [] }));
-	push("refused model", undefined, subagentModels.refused({ model: "a/b" }));
 	for (const firm of [true, false]) push(`auto-mode note${firm ? " firm" : ""}`, undefined, autoMode.systemNote({ firm }));
 
-	// Results, refusals and notes: sent whenever their own feature is on.
-	const blocks: ShellBlock[] = [
-		{ kind: "sleep", shown: "sleep 30", sleepName: "sleep", untilExample: "until test -f x; do sleep 2; done" },
-		{ kind: "pollingLoop", command: "while true; do sleep 5; done" },
-		{ kind: "detach", via: "`nohup`" },
-		{ kind: "editor", command: "vim" },
-		{ kind: "watch" },
-		{ kind: "rebaseInteractive", shell: "bash" },
-		{ kind: "addInteractive" },
-		{ kind: "consolePrompt", command: "Read-Host" },
-	];
-	for (const block of blocks) push(`shell blocked ${block.kind}`, "bash", shellResultWords(live).blocked(block));
-	push("shell background started", "bash", shellResultWords(live).backgroundStarted({ label: "Bash", id: "b1", description: "d", logPath: "/l" }));
 	for (const edition of ["core", "desktop", "unknown"] as const) push(`powershell ${edition}`, "bash", shell.powershellDescription({ edition }));
-	const runs = [{ name: "a", taskId: "t1" }];
-	push("Agent launched", "subagents", subagentResultWords(live).launched({ lines: ["x"] }));
-	push("Agent inline report", "subagents", subagentResultWords(live).inlineReport({ name: "a", taskId: "t1", note: "n" }));
-	push("SendMessage next turn", "subagents", subagentResultWords(live).nextTurn({ name: "a" }));
-	push("SendMessage to resident", "subagents", subagentResultWords(live).sentToResident({ name: "a", taskId: "t1" }));
-	push("SendMessage sent", "subagents", subagentResultWords(live).sent({ name: "a", taskId: "t1" }));
-	push("pending claim", "subagents", subagentResultWords(live).pendingClaim({ runs }));
-	push("running after compaction", "subagents", subagentResultWords(live).runningAfterCompaction({ runs }));
-	push("plan mode entered", "plan-mode", planModeResultWords(live).entered("/p.md"));
 	for (const planExists of [true, false]) push("plan mode reminder", "plan-mode", planMode.reminder({ planFile: "/p.md", planExists }));
-	push("plan mode refusal", undefined, permissions.refused({ kind: "planMode" }));
-	push("web_fetch failed", "web-fetch", webFetchResultWords(live).failed({ url: "u", failure: { kind: "httpStatus", status: 500, statusText: "x" } }));
 	return out;
-}
-
-/** The places a text still names `tool`, outside the English phrases. */
-function mentions(text: string, tool: string): string[] {
-	let rest = text;
-	for (const phrase of ENGLISH[tool] ?? []) rest = rest.replace(new RegExp(phrase.source, `${phrase.flags.replace("g", "")}g`), "");
-	const found: string[] = [];
-	const rx = new RegExp(`(^|[^A-Za-z_-])${tool}([^A-Za-z_-]|$)`, "g");
-	for (const match of rest.matchAll(rx)) found.push(rest.slice(Math.max(0, match.index - 50), match.index + tool.length + 40).replace(/\n/g, "⏎"));
-	return found;
 }
 
 describe("text naming another tool", () => {
 	it("leaves out the tools of each optional feature that is off, and edit", () => {
-		const leaks: string[] = [];
-		// The shell features are left out: with bash off the shell texts already
-		// name the shell the session has (system-prompt/low.ts shellToolPhrase).
-		const cases: { feature: string; off: string[] }[] = [...new Set<string>(Object.values(TOOL_FEATURES))]
-			.filter((feature) => feature !== "bash" && feature !== "powershell")
-			.map((feature) => ({ feature, off: Object.keys(TOOL_FEATURES).filter((tool) => TOOL_FEATURES[tool] === feature) }));
-		cases.push({ feature: "edit", off: ["edit"] });
-		for (const { feature, off } of cases) {
-			const live: LiveTools = { has: (name) => !off.includes(name) };
-			for (const [label, owner, text] of texts(live)) {
-				if (owner === feature) continue;
-				for (const tool of off) for (const where of mentions(text, tool)) leaks.push(`${tool} off, ${label}: …${where}…`);
-			}
-		}
-		expect(leaks).toEqual([]);
+		expect(toolLeaks(texts, ENGLISH)).toEqual([]);
 	});
 
 	it("leaves ask_user_question out of the /doctor fix prompt when it is off", () => {

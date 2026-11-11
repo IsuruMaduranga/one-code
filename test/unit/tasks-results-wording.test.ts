@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest";
 import tasksExtension from "../../extensions/tools/tasks/index.ts";
-import { createFakeCtx, createFakePi } from "../../test/unit/helpers/fake-pi.ts";
+import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 /**
- * The task tools answer in Claude Code's words under One Code's profile: the
- * created task, and the fields an update changed. Which values the tools pass
- * to the profile is tested in test/unit/tasks-results.test.ts.
+ * The task tools' answers: the created task, and the fields an update
+ * changed. Which values the tools report: tasks-results.test.ts.
  */
 describe("tasks: result texts", () => {
 	const setup = () => {

@@ -1,7 +1,6 @@
 /**
- * One Code's environment block and model line, Claude Code's byte for byte,
- * as the base fills them. Which facts and which name and cutoff the base
- * hands the profile: test/unit/environment-block.test.ts.
+ * The environment block's and the model line's words. Which facts, name and
+ * cutoff go into them: environment-block.test.ts.
  */
 import { describe, expect, it } from "vitest";
 import { claudeDisplayName, environmentBlock, modelLine } from "../../extensions/lib/context/environment-block.ts";

@@ -1,7 +1,6 @@
 /**
- * One Code's environment block lists workspace directories the way Claude
- * Code's does (profile/text/context/). The base's permissions-workspace.test.ts
- * checks which directories reach it.
+ * How the environment block lists workspace directories. Which directories
+ * reach it: permissions-workspace.test.ts.
  */
 import { describe, expect, it } from "vitest";
 import { environmentBlock } from "../../extensions/lib/context/environment-block.ts";

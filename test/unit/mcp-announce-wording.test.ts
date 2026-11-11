@@ -1,8 +1,7 @@
 /**
- * One Code's words for the MCP change notices: a recovered server, a newly
- * connected one's instructions in Claude Code's frame, a failure and a
- * disconnect. Which notices the base sends, and in what order:
- * test/unit/mcp-announce.test.ts.
+ * The words of the MCP change notices: a recovered server, a newly connected
+ * one's instructions, a failure and a disconnect. Which notices the base sends,
+ * and in what order: mcp-announce.test.ts.
  */
 import { describe, expect, it } from "vitest";
 import { mcpChangeNotices as changeNotices, type McpDelta } from "../../extensions/tools/mcp/announce.ts";
@@ -10,7 +9,7 @@ import { mcpResultText } from "../../extensions/tools/mcp/text.ts";
 
 const mcpChangeNotices = (d: McpDelta) => changeNotices(d, mcpResultText);
 
-describe("One Code's MCP change notices", () => {
+describe("the MCP change notices", () => {
 	it("renders one notice per kind of change, instructions in Claude Code's frame", () => {
 		const texts = mcpChangeNotices({
 			newInstructions: [{ name: "deepwiki", instructions: "Use ask_question." }],

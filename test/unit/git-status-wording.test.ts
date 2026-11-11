@@ -1,11 +1,11 @@
 /**
- * One Code's git status block, Claude Code's byte for byte: its layout, the
- * main-branch line, a dropped user line, a clean tree and the clip note. What
- * the base gathers and clips: test/unit/git-status.test.ts.
+ * The git status block's words: its layout, the main-branch line, a dropped
+ * user line, a clean tree and the clip note. What the base gathers and clips:
+ * git-status.test.ts.
  */
 import { describe, expect, it } from "vitest";
 import { collectGitStatus, formatGitStatus, GIT_STATUS_MAX_CHARS } from "../../extensions/lib/context/git-status.ts";
-import { fakeRunner, IN_WORK_TREE } from "../../test/unit/helpers/git-runner.ts";
+import { fakeRunner, IN_WORK_TREE } from "./helpers/git-runner.ts";
 
 describe("formatGitStatus", () => {
 	it("assembles CC's block byte-for-byte", () => {

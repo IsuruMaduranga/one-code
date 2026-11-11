@@ -26,7 +26,7 @@ const PROJECT = resolve("/project");
 const uri = (name: string) => pathToFileURL(join(PROJECT, name)).href;
 
 
-/** The block with the profile's words, as the extension passes them (One Code's: profile/test/lsp-wording.test.ts). */
+/** The block with the base's words, as the extension passes them (the wording: lsp-wording.test.ts). */
 const formatNewDiagnostics = (delta: Map<string, LspDiagnostic[]>, cwd: string) => formatWith(delta, cwd, lspResultText.newDiagnostics);
 
 describe("fingerprintDiagnostic", () => {

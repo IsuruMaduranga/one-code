@@ -1,7 +1,7 @@
 /**
  * The environment block and the model line: the facts, model name and
- * knowledge cutoff the base hands the profile's text (lib/context/environment-block.ts).
- * One Code's wording of them: profile/test/environment-block-wording.test.ts.
+ * knowledge cutoff that go into them (lib/context/environment-block.ts).
+ * Their wording: environment-block-wording.test.ts.
  */
 import { describe, expect, it } from "vitest";
 import { claudeDisplayName, environmentBlock, modelLine } from "../../extensions/lib/context/environment-block.ts";

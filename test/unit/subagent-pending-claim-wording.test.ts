@@ -1,12 +1,11 @@
 /**
- * One Code's wording for the reminder after a turn that ended with a
- * background run still pending (profile/text/subagents/). The base's part is
- * in test/unit/subagent-pending-claim.test.ts.
+ * The words of the reminder after a turn that ended with a background run
+ * still pending. When it fires: subagent-pending-claim.test.ts.
  */
 import { describe, expect, it } from "vitest";
 import { pendingClaimReminder } from "../../extensions/agents/subagents/pending-claim.ts";
 
-describe("One Code's pending-claim reminder", () => {
+describe("the pending-claim reminder", () => {
 	it("names the run and offers both sanctioned ways to get the result", () => {
 		const text = pendingClaimReminder([{ name: "count-src-python-files", taskId: "b1f7f47e" }]);
 		expect(text).toContain("count-src-python-files (task b1f7f47e)");

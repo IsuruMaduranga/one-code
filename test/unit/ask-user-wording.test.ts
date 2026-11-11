@@ -1,7 +1,6 @@
 /**
- * One Code's ask_user_question wording (profile/text/ask-user/): the answers in
- * Claude Code's phrasing, the careful-reading note for typed answers and
- * notes, and the decline that lists the questions back.
+ * The ask_user_question results' words: the answers, the careful-reading note
+ * for typed answers and notes, and the decline that lists the questions back.
  */
 import { describe, expect, it } from "vitest";
 import type { Answer, Question } from "../../extensions/tools/ask-user/questions.ts";

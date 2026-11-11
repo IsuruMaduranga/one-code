@@ -1,7 +1,7 @@
 /**
  * The git status block at the start of a conversation (lib/context/git-status.ts):
- * the snapshot the base gathers from git, clipped where the status is long,
- * in the profile's words. One Code's block: profile/test/git-status-wording.test.ts.
+ * the snapshot the base gathers from git, clipped where the status is long.
+ * The block's words: git-status-wording.test.ts.
  */
 import { describe, expect, it } from "vitest";
 import { collectGitStatus, formatGitStatus, GIT_STATUS_MAX_CHARS, type GitSnapshot } from "../../extensions/lib/context/git-status.ts";

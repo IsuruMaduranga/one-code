@@ -1,7 +1,7 @@
 /**
  * The reminder after a turn that ended with a background run still pending:
  * nothing when no run is pending, else the profile's text for every pending
- * run, in order. One Code's wording is checked in profile/test/.
+ * run, in order. The wording is checked in subagent-pending-claim-wording.test.ts.
  */
 import { describe, expect, it } from "vitest";
 import { pendingClaimReminder } from "../../extensions/agents/subagents/pending-claim.ts";

@@ -1,12 +1,12 @@
 /**
- * One Code's note in a skipped instruction file's slot: its size, the window,
- * the files a section inlines, and to read what it needs. When the base skips
- * a file: test/unit/instruction-budget.test.ts.
+ * The note in a skipped instruction file's slot: its size, the window, the
+ * files a section inlines, and to read what it needs. When the base skips a
+ * file: instruction-budget.test.ts.
  */
 import { describe, expect, it } from "vitest";
 import { skippedInstructionNote } from "../../extensions/lib/context/instruction-budget.ts";
 
-describe("One Code's skipped-instruction note", () => {
+describe("the skipped-instruction note", () => {
 	it("tells the model the size, the window, the files a section inlines, and to read what it needs", () => {
 		expect(skippedInstructionNote(210_000, 200_000)).toBe(
 			"This file is not loaded: it is about 210,000 tokens, and instruction files may take at most half of this model's 200,000-token context window. " +

@@ -4,9 +4,9 @@
  * path and size, and the user is warned at
  * startup, before the prompt after a model switch that crosses the line, and on
  * a nested attach (decisions/memory-state.md, "Instruction files may take half
- * the window; past it the largest are skipped"). The note's wording and the
- * instructions wiring over Claude Code's instruction files (One Code's
- * source provider): profile/test/instruction-budget-wording.test.ts and
+ * the window; past it the largest are skipped"). The note's wording:
+ * instruction-budget-wording.test.ts. The instructions wiring over Claude
+ * Code's instruction files (One Code's source provider):
  * profile/test/instruction-budget-wiring.test.ts.
  */
 import { describe, expect, it } from "vitest";

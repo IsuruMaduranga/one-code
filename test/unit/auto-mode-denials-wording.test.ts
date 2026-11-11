@@ -1,4 +1,4 @@
-/** One Code's message for a denied call the user then approved: Claude Code's words. */
+/** The message for a denied call the user then approved. */
 import { describe, expect, it } from "vitest";
 import { permissionGrantedMessage } from "../../extensions/safety/permissions/auto-mode/denials.ts";
 

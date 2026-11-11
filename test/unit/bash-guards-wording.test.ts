@@ -1,8 +1,7 @@
 /**
- * One Code's words for the bash tool's guard blocks: each names what was
- * blocked and the alternative (a background run, the monitor tool, the
- * non-interactive form), and a sleep block forbids the chained-sleep
- * workaround.
+ * The words of the bash tool's guard blocks: each names what was blocked and
+ * the alternative (a background run, the monitor tool, the non-interactive
+ * form), and a sleep block forbids the chained-sleep workaround.
  */
 import { describe, expect, it } from "vitest";
 import { bashGuardReason } from "../../extensions/lib/shell/bash-guards.ts";
