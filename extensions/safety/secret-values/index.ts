@@ -17,14 +17,14 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { feature } from "../../lib/profile/feature.ts";
 import { carriesSecretPlaceholder, hasSecretValues, redactSecretValues, redactSecretValuesIn } from "../../lib/profile/secrets.ts";
-import { toolResultWords } from "../../lib/request/tool-results-words.ts";
+import { toolResultsText } from "../../lib/request/tool-results-text.ts";
 import { isWritingTool } from "../../lib/shell/paths.ts";
 
 function secretValuesExtension(pi: ExtensionAPI) {
 	pi.on("tool_call", (event) => {
 		if (!hasSecretValues() || !isWritingTool(event.toolName)) return undefined;
 		if (!carriesSecretPlaceholder(JSON.stringify(event.input ?? {}))) return undefined;
-		return { block: true, reason: toolResultWords().secretPlaceholderWrite };
+		return { block: true, reason: toolResultsText.secretPlaceholderWrite };
 	});
 
 	pi.on("tool_result", (event) => {

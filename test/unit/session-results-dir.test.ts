@@ -9,7 +9,7 @@ import { basename, dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { brand } from "../../extensions/lib/profile/brand.mjs";
 import { persistIfLarge, sessionResultsDir } from "../../extensions/lib/request/persisted-output.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { toolResultsText } from "../../extensions/lib/request/tool-results-text.ts";
 
 const inMemory = (id: string, cwd = "/some/project") => ({ cwd, sessionManager: { getSessionDir: () => "", getSessionId: () => id } });
 
@@ -40,7 +40,7 @@ describe("sessionResultsDir without a session dir", () => {
 		const dir = sessionResultsDir(inMemory("persist-check"));
 		const text = persistIfLarge("x".repeat(60 * 1024), { dir, id: "t1" });
 		const file = join(dir, "tool-results", "t1.txt");
-		expect(text).toContain(requireText("toolResults").persisted({ size: "60.0KB", file }));
+		expect(text).toContain(toolResultsText.persisted({ size: "60.0KB", file }));
 		expect(statSync(file).size).toBe(60 * 1024);
 	});
 });

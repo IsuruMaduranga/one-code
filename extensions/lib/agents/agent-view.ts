@@ -12,8 +12,7 @@ import { brandedId } from "../profile/brand.mjs";
 import { fitPainted, visibleWidth } from "../ui/text-width.ts";
 import { cutPlainText } from "../ui/tui-render.ts";
 import { notificationWords } from "../notify/notification-words.ts";
-import { around, fillOf, memoOn } from "../profile/template-probe.ts";
-import type { NotificationsText } from "../notify/notifications-text.ts";
+import { USER_MESSAGE_MID_TURN_HEAD } from "../notify/notifications-text.ts";
 
 /** `{ target }` while an agent is viewed, `{}` when the view returns to main. */
 export const AGENT_VIEW_CHANNEL = brandedId("agent-view");
@@ -46,18 +45,17 @@ export function agentViewTarget(run: ViewedRun, fork: boolean): AgentViewTarget 
 	return { badge: fork ? `@${run.name}` : run.label, placeholder: `Message @${handle}…` };
 }
 
-/** A message the user types at an agent, idle or running, in the profile's wrapper. */
+/** A message the user types at an agent, idle or running, in its wrapper (notifications-text.ts). */
 export function userMessageForAgent(text: string): string {
 	return notificationWords().userMessageMidTurn({ text });
 }
 
-/** The wrapper around the user's text, from the profile's own words. */
-const userMessageFrame = memoOn((words: NotificationsText) => around((text) => words.userMessageMidTurn({ text })));
-
 /** The user's own text inside `userMessageForAgent`'s wrapper, or undefined for any other prompt. */
 export function unwrapUserMessage(prompt: string): string | undefined {
-	const frame = userMessageFrame(notificationWords());
-	return frame?.before ? fillOf(prompt, frame) : undefined;
+	// The wrapper is the head, the text, then what follows an empty text.
+	const tail = notificationWords().userMessageMidTurn({ text: "" }).slice(USER_MESSAGE_MID_TURN_HEAD.length);
+	if (prompt.length < USER_MESSAGE_MID_TURN_HEAD.length + tail.length || !prompt.startsWith(USER_MESSAGE_MID_TURN_HEAD) || !prompt.endsWith(tail)) return undefined;
+	return prompt.slice(USER_MESSAGE_MID_TURN_HEAD.length, prompt.length - tail.length);
 }
 
 /**

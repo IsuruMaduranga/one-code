@@ -1,10 +1,18 @@
 /**
- * The profile's notification words for lib/notify/notifications.ts, which every
- * background feature shares. Fails closed (`requireText`) without them: the
- * frames are part of every session.
+ * The notification words in force for lib/notify/notifications.ts, which
+ * every background feature shares: the base's words (notifications-text.ts)
+ * built for this session's tools and the profile's part. Fails closed
+ * (`requireText`) without that part: the frames are part of every session.
  */
 
-import type { NotificationsText } from "./notifications-text.ts";
-import { requireText } from "../profile/profile.ts";
+import { activeProfile, requireText } from "../profile/profile.ts";
+import { type NotificationWords, notificationText } from "./notifications-text.ts";
 
-export const notificationWords = (): NotificationsText => requireText("notifications");
+const built = new WeakMap<object, NotificationWords>();
+
+export function notificationWords(): NotificationWords {
+	const product = requireText("notifications");
+	let words = built.get(product);
+	if (!words) built.set(product, (words = notificationText(activeProfile().live, product)));
+	return words;
+}

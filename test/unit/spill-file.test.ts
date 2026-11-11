@@ -12,9 +12,9 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { createBashToolDefinition } from "@earendil-works/pi-coding-agent";
 import { boundSpillIn, keepSpillReadable, piSpillPath } from "../../extensions/lib/shell-run/spill-file.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { decide } from "../../extensions/lib/rules/matcher.ts";
 import { createFakeCtx } from "./helpers/fake-pi.ts";
+import { toolResultsText } from "../../extensions/lib/request/tool-results-text.ts";
 
 const cwd = mkdtempSync(join(tmpdir(), "spill-cwd-"));
 const resultsDir = mkdtempSync(join(tmpdir(), "spill-results-"));
@@ -31,14 +31,14 @@ const run = (command: string) =>
 /** A saved output's size as the persisted block gives it. */
 const shownSize = (bytes: number) => (bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)}KB` : `${(bytes / (1024 * 1024)).toFixed(1)}MB`);
 /** The profile's line naming a saved output, as the base writes it for `file`. */
-const persistedLine = (file: string) => requireText("toolResults").persisted({ size: shownSize(statSync(file).size), file });
+const persistedLine = (file: string) => toolResultsText.persisted({ size: shownSize(statSync(file).size), file });
 /** The file in the results dir a persisted block names, by the profile's line for it. */
 const savedPath = (text: string) =>
 	(readdirSync(resultsDir, { recursive: true }) as string[])
 		.map((name) => join(resultsDir, name))
 		.find((file) => statSync(file).isFile() && text.includes(persistedLine(file)));
 /** The profile's heading over a 2 KB preview, with the line break the block puts after it. */
-const previewHeading = () => `${requireText("toolResults").previewHeading({ kb: 2 })}\n`;
+const previewHeading = () => `${toolResultsText.previewHeading({ kb: 2 })}\n`;
 
 describe("keepSpillReadable", () => {
 	it("moves a successful run's spill file into the results dir and rewrites the path", async () => {
@@ -133,7 +133,7 @@ describe("keepSpillReadable with Claude Code's cut", () => {
 		// 1,000 lines of 44 bytes: under pi's limits, over the cap.
 		const text = (await cut("for i in $(seq 1 1000); do echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; done")).content[0].text ?? "";
 		const file = join(resultsDir, "tool-results", "bash-t1.txt");
-		expect(text.startsWith(`<persisted-output>\n${requireText("toolResults").persisted({ size: "43.0KB", file })}\n`)).toBe(true);
+		expect(text.startsWith(`<persisted-output>\n${toolResultsText.persisted({ size: "43.0KB", file })}\n`)).toBe(true);
 	});
 
 	it("bounds the output in the error pi throws on a timeout", async () => {

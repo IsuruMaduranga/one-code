@@ -1,7 +1,6 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { memoryDir, projectSlug } from "../../extensions/lib/context/memory.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { userConfigDir } from "../../extensions/lib/profile/sources.ts";
 import {
 	INDEX_MAX_CHARS,
@@ -11,6 +10,7 @@ import {
 	stampFrontmatter,
 	truncateIndex,
 } from "../../extensions/lib/context/memory-content.ts";
+import { contextWords } from "../../extensions/lib/context/context-words.ts";
 
 describe("projectSlug", () => {
 	it("matches Claude Code's slugging: non [A-Za-z0-9-] chars become dashes", () => {
@@ -45,7 +45,7 @@ describe("truncateIndex", () => {
 		const long = `${Array.from({ length: INDEX_MAX_LINES + 30 }, (_, i) => `- [entry ${i + 1}](e${i + 1}.md) — one line`).join("\n")}\n`;
 		const out = truncateIndex(long);
 		const kept = long.split("\n").slice(0, INDEX_MAX_LINES).join("\n");
-		const note = requireText("context").memoryIndexCut({
+		const note = contextWords().memoryIndexCut({
 			size: { kind: "lines", lines: 230, limit: 200 },
 			cut: { kind: "lines", cut: 30, total: 230, from: 201, next: "- [entry 201](e201.md) — one line" },
 		});
@@ -56,7 +56,7 @@ describe("truncateIndex", () => {
 		const line = `- ${"x".repeat(98)}`; // 100 characters
 		const long = Array.from({ length: 150 }, () => `${line}${"y".repeat(100)}`).join("\n"); // 150 lines of 200 chars
 		const out = truncateIndex(long);
-		const note = requireText("context").memoryIndexCut({
+		const note = contextWords().memoryIndexCut({
 			size: { kind: "chars", size: "29.4KB", limit: "24.4KB" },
 			cut: { kind: "lines", cut: 26, total: 150, from: 125, next: `${`${line}${"y".repeat(100)}`.slice(0, 79)}\u2026` },
 		});
@@ -69,7 +69,7 @@ describe("truncateIndex", () => {
 
 	it("cuts a single overlong line at the character limit", () => {
 		const out = truncateIndex("x".repeat(INDEX_MAX_CHARS + 10));
-		const note = requireText("context").memoryIndexCut({
+		const note = contextWords().memoryIndexCut({
 			size: { kind: "chars", size: "24.4KB", limit: "24.4KB" },
 			cut: { kind: "firstLine", chars: INDEX_MAX_CHARS },
 		});

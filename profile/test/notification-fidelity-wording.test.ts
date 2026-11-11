@@ -1,5 +1,6 @@
 /**
- * Locks One Code's notification words (profile/text/notifications/) to Claude
+ * Locks the notification words (lib/notify/notifications-text.ts and One
+ * Code's part, profile/text/notifications/) to Claude
  * Code 2.1.278's wire text. Every expected string below is the text Claude
  * Code 2.1.273 to 2.1.278 sends; how each was confirmed is in
  * working-docs/findings/24-claude-code-notifications.md. A drift here is a
@@ -11,16 +12,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { agentSummary, handBackPointer, handBackWarning, monitorEndedSummary, monitorEventSummary, shellSummary, workflowSummary } from "../../extensions/lib/notify/notifications.ts";
-import {
-	AGENT_MESSAGE_GUARD,
-	AGENT_MESSAGE_OPENER,
-	AGENT_MESSAGE_OPENER_MID_TURN,
-	AGENT_MESSAGE_REPLY_HINT,
-	AGENT_NOTE,
-	HAND_BACK_PREAMBLE,
-	TASK_NOTIFICATION_PREAMBLE,
-	TASK_NOTIFICATION_PREAMBLE_WITH_USER_TURN,
-} from "../text/notifications/index.ts";
+import { AGENT_MESSAGE_REPLY_HINT, AGENT_NOTE, HAND_BACK_PREAMBLE, TASK_NOTIFICATION_PREAMBLE, TASK_NOTIFICATION_PREAMBLE_WITH_USER_TURN } from "../../extensions/lib/notify/notifications-text.ts";
+import { AGENT_MESSAGE_GUARD, AGENT_MESSAGE_OPENER, AGENT_MESSAGE_OPENER_MID_TURN } from "../text/notifications/index.ts";
 
 describe("Claude Code 2.1.278 notification literals", () => {
 	it("agent-message envelope: opener, guard, reply hint, hand-back preamble", () => {

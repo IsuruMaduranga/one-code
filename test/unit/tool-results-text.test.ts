@@ -1,16 +1,16 @@
 /**
- * One Code's tool-result wording (profile/) where the golden snapshot
+ * The tool-result wording (lib/request/tool-results-text.ts) where the golden snapshot
  * cannot reach it: a save that failed and a denial with the user's words.
  * It also checks the empty results and the saved-output pointer
  * in Claude Code's words. The golden snapshot pins the empty results, a
  * persisted output and a denial without words.
  */
 import { describe, expect, it } from "vitest";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { userDenialKind, userDenialText } from "../../extensions/lib/consent/user-denial.ts";
-import { toolResults } from "../text/tool-results/index.ts";
+import { toolResultsText as toolResults } from "../../extensions/lib/request/tool-results-text.ts";
+import { toolResultsText } from "../../extensions/lib/request/tool-results-text.ts";
 
-describe("One Code's tool-result text", () => {
+describe("the tool-result text", () => {
 	it("says when a large output could not be saved", () => {
 		expect(toolResults.persisted({ size: "2MB", file: "/r/x.txt", saveError: "EACCES" })).toBe(
 			"Output too large (2MB) and could not be saved to /r/x.txt: EACCES. Only this preview survives — re-run with a narrower query if more is needed.",
@@ -26,7 +26,7 @@ describe("One Code's tool-result text", () => {
 	});
 
 	it("names the file the whole output was saved to", () => {
-		expect(requireText("toolResults").persisted({ size: "305.6KB", file: "/tmp/out.log" })).toContain("Full output saved to: /tmp/out.log");
+		expect(toolResultsText.persisted({ size: "305.6KB", file: "/tmp/out.log" })).toContain("Full output saved to: /tmp/out.log");
 	});
 
 	it("names the tool that completed with no output", () => {

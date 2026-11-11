@@ -6,6 +6,7 @@ import bashExtension from "../../extensions/tools/bash/index.ts";
 import { startBackgroundBash } from "../../extensions/lib/shell-run/bash-background.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { toolResultsText } from "../../extensions/lib/request/tool-results-text.ts";
 
 const text = requireText("shell");
 
@@ -19,7 +20,7 @@ describe("background shell output survives the memory cap and spool failure", ()
 		const dir = directory();
 		const fake = createFakePi();
 		bashExtension(fake.pi as never);
-		const persisted = vi.spyOn(requireText("toolResults"), "persisted");
+		const persisted = vi.spyOn(toolResultsText, "persisted");
 		const result = await fake.tools.get("bash")!.execute("large", {
 			command: "printf 'BEGIN\\n'; for ((i=0; i<12000; i++)); do printf 'line-%s-padding-padding\\n' \"$i\"; done; printf 'END\\n'",
 			run_in_background: true,

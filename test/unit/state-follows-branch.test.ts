@@ -21,6 +21,7 @@ import type { ToldFact } from "../../extensions/lib/request/ledger/records.ts";
 import { createFakeCtx, createFakePi, renderRequest } from "./helpers/fake-pi.ts";
 import { stateEntry } from "./helpers/state-entry.ts";
 import { brand, envName } from "../../extensions/lib/profile/brand.mjs";
+import { permissionText } from "../../extensions/lib/rules/permission-text.ts";
 
 /** A request recorded on the branch: its model was told the mode in force. */
 const requestEntry = {
@@ -89,7 +90,7 @@ describe("the permission mode follows the branch (H4)", () => {
 		// `pi --continue --permission-mode default`: the process's first runtime starts with reason "startup".
 		const resumed = await start([stateEntry("permission-mode", "plan"), requestEntry], { "permission-mode": "default" }, "startup", reminders);
 		expect(resumed.mode()).toBe("default");
-		expect(reminders.find((r) => r.key === "permission-mode-change")?.text).toBe(requireText("permissions").modeChanged({ mode: "default" }));
+		expect(reminders.find((r) => r.key === "permission-mode-change")?.text).toBe(permissionText().modeChanged({ mode: "default" }));
 	});
 
 	it("says nothing to a branch whose model was never told a mode, or that keeps it", async () => {

@@ -40,9 +40,9 @@ import { escapeXml } from "../core/xml.ts";
 import { piFiresBeforeAgentStartForCustomRuns } from "../app/pi-version.ts";
 import { isUserRun, PROMPT_OPTIONS_CHANNEL } from "../ui/prompt-options.ts";
 import { wrapReminder } from "../request/reminders.ts";
-import type { NotificationsText, OneShotWork } from "./notifications-text.ts";
+import { HAND_BACK_POINTER_PREFIX, type NotificationWords, type OneShotWork } from "./notifications-text.ts";
 import { notificationWords } from "./notification-words.ts";
-import { around, commonPrefix, escapeRegExp, memoOn } from "../profile/template-probe.ts";
+import { commonPrefix, escapeRegExp, memoOn } from "../profile/template-probe.ts";
 
 /** pi's session-mode union, derived from the context (the package root does not export ExtensionMode itself). */
 type ExtensionMode = ExtensionContext["mode"];
@@ -126,14 +126,11 @@ export const agentNote = (): string => notificationWords().agentNote;
  * the auto-mode variant (the warning sits above the report in that message).
  * "SubagentHandback" is CC's name for the call a subagent delivers its report
  * through; One Code has no tool by that name, and the reading model only needs
- * the correlation, so the wording stays CC's (profile/text/notifications/).
+ * the correlation, so the wording stays CC's (notifications-text.ts).
  */
 export function handBackPointer(from: string, flagged: boolean): string {
 	return notificationWords().handBackPointer({ from, flagged });
 }
-
-/** How every pointer opens (what the display parser recognises one by): the profile's text before the sender. */
-const handBackPointerPrefix = memoOn((words: NotificationsText) => around((from) => words.handBackPointer({ from, flagged: false }))?.before);
 
 /** Auto mode's verdict on a resident's finished turn, as the hand-back review answers it. */
 export type HandBackVerdict = { kind: "blocked"; reason: string } | { kind: "unavailable"; reason: string };
@@ -283,11 +280,11 @@ export function frameForDelivery(text: string, delivery: Delivery): string {
 }
 
 /**
- * The patterns that read the frames back, built from the same profile words
+ * The patterns that read the frames back, built from the same words
  * that build them, so a wording change cannot leave the parsers behind:
  * `delivery` matches everything `frameForDelivery` adds, `frame` both frames.
  */
-const framing = memoOn((words: NotificationsText): { delivery: RegExp; frame: RegExp } => {
+const framing = memoOn((words: NotificationWords): { delivery: RegExp; frame: RegExp } => {
 	const { preamble, agentMessage: message } = words;
 	const delivery = new RegExp(
 		[
@@ -358,7 +355,7 @@ export function parseNotificationFrames(wire: string): NotificationFrame[] {
 	const frames: NotificationFrame[] = [];
 	let last = 0;
 	const preamble = notificationWords().agentMessage.handBackPreamble;
-	const pointerPrefix = handBackPointerPrefix(notificationWords());
+	const pointerPrefix = HAND_BACK_POINTER_PREFIX;
 	for (const match of text.matchAll(framingPatterns().frame)) {
 		const gap = text.slice(last, match.index).trim();
 		if (gap) frames.push({ kind: "text", text: gap });

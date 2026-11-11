@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { wrapReminder } from "../../extensions/lib/request/reminders.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
-import { clearAtNudge, resolveCountdowns, withTurnBudgetMessages } from "../../extensions/request/system-reminder/turn-budget-layout.ts";
-import { totalTokensBlock } from "../../extensions/lib/context/budget.ts";
+import { resolveCountdowns, withTurnBudgetMessages } from "../../extensions/request/system-reminder/turn-budget-layout.ts";
+import { CLEAR_AT_NUDGE, totalTokensBlock } from "../../extensions/lib/context/budget.ts";
 
 /** The budget line for `n` tokens as context-budget writes it, in the profile's words. */
-const left = (n: number) => totalTokensBlock(requireText("contextBudget"), n);
+const left = (n: number) => totalTokensBlock(n);
 const BUDGET = left(15_000_000);
 const mark = { type: "ephemeral" };
 
@@ -78,7 +77,7 @@ describe("withTurnBudgetMessages on a model that takes system messages", () => {
 
 	it("adds Fable's clear_at nudge after each tool result's message, the mark staying on the budget line", () => {
 		const messages = run(true);
-		expect(messages[4]).toEqual({ role: "system", content: clearAtNudge(), clear_at: "next_user_message" });
+		expect(messages[4]).toEqual({ role: "system", content: CLEAR_AT_NUDGE, clear_at: "next_user_message" });
 		const last = messages.findLastIndex((m) => m.clear_at !== undefined);
 		expect((messages[last - 1].content as Array<Record<string, unknown>>)[0].cache_control).toEqual(mark);
 	});

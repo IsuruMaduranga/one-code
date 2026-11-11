@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import permissionsExtension from "../../extensions/safety/permissions/index.ts";
 import { brand, brandedId } from "../../extensions/lib/profile/brand.mjs";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import type { PermissionMode } from "../../extensions/lib/rules/matcher.ts";
 import { modeCycleKey, pauseGlyph } from "../../extensions/lib/ui/keys.ts";
 
@@ -23,6 +22,7 @@ import {
 	shortModelName,
 } from "../../extensions/lib/rules/modes.ts";
 import { normalizePermissionMode } from "../../extensions/lib/rules/settings.ts";
+import { permissionText } from "../../extensions/lib/rules/permission-text.ts";
 
 describe("nextMode", () => {
 	it("cycles manual → acceptEdits → plan → manual", () => {
@@ -327,7 +327,7 @@ describe("permissionsExtension model_select updates classifier", () => {
 		);
 		const reminders = (fake.emitted[brandedId("system-reminder")] ?? []) as Array<{ key?: string; text?: string; placement?: string }>;
 		const standing = reminders.find((r) => r.key === "permission-mode" && typeof r.text === "string");
-		expect(standing?.text).toBe(requireText("permissions").autoModeActive);
+		expect(standing?.text).toBe(permissionText().autoModeActive);
 		// No switch happened, so no "is now" announcement beside the standing block.
 		expect(reminders.some((r) => r.key === "permission-mode-change")).toBe(false);
 		expect(standing?.placement).toBe("sticky-append");
@@ -372,7 +372,7 @@ describe("permissionsExtension model_select updates classifier", () => {
 		expect(order).toEqual(["remove", "status:plan", "add"]);
 		const reminders = (fake.emitted[brandedId("system-reminder")] ?? []) as Array<{ key?: string; text?: string }>;
 		const announce = reminders.filter((r) => r.key === "permission-mode-change").pop();
-		expect(announce?.text).toBe(requireText("permissions").modeChanged({ mode: "plan", planFile: `/home/u/${brand.stateDir}/plans/brisk-otter-map.md` }));
+		expect(announce?.text).toBe(permissionText().modeChanged({ mode: "plan", planFile: `/home/u/${brand.stateDir}/plans/brisk-otter-map.md` }));
 	});
 });
 

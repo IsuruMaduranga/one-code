@@ -13,7 +13,7 @@ import { requireText } from "../../extensions/lib/profile/profile.ts";
 const words = requireText("toolSearch");
 /** tool_search's result for a load, in the profile's words. */
 const loadedResult = (added: string[], missing: string[] = []) => words.result({ added, already: [], refused: [], missing, withdrawn: [] });
-const budgetLine = totalTokensBlock(requireText("contextBudget"), 9);
+const budgetLine = totalTokensBlock(9);
 
 describe("supportsToolReferences", () => {
 	it("is first-party Claude 4.5+ and Haiku 4.5 or later, not older Haikus or gateways", () => {

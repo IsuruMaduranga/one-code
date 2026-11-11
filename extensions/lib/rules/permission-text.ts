@@ -1,12 +1,65 @@
 /**
- * One Code's permission-gate text (the profile's `text.permissions`): why a
- * call was refused, the mode-change announcement and auto mode's standing
- * note. The classifier's denial and the outside-read refusals are Claude
- * Code's; the rest is One Code's.
+ * The permission gate's words for the model: why a call was refused, the
+ * mode-change announcement and auto mode's standing note. The gate decides
+ * (rules, modes, the workspace, the classifier's verdict, the child gate).
+ * The classifier's denial and the outside-read refusals are worded the way
+ * Claude Code words them. Prompts, panels and notifications are the user's
+ * and are in the extension. The classifier's own reasons are auto mode's
+ * words (safety/permissions/auto-mode/text.ts); the user's denial is the
+ * shared tool-result text (lib/request/tool-results-text.ts).
  */
 
-import type { LiveTools, PermissionRefusal, PermissionsText } from "../../../extensions/sdk/profile.ts";
-import { type ToolPassages, withoutOff } from "../../../extensions/sdk/profile.ts";
+import { type LiveTools, type ToolPassages, withoutOff } from "../profile/live-tools.ts";
+import { activeProfile } from "../profile/profile.ts";
+
+/** Why the gate refused a call. */
+export type PermissionRefusal =
+	/** The call needs approval and nobody can give it in this session. */
+	| { kind: "nonInteractive" }
+	/** Plan mode allows only read-only tools and the plan file. */
+	| { kind: "planMode" }
+	/** A tool the profile turned off. */
+	| { kind: "toolOff" }
+	/** A file tool on a secret file of the profile's, or a command that names one. */
+	| { kind: "secretFile" }
+	/** dontAsk mode denies anything that would prompt. */
+	| { kind: "dontAsk" }
+	/** A write to a path that configures the user's tooling or the harness. */
+	| { kind: "protectedPath" }
+	/** A read outside the working directory, in dontAsk mode. */
+	| { kind: "outsideWorkingDir" }
+	/** The `blockReadsOutsideWorkingDirectories` setting refused a read. */
+	| { kind: "outsideReadsBlocked" }
+	/** The user just chose to block reads outside the working directories. */
+	| { kind: "userBlockedOutsideReads" }
+	/** Auto mode is paused and nobody answered the timed resume prompt. */
+	| { kind: "unansweredResume" }
+	/** A deny rule (`rule` as the settings spell it). */
+	| { kind: "rule"; rule: string }
+	/** The call spells its target in several path fields with different values. */
+	| { kind: "conflictingPaths"; fields: string[] }
+	/** The classifier denied the call; `reason` is the classifier's (auto mode's words). */
+	| { kind: "classifierDenied"; reason: string }
+	/** The classifier timed out; worth trying again. */
+	| { kind: "classifierTimedOut"; reason: string }
+	/** The classifier ran but gave no verdict. */
+	| { kind: "classifierNoVerdict"; reason: string }
+	/** The classifier's transcript outgrew its window in a session with no user to ask; the turn stops. */
+	| { kind: "classifierOverflowHeadless" }
+	/** The classifier's transcript outgrew its window and the user did not approve the call. */
+	| { kind: "manualApprovalWithheld" }
+	/** The turn (`who: "turn"`) or a child agent was stopped while the user's approval was pending. */
+	| { kind: "stoppedWhileWaiting"; who: "turn" | "agent" }
+	/** A child's gate could not reach the parent's decision. */
+	| { kind: "bridgeFailed"; osMessage: string }
+	/** The child or its parent session stopped before the decision. */
+	| { kind: "childStopped" }
+	/** An in-process child's own gate (no bridge): a deny rule, when one matched. */
+	| { kind: "childDenied"; rule?: string }
+	/** An in-process child in auto mode with no link to the classifier. */
+	| { kind: "childNoClassifier"; outsideWorkingDir: boolean }
+	/** An in-process child's call that needs the user's approval. */
+	| { kind: "childNeedsApproval"; outsideWorkingDir: boolean };
 
 // Must agree with the plan-mode reminder (plan-mode/reminder.ts): the plan is
 // built in the plan file and approved through exit_plan_mode, never presented
@@ -36,7 +89,7 @@ const classifierNoVerdict = (reason: string) =>
 	"reading files, searching code, and other read-only operations do not require the classifier. " +
 	"If this action is essential, tell the user what you were about to do so they can re-run interactively or set another classifier model.";
 
-function refused(refusal: PermissionRefusal): string {
+function refused(refusal: PermissionRefusal, own: OwnWords): string {
 	switch (refusal.kind) {
 		case "nonInteractive":
 			return "Permission required but this session is non-interactive, so the user cannot approve the call. It was blocked. Only pre-approved tools can run here; work within those, or ask the user to re-run interactively or with an allow rule / --dangerously-skip-permissions.";
@@ -45,7 +98,7 @@ function refused(refusal: PermissionRefusal): string {
 		case "toolOff":
 			return "That tool is not available in this harness, so the call was blocked. Continue with the tools you have.";
 		case "secretFile":
-			return "That file holds secrets the user manages, so it cannot be read, written or named in a command here. Continue without its contents; if you need to know whether a value is set, ask the user.";
+			return own.secretFile ?? "That file holds secrets the user manages, so it cannot be read, written or named in a command here. Continue without its contents; if you need to know whether a value is set, ask the user.";
 		case "dontAsk":
 			return "Permission mode is dontAsk: anything that would normally prompt the user is denied instead. Only pre-approved tools can run; work within those, or tell the user which allow rule would unblock you.";
 		case "protectedPath":
@@ -93,7 +146,6 @@ function refused(refusal: PermissionRefusal): string {
 	}
 }
 
-/** The group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
 /** The plan-mode refusal names both plan tools (exit_plan_mode's entry first, so both apply when both are off). */
 const REFUSAL_PASSAGES: ToolPassages = {
 	exit_plan_mode: [
@@ -106,9 +158,18 @@ const REFUSAL_PASSAGES: ToolPassages = {
 	edit: [["edit/write are limited to the plan file", "write is limited to the plan file"]],
 };
 
-export const permissionsText = (live: LiveTools): PermissionsText => ({
-	refused: (refusal) => withoutOff(refused(refusal), live, REFUSAL_PASSAGES),
-	modeChanged: ({ mode, planFile }) => {
+/** The profile's own wording, where it has one. */
+interface OwnWords {
+	/** The refusal for a secret file (`Profile.secretFileRefusal`). */
+	secretFile?: string;
+}
+
+/** The words, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
+export const permissionWords = (live: LiveTools, own: OwnWords = {}) => ({
+	/** Why the gate refused a call. */
+	refused: (refusal: PermissionRefusal): string => withoutOff(refused(refusal, own), live, REFUSAL_PASSAGES),
+	/** A switch of the permission mode; `planFile` when the mode is plan and its file is known. */
+	modeChanged: ({ mode, planFile }: { mode: string; planFile?: string }): string => {
 		const plan =
 			mode !== "plan"
 				? ""
@@ -117,9 +178,24 @@ export const permissionsText = (live: LiveTools): PermissionsText => ({
 					: " Only read-only tools are available now, plus the plan file named in the plan-mode reminder.";
 		return `The user's permission mode is now "${mode}".${plan}`;
 	},
+	/** Auto mode's standing note, on every user message while auto mode is on. */
 	autoModeActive:
 		"Auto mode is active: your tool calls run without per-action prompts, but each one is screened by an approval classifier that blocks anything irreversible, destructive, or aimed outside this environment. " +
 		"Work normally — do not narrate the classifier or try to phrase calls to get past it. If a call is blocked, take the block at face value: do not retry it, and do not reach the same result another way. Continue with work that does not depend on it, or explain what you were trying to do and let the user decide. " +
 		"Attempting to weaken this gate (editing permission settings, changing the mode, or routing work around it) is itself blocked.",
-	reviewFailed: ({ osMessage }) => `the review itself failed (${osMessage})`,
+	/** A child's run review that failed, as the reason in the hand-back warning. */
+	reviewFailed: ({ osMessage }: { osMessage: string }): string => `the review itself failed (${osMessage})`,
 });
+
+const built = new WeakMap<LiveTools, ReturnType<typeof permissionWords>>();
+
+/** The words for this session's tools (the profile in force), built once per live set. */
+export function permissionText(): ReturnType<typeof permissionWords> {
+	const { live, secretFileRefusal } = activeProfile();
+	let words = built.get(live);
+	if (!words) built.set(live, (words = permissionWords(live, { secretFile: secretFileRefusal })));
+	return words;
+}
+
+/** Why the gate refused a call, for the modules that run without the extension's own context (the in-process child gate, the parent bridge). */
+export const refusalText = (refusal: PermissionRefusal): string => permissionText().refused(refusal);

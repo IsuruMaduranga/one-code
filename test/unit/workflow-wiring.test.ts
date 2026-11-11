@@ -13,6 +13,7 @@ import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import workflowExtension from "../../extensions/agents/workflow/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { notificationWords } from "../../extensions/lib/notify/notification-words.ts";
 
 describe("workflow wiring: the ultracode keyword", () => {
 	let fake: FakePi;
@@ -144,7 +145,7 @@ describe("workflow wiring: one-shot modes (LIFECYCLE-REVIEW-2026-09-06 M1)", () 
 			keptWorktrees: [],
 		});
 		expect(result.content[0].text).toBe(
-			words.ranToEnd({ note: requireText("notifications").oneShotNote("workflow"), report, scriptPath: result.details.scriptPath }),
+			words.ranToEnd({ note: notificationWords().oneShotNote("workflow"), report, scriptPath: result.details.scriptPath }),
 		);
 		// Nothing left to deliver later: no follow-up message is ever queued.
 		await new Promise((r) => setTimeout(r, 50));

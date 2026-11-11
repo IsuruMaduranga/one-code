@@ -12,7 +12,7 @@
 import { describe, expect, it } from "vitest";
 import { fitToWindow, skippedInstructionNote, skippedInstructionWarning } from "../../extensions/lib/context/instruction-budget.ts";
 import { estimateTextTokens } from "../../extensions/lib/models/pi-ai-estimate.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { contextWords } from "../../extensions/lib/context/context-words.ts";
 
 /** A file body of 24,000 characters, and pi-ai's token estimate for it (its chars-per-token depends on pi's version). */
 const BIG = "x".repeat(24_000);
@@ -105,7 +105,7 @@ describe("instruction budget", () => {
 	});
 
 	it("hands the profile's note the size, the window and the files a section inlines", () => {
-		const context = requireText("context");
+		const context = contextWords();
 		expect(skippedInstructionNote(210_000, 200_000)).toBe(context.skippedInstruction({ tokens: 210_000, contextWindow: 200_000, imported: [] }));
 		expect(skippedInstructionNote(210_000, 200_000, ["/p/big.md"])).toBe(context.skippedInstruction({ tokens: 210_000, contextWindow: 200_000, imported: ["/p/big.md"] }));
 	});

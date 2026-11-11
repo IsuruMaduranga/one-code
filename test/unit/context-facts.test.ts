@@ -9,13 +9,13 @@ import { GIT_SNAPSHOT_OWNER_CHANNEL } from "../../extensions/lib/context/git-sta
 import { toldOf } from "../../extensions/lib/request/ledger/fold.ts";
 import type { ToldFact } from "../../extensions/lib/request/ledger/records.ts";
 import { projectMemoryDir } from "../../extensions/lib/context/memory.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi, renderRequest } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
+import { contextWords } from "../../extensions/lib/context/context-words.ts";
 
 /** The profile's notice for what changed since the saved context snapshot. */
-const changedNotice = (changes: Array<"git" | "memory" | "instructions">, atCompaction = false) => requireText("context").changedSinceSnapshot({ changes, atCompaction });
+const changedNotice = (changes: Array<"git" | "memory" | "instructions">, atCompaction = false) => contextWords().changedSinceSnapshot({ changes, atCompaction });
 
 describe("context fact comparisons", () => {
 	const files: Parameters<typeof contextFingerprints>[0] = { contextFiles: [{ path: "/CLAUDE.md", content: "rules", descriptor: "rules" }] as never, memoryIndex: { path: "/MEMORY.md", content: "memory" } };

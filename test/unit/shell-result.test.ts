@@ -10,11 +10,12 @@ import { claudeCodeShellText } from "../../extensions/lib/shell-run/shell-result
 import { registerShellTool } from "../../extensions/lib/shell-run/shell-tool.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { toolResultsText } from "../../extensions/lib/request/tool-results-text.ts";
 
 /** The profile's failure text for exit `code`, given the output the base passes (pi's, without its trailer). */
 const exitText = (code: number, output = "") => requireText("shell").exitCode({ code, output });
 /** The profile's text for an empty result of the tool Claude Code calls `tool`. */
-const emptyText = (tool: "Bash" | "PowerShell") => requireText("toolResults").empty({ tool });
+const emptyText = (tool: "Bash" | "PowerShell") => toolResultsText.empty({ tool });
 
 describe("claudeCodeShellText", () => {
 	it("puts the exit code first on a failure, without pi's trailer", () => {
@@ -80,7 +81,7 @@ describe("registerShellTool: the foreground result reads as Claude Code's", () =
 		const text = (await run("cat big")).content[0].text;
 		expect(text.startsWith("<persisted-output>\n")).toBe(true);
 		expect(text.endsWith("</persisted-output>")).toBe(true);
-		expect(text).toContain(`\n\n${requireText("toolResults").previewHeading({ kb: 2 })}\nline 1\nline 2\n`);
+		expect(text).toContain(`\n\n${toolResultsText.previewHeading({ kb: 2 })}\nline 1\nline 2\n`);
 	});
 
 	it("trims a success", async () => {

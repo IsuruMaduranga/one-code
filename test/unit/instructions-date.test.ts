@@ -11,9 +11,9 @@ import instructionsExtension from "../../extensions/context/instructions/index.t
 import { dateChangeReminder, localDate } from "../../extensions/context/instructions/instructions.ts";
 import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/request/reminders.ts";
 import { dateFingerprint, FACT_KEYS } from "../../extensions/context/instructions/context-facts.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { createFakeCtx, createFakePi, type FakePi, renderRequest } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
+import { contextWords } from "../../extensions/lib/context/context-words.ts";
 
 describe("localDate", () => {
 	const originalTz = process.env.TZ;
@@ -67,7 +67,7 @@ describe("instructions date wiring", () => {
 	it("stamps the local date, with the date it tells as a fact", async () => {
 		await fake.fireOne("session_start", {}, createFakeCtx({ cwd: dir }));
 		expect(block()).toHaveLength(1);
-		expect(block()[0]).toMatchObject({ text: requireText("context").date({ date: "2026-09-26" }), facts: [{ kind: "block", key: FACT_KEYS.date, hash: dateFingerprint("2026-09-26") }] });
+		expect(block()[0]).toMatchObject({ text: contextWords().date({ date: "2026-09-26" }), facts: [{ kind: "block", key: FACT_KEYS.date, hash: dateFingerprint("2026-09-26") }] });
 		expect(reminders.find((r) => r.key === "instructions")?.text).toContain("Project rules.");
 	});
 
@@ -79,17 +79,17 @@ describe("instructions date wiring", () => {
 		vi.setSystemTime(new Date(2026, 8, 27, 0, 10));
 		const blocks = render("2026-09-26");
 		expect(blocks).toEqual([{ text: dateChangeReminder("2026-09-27"), facts: [{ kind: "block", key: FACT_KEYS.date, hash: dateFingerprint("2026-09-27") }] }]);
-		expect(blocks[0].text).toBe(requireText("context").dateChanged({ date: "2026-09-27" }));
+		expect(blocks[0].text).toBe(contextWords().dateChanged({ date: "2026-09-27" }));
 		// Once told, not again; and the live block now says the new date, for a later epoch's message 1.
 		expect(render("2026-09-27")).toEqual([]);
 		expect(block()).toHaveLength(2);
-		expect(block().at(-1)?.text).toBe(requireText("context").date({ date: "2026-09-27" }));
+		expect(block().at(-1)?.text).toBe(contextWords().date({ date: "2026-09-27" }));
 	});
 
 	it("refreshes the live date block at a compaction, for the epoch it opens", async () => {
 		await fake.fireOne("session_start", {}, createFakeCtx({ cwd: dir }));
 		vi.setSystemTime(new Date(2026, 8, 27, 0, 10));
 		await fake.fireOne("session_compact", {}, createFakeCtx({ cwd: dir, sessionManager: { getBranch: () => [] } }));
-		expect(block().at(-1)?.text).toBe(requireText("context").date({ date: "2026-09-27" }));
+		expect(block().at(-1)?.text).toBe(contextWords().date({ date: "2026-09-27" }));
 	});
 });

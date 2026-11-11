@@ -30,7 +30,7 @@ import {
 	stripHarnessText,
 	stripReminderBlocks,
 } from "../../extensions/lib/ui/tui-render.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { notificationWords } from "../../extensions/lib/notify/notification-words.ts";
 
 /** `text` without whitespace: compares text a renderer may have wrapped. */
 const squash = (text: string) => text.replace(/\s+/g, "");
@@ -284,14 +284,14 @@ describe("notificationComponent: agent messages, Claude Code's transcript look",
 		const lines = notificationComponent(theme, wire, true).render(400);
 		expect(lines[0]).toContain("› Message from a94a90cbdda8038c4");
 		expect(lines[0]).not.toContain("@");
-		const words = requireText("notifications").agentMessage;
+		const words = notificationWords().agentMessage;
 		expect(lines[1].startsWith(`<muted>  ${words.handBackPreamble.split("\n")[0].slice(0, 40)}`)).toBe(true);
 		// The long preamble wraps at this width; the report lines keep their own two-space indent under the body indent.
 		expect(lines.some((l) => l.includes("<muted>    ALTITUDE review — 3 findings."))).toBe(true);
 		expect(lines.at(-1)).toContain("<muted>    1. first");
 		// The guard, the pointer and the delivery preamble stay hidden (compared without the wrap's whitespace).
 		const shown = squash(lines.join(""));
-		const notifications = requireText("notifications");
+		const notifications = notificationWords();
 		for (const hidden of [words.guard, handBackPointer("a94a90cbdda8038c4", false), notifications.preamble.alone]) expect(shown).not.toContain(squash(hidden));
 	});
 
@@ -352,7 +352,7 @@ describe("notificationComponent wraps long body lines instead of cutting them", 
 		expect(lines.every((l) => l.length <= 30)).toBe(true);
 		expect(lines[2].startsWith(" ")).toBe(false);
 		// Every character of the preamble is kept, only the line breaks differ.
-		expect(squash(lines.slice(1, -1).join(""))).toBe(squash(requireText("notifications").agentMessage.handBackPreamble));
+		expect(squash(lines.slice(1, -1).join(""))).toBe(squash(notificationWords().agentMessage.handBackPreamble));
 		expect(lines.some((l) => l.endsWith("…"))).toBe(false);
 		expect(lines.at(-1)).toBe("    r");
 	});

@@ -148,15 +148,14 @@ import { builtinRuleCounts } from "./auto-mode/rules.ts";
 import { autoModeSystemNote } from "./auto-mode/system-note.ts";
 import { announceArgumentHint } from "../../lib/ui/argument-hints.ts";
 import { userDenialText } from "../../lib/consent/user-denial.ts";
-import type { PermissionRefusal } from "./text.ts";
-import { permissionWords } from "./words.ts";
+import { type PermissionRefusal, permissionText } from "../../lib/rules/permission-text.ts";
 import { liveUiCtx } from "../../lib/ui/tui-render.ts";
 
 /** Shown when a permission prompt is held behind an open panel (serializePrompt). */
 const PROMPT_WAITS_FOR_PANEL = "A permission request is waiting. Close this panel to answer it.";
 
 /** Why the gate refused a call, in the profile's words (text.ts). */
-const refused = (refusal: PermissionRefusal): string => permissionWords().refused(refusal);
+const refused = (refusal: PermissionRefusal): string => permissionText().refused(refusal);
 /** Claude Code's first outside-read prompt in auto mode (2.1.282): title, question, answers. */
 const OUTSIDE_READ_TITLE = "Read outside the working directories";
 const OUTSIDE_READ_QUESTION = "Allow reads outside the working directories?";
@@ -908,14 +907,14 @@ function permissionsExtension(pi: ExtensionAPI) {
 		// recorded (a flag, a stored bypass that needs its flag again) is one.
 		if (!startup || (told !== undefined && told !== mode && requestOnBranch)) {
 			pi.events.emit(REMINDER_CHANNEL, {
-				text: permissionWords().modeChanged({ mode, planFile: planFilePath }),
+				text: permissionText().modeChanged({ mode, planFile: planFilePath }),
 				key: "permission-mode-change",
 				toolCallId,
 			});
 		}
 		if (mode === "auto") {
 			pi.events.emit(REMINDER_CHANNEL, {
-				text: permissionWords().autoModeActive,
+				text: permissionText().autoModeActive,
 				key: "permission-mode",
 				// Session state: rides every user message since auto mode came on, so
 				// the cached prefix holds turn to turn (lib/request/reminders.ts).
@@ -2339,7 +2338,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		};
 		reviewCompletedRun(payload.actions, ctx, label, new AbortController().signal, payload.startedBy)
 			.then(respondIfCurrent)
-			.catch((error) => respondIfCurrent({ kind: "unavailable", reason: permissionWords().reviewFailed({ osMessage: (error as Error).message }) }));
+			.catch((error) => respondIfCurrent({ kind: "unavailable", reason: permissionText().reviewFailed({ osMessage: (error as Error).message }) }));
 	});
 
 	pi.on("tool_result", async (event, ctx) => {

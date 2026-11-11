@@ -10,7 +10,7 @@ import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { productStateDir } from "../../extensions/lib/profile/brand.mjs";
 import { productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { permissionText } from "../../extensions/lib/rules/permission-text.ts";
 
 const seen: TranscriptEntry[][] = [];
 const seenUserMessages: string[][] = [];
@@ -137,7 +137,7 @@ describe("classifier history in the permissions gate", () => {
 		fake.events.on(TURN_FAILED_CHANNEL, (data) => order.push(`failed:${(data as { reason: string }).reason}`));
 		(ctx.abort as ReturnType<typeof vi.fn>).mockImplementation(() => order.push("abort"));
 		const result = await call("bash", { command: "rm probe.*" }) as { block?: boolean; reason?: string };
-		const reason = requireText("permissions").refused({ kind: "classifierOverflowHeadless" });
+		const reason = permissionText().refused({ kind: "classifierOverflowHeadless" });
 		// The exit extension turns the stop into a failed one-shot run.
 		expect(order).toEqual([`failed:${reason}`, "abort"]);
 		expect(result.block).toBe(true);

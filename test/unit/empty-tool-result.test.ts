@@ -11,10 +11,11 @@ import { applyPostToolUseOutcome } from "../../extensions/lib/rules/hook-protoco
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { fileTrackerText } from "../../extensions/safety/file-tracker/text.ts";
+import { toolResultsText } from "../../extensions/lib/request/tool-results-text.ts";
 
 const text = (value: string) => ({ type: "text", text: value });
 /** The profile's text for a tool that returned nothing (One Code's: profile/test/profile-tool-results-text.test.ts). */
-const marker = (name: string) => requireText("toolResults").empty({ tool: name });
+const marker = (name: string) => toolResultsText.empty({ tool: name });
 
 // Apply returned changes in registration order, as pi's emitToolResult does.
 async function resultFor(content: unknown, name = "mcp__demo__silent", reminders = false, structuredContent?: unknown) {
@@ -125,6 +126,6 @@ describe("built-in empty results", () => {
 		const fake = createFakePi();
 		toolStyleExtension(fake.pi as never);
 		const result = await fake.tools.get("find")!.execute("f1", { pattern: "*.absent" }, undefined, undefined, createFakeCtx({ cwd: dir })) as any;
-		expect((await resultFor(result.content, "find")).content).toEqual([text(requireText("toolResults").noFilesFound)]);
+		expect((await resultFor(result.content, "find")).content).toEqual([text(toolResultsText.noFilesFound)]);
 	});
 });

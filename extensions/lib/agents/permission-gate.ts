@@ -50,7 +50,7 @@ import { decide, extractSubject, isPathSubjectTool, normalizeToolName, type Perm
 import { projectAllowApproved } from "../consent/project-trust.ts";
 import { loadPermissionSettings, normalizePermissionMode } from "../rules/settings.ts";
 import type { PermissionBridge } from "./subagent-gate.ts";
-import { refusalText } from "../../safety/permissions/words.ts";
+import { refusalText } from "../rules/permission-text.ts";
 import { resolveForContainment, toAbsolute } from "../shell/paths.ts";
 
 /** A directory's realpath for containment, or the path itself when nothing about it resolves. */

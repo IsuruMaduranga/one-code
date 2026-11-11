@@ -3,9 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { persistIfLarge, PERSIST_MAX_BYTES } from "../../extensions/lib/request/persisted-output.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { toolResultsText } from "../../extensions/lib/request/tool-results-text.ts";
 
-const words = requireText("toolResults");
+const words = toolResultsText;
 /** The block the base builds around the profile's two lines. */
 const block = (saved: string, preview: string, kb = 2) => ["<persisted-output>", saved, "", words.previewHeading({ kb }), preview, "...", "</persisted-output>"].join("\n");
 

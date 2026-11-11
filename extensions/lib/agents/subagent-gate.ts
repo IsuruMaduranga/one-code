@@ -22,7 +22,7 @@
 import { brandedId } from "../profile/brand.mjs";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { type BridgeWatchApi, watchBridge } from "../consent/bridge-watch.ts";
-import { refusalText } from "../../safety/permissions/words.ts";
+import { refusalText } from "../rules/permission-text.ts";
 
 export const SUBAGENT_GATE_CHANNEL = brandedId("subagent-permission-gate");
 

@@ -16,7 +16,7 @@ import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 const TOOLS_AVAILABLE = requireText("toolSearch").toolsAvailable;
 /** The budget line for `left` tokens, in the profile's words. */
-const budget = (left: number) => totalTokensBlock(requireText("contextBudget"), left);
+const budget = (left: number) => totalTokensBlock(left);
 
 
 const BUDGET = budget(15_000_000);

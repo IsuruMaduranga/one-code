@@ -1,5 +1,5 @@
 /**
- * One Code's permission-gate wording (profile/text/permissions/) where the golden
+ * The permission-gate wording (lib/rules/permission-text.ts) where the golden
  * snapshot cannot reach it: the dontAsk and outside-read refusals, the
  * classifier's timeout and headless overflow, the stops and the in-process
  * child gate. The golden snapshot pins the non-interactive, plan-mode,
@@ -8,13 +8,17 @@
  * note.
  */
 import { describe, expect, it } from "vitest";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
-import { permissionsText } from "../text/permissions/index.ts";
-import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
+import { permissionWords } from "../../extensions/lib/rules/permission-text.ts";
+import { ALL_LIVE } from "./helpers/live.ts";
 
-const permissions = permissionsText(ALL_LIVE);
+const permissions = permissionWords(ALL_LIVE);
 
-describe("One Code's permission-gate text", () => {
+describe("the permission-gate text", () => {
+	it("words a secret file's refusal itself, or as the profile does", () => {
+		expect(permissions.refused({ kind: "secretFile" })).toMatch(/^That file holds secrets the user manages/);
+		expect(permissionWords(ALL_LIVE, { secretFile: "Use config_status." }).refused({ kind: "secretFile" })).toBe("Use config_status.");
+	});
+
 	it("words each refusal a fixture cannot provoke", () => {
 		expect(permissions.refused({ kind: "dontAsk" })).toMatch(/^Permission mode is dontAsk/);
 		expect(permissions.refused({ kind: "outsideWorkingDir" })).toContain("e.g. Read(~/dir/**)");
@@ -28,7 +32,7 @@ describe("One Code's permission-gate text", () => {
 	});
 
 	it("names the classifier's transcript overflow in a session with no user to ask, and the headless mode", () => {
-		expect(requireText("permissions").refused({ kind: "classifierOverflowHeadless" })).toBe("auto mode classifier transcript exceeded context window in headless mode");
+		expect(permissions.refused({ kind: "classifierOverflowHeadless" })).toBe("auto mode classifier transcript exceeded context window in headless mode");
 	});
 
 	it("tells a timeout apart from a denial", () => {

@@ -463,11 +463,6 @@ export const toolStyle: NonNullable<ProfileText["toolStyle"]> = {
 	editDescription: (p) => mark("toolStyle.editDescription", p),
 };
 
-export const contextBudget: NonNullable<ProfileText["contextBudget"]> = {
-	tokensLeft: (p) => mark("contextBudget.tokensLeft", p),
-	clearAtNudge: "[contextBudget.clearAtNudge]",
-};
-
 export const compaction: NonNullable<ProfileText["compaction"]> = {
 	instruction: (p) => mark("compaction.instruction", p),
 	continuation: (p) => mark("compaction.continuation", p),
@@ -602,51 +597,14 @@ export const notifications: NonNullable<ProfileText["notifications"]> = {
 		opener: "[notifications.agentMessage.opener]",
 		openerMidTurn: "[notifications.agentMessage.openerMidTurn]",
 		guard: "[notifications.agentMessage.guard]",
-		replyHint: "[notifications.agentMessage.replyHint]",
-		handBackPreamble: "[notifications.agentMessage.handBackPreamble]",
 	},
-	agentNote: "[notifications.agentNote]",
-	handBackPointer: (p) => mark("notifications.handBackPointer", p),
-	handBackWarning: (p) => mark("notifications.handBackWarning", p),
-	summary: (summary) => mark("notifications.summary", summary),
-	preamble: {
-		alone: "[notifications.preamble.alone]",
-		withUserTurn: "[notifications.preamble.withUserTurn]",
-	},
-	oneShotSession: "[notifications.oneShotSession]",
-	interactiveSession: "[notifications.interactiveSession]",
-	oneShotNote: (work) => mark("notifications.oneShotNote", work),
-	localCommandCaveat: "[notifications.localCommandCaveat]",
-	userMessageMidTurn: (p) => mark("notifications.userMessageMidTurn", p),
-};
-
-export const toolResults: NonNullable<ProfileText["toolResults"]> = {
-	empty: (p) => mark("toolResults.empty", p),
-	noFilesFound: "[toolResults.noFilesFound]",
-	persisted: (p) => mark("toolResults.persisted", p),
-	previewHeading: (p) => mark("toolResults.previewHeading", p),
-	userDenial: (p) => mark("toolResults.userDenial", p),
-	secretPlaceholderWrite: "[toolResults.secretPlaceholderWrite]",
+	midTurnNote: "[notifications.midTurnNote]",
 };
 
 export const context: NonNullable<ProfileText["context"]> = {
-	memoryIndexCut: (p) => mark("context.memoryIndexCut", p),
-	instructionsPreamble: "[context.instructionsPreamble]",
-	section: (p) => mark("context.section", p),
 	productPreamble: (p) => mark("context.productPreamble", p),
-	nestedFile: (p) => mark("context.nestedFile", p),
-	contextPreamble: "[context.contextPreamble]",
-	email: (p) => mark("context.email", p),
-	contextFooter: "[context.contextFooter]",
-	date: (p) => mark("context.date", p),
-	dateChanged: (p) => mark("context.dateChanged", p),
-	environment: (env) => mark("context.environment", env),
-	modelLine: (p) => mark("context.modelLine", p),
-	gitStatus: (p) => mark("context.gitStatus", p),
-	gitStatusClipped: (p) => mark("context.gitStatusClipped", p),
-	changedSinceSnapshot: (p) => mark("context.changedSinceSnapshot", p),
-	skippedInstruction: (p) => mark("context.skippedInstruction", p),
-	classifierSkippedInstruction: (p) => mark("context.classifierSkippedInstruction", p),
+	descriptors: { product: "[context.descriptors.product]", productGlobal: "[context.descriptors.productGlobal]" },
+	instructionsChanged: "[context.instructionsChanged]",
 };
 
 export const toolSearch: NonNullable<ProfileText["toolSearch"]> = {
@@ -667,13 +625,6 @@ export const toolSearch: NonNullable<ProfileText["toolSearch"]> = {
 	withheldMiss: (p) => mark("toolSearch.withheldMiss", p),
 	unavailable: (p) => mark("toolSearch.unavailable", p),
 	loaderUnavailable: "[toolSearch.loaderUnavailable]",
-};
-
-export const permissions: NonNullable<ProfileText["permissions"]> = {
-	refused: (refusal) => mark("permissions.refused", refusal),
-	modeChanged: (p) => mark("permissions.modeChanged", p),
-	autoModeActive: "[permissions.autoModeActive]",
-	reviewFailed: (p) => mark("permissions.reviewFailed", p),
 };
 
 export const handback: NonNullable<ProfileText["handback"]> = {

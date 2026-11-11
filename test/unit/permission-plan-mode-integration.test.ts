@@ -18,8 +18,9 @@ import planModeExtension from "../../extensions/safety/plan-mode/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { brandedId, envName } from "../../extensions/lib/profile/brand.mjs";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { permissionText } from "../../extensions/lib/rules/permission-text.ts";
 
-const permissionWords = requireText("permissions");
+const permissionWords = permissionText();
 const planMode = requireText("planMode");
 
 describe("permission mode cycle with plan-mode mounted", () => {

@@ -2,6 +2,7 @@ import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	DEFAULT_TURN_TOKEN_BUDGET,
+	tokensLeftIn,
 	totalTokensBlock,
 	TurnBudget,
 	turnTokenBudget,
@@ -10,11 +11,9 @@ import contextBudgetExtension from "../../extensions/context/context-budget/inde
 import systemReminderExtension from "../../extensions/request/system-reminder/index.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 
-const contextBudget = requireText("contextBudget");
 /** The budget line for `left` tokens, as the base frames the profile's words. */
-const budget = (left: number) => totalTokensBlock(contextBudget, left);
+const budget = (left: number) => totalTokensBlock(left);
 
 describe("turnTokenBudget", () => {
 	it("is Claude Code's 15,000,000 unless the TOTAL_TOKENS_BUDGET knob names a positive number", () => {
@@ -77,8 +76,11 @@ describe("TurnBudget", () => {
 });
 
 describe("totalTokensBlock", () => {
-	it("frames the profile's words as Claude Code's bare block, byte for byte", () => {
-		expect(totalTokensBlock(contextBudget, 14_832_967)).toBe(`<total_tokens>${contextBudget.tokensLeft({ left: 14_832_967 })}</total_tokens>`);
+	it("is Claude Code's bare block, byte for byte, and reads back", () => {
+		expect(totalTokensBlock(14_832_967)).toBe("<total_tokens>14832967 tokens left</total_tokens>");
+		expect(tokensLeftIn(totalTokensBlock(14_832_967))).toBe(14_832_967);
+		expect(tokensLeftIn("<total_tokens>many tokens left</total_tokens>")).toBeUndefined();
+		expect(tokensLeftIn(`${totalTokensBlock(5)}\n`)).toBeUndefined();
 	});
 });
 

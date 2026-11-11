@@ -11,10 +11,10 @@ import { escapeXml } from "../../extensions/lib/core/xml.ts";
 import { modelSwitchStdout } from "../../extensions/ui/model-default/index.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { ARGUMENT_HINT_CHANNEL } from "../../extensions/lib/ui/argument-hints.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { notificationWords } from "../../extensions/lib/notify/notification-words.ts";
 
 /** The caveat block as the base wraps the profile's caveat (One Code's: profile/test/local-command-wording.test.ts). */
-const caveatBlock = () => `<local-command-caveat>${requireText("notifications").localCommandCaveat}</local-command-caveat>\n`;
+const caveatBlock = () => `<local-command-caveat>${notificationWords().localCommandCaveat}</local-command-caveat>\n`;
 
 describe("local-command breadcrumbs (Claude Code's three blocks)", () => {
 	it("reproduces the /model trio byte for byte", () => {

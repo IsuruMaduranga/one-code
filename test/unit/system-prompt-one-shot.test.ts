@@ -9,6 +9,7 @@ import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, toldBlockFact } from "../../extensions/lib/request/reminders.ts";
 import { sessionScratchpadDir } from "../../extensions/lib/core/scratchpad.ts";
 import { createFakeCtx, createFakePi, renderRequest } from "./helpers/fake-pi.ts";
+import { notificationWords } from "../../extensions/lib/notify/notification-words.ts";
 
 const queued = async (mode: string) => {
 	const fake = createFakePi();
@@ -25,7 +26,7 @@ describe("system-prompt: the one-shot session note", () => {
 			const [note] = await queued(mode);
 			expect(note?.placement, mode).toBe("first-prepend");
 			expect(note?.order).toBe(CONTEXT_ORDER.oneShot);
-			expect(note?.text).toBe(requireText("notifications").oneShotSession);
+			expect(note?.text).toBe(notificationWords().oneShotSession);
 		}
 	});
 
@@ -48,14 +49,14 @@ describe("system-prompt: what changed since message 1 (R3-M11, R3-M12)", () => {
 	it("tells a one-shot epoch continued in the TUI that the session is interactive now, once", async () => {
 		const fake = await mounted("tui");
 		const blocks = renderRequest(fake.events, { facts: [{ kind: "mode", key: "one-shot", on: true }, toldBlockFact("environment:scratchpad", "")] });
-		expect(texts(blocks)).toContain(requireText("notifications").interactiveSession);
+		expect(texts(blocks)).toContain(notificationWords().interactiveSession);
 		expect(renderRequest(fake.events, { facts: [{ kind: "mode", key: "one-shot", on: false }] })).toEqual([]);
 	});
 
 	it("tells an interactive epoch continued in print mode that it is one-shot now", async () => {
 		const fake = await mounted("print");
 		const blocks = renderRequest(fake.events, { facts: [] });
-		expect(texts(blocks)).toContain(requireText("notifications").oneShotSession);
+		expect(texts(blocks)).toContain(notificationWords().oneShotSession);
 	});
 
 	it("names the scratchpad when the epoch's message 1 named another session's (a /fork)", async () => {

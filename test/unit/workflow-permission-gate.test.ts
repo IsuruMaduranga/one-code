@@ -13,11 +13,11 @@ import { persistProjectAllowApproval } from "../../extensions/lib/consent/projec
 import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { stubHome } from "./helpers/home.ts";
 import { POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
-import type { PermissionRefusal } from "../../extensions/safety/permissions/text.ts";
+import type { PermissionRefusal } from "../../extensions/lib/rules/permission-text.ts";
+import { permissionText } from "../../extensions/lib/rules/permission-text.ts";
 
 /** Why the child gate refused a call, in the profile's words. */
-const refused = (refusal: PermissionRefusal) => requireText("permissions").refused(refusal);
+const refused = (refusal: PermissionRefusal) => permissionText().refused(refusal);
 
 const buildGate = (...args: Parameters<typeof buildGateHarness>) => buildGateHarness(...args).handler;
 

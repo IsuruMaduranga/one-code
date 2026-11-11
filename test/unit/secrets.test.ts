@@ -13,7 +13,7 @@ import { resetProcessStateForTest } from "../../extensions/lib/profile/process-s
 import { setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 import { commandNamesSecretFile, isSecretFilePath, MIN_SECRET_LENGTH, redactSecretValues, setSecretValues } from "../../extensions/lib/profile/secrets.ts";
 import { decide, type DecideInput } from "../../extensions/lib/rules/matcher.ts";
-import { toolResultWords } from "../../extensions/lib/request/tool-results-words.ts";
+import { toolResultsText } from "../../extensions/lib/request/tool-results-text.ts";
 import secretValuesExtension from "../../extensions/safety/secret-values/index.ts";
 import { createFakePi } from "./helpers/fake-pi.ts";
 import { useProfile } from "./helpers/profile.ts";
@@ -182,7 +182,7 @@ describe("the secret-values extension", () => {
 		const fake = createFakePi();
 		secretValuesExtension(fake.pi as never);
 		const [gate] = fake.handlers.get("tool_call") ?? [];
-		const PLACEHOLDER_REFUSAL = toolResultWords().secretPlaceholderWrite;
+		const PLACEHOLDER_REFUSAL = toolResultsText.secretPlaceholderWrite;
 		const write = { toolName: "write", input: { path: "settings.json", content: '{"password": "[secret:db_password]"}' } };
 		expect(await gate(write, {})).toBeUndefined();
 		setSecretValues("a", [{ value: "hunter2-token", name: "db_password" }]);

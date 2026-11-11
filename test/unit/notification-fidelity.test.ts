@@ -23,9 +23,9 @@ import {
 	taskStatusOf,
 	workflowSummary,
 } from "../../extensions/lib/notify/notifications.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { notificationWords } from "../../extensions/lib/notify/notification-words.ts";
 
-const words = requireText("notifications");
+const words = notificationWords();
 const AGENT_MESSAGE_GUARD = words.agentMessage.guard;
 const AGENT_MESSAGE_OPENER = words.agentMessage.opener;
 const AGENT_MESSAGE_OPENER_MID_TURN = words.agentMessage.openerMidTurn;

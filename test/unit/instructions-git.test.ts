@@ -7,10 +7,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import instructionsExtension from "../../extensions/context/instructions/index.ts";
 import { GIT_SNAPSHOT_OWNER_CHANNEL } from "../../extensions/lib/context/git-status.ts";
 import { makeRecord, RECORD } from "../../extensions/lib/request/ledger/records.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
+import { contextWords } from "../../extensions/lib/context/context-words.ts";
 
 describe("the instructions extension's git snapshot", () => {
 	let dir: string;
@@ -42,7 +42,7 @@ describe("the instructions extension's git snapshot", () => {
 
 	/** The context block, the snapshot the base rendered into it, and the email spy. */
 	async function snapshotIn(owner: boolean, branch: unknown[] = []) {
-		const words = requireText("context");
+		const words = contextWords();
 		const gitStatus = vi.spyOn(words, "gitStatus");
 		const email = vi.spyOn(words, "email");
 		const block = await contextBlock(owner, branch);

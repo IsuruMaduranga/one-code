@@ -22,6 +22,8 @@ import type { Worktree } from "../../extensions/lib/agents/agent-worktree.ts";
 import { emptyUsage } from "../../extensions/lib/agents/usage.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { subagentModelWordsInForce } from "../../extensions/lib/models/subagent-model.ts";
+import { toolResultsText } from "../../extensions/lib/request/tool-results-text.ts";
+import { notificationWords } from "../../extensions/lib/notify/notification-words.ts";
 
 const model = (id: string, input: string[], cost: number) => ({
 	provider: "openai", id, name: id, input, cost: { input: cost, output: cost * 4 },
@@ -489,7 +491,7 @@ describe("subagent resumed turns", () => {
 		reviews[0].onReview!({ kind: "blocked", reason: "sent .env off the machine" });
 		await vi.advanceTimersByTimeAsync(DEFAULT_COALESCE_MS + 1);
 		// messages() holds each message's content as JSON, so the warning is matched in that spelling.
-		const warning = requireText("notifications").handBackWarning({ kind: "blocked", reason: "sent .env off the machine", clipped: false });
+		const warning = notificationWords().handBackWarning({ kind: "blocked", reason: "sent .env off the machine", clipped: false });
 		expect(h.messages()).toContain(JSON.stringify(warning).slice(1, -1));
 	});
 
@@ -639,7 +641,7 @@ describe("subagent reports past the cap", () => {
 	const shownSize = (bytes: number) => (bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)}KB` : `${(bytes / (1024 * 1024)).toFixed(1)}MB`);
 	/** The persisted file a <persisted-output> block names (by the profile's line for it), read back. */
 	const persistedText = (text: string) => {
-		const words = requireText("toolResults");
+		const words = toolResultsText;
 		const path = (readdirSync(dir, { recursive: true }) as string[])
 			.map((name) => join(dir, name))
 			.find((file) => statSync(file).isFile() && text.includes(words.persisted({ size: shownSize(statSync(file).size), file })));
@@ -732,7 +734,7 @@ describe("hand-back shape by permission mode", () => {
 		await vi.advanceTimersByTimeAsync(DEFAULT_COALESCE_MS + 1);
 		return { out: sent(h), taskId: spawned.details.agentRuns[0].taskId };
 	};
-	const words = () => requireText("notifications");
+	const words = () => notificationWords();
 
 	it("sends the report inline in one notification outside auto mode", async () => {
 		const { out } = await run("default", "general-purpose");

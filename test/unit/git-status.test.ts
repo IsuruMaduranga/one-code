@@ -5,10 +5,10 @@
  */
 import { describe, expect, it } from "vitest";
 import { collectGitStatus, formatGitStatus, GIT_STATUS_MAX_CHARS, type GitSnapshot } from "../../extensions/lib/context/git-status.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { fakeRunner, IN_WORK_TREE } from "./helpers/git-runner.ts";
+import { contextWords } from "../../extensions/lib/context/context-words.ts";
 
-const context = requireText("context");
+const context = contextWords();
 /** The profile's block for a snapshot taken at the start of a conversation. */
 const block = (snapshot: GitSnapshot) => context.gitStatus({ snapshot, at: "start" });
 

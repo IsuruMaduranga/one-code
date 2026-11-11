@@ -96,8 +96,8 @@ type OptionalGroup = { [K in keyof ProfileText]-?: undefined extends ProfileText
  * the subagent model). A profile may leave a group out only when all of them are
  * off; `resolveProfile` checks it at load, because a reader that finds its
  * group missing can only stop the process, in the middle of a session.
- * A group read only where it is present (`contextBudget` by the system
- * prompt, `background.cron` by subagents, `lsp` by /doctor) lists its owner alone.
+ * A group read only where it is present (`background.cron` by subagents,
+ * `lsp` by /doctor) lists its owner alone.
  */
 export const TEXT_GROUP_READERS: Readonly<Record<OptionalGroup, readonly FeatureId[]>> = {
 	notebook: ["notebook"],
@@ -119,7 +119,6 @@ export const TEXT_GROUP_READERS: Readonly<Record<OptionalGroup, readonly Feature
 	background: ["background"],
 	artifacts: ["artifacts"],
 	toolStyle: ["tool-style"],
-	contextBudget: ["context-budget"],
 	compaction: ["compaction"],
 	workflow: ["workflow"],
 	shell: ["bash", "powershell"],
@@ -159,6 +158,8 @@ export interface ResolvedProfile {
 	providers: ReadonlyMap<string, ProductProvider>;
 	/** The profile's secret file names, lowercased (lib/profile/secrets.ts). */
 	secretFiles: ReadonlySet<string>;
+	/** The profile's wording of a secret file's refusal, when it has one. */
+	secretFileRefusal?: string;
 	/** The option table of each read-only subcommand the profile declares (lib/shell/product-read-only.ts). */
 	readOnlyCommands: ReadonlyMap<string, ReadonlyMap<string, OptionSpec>>;
 	/** The profile's language servers, `${PROFILE_DIR}` filled in (lib/profile/language-servers.ts). */
@@ -246,6 +247,7 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		globalAgentsFiles: profile.globalAgentsFiles ?? [],
 		providers: new Map(Object.entries(profile.providers ?? {})),
 		secretFiles: new Set((profile.secretFiles ?? []).map((name) => name.toLowerCase())),
+		secretFileRefusal: profile.secretFileRefusal,
 		readOnlyCommands: readOnlyCommandSpecs(profile.readOnlyCommands ?? {}),
 		languageServers: resolveLanguageServers(profile.languageServers ?? {}, profileDir),
 	};

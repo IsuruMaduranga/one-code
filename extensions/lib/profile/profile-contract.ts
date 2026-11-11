@@ -20,13 +20,11 @@ import type { BackgroundText } from "../../tools/background/text.ts";
 import type { BtwText } from "../../agents/btw/text.ts";
 import type { CompactionText } from "../../context/compaction/text.ts";
 import type { DoctorText } from "../../commands/doctor/text.ts";
-import type { ContextBudgetText } from "../../context/context-budget/text.ts";
 import type { EffortText } from "../../ui/effort/text.ts";
 import type { InitText } from "../../commands/init/text.ts";
 import type { LspText } from "../../tools/lsp/text.ts";
 import type { McpText } from "../../tools/mcp/text.ts";
 import type { NotebookText } from "../../tools/notebook/text.ts";
-import type { PermissionsText } from "../../safety/permissions/text.ts";
 import type { PlanModeText } from "../../safety/plan-mode/text.ts";
 import type { RecapText } from "../../agents/recap/text.ts";
 import type { SessionTitleText } from "../../agents/session-title/text.ts";
@@ -45,7 +43,6 @@ import type { HandbackText } from "../agents/handback-text.ts";
 import type { NativeWebText } from "../request/native-web-text.ts";
 import type { NotificationsText } from "../notify/notifications-text.ts";
 import type { ContextText } from "../context/context-text.ts";
-import type { ToolResultsText } from "../request/tool-results-text.ts";
 import type { ShellText } from "../shell-run/shell-text.ts";
 import type { FeatureId } from "./features.ts";
 import type { LiveTools } from "./live-tools.ts";
@@ -78,8 +75,6 @@ export interface ProfileText {
 	background?: BackgroundText;
 	artifacts?: ArtifactsText;
 	toolStyle?: ToolStyleText;
-	/** Also read by the system prompt, for its last line. */
-	contextBudget?: ContextBudgetText;
 	compaction?: CompactionText;
 	workflow?: WorkflowText;
 	/** Read by the permission gate, which always runs: a profile must supply it. */
@@ -91,16 +86,12 @@ export interface ProfileText {
 	/** Used by bash and powershell (lib/shell-run/shell-tool.ts). */
 	shell?: ShellText;
 	doctor?: DoctorText;
-	/** The shared notification frames (lib/notify/notifications.ts): every session uses them, so a profile must supply them. */
+	/** The profile's part of the shared notification frames (lib/notify/notifications-text.ts): every session uses them, so a profile must supply it. */
 	notifications: NotificationsText;
-	/** The base's shared result rewrites (empty results, persisted output, a user's denial): a profile must supply them. */
-	toolResults: ToolResultsText;
 	/** The first-message context (instructions, context block, date, environment, git status): every session sends it, so a profile must supply it. */
 	context: ContextText;
 	/** tool-search is part of the required core: a profile must supply it. */
 	toolSearch: ToolSearchText;
-	/** The permission gate always runs: a profile must supply it. */
-	permissions: PermissionsText;
 	/** Every child session (subagents, forks, workflow agents) hands back through it. */
 	handback?: HandbackText;
 	subagents?: SubagentsText;
@@ -169,13 +160,18 @@ export interface Profile {
 	providers?: Readonly<Record<string, ProductProvider>>;
 	/**
 	 * Bare file names that hold secrets (BI's `Config.toml`). In every mode the
-	 * gate refuses a file tool on one and a shell command that names one; the
-	 * refusal's words are the profile's (`permissions.refused`, kind
-	 * `secretFile`), so they can name the product's own tool. The product's
+	 * gate refuses a file tool on one and a shell command that names one
+	 * (`secretFileRefusal` words it). The product's
 	 * extension registers the values themselves for redaction
 	 * (`setSecretValues`, `extensions/sdk/extension.ts`).
 	 */
 	secretFiles?: readonly string[];
+	/**
+	 * What the model reads when the gate refuses a secret file, in place of
+	 * the base's sentence, so it can name the product's own tool for the job
+	 * ("…use config_status to see whether a value is set").
+	 */
+	secretFileRefusal?: string;
 	/**
 	 * Read-only subcommands of the product's own command-line tools, with the
 	 * options each may carry (`lib/shell/product-read-only.ts`):

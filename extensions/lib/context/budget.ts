@@ -1,7 +1,7 @@
 /**
- * Claude Code's `<total_tokens>N tokens left</total_tokens>` signal, pure half.
- * The base frames it (the tag is how lib/request/reminders.ts recognizes the block on a
- * tool result); the profile words what is inside (text.ts).
+ * Claude Code's `<total_tokens>N tokens left</total_tokens>` signal, pure
+ * half: the block, byte for byte (the tag is how lib/request/reminders.ts
+ * recognizes it on a tool result), and reading a stored one back.
  *
  * What the number is (read off a live Claude Code session and the 2.1.261
  * capture, findings §14): a PER-TURN token budget, not the context window. It
@@ -16,7 +16,6 @@
  */
 
 import { knobValue } from "../profile/knobs.ts";
-import type { ContextBudgetText } from "../../context/context-budget/text.ts";
 
 /** Claude Code's per-turn budget as observed; the meaning of the figure is CC's max tokens per turn with compaction. */
 export const DEFAULT_TURN_TOKEN_BUDGET = 15_000_000;
@@ -74,7 +73,19 @@ export class TurnBudget {
 	}
 }
 
-/** The budget block for `left` tokens as it rides a message: the profile's words in Claude Code's `<total_tokens>` frame. */
-export function totalTokensBlock(words: ContextBudgetText, left: number): string {
-	return `<total_tokens>${words.tokensLeft({ left })}</total_tokens>`;
+/**
+ * The budget block for `left` tokens as it rides a message: the full budget
+ * at a turn's start, then the countdown on each tool result.
+ */
+export function totalTokensBlock(left: number): string {
+	return `<total_tokens>${left} tokens left</total_tokens>`;
 }
+
+/** The tokens left in a stored budget block, exactly as `totalTokensBlock` writes it, else undefined. */
+export function tokensLeftIn(text: string): number | undefined {
+	const digits = /^<total_tokens>(\d+) tokens left<\/total_tokens>$/.exec(text)?.[1];
+	return digits === undefined ? undefined : Number(digits);
+}
+
+/** Claude Code's Fable nudge after a tool result's budget line (cleared at the next user message). */
+export const CLEAR_AT_NUDGE = "First privately list what you need next; then request every item that doesn't depend on another's result in this one response.";

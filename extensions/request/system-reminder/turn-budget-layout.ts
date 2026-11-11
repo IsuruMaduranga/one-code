@@ -24,31 +24,7 @@
 import { reseatMessageMark } from "../../lib/request/anthropic-payload.ts";
 import { wrapReminder } from "../../lib/request/reminders.ts";
 import { messagesKey, type SystemRoleLayout, systemMessage, type WireMessage, type WirePart, byWireCallId, withoutParts } from "../../lib/request/system-role.ts";
-import { totalTokensBlock } from "../../lib/context/budget.ts";
-import { profileText } from "../../lib/profile/profile.ts";
-import type { ContextBudgetText } from "../../context/context-budget/text.ts";
-import { around, fillOf, memoOn } from "../../lib/profile/template-probe.ts";
-
-/** The budget line for `left` tokens, in the profile's words; undefined without context-budget's words (no lines then). */
-function budgetLine(left: number): string | undefined {
-	const words = profileText().contextBudget;
-	return words && totalTokensBlock(words, left);
-}
-
-/** The text around the count in a budget line, per context-budget words object. */
-const budgetFrame = memoOn((words: ContextBudgetText) => around((left) => totalTokensBlock(words, Number(left)), "987654321"));
-
-/** The tokens left in a stored budget line, exactly as `budgetLine` writes it, else undefined. */
-function tokensLeftIn(text: string): number | undefined {
-	const words = profileText().contextBudget;
-	const digits = words && fillOf(text, budgetFrame(words));
-	return digits !== undefined && /^\d+$/.test(digits) ? Number(digits) : undefined;
-}
-
-/** Claude Code's Fable nudge after a tool result's budget message, in the profile's words. */
-export function clearAtNudge(): string {
-	return profileText().contextBudget?.clearAtNudge ?? "";
-}
+import { CLEAR_AT_NUDGE, tokensLeftIn, totalTokensBlock as budgetLine } from "../../lib/context/budget.ts";
 
 type StoredBlock = { type?: string; text?: string };
 type StoredMessage = { role: string; toolCallId?: string; content?: unknown };
@@ -164,7 +140,7 @@ export function withTurnBudgetMessages(payload: Record<string, unknown>, opts: T
 			if (pending !== undefined && !runContinues) {
 				after.push(systemMessage(opts.shape, opts.role, budgetLine(pending) ?? ""));
 				if (opts.nudge) {
-					const nudge = clearAtNudge();
+					const nudge = CLEAR_AT_NUDGE;
 					after.push(opts.shape === "anthropic" ? ({ role: "system", content: nudge, clear_at: "next_user_message" } as WireMessage) : systemMessage(opts.shape, opts.role, nudge));
 				}
 				pending = undefined;

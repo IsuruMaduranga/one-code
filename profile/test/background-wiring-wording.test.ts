@@ -9,11 +9,12 @@ import { RECURRING_MAX_AGE_DAYS as maxAgeDays } from "../../extensions/lib/agent
 import { STORED_OUTPUT_CAP } from "../../extensions/lib/shell-run/bash-background.ts";
 import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
 import { background } from "../text/background/index.ts";
-import { notificationsText } from "../text/notifications/index.ts";
-import { toolResults } from "../text/tool-results/index.ts";
+import { notificationText } from "../../extensions/lib/notify/notifications-text.ts";
+import { notifications as notificationsPart } from "../text/notifications/index.ts";
+import { toolResultsText as toolResults } from "../../extensions/lib/request/tool-results-text.ts";
 
 const { cron, wakeup, monitor, tasks, loop } = background;
-const notifications = notificationsText(ALL_LIVE);
+const notifications = notificationText(ALL_LIVE, notificationsPart);
 
 describe("monitor notifications", () => {
 	it("names a mid-run batch and a stream's end as Claude Code does", () => {

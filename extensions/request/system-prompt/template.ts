@@ -52,7 +52,7 @@ export function buildClaudeCodeSystemPrompt(
 	tier: PromptTier,
 	/**
 	 * Claude Code's per-turn budget line (`<total_tokens>N tokens left</total_tokens>`,
-	 * `lib/context/budget.ts`, worded by `text.contextBudget`), placed last, after the cwd line. Constant for
+	 * `lib/context/budget.ts`), placed last, after the cwd line. Constant for
 	 * the session, so it stays cache-stable.
 	 */
 	totalTokensLine?: string | null,

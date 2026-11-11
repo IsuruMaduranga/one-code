@@ -5,9 +5,9 @@
  */
 import { describe, expect, it } from "vitest";
 import { claudeDisplayName, environmentBlock, modelLine } from "../../extensions/lib/context/environment-block.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { contextWords } from "../../extensions/lib/context/context-words.ts";
 
-const context = requireText("context");
+const context = contextWords();
 
 describe("environmentBlock", () => {
 	it("is the profile's block for the facts given", () => {

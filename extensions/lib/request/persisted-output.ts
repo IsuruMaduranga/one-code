@@ -17,7 +17,7 @@ import { StringDecoder } from "node:string_decoder";
 import { join } from "node:path";
 import { productStateDir } from "../profile/paths.ts";
 import { privateSessionTempDir } from "../core/scratchpad.ts";
-import { toolResultWords } from "./tool-results-words.ts";
+import { toolResultsText } from "./tool-results-text.ts";
 
 /**
  * Where a session's oversized outputs are persisted — the session dir,
@@ -95,9 +95,9 @@ export function persistIfLarge(text: string, options: PersistOptions): string {
 	try {
 		mkdirSync(join(options.dir, "tool-results"), { recursive: true });
 		writeFileSync(file, text);
-		saved = toolResultWords().persisted({ size: formatSize(size), file });
+		saved = toolResultsText.persisted({ size: formatSize(size), file });
 	} catch (error) {
-		saved = toolResultWords().persisted({ size: formatSize(size), file, saveError: (error as Error).message });
+		saved = toolResultsText.persisted({ size: formatSize(size), file, saveError: (error as Error).message });
 	}
 
 	return persistedBlock(saved, preview, previewBytes);
@@ -109,7 +109,7 @@ export function persistIfLarge(text: string, options: PersistOptions): string {
  * reading or copying the file.
  */
 export function persistedFileBlock(file: string, size: number, preview: string, previewBytes: number = PREVIEW_BYTES): string {
-	return persistedBlock(toolResultWords().persisted({ size: formatSize(size), file }), preview, previewBytes);
+	return persistedBlock(toolResultsText.persisted({ size: formatSize(size), file }), preview, previewBytes);
 }
 
 /** Preview an existing spool without reading or copying the whole output. */
@@ -133,7 +133,7 @@ function persistedBlock(saved: string, preview: string, previewBytes: number): s
 		"<persisted-output>",
 		saved,
 		"",
-		toolResultWords().previewHeading({ kb: Math.round(previewBytes / 1024) }),
+		toolResultsText.previewHeading({ kb: Math.round(previewBytes / 1024) }),
 		preview,
 		"...",
 		"</persisted-output>",
