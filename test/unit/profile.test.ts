@@ -87,6 +87,11 @@ describe("resolveProfile", () => {
 		expect(resolveProfile({ ...empty, features: off, text: without("subagentModels", "handback", "notebook", "worktree", "subagents", "workflow", "doctor") }, {}, "/p").text.notebook).toBeUndefined();
 	});
 
+	it("refuses an empty secret-file refusal", () => {
+		expect(() => resolveProfile({ ...empty, secretFileRefusal: " " }, {}, "/p")).toThrow(/"secretFileRefusal" must not be empty/);
+		expect(resolveProfile({ ...empty, secretFileRefusal: "Ask the user." }, {}, "/p").secretFileRefusal).toBe("Ask the user.");
+	});
+
 	it("names a reader for every optional text group, and only features", () => {
 		for (const [group, readers] of Object.entries(TEXT_GROUP_READERS)) {
 			expect(readers.length, group).toBeGreaterThan(0);

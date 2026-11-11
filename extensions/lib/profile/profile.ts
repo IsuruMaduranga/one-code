@@ -224,6 +224,8 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 	problems.push(...secretFileProblems(profile.secretFiles ?? []));
 	problems.push(...readOnlyCommandProblems(profile.readOnlyCommands ?? {}));
 	problems.push(...languageServerProblems(profile.languageServers ?? {}));
+	// An empty refusal would reach the model as an error with no reason.
+	if (profile.secretFileRefusal !== undefined && profile.secretFileRefusal.trim() === "") problems.push(`"secretFileRefusal" must not be empty: leave it out for the base's own wording`);
 	if (problems.length > 0) throw new Error(`Invalid profile: ${problems.join("; ")}.`);
 	const features = enabledFeatures(featureMap);
 	const disabledTools = new Set([...tools].filter(([, sw]) => sw.enabled === false).map(([name]) => name));

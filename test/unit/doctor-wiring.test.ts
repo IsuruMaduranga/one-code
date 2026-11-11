@@ -219,6 +219,7 @@ describe("/doctor wiring", () => {
 		const { ctx, notified } = ctxFor(anthropic[0]);
 		await run("report", ctx);
 		expect(notified[0]).toContain("Prompt register: workhorse");
+		expect(notified[0]).toContain(`forced by ${envName("PROMPT_TIER")}`);
 		vi.stubEnv(envName("PROMPT_TIER"), "tiny");
 		await run("report", ctx);
 		expect(notified[1]).toContain("Prompt register: workhorse");

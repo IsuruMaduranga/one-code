@@ -138,7 +138,7 @@ export function withTurnBudgetMessages(payload: Record<string, unknown>, opts: T
 			const runContinues = opts.shape !== "anthropic" && (next?.type === "function_call_output" || next?.role === "tool");
 			if (pending !== undefined && !runContinues && followedByUser(messages, i)) pending = undefined;
 			if (pending !== undefined && !runContinues) {
-				after.push(systemMessage(opts.shape, opts.role, budgetLine(pending) ?? ""));
+				after.push(systemMessage(opts.shape, opts.role, budgetLine(pending)));
 				if (opts.nudge) {
 					const nudge = CLEAR_AT_NUDGE;
 					after.push(opts.shape === "anthropic" ? ({ role: "system", content: nudge, clear_at: "next_user_message" } as WireMessage) : systemMessage(opts.shape, opts.role, nudge));

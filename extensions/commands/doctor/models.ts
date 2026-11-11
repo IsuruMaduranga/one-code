@@ -10,7 +10,7 @@
  * own notice, not a paraphrase.
  */
 
-import { brand } from "../../lib/profile/brand.mjs";
+import { brand, envName } from "../../lib/profile/brand.mjs";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { modeCycleKey } from "../../lib/ui/keys.ts";
 import { loadAutoModeConfig } from "../../lib/rules/auto-mode-config.ts";
@@ -152,7 +152,7 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 		findings.push({ level: "warn", text: facts.newerModel.text, fix: facts.newerModel.fix });
 	}
 	lines.push({
-		text: `Prompt register: ${TIER_LABEL[facts.promptTier]}${facts.promptTierForced ? " (forced by *_PROMPT_TIER)" : ""}`,
+		text: `Prompt register: ${TIER_LABEL[facts.promptTier]}${facts.promptTierForced ? ` (forced by ${envName("PROMPT_TIER")})` : ""}`,
 		indent: 1,
 		level: "dim",
 	});

@@ -67,10 +67,10 @@ const MEMORY_CUT = (cut: MemoryIndexCut): string =>
 		? `everything after the first ${cut.chars} characters of line 1 was cut off`
 		: `${cut.cut} of ${cut.total} lines were cut off, starting at line ${cut.from}${cut.next ? ` ("${cut.next}")` : ""}`;
 
-/** The words, with the profile's part. */
 /** When the git snapshot says it was taken; a refreshed snapshot swaps one phrase for the other (instructions/context-facts.ts). */
 export const GIT_STATUS_TAKEN_AT = { start: "the start of the conversation", compaction: "the latest compaction" } as const;
 
+/** The words, with the profile's part. */
 export const contextText = (product: ContextText) => ({
 	/** The warning after a MEMORY.md index loaded in part. */
 	memoryIndexCut: ({ size, cut }: { size: MemoryIndexSize; cut: MemoryIndexCut }): string =>

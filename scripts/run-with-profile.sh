@@ -31,6 +31,8 @@ start="$PWD"
 key="$(printf '%s' "$profile" | shasum | cut -c1-12)"
 work="${TMPDIR:-/tmp}/profile-run-$key"
 mkdir -p "$work"
+# The copy is rebuilt on every run, so a file renamed or deleted in the repo does not linger in it; the session state stays.
+find "$work" -mindepth 1 -maxdepth 1 ! -name .agent ! -name node_modules -exec rm -rf {} +
 
 # A tracked file deleted in the working tree is left out, as a checkout of it would be.
 git -C "$repo" ls-files -z --cached --others --exclude-standard -- . ':!profile' |
@@ -43,7 +45,7 @@ agent="$work/.agent"
 if [ "${KEEP_STATE:-1}" = 0 ]; then rm -rf "$agent"; fi
 mkdir -p "$agent"
 # This machine's logins and models, read through links; everything else is the copy's own.
-real="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
+real="$(cd "$repo" && node --input-type=module -e 'console.log((await import("@earendil-works/pi-coding-agent")).getAgentDir())')"
 for file in auth.json models.json models-store.json; do
 	if [ -e "$real/$file" ] && [ ! -e "$agent/$file" ]; then ln -s "$real/$file" "$agent/$file"; fi
 done

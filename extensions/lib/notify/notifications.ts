@@ -355,7 +355,6 @@ export function parseNotificationFrames(wire: string): NotificationFrame[] {
 	const frames: NotificationFrame[] = [];
 	let last = 0;
 	const preamble = notificationWords().agentMessage.handBackPreamble;
-	const pointerPrefix = HAND_BACK_POINTER_PREFIX;
 	for (const match of text.matchAll(framingPatterns().frame)) {
 		const gap = text.slice(last, match.index).trim();
 		if (gap) frames.push({ kind: "text", text: gap });
@@ -368,7 +367,7 @@ export function parseNotificationFrames(wire: string): NotificationFrame[] {
 				kind: "task",
 				summary: unescapeTaskText(tagBody(block, "summary") ?? ""),
 				body: result,
-				pointer: !!pointerPrefix && result.startsWith(pointerPrefix),
+				pointer: result.startsWith(HAND_BACK_POINTER_PREFIX),
 				status: tagBody(block, "status"),
 				durationMs: durationMs === undefined ? undefined : Number(durationMs),
 			});
