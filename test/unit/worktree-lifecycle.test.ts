@@ -7,7 +7,6 @@ import { WORKTREE_CHANNEL, type WorktreeLocation } from "../../extensions/lib/ag
 import { resetProcessStateForTest } from "../../extensions/lib/profile/process-state.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { projectConfigDir } from "../../extensions/lib/profile/sources.ts";
-import { around } from "../../extensions/lib/profile/template-probe.ts";
 import worktreeExtension from "../../extensions/safety/worktree/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
@@ -176,10 +175,10 @@ describe("worktree lifecycle safety", () => {
 		expect(location).toBeNull();
 		expect(result.details.worktreeState).toBeNull();
 		// git's own message sits in the middle of the profile's words.
-		const frame = around((osMessage) => words().exit.branchDeleteFailed({ session: session as never, branch: "feature", osMessage }));
-		expect(frame).toBeDefined();
-		expect(result.content[0].text.startsWith(frame!.before)).toBe(true);
-		expect(result.content[0].text.endsWith(frame!.after)).toBe(true);
+		const [before, after] = words().exit.branchDeleteFailed({ session: session as never, branch: "feature", osMessage: "GITSAYS" }).split("GITSAYS");
+		expect(after).toBeDefined();
+		expect(result.content[0].text.startsWith(before)).toBe(true);
+		expect(result.content[0].text.endsWith(after)).toBe(true);
 		expect(result.content[0].text).toContain("feature");
 	});
 

@@ -9,15 +9,12 @@ import type { Profile } from "../../extensions/lib/profile/profile-contract.ts";
 import { requireText, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 import { buildClaudeCodeSystemPrompt } from "../../extensions/request/system-prompt/template.ts";
 import { profile as shipped } from "../../profile/index.ts";
-import type { SystemPromptSection, SystemPromptText } from "../../extensions/request/system-prompt/text.ts";
+import { cwdLine, type SystemPromptSection, type SystemPromptText, toolList } from "../../extensions/request/system-prompt/text.ts";
 
 const markers: SystemPromptText = {
 	lead: ({ tier, taskTools }) => [`LEAD ${tier} tasks=${taskTools}`],
 	tail: () => ["TAIL"],
 	memory: (dir) => `MEMORY ${dir}`,
-	toolList: (tools, guidelines) => `TOOLS ${tools.map((t) => `${t.name}=${t.snippet}`).join(",")} | ${guidelines.join(",")}`,
-	cwdLine: (cwd) => `CWD ${cwd}`,
-	scratchpadMoved: ({ dir }) => `SCRATCHPAD ${dir}`,
 };
 
 const use = (systemPrompt: SystemPromptText) => {
@@ -42,10 +39,10 @@ describe("system prompt from the profile", () => {
 			[
 				"LEAD cheap tasks=false",
 				// Registration order (the snippets' order), deduplicated guidelines, tools without a snippet left out.
-				"TOOLS read=Read a file,bash=Run a command | Prefer read,Quote paths",
+				toolList([{ name: "read", snippet: "Read a file" }, { name: "bash", snippet: "Run a command" }], ["Prefer read", "Quote paths"]),
 				"MEMORY /mem",
 				"TAIL",
-				"APPENDED\nCWD C:/work/repo",
+				`APPENDED\n${cwdLine("C:/work/repo")}`,
 				"<total_tokens>5 tokens left</total_tokens>",
 			].join("\n\n"),
 		);
@@ -64,7 +61,7 @@ describe("system prompt from the profile", () => {
 			{ id: "closing", place: "tail", render: () => "CLOSING" },
 		];
 		const prompt = buildClaudeCodeSystemPrompt({ selectedTools: [], toolSnippets: {} } as never, { cwd: "/r", memoryDir: undefined }, "workhorse", null, true, sections);
-		expect(prompt).toBe(["LEAD workhorse tasks=true", "DOMAIN workhorse", "TOOLS  | ", "TAIL", "CLOSING"].join("\n\n") + "\nCWD /r");
+		expect(prompt).toBe(["LEAD workhorse tasks=true", "DOMAIN workhorse", toolList([], []), "TAIL", "CLOSING"].join("\n\n") + `\n${cwdLine("/r")}`);
 	});
 
 	it("the shipped profile renders the same prompt twice (byte-stable), opening with its lead", () => {

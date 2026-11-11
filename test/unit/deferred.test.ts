@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import {
 	deferredMissReminderText,
 	DeferredRegistry,
@@ -11,6 +10,7 @@ import {
 	selectedRequests,
 	toolNotFoundName,
 } from "../../extensions/lib/request/deferred.ts";
+import { toolSearchResultText } from "../../extensions/lib/request/tool-search-text.ts";
 
 const tools: SearchableTool[] = [
 	{ name: "notebook_edit", description: "Edit a Jupyter notebook cell", keywords: ["ipynb", "jupyter"] },
@@ -162,7 +162,7 @@ describe("resultText", () => {
 
 describe("deferredMissReminderText", () => {
 	it("passes the missed tool's name to the profile's reminder", () => {
-		expect(deferredMissReminderText("web_fetch")).toBe(requireText("toolSearch").missReminder({ name: "web_fetch" }));
+		expect(deferredMissReminderText("web_fetch")).toBe(toolSearchResultText.missReminder({ name: "web_fetch" }));
 	});
 });
 
@@ -173,7 +173,7 @@ describe("deferredReminderText", () => {
 			{ name: "monitor", description: "Watch a command." },
 		]);
 		const lines = text.split("\n");
-		expect(text).toBe([requireText("toolSearch").listingHead, "web_fetch", "monitor"].join("\n"));
+		expect(text).toBe([toolSearchResultText.listingHead, "web_fetch", "monitor"].join("\n"));
 		expect(lines.slice(-2)).toEqual(["web_fetch", "monitor"]);
 		expect(text).not.toContain("Fetch a URL");
 	});

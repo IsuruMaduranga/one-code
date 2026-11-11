@@ -16,7 +16,7 @@ import type { BuildSystemPromptOptions } from "@earendil-works/pi-coding-agent";
 import type { PromptTier } from "../../lib/models/model-tier.ts";
 import { profileText } from "../../lib/profile/profile.ts";
 import type { EnvironmentInfo } from "./environment.ts";
-import type { SystemPromptSection, SystemPromptSession } from "./text.ts";
+import { cwdLine, type SystemPromptSection, type SystemPromptSession, toolList } from "./text.ts";
 
 /** The active tools with a snippet, in registration order, and the tools' guidelines, deduplicated. */
 function toolListInputs(options: BuildSystemPromptOptions): { tools: { name: string; snippet: string }[]; guidelines: string[] } {
@@ -69,7 +69,7 @@ export function buildClaudeCodeSystemPrompt(
 	const sections = [
 		...text.lead(session),
 		...extra("lead"),
-		text.toolList(tools, guidelines),
+		toolList(tools, guidelines),
 		// No section while auto-memory is off, as in Claude Code.
 		...(env.memoryDir ? [text.memory(env.memoryDir, session)] : []),
 		...text.tail(session),
@@ -91,7 +91,7 @@ export function buildClaudeCodeSystemPrompt(
 	// message (Claude Code's block 3), framed for the `skill` tool rather than pi's
 	// read-the-file convention.
 
-	prompt += `\n${text.cwdLine(env.cwd.replace(/\\/g, "/"))}`;
+	prompt += `\n${cwdLine(env.cwd.replace(/\\/g, "/"))}`;
 
 	// Claude Code ends its prompt with the budget line, after a blank line.
 	if (totalTokensLine) {

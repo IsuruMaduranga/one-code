@@ -9,10 +9,11 @@ import {
 import { type Item, real, toolsItem as headWith } from "./helpers/responses-fixture.ts";
 import { totalTokensBlock } from "../../extensions/lib/context/budget.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { toolSearchResultText } from "../../extensions/lib/request/tool-search-text.ts";
 
 const words = requireText("toolSearch");
 /** tool_search's result for a load, in the profile's words. */
-const loadedResult = (added: string[], missing: string[] = []) => words.result({ added, already: [], refused: [], missing, withdrawn: [] });
+const loadedResult = (added: string[], missing: string[] = []) => toolSearchResultText.result({ added, already: [], refused: [], missing, withdrawn: [] });
 const budgetLine = totalTokensBlock(9);
 
 describe("supportsToolReferences", () => {
@@ -124,7 +125,7 @@ describe("stabilizeDeferredTools", () => {
 			role: "user",
 			content: [
 				{ type: "tool_result", tool_use_id: "toolu_1", is_error: false, content: [{ type: "tool_reference", tool_name: "web_fetch" }] },
-				{ type: "text", text: words.toolLoaded, cache_control: breakpoint },
+				{ type: "text", text: toolSearchResultText.toolLoaded, cache_control: breakpoint },
 			],
 		});
 		// Never mutates the input.
@@ -152,7 +153,7 @@ describe("stabilizeDeferredTools", () => {
 			{ type: "tool_reference", tool_name: "web_fetch" },
 			{ type: "tool_reference", tool_name: "lsp_diagnostics" },
 		]);
-		expect(message.content[1]).toEqual({ type: "text", text: `${words.toolLoaded}\n${budgetLine}` });
+		expect(message.content[1]).toEqual({ type: "text", text: `${toolSearchResultText.toolLoaded}\n${budgetLine}` });
 		const noted = { ...payload, messages: payload.messages.map((m, i) => (i === 2 ? { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content: loadedResult(["web_fetch"], ["x"]) }] } : m)) };
 		const kept = stabilizeDeferredTools(noted, registry, deferred, new Map([["toolu_1", ["web_fetch"]]]))!;
 		expect((kept.messages as Array<{ content: Array<{ text?: string }> }>)[2].content[1].text).toBe(loadedResult(["web_fetch"], ["x"]));
@@ -173,7 +174,7 @@ describe("stabilizeDeferredTools", () => {
 		const messages = out.messages as Array<{ content: Array<Record<string, unknown>> }>;
 		expect(messages[2].content).toEqual([
 			{ type: "tool_result", tool_use_id: "toolu_1", is_error: false, content: [{ type: "tool_reference", tool_name: "web_fetch" }] },
-			{ type: "text", text: words.toolLoaded },
+			{ type: "text", text: toolSearchResultText.toolLoaded },
 		]);
 		// The use after the load is untouched, and so is its breakpoint.
 		expect(messages[4].content[0]).toHaveProperty("cache_control");

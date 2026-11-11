@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFER_CHANNEL, deferralEnabled, loaderUnavailableReminderText, WITHHOLD_CHANNEL } from "../../extensions/lib/request/deferred.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import toolSearchExtension from "../../extensions/request/tool-search/index.ts";
 import { makeToolSearchFakePi } from "./helpers/tool-search-fake-pi.ts";
+import { toolSearchResultText } from "../../extensions/lib/request/tool-search-text.ts";
 
 /**
  * A `--tools` list that leaves out tool_search unregisters it, while pi 1.0.4+
@@ -96,13 +96,12 @@ describe("tool_search when pi declines to activate a tool", () => {
 		};
 
 		const refusedOnly = await fake.runTool("tool_search", { query: "select:mcp__fixture__lookup_ticket" });
-		const words = requireText("toolSearch");
-		expect(refusedOnly.content[0].text).toBe(words.result({ added: [], already: [], refused: ["mcp__fixture__lookup_ticket"], missing: [], withdrawn: [] }));
+		expect(refusedOnly.content[0].text).toBe(toolSearchResultText.result({ added: [], already: [], refused: ["mcp__fixture__lookup_ticket"], missing: [], withdrawn: [] }));
 		expect((refusedOnly as { isError?: boolean }).isError).toBe(true);
 		expect(refusedOnly.details).toMatchObject({ added: [], refused: ["mcp__fixture__lookup_ticket"] });
 
 		const mixed = await fake.runTool("tool_search", { query: "select:web_fetch,mcp__fixture__lookup_ticket" });
-		expect(mixed.content[0].text).toBe(words.result({ added: ["web_fetch"], already: [], refused: ["mcp__fixture__lookup_ticket"], missing: [], withdrawn: [] }));
+		expect(mixed.content[0].text).toBe(toolSearchResultText.result({ added: ["web_fetch"], already: [], refused: ["mcp__fixture__lookup_ticket"], missing: [], withdrawn: [] }));
 		expect((mixed as { isError?: boolean }).isError).toBe(false);
 		expect(fake.activeTools()).toContain("web_fetch");
 	});

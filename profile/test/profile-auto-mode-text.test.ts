@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { autoModeText } from "../text/auto-mode/index.ts";
 import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
+import { autoModeResultText } from "../../extensions/safety/permissions/auto-mode/text.ts";
 
 const autoMode = autoModeText(ALL_LIVE);
 
@@ -21,26 +22,26 @@ describe("One Code's auto-mode text", () => {
 	});
 
 	it("words the retry note for one call and for several", () => {
-		expect(autoMode.permissionGranted({ displays: ["bash(ls)"] })).toBe("Permission granted for: bash(ls). You may now retry this command if you would like.");
-		expect(autoMode.permissionGranted({ displays: ["a", "b"] })).toContain("retry these commands");
+		expect(autoModeResultText.permissionGranted({ displays: ["bash(ls)"] })).toBe("Permission granted for: bash(ls). You may now retry this command if you would like.");
+		expect(autoModeResultText.permissionGranted({ displays: ["a", "b"] })).toContain("retry these commands");
 	});
 
 	it("names the classifiers that could not be used", () => {
-		expect(autoMode.classifierBlock({ kind: "noClassifierLeft", refused: ["a/x"], unusable: [{ model: "b/y", error: "401" }] })).toBe(
+		expect(autoModeResultText.classifierBlock({ kind: "noClassifierLeft", refused: ["a/x"], unusable: [{ model: "b/y", error: "401" }] })).toBe(
 			"Auto mode has no classifier: a/x refused the classifier's prompt as a possible usage-policy violation. b/y cannot be used (401).",
 		);
-		expect(autoMode.classifierBlock({ kind: "unavailable", tool: "bash", model: "m", networkError: "ECONNRESET" })).toBe(
+		expect(autoModeResultText.classifierBlock({ kind: "unavailable", tool: "bash", model: "m", networkError: "ECONNRESET" })).toBe(
 			"Auto mode could not screen this bash call — the approval classifier (m) is temporarily unavailable (network error: ECONNRESET), so the call was not judged either way.",
 		);
-		expect(autoMode.classifierBlock({ kind: "unavailable", tool: "bash" })).toContain("this bash call in time — the approval classifier is temporarily unavailable (timed out)");
-		expect(autoMode.classifierBlock({ kind: "actionTooLong", chars: 90000, max: 80000 })).toContain("Split it into smaller calls.");
+		expect(autoModeResultText.classifierBlock({ kind: "unavailable", tool: "bash" })).toContain("this bash call in time — the approval classifier is temporarily unavailable (timed out)");
+		expect(autoModeResultText.classifierBlock({ kind: "actionTooLong", chars: 90000, max: 80000 })).toContain("Split it into smaller calls.");
 	});
 
 	it("words the floor's pattern and catalog reasons", () => {
-		const pattern = autoMode.floorBlock({ kind: "pattern", token: "./node_modules/*" });
+		const pattern = autoModeResultText.floorBlock({ kind: "pattern", token: "./node_modules/*" });
 		expect(pattern).toContain("its pattern ./node_modules/* can select a file");
 		expect(pattern).toContain("rewrite it without the wildcard or negated pattern");
-		expect(autoMode.floorReason({ kind: "catalog", token: "models-dev.json" })).toContain("a model catalog that decides the model tier");
+		expect(autoModeResultText.floorReason({ kind: "catalog", token: "models-dev.json" })).toContain("a model catalog that decides the model tier");
 	});
 });
 
@@ -55,7 +56,7 @@ describe("auto mode system note wording", () => {
 	});
 });
 
-const block = (b: Parameters<ReturnType<typeof requireText<"autoMode">>["classifierBlock"]>[0]) => requireText("autoMode").classifierBlock(b);
+const block = (b: Parameters<typeof autoModeResultText.classifierBlock>[0]) => autoModeResultText.classifierBlock(b);
 
 describe("classifier block wording", () => {
 	it("words a provider error as no verdict, and a truncated reply by its output limit", () => {
@@ -102,7 +103,7 @@ describe("classifier block wording", () => {
 
 describe("consent store floor wording", () => {
 	it("says a file that grants permissions holds permission rules", () => {
-		expect(requireText("autoMode").floorReason({ kind: "control", token: "/home/u/.onecode/hooks/project-approvals.json" })).toContain("permission rules");
+		expect(autoModeResultText.floorReason({ kind: "control", token: "/home/u/.onecode/hooks/project-approvals.json" })).toContain("permission rules");
 	});
 });
 

@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFER_CHANNEL } from "../../extensions/lib/request/deferred.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import toolSearchExtension from "../../extensions/request/tool-search/index.ts";
 import { makeToolSearchFakePi, type Reminder } from "./helpers/tool-search-fake-pi.ts";
+import { toolSearchResultText } from "../../extensions/lib/request/tool-search-text.ts";
 
 /**
  * Integration test for the deferred-miss steering wired in request/tool-search/index.ts:
@@ -43,7 +43,7 @@ describe("tool-search deferred-miss steering", () => {
 		const correction = correctionFor(fake.reminders, "web_fetch");
 		expect(correction).toBeDefined();
 		expect(correction?.placement).toBeUndefined();
-		expect(correction?.text).toBe(requireText("toolSearch").missReminder({ name: "web_fetch" }));
+		expect(correction?.text).toBe(toolSearchResultText.missReminder({ name: "web_fetch" }));
 	});
 
 	it("ignores a not-found error for a tool that is not deferred", () => {

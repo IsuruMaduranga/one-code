@@ -15,7 +15,7 @@ export type { ArtifactsText, NoBrowser, PublishBrowser, PublishProblem, ShownArt
 export type { Answer, Question } from "../tools/ask-user/questions.ts";
 export type { AskUserText } from "../tools/ask-user/text.ts";
 export type { CheckoutProgram } from "../lib/shell/git-checkout-programs.ts";
-export type { AutoModeSetupText, AutoModeText, ClassifierBlock, ClassifierRuleset, ClassifierText, FloorTarget } from "../safety/permissions/auto-mode/text.ts";
+export type { AutoModeSetupText, AutoModeText, ClassifierRuleset, ClassifierText } from "../safety/permissions/auto-mode/text.ts";
 export { AUTONOMOUS_LOOP, AUTONOMOUS_LOOP_DYNAMIC, LOOP_FILE_DYNAMIC_SENTINEL, LOOP_FILE_SENTINEL } from "../tools/background/loop-sentinels.ts";
 export type { BackgroundText, CronCreateFailure, CronText, LoopFile, LoopText, LoopTick, MonitorEnd, MonitorStartFailure, MonitorText, ShownJob, ShownTask, TaskToolsText, WakeupMissingField, WakeupText } from "../tools/background/text.ts";
 export type { BtwText } from "../agents/btw/text.ts";
@@ -47,7 +47,7 @@ export type { AgentTools, LaunchLine, PendingRun, RunFailure, RunStatus, Subagen
 export type { SystemPromptText } from "../request/system-prompt/text.ts";
 export type { TaskItem, TaskStatus } from "../tools/tasks/store.ts";
 export type { TaskView, TasksText, UpdateProblem } from "../tools/tasks/text.ts";
-export type { SearchOutcome, ToolSearchText } from "../request/tool-search/text.ts";
+export type { ToolSearchText } from "../request/tool-search/text.ts";
 export type { ToolStyleText } from "../tools/tool-style/text.ts";
 export type { FetchAnswer, FetchFailure, ReaderFailure, UrlProblem, WebFetchText } from "../tools/web-fetch/text.ts";
 export { BRAVE_KEY_ENV, SETTINGS_FILE, SETTINGS_SNIPPET, TAVILY_KEY_ENV } from "../tools/web/backend-names.ts";

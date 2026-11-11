@@ -20,6 +20,7 @@ import { buildRuleset } from "../../extensions/safety/permissions/auto-mode/clas
 import { brand, envName } from "../../extensions/lib/profile/brand.mjs";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { CLEAN_UP_REQUEST, DEFAULT_ENVIRONMENT } from "./helpers/classify-request.ts";
+import { autoModeResultText } from "../../extensions/safety/permissions/auto-mode/text.ts";
 
 const words = requireText("classifier");
 
@@ -237,7 +238,7 @@ describe("parseStage2", () => {
 		const verdict = parseStage2("<severity>80</severity><category>Made Up Danger</category>", index);
 		expect(verdict.decision).toBe("block");
 		expect(verdict.tier).toBe("unmatched");
-		expect(verdict.reason).toBe(requireText("autoMode").classifierBlock({ kind: "unmatchedRule", category: "Made Up Danger" }));
+		expect(verdict.reason).toBe(autoModeResultText.classifierBlock({ kind: "unmatchedRule", category: "Made Up Danger" }));
 	});
 
 	it("blocks with unmatched tier when a block names no category at all", () => {

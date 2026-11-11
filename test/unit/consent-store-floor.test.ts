@@ -16,7 +16,7 @@ import { lspTrustStorePath } from "../../extensions/tools/lsp/trust.ts";
 import { approvalStorePath as mcpStore } from "../../extensions/tools/mcp/trust.ts";
 import { projectAllowStorePath } from "../../extensions/lib/consent/project-trust.ts";
 import { brand, envName } from "../../extensions/lib/profile/brand.mjs";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { autoModeResultText } from "../../extensions/safety/permissions/auto-mode/text.ts";
 
 let home: string;
 let cwd: string;
@@ -46,7 +46,7 @@ describe("the consent stores", () => {
 
 	it("floor a write through the file tools", () => {
 		for (const store of consentStorePaths(home)) {
-			expect(check("write", { path: store }), store).toBe(requireText("autoMode").floorReason({ kind: "control", token: store }));
+			expect(check("write", { path: store }), store).toBe(autoModeResultText.floorReason({ kind: "control", token: store }));
 			expect(check("edit", { file_path: store }), store).toBeDefined();
 		}
 	});

@@ -43,7 +43,6 @@ const liveSections = (sections: readonly string[], live: LiveTools): string[] =>
 
 /** The group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
 export const systemPromptText = (live: LiveTools): SystemPromptText => ({
-	scratchpadMoved: ({ dir }) => `This session's scratchpad directory is now ${dir}. Use it for temporary files instead of the scratchpad named earlier in this conversation.`,
 	lead({ tier, taskTools, tools }) {
 		const bundle = BUNDLES[tier];
 		return liveSections(bundle.leadFor?.({ taskTools, tools }) ?? (taskTools ? bundle.lead : (bundle.leadWithoutTaskTools ?? bundle.lead)), live);
@@ -51,10 +50,4 @@ export const systemPromptText = (live: LiveTools): SystemPromptText => ({
 	tail: ({ tier }) => liveSections(BUNDLES[tier].tail, live),
 	// Workhorse, cheap and tiny use the long memory spec.
 	memory: (dir, { tier }) => memoryPromptSection(dir, BUNDLES[tier].verboseMemory),
-	toolList(tools, guidelines) {
-		const list = tools.length > 0 ? tools.map(({ name, snippet }) => `- ${name}: ${snippet}`).join("\n") : "(none)";
-		const guidelinesBlock = guidelines.length > 0 ? `\n\nGuidelines:\n${guidelines.map((g) => `- ${g}`).join("\n")}` : "";
-		return `# Available tools\n${list}${guidelinesBlock}`;
-	},
-	cwdLine: (cwd) => `Current working directory: ${cwd}`,
 });

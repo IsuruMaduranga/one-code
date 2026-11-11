@@ -12,28 +12,16 @@
 
 import type { ProfileText } from "../extensions/sdk/profile.ts";
 
-/**
- * An object argument as JSON, but with the NUL character left raw: the base
- * finds where a value lands in a text by passing a NUL hole and searching for
- * it (lib/profile/template-probe.ts), which an escaped `\u0000` would hide.
- */
-function shownObject(arg: object): string {
-	return JSON.stringify(arg).replaceAll("\\u0000", "\u0000");
-}
-
 /** A marker with the arguments the base passed, so a test can see them placed. */
 export function mark(path: string, ...args: unknown[]): string {
-	const shown = args.map((arg) => (typeof arg === "string" ? arg : Array.isArray(arg) ? arg.map(String).join(", ") : typeof arg === "object" && arg !== null ? shownObject(arg) : String(arg)));
+	const shown = args.map((arg) => (typeof arg === "string" ? arg : Array.isArray(arg) ? arg.map(String).join(", ") : typeof arg === "object" && arg !== null ? JSON.stringify(arg) : String(arg)));
 	return shown.length > 0 ? `[${path} ${shown.join(" | ")}]` : `[${path}]`;
 }
 
 export const systemPrompt: NonNullable<ProfileText["systemPrompt"]> = {
-	scratchpadMoved: (p) => mark("systemPrompt.scratchpadMoved", p),
 	lead: (session) => [mark("systemPrompt.lead", session)],
 	tail: (session) => [mark("systemPrompt.tail", session)],
 	memory: (dir, session) => mark("systemPrompt.memory", dir, session),
-	toolList: (tools, guidelines) => mark("systemPrompt.toolList", tools, guidelines),
-	cwdLine: (cwd) => mark("systemPrompt.cwdLine", cwd),
 };
 
 export const notebook: NonNullable<ProfileText["notebook"]> = {
@@ -517,10 +505,6 @@ export const workflow: NonNullable<ProfileText["workflow"]> = {
 
 export const autoMode: NonNullable<ProfileText["autoMode"]> = {
 	systemNote: (p) => mark("autoMode.systemNote", p),
-	permissionGranted: (p) => mark("autoMode.permissionGranted", p),
-	classifierBlock: (block) => mark("autoMode.classifierBlock", block),
-	floorReason: (target) => mark("autoMode.floorReason", target),
-	floorBlock: (target) => mark("autoMode.floorBlock", target),
 };
 
 export const classifier: NonNullable<ProfileText["classifier"]> = {
@@ -614,17 +598,6 @@ export const toolSearch: NonNullable<ProfileText["toolSearch"]> = {
 		query: "[toolSearch.params.query]",
 		maxResults: "[toolSearch.params.maxResults]",
 	},
-	result: (outcome) => mark("toolSearch.result", outcome),
-	noMatch: (p) => mark("toolSearch.noMatch", p),
-	toolLoaded: "[toolSearch.toolLoaded]",
-	listingHead: "[toolSearch.listingHead]",
-	addendumHead: "[toolSearch.addendumHead]",
-	removedHead: "[toolSearch.removedHead]",
-	toolsAvailable: "[toolSearch.toolsAvailable]",
-	missReminder: (p) => mark("toolSearch.missReminder", p),
-	withheldMiss: (p) => mark("toolSearch.withheldMiss", p),
-	unavailable: (p) => mark("toolSearch.unavailable", p),
-	loaderUnavailable: "[toolSearch.loaderUnavailable]",
 };
 
 export const handback: NonNullable<ProfileText["handback"]> = {

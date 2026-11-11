@@ -13,8 +13,9 @@ import { withToolAdditions } from "../../extensions/request/tool-search/tool-add
 import { withTurnBudgetMessages } from "../../extensions/request/system-reminder/turn-budget-layout.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { toolSearchResultText } from "../../extensions/lib/request/tool-search-text.ts";
 
-const TOOLS_AVAILABLE = requireText("toolSearch").toolsAvailable;
+const TOOLS_AVAILABLE = toolSearchResultText.toolsAvailable;
 /** The budget line for `left` tokens, in the profile's words. */
 const budget = (left: number) => totalTokensBlock(left);
 

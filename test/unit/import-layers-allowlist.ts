@@ -10,7 +10,6 @@ export const IMPORT_LAYER_VIOLATIONS: readonly string[] = [
 	"extensions/lib/agents/agent-catalog.ts -> extensions/agents/subagents/words.ts",
 	"extensions/lib/agents/agent-worktree.ts -> extensions/agents/subagents/words.ts",
 	"extensions/lib/agents/usage.ts -> extensions/agents/subagents/words.ts",
-	"extensions/lib/request/deferred.ts -> extensions/request/tool-search/words.ts",
 	"extensions/lib/context/instruction-budget.ts -> extensions/ui/footer/footer-line.ts",
 	"extensions/lib/side-calls/replay-call.ts -> extensions/request/context-management/index.ts",
 	"extensions/lib/rules/auto-mode-config.ts -> extensions/safety/permissions/auto-mode/classifier-prompt.ts",

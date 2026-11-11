@@ -24,9 +24,10 @@ import { brand, brandedId, productStateDir } from "../../extensions/lib/profile/
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { defaultEnvironment } from "../../extensions/safety/permissions/auto-mode/classifier-prompt.ts";
 import { indexFor } from "../../extensions/safety/permissions/auto-mode/prompt.ts";
+import { autoModeResultText } from "../../extensions/safety/permissions/auto-mode/text.ts";
 
 const completeMock = vi.mocked(completeSimple);
-const granted = (display: string) => requireText("autoMode").permissionGranted({ displays: [display] });
+const granted = (display: string) => autoModeResultText.permissionGranted({ displays: [display] });
 /** A real block rule of the profile's ruleset, so the classifier's verdict grounds to it. */
 const RULE = indexFor(defaultEnvironment()).rules.find((rule) => rule.tier === "soft_deny")!.name;
 const reply = (text: string) => ({ stopReason: "stop", content: [{ type: "text", text }], usage: {} }) as never;

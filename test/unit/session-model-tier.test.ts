@@ -7,7 +7,6 @@ import { writeJsonAtomic } from "../../extensions/lib/core/atomic-write.ts";
 import { type CatalogSources, catalogCacheDir, setCatalogSourcesForTest } from "../../extensions/lib/models/model-catalog-data.ts";
 import { resolveModelTier } from "../../extensions/lib/models/model-tier.ts";
 import { requestSystemPrompt } from "../../extensions/lib/ui/prompt-options.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { registerFormTool } from "../../extensions/lib/profile/tool-variants.ts";
 import { sessionModelTier } from "../../extensions/lib/models/session-model-tier.ts";
 import searchToolsExtension from "../../extensions/tools/search-tools/index.ts";
@@ -15,6 +14,7 @@ import systemPromptExtension from "../../extensions/request/system-prompt/index.
 import { catalogSources } from "./catalog-fixture.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { envName } from "../../extensions/lib/profile/brand.mjs";
+import { cwdLine } from "../../extensions/request/system-prompt/text.ts";
 
 const model = { provider: "openai", id: "gpt-5", cost: { input: 2 } } as Model<Api>;
 const otherModel = { ...model, id: "gpt-5.1" };
@@ -138,7 +138,7 @@ describe("the session's request-surface tier", () => {
 		await t.fake.fire("session_start", { reason: "startup" }, t.ctx);
 		const before = await t.request();
 		// The profile's prompt, built by the system-prompt extension (not pi's default).
-		expect(before.prompt).toContain(requireText("systemPrompt").cwdLine((t.ctx.cwd as string).replace(/\\/g, "/")));
+		expect(before.prompt).toContain(cwdLine((t.ctx.cwd as string).replace(/\\/g, "/")));
 		expect(before.description).toBe(form);
 		expect(before.tools).toEqual(beforeTier === "tiny" ? [...baseTools, ...searchTools] : baseTools);
 

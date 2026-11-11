@@ -18,7 +18,7 @@
 import { acceptsAnthropicWire } from "../../lib/models/model-policy.ts";
 import { MID_CONVERSATION_SYSTEM_BETA, MID_CONVERSATION_TOOL_CHANGES_BETA, reseatMessageMark } from "../../lib/request/anthropic-payload.ts";
 import { byWireCallId, systemRoleLayout, type WireMessage, type WirePart, withoutParts } from "../../lib/request/system-role.ts";
-import { toolSearchWords } from "./words.ts";
+import { toolSearchResultText } from "../../lib/request/tool-search-text.ts";
 
 
 /** Claude Code's betas for a reference-form tool addition in a system message. */
@@ -39,7 +39,7 @@ const CLOSE = "\n</system-reminder>";
 
 /** The names a whole framed addendum block lists (its head line is the profile's); undefined for any other text. */
 export function addendumNames(text: string): string[] | undefined {
-	const open = `<system-reminder>\n${toolSearchWords().addendumHead}\n`;
+	const open = `<system-reminder>\n${toolSearchResultText.addendumHead}\n`;
 	if (!text.startsWith(open) || !text.endsWith(CLOSE)) return undefined;
 	return text
 		.slice(open.length, -CLOSE.length)
@@ -116,7 +116,7 @@ export function withToolAdditions(
 		out.push(kept.length === parts.length ? message : { ...message, content: kept }, {
 			role: "system",
 			content: [
-				{ type: "text", text: [toolSearchWords().toolsAvailable, ...unique].join("\n") },
+				{ type: "text", text: [toolSearchResultText.toolsAvailable, ...unique].join("\n") },
 				...(references ? unique.map((name) => ({ type: "tool_addition", tool: { type: "tool_reference", name } })) : []),
 			],
 		});

@@ -14,7 +14,7 @@
 import { buildRuleset, classifierText, instructionsFraming, renderSessionContext, type RuleExtras } from "./classifier-prompt.ts";
 import { buildCategoryIndex, groundCategory, normalizeName, type RuleIndex } from "./rules.ts";
 import { clip, transcriptBlocks, type TranscriptEntry } from "./transcript.ts";
-import { autoModeWords } from "./words.ts";
+import { autoModeResultText } from "./text.ts";
 
 export interface ClassifyRequest {
 	/**
@@ -198,7 +198,7 @@ export function parseStage2(text: string, index: RuleIndex, userMessages: string
 	if (severity === null) {
 		return {
 			decision: "block",
-			reason: autoModeWords().classifierBlock({ kind: "noSeverity" }),
+			reason: autoModeResultText.classifierBlock({ kind: "noSeverity" }),
 			tier: "unmatched",
 			raw,
 			noVerdict: true,
@@ -215,7 +215,7 @@ export function parseStage2(text: string, index: RuleIndex, userMessages: string
 			if (!intentQuoted(intent, userMessages)) {
 				return {
 					decision: "block",
-					reason: autoModeWords().classifierBlock({ kind: "intentUnverified" }),
+					reason: autoModeResultText.classifierBlock({ kind: "intentUnverified" }),
 					tier: "soft_deny",
 					ruleId: "intent-unverified",
 					// The full quote, not a clip: the mismatch class is only diagnosable
@@ -238,7 +238,7 @@ export function parseStage2(text: string, index: RuleIndex, userMessages: string
 	if (!rule) {
 		return {
 			decision: "block",
-			reason: autoModeWords().classifierBlock({ kind: "unmatchedRule", ...(category ? { category } : {}) }),
+			reason: autoModeResultText.classifierBlock({ kind: "unmatchedRule", ...(category ? { category } : {}) }),
 			tier: "unmatched",
 			ruleId: category,
 			raw,

@@ -1,9 +1,9 @@
 /**
- * What auto mode needs from a profile for the session model (types only):
- * the note a session opening in auto mode gets, the retry note after the
- * user grants denied calls, and why a call was blocked (the classifier's
- * reasons and the safety floor's). The permission gate frames a block for
- * the model. The classifier's own prompt (`ClassifierText`, the ruleset and
+ * Auto mode's words for the session model. The profile supplies the note a
+ * session opening in auto mode gets (`AutoModeText`); the retry note after
+ * the user grants denied calls and why a call was blocked (the classifier's
+ * reasons and the safety floor's) are here (`autoModeResultText`). The
+ * permission gate frames a block for the model. The classifier's own prompt (`ClassifierText`, the ruleset and
  * its stage instructions) and the `/auto-mode setup` drafting prompt
  * (`AutoModeSetupText`) are their own groups, below.
  */
@@ -45,17 +45,78 @@ export interface FloorTarget {
 	token: string;
 }
 
+/** The profile's part: the note a session opening in auto mode gets. */
 export interface AutoModeText {
 	/** The note for a session that opens in auto mode; `firm` for models that need the firmer wording. */
 	systemNote(p: { firm: boolean }): string;
-	/** After the user grants denied calls in /permissions; `displays` names each call. */
-	permissionGranted(p: { displays: readonly string[] }): string;
-	classifierBlock(block: ClassifierBlock): string;
-	/** The floor's reason, also written to the decision log. */
-	floorReason(target: FloorTarget): string;
-	/** The block the model gets for a floor reason. */
-	floorBlock(target: FloorTarget): string;
 }
+
+function classifierBlock(block: ClassifierBlock): string {
+	switch (block.kind) {
+		case "noClassifierLeft": {
+			const others = block.unusable.length > 0 ? ` ${block.unusable.map((u) => `${u.model} cannot be used (${u.error})`).join("; ")}.` : "";
+			return `Auto mode has no classifier: ${block.refused.join(", ")} refused the classifier's prompt as a possible usage-policy violation.${others}`;
+		}
+		case "noModel":
+			return "No model is available to run the auto-mode classifier.";
+		case "actionTooLong":
+			return `This call is ${block.chars} characters, more than the ${block.max} the auto-mode classifier reviews in full. Split it into smaller calls.`;
+		case "cancelled":
+			return "Auto-mode classification was cancelled.";
+		case "transcriptTooLong":
+			return `Classifier transcript exceeded context window (${block.model}). The action was not judged. Compact the session (/compact) and continue.`;
+		case "truncated":
+			return "The approval classifier's reply was cut off by its output limit before the verdict completed.";
+		case "providerError":
+			return `The auto-mode classifier returned no verdict (${block.summary}).`;
+		case "unavailable": {
+			const network = block.networkError !== undefined;
+			return (
+				`Auto mode could not screen this ${block.tool} call${network ? "" : " in time"} — the approval classifier${block.model ? ` (${block.model})` : ""} ` +
+				`is temporarily unavailable (${network ? `network error: ${block.networkError}` : "timed out"}), so the call was not judged either way.`
+			);
+		}
+		case "noUsableModel":
+			return `No usable auto-mode classifier model (last error: ${block.lastError}).`;
+		case "noSeverity":
+			return "The approval classifier's reply carried no severity, so the verdict could not be read.";
+		case "intentUnverified":
+			return "The classifier cleared this as something the user asked for, but could not point to the user's own words asking for it.";
+		case "unmatchedRule":
+			return block.category
+				? `The approval classifier blocked this as "${block.category}", which is not a rule that could be matched.`
+				: "The approval classifier blocked this without naming a rule.";
+	}
+}
+
+function floorReason({ kind, token }: FloorTarget): string {
+	switch (kind) {
+		case "catalog":
+			return `it writes ${token}, a model catalog that decides the model tier the auto-mode checks that contain this agent depend on`;
+		case "pattern":
+			return `its pattern ${token} can select a file that holds the permission rules and auto-mode configuration that contain this agent`;
+		case "control":
+			return `it writes ${token}, which holds the permission rules and auto-mode configuration that contain this agent`;
+	}
+}
+
+/** The base's words: the retry note after a grant, and why a call was blocked (the classifier's reasons and the safety floor's). */
+export const autoModeResultText = {
+	/** After the user grants denied calls in /permissions; `displays` names each call (Claude Code's retry note, findings §33). */
+	permissionGranted: ({ displays }: { displays: readonly string[] }): string =>
+		`Permission granted for: ${displays.join(", ")}. You may now retry ${displays.length === 1 ? "this command" : "these commands"} if you would like.`,
+	classifierBlock,
+	/** The floor's reason, also written to the decision log. */
+	floorReason,
+	/** The block the model gets for a floor reason. The floor re-checks a rewrite, and the classifier still judges it. */
+	floorBlock: (target: FloorTarget): string => {
+		const opening = `Auto mode blocked this call without consulting the classifier: ${floorReason(target)}.`;
+		if (target.kind === "pattern") {
+			return `${opening} A command that may touch the gate's own configuration is never auto-approved. If this is a read-only search, rewrite it without the wildcard or negated pattern (for example \`grep -r --exclude-dir=node_modules\`); otherwise ask the user to run it themselves.`;
+		}
+		return `${opening} Writes to the gate's own configuration are never auto-approved. Do not retry or route around this; ask the user to make the change themselves.`;
+	},
+};
 
 /**
  * The auto-mode classifier's ruleset (a side call's system prompt), split at

@@ -31,10 +31,10 @@ import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, to
 import { privateSessionScratchpadDir } from "../../lib/core/scratchpad.ts";
 import { collectEnvironment, type EnvironmentInfo } from "./environment.ts";
 import { totalTokensBlock, turnTokenBudget } from "../../lib/context/budget.ts";
-import { featureEnabled, profileText, toolLive } from "../../lib/profile/profile.ts";
+import { featureEnabled, toolLive } from "../../lib/profile/profile.ts";
 import { optionsForIdleTurn, withSystemHead } from "./idle-turn.ts";
 import { buildClaudeCodeSystemPrompt } from "./template.ts";
-import { SYSTEM_PROMPT_SECTION_CHANNEL, type SystemPromptSection } from "./text.ts";
+import { SYSTEM_PROMPT_SECTION_CHANNEL, type SystemPromptSection, scratchpadMoved } from "./text.ts";
 import { WORKSPACE_CHANNEL, type WorkspaceAnnouncement } from "../../lib/rules/workspace-channel.ts";
 import { PROMPT_OPTIONS_CHANNEL, type PromptOptionsAnnouncement, SYSTEM_PROMPT_REQUEST_CHANNEL, type SystemPromptRequest } from "../../lib/ui/prompt-options.ts";
 
@@ -45,7 +45,7 @@ const ONE_SHOT_MODE = "one-shot";
 
 /** The notice that this session's scratchpad is not the one message 1 names (a /fork is a new session). */
 function scratchpadChangedNote(dir: string): string {
-	return profileText().systemPrompt.scratchpadMoved({ dir });
+	return scratchpadMoved({ dir });
 }
 
 function systemPromptExtension(pi: ExtensionAPI) {

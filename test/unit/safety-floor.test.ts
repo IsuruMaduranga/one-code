@@ -13,9 +13,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { isSafetyControlTarget, safetyControlWrite, safetyFloorBlockText, safetyFloorReason } from "../../extensions/safety/permissions/auto-mode/safety-floor.ts";
 import { analyzeShellCommand } from "../../extensions/lib/shell/shell-analysis.ts";
 import { brand, envName } from "../../extensions/lib/profile/brand.mjs";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { productProjectSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
 import { claudeJsonPath, forwardSlashes, toPosixPath } from "../../extensions/lib/profile/paths.ts";
+import { autoModeResultText } from "../../extensions/safety/permissions/auto-mode/text.ts";
 
 const STATE_DIR = envName("STATE_DIR");
 /** The product's state folder name (One Code: `.onecode`). */
@@ -404,7 +404,7 @@ describe("safetyControlWrite: what the floor reports", () => {
 	});
 
 	it("words the reason and the block through the profile", () => {
-		const words = requireText("autoMode");
+		const words = autoModeResultText;
 		const target = check("write", { path: ".claude/settings.json", content: "{}" })!;
 		expect(safetyFloorReason(target)).toBe(words.floorReason(target));
 		expect(safetyFloorBlockText(target)).toBe(words.floorBlock(target));

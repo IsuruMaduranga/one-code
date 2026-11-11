@@ -20,7 +20,7 @@
  * starts empty.
  */
 
-import { autoModeWords } from "./words.ts";
+import { autoModeResultText } from "./text.ts";
 
 /** Claude Code's `MAX_DENIALS`. */
 export const MAX_DENIALS = 20;
@@ -122,5 +122,5 @@ export class DenialStore {
  * Claude Code's wording, verbatim (findings §33), from the profile.
  */
 export function permissionGrantedMessage(displays: readonly string[]): string {
-	return autoModeWords().permissionGranted({ displays });
+	return autoModeResultText.permissionGranted({ displays });
 }

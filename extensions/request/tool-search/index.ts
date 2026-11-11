@@ -73,6 +73,7 @@ import { sessionAlive } from "../../lib/notify/session-lifecycle.ts";
 import { toolRenderers } from "../../lib/ui/tui-render.ts";
 import { normalizeToolName } from "../../lib/rules/matcher.ts";
 import { registerLocalCommand } from "../../lib/ui/local-command.ts";
+import { toolSearchResultText } from "../../lib/request/tool-search-text.ts";
 
 /** The told mode for "this epoch's message 1 lists deferred tools this run cannot load", said once per epoch. */
 const UNAVAILABLE_MODE = "deferred-unavailable";
@@ -484,14 +485,14 @@ function toolSearchExtension(pi: ExtensionAPI) {
 
 			if (matches.length === 0 && eager.length > 0) {
 				return {
-					content: [{ type: "text", text: words.result({ added: [], already: eager, refused: [], missing, withdrawn }) }],
+					content: [{ type: "text", text: toolSearchResultText.result({ added: [], already: eager, refused: [], missing, withdrawn }) }],
 					details: { matches: eager, added: [] as string[], notFound, refused: [] as string[] },
 				};
 			}
 
 			if (matches.length === 0) {
 				return {
-					content: [{ type: "text", text: words.noMatch({ query: params.query, missing, withdrawn, loadable: available.map((t) => t.name) }) }],
+					content: [{ type: "text", text: toolSearchResultText.noMatch({ query: params.query, missing, withdrawn, loadable: available.map((t) => t.name) }) }],
 					details: { matches: [] as string[], added: [] as string[], notFound, refused: [] as string[] },
 					isError: true,
 				};
@@ -514,7 +515,7 @@ function toolSearchExtension(pi: ExtensionAPI) {
 			const loaded = [...new Set([...matchNames, ...eager])].filter((name) => now.has(name));
 			const already = loaded.filter((name) => !added.includes(name));
 			return {
-				content: [{ type: "text", text: words.result({ added, already, refused, missing, withdrawn }) }],
+				content: [{ type: "text", text: toolSearchResultText.result({ added, already, refused, missing, withdrawn }) }],
 				details: { matches: loaded, added, notFound, refused },
 				isError: loaded.length === 0,
 			};

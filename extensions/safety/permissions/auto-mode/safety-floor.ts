@@ -40,7 +40,7 @@ import { CATALOG_CACHE_TAIL, catalogCacheFiles } from "../../../lib/models/model
 import { claudeJsonPath, comparablePath, productStateDir } from "../../../lib/profile/paths.ts";
 import { isWritingTool, resolveForContainment, toAbsolute, toAbsoluteBash } from "../../../lib/shell/paths.ts";
 import type { FloorTarget } from "./text.ts";
-import { autoModeWords } from "./words.ts";
+import { autoModeResultText } from "./text.ts";
 
 /** The same comparison form resolveForContainment's output is in (lib/profile/paths.ts). */
 const fold = comparablePath;
@@ -199,12 +199,12 @@ const REASON = (token: string): FloorTarget => ({
 
 /** The model-facing block text for a floor target, in the profile's words. The floor re-checks a rewrite, and the classifier still judges it. */
 export function safetyFloorBlockText(target: FloorTarget): string {
-	return autoModeWords().floorBlock(target);
+	return autoModeResultText.floorBlock(target);
 }
 
 /** The floor's reason for the decision log, in the profile's words. */
 export function safetyFloorReason(target: FloorTarget): string {
-	return autoModeWords().floorReason(target);
+	return autoModeResultText.floorReason(target);
 }
 
 /** A cached catalog's file name, to word the reason (a false match only rewords it). */

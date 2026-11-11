@@ -53,12 +53,12 @@ import {
 } from "../../../lib/models/classifier-model.ts";
 import { actionLength, MAX_ACTION_CHARS } from "./transcript.ts";
 import type { ClassifierBlock, UnusableClassifier } from "./text.ts";
-import { autoModeWords } from "./words.ts";
+import { autoModeResultText } from "./text.ts";
 
 /** A verdict that blocks without one: the classifier could not judge the call. */
 const noVerdict = (block: ClassifierBlock, extra: Partial<ClassifyVerdict> = {}): ClassifyVerdict => ({
 	decision: "block",
-	reason: autoModeWords().classifierBlock(block),
+	reason: autoModeResultText.classifierBlock(block),
 	tier: "unmatched",
 	noVerdict: true,
 	...extra,

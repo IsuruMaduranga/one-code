@@ -12,7 +12,7 @@ import { contentHash } from "../../lib/request/ledger/wire.ts";
 import { toldBlockFact } from "../../lib/request/reminders.ts";
 import type { ContextChange } from "../../lib/context/context-text.ts";
 import { contextWords } from "../../lib/context/context-words.ts";
-import { differingSpans } from "../../lib/profile/template-probe.ts";
+import { differingSpans } from "../../lib/core/text-spans.ts";
 
 /** The told keys of the fingerprints (whole-text block facts) and of the compaction flag (a mode). */
 export const FACT_KEYS = {

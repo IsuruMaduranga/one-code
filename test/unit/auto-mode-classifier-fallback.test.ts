@@ -28,11 +28,11 @@ import { loadAutoModeConfig } from "../../extensions/lib/rules/auto-mode-config.
 import { isModelUnavailableError } from "../../extensions/lib/models/classifier-model.ts";
 import type { ClassifierBlock } from "../../extensions/safety/permissions/auto-mode/text.ts";
 import { actionLength, MAX_ACTION_CHARS } from "../../extensions/safety/permissions/auto-mode/transcript.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { pinCatalog } from "./catalog-fixture.ts";
+import { autoModeResultText } from "../../extensions/safety/permissions/auto-mode/text.ts";
 
 /** The profile's words for a block the classifier could not judge. */
-const blockText = (block: ClassifierBlock) => requireText("autoMode").classifierBlock(block);
+const blockText = (block: ClassifierBlock) => autoModeResultText.classifierBlock(block);
 
 const completeMock = vi.mocked(completeSimple);
 

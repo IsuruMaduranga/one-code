@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFER_CHANNEL, deferredAddendumText, WITHHOLD_CHANNEL } from "../../extensions/lib/request/deferred.ts";
 import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/plugins/mcp-share.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/request/reminders.ts";
 import toolSearchExtension from "../../extensions/request/tool-search/index.ts";
 import webExtension from "../../extensions/tools/web/index.ts";
 import { createFakeCtx, createFakePi, renderRequest } from "./helpers/fake-pi.ts";
 import type { Reminder } from "./helpers/tool-search-fake-pi.ts";
+import { toolSearchResultText } from "../../extensions/lib/request/tool-search-text.ts";
 
 const gemini = { provider: "google", api: "google-generative-ai", id: "gemini-test" };
 const other = { provider: "openai", api: "openai-responses", id: "gpt-test" };
@@ -77,7 +77,7 @@ describe("url_context model-scoped deferral", () => {
 			const result = await fake.search();
 			expect(result.isError).toBe(true);
 			expect(result.details.matches).toEqual([]);
-			expect(result.content[0].text).toBe(requireText("toolSearch").noMatch({ query: "select:url_context", missing: [], withdrawn: ["url_context"], loadable: ["web_search"] }));
+			expect(result.content[0].text).toBe(toolSearchResultText.noMatch({ query: "select:url_context", missing: [], withdrawn: ["url_context"], loadable: ["web_search"] }));
 			expect((await fake.search("gemini")).details.matches).not.toContain("url_context");
 			expect(fake.getActiveTools()).not.toContain("url_context");
 			expect(fake.render(told, other)).toEqual([]);
@@ -114,7 +114,7 @@ describe("url_context model-scoped deferral", () => {
 			});
 			const miss = fake.reminders.find((r) => r.key === "deferred-miss-url_context");
 			// Not the ordinary "load it with tool_search" advice.
-			expect(miss?.text).toBe(requireText("toolSearch").withheldMiss({ name: "url_context" }));
+			expect(miss?.text).toBe(toolSearchResultText.withheldMiss({ name: "url_context" }));
 			expect((await fake.search()).isError).toBe(true);
 			expect(fake.getActiveTools()).not.toContain("url_context");
 		});

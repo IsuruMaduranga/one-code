@@ -18,12 +18,10 @@ import { acceptsAnthropicWire, anthropicModelId } from "../models/model-policy.t
 import { parseClaudeId } from "../profile/claude-id.ts";
 import { leadingToolsItem, toolsItemFor } from "./ledger/wire.ts";
 import { RESPONSES_APIS } from "./system-role.ts";
-import { toolSearchWords } from "../../request/tool-search/words.ts";
-import type { ToolSearchText } from "../../request/tool-search/text.ts";
-import { around, escapeRegExp, memoOn } from "../profile/template-probe.ts";
 import { normalizeToolName } from "../rules/matcher.ts";
 
 import { DEFER_CHANNEL, type DeferRequest } from "./deferred-channel.ts";
+import { LOADED_SENTENCE, toolSearchResultText } from "./tool-search-text.ts";
 
 export { DEFER_CHANNEL, type DeferRequest } from "./deferred-channel.ts";
 
@@ -128,7 +126,7 @@ export class DeferredRegistry {
  * loaded tool is simply callable, and the sentence says as much.
  */
 export function deferredReminderText(tools: Array<Pick<SearchableTool, "name"> & Partial<SearchableTool>>): string {
-	return [toolSearchWords().listingHead, ...tools.map((t) => t.name)].join("\n");
+	return [toolSearchResultText.listingHead, ...tools.map((t) => t.name)].join("\n");
 }
 
 /**
@@ -138,7 +136,7 @@ export function deferredReminderText(tools: Array<Pick<SearchableTool, "name"> &
  * this rides the tail instead, so the cached prefix holds.
  */
 export function deferredAddendumText(added: readonly string[]): string {
-	return [toolSearchWords().addendumHead, ...added].join("\n");
+	return [toolSearchResultText.addendumHead, ...added].join("\n");
 }
 
 /**
@@ -149,7 +147,7 @@ export function deferredAddendumText(added: readonly string[]): string {
  * not found".
  */
 export function deferredRemovedText(removed: readonly string[]): string {
-	return [toolSearchWords().removedHead, ...removed].join("\n");
+	return [toolSearchResultText.removedHead, ...removed].join("\n");
 }
 
 /** The loader every deferred tool sits behind. */
@@ -447,20 +445,13 @@ function withToolReferences(message: WireMessage, referencesAt: ReadonlyMap<stri
 	return { ...message, content: withBreakpointOnLast([...blocks, ...siblings], movedBreakpoint) };
 }
 
-/** `tool_search`'s plain success sentence, which the references stand in for: the profile's, around the names (never matches when the profile's sentence has no place for them). */
-const loadedSentence = memoOn((words: ToolSearchText): RegExp => {
-	const frame = around((name) => words.result({ added: [name], already: [], refused: [], missing: [], withdrawn: [] }));
-	return frame ? new RegExp(`^${escapeRegExp(frame.before)}[^\\n]*${escapeRegExp(frame.after)}(?=\\n|$)`) : /(?!)/;
-});
-
 /**
  * The text beside the references: Claude Code's "Tool loaded." in place of the
  * plain success sentence, which names what the references already carry. A
  * sentence with a not-found note, and anything after it, stays as it was.
  */
 function withClaudeCodeLoadText(text: string): string {
-	const words = toolSearchWords();
-	return text.replace(loadedSentence(words), words.toolLoaded);
+	return text.replace(LOADED_SENTENCE, toolSearchResultText.toolLoaded);
 }
 
 /**
@@ -620,7 +611,7 @@ export function resultText(result: unknown): string {
  * to recover from the bare error on its own.
  */
 export function deferredMissReminderText(name: string): string {
-	return toolSearchWords().missReminder({ name });
+	return toolSearchResultText.missReminder({ name });
 }
 
 /**
@@ -629,7 +620,7 @@ export function deferredMissReminderText(name: string): string {
  * tool_search out (`deferralEnabled`): nothing can load them now.
  */
 export function loaderUnavailableReminderText(): string {
-	return toolSearchWords().loaderUnavailable;
+	return toolSearchResultText.loaderUnavailable;
 }
 
 /**
@@ -640,7 +631,7 @@ export function loaderUnavailableReminderText(): string {
  * tool_search" advice, which would just fail again.
  */
 export function withheldMissReminderText(name: string): string {
-	return toolSearchWords().withheldMiss({ name });
+	return toolSearchResultText.withheldMiss({ name });
 }
 
 /**
@@ -649,7 +640,7 @@ export function withheldMissReminderText(name: string): string {
  * no longer runs: a setting turned it off, or an extension stopped offering it.
  */
 export function unavailableToolReminderText(name: string): string {
-	return toolSearchWords().unavailable({ name });
+	return toolSearchResultText.unavailable({ name });
 }
 
 export interface SearchMatch {

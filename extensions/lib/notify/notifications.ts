@@ -42,7 +42,7 @@ import { isUserRun, PROMPT_OPTIONS_CHANNEL } from "../ui/prompt-options.ts";
 import { wrapReminder } from "../request/reminders.ts";
 import { HAND_BACK_POINTER_PREFIX, type NotificationWords, type OneShotWork } from "./notifications-text.ts";
 import { notificationWords } from "./notification-words.ts";
-import { commonPrefix, escapeRegExp, memoOn } from "../profile/template-probe.ts";
+import { commonPrefix, escapeRegExp, memoOn } from "../core/text-spans.ts";
 
 /** pi's session-mode union, derived from the context (the package root does not export ExtensionMode itself). */
 type ExtensionMode = ExtensionContext["mode"];

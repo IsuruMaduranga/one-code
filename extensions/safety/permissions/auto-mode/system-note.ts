@@ -15,10 +15,10 @@
 
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { claudeFamily, usesClaudeCodeFastPaths } from "../../../lib/models/model-tier.ts";
-import { autoModeWords } from "./words.ts";
+import { requireText } from "../../../lib/profile/profile.ts";
 
 /** The note for a session opening in auto mode on `model`, or undefined on a cheap or tiny model. */
 export function autoModeSystemNote(model: Model<Api>): string | undefined {
 	if (!usesClaudeCodeFastPaths(model)) return undefined;
-	return autoModeWords().systemNote({ firm: claudeFamily(model.id) === "fable" });
+	return requireText("autoMode").systemNote({ firm: claudeFamily(model.id) === "fable" });
 }

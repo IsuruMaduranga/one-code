@@ -6,8 +6,8 @@ import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { classify, createClassifierState } from "../../extensions/safety/permissions/auto-mode/classifier.ts";
 import { loadAutoModeConfig } from "../../extensions/lib/rules/auto-mode-config.ts";
 import { buildPayload, type ClassifyRequest } from "../../extensions/safety/permissions/auto-mode/prompt.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { pinCatalog } from "./catalog-fixture.ts";
+import { autoModeResultText } from "../../extensions/safety/permissions/auto-mode/text.ts";
 
 const completeMock = vi.mocked(completeSimple);
 const config = loadAutoModeConfig("/nonexistent-home-for-tests");
@@ -55,7 +55,7 @@ describe("classifier provider context overflow", () => {
 		"The input token count (280000) exceeds the maximum number of tokens allowed (272000)",
 	])("returns a distinct no-verdict result without retrying for %s", async (error) => {
 		completeMock.mockResolvedValue(errorReply(error));
-		const words = requireText("autoMode");
+		const words = autoModeResultText;
 		const blockSpy = vi.spyOn(words, "classifierBlock");
 		const state = deps();
 		const verdict = await classify(base, state);

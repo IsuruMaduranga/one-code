@@ -13,10 +13,10 @@ import systemPromptExtension from "../../extensions/request/system-prompt/index.
 import { optionsForIdleTurn, withSystemHead } from "../../extensions/request/system-prompt/idle-turn.ts";
 import { announcePromptOptions, requestSystemPrompt } from "../../extensions/lib/ui/prompt-options.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { cwdLine } from "../../extensions/request/system-prompt/text.ts";
 
 /** A line only the profile's prompt carries (pi's default has none): its working-directory line. */
-const profilePromptMark = (cwd: string) => requireText("systemPrompt").cwdLine(cwd.replace(/\\/g, "/"));
+const profilePromptMark = (cwd: string) => cwdLine(cwd.replace(/\\/g, "/"));
 
 const PI_DEFAULT = "You are an expert coding assistant operating inside pi, a coding agent harness.";
 

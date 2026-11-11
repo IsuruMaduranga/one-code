@@ -3,6 +3,7 @@ import { PROMPT_TIERS, type PromptTier } from "../../extensions/lib/models/model
 import type { EnvironmentInfo } from "../../extensions/request/system-prompt/environment.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { buildClaudeCodeSystemPrompt } from "../../extensions/request/system-prompt/template.ts";
+import { cwdLine, toolList } from "../../extensions/request/system-prompt/text.ts";
 
 /**
  * Where the base places the profile's system-prompt text: the memory section
@@ -37,7 +38,7 @@ describe("buildClaudeCodeSystemPrompt", () => {
 		// Only the memory section goes; the rest stays.
 		expect(prompt).toBe(on.replace(`\n\n${text().memory(env.memoryDir!, session(tier))}`, ""));
 		expect(prompt).not.toBe(on);
-		expect(prompt).toContain(text().cwdLine("/tmp/project"));
+		expect(prompt).toContain(cwdLine("/tmp/project"));
 	});
 
 	it("lists tools that have snippets and appends guidelines", () => {
@@ -53,7 +54,7 @@ describe("buildClaudeCodeSystemPrompt", () => {
 		);
 		// Only tools with a snippet, deduplicated and trimmed guidelines.
 		expect(prompt).toContain(
-			text().toolList(
+			toolList(
 				[
 					{ name: "read", snippet: "Read files" },
 					{ name: "bash", snippet: "Run commands" },
@@ -88,8 +89,8 @@ describe("buildClaudeCodeSystemPrompt", () => {
 describe("the per-turn budget line", () => {
 	it("closes the prompt after the cwd line, and is absent when not given", () => {
 		const line = "<total_tokens>15000000 tokens left</total_tokens>";
-		const cwdLine = text().cwdLine("/tmp/project");
-		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", line).endsWith(`\n${cwdLine}\n\n${line}`)).toBe(true);
-		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", null).endsWith(`\n${cwdLine}`)).toBe(true);
+		const lastLine = cwdLine("/tmp/project");
+		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", line).endsWith(`\n${lastLine}\n\n${line}`)).toBe(true);
+		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", null).endsWith(`\n${lastLine}`)).toBe(true);
 	});
 });

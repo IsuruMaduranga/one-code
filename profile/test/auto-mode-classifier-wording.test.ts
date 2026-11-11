@@ -8,8 +8,8 @@ import { buildRuleset } from "../../extensions/safety/permissions/auto-mode/clas
 import { unattendedPromptTimeoutMs, UNATTENDED_PROMPT_TIMEOUT_MS } from "../../extensions/safety/permissions/auto-mode/pause.ts";
 import { buildPayload, indexFor, parseStage2, stage1User, stage2User } from "../../extensions/safety/permissions/auto-mode/prompt.ts";
 import { groundCategory } from "../../extensions/safety/permissions/auto-mode/rules.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { CLEAN_UP_REQUEST, DEFAULT_ENVIRONMENT } from "../../test/unit/helpers/classify-request.ts";
+import { autoModeResultText } from "../../extensions/safety/permissions/auto-mode/text.ts";
 
 const index = indexFor(DEFAULT_ENVIRONMENT);
 
@@ -36,7 +36,7 @@ describe("One Code's ruleset", () => {
 	});
 
 	it("says an invented category is not a rule", () => {
-		expect(requireText("autoMode").classifierBlock({ kind: "unmatchedRule", category: "Made Up Danger" })).toContain("not a rule");
+		expect(autoModeResultText.classifierBlock({ kind: "unmatchedRule", category: "Made Up Danger" })).toContain("not a rule");
 	});
 
 	it("closes the ALLOW list inside Claude Code's permissions block", () => {
