@@ -56,7 +56,7 @@ import { type McpEntry, type McpEntryStatus } from "./panel/model.ts";
 import { renderMcpPanel, type McpPaint } from "./panel/render.ts";
 import { applyMcpKey, initialMcpState, type McpEffect } from "./panel/state.ts";
 import { sessionAlive } from "../../lib/notify/session-lifecycle.ts";
-import { loadServers, mcpConfigFiles, type McpServer, noMcpServersMessage, piMcpConfigPaths, registeredMcpServers } from "./config.ts";
+import { loadServers, mcpConfigFiles, mcpConfigWhere, type McpServer, noMcpServersMessage, piMcpConfigPaths, registeredMcpServers } from "./config.ts";
 import { type McpFile, openSources } from "../../lib/profile/sources.ts";
 import { approveMcpServers, type McpTrustDeps, persistApproval, projectRootOf, reconnectRefusal } from "./trust.ts";
 import {
@@ -911,7 +911,7 @@ function mcpExtension(pi: ExtensionAPI) {
 					const termRows = (tui as { terminal: { rows: number } }).terminal.rows;
 					const height = boundedDockHeight(termRows, MCP_PANEL_MAX_HEIGHT);
 					const lines = renderMcpPanel(
-						{ state, entries, width, height, notices, settled: connectSettled },
+						{ state, entries, width, height, notices, settled: connectSettled, where: mcpConfigWhere(openSources(os.homedir()).mcpWhere) },
 						paint,
 					).map((line) => truncateLine(line, width));
 					cache = { width, lines };

@@ -5,7 +5,7 @@
  */
 
 import type { AutoModeText, ClassifierBlock, FloorTarget, LiveTools } from "../../../extensions/sdk/profile.ts";
-import { type ToolPassages, withoutOff } from "../../live-tools.ts";
+import { type ToolPassages, withoutOff } from "../../../extensions/sdk/profile.ts";
 
 const OPUS_NOTE =
 	"While auto mode is active:\n\n" +

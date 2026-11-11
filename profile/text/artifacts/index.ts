@@ -3,7 +3,7 @@
  * tool's description, parameters and results, and the store's refusals.
  */
 
-import { type ToolPassages, withoutOff } from "../../live-tools.ts";
+import { type ToolPassages, withoutOff } from "../../../extensions/sdk/profile.ts";
 import type { ArtifactsText, LiveTools, NoBrowser, PublishBrowser, PublishProblem, ShownArtifact } from "../../../extensions/sdk/profile.ts";
 
 const NO_BROWSER: Record<NoBrowser, string> = {

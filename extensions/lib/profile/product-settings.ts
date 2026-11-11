@@ -50,7 +50,7 @@ export function productProjectRoot(cwd: string): string {
  * (writable), for `productProjectRoot`. The slug is the memory dir's
  * (`projectSlug`), but of the resolved root, where the memory dir slugs the
  * root as found. It is lossy (`my_app` and `my-app` share a file), so a setting
- * that grants trust records the root it was given for (claude-external-includes.ts).
+ * that grants trust records the root it was given for (external-includes.ts).
  */
 export function productProjectSettingsPath(cwd: string, home: string, env: NodeJS.ProcessEnv = process.env): string {
 	return productProjectSettingsPathFor(productProjectRoot(cwd), home, env);

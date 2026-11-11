@@ -237,8 +237,12 @@ export function findProjectConfigs(cwd: string): string[] {
  * Claude Code names its own CLI and docs here; One Code names its own.
  */
 export const MCP_GUIDE_URL = `${brand.homepage}/blob/master/docs/guide/skills-plugins-and-mcp.md#mcp-servers`;
+/** The files MCP servers are configured in: another tool's as the source view words them, then pi's own. */
+export function mcpConfigWhere(otherFiles: string | undefined): string {
+	return `${otherFiles ? `${otherFiles}, ` : ""}.pi/mcp.json or the agent dir's mcp.json`;
+}
 export function noMcpServersMessage(otherFiles: string | undefined): string {
-	const where = `${otherFiles ? `${otherFiles}, ` : ""}.pi/mcp.json or the agent dir's mcp.json`;
+	const where = mcpConfigWhere(otherFiles);
 	return `No MCP servers configured. Run /doctor if this is unexpected — it lists MCP config files that failed validation. Otherwise, add servers to ${where}; see ${MCP_GUIDE_URL} to learn more.`;
 }
 

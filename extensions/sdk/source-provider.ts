@@ -7,7 +7,7 @@
  */
 export { readJsonFile } from "../lib/core/atomic-write.ts";
 export { envName } from "../lib/profile/brand.mjs";
-export { readExternalIncludesApproval } from "../lib/context/claude-external-includes.ts";
+export { readExternalIncludesApproval } from "../lib/context/external-includes.ts";
 export { discoverRules, readRuleInstructions, type RuleFile, type RuleOptions } from "../lib/context/claude-rules.ts";
 export { claudeUserSettingsPath, managedSettingsPaths, readSettingsFile } from "../lib/profile/settings-files.ts";
 export type { InstructionSource } from "../lib/context/context-text.ts";

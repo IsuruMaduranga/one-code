@@ -1,8 +1,11 @@
 /**
- * Claude Code's spinner verbs, verbatim from the reconstructed source
- * (src/constants/spinnerVerbs.ts) — the whimsical gerund shown while the
- * model works ("✳ Hyperspacing…"). One is picked at random per turn.
+ * The spinner verbs: the whimsical gerund shown while the model works
+ * ("✳ Hyperspacing…"), the way Claude Code does. One is picked at random
+ * per turn, from this list and the brand's own (`spinnerVerbs` in
+ * brand.json: a product's verbs, such as one made from its name).
  */
+
+import { brand } from "../../lib/profile/brand.mjs";
 
 export const SPINNER_VERBS: readonly string[] = [
 	"Accomplishing",
@@ -33,7 +36,6 @@ export const SPINNER_VERBS: readonly string[] = [
 	"Channelling",
 	"Choreographing",
 	"Churning",
-	"Clauding",
 	"Coalescing",
 	"Cogitating",
 	"Combobulating",
@@ -194,8 +196,11 @@ export const SPINNER_VERBS: readonly string[] = [
 	"Zigzagging",
 ];
 
+/** The base's verbs and the brand's. */
+export const ALL_VERBS: readonly string[] = [...SPINNER_VERBS, ...((brand as { spinnerVerbs?: string[] }).spinnerVerbs ?? [])];
+
 /** Random verb for one turn; `random` is injectable for tests. */
-export function pickVerb(random: () => number = Math.random): string {
-	const index = Math.min(SPINNER_VERBS.length - 1, Math.floor(random() * SPINNER_VERBS.length));
-	return SPINNER_VERBS[index];
+export function pickVerb(random: () => number = Math.random, verbs: readonly string[] = ALL_VERBS): string {
+	const index = Math.min(verbs.length - 1, Math.floor(random() * verbs.length));
+	return verbs[index];
 }

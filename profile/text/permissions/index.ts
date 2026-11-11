@@ -6,7 +6,7 @@
  */
 
 import type { LiveTools, PermissionRefusal, PermissionsText } from "../../../extensions/sdk/profile.ts";
-import { type ToolPassages, withoutOff } from "../../live-tools.ts";
+import { type ToolPassages, withoutOff } from "../../../extensions/sdk/profile.ts";
 
 // Must agree with the plan-mode reminder (plan-mode/reminder.ts): the plan is
 // built in the plan file and approved through exit_plan_mode, never presented

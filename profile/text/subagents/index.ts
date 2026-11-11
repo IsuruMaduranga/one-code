@@ -12,7 +12,7 @@ import type { AgentTools, LaunchLine, LiveTools, PendingRun, RunFailure, RunStat
 import { checkoutProgram } from "../worktree/guard.ts";
 import { agentDescription } from "./agent-description.ts";
 import { guideAgent } from "./guide-agent.ts";
-import { type ToolPassages, withoutOff } from "../../live-tools.ts";
+import { type ToolPassages, withoutOff } from "../../../extensions/sdk/profile.ts";
 
 /**
  * The anti-fabrication sentence, carried by the RESULT of a background spawn

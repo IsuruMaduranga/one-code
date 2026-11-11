@@ -6,7 +6,7 @@
  */
 
 import type { LiveTools, SearchOutcome, ToolSearchText } from "../../../extensions/sdk/profile.ts";
-import { type ToolPassages, withoutOff } from "../../live-tools.ts";
+import { type ToolPassages, withoutOff } from "../../../extensions/sdk/profile.ts";
 
 /** The notes about names that were not loadable, each starting with a space. */
 function notFoundNote({ missing, withdrawn }: Pick<SearchOutcome, "missing" | "withdrawn">): string {

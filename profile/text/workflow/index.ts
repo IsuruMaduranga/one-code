@@ -6,7 +6,7 @@
 
 import type { AgentFailure, AgentNotice, LiveTools, RunReport, RunStop, ScriptCallProblem, ScriptProblem, WorkflowRefusal, WorkflowText } from "../../../extensions/sdk/profile.ts";
 import { workflowDescription } from "./description.ts";
-import { type ToolPassages, withoutOff } from "../../live-tools.ts";
+import { type ToolPassages, withoutOff } from "../../../extensions/sdk/profile.ts";
 
 function refused(refusal: WorkflowRefusal): string {
 	switch (refusal.kind) {

@@ -29,7 +29,7 @@ import os from "node:os";
 import { dirname } from "node:path";
 import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { buildClaudeMdBlock, buildContextBlock, buildOneCodeBlock, dateBlock, dateChangeReminder, localDate, nestedInstructionText } from "./instructions.ts";
-import { collectImportedPaths, openInstructions } from "../../lib/context/instructions.ts";
+import { collectImportedPaths, instructionTargets, openInstructions } from "../../lib/context/instructions.ts";
 import { collectGitStatus, GIT_SNAPSHOT_OWNER_CHANNEL } from "../../lib/context/git-status.ts";
 import { readMemoryIndex } from "./memory-index.ts";
 import { productStateDir, tildify, tryRealpath } from "../../lib/profile/paths.ts";
@@ -42,7 +42,7 @@ import { resolveToolPath } from "../../lib/rules/tool-path.ts";
 import { sessionWorkCwd, WORKTREE_CHANNEL, type WorktreeLocation } from "../../lib/agents/worktree-channel.ts";
 import { pathArgument } from "../../lib/shell/paths.ts";
 import { HARNESS_GIT_CONFIG } from "../../lib/context/git.ts";
-import { EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_NONE, EXTERNAL_INCLUDES_SETTING, EXTERNAL_INCLUDES_YES, externalIncludesDialog, persistExternalIncludesApproval, readExternalIncludesApproval } from "../../lib/context/claude-external-includes.ts";
+import { EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_YES, externalIncludesCommand, externalIncludesDialog, externalIncludesNeedsUi, externalIncludesNone, externalIncludesNotSaved, externalIncludesSetting, persistExternalIncludesApproval, readExternalIncludesApproval } from "../../lib/context/external-includes.ts";
 import { registerLocalCommand } from "../../lib/ui/local-command.ts";
 import { consentDialog, installConsentDialogs, startupConsentReady } from "../../lib/consent/consent-dialogs.ts";
 import type { ToldFact } from "../../lib/request/ledger/records.ts";
@@ -210,11 +210,13 @@ function instructionsExtension(pi: ExtensionAPI) {
 		return takesGitSnapshot ? collectGitStatus(cwd, undefined, shellTool) : null;
 	};
 
+	/** The project instruction file's name, as the dialog and /config show it. */
+	const instructionFile = () => instructionTargets().project;
 	const externalPaths = (cwd: string) => openInstructions(os.homedir(), getAgentDir()).externalIncludes({ cwd });
 	const saveApproval = (ctx: ExtensionContext, approved: boolean) => {
 		includeExternal = approved;
 		try { persistExternalIncludesApproval(ctx.cwd, os.homedir(), approved); }
-		catch (error) { ctx.ui.notify(`Could not remember external CLAUDE.md include approval: ${String(error)}`, "error"); }
+		catch (error) { ctx.ui.notify(externalIncludesNotSaved(instructionFile(), error), "error"); }
 	};
 	/**
 	 * The current model's context window: past half of it, the largest
@@ -314,17 +316,17 @@ function instructionsExtension(pi: ExtensionAPI) {
 		const signal = approvalAbort.signal;
 		// No is first and focused, as in Claude Code. Escape is also a remembered no;
 		// a shutdown/superseded session is not an answer at all.
-		const choice = await consentDialog(pi.events, () => ctx.ui.select(externalIncludesDialog(paths, os.homedir()), [EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_YES], { signal }), afterStartup);
+		const choice = await consentDialog(pi.events, () => ctx.ui.select(externalIncludesDialog(paths, os.homedir(), instructionFile(), instructionTargets().importers), [EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_YES], { signal }), afterStartup);
 		if (signal.aborted || gen !== sessionGeneration) return;
 		saveApproval(ctx, choice === EXTERNAL_INCLUDES_YES);
 		refreshInstructions(ctx.cwd);
 	};
 	registerLocalCommand(pi, "config", {
-		description: "Configure external CLAUDE.md includes for this project",
+		description: externalIncludesCommand(instructionFile()),
 		reportsResult: true,
 		handler: async (_args, ctx) => {
 			if (!ctx.hasUI) {
-				const text = "/config requires an interactive UI to change external CLAUDE.md include approval.";
+				const text = externalIncludesNeedsUi(instructionFile());
 				process.stderr.write(`${text}\n`);
 				return text;
 			}
@@ -334,11 +336,11 @@ function instructionsExtension(pi: ExtensionAPI) {
 			if (gen !== sessionGeneration || approvalAbort.signal.aborted) return;
 			const paths = externalPaths(ctx.cwd);
 			if (!paths.length) {
-				const text = EXTERNAL_INCLUDES_NONE;
+				const text = externalIncludesNone(instructionFile());
 				ctx.ui.notify(text, "info");
 				return text;
 			}
-			const row = `${EXTERNAL_INCLUDES_SETTING}: ${includeExternal ? "true" : "false"}`;
+			const row = `${externalIncludesSetting(instructionFile())}: ${includeExternal ? "true" : "false"}`;
 			const picked = await consentDialog(pi.events, () => ctx.ui.select("Config", [row], { signal: approvalAbort.signal }));
 			if (picked !== row || gen !== sessionGeneration || approvalAbort.signal.aborted) return;
 			if (includeExternal) {
@@ -347,7 +349,7 @@ function instructionsExtension(pi: ExtensionAPI) {
 			} else await askApproval(ctx, paths);
 			// As in Claude Code, this changes future loads, never retracts text or
 			// rewrites the frozen first-message block after a request was sent.
-			return `${EXTERNAL_INCLUDES_SETTING}: ${includeExternal ? "true" : "false"}`;
+			return `${externalIncludesSetting(instructionFile())}: ${includeExternal ? "true" : "false"}`;
 		},
 	});
 	const drainApproval = async () => { startupConsentReady(pi.events); await approvalPending; };

@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseFrontmatterLoosely } from "../../extensions/lib/core/frontmatter.ts";
 import { BUNDLED_SKILLS_DIR } from "../../extensions/lib/plugins/skill-scan.ts";
+import { codeReviewCell, readCellTable, REVIEW_EFFORTS } from "../../extensions/tools/skill/code-review.ts";
 import { sha } from "./helpers/sha.ts";
 
 const read = (...path: string[]) => readFileSync(join(BUNDLED_SKILLS_DIR, ...path), "utf-8").replace(/\r\n/g, "\n");
@@ -16,6 +17,15 @@ const cell = (name: string) => read("code-review", "cells", `${name}.md`);
 const skill = (name: string) => parseFrontmatterLoosely(read(name, "SKILL.md")) as { frontmatter: Record<string, string>; body: string };
 
 describe("code-review cells", () => {
+	it("maps frontier to Claude Code's default table and the other tiers to its Sonnet 5 table, each followed by the flags section", () => {
+		const table = readCellTable(join(BUNDLED_SKILLS_DIR, "code-review", "cells"));
+		const cells = (tier: "frontier" | "workhorse" | "cheap" | "tiny") => REVIEW_EFFORTS.map((effort) => codeReviewCell(table, tier, effort));
+		expect(cells("frontier")).toEqual(["low-1-pass-max4", "minimal-prompt", "high-8-inline", "xhigh-10-inline-sweep", "max-5x5-verify-sweep"]);
+		const sonnet5 = ["low-1-pass-min-files-4", "medium-3x5-verify", "high-3x5-recall-verify", "xhigh-5x5-verify-sweep", "max-5x5-verify-sweep"];
+		for (const tier of ["workhorse", "cheap", "tiny"] as const) expect(cells(tier), tier).toEqual(sonnet5);
+		expect(table.after).toBe("arguments-and-flags");
+	});
+
 	it("keeps each cell's text", () => {
 		expect(
 			Object.fromEntries(

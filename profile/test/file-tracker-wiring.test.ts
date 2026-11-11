@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fileTrackerExtension from "../../extensions/safety/file-tracker/index.ts";
 import { discoverContextFiles } from "../claude-code/instructions.ts";
-import { persistExternalIncludesApproval } from "../../extensions/lib/context/claude-external-includes.ts";
+import { persistExternalIncludesApproval } from "../../extensions/lib/context/external-includes.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "../../test/unit/helpers/fake-pi.ts";

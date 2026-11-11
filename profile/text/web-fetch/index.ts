@@ -6,7 +6,7 @@
 
 import type { FetchAnswer, FetchFailure, LiveTools, ReaderFailure, UrlProblem, WebFetchText } from "../../../extensions/sdk/profile.ts";
 import { webFetchDescription } from "./description.ts";
-import { type ToolPassages, withoutOff } from "../../live-tools.ts";
+import { type ToolPassages, withoutOff } from "../../../extensions/sdk/profile.ts";
 
 function urlRejected(problem: UrlProblem): string {
 	switch (problem.kind) {

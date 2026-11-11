@@ -31,7 +31,7 @@ import { findGitRoot } from "./git.ts";
 import { tryReadFile } from "../plugins/plugins.ts";
 import { absoluteFrom, expandTilde, isPathAtOrUnder, productStateDir, tryRealpath } from "../profile/paths.ts";
 import { MAX_INSTRUCTION_BYTES } from "./claude-rules.ts";
-import { readExternalIncludesApproval } from "./claude-external-includes.ts";
+import { readExternalIncludesApproval } from "./external-includes.ts";
 import type { InstructionSource } from "./context-text.ts";
 import { activeProfile, featureEnabled } from "../profile/profile.ts";
 import { allowedPath, allowPathOf, type InstructionTargets, openSources, projectConfigDirName } from "../profile/sources.ts";

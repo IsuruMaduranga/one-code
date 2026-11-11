@@ -6,7 +6,7 @@
 
 import type { Answer, AskUserText, LiveTools, Question } from "../../../extensions/sdk/profile.ts";
 import { ASK_PARAMS, askDescription } from "./description.ts";
-import { type ToolPassages, withoutOff } from "../../live-tools.ts";
+import { type ToolPassages, withoutOff } from "../../../extensions/sdk/profile.ts";
 
 /**
  * Claude Code's answer list: `"question"="answer"` per answered question, with

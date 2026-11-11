@@ -1,9 +1,8 @@
 /**
  * The sentence-like string literals in a TypeScript file, outside comments:
- * plain strings and template text with at least four words. The base-text
- * check (base-text.test.ts) lists them per file, so a new sentence in the base
- * fails until someone decides whether it is the model's (the profile) or the
- * user's (UI, logs, errors the user reads).
+ * plain strings and template text with at least four words. The text moves
+ * between the profile and the base are checked with it: the sentences a
+ * move removes from one side are the ones it adds to the other.
  */
 import ts from "typescript";
 

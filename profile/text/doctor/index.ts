@@ -4,7 +4,7 @@
  */
 
 import type { DoctorText, LiveTools } from "../../../extensions/sdk/profile.ts";
-import { type ToolPassages, withoutOff } from "../../live-tools.ts";
+import { type ToolPassages, withoutOff } from "../../../extensions/sdk/profile.ts";
 import { doctorFixPrompt } from "./fix-prompt.ts";
 
 const FIX_PASSAGES: ToolPassages = { ask_user_question: [" with the `ask_user_question` tool"] };

@@ -39,6 +39,7 @@ export function checkBrand(value) {
 		if (!Array.isArray(info?.keywords) || info.keywords.some((word) => typeof word !== "string")) problems.push(`"packageInfo.${key}.keywords" must be an array of strings`);
 	}
 	// A folder inside the package, forward-slashed: it is joined to the package root and listed in package.json `files`.
+	if (value.spinnerVerbs !== undefined && (!Array.isArray(value.spinnerVerbs) || value.spinnerVerbs.some((verb) => typeof verb !== "string" || verb.trim() === ""))) problems.push(`"spinnerVerbs" must be an array of words`);
 	if (value.guideDir !== undefined && (typeof value.guideDir !== "string" || !/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/.test(value.guideDir) || value.guideDir.split("/").some((part) => part === "." || part === "..") || `${value.guideDir}/`.startsWith("profile/test/"))) problems.push(`"guideDir" must be a folder path inside the package ("docs/guide"), outside profile/test, when set`);
 	if (typeof value.envPrefix === "string" && !/^[A-Z][A-Z0-9_]*$/.test(value.envPrefix)) problems.push(`"envPrefix" must be upper-case letters, digits and underscores`);
 	if (typeof value.idPrefix === "string" && !/^[a-z][a-z0-9-]*$/.test(value.idPrefix)) problems.push(`"idPrefix" must be lower-case letters, digits and hyphens`);

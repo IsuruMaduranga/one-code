@@ -29,7 +29,7 @@ export type { HooksText } from "../safety/hooks/text.ts";
 export type { InitText } from "../commands/init/text.ts";
 export type { ContextChange, ContextText, InstructionSource, MemoryIndexCut, MemoryIndexSize } from "../lib/context/context-text.ts";
 export type { HandbackText } from "../lib/agents/handback-text.ts";
-export type { LiveTools } from "../lib/profile/live-tools.ts";
+export { type LiveTools, type ToolPassages, withoutOff } from "../lib/profile/live-tools.ts";
 export type { PromptTier } from "../lib/models/model-tier.ts";
 export type { NativeFallback, NativeWebText } from "../lib/request/native-web-text.ts";
 export type { NotificationsText, OneShotWork, TaskSummary } from "../lib/notify/notifications-text.ts";

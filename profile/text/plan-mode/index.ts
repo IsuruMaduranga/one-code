@@ -8,7 +8,7 @@
 import type { LiveTools, PlanModeText } from "../../../extensions/sdk/profile.ts";
 import { buildPlanModeReminder } from "./reminder.ts";
 import { approvedPlanText, enteredPlanModeText, enterPlanModeDescription, EXIT_PLAN_MODE_DESCRIPTION, exitedPlanModeText } from "./texts.ts";
-import { type ToolPassages, withoutOff } from "../../live-tools.ts";
+import { type ToolPassages, withoutOff } from "../../../extensions/sdk/profile.ts";
 
 const CONTINUE = "If this plan is relevant to the current work and not already complete, continue working on it.";
 

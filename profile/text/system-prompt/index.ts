@@ -11,7 +11,7 @@ import { frontierBundle } from "./frontier.ts";
 import { lowBundle } from "./low.ts";
 import { memoryPromptSection } from "./memory.ts";
 import { midBundle } from "./mid.ts";
-import { type ToolPassages, withoutOff } from "../../live-tools.ts";
+import { type ToolPassages, withoutOff } from "../../../extensions/sdk/profile.ts";
 import { TYPED_SKILL_BULLET } from "./common.ts";
 import { DELEGATE_STRICT } from "./low.ts";
 import { DELEGATING_WORK, FORK_BULLET } from "./mid.ts";

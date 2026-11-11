@@ -9,7 +9,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { codeReviewCell, readCellTable, type ReviewEffort } from "../../extensions/tools/skill/code-review.ts";
 import skillExtension from "../../extensions/tools/skill/index.ts";
+import type { PromptTier } from "../../extensions/lib/models/model-tier.ts";
 import { invalidatePluginsCache } from "../../extensions/lib/plugins/plugins.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { BUNDLED_SKILLS_DIR } from "../../extensions/lib/plugins/skill-scan.ts";
@@ -26,6 +28,12 @@ const pluginDir = join(pluginsRoot, "cache", "market", "kit", "1.0.0");
 const codeReviewFile = join(BUNDLED_SKILLS_DIR, "code-review", "SKILL.md");
 // A Windows checkout may carry CRLF; the selector reads the cells with LF, as Claude Code's text is.
 const cell = (name: string) => readFileSync(join(BUNDLED_SKILLS_DIR, "code-review", "cells", `${name}.md`), "utf-8").replace(/\r\n/g, "\n").trimEnd();
+const table = readCellTable(join(BUNDLED_SKILLS_DIR, "code-review", "cells"));
+/** The body the profile's table gives a tier and effort: the cell, then the table's closing section. */
+const body = (tier: PromptTier, effort: ReviewEffort) => {
+	const picked = cell(codeReviewCell(table, tier, effort));
+	return table.after ? `${picked}\n\n${cell(table.after)}` : picked;
+};
 
 const write = (path: string, text: string) => {
 	mkdirSync(join(path, ".."), { recursive: true });
@@ -133,17 +141,17 @@ describe("skill tool: Claude Code's result", () => {
 		await turn();
 		const result = await call({ skill: "code-review", args: "123" });
 		expect(result.content[0].text).toBe(requireText("skill").launching("code-review"));
-		expect(result.content[1].text).toBe(`${cell("minimal-prompt")}\n\n${cell("arguments-and-flags")}\n\nARGUMENTS: 123`);
+		expect(result.content[1].text).toBe(`${body("frontier", "medium")}\n\nARGUMENTS: 123`);
 	});
 
-	it("gives a workhorse session Claude Code's Sonnet 5 cells, and a typed level wins over the session's", async () => {
+	it("gives a session its tier's cell, and a typed level wins over the session's", async () => {
 		const high = await mount(workhorse, "high");
 		await high.turn();
-		expect((await high.call({ skill: "code-review", args: "main" })).content[1].text.startsWith(cell("high-3x5-recall-verify"))).toBe(true);
+		expect((await high.call({ skill: "code-review", args: "main" })).content[1].text.startsWith(body("workhorse", "high"))).toBe(true);
 		const typed = await mount(frontier, "high");
 		await typed.turn();
 		const text = (await typed.call({ skill: "code-review", args: "low 123 --fix" })).content[1].text;
-		expect(text.startsWith(cell("low-1-pass-max4"))).toBe(true);
+		expect(text.startsWith(body("frontier", "low"))).toBe(true);
 		expect(text.endsWith("\n\nARGUMENTS: 123 --fix")).toBe(true);
 	});
 
@@ -153,6 +161,6 @@ describe("skill tool: Claude Code's result", () => {
 		await fake.commands.get("code-review")!.handler("", ctx);
 		const content = fake.sentMessages[0].message.content as Array<{ text: string }>;
 		expect(content[0].text).toBe("<command-message>code-review</command-message>\n<command-name>/code-review</command-name>\n");
-		expect(content[1].text).toBe(`${cell("xhigh-5x5-verify-sweep")}\n\n${cell("arguments-and-flags")}\n`);
+		expect(content[1].text).toBe(`${body("workhorse", "xhigh")}\n`);
 	});
 });

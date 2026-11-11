@@ -9,7 +9,7 @@ import mcpExtension from "../../extensions/tools/mcp/index.ts";
 import { buildClaudeMdBlock } from "../../extensions/context/instructions/instructions.ts";
 import { discoverOneCodeFiles, openInstructions } from "../../extensions/lib/context/instructions.ts";
 import { discoverContextFiles, externalInstructionIncludes, nestedInstructionFiles } from "../claude-code/instructions.ts";
-import { EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_NONE, EXTERNAL_INCLUDES_TITLE, EXTERNAL_INCLUDES_YES, externalIncludesDialog, persistExternalIncludesApproval, readExternalIncludesApproval } from "../../extensions/lib/context/claude-external-includes.ts";
+import { EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_YES, externalIncludesDialog, externalIncludesNone, externalIncludesTitle, persistExternalIncludesApproval, readExternalIncludesApproval } from "../../extensions/lib/context/external-includes.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { productProjectSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
 import { forwardSlashes } from "../../extensions/lib/profile/paths.ts";
@@ -71,7 +71,7 @@ describe("external instruction include approval", () => {
 		write(join(root, "shared.md"), "APPROVED EXTERNAL INSTRUCTION\n");
 		const { select, texts } = await start(EXTERNAL_INCLUDES_YES);
 		expect(select).toHaveBeenCalledTimes(1);
-		expect(select.mock.calls[0][0]).toBe(externalIncludesDialog([join(root, "shared.md")], home));
+		expect(select.mock.calls[0][0]).toBe(externalIncludesDialog([join(root, "shared.md")], home, "CLAUDE.md", "CLAUDE.md or .claude/rules"));
 		expect(select.mock.calls[0][1]).toEqual([EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_YES]);
 		expect(texts.at(-1)).toContain("APPROVED EXTERNAL INSTRUCTION");
 		expect(readExternalIncludesApproval(cwd, home)).toEqual({ approved: true, warningShown: true });
@@ -202,9 +202,9 @@ describe("external instruction include approval", () => {
 		// Decline all prompts, as a person would; only one may be visible at a time.
 		await fake.fire("before_agent_start", {}, ctx);
 		expect(maximum).toBe(1);
-		expect(shown[0]).not.toContain(EXTERNAL_INCLUDES_TITLE);
+		expect(shown[0]).not.toContain(externalIncludesTitle("CLAUDE.md"));
 		expect(shown[1]).toContain("MCP");
-		expect(shown[2]).toContain(EXTERNAL_INCLUDES_TITLE);
+		expect(shown[2]).toContain(externalIncludesTitle("CLAUDE.md"));
 	});
 
 	it("does not publish a waiting first turn after session shutdown", async () => {
@@ -229,7 +229,7 @@ describe("external instruction include approval", () => {
 		fixture();
 		const fake = createFakePi();
 		instructionsExtension(fake.pi as never);
-		const select = vi.fn(async (title: string): Promise<string | undefined> => title.startsWith(EXTERNAL_INCLUDES_TITLE) ? new Promise(() => {}) : undefined);
+		const select = vi.fn(async (title: string): Promise<string | undefined> => title.startsWith(externalIncludesTitle("CLAUDE.md")) ? new Promise(() => {}) : undefined);
 		const ctx = createFakeCtx({ cwd, hasUI: true, mode: "rpc", ui: { select } });
 		await fake.fire("session_start", {}, ctx);
 		const command = fake.commands.get("config")!.handler("", ctx as never);
@@ -249,8 +249,8 @@ describe("external instruction include approval", () => {
 		await fake.fire("session_start", {}, ctx);
 		await fake.commands.get("config")!.handler("", ctx as never);
 		expect(select).not.toHaveBeenCalled();
-		expect(notify).toHaveBeenCalledWith(EXTERNAL_INCLUDES_NONE, "info");
-		expect(EXTERNAL_INCLUDES_NONE).toContain("/settings");
+		expect(notify).toHaveBeenCalledWith(externalIncludesNone("CLAUDE.md"), "info");
+		expect(externalIncludesNone("CLAUDE.md")).toContain("/settings");
 	});
 
 	it("config can enable after a no without rewriting a sent prefix, and disable without a new approval", async () => {
@@ -261,7 +261,7 @@ describe("external instruction include approval", () => {
 		const first = await fake.fireOne("context", { messages }, ctx);
 		expect(JSON.stringify(first)).toContain(ref(join(root, "shared.md")));
 		expect(JSON.stringify(first)).not.toContain("APPROVED EXTERNAL INSTRUCTION");
-		select.mockImplementation(async (title, options) => title.startsWith(EXTERNAL_INCLUDES_TITLE) ? EXTERNAL_INCLUDES_YES : options[0]);
+		select.mockImplementation(async (title, options) => title.startsWith(externalIncludesTitle("CLAUDE.md")) ? EXTERNAL_INCLUDES_YES : options[0]);
 		await fake.commands.get("config")!.handler("", ctx as never);
 		expect(readExternalIncludesApproval(cwd, home).approved).toBe(true);
 		// The live block takes the approval: the next epoch's message 1 carries it.
@@ -508,14 +508,14 @@ describe("durable approval and dialog fidelity", () => {
 
 	it("uses the exact dialog copy and the eight/six-path preview cap", () => {
 		const paths = Array.from({ length: 9 }, (_, i) => join(home, `rule-${i}.md`));
-		const text = externalIncludesDialog(paths, home);
+		const text = externalIncludesDialog(paths, home, "CLAUDE.md", "CLAUDE.md or .claude/rules");
 		expect(text).toBe([
 			"Allow external CLAUDE.md file imports?",
 			"This project's CLAUDE.md or .claude/rules imports files outside the current working directory. Never allow this for third-party repositories.",
 			"External imports:\n" + Array.from({ length: 6 }, (_, i) => `  ~/rule-${i}.md`).join("\n") + "\n  … +3 imports not shown.\n  Yes covers those too, plus any this project adds later.",
 			"Important: Only use One Code with files you trust. Accessing untrusted files may pose security risks.",
 		].join("\n\n"));
-		expect(externalIncludesDialog(paths.slice(0, 8), home)).toContain("~/rule-7.md");
-		expect(externalIncludesDialog(paths.slice(0, 8), home)).not.toContain("not shown");
+		expect(externalIncludesDialog(paths.slice(0, 8), home, "CLAUDE.md", "CLAUDE.md or .claude/rules")).toContain("~/rule-7.md");
+		expect(externalIncludesDialog(paths.slice(0, 8), home, "CLAUDE.md", "CLAUDE.md or .claude/rules")).not.toContain("not shown");
 	});
 });

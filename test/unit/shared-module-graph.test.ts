@@ -64,7 +64,7 @@ describe("modules loaded through sharedModule", () => {
 		// The text is evaluated while the base resolves the profile; a base
 		// module in its graph that read the profile at load would re-enter that.
 		const loaded = baseValueModules(join(ROOT, "profile", "index.ts"));
-		const leaves = ["extensions/lib/profile/brand.mjs", "extensions/lib/profile/settings-display.ts", "extensions/tools/background/loop-sentinels.ts", "extensions/tools/web/backend-names.ts"];
+		const leaves = ["extensions/lib/profile/brand.mjs", "extensions/lib/profile/live-tools.ts", "extensions/lib/profile/settings-display.ts", "extensions/tools/background/loop-sentinels.ts", "extensions/tools/web/backend-names.ts"];
 		// A profile that names none of the constants loads none of them.
 		expect(loaded.filter((path) => !path.startsWith("extensions/sdk/") && !leaves.includes(path))).toEqual([]);
 	});

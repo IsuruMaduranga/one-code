@@ -5,14 +5,17 @@
  * skills' wording are the profile's (One Code's:
  * profile/test/bundled-skill-texts-wording.test.ts).
  */
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { BUNDLED_SKILLS_DIR } from "../../extensions/lib/plugins/skill-scan.ts";
 import {
+	type CellTable,
 	codeReviewBody,
 	codeReviewCell,
 	parseCodeReviewArgs,
+	readCellTable,
 	REVIEW_EFFORTS,
 	reviewEffortFor,
 } from "../../extensions/tools/skill/code-review.ts";
@@ -22,11 +25,21 @@ const cellsDir = join(BUNDLED_SKILLS_DIR, "code-review", "cells");
 const cell = (name: string) => read("code-review", "cells", `${name}.md`);
 
 describe("code-review cell choice", () => {
-	it("maps frontier to Claude Code's default table and the other tiers to its Sonnet 5 table", () => {
-		const table = (tier: "frontier" | "workhorse" | "cheap" | "tiny") => REVIEW_EFFORTS.map((effort) => codeReviewCell(tier, effort));
-		expect(table("frontier")).toEqual(["low-1-pass-max4", "minimal-prompt", "high-8-inline", "xhigh-10-inline-sweep", "max-5x5-verify-sweep"]);
-		const sonnet5 = ["low-1-pass-min-files-4", "medium-3x5-verify", "high-3x5-recall-verify", "xhigh-5x5-verify-sweep", "max-5x5-verify-sweep"];
-		for (const tier of ["workhorse", "cheap", "tiny"] as const) expect(table(tier), tier).toEqual(sonnet5);
+	it("takes a tier's own table, else the default one", () => {
+		const efforts = (cell: string) => Object.fromEntries(REVIEW_EFFORTS.map((effort) => [effort, `${cell}-${effort}`])) as CellTable["tables"][string];
+		const table: CellTable = { tables: { default: efforts("d"), frontier: efforts("f") } };
+		expect(codeReviewCell(table, "frontier", "high")).toBe("f-high");
+		for (const tier of ["workhorse", "cheap", "tiny"] as const) expect(codeReviewCell(table, tier, "max"), tier).toBe("d-max");
+	});
+
+	it("refuses a table without a complete default, naming the file", () => {
+		const dir = mkdtempSync(join(tmpdir(), "cells-"));
+		try {
+			writeFileSync(join(dir, "table.json"), JSON.stringify({ tables: { frontier: { low: "a" } } }));
+			expect(() => readCellTable(dir)).toThrow(/table\.json: it has no "default" table; table "frontier" has no cell for "medium"/);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	it("reads the effort from a typed level first, else the session's thinking level", () => {
@@ -45,10 +58,12 @@ describe("code-review cell choice", () => {
 		expect(parseCodeReviewArgs(" 123 high")).toEqual({ rest: "123 high" });
 		expect(parseCodeReviewArgs("")).toEqual({ rest: "" });
 		const review = codeReviewBody(cellsDir, "workhorse", "off", "xhigh feature-branch");
+		const table = readCellTable(cellsDir);
+		const picked = codeReviewCell(table, "workhorse", "xhigh");
 		expect(review).toEqual({
-			body: `${cell("xhigh-5x5-verify-sweep").trimEnd()}\n\n${cell("arguments-and-flags").trimEnd()}`,
+			body: table.after ? `${cell(picked).trimEnd()}\n\n${cell(table.after).trimEnd()}` : cell(picked).trimEnd(),
 			args: "feature-branch",
-			cell: "xhigh-5x5-verify-sweep",
+			cell: picked,
 		});
 	});
 

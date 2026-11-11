@@ -9,6 +9,7 @@
 	"homepage": "https://github.com/IsuruMaduranga/one-code",
 	"guideDir": "docs/guide",
 	"subtitle": "the Claude Code experience, on any model",
+	"spinnerVerbs": ["Clauding"],
 	"wordmark": [
 		" ██████╗ ███╗   ██╗███████╗   ██████╗ ██████╗ ██████╗ ███████╗",
 		"██╔═══██╗████╗  ██║██╔════╝  ██╔════╝██╔═══██╗██╔══██╗██╔════╝",

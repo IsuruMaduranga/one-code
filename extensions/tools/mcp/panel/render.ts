@@ -25,6 +25,8 @@ export interface McpRenderInput {
 	/** Transient messages (auth in progress / URL / errors). */
 	notices: string[];
 	settled: boolean;
+	/** The files servers are configured in, as the panel names them (config.ts `mcpConfigWhere`). */
+	where: string;
 }
 
 function statusFragment(entry: McpEntry, paint: McpPaint): string {
@@ -125,14 +127,14 @@ export function renderMcpPanel(input: McpRenderInput, paint: McpPaint): string[]
 		const footerReserve = 2 + footer.length + noticeLines + 1;
 		const budget = Math.max(1, height - out.length - footerReserve);
 		if (entries.length === 0) {
-			out.push("", paint.fg("dim", "  No MCP servers configured. Add them to .mcp.json or ~/.claude.json."));
+			out.push("", paint.fg("dim", `  No MCP servers configured. Add them to ${input.where}.`));
 		} else {
 			const windowed = windowBlocks(listBlocks(input, paint), state.cursor, budget);
 			out.push(...windowed.lines);
 			if (windowed.more > 0) out.push(paint.fg("dim", `  ↓ ${windowed.more} more`));
 		}
 		out.push("");
-		out.push(paint.fg("dim", cutPlainText("  Servers are configured in .mcp.json or ~/.claude.json.", width - 1)));
+		out.push(paint.fg("dim", cutPlainText(`  Servers are configured in ${input.where}.`, width - 1)));
 	}
 
 	for (const notice of input.notices) {

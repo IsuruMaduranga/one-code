@@ -133,7 +133,7 @@ describe("the settings ladder", () => {
 
 describe("the instruction files a user writes", () => {
 	it("are CLAUDE.md with One Code's provider on", () => {
-		expect(instructionTargets(home)).toEqual({ project: "CLAUDE.md", user: join(home, ".claude", "CLAUDE.md") });
+		expect(instructionTargets(home)).toEqual({ project: "CLAUDE.md", user: join(home, ".claude", "CLAUDE.md"), importers: "CLAUDE.md or .claude/rules" });
 		expect(instructionFileNames(home)).toEqual(["CLAUDE.md"]);
 	});
 

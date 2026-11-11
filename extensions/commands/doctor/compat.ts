@@ -129,7 +129,7 @@ const SCOPE_KEYS: Partial<Record<SettingsScope, ReadonlySet<string>>> = {
 		"disabledMcpServers",
 		AUTO_MEMORY,
 		...WORKFLOW_KEYS,
-		// The external CLAUDE.md includes answer, per repository (lib/context/claude-external-includes.ts).
+		// The external CLAUDE.md includes answer, per repository (lib/context/external-includes.ts).
 		"hasClaudeMdExternalIncludesApproved",
 		"hasClaudeMdExternalIncludesWarningShown",
 		"claudeMdExternalIncludesRoot",

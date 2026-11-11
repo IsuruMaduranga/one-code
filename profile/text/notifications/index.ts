@@ -7,7 +7,7 @@
  */
 
 import type { LiveTools, NotificationsText, OneShotWork, TaskSummary } from "../../../extensions/sdk/profile.ts";
-import { type ToolPassages, withoutOff } from "../../live-tools.ts";
+import { type ToolPassages, withoutOff } from "../../../extensions/sdk/profile.ts";
 
 export const AGENT_MESSAGE_OPENER = "Another Claude session sent a message:";
 

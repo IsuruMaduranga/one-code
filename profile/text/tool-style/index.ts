@@ -9,7 +9,7 @@
  */
 
 import type { LiveTools, ToolStyleText } from "../../../extensions/sdk/profile.ts";
-import { type ToolPassages, withoutOff } from "../../live-tools.ts";
+import { type ToolPassages, withoutOff } from "../../../extensions/sdk/profile.ts";
 
 export const WRITE_SHORT_DESCRIPTION = `Writes a file to the local filesystem, overwriting if one exists.
 
