@@ -1,9 +1,10 @@
 /**
- * What the worktree tools need from a profile (types only). The extension
- * decides what happened; the profile words it (working-docs/features/profiles/).
- * The shell guards' refusals are the base's own
- * (lib/rules/worktree-guard-text.ts): subagent worktree isolation uses them
- * too.
+ * The worktree tools' words. The extension decides what happened. The
+ * profile words the tools themselves (`WorktreeText`: descriptions,
+ * parameters, search keywords); the enter and exit results, the reminder
+ * and the missing-worktree notes are here (`worktreeResultText`). The shell
+ * guards' refusals are in lib/rules/worktree-guard-text.ts: subagent
+ * worktree isolation uses them too.
  */
 import type { CheckoutProgram } from "../../lib/shell/git-checkout-programs.ts";
 import { checkoutProgram } from "../../lib/rules/worktree-guard-text.ts";

@@ -1,8 +1,10 @@
 /**
- * What the shell tools (bash and powershell, through lib/shell-run/shell-tool.ts) need
- * from a profile (types only). The base runs the commands, decides which
- * calls its guards block, and reports how a run ended; the profile words
- * all of it. The command clips in a block, the output caps and the
+ * The shell tools' words (bash and powershell, through
+ * lib/shell-run/shell-tool.ts). The base runs the commands, decides which
+ * calls its guards block, and reports how a run ended. The profile words the
+ * tools themselves (`ShellText`: descriptions, parameters, the primary-shell
+ * guideline); the blocks, the results and the background notes are here
+ * (`shellResultText`, built for the session's live tools). The command clips in a block, the output caps and the
  * "(no output)" detection stay in the base.
  */
 

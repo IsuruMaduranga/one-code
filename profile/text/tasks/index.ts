@@ -1,7 +1,7 @@
 /**
- * One Code's task-tool text (the profile's `text.tasks`): Claude Code's
- * TaskCreate/TaskGet/TaskList/TaskUpdate descriptions (descriptions.ts), the
- * results, and the periodic reminder.
+ * One Code's task-tool words (the profile's `text.tasks`): Claude Code's
+ * TaskCreate/TaskGet/TaskList/TaskUpdate descriptions and parameter words
+ * (descriptions.ts). The results and the periodic reminder are the base's.
  */
 
 import type { TasksText } from "../../../extensions/sdk/profile.ts";

@@ -1,7 +1,7 @@
 /**
- * One Code's workflow text (the profile's `text.workflow`): Claude Code's
- * Workflow tool texts with One Code's tool names (description.ts), and the
- * run's results, refusals and script errors.
+ * One Code's workflow words (the profile's `text.workflow`): Claude Code's
+ * Workflow tool texts with One Code's tool names (description.ts), the agent
+ * prompt and the ultracode reminder.
  */
 
 import type { LiveTools, WorkflowText } from "../../../extensions/sdk/profile.ts";

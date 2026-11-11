@@ -1,7 +1,7 @@
 /**
- * One Code's worktree-tool text (the profile's `text.worktree`): Claude Code's
- * EnterWorktree/ExitWorktree descriptions (descriptions.ts), the results, and
- * the session reminders.
+ * One Code's worktree-tool words (the profile's `text.worktree`): Claude Code's
+ * EnterWorktree/ExitWorktree descriptions (descriptions.ts) and the parameter
+ * words.
  */
 
 import type { WorktreeText } from "../../../extensions/sdk/profile.ts";

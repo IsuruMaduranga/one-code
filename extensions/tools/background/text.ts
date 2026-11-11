@@ -1,7 +1,10 @@
 /**
- * What the background extension needs from a profile (types only). The
- * extension decides what happened; the profile words it
- * (working-docs/features/profiles/). The scheduling rules (the limits, the
+ * The background tools' words. The extension decides what happened. The
+ * profile words the tools themselves and the loop skill (`BackgroundText`:
+ * each tool's description and parameters, the loop's body and ticks); the
+ * monitor, wake-up and task results are here, the cron results in
+ * lib/agents/cron-text.ts, and `backgroundWords` hands the extension both
+ * parts per tool family. The scheduling rules (the limits, the
  * jitter, the clamp) and two formats stay in the base: a cron expression's
  * cadence reading (cron.ts describeCadence) and the list's 80-column prompt
  * clip (clipPrompt), which reach the words as values.

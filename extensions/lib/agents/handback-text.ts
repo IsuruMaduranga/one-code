@@ -1,8 +1,9 @@
 /**
- * What the SubagentHandback tool needs from a profile (types only): every
- * child session (an Agent run, a fork, a workflow agent) hands its report
- * back through it (lib/agents/subagent-handback.ts). The tool's name, its slot and
- * the run's end are the base's.
+ * The SubagentHandback tool's words: every child session (an Agent run, a
+ * fork, a workflow agent) hands its report back through it
+ * (lib/agents/subagent-handback.ts). The profile words the tool itself
+ * (`HandbackText`: description, message parameter); the reminder and the
+ * delivery results are here (`handbackResultText`).
  */
 
 export interface HandbackText {

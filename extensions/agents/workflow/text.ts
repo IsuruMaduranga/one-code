@@ -1,7 +1,10 @@
 /**
- * What the workflow extension needs from a profile (types only). The base
- * runs scripts (parsing, the determinism guard, the agent runtime, resume,
- * the limits) and decides what happened; the profile words it. Messages the
+ * The workflow extension's words. The extension runs scripts (parsing, the
+ * determinism guard, the agent runtime, resume, the limits) and decides
+ * what happened. The profile words the tool itself, the agent prompt and
+ * the ultracode reminder (`WorkflowText`); refusals, script and call
+ * problems, run reports, notices and progress lines are here
+ * (`workflowResultText`). Messages the
  * runtime throws into a script are worded where they are thrown, since a
  * script can read `e.message`; deep modules reach the words through
  * `words.ts`. The progress lines' glyphs (`•`, `⏳`, `✓`, `✗`) and the

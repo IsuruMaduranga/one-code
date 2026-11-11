@@ -1,6 +1,8 @@
 /**
- * What web_fetch needs from a profile (types only). The extension decides what
- * happened; the profile words it (working-docs/features/profiles/). The
+ * web_fetch's words. The extension decides what happened. The profile words
+ * the tool itself and the reader model's prompt (`WebFetchText`); the
+ * results, failures, the header and the words around a fetched page are
+ * here (`webFetchResultText`, built for the session's live tools). The
  * `<page>` frame around fetched text and its escaping stay in the base
  * (page-content.ts): they hold the data boundary.
  */

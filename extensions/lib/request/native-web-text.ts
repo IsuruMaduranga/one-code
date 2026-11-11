@@ -1,6 +1,7 @@
 /**
- * What Anthropic's server-side web tools need from a profile (types only):
- * the nested calls' prompts and why a call did not answer. web_search and
+ * The words of Anthropic's server-side web tools: the profile supplies the
+ * nested calls' prompts (`NativeWebText`); why a call did not answer is
+ * here (`nativeWebResultText`). web_search and
  * web_fetch both use it (lib/request/anthropic-server-tools.ts, lib/request/anthropic-server-call.ts).
  */
 

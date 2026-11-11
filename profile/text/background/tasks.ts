@@ -1,8 +1,8 @@
 /**
- * One Code's task_output and task_stop text (the profile's
+ * One Code's task_output and task_stop words (the profile's
  * `text.background.tasks`). task_stop's description is Claude Code's
  * TaskStop text without its agent-team and agent-name clauses: a task is
- * stopped by its id here. The clipped-output header is Claude Code's.
+ * stopped by its id here.
  */
 
 import type { TaskToolsText } from "../../../extensions/sdk/profile.ts";

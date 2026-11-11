@@ -1,7 +1,6 @@
 /**
- * One Code's ask_user_question text (the profile's `text.askUser`): Claude
- * Code's AskUserQuestion description and parameter docs (description.ts) and
- * its result wording.
+ * One Code's ask_user_question words (the profile's `text.askUser`): Claude
+ * Code's AskUserQuestion description and parameter docs (description.ts).
  */
 
 import type { AskUserText, LiveTools } from "../../../extensions/sdk/profile.ts";

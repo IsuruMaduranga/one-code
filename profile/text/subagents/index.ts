@@ -1,11 +1,9 @@
 /**
- * One Code's subagent text (the profile's `text.subagents`): the Agent tool's
+ * One Code's subagent words (the profile's `text.subagents`): the Agent tool's
  * description (agent-description.ts: Claude Code's text with One Code's
- * paragraph), the parameters, results and refusals of Agent, SendMessage and
- * list_agents, a run's failures, the fork's framing, and the blocks the
- * extension adds to the conversation. Claude Code's wording where it has
- * one (the catalog rows, the anti-fabrication sentence, the hand-off
- * results); One Code's elsewhere.
+ * paragraph), the parameters of Agent, SendMessage and list_agents, the
+ * fork's framing, the delegation steer and the guide agent, and two clauses
+ * the base's refusals take because they name Claude Code.
  */
 
 import type { LiveTools, SubagentsText } from "../../../extensions/sdk/profile.ts";

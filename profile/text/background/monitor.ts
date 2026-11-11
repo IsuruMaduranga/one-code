@@ -1,5 +1,6 @@
 /**
- * One Code's monitor text (the profile's `text.background.monitor`).
+ * One Code's monitor words (the profile's `text.background.monitor`): the
+ * tool's description and parameters.
  */
 
 import type { MonitorText } from "../../../extensions/sdk/profile.ts";

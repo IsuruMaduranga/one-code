@@ -1,8 +1,6 @@
 /**
- * One Code's SubagentHandback text (the profile's `text.handback`): Claude
- * Code's description, reminder and results, and One Code's load-first line
- * for a fork, where the tool is deferred (the fork sends its parent's tool
- * list): the frozen deferred listing it inherits does not name it.
+ * One Code's SubagentHandback words (the profile's `text.handback`): Claude
+ * Code's description and its message parameter's.
  */
 
 import type { HandbackText } from "../../../extensions/sdk/profile.ts";

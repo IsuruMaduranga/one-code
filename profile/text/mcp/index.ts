@@ -1,7 +1,6 @@
 /**
- * One Code's MCP text (the profile's `text.mcp`): the servers' instructions
- * and failed-servers blocks (Claude Code's, findings §14), the change notices,
- * the server tools' results and the resource tools.
+ * One Code's MCP words (the profile's `text.mcp`): the resource tools'
+ * descriptions and parameters.
  */
 
 import type { McpText } from "../../../extensions/sdk/profile.ts";

@@ -1,4 +1,4 @@
-/** What the recap needs from a profile (types only). */
+/** The recap's words: the profile supplies its prompt (`RecapText`); the stub's reason is here. */
 export interface RecapText {
 	/** The instruction sent after the recent messages. */
 	prompt: string;

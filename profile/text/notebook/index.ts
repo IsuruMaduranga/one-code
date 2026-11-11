@@ -1,7 +1,7 @@
 /**
- * One Code's notebook_edit text (the profile's `text.notebook`): the
- * description, parameter docs, results and failures, in Claude Code's
- * NotebookEdit wording with One Code's extras (description.ts).
+ * One Code's notebook_edit words (the profile's `text.notebook`): the
+ * description and parameter docs in Claude Code's NotebookEdit wording with
+ * One Code's extras (description.ts), and the name of the path's alias.
  */
 
 import type { NotebookText } from "../../../extensions/sdk/profile.ts";

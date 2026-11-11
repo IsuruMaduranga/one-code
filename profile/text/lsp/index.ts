@@ -1,7 +1,6 @@
 /**
- * One Code's language-server text (the profile's `text.lsp`): the
- * lsp_diagnostics tool, its results and failures, and the new-diagnostics
- * block (Claude Code's `<new-diagnostics>` shape).
+ * One Code's language-server words (the profile's `text.lsp`): the
+ * lsp_diagnostics tool's description and parameters.
  */
 
 import type { LspText } from "../../../extensions/sdk/profile.ts";

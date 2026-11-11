@@ -1,4 +1,4 @@
-/** What `/btw` needs from a profile (types only). */
+/** `/btw`'s words: the profile supplies the side question's prompt (`BtwText`); the stub's reason is here. */
 export interface BtwText {
 	/** The final user message of a side question; `question` is already trimmed. */
 	question(question: string): string;

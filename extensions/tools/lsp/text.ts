@@ -1,8 +1,9 @@
 /**
- * What the language-server tool needs from a profile (types only). The
- * extension decides what happened; the profile words it
- * (working-docs/features/profiles/). The caps on the new-diagnostics block
- * stay in the base; the profile words its framing, entries and cut label.
+ * The language-server tool's words. The extension decides what happened.
+ * The profile words the tool itself (`LspText`: description, parameters);
+ * the diagnostics, the failures and the new-diagnostics block's framing,
+ * entries and cut label are here (`lspResultText`), with the block's caps
+ * in the extension.
  */
 
 /** Why a language server is not available, or stopped. */

@@ -1,7 +1,10 @@
 /**
- * What plan mode needs from a profile (types only). The extension owns the
- * mode, the plan file and the approval dialog's choices; the profile words
- * what the model reads (working-docs/features/profiles/).
+ * Plan mode's words. The extension owns the mode, the plan file and the
+ * approval dialog's choices. The profile words the two tools and the
+ * mode's standing reminder, which is policy (`PlanModeText`); the enter,
+ * approve and exit results and the reattached-plan note are here, the way
+ * Claude Code words them (`planModeResultText`, built for the session's
+ * live tools).
  */
 
 import type { DescriptionForm } from "../../lib/profile/tool-variants.ts";

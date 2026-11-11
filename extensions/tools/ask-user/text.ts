@@ -1,7 +1,8 @@
 /**
- * What ask_user_question needs from a profile (types only). The base asks
- * and collects the answers as data (questions.ts); the profile words the
- * tool and its results (working-docs/features/profiles/).
+ * ask_user_question's words. The extension asks and collects the answers as
+ * data (questions.ts). The profile words the tool itself (`AskUserText`:
+ * description, prompt snippet, parameters); the answers, the decline and the
+ * refusal without a user are here (`askUserResultText`).
  */
 
 import type { DescriptionForm } from "../../lib/profile/tool-variants.ts";

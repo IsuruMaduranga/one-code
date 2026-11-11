@@ -1,8 +1,7 @@
 /**
- * One Code's shell text (the profile's `text.shell`): Claude Code's Bash and
+ * One Code's shell words (the profile's `text.shell`): Claude Code's Bash and
  * PowerShell descriptions with One Code's corrections (bash-description.ts,
- * powershell-description.ts), Claude Code's parameter and exit-code texts,
- * and One Code's guard blocks and background-run results.
+ * powershell-description.ts) and Claude Code's parameter words.
  */
 
 import type { LiveTools, ShellText } from "../../../extensions/sdk/profile.ts";

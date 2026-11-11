@@ -1,6 +1,8 @@
 /**
- * What the notebook tool needs from a profile (types only). The base decides
- * what happened; the profile words it (working-docs/features/profiles/).
+ * The notebook tool's words. The extension decides what happened. The
+ * profile words the tool itself (`NotebookText`: description, parameters,
+ * search keywords, and the name of the path's alias); the edit's result and
+ * failures are here (`notebookResultText`).
  */
 
 /** A cell as the model addresses it: its own id, else its position (`cell-0`). */

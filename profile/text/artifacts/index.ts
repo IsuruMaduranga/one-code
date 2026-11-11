@@ -1,6 +1,6 @@
 /**
- * One Code's artifact text (the profile's `text.artifacts`): the artifact
- * tool's description, parameters and results, and the store's refusals.
+ * One Code's artifact words (the profile's `text.artifacts`): the artifact
+ * tool's description and parameters.
  */
 
 import { type ToolPassages, withoutOff } from "../../../extensions/sdk/profile.ts";

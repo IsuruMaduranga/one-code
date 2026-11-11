@@ -1,7 +1,6 @@
 /**
- * One Code's web_fetch text (the profile's `text.webFetch`): the descriptions
- * (description.ts), the parameters, every result and failure, the words around
- * fetched pages, and the reader model's prompt.
+ * One Code's web_fetch words (the profile's `text.webFetch`): the descriptions
+ * (description.ts), the parameters, and the reader model's prompt.
  */
 
 import type { LiveTools, WebFetchText } from "../../../extensions/sdk/profile.ts";

@@ -1,8 +1,11 @@
 /**
- * What the skill tool and the skills listing need from a profile (types only;
- * working-docs/features/profiles/). The listing's lines, the `$ARGUMENTS`
- * substitution, the command breadcrumb and the skill's base-directory line
- * are the skill format, shared by every product, and stay in the base.
+ * The skill tool's and the skills listing's words. The profile words the
+ * tool itself (`SkillText`: description, prompt snippet, parameters); the
+ * listing's header, the launch line and the refusals are here
+ * (`skillResultText`). The listing's lines, the `$ARGUMENTS` substitution,
+ * the command breadcrumb and the skill's base-directory line
+ * (lib/plugins/skill-invoke.ts) are the skill format, shared by every
+ * product.
  */
 
 export interface SkillText {

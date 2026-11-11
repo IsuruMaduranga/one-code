@@ -1,6 +1,6 @@
 /**
- * One Code's skill text (the profile's `text.skill`): the skill tool, its
- * results, and the skills listing's framing (Claude Code's header).
+ * One Code's skill words (the profile's `text.skill`): the skill tool's
+ * description, prompt snippet and parameters.
  */
 
 import type { SkillText } from "../../../extensions/sdk/profile.ts";

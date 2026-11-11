@@ -1,8 +1,11 @@
 /**
- * What MCP needs from a profile (types only). The extension decides what
- * happened; the profile words it (working-docs/features/profiles/). The caps
- * stay in the base (a server's description, instructions and error line are
- * bounded before the profile sees them); the profile words the cut labels.
+ * MCP's words. The extension decides what happened. The profile words the
+ * resource tools themselves (`McpText.resources`: descriptions, parameters,
+ * search keywords); the servers' instructions and failed-servers blocks
+ * (Claude Code's, findings §14), the change notices, the server tools'
+ * results and the resource tools' results are here (`mcpResultText`,
+ * `mcpResourcesResultText`). A server's description, instructions and error
+ * line are bounded before they are worded; the cut labels are here too.
  * A server's own text (its instructions, a tool's description, an error it
  * sent) passes through unchanged.
  */

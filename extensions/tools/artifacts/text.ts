@@ -1,8 +1,9 @@
 /**
- * What the artifacts extension needs from a profile (types only). The
- * extension decides what happened; the profile words it
- * (working-docs/features/profiles/). The store's rules (the 16 MB cap, the
- * .html extension, versions) stay in the base and reach the words as values.
+ * The artifact tool's words. The extension decides what happened. The
+ * profile words the tool itself (`ArtifactsText`: description, parameters);
+ * its results and refusals are here (`artifactsResultText`). The store's
+ * rules (the 16 MB cap, the .html extension, versions) reach the words as
+ * values.
  */
 
 

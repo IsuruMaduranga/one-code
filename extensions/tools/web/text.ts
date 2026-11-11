@@ -1,7 +1,8 @@
 /**
- * What web_search needs from a profile (types only). The extension and its
- * backends decide what happened; the profile words it
- * (working-docs/features/profiles/). Backend labels and the user's progress
+ * web_search's words. The extension and its backends decide what happened.
+ * The profile words the tool itself (`WebSearchText`: description,
+ * parameters, search keywords); the answers, the fallback notes and the
+ * failures are here (`webSearchResultText`). Backend labels and the user's progress
  * lines stay in the base as UI; the server-side search's prompt and fallback
  * reasons are the `nativeWeb` group (lib/request/native-web-text.ts).
  */

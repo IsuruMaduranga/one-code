@@ -1,7 +1,6 @@
 /**
- * One Code's text for Anthropic's server-side web tools (the profile's
- * `text.nativeWeb`): the nested fetch and search calls' prompts, and why a
- * call did not answer.
+ * One Code's words for Anthropic's server-side web tools (the profile's
+ * `text.nativeWeb`): the nested fetch and search calls' prompts.
  */
 
 import type { NativeWebText } from "../../../extensions/sdk/profile.ts";

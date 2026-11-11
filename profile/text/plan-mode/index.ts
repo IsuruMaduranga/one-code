@@ -1,8 +1,7 @@
 /**
- * One Code's plan-mode text (the profile's `text.planMode`): Claude Code's
- * EnterPlanMode and ExitPlanMode descriptions and results (texts.ts), its
- * plan-mode instructions (reminder.ts), and the plan re-attached after a
- * compaction.
+ * One Code's plan-mode words (the profile's `text.planMode`): Claude Code's
+ * EnterPlanMode and ExitPlanMode descriptions (texts.ts) and its plan-mode
+ * instructions (reminder.ts).
  */
 
 import type { LiveTools, PlanModeText } from "../../../extensions/sdk/profile.ts";

@@ -1,13 +1,14 @@
 /**
- * What the subagents extension needs from a profile (types only). The base
- * runs agents (the catalog, the runtime, residents, forks, worktrees, the
- * registry) and decides what happened; the profile words what the model
- * reads: the tools' descriptions and parameters, their results and refusals,
- * a run's failures, the fork's framing, and the blocks the extension adds to
- * the conversation. The hand-back tool and the model menu are their own
- * groups (lib/agents/handback-text.ts, lib/models/subagent-model-text.ts). Progress lines the UI shows
- * and the panels are the base's. Deep modules reach the words through
- * `words.ts`.
+ * What the subagents extension needs from a profile (`SubagentsText`), and
+ * the data types its words take. The extension runs agents (the catalog,
+ * the runtime, residents, forks, worktrees, the registry) and decides what
+ * happened. The profile words the tools' descriptions and parameters, the
+ * fork's framing, the delegation policy and the guide agent; the results,
+ * refusals, failures and the blocks the extension adds to the conversation
+ * are in lib/agents/subagent-text.ts, which the workflow feature and lib
+ * modules read too. The hand-back tool and the model menu have their own
+ * modules (lib/agents/handback-text.ts, lib/models/subagent-model-text.ts).
+ * Deep modules reach the profile's part through `words.ts`.
  */
 
 import type { DescriptionForm } from "../../lib/profile/tool-variants.ts";

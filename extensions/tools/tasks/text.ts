@@ -1,7 +1,8 @@
 /**
- * What the task tools need from a profile (types only). The store keeps the
- * tasks and reports what changed as data; the profile words the tools and
- * their results (working-docs/features/profiles/).
+ * The task tools' words. The store keeps the tasks and reports what changed
+ * as data. The profile words the tools themselves (`TasksText`: descriptions,
+ * parameters, search keywords); their results and the periodic reminder are
+ * here (`tasksResultText`).
  */
 
 import type { TaskItem, TaskStatus } from "./store.ts";

@@ -1,8 +1,9 @@
 /**
- * What the compaction extension needs from a profile (types only). The base
- * decides when and how to compact (the cut, the replay or standalone
- * request, which tool results to clear, the kept tail); the profile words
- * the request and the stored summary. The summarizer's answer is read back by
+ * The compaction extension's words. The extension decides when and how to
+ * compact (the cut, the replay or standalone request, which tool results to
+ * clear, the kept tail). The profile words the request and the stored
+ * summary (`CompactionText`); the note left in place of a cleared tool
+ * result is here (`compactionResultText`). The summarizer's answer is read back by
  * the base (prompt.ts extractSummary), so the instruction must ask for the
  * surviving context inside a `<summary>` block, with any scratch work in an
  * `<analysis>` block.

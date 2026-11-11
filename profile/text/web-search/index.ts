@@ -1,7 +1,6 @@
 /**
- * One Code's web_search text (the profile's `text.webSearch`): the
- * descriptions (description.ts), the parameters, each route's result, the
- * notes on routes that fell back, and every failure.
+ * One Code's web_search words (the profile's `text.webSearch`): the
+ * descriptions (description.ts) and the parameters.
  */
 
 import { type WebSearchText } from "../../../extensions/sdk/profile.ts";
