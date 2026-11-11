@@ -4,8 +4,8 @@
  * or the cc-windows-mode skill's portable copy); the repo never mocks
  * child_process. Skipped cleanly where no pwsh exists.
  */
-import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { localPwsh, windowsPowerShell } from "./helpers/local-pwsh.ts";

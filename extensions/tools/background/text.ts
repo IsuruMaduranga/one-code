@@ -10,6 +10,7 @@
  * clip (clipPrompt), which reach the words as values.
  */
 import { cronWords } from "../../lib/agents/cron-text.ts";
+import { memoOn } from "../../lib/core/text-spans.ts";
 
 /** Why cron_create scheduled nothing. */
 export type CronCreateFailure =
@@ -249,18 +250,13 @@ const merge = (profile: BackgroundText) => ({
 	tasks: { ...profile.tasks, ...taskToolsResultText },
 	loop: profile.loop,
 });
-const merged = new WeakMap<BackgroundText, ReturnType<typeof merge>>();
 
 /**
  * The background tools' words as the extension reads them: the profile's and
  * the base's, per tool family. One object per profile group, so every reader
  * of a group shares it.
  */
-export function backgroundWords(profile: BackgroundText): ReturnType<typeof merge> {
-	let words = merged.get(profile);
-	if (!words) merged.set(profile, (words = merge(profile)));
-	return words;
-}
+export const backgroundWords = memoOn(merge);
 
 /** The task tools' words, both parts. */
 export type TaskToolsWords = TaskToolsText & TaskToolsResultText;

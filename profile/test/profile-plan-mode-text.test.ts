@@ -7,9 +7,7 @@
  * file's name and the approval dialog.
  */
 import { describe, expect, it } from "vitest";
-import { planModeText } from "../text/plan-mode/index.ts";
 import { buildPlanModeReminder } from "../text/plan-mode/reminder.ts";
-import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
 import { planModeResultText } from "../../extensions/safety/plan-mode/text.ts";
 
 

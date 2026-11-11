@@ -15,6 +15,7 @@ import { subagentResultWords } from "../../extensions/lib/agents/subagent-text.t
 import { permissionWords } from "../../extensions/lib/rules/permission-text.ts";
 import { subagentModelWords } from "../../extensions/lib/models/subagent-model-text.ts";
 import { profile } from "../../profile/index.ts";
+import { ALL_LIVE } from "./helpers/live.ts";
 import { type EnglishPhrases, type NamedText, toolLeaks } from "./helpers/tool-mentions.ts";
 
 /** Phrases where a tool's name is an English word, not the tool. */
@@ -63,7 +64,7 @@ describe("the base's words naming another tool", () => {
 	});
 
 	it("name the tools when every one is on", () => {
-		const all = texts({ has: () => true }).map(([, , text]) => text).join("\n");
+		const all = texts(ALL_LIVE).map(([, , text]) => text).join("\n");
 		for (const tool of ["task_output", "monitor", "SendMessage"]) expect(all, tool).toContain(tool);
 	});
 });

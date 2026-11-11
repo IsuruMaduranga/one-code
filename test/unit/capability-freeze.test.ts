@@ -11,7 +11,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { toolsInUse } from "../../extensions/lib/request/deferred.ts";
 import type { ToldFact } from "../../extensions/lib/request/ledger/records.ts";
 import { pluginRoot } from "../../extensions/lib/plugins/plugin-root.ts";
-import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/request/reminders.ts";
+import { REMINDER_CHANNEL, type RenderRequest } from "../../extensions/lib/request/reminders.ts";
 import { projectConfigDir } from "../../extensions/lib/profile/sources.ts";
 import { setSkillState } from "../../extensions/lib/plugins/skill-overrides.ts";
 import { listableSkillNames } from "../../extensions/tools/skill/announce.ts";

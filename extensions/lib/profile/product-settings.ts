@@ -21,7 +21,6 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { brand } from "./brand.mjs";
 import { join } from "node:path";
 import { readJsonFile, writeJsonAtomic } from "../core/atomic-write.ts";
 import { findProjectRoot } from "../context/git.ts";

@@ -36,7 +36,6 @@ import {
 	type TaskSnapshot,
 	TaskStore,
 } from "./store.ts";
-import { registerLocalCommand } from "../../lib/ui/local-command.ts";
 import { canShowCustomUi } from "../../lib/notify/headless-output.ts";
 import { taskToggleKey } from "../../lib/ui/keys.ts";
 import { tasksResultText } from "./text.ts";

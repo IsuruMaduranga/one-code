@@ -37,7 +37,6 @@ import { isExecutionPrimitivePath, isSensitivePath } from "./sensitive.ts";
 import { isWithin, resolveForContainment, toAbsoluteBash, touchesGuardedPath } from "./paths.ts";
 import { type CheckoutProgram, checkoutGitRunsProgram, READ_HOOKS } from "./git-checkout-programs.ts";
 import { lstatSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
 import {
 	GIT_GLOBAL_SAFE,
 	GIT_SUBCOMMAND_SPECS,

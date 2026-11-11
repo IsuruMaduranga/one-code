@@ -1,15 +1,14 @@
 /**
- * One Code's language-server wording (profile/text/lsp/) for the texts the golden
+ * The language-server results' wording for the texts the golden
  * snapshot cannot reach: a server that crashes, times out or is missing, a
  * TypeScript 7 project, a cancelled call, and the long-list and cut labels.
  * The golden snapshot pins the bytes of every other text; lsp.test.ts words
  * the not-installed failures.
  */
 import { describe, expect, it } from "vitest";
-import { lsp } from "../text/lsp/index.ts";
 import { lspResultText } from "../../extensions/tools/lsp/text.ts";
 
-describe("One Code's language-server text", () => {
+describe("the language-server text", () => {
 	it("words a server that fails after it started", () => {
 		expect(lspResultText.failure({ kind: "spawnFailed", command: "gopls", osMessage: "EACCES" })).toBe("Could not start gopls: EACCES");
 		expect(lspResultText.failure({ kind: "stoppedInput", command: "gopls", osMessage: "EPIPE" })).toBe("gopls stopped accepting input: EPIPE");

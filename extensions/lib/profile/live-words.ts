@@ -5,14 +5,11 @@
  * builder itself stays exported, for a test that passes a live set.
  */
 
+import { memoOn } from "../core/text-spans.ts";
 import type { LiveTools } from "./live-tools.ts";
 import { activeProfile } from "./profile.ts";
 
 export function forLive<T>(build: (live: LiveTools) => T): () => T {
-	const built = new WeakMap<LiveTools, T>();
-	return () => {
-		const { live } = activeProfile();
-		if (!built.has(live)) built.set(live, build(live));
-		return built.get(live) as T;
-	};
+	const built = memoOn(build);
+	return () => built(activeProfile().live);
 }

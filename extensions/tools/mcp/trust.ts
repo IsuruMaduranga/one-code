@@ -28,7 +28,7 @@
 import { brand } from "../../lib/profile/brand.mjs";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname } from "node:path";
 import { primaryFamily, primarySettingsFile, readSettingsFile, settingsSources } from "../../lib/profile/settings-files.ts";
 import { boundConsentItems } from "../../lib/consent/consent-preview.ts";
 import { consentStorePath } from "../../lib/consent/consent-stores.ts";

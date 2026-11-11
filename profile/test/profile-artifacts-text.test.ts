@@ -6,12 +6,8 @@
  * artifact text.
  */
 import { describe, expect, it } from "vitest";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
-import { artifactsText } from "../text/artifacts/index.ts";
-import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
 import { artifactsResultText } from "../../extensions/tools/artifacts/text.ts";
 
-const artifacts = artifactsText(ALL_LIVE);
 
 const page = { id: "report-a1b2c3", title: "Report", version: 1, created: true, url: "file:///s/view.html", file: "/s/index.html", galleryUrl: "file:///g.html" };
 
@@ -45,7 +41,6 @@ describe("One Code's artifact text", () => {
 });
 
 describe("artifact store wording", () => {
-	const words = () => requireText("artifacts");
 
 	it("names the size of a page too large to publish", () => {
 		const text = artifactsResultText.publishProblem({ kind: "tooLarge", path: "/tmp/p.html", bytes: 16 * 1024 * 1024 + 1, maxBytes: 16 * 1024 * 1024 });

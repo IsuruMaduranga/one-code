@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { powershellGuardReason, startSleepSeconds } from "../../extensions/tools/powershell/guards.ts";
 import { shellResultText } from "../../extensions/lib/shell-run/shell-text.ts";
 
@@ -20,7 +19,6 @@ describe("startSleepSeconds", () => {
 
 describe("powershellGuardReason", () => {
 	const fg = { background: false };
-	const shell = requireText("shell");
 	const sleep = (shown: string, rest?: string) =>
 		shellResultText().blocked({ kind: "sleep", shown, ...(rest ? { rest } : {}), sleepName: "Start-Sleep", untilExample: "while (-not (<check>)) { Start-Sleep 2 }" });
 	it("blocks a leading Start-Sleep (and the sleep alias) that is not provably short", () => {

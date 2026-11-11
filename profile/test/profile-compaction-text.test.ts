@@ -7,9 +7,8 @@
  * pins the manual and overflow requests and the stored summary.
  */
 import { describe, expect, it } from "vitest";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { compactionResultText } from "../../extensions/context/compaction/text.ts";
-import { buildCompactionInstruction, COMPACTION_INSTRUCTION, compaction, continuationSummary, keptTailNote } from "../text/compaction/index.ts";
+import { buildCompactionInstruction, COMPACTION_INSTRUCTION, continuationSummary, keptTailNote } from "../text/compaction/index.ts";
 
 describe("One Code's compaction text", () => {
 	it("names each kind of first kept message", () => {

@@ -1,14 +1,13 @@
 /**
- * One Code's wording of the task tools' texts (its profile's `tasks` group):
+ * The wording of the task tools' results:
  * the task reminder, the list and details, and an update's problems. The
- * store behind them is tested in test/unit/tasks-store.test.ts.
+ * store behind them is tested in tasks-store.test.ts.
  */
 import { describe, expect, it } from "vitest";
 import { TaskStore, taskView } from "../../extensions/tools/tasks/store.ts";
-import { tasks as text } from "../text/tasks/index.ts";
 import { tasksResultText } from "../../extensions/tools/tasks/text.ts";
 
-describe("One Code's task texts", () => {
+describe("the task texts", () => {
 	it("words a self-reference apart from an unknown dependency id", () => {
 		const store = new TaskStore();
 		const a = store.create({ subject: "A", description: "" });

@@ -13,7 +13,8 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ProfileText } from "../../extensions/lib/profile/profile-contract.ts";
-import { PROFILE_DIR, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
+import { PROFILE_DIR, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
+import { useProfile } from "./helpers/profile.ts";
 import { createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
 const ROOT = join(import.meta.dirname, "..", "..");
@@ -72,7 +73,7 @@ const failedToLoad: string[] = [];
 
 beforeAll(async () => {
 	const { mark: _mark, ...groups } = await import(pathToFileURL(join(ROOT, "test", "fixtures", "profile", "text.ts")).href);
-	setActiveProfileForTest(resolveProfile({ features: {}, tools: {}, childExtensions: [], text: () => groups as ProfileText }, {}, PROFILE_DIR));
+	useProfile({ text: () => groups as ProfileText }, PROFILE_DIR);
 	fake = createFakePi();
 	for (const entry of ENTRIES) {
 		try {

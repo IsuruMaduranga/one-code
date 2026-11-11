@@ -109,6 +109,8 @@ declare module "*/brand.mjs" {
 		readonly homepage: string;
 		/** The product's user guide, a folder inside the package, when it is not `profile/guide`: "docs/guide". Listed in package.json `files` (scripts/apply-brand.mjs). */
 		readonly guideDir?: string;
+		/** Spinner verbs the product adds to the base's list. */
+		readonly spinnerVerbs?: readonly string[];
 		/** The banner's tagline. */
 		readonly subtitle: string;
 		/** The banner's wordmark rows. */

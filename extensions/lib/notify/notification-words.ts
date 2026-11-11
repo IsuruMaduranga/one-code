@@ -5,14 +5,11 @@
  * (`requireText`) without that part: the frames are part of every session.
  */
 
+import { memoOn } from "../core/text-spans.ts";
 import { activeProfile, requireText } from "../profile/profile.ts";
-import { type NotificationWords, notificationText } from "./notifications-text.ts";
+import { type NotificationsText, type NotificationWords, notificationText } from "./notifications-text.ts";
 
-const built = new WeakMap<object, NotificationWords>();
+// One object per profile group: the frame patterns are cached on it (notifications.ts).
+const built = memoOn((product: NotificationsText) => notificationText(activeProfile().live, product));
 
-export function notificationWords(): NotificationWords {
-	const product = requireText("notifications");
-	let words = built.get(product);
-	if (!words) built.set(product, (words = notificationText(activeProfile().live, product)));
-	return words;
-}
+export const notificationWords = (): NotificationWords => built(requireText("notifications"));

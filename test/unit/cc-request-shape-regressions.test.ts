@@ -1,7 +1,6 @@
 /** Regressions for the request-shaping steps: the cache mark, call ids after a model switch, and fallbacks. */
 import { setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 import { useProfile } from "./helpers/profile.ts";
-import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { afterEach, describe, expect, it, vi, onTestFinished } from "vitest";
 import systemReminderExtension from "../../extensions/request/system-reminder/index.ts";
 import { deferredAddendumText } from "../../extensions/lib/request/deferred.ts";

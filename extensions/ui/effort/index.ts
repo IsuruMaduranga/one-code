@@ -23,7 +23,6 @@
 
 import { feature } from "../../lib/profile/feature.ts";
 import os from "node:os";
-import { join } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
 import { getAgentDir, SettingsManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";

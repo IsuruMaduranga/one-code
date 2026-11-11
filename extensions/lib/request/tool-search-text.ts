@@ -6,6 +6,7 @@
  * (request/tool-search/text.ts).
  */
 
+import { escapeRegExp } from "../core/text-spans.ts";
 
 /** What a tool_search call did, by tool name as the model wrote it. */
 export interface SearchOutcome {
@@ -29,11 +30,14 @@ function notFoundNote({ missing, withdrawn }: Pick<SearchOutcome, "missing" | "w
 	);
 }
 
+/** How the success sentence ends; `LOADED_SENTENCE` recognises it by this. */
+const LOADED_TAIL = ". These tools are now callable.";
+
 export const toolSearchResultText = {
 	result: (outcome: SearchOutcome): string =>
 		(
 			[
-				outcome.added.length > 0 ? `Loaded ${outcome.added.join(", ")}. These tools are now callable.` : "",
+				outcome.added.length > 0 ? `Loaded ${outcome.added.join(", ")}${LOADED_TAIL}` : "",
 				outcome.already.length > 0 ? `Already loaded: ${outcome.already.join(", ")}.` : "",
 			]
 				.filter(Boolean)
@@ -72,4 +76,4 @@ export const toolSearchResultText = {
 };
 
 /** `tool_search`'s plain success sentence, alone on its line: what `result` writes when every name loaded. */
-export const LOADED_SENTENCE = /^Loaded [^\n]*\. These tools are now callable\.(?=\n|$)/;
+export const LOADED_SENTENCE = new RegExp(`^Loaded [^\\n]*${escapeRegExp(LOADED_TAIL)}(?=\\n|$)`);

@@ -197,7 +197,7 @@ export const SPINNER_VERBS: readonly string[] = [
 ];
 
 /** The base's verbs and the brand's. */
-export const ALL_VERBS: readonly string[] = [...SPINNER_VERBS, ...((brand as { spinnerVerbs?: string[] }).spinnerVerbs ?? [])];
+export const ALL_VERBS: readonly string[] = [...SPINNER_VERBS, ...(brand.spinnerVerbs ?? [])];
 
 /** Random verb for one turn; `random` is injectable for tests. */
 export function pickVerb(random: () => number = Math.random, verbs: readonly string[] = ALL_VERBS): string {

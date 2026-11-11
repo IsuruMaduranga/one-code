@@ -26,10 +26,9 @@ import { AgentRecordStore, previewValue } from "./records.ts";
 import { findSavedWorkflow } from "./saved-workflows.ts";
 import { parseWorkflowScript } from "./script-source.ts";
 import { runWorkflowScript } from "./vm-runtime.ts";
-import type { AgentRecord, RunProgressEvent, RunStatus, WorkflowMeta } from "./types.ts";
+import type { RunProgressEvent, RunStatus, WorkflowMeta } from "./types.ts";
 import { WorkflowScriptError } from "./types.ts";
 import type { ViewerRunSnapshot } from "./viewer.ts";
-import { workflowWords } from "./words.ts";
 import type { DeferRequest } from "../../lib/request/deferred.ts";
 import { workflowResultText } from "./text.ts";
 
@@ -351,9 +350,8 @@ function defaultConcurrency(): number {
 	return Math.min(MAX_CONCURRENCY, Math.max(1, os.cpus().length - 2));
 }
 
-/** Human/LLM-facing completion report, delivered as the followUp message (the profile words it). */
+/** Human/LLM-facing completion report, delivered as the followUp message. */
 export function buildRunReport(handle: RunHandle): string {
-	const words = workflowWords();
 	const state = handle.state;
 	const seconds = handle.finishedAt ? Math.round((handle.finishedAt - handle.startedAt) / 1000) : 0;
 	// The isolation worktrees the run's agents left work in: their edits and

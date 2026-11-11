@@ -10,9 +10,8 @@ import type { ContextFile } from "../../lib/context/instructions.ts";
 import type { ToldFact } from "../../lib/request/ledger/records.ts";
 import { contentHash } from "../../lib/request/ledger/wire.ts";
 import { toldBlockFact } from "../../lib/request/reminders.ts";
-import type { ContextChange } from "../../lib/context/context-text.ts";
+import { type ContextChange, GIT_STATUS_TAKEN_AT } from "../../lib/context/context-text.ts";
 import { contextWords } from "../../lib/context/context-words.ts";
-import { differingSpans } from "../../lib/core/text-spans.ts";
 
 /** The told keys of the fingerprints (whole-text block facts) and of the compaction flag (a mode). */
 export const FACT_KEYS = {
@@ -68,15 +67,10 @@ export function contextBlockFacts(gitStatus: string | null, atCompaction: boolea
 
 /**
  * A refreshed git snapshot must not describe itself as the conversation's
- * initial status: the part of the profile's heading that differs between its
- * start and compaction renderings is swapped.
+ * initial status: the heading's phrase for when it was taken is swapped.
  */
 export function compactionGitStatus(text: string | null): string | null {
-	if (text === null) return null;
-	const probe = { branch: "", mainBranch: "", user: "", status: "", commits: "" };
-	const words = contextWords();
-	const [start, compaction] = differingSpans(words.gitStatus({ snapshot: probe, at: "start" }), words.gitStatus({ snapshot: probe, at: "compaction" }));
-	return text.replace(start, compaction);
+	return text === null ? null : text.replace(GIT_STATUS_TAKEN_AT.start, GIT_STATUS_TAKEN_AT.compaction);
 }
 
 /**

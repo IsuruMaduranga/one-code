@@ -15,7 +15,6 @@ vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
 
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { productProjectSettingsPath, productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
-import { forwardSlashes } from "../../extensions/lib/profile/paths.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import permissionsExtension from "../../extensions/safety/permissions/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";

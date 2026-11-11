@@ -64,7 +64,8 @@ import {
 	supportsImageInput,
 } from "./model-policy.ts";
 import { pairedModel } from "./model-pairings.ts";
-import { activeProfile, requireText } from "../profile/profile.ts";
+import { forLive } from "../profile/live-words.ts";
+import { requireText } from "../profile/profile.ts";
 import { atLeastTier, economicalContainedCandidates, intrinsicTier, type PromptTier, sameTierContainedCandidates } from "./model-tier.ts";
 
 /**
@@ -168,7 +169,7 @@ export interface SubagentModelResolution {
  * The words in force (subagent-model-text.ts), with the profile's clause; fails
  * closed without it, as every Agent and workflow call reads them.
  */
-export const subagentModelWordsInForce = (): SubagentModelWords => subagentModelWords(activeProfile().live, requireText("subagentModels"));
+export const subagentModelWordsInForce = forLive((live): SubagentModelWords => subagentModelWords(live, requireText("subagentModels")));
 const words = subagentModelWordsInForce;
 
 /**

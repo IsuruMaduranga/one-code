@@ -4,14 +4,10 @@
  * without that part: every session sends the context.
  */
 
+import { memoOn } from "../core/text-spans.ts";
 import { requireText } from "../profile/profile.ts";
 import { type ContextWords, contextText } from "./context-text.ts";
 
-const built = new WeakMap<object, ContextWords>();
+const built = memoOn(contextText);
 
-export function contextWords(): ContextWords {
-	const product = requireText("context");
-	let words = built.get(product);
-	if (!words) built.set(product, (words = contextText(product)));
-	return words;
-}
+export const contextWords = (): ContextWords => built(requireText("context"));

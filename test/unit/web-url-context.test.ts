@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFER_CHANNEL, deferredAddendumText, WITHHOLD_CHANNEL } from "../../extensions/lib/request/deferred.ts";
 import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/plugins/mcp-share.ts";
-import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/request/reminders.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import toolSearchExtension from "../../extensions/request/tool-search/index.ts";
 import webExtension from "../../extensions/tools/web/index.ts";
 import { createFakeCtx, createFakePi, renderRequest } from "./helpers/fake-pi.ts";

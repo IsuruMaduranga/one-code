@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import instructionsExtension from "../../extensions/context/instructions/index.ts";
 import { dateChangeReminder, localDate } from "../../extensions/context/instructions/instructions.ts";
-import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/request/reminders.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { dateFingerprint, FACT_KEYS } from "../../extensions/context/instructions/context-facts.ts";
 import { createFakeCtx, createFakePi, type FakePi, renderRequest } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";

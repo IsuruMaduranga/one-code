@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import tasksExtension from "../../extensions/tools/tasks/index.ts";
 import { TaskStore } from "../../extensions/tools/tasks/store.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { tasksResultText } from "../../extensions/tools/tasks/text.ts";
 
@@ -11,7 +10,6 @@ import { tasksResultText } from "../../extensions/tools/tasks/text.ts";
  * The wording is tested in tasks-results-wording.test.ts.
  */
 describe("tasks: result texts", () => {
-	const text = () => requireText("tasks");
 	const setup = () => {
 		const fake = createFakePi();
 		tasksExtension(fake.pi as never);

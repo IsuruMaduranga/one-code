@@ -32,7 +32,7 @@ import { buildClaudeMdBlock, buildContextBlock, buildOneCodeBlock, dateBlock, da
 import { collectImportedPaths, instructionTargets, openInstructions } from "../../lib/context/instructions.ts";
 import { collectGitStatus, GIT_SNAPSHOT_OWNER_CHANNEL } from "../../lib/context/git-status.ts";
 import { readMemoryIndex } from "./memory-index.ts";
-import { productStateDir, tildify, tryRealpath } from "../../lib/profile/paths.ts";
+import { tildify, tryRealpath } from "../../lib/profile/paths.ts";
 import { fitToWindow, restoredInstructionNotice, type SkippedInstruction, skippedInstructionWarning } from "../../lib/context/instruction-budget.ts";
 import { queueNotice } from "../../lib/notify/notices.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, toldBlockFact } from "../../lib/request/reminders.ts";

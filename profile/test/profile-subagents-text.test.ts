@@ -8,7 +8,6 @@
  * resume and a fork's framing.
  */
 import { describe, expect, it } from "vitest";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { subagentModelWords } from "../../extensions/lib/models/subagent-model-text.ts";
 import { subagentModels as subagentModelsPart } from "../text/subagent-models/index.ts";
 import { subagentsText } from "../text/subagents/index.ts";
@@ -42,7 +41,6 @@ describe("One Code's subagent text", () => {
 	});
 
 	it("heads the agent catalog as Claude Code does and words each row", () => {
-		const words = requireText("subagents");
 		const row = subagentResultText().catalogRow({ name: "editor", description: "Edits prose", tools: { kind: "all", builtIn: false } });
 		expect(row.startsWith("- editor: Edits prose")).toBe(true);
 		expect(subagentResultText().catalogBlock({ rows: [row] })).toMatch(/^Available agent types for the Agent tool:\n- editor: Edits prose/);

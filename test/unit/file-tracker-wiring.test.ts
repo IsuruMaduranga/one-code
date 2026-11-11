@@ -8,7 +8,6 @@
  */
 import { setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 import { useProfile } from "./helpers/profile.ts";
-import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

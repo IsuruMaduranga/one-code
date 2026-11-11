@@ -11,11 +11,12 @@
  * shrinks: a file that stops naming one must leave it, and a new file fails
  * until its text moves to the profile.
  */
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
-import ts from "typescript";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { compareWithAllowlist } from "./helpers/claude-locations.ts";
+import { sourceFiles } from "./helpers/import-graph.ts";
+import { stringLiterals } from "./helpers/sentence-literals.ts";
 
 const ROOT = join(import.meta.dirname, "..", "..");
 const BASE = join(ROOT, "extensions");
@@ -32,29 +33,7 @@ const catalogName = (name: string) => new RegExp(`["'\`]${name}["'\`]|(?<![\\w/.
 // "A non-Claude session" names the model family, which the base knows (lib/models/); "another Claude session" names the product.
 const OTHER_PRODUCT = /Claude Code|\bCLAUDE(\.local)?\.md\b|(?<!non-)\bClaude session\b|claude\.ai\b/;
 
-function walk(dir: string): string[] {
-	return readdirSync(dir).flatMap((name) => {
-		const path = join(dir, name);
-		if (statSync(path).isDirectory()) return walk(path);
-		return name.endsWith(".ts") || name.endsWith(".mjs") ? [path] : [];
-	});
-}
-
-/** The text of every string and template literal in a file: comments, identifiers and module specifiers are not text. */
-function literals(source: string, path: string): string[] {
-	const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, false, path.endsWith(".mjs") ? ts.ScriptKind.JS : ts.ScriptKind.TS);
-	const found: string[] = [];
-	const visit = (node: ts.Node) => {
-		if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node) || ts.isLiteralTypeNode(node)) return;
-		if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) found.push(node.text);
-		else if (ts.isTemplateExpression(node)) found.push([node.head.text, ...node.templateSpans.map((span) => span.literal.text)].join("${…}"));
-		ts.forEachChild(node, visit);
-	};
-	visit(file);
-	return found;
-}
-
-const files = walk(BASE).map((path) => [relative(BASE, path).split("\\").join("/"), literals(readFileSync(path, "utf8"), path)] as const);
+const files = sourceFiles(BASE, BASE).map((path) => [path, stringLiterals(readFileSync(join(BASE, path), "utf8"), path)] as const);
 
 const naming = (pattern: RegExp): string[] => files.filter(([, texts]) => texts.some((text) => pattern.test(text))).map(([path]) => path);
 

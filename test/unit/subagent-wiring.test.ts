@@ -7,7 +7,6 @@ import backgroundExtension from "../../extensions/tools/background/index.ts";
 import { type BackgroundTask, TASK_REGISTER_CHANNEL } from "../../extensions/lib/agents/task-registry.ts";
 import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/plugins/mcp-share.ts";
 import { DEFAULT_COALESCE_MS, oneShotNote } from "../../extensions/lib/notify/notifications.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { AGENT_VIEW_CHANNEL } from "../../extensions/lib/agents/agent-view.ts";
 import { SUBAGENT_GATE_CHANNEL } from "../../extensions/lib/agents/subagent-gate.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../../extensions/lib/rules/modes.ts";
@@ -379,7 +378,6 @@ describe("subagent runtime build failure", () => {
 		const h = await mount([record]);
 		const first = (await h.call("SendMessage", { to: "worker", message: "Continue" })) as { content: Array<{ text: string }>; isError?: boolean };
 		expect(first.isError).toBe(true);
-		const words = requireText("subagents");
 		expect(first.content[0].text).toBe(
 			subagentResultText().refused({ kind: "couldNotResume", name: "worker", problem: subagentResultText().runtimeProblem({ kind: "failed", osMessage: "models.json: Unexpected token" }) }),
 		);
@@ -394,7 +392,6 @@ describe("subagent runtime build failure", () => {
 		const h = await mount();
 		const result = (await h.call("Agent", { subagent_type: "general-purpose", task: "Count the files" })) as { content: Array<{ text: string }>; isError?: boolean };
 		expect(result.isError).toBe(true);
-		const words = requireText("subagents");
 		expect(result.content[0].text).toBe(subagentResultText().refused({ kind: "couldNotStart", problem: subagentResultText().runtimeProblem({ kind: "failed", osMessage: "models.json: Unexpected token" }) }));
 		expect(await statusOf(h, "general-purpose-1")).toBeUndefined();
 	});
@@ -574,7 +571,6 @@ describe("fork runs in a one-shot session", () => {
 		await h.call("Agent", { subagent_type: "fork", name: "historian", task: "Read the git history" });
 		const nested = (run.mock.calls[0][0] as { extraTools?: Array<{ name: string; execute: (...args: unknown[]) => Promise<Result> }> }).extraTools!.find((tool) => tool.name === "Agent")!;
 		const call = (params: Record<string, unknown>) => nested.execute("nested-call", { subagent_type: "general-purpose", task: "Look", ...params }, undefined, undefined, h.ctx);
-		const words = requireText("subagents");
 		for (const option of [{ model: "gpt-5-flash-text" }, { thinking: "high" }, { isolation: "worktree" }]) {
 			const refused = await call(option);
 			expect(refused.isError).toBe(true);

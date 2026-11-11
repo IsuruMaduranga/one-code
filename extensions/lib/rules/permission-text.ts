@@ -10,6 +10,7 @@
  */
 
 import { type LiveTools, type ToolPassages, withoutOff } from "../profile/live-tools.ts";
+import { forLive } from "../profile/live-words.ts";
 import { activeProfile } from "../profile/profile.ts";
 
 /** Why the gate refused a call. */
@@ -187,15 +188,8 @@ export const permissionWords = (live: LiveTools, own: OwnWords = {}) => ({
 	reviewFailed: ({ osMessage }: { osMessage: string }): string => `the review itself failed (${osMessage})`,
 });
 
-const built = new WeakMap<LiveTools, ReturnType<typeof permissionWords>>();
-
 /** The words for this session's tools (the profile in force), built once per live set. */
-export function permissionText(): ReturnType<typeof permissionWords> {
-	const { live, secretFileRefusal } = activeProfile();
-	let words = built.get(live);
-	if (!words) built.set(live, (words = permissionWords(live, { secretFile: secretFileRefusal })));
-	return words;
-}
+export const permissionText = forLive((live) => permissionWords(live, { secretFile: activeProfile().secretFileRefusal }));
 
 /** Why the gate refused a call, for the modules that run without the extension's own context (the in-process child gate, the parent bridge). */
 export const refusalText = (refusal: PermissionRefusal): string => permissionText().refused(refusal);

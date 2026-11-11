@@ -1,15 +1,14 @@
 /**
- * One Code's skill wording (profile/text/skill/) for the results the golden
+ * The skill results' wording for the results the golden
  * snapshot cannot reach: an ambiguous plugin skill name, an unreadable skill,
  * the listing for a session that reads skill files with the shell, and the
  * refusal of a user-only skill. The golden snapshot pins the bytes of every
  * other text.
  */
 import { describe, expect, it } from "vitest";
-import { skill } from "../text/skill/index.ts";
 import { skillResultText } from "../../extensions/tools/skill/text.ts";
 
-describe("One Code's skill text", () => {
+describe("the skill text", () => {
 	it("asks for the full name when plugins share a skill name", () => {
 		expect(skillResultText.ambiguous({ query: "review", wanted: "review", matches: ["a:review", "b:review"] })).toBe(
 			'"review" is ambiguous — it matches a:review, b:review. Use the full `<plugin>:review` name.',

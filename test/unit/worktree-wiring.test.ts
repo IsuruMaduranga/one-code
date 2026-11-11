@@ -9,7 +9,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ORIGINAL_COMMAND_CHANNEL, type OriginalCommandRecord } from "../../extensions/lib/shell/original-command.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { REMINDER_CHANNEL, type ReminderPayload } from "../../extensions/lib/request/reminders.ts";
 import { projectConfigDir, projectConfigDirName } from "../../extensions/lib/profile/sources.ts";
 import { shellQuote } from "../../extensions/lib/shell/shell-quote.ts";
@@ -23,7 +22,6 @@ type GateResult = { block?: boolean; reason?: string } | undefined;
 /** The worktree session a tool recorded (the state its texts name). */
 type Session = Parameters<(typeof worktreeResultText)["reminder"]>[0];
 
-const words = () => requireText("worktree");
 /** A guard's refusal of git aimed at `target`, in the profile's words. */
 const sharedTarget = (target: string) =>
 	worktreeGuardText.refusal({ kind: "gitTarget", worktreePath: worktree, problem: { kind: "sharedTarget", target } });

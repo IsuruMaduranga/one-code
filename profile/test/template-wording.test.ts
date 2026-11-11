@@ -5,7 +5,7 @@
  * the text is tested in test/unit/template.test.ts.
  */
 import { describe, expect, it } from "vitest";
-import { PROMPT_TIERS, type PromptTier } from "../../extensions/lib/models/model-tier.ts";
+import { PROMPT_TIERS } from "../../extensions/lib/models/model-tier.ts";
 import type { EnvironmentInfo } from "../../extensions/request/system-prompt/environment.ts";
 import { buildClaudeCodeSystemPrompt } from "../../extensions/request/system-prompt/template.ts";
 

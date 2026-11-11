@@ -1,22 +1,20 @@
 /**
- * One Code's wording of the web_search fallback chain (its profile's
- * `webSearch` group): a backend's failure, the chain's results with the
+ * The wording of the web_search fallback chain: a backend's failure, the chain's results with the
  * keyless note, and the report when every backend failed. What the chain
- * does is tested in test/unit/web-search-backends.test.ts.
+ * does is tested in web-search-backends.test.ts.
  */
 import { describe, expect, it } from "vitest";
 import { BRAVE_KEY_ENV, type ChainOutcome, runChain } from "../../extensions/tools/web/backends.ts";
-import { failureOf, fakeBackend, ONE_RESULT } from "../../test/unit/helpers/web-search.ts";
-import { webSearch } from "../text/web-search/index.ts";
+import { failureOf, fakeBackend, ONE_RESULT } from "./helpers/web-search.ts";
 import { webSearchResultText } from "../../extensions/tools/web/text.ts";
 
 
-/** The chain's result in One Code's words. */
+/** The chain's result in words. */
 const formatSearchResults = (query: string, outcome: ChainOutcome) =>
 	webSearchResultText.chainResults({ query, label: outcome.backend.label, attempts: outcome.attempts, keyless: outcome.backend.keyless, results: outcome.results });
 const KEYLESS_NOTE_START = "Note: these results came from Exa's free keyless endpoint";
 
-describe("a backend's failure in One Code's words", () => {
+describe("a backend's failure in words", () => {
 	it("names the env var on an auth failure", () => {
 		const failure = { kind: "http", api: "Brave Search API", status: 401, keyEnv: BRAVE_KEY_ENV, body: "Unauthorized" } as const;
 		expect(webSearchResultText.attempt({ label: "Brave Search", failure })).toBe(`Brave Search: Brave Search API HTTP 401 (check ${BRAVE_KEY_ENV}): Unauthorized`);

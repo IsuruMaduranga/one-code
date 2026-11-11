@@ -21,7 +21,7 @@ import mcpExtension from "../../extensions/tools/mcp/index.ts";
 import { noMcpServersMessage } from "../../extensions/tools/mcp/config.ts";
 import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/plugins/mcp-share.ts";
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../../extensions/lib/plugins/mcp-status.ts";
-import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/request/reminders.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { mcpFacts, type McpSnapshot } from "../../extensions/tools/mcp/announce.ts";
 import type { McpFailure } from "../../extensions/tools/mcp/text.ts";
 import { mcpResultText } from "../../extensions/tools/mcp/text.ts";

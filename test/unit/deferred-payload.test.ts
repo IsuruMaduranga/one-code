@@ -8,10 +8,8 @@ import {
 } from "../../extensions/lib/request/deferred.ts";
 import { type Item, real, toolsItem as headWith } from "./helpers/responses-fixture.ts";
 import { totalTokensBlock } from "../../extensions/lib/context/budget.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { toolSearchResultText } from "../../extensions/lib/request/tool-search-text.ts";
 
-const words = requireText("toolSearch");
 /** tool_search's result for a load, in the profile's words. */
 const loadedResult = (added: string[], missing: string[] = []) => toolSearchResultText.result({ added, already: [], refused: [], missing, withdrawn: [] });
 const budgetLine = totalTokensBlock(9);

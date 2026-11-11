@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WORKTREE_CHANNEL, type WorktreeLocation } from "../../extensions/lib/agents/worktree-channel.ts";
 import { resetProcessStateForTest } from "../../extensions/lib/profile/process-state.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { projectConfigDir } from "../../extensions/lib/profile/sources.ts";
 import worktreeExtension from "../../extensions/safety/worktree/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
@@ -19,7 +18,6 @@ let fake: FakePi;
 let location: WorktreeLocation | null;
 /** The worktree session the last enter_worktree recorded (the state the tools' texts name). */
 let session: { path: string } | null | undefined;
-const words = () => requireText("worktree");
 const ctx = () => createFakeCtx({ cwd: repo });
 const enter = (params: Record<string, unknown>, context = ctx()) => fake.tools.get("enter_worktree")!.execute("enter", params, undefined, undefined, context) as Promise<Result>;
 const exit = (params: Record<string, unknown>) => fake.tools.get("exit_worktree")!.execute("exit", params, undefined, undefined, ctx()) as Promise<Result>;

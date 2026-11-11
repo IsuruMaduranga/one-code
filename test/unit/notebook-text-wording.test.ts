@@ -1,10 +1,9 @@
 /**
- * One Code's notebook_edit wording (profile/text/notebook/): the hints a weak tier
+ * The notebook_edit results' wording: the hints a weak tier
  * needs, in the right places (review M4, code-review F3). The exact bytes of
  * every result are pinned by the golden snapshot.
  */
 import { describe, expect, it } from "vitest";
-import { notebook } from "../text/notebook/index.ts";
 import { notebookResultText } from "../../extensions/tools/notebook/text.ts";
 
 const cells = [
@@ -12,7 +11,7 @@ const cells = [
 	{ label: "bbb", type: "code" },
 ];
 
-describe("One Code's notebook text", () => {
+describe("the notebook text", () => {
 	it("names every edit the way the model addresses the cell next", () => {
 		expect(notebookResultText.edited({ outcome: { kind: "replaced", cell: "bbb" }, path: "a.ipynb", cellCount: 2 })).toBe("Replaced cell bbb in a.ipynb (2 cells).");
 		expect(notebookResultText.edited({ outcome: { kind: "inserted", cellType: "code", cell: "new1" }, path: "a.ipynb", cellCount: 3 })).toContain("Inserted code cell new1 at the top");

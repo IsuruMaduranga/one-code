@@ -9,21 +9,19 @@ import ts from "typescript";
 /** Four or more words of letters, the first one capitalized or not: prose, not an identifier, a path or a format. */
 const SENTENCE = /[A-Za-z][A-Za-z'’]*(?:,?\s+[A-Za-z][A-Za-z'’]*){3,}/;
 
-export function sentenceLiterals(source: string, fileName = "file.ts"): string[] {
-	const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
+/** The text of every string and template literal in a file: comments, identifiers, module specifiers and type positions are not text. */
+export function stringLiterals(source: string, fileName = "file.ts"): string[] {
+	const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, false, /\.m?js$/.test(fileName) ? ts.ScriptKind.JS : ts.ScriptKind.TS);
 	const found: string[] = [];
 	const visit = (node: ts.Node) => {
-		// Module specifiers and type positions are code, not text.
 		if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node) || ts.isLiteralTypeNode(node)) return;
-		if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
-			if (SENTENCE.test(node.text)) found.push(node.text);
-		} else if (ts.isTemplateExpression(node)) {
-			const parts = [node.head.text, ...node.templateSpans.map((span) => span.literal.text)];
-			const joined = parts.join("${…}");
-			if (parts.some((part) => SENTENCE.test(part))) found.push(joined);
-		}
+		if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) found.push(node.text);
+		// A placeholder holds no letters, so it never joins two parts into one sentence.
+		else if (ts.isTemplateExpression(node)) found.push([node.head.text, ...node.templateSpans.map((span) => span.literal.text)].join("${…}"));
 		ts.forEachChild(node, visit);
 	};
 	visit(file);
 	return found;
 }
+
+export const sentenceLiterals = (source: string, fileName = "file.ts"): string[] => stringLiterals(source, fileName).filter((text) => SENTENCE.test(text));

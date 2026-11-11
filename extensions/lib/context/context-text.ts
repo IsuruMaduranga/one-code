@@ -68,6 +68,9 @@ const MEMORY_CUT = (cut: MemoryIndexCut): string =>
 		: `${cut.cut} of ${cut.total} lines were cut off, starting at line ${cut.from}${cut.next ? ` ("${cut.next}")` : ""}`;
 
 /** The words, with the profile's part. */
+/** When the git snapshot says it was taken; a refreshed snapshot swaps one phrase for the other (instructions/context-facts.ts). */
+export const GIT_STATUS_TAKEN_AT = { start: "the start of the conversation", compaction: "the latest compaction" } as const;
+
 export const contextText = (product: ContextText) => ({
 	/** The warning after a MEMORY.md index loaded in part. */
 	memoryIndexCut: ({ size, cut }: { size: MemoryIndexSize; cut: MemoryIndexCut }): string =>
@@ -120,7 +123,7 @@ export const contextText = (product: ContextText) => ({
 	/** The git snapshot; `at` says whether it was taken at the conversation's start or at its latest compaction. */
 	gitStatus: ({ snapshot: s, at }: { snapshot: GitSnapshot; at: "start" | "compaction" }): string =>
 		[
-			`# gitStatus\nThis is the git status at ${at === "start" ? "the start of the conversation" : "the latest compaction"}. ` +
+			`# gitStatus\nThis is the git status at ${GIT_STATUS_TAKEN_AT[at]}. ` +
 				"Note that this status is a snapshot in time, and will not update during the conversation.",
 			"",
 			`Current branch: ${s.branch}`,

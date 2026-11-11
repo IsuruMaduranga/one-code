@@ -7,11 +7,8 @@
  * one-shot background results.
  */
 import { describe, expect, it } from "vitest";
-import { shellText } from "../text/shell/index.ts";
-import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
 import { shellResultText } from "../../extensions/lib/shell-run/shell-text.ts";
 
-const shell = shellText(ALL_LIVE);
 
 describe("One Code's shell text", () => {
 	it("words a standalone sleep and one with work after it", () => {

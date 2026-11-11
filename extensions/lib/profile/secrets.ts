@@ -27,6 +27,7 @@
  */
 
 import { posix } from "node:path";
+import { escapeRegExp } from "../core/text-spans.ts";
 import { forwardSlashes } from "./paths.ts";
 import { processState } from "./process-state.ts";
 
@@ -51,7 +52,6 @@ interface SecretStore {
 
 const store = (): SecretStore => processState("secrets:values", () => ({ bySource: new Map<string, SecretValue[]>(), placeholders: new Map<string, string>(), pattern: undefined }));
 
-const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** A name safe inside the placeholder. */
 const placeholderFor = (name: string | undefined): string => {
