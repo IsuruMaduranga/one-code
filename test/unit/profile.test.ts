@@ -2,7 +2,7 @@
  * The profile in force (lib/profile/profile.ts), the feature() wrapper's view of pi
  * (lib/profile/feature.ts), and the permission gate's use of the tool switches.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -92,6 +92,25 @@ describe("resolveProfile", () => {
 			expect(readers.length, group).toBeGreaterThan(0);
 			for (const id of readers) expect(isFeatureId(id), `${group}: ${id}`).toBe(true);
 		}
+	});
+
+	// A reader the table misses passes the load check and then stops the process in the middle of a session (requireText).
+	it("lists every feature that reads an optional text group as one of its readers", () => {
+		const root = join(import.meta.dirname, "..", "..", "extensions");
+		const sites: string[] = [];
+		for (const entry of readdirSync(root, { recursive: true, encoding: "utf8" })) {
+			if (!entry.endsWith(".ts")) continue;
+			const [area, folder] = entry.replaceAll("\\", "/").split("/");
+			// `lib/` belongs to no one feature: its readers are the table's hand-written entries.
+			if (area === "lib" || !isFeatureId(folder)) continue;
+			for (const [, group] of readFileSync(join(root, entry), "utf8").matchAll(/requireText\("(\w+)"\)/g)) {
+				const readers: readonly string[] | undefined = (TEXT_GROUP_READERS as Record<string, readonly string[]>)[group];
+				if (readers === undefined) continue; // a required group
+				sites.push(entry);
+				expect(readers, `${entry} reads "${group}"`).toContain(folder);
+			}
+		}
+		expect(sites.length).toBeGreaterThan(20);
 	});
 
 	it("refuses turning off or deferring tool_search", () => {
