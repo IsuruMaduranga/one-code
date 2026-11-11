@@ -9,7 +9,7 @@
  */
 
 import type { AgentTools, LaunchLine, LiveTools, PendingRun, RunFailure, RunStatus, SubagentRefusal, SubagentsText } from "../../../extensions/sdk/profile.ts";
-import { checkoutProgram } from "../worktree/guard.ts";
+import { checkoutProgram } from "../../../extensions/sdk/profile.ts";
 import { agentDescription } from "./agent-description.ts";
 import { guideAgent } from "./guide-agent.ts";
 import { type ToolPassages, withoutOff } from "../../../extensions/sdk/profile.ts";

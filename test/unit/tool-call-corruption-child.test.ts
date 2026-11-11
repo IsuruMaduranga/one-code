@@ -12,7 +12,7 @@ import { Type } from "typebox";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { openChildSession } from "../../extensions/lib/agents/agent-loader.ts";
 import { CHILD_EXTENSION_PATHS } from "../../extensions/lib/agents/child-extensions.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { toolCallCorruptionText } from "../../extensions/request/tool-call-corruption/text.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "oc-child-corruption-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -95,7 +95,7 @@ describe("OpenRouter corruption guard in a child session", () => {
 			expect(execute).not.toHaveBeenCalled();
 			expect(requests).toHaveBeenCalledTimes(1);
 			const result = session.messages.find((message) => message.role === "toolResult");
-			const words = requireText("toolCallCorruption");
+			const words = toolCallCorruptionText;
 			const text = (result as { content: Array<{ text?: string }> }).content.map((part) => part.text ?? "").join("");
 			expect(text).toBe(words.corruptBlock({ reason: words.damage({ kind: "unbalancedQuote" }), repeat: false }));
 			// Stopped after the blocked result: no second request, nothing after it.

@@ -1,11 +1,61 @@
 /**
- * One Code's worktree guard refusals (the profile's `text.worktreeGuard`): git
- * that may reach another checkout of the repository, a stash form that
- * collides with parallel sessions, and an isolated subagent's write into the
- * shared checkout. Each names the fix.
+ * The worktree guards' refusals, as data and in words: git that may reach
+ * another checkout of the repository, a stash form that collides with
+ * parallel sessions, and an isolated subagent's write into the shared
+ * checkout. Each names the fix. worktree-guards.ts and the PowerShell guards
+ * decide; the worktree tools and subagent worktree isolation show the words.
  */
+import type { CheckoutProgram } from "../shell/git-checkout-programs.ts";
 
-import type { CheckoutProgram, GitTargetProblem, StashRisk, WorktreeGuardRefusal, WorktreeGuardText } from "../../../extensions/sdk/profile.ts";
+/**
+ * Why a git command in a worktree-isolated session cannot be shown to target
+ * that worktree (guards.ts, powershell-guards.ts). The last four are
+ * PowerShell's.
+ */
+export type GitTargetProblem =
+	| { kind: "unlisted" }
+	| { kind: "tooComplex" }
+	| { kind: "stdinFed" }
+	| { kind: "cdInLoop" }
+	| { kind: "cdInPipeline" }
+	/** `wrapper`: the command git runs behind, as written (`sudo`, `env`). */
+	| { kind: "wrapper"; wrapper: string }
+	| { kind: "findExec" }
+	| { kind: "precedingCd" }
+	/** `name`: the variable or config key (`GIT_DIR`, `core.worktree`). */
+	| { kind: "runtimeEnv"; name: string }
+	/** `flag`: the option as written (`-C`, `--git-dir=$X`). */
+	| { kind: "runtimeFlag"; flag: string }
+	/** `target`: the shared checkout or sibling worktree the command reaches. */
+	| { kind: "sharedTarget"; target: string }
+	| { kind: "unfollowedQuoting" }
+	/** `syntax`: what the command uses, as lib/shell/powershell-rules.ts powershellInjectionSyntax names it. */
+	| { kind: "besideSyntax"; syntax: string }
+	| { kind: "repositoryVariable" }
+	| { kind: "configEnv" };
+
+/** A stash form that collides with parallel sessions on the shared stash stack. */
+export type StashRisk = "untagged" | "pop" | "clear" | "drop" | "branch";
+
+/** Why a guard refused a tool call in a worktree-isolated session. */
+export type WorktreeGuardRefusal =
+	| { kind: "gitTarget"; worktreePath: string; problem: GitTargetProblem }
+	/** `command`: the stash form as the guard names it (`git stash`, `git stash save`). */
+	| { kind: "stash"; risk: StashRisk; command: string }
+	/**
+	 * An isolated subagent's write lands in the shared checkout
+	 * (lib/agents/worktree-isolation.ts). `target`: the path as written; `inCommand`:
+	 * a shell command writes it; `mapped`: the same path in the worktree.
+	 */
+	| { kind: "sharedCheckoutWrite"; worktreePath: string; sharedRoot: string; target: string; inCommand: boolean; mapped: string };
+
+/**
+ * The guard refusals' words. Not tied to one feature: the worktree tools,
+ * subagents and workflows all run isolated sessions.
+ */
+export interface WorktreeGuardText {
+	refusal(refusal: WorktreeGuardRefusal): string;
+}
 
 /** Why the target cannot be verified, and the fix, for a worktree at `wt`. */
 function gitTarget(problem: GitTargetProblem, wt: string): [string, string] {
@@ -110,4 +160,4 @@ export function checkoutProgram(program: CheckoutProgram): string {
 	}
 }
 
-export const worktreeGuard: WorktreeGuardText = { refusal };
+export const worktreeGuardText: WorktreeGuardText = { refusal };

@@ -1,18 +1,18 @@
 /**
- * One Code's wording of the worktree write guards' refusals (its profile's
- * `worktreeGuard` group): the worktree, the shared checkout and the path to
- * write instead. The decisions alone, on any profile, are tested in
+ * The wording of the worktree write guards' refusals
+ * (safety/worktree/text.ts `worktreeGuardText`): the worktree, the shared checkout and the path to
+ * write instead. The decisions alone are tested in
  * test/unit/worktree-isolation.test.ts.
  */
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { describeIsolation, worktreeBashWriteGuardReason, worktreeWriteGuardReason } from "../../extensions/lib/agents/worktree-isolation.ts";
-import type { WorktreeGuardRefusal } from "../../extensions/safety/worktree/text.ts";
-import { worktreeGuard } from "../text/worktree/guard.ts";
+import type { WorktreeGuardRefusal } from "../../extensions/lib/rules/worktree-guard-text.ts";
+import { worktreeGuardText as worktreeGuard } from "../../extensions/lib/rules/worktree-guard-text.ts";
 
 const worded = (refusal: WorktreeGuardRefusal | undefined) => refusal && worktreeGuard.refusal(refusal);
 
-describe("worktree write refusals in One Code's words", () => {
+describe("worktree write refusals in words", () => {
 	const base = { cwd: "/tmp/cc-wt-x/tree", isolation: describeIsolation("/tmp/cc-wt-x/tree", "/repo"), home: "/home/u" };
 
 	it("names the worktree, the shared checkout and the path to write instead", () => {

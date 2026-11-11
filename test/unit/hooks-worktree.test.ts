@@ -10,10 +10,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import hooksExtension from "../../extensions/safety/hooks/index.ts";
 import { SUBAGENT_HOOK_CHANNEL, type HookBridge } from "../../extensions/lib/agents/hook-bridge.ts";
 import { WORKTREE_CHANNEL } from "../../extensions/lib/agents/worktree-channel.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { makeHookWorktreeDirs, readObservations, writeObserverHook } from "./helpers/hook-worktree.ts";
 import { writeUserSettings } from "./helpers/settings-files.ts";
+import { hooksText } from "../../extensions/safety/hooks/text.ts";
 
 const state = vi.hoisted(() => ({ home: `/nonexistent/one-code-hooks-worktree-${Math.random().toString(36).slice(2)}` }));
 vi.mock("node:os", async (importOriginal) => {
@@ -42,7 +42,7 @@ afterEach(() => {
 const writeHooks = (events: string[]) =>
 	writeUserSettings(project, homedir(), { hooks: Object.fromEntries(events.map((event) => [event, [{ hooks: [{ type: "command", command }] }]])) });
 /** The reminder after a PostToolUse hook changed the file a call wrote. */
-const changedByHook = (path: string) => requireText("hooks").fileChangedByHook({ path });
+const changedByHook = (path: string) => hooksText.fileChangedByHook({ path });
 const seen = () => readObservations(observations);
 const enter = () => fake.events.emit(WORKTREE_CHANNEL, { path: worktree, sharedRoot: project });
 const toolCall = (id: string) => fake.fire("tool_call", { toolName: "bash", toolCallId: id, input: { command: "pwd" } }, createFakeCtx({ cwd: project }));

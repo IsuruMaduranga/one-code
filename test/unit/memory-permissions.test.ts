@@ -13,7 +13,7 @@ import { decide, parseRules, type DecideInput } from "../../extensions/lib/rules
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { describeChanges } from "../../extensions/safety/file-tracker/tracker.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { fileTrackerText } from "../../extensions/safety/file-tracker/text.ts";
 
 const modes = ["default", "auto", "dontAsk", "acceptEdits"] as const;
 const escapedDecisions = { default: "ask", auto: "classify", dontAsk: "deny", acceptEdits: "ask" } as const;
@@ -187,11 +187,11 @@ describe("memory freshness across sessions", () => {
 			parent.fake.events.on(REMINDER_CHANNEL, (data) => reminders.push((data as { text: string }).text));
 			parent.fake.events.emit(CHILD_WROTE_CHANNEL, { path, agent: "memory child" });
 			await parent.fake.fire("tool_execution_end", { toolName: "Agent", toolCallId: "child-run", isError: false }, parent.ctx);
-			expect(reminders).toContain(requireText("fileTracker").changedByAgent({ path, agent: "memory child", excerpt: describeChanges("user: v1\n", "user: v2\n")! }));
+			expect(reminders).toContain(fileTrackerText.changedByAgent({ path, agent: "memory child", excerpt: describeChanges("user: v1\n", "user: v2\n")! }));
 		}
 		const stale = await parent.fake.fireOne<{ block?: boolean; reason?: string }>("tool_call", write("parent"), parent.ctx);
 		expect(stale?.block).toBe(true);
-		expect(stale?.reason).toBe(requireText("fileTracker").stale({ path }));
+		expect(stale?.reason).toBe(fileTrackerText.stale({ path }));
 		expect(readFileSync(path, "utf8")).toBe("user: v2\n");
 		await parent.fake.fire("tool_result", { toolName: "read", toolCallId: "parent-reread", input: { path }, isError: false }, parent.ctx);
 		expect(await parent.fake.fireOne("tool_call", write("parent-retry"), parent.ctx)).toBeUndefined();

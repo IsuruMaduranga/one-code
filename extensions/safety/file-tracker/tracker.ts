@@ -8,7 +8,7 @@
  * through bash, which no tool hook can see.
  *
  * This module holds the state machine; `index.ts` wires it to pi's events
- * and the profile words what the model hears (text.ts).
+ * and text.ts words what the model hears.
  */
 
 import type { ChangeExcerpt } from "./text.ts";

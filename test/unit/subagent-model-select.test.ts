@@ -19,10 +19,10 @@ import {
 	subagentModelsReminder,
 	subagentStatusModel,
 } from "../../extensions/lib/models/subagent-model.ts";
-import type { SubagentModelNotice } from "../../extensions/agents/subagents/model-text.ts";
+import type { SubagentModelNotice } from "../../extensions/lib/models/subagent-model-text.ts";
 import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { subagentModelWordsInForce } from "../../extensions/lib/models/subagent-model.ts";
 
 /** The product's own settings file lives under its state dir, not ~/.claude. */
 const writeProductSettings = (home: string, data: unknown) => {
@@ -31,7 +31,7 @@ const writeProductSettings = (home: string, data: unknown) => {
 };
 
 /** The profile's subagent-model text. */
-const words = () => requireText("subagentModels");
+const words = () => subagentModelWordsInForce();
 /** A resolution notice in the profile's words. */
 const notice = (n: SubagentModelNotice) => words().notice(n);
 

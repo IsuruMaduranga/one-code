@@ -1,16 +1,16 @@
 /**
- * What a plugin command's body needs from a profile (types only): the text a
- * `` !`command` `` placeholder becomes when its command fails, times out or
- * writes too much. The output itself is the command's.
+ * What a `` !`command` `` placeholder in a plugin command's body becomes
+ * when its command fails, times out or writes too much. The output itself is
+ * the command's.
  */
 
-export interface PluginsText {
+export const pluginsText = {
 	/** The command could not run; `osMessage` is the system's own message. */
-	placeholderFailed(p: { osMessage: string }): string;
+	placeholderFailed: ({ osMessage }: { osMessage: string }): string => `command failed: ${osMessage}`,
 	/** No bash to run the command in. */
-	noBash: string;
+	noBash: "no bash shell found",
 	/** After the output the command wrote before its timeout. */
-	placeholderTimedOut(p: { seconds: number }): string;
+	placeholderTimedOut: ({ seconds }: { seconds: number }): string => `command timed out after ${seconds} seconds`,
 	/** After output cut at the collection limit. */
-	outputCut(p: { chars: number }): string;
-}
+	outputCut: ({ chars }: { chars: number }): string => `[output cut after ${chars} characters]`,
+};

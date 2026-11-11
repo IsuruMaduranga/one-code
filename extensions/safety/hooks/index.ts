@@ -22,7 +22,7 @@
  * here is wrapped — a throwing hook fails open, never takes the turn down.
  *
  * Hook context reaches the model in Claude Code's `hook_additional_context`
- * shape — a `<system-reminder>` worded by the profile (text.ts) — never as a
+ * shape — a `<system-reminder>` in text.ts's words — never as a
  * message of its own: PreToolUse context is queued as a one-shot on
  * the reminder channel, so it lands INSIDE the tool result it belongs to,
  * persisted, at no extra turn; PostToolUse context is appended to the result
@@ -77,7 +77,7 @@ import { PromptContextRouter } from "./prompt-context.ts";
 import { SKILL_INVOCATION_TYPE, type SkillInvocationDetails } from "../../lib/plugins/skill-invoke.ts";
 import { consentDialog } from "../../lib/consent/consent-dialogs.ts";
 import { followWorkCwd } from "../../lib/agents/worktree-channel.ts";
-import { requireText } from "../../lib/profile/profile.ts";
+import { hooksText } from "./text.ts";
 
 /**
  * Every hook text that reaches the model is bounded through this: additional
@@ -130,7 +130,7 @@ function isStopContinuation(event: unknown): boolean {
 }
 
 function hooksExtension(pi: ExtensionAPI) {
-	const text = requireText("hooks");
+	const text = hooksText;
 	const contextText = (event: CcHookEvent, added: string) => text.additionalContext({ event, text: added });
 	/** A PostToolUse hook's added context and the notice of a file it changed, as one appended block. */
 	const postToolUseContext = (added: string | undefined, changedPath: string | undefined) =>

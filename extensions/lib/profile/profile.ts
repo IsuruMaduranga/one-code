@@ -91,8 +91,7 @@ type OptionalGroup = { [K in keyof ProfileText]-?: undefined extends ProfileText
 
 /**
  * The features that read each optional text group: its owner, and every
- * feature that words something through it (an isolated child of `subagents`
- * or `workflow` is refused through `worktreeGuard`; a workflow agent's
+ * feature that words something through it (a workflow agent's
  * worktree and tool-list errors are the `subagents` group's; /doctor resolves
  * the subagent model). A profile may leave a group out only when all of them are
  * off; `resolveProfile` checks it at load, because a reader that finds its
@@ -117,23 +116,17 @@ export const TEXT_GROUP_READERS: Readonly<Record<OptionalGroup, readonly Feature
 	skill: ["skill"],
 	mcp: ["mcp"],
 	lsp: ["lsp"],
-	hooks: ["hooks"],
-	memory: ["memory"],
 	background: ["background"],
 	artifacts: ["artifacts"],
 	toolStyle: ["tool-style"],
 	contextBudget: ["context-budget"],
-	fileTracker: ["file-tracker"],
 	compaction: ["compaction"],
 	workflow: ["workflow"],
 	shell: ["bash", "powershell"],
 	doctor: ["doctor"],
-	toolCallCorruption: ["tool-call-corruption"],
 	handback: ["subagents", "workflow"],
 	subagents: ["subagents", "workflow"],
-	plugins: ["plugins"],
 	subagentModels: ["subagents", "workflow", "doctor"],
-	worktreeGuard: ["worktree", "subagents", "workflow"],
 };
 
 /** The optional groups `text` lacks although a feature that reads them is on, one sentence each. */

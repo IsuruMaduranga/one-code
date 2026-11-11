@@ -78,14 +78,13 @@ describe("resolveProfile", () => {
 
 	it("refuses a profile that leaves out a text group a feature that is on reads", () => {
 		const without = (...groups: string[]): Profile["text"] => (env) => Object.fromEntries(Object.entries(shippedProfile.text(env)).filter(([group]) => !groups.includes(group))) as ReturnType<Profile["text"]>;
-		// The owner off is not enough while another reader is on: an isolated child of subagents is refused through worktreeGuard.
-		expect(() => resolveProfile({ ...empty, features: { worktree: false }, text: without("worktreeGuard") }, {}, "/p")).toThrow(/no text for "worktreeGuard", which "subagents", "workflow" read/);
+		// The owner off is not enough while another reader is on: /doctor words a model resolution through subagentModels.
 		expect(() => resolveProfile({ ...empty, features: { subagents: false, workflow: false }, text: without("subagentModels") }, {}, "/p")).toThrow(/no text for "subagentModels", which "doctor" reads/);
 		// A workflow agent's worktree and tool-list errors are worded by the subagents group.
 		expect(() => resolveProfile({ ...empty, features: { subagents: false }, text: without("subagents") }, {}, "/p")).toThrow(/no text for "subagents", which "workflow" reads/);
 		expect(() => resolveProfile({ ...empty, text: without("notebook", "shell") }, {}, "/p")).toThrow(/no text for "notebook", which "notebook" reads; it has no text for "shell", which "bash", "powershell" read/);
 		const off = { worktree: false, subagents: false, workflow: false, doctor: false, notebook: false } as const;
-		expect(resolveProfile({ ...empty, features: off, text: without("worktreeGuard", "subagentModels", "handback", "notebook", "worktree", "subagents", "workflow", "doctor") }, {}, "/p").text.notebook).toBeUndefined();
+		expect(resolveProfile({ ...empty, features: off, text: without("subagentModels", "handback", "notebook", "worktree", "subagents", "workflow", "doctor") }, {}, "/p").text.notebook).toBeUndefined();
 	});
 
 	it("names a reader for every optional text group, and only features", () => {

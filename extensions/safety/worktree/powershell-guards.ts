@@ -20,7 +20,7 @@ import { toAbsolute } from "../../lib/shell/paths.ts";
 import { gitSubcommand } from "../../lib/shell/shell-analysis.ts";
 import { powershellInjectionSyntax, powershellStatements, statementCommand } from "../../lib/shell/powershell-rules.ts";
 import { containsPath, isolated, sharedRepositoryRoots, stashReason, type WorktreeGuardContext } from "../../lib/rules/worktree-guards.ts";
-import type { WorktreeGuardRefusal } from "./text.ts";
+import type { WorktreeGuardRefusal } from "../../lib/rules/worktree-guard-text.ts";
 
 /** git as a word (`git`, `GIT`, `git.exe`); PowerShell resolves commands case-insensitively. */
 const mentionsGit = (text: string) => /\bgit(?:\.exe)?\b/i.test(text);

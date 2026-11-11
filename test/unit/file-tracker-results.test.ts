@@ -12,9 +12,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import fileTrackerExtension from "../../extensions/safety/file-tracker/index.ts";
 import { fileToolResultContent } from "../../extensions/safety/file-tracker/results.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { fileTrackerText } from "../../extensions/safety/file-tracker/text.ts";
 
-const fileTracker = requireText("fileTracker");
+const fileTracker = fileTrackerText;
 const said = fileTracker.toolResult;
 const text = (t: string) => [{ type: "text", text: t }];
 const rewritten = (toolName: string, isError: boolean, t: string, extra: Record<string, unknown> = {}) =>

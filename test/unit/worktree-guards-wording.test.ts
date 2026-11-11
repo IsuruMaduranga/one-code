@@ -1,14 +1,13 @@
 /**
- * One Code's wording of the worktree guards' refusals (its profile's
- * `worktreeGuard` group), over every refusal the bash and PowerShell guards
+ * The wording of the worktree guards' refusals (safety/worktree/text.ts
+ * `worktreeGuardText`), over every refusal the bash and PowerShell guards
  * produce. Both shells' guards return the same refusal data, so one table
- * covers them. Which command yields which refusal is tested, on any profile,
- * in test/unit/worktree-guards.test.ts and
+ * covers them. Which command yields which refusal is tested in test/unit/worktree-guards.test.ts and
  * test/unit/worktree-powershell-guards.test.ts.
  */
 import { describe, expect, it } from "vitest";
-import type { GitTargetProblem, StashRisk } from "../../extensions/safety/worktree/text.ts";
-import { worktreeGuard } from "../text/worktree/guard.ts";
+import type { GitTargetProblem, StashRisk } from "../../extensions/lib/rules/worktree-guard-text.ts";
+import { worktreeGuardText as worktreeGuard } from "../../extensions/lib/rules/worktree-guard-text.ts";
 
 const WT = "/repo/.claude/worktrees/wt1";
 

@@ -8,7 +8,7 @@
  * comes back as a read call and its result, a larger one as a note to read it
  * again, while the total stays within 50,000 tokens (findings §47). Each is
  * its own `<system-reminder>` block at the start of the next user message,
- * worded by the profile (text.ts).
+ * in text.ts's words.
  */
 
 import type { FileTrackerText } from "./text.ts";

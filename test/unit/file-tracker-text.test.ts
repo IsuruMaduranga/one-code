@@ -1,17 +1,17 @@
 /**
- * One Code's file-tracker wording (profile/text/file-tracker/): Claude Code's
+ * The file-tracker wording (safety/file-tracker/text.ts): Claude Code's
  * texts for pi's read, write and edit results, the files put back after a
  * compaction, and the refusal of an edit to a file the model has not read,
  * plus what the golden snapshot cannot reach: a notice after a resume or
  * reload, an agent with no name, and an excerpt with nothing left out. The
  * golden snapshot pins the bytes of everything a one-shot run and the session
- * scenario reach. The base decides which result gets which outcome, which
+ * scenario reach. The extension decides which result gets which outcome, which
  * files to put back and when to refuse an edit (test/unit/file-tracker.test.ts,
  * file-tracker-results.test.ts, file-tracker-restore.test.ts and
  * file-tracker-shell-reads.test.ts).
  */
 import { describe, expect, it } from "vitest";
-import { fileTracker } from "../text/file-tracker/index.ts";
+import { fileTrackerText as fileTracker } from "../../extensions/safety/file-tracker/text.ts";
 
 const excerpt = { firstChangedLine: 1, numbered: "1\tnew", moreLines: 0 };
 

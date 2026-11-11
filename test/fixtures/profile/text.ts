@@ -347,20 +347,6 @@ export const lsp: NonNullable<ProfileText["lsp"]> = {
 	},
 };
 
-export const hooks: NonNullable<ProfileText["hooks"]> = {
-	additionalContext: (p) => mark("hooks.additionalContext", p),
-	blockReason: (block) => mark("hooks.blockReason", block),
-	preToolUseBlocked: (p) => mark("hooks.preToolUseBlocked", p),
-	postToolUseBlocked: (p) => mark("hooks.postToolUseBlocked", p),
-	stopBlocked: (p) => mark("hooks.stopBlocked", p),
-	fileChangedByHook: (p) => mark("hooks.fileChangedByHook", p),
-};
-
-export const memory: NonNullable<ProfileText["memory"]> = {
-	indexNearLimit: (limits) => mark("memory.indexNearLimit", limits),
-	indexOverLimit: (limits) => mark("memory.indexOverLimit", limits),
-};
-
 export const background: NonNullable<ProfileText["background"]> = {
 	cron: {
 		createDescription: (p) => mark("background.cron.createDescription", p),
@@ -480,20 +466,6 @@ export const toolStyle: NonNullable<ProfileText["toolStyle"]> = {
 export const contextBudget: NonNullable<ProfileText["contextBudget"]> = {
 	tokensLeft: (p) => mark("contextBudget.tokensLeft", p),
 	clearAtNudge: "[contextBudget.clearAtNudge]",
-};
-
-export const fileTracker: NonNullable<ProfileText["fileTracker"]> = {
-	toolResult: (outcome) => mark("fileTracker.toolResult", outcome),
-	unread: (p) => mark("fileTracker.unread", p),
-	stale: (p) => mark("fileTracker.stale", p),
-	changedOnDisk: (p) => mark("fileTracker.changedOnDisk", p),
-	changedByAgent: (p) => mark("fileTracker.changedByAgent", p),
-	moreChanged: (p) => mark("fileTracker.moreChanged", p),
-	deleted: (p) => mark("fileTracker.deleted", p),
-	changedWhileAway: (p) => mark("fileTracker.changedWhileAway", p),
-	restoredCall: (p) => mark("fileTracker.restoredCall", p),
-	restoredResult: (p) => mark("fileTracker.restoredResult", p),
-	tooLargeToRestore: (p) => mark("fileTracker.tooLargeToRestore", p),
 };
 
 export const compaction: NonNullable<ProfileText["compaction"]> = {
@@ -657,12 +629,6 @@ export const toolResults: NonNullable<ProfileText["toolResults"]> = {
 	secretPlaceholderWrite: "[toolResults.secretPlaceholderWrite]",
 };
 
-export const toolCallCorruption: NonNullable<ProfileText["toolCallCorruption"]> = {
-	damage: (damage) => mark("toolCallCorruption.damage", damage),
-	suspectBlock: (p) => mark("toolCallCorruption.suspectBlock", p),
-	corruptBlock: (p) => mark("toolCallCorruption.corruptBlock", p),
-};
-
 export const context: NonNullable<ProfileText["context"]> = {
 	memoryIndexCut: (p) => mark("context.memoryIndexCut", p),
 	instructionsPreamble: "[context.instructionsPreamble]",
@@ -796,24 +762,7 @@ export const subagents: NonNullable<ProfileText["subagents"]> = {
 	reviewTimedOut: "[subagents.reviewTimedOut]",
 };
 
-export const plugins: NonNullable<ProfileText["plugins"]> = {
-	placeholderFailed: (p) => mark("plugins.placeholderFailed", p),
-	noBash: "[plugins.noBash]",
-	placeholderTimedOut: (p) => mark("plugins.placeholderTimedOut", p),
-	outputCut: (p) => mark("plugins.outputCut", p),
-};
-
 export const subagentModels: NonNullable<ProfileText["subagentModels"]> = {
-	notice: (notice) => mark("subagentModels.notice", notice),
-	runsOn: (p) => mark("subagentModels.runsOn", p),
-	costsMore: (p) => mark("subagentModels.costsMore", p),
-	menuLine: (p) => mark("subagentModels.menuLine", p),
-	defaultCostsMore: (p) => mark("subagentModels.defaultCostsMore", p),
-	settingPinned: (p) => mark("subagentModels.settingPinned", p),
-	refused: (p) => mark("subagentModels.refused", p),
-	menu: (p) => mark("subagentModels.menu", p),
+	aliasTier: "[subagentModels.aliasTier]",
 };
 
-export const worktreeGuard: NonNullable<ProfileText["worktreeGuard"]> = {
-	refusal: (refusal) => mark("worktreeGuard.refusal", refusal),
-};

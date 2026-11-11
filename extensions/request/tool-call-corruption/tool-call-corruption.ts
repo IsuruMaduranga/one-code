@@ -7,9 +7,9 @@
  */
 
 import type { ArgumentDamage } from "./text.ts";
-import { requireText } from "../../lib/profile/profile.ts";
-/** A damage worded by the profile (`text.toolCallCorruption`). */
-const damageWords = (damage: ArgumentDamage): string => requireText("toolCallCorruption").damage(damage);
+import { toolCallCorruptionText } from "./text.ts";
+/** A damage in words (text.ts). */
+const damageWords = (damage: ArgumentDamage): string => toolCallCorruptionText.damage(damage);
 
 export interface ToolCallDamage {
 	kind: "corrupt" | "suspect";

@@ -1,13 +1,13 @@
 /**
- * One Code's hooks wording (profile/text/hooks/) for what the golden snapshot
+ * The hooks wording (safety/hooks/text.ts) for what the golden snapshot
  * cannot reach: a hook cancelled with its turn. The golden snapshot pins the
  * bytes of every other text (golden-hook.mjs); this also keeps the formatter
  * notice's guidance, which a weak model needs to read before it acts.
  */
 import { describe, expect, it } from "vitest";
-import { hooks } from "../text/hooks/index.ts";
+import { hooksText as hooks } from "../../extensions/safety/hooks/text.ts";
 
-describe("One Code's hooks text", () => {
+describe("the hooks text", () => {
 	it("words a cancelled hook and a stated reason as they come", () => {
 		expect(hooks.blockReason({ kind: "cancelled" })).toBe("Hook cancelled");
 		expect(hooks.preToolUseBlocked({ reason: hooks.blockReason({ kind: "cancelled" }) })).toBe("PreToolUse hook: Hook cancelled");

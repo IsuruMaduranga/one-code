@@ -4,6 +4,7 @@ import { resolveWorkflowAgentModel } from "../../extensions/agents/workflow/agen
 import { supportsImageInput } from "../../extensions/lib/models/model-policy.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { resolveSubagentModel, subagentModelMenu } from "../../extensions/lib/models/subagent-model.ts";
+import { subagentModelWordsInForce } from "../../extensions/lib/models/subagent-model.ts";
 
 const model = (id: string, input: number) =>
 	({
@@ -138,7 +139,7 @@ describe("workflow model defaults", () => {
 		).toThrow(
 			requireText("workflow").callProblem({
 				kind: "expensiveModel",
-				gate: requireText("subagentModels").costsMore({ model: "openai-codex/gpt-5.6-sol", price: 5, session: "openai-codex/gpt-5.6-luna", sessionPrice: 0.2 }),
+				gate: subagentModelWordsInForce().costsMore({ model: "openai-codex/gpt-5.6-sol", price: 5, session: "openai-codex/gpt-5.6-luna", sessionPrice: 0.2 }),
 			}),
 		);
 		expect(

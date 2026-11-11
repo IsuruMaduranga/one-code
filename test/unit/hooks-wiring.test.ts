@@ -28,11 +28,11 @@ import { type HookBridge, SUBAGENT_HOOK_CHANNEL } from "../../extensions/lib/age
 import { REMINDER_CHANNEL, wrapReminder } from "../../extensions/lib/request/reminders.ts";
 import { SKILL_INVOCATION_TYPE } from "../../extensions/lib/plugins/skill-invoke.ts";
 import { brandedId, envName } from "../../extensions/lib/profile/brand.mjs";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { writeUserSettings } from "./helpers/settings-files.ts";
+import { hooksText } from "../../extensions/safety/hooks/text.ts";
 
-const hooks = requireText("hooks");
+const hooks = hooksText;
 
 const hookContextText = (event: CcHookEvent, text: string) => hooks.additionalContext({ event, text });
 /** A PreToolUse hook's refusal of a call, for the reason it stated. */

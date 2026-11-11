@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { scanToolCallMarkup, toolCallCorruptionReason } from "../../extensions/request/tool-call-corruption/tool-call-corruption.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import type { ArgumentDamage } from "../../extensions/request/tool-call-corruption/text.ts";
+import { toolCallCorruptionText } from "../../extensions/request/tool-call-corruption/text.ts";
 
 /** The damage as the profile words it: the reason the base passes on. */
-const damage = (d: ArgumentDamage) => requireText("toolCallCorruption").damage(d);
+const damage = (d: ArgumentDamage) => toolCallCorruptionText.damage(d);
 const NOT_ONE_JSON = (): string => damage({ kind: "notOneJson" });
 const UNBALANCED_QUOTE = (): string => damage({ kind: "unbalancedQuote" });
 

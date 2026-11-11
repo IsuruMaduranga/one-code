@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { RESTORE_FILE_MAX_TOKENS, restoreBlocks, restoreCandidates } from "../../extensions/safety/file-tracker/restore.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { fileTrackerText } from "../../extensions/safety/file-tracker/text.ts";
 
-const fileTracker = requireText("fileTracker");
+const fileTracker = fileTrackerText;
 
 const tokens = (text: string) => Math.ceil(text.length / 4);
 

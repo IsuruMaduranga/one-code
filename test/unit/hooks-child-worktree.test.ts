@@ -10,9 +10,9 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetTrustSessionState } from "../../extensions/safety/hooks/trust.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { childHookBridge, makeHookWorktreeDirs, writeHookScript } from "./helpers/hook-worktree.ts";
 import { writeUserSettings } from "./helpers/settings-files.ts";
+import { hooksText } from "../../extensions/safety/hooks/text.ts";
 
 const state = vi.hoisted(() => ({ home: `/nonexistent/one-code-child-hooks-${Math.random().toString(36).slice(2)}` }));
 vi.mock("node:os", async (importOriginal) => {
@@ -64,7 +64,7 @@ process.stdin.on("end", () => require("node:fs").writeFileSync(${JSON.stringify(
 		const outcome = await hooks.postToolUse({ toolName: "write", input: { path: "file.txt", content: "child contents\n" }, cwd: worktree, sessionId: "child", content: [], isError: false });
 		expect(readFileSync(join(parent, "file.txt"), "utf8")).toBe("parent contents\n");
 		expect(readFileSync(join(worktree, "file.txt"), "utf8")).toBe("formatted child\n");
-		expect(outcome.additionalContext).toContain(requireText("hooks").fileChangedByHook({ path: join(worktree, "file.txt") }));
+		expect(outcome.additionalContext).toContain(hooksText.fileChangedByHook({ path: join(worktree, "file.txt") }));
 	});
 
 	it("does not start a hook for an already-aborted child turn", async () => {

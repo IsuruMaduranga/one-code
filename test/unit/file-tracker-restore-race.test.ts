@@ -8,6 +8,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fileTrackerText } from "../../extensions/safety/file-tracker/text.ts";
 
 /** Writes run around the next read-back of a file, to stage a change while it is read. */
 const aroundRead: { before?: () => void; after?: () => void } = {};
@@ -37,7 +38,7 @@ const { createFakeCtx, createFakePi } = await import("./helpers/fake-pi.ts");
 const { requireText } = await import("../../extensions/lib/profile/profile.ts");
 
 /** The restore's result block for a file that read back as `text`. */
-const restoredResult = (text: string) => requireText("fileTracker").restoredResult({ text });
+const restoredResult = (text: string) => fileTrackerText.restoredResult({ text });
 
 describe("file-tracker post-compaction restore race", () => {
 	let dir: string;

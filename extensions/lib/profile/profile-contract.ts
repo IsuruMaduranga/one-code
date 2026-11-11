@@ -22,20 +22,16 @@ import type { CompactionText } from "../../context/compaction/text.ts";
 import type { DoctorText } from "../../commands/doctor/text.ts";
 import type { ContextBudgetText } from "../../context/context-budget/text.ts";
 import type { EffortText } from "../../ui/effort/text.ts";
-import type { FileTrackerText } from "../../safety/file-tracker/text.ts";
-import type { HooksText } from "../../safety/hooks/text.ts";
 import type { InitText } from "../../commands/init/text.ts";
 import type { LspText } from "../../tools/lsp/text.ts";
 import type { McpText } from "../../tools/mcp/text.ts";
-import type { MemoryText } from "../../context/memory/text.ts";
 import type { NotebookText } from "../../tools/notebook/text.ts";
 import type { PermissionsText } from "../../safety/permissions/text.ts";
 import type { PlanModeText } from "../../safety/plan-mode/text.ts";
-import type { PluginsText } from "../../tools/plugins/text.ts";
 import type { RecapText } from "../../agents/recap/text.ts";
 import type { SessionTitleText } from "../../agents/session-title/text.ts";
 import type { SkillText } from "../../tools/skill/text.ts";
-import type { SubagentModelsText } from "../../agents/subagents/model-text.ts";
+import type { SubagentModelsText } from "../models/subagent-model-text.ts";
 import type { SubagentsText } from "../../agents/subagents/text.ts";
 import type { SystemPromptText } from "../../request/system-prompt/text.ts";
 import type { TasksText } from "../../tools/tasks/text.ts";
@@ -44,13 +40,12 @@ import type { ToolSearchText } from "../../request/tool-search/text.ts";
 import type { WebFetchText } from "../../tools/web-fetch/text.ts";
 import type { WorkflowText } from "../../agents/workflow/text.ts";
 import type { WebSearchText } from "../../tools/web/text.ts";
-import type { WorktreeGuardText, WorktreeText } from "../../safety/worktree/text.ts";
+import type { WorktreeText } from "../../safety/worktree/text.ts";
 import type { HandbackText } from "../agents/handback-text.ts";
 import type { NativeWebText } from "../request/native-web-text.ts";
 import type { NotificationsText } from "../notify/notifications-text.ts";
 import type { ContextText } from "../context/context-text.ts";
 import type { ToolResultsText } from "../request/tool-results-text.ts";
-import type { ToolCallCorruptionText } from "../../request/tool-call-corruption/text.ts";
 import type { ShellText } from "../shell-run/shell-text.ts";
 import type { FeatureId } from "./features.ts";
 import type { LiveTools } from "./live-tools.ts";
@@ -79,15 +74,12 @@ export interface ProfileText {
 	skill?: SkillText;
 	mcp?: McpText;
 	lsp?: LspText;
-	hooks?: HooksText;
-	memory?: MemoryText;
 	/** Also read by subagents, for a child's cron tools. */
 	background?: BackgroundText;
 	artifacts?: ArtifactsText;
 	toolStyle?: ToolStyleText;
 	/** Also read by the system prompt, for its last line. */
 	contextBudget?: ContextBudgetText;
-	fileTracker?: FileTrackerText;
 	compaction?: CompactionText;
 	workflow?: WorkflowText;
 	/** Read by the permission gate, which always runs: a profile must supply it. */
@@ -103,7 +95,6 @@ export interface ProfileText {
 	notifications: NotificationsText;
 	/** The base's shared result rewrites (empty results, persisted output, a user's denial): a profile must supply them. */
 	toolResults: ToolResultsText;
-	toolCallCorruption?: ToolCallCorruptionText;
 	/** The first-message context (instructions, context block, date, environment, git status): every session sends it, so a profile must supply it. */
 	context: ContextText;
 	/** tool-search is part of the required core: a profile must supply it. */
@@ -113,12 +104,8 @@ export interface ProfileText {
 	/** Every child session (subagents, forks, workflow agents) hands back through it. */
 	handback?: HandbackText;
 	subagents?: SubagentsText;
-	/** A plugin command body's placeholders. */
-	plugins?: PluginsText;
 	/** Used by subagents and workflow agents (the model menu, the notices, the expensive-model gate). */
 	subagentModels?: SubagentModelsText;
-	/** Used by the worktree tools, subagents and workflows (each guards isolated sessions with it). */
-	worktreeGuard?: WorktreeGuardText;
 }
 
 /** A profile's switches for one tool, by its registered name. Omitted fields keep the base's choice. */

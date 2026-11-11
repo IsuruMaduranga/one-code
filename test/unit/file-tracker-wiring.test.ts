@@ -17,11 +17,11 @@ import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fileTrackerExtension from "../../extensions/safety/file-tracker/index.ts";
 import { CHILD_WROTE_CHANNEL } from "../../extensions/lib/agents/child-writes.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { fileTrackerText } from "../../extensions/safety/file-tracker/text.ts";
 
-const words = requireText("fileTracker");
+const words = fileTrackerText;
 
 describe("file-tracker wiring", () => {
 	let dir: string;

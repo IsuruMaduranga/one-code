@@ -6,7 +6,7 @@
 
 import type { EnterWorktreeFailure, RemoveBlocker, WorktreeNameProblem, WorktreeSessionView, WorktreeText } from "../../../extensions/sdk/profile.ts";
 import { enterWorktreeDescription, ENTER_WORKTREE_PARAMS, EXIT_WORKTREE_DESCRIPTION, EXIT_WORKTREE_PARAMS } from "./descriptions.ts";
-import { checkoutProgram } from "./guard.ts";
+import { checkoutProgram } from "../../../extensions/sdk/profile.ts";
 
 /**
  * The worktree git-isolation guard, said when the session enters: before it,

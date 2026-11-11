@@ -10,11 +10,12 @@ import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { applicableSubagentDefault, loadSubagentDefault } from "../../extensions/lib/models/subagent-default.ts";
 import { productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
-import { subagentModelsText } from "../text/subagent-models/index.ts";
+import { subagentModelWords } from "../../extensions/lib/models/subagent-model-text.ts";
+import { subagentModels as subagentModelsPart } from "../text/subagent-models/index.ts";
 import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
 import { tempHome } from "../../test/unit/helpers/temp-home.ts";
 
-const words = subagentModelsText(ALL_LIVE);
+const words = subagentModelWords(ALL_LIVE, subagentModelsPart);
 
 /** Minimal structural stand-in; only provider/id/cost are consulted. */
 const model = (provider: string, id: string, input?: number) =>

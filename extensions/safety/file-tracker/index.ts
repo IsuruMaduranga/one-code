@@ -34,7 +34,6 @@ import { projectMemoryDir } from "../../lib/context/memory.ts";
 import { comparablePath, isPathAtOrUnder, tryRealpath } from "../../lib/profile/paths.ts";
 import { estimateTextTokens } from "../../lib/models/pi-ai-estimate.ts";
 import { planFileOnBranch } from "../../lib/rules/plan-mode-channels.ts";
-import { requireText } from "../../lib/profile/profile.ts";
 import { REMINDER_CHANNEL, type ReminderPayload } from "../../lib/request/reminders.ts";
 import { resolveToolPath } from "../../lib/rules/tool-path.ts";
 import { parseRules, ruleMatches } from "../../lib/rules/matcher.ts";
@@ -45,6 +44,7 @@ import { fileToolResultContent } from "./results.ts";
 import { shellReadPaths, shownInFull } from "./shell-reads.ts";
 import { sessionWorkCwd, WORKTREE_CHANNEL, type WorktreeLocation } from "../../lib/agents/worktree-channel.ts";
 import { describeChanges, type FileStamp, FileTracker } from "./tracker.ts";
+import { fileTrackerText } from "./text.ts";
 
 const GUARDED_TOOLS = new Set(["edit", "write", "notebook_edit"]);
 const READ_TOOLS = new Set(["read", "notebook_edit"]);
@@ -246,7 +246,7 @@ async function readAgain(read: ReturnType<typeof createReadToolDefinition>, path
 }
 
 function fileTrackerExtension(pi: ExtensionAPI) {
-	const words = requireText("fileTracker");
+	const words = fileTrackerText;
 	let tracker = new FileTracker();
 	/**
 	 * The files each bash call showed in full, by call id, decided where the

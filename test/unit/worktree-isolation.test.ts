@@ -12,9 +12,9 @@ import {
 	worktreeIsolationFor,
 	worktreeWriteGuardReason,
 } from "../../extensions/lib/agents/worktree-isolation.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
-import type { WorktreeGuardRefusal } from "../../extensions/safety/worktree/text.ts";
+import type { WorktreeGuardRefusal } from "../../extensions/lib/rules/worktree-guard-text.ts";
 import { captureToolCallHandler } from "./helpers/permission-gate-harness.ts";
+import { worktreeGuardText } from "../../extensions/lib/rules/worktree-guard-text.ts";
 
 /**
  * Worktree isolation for subagents and workflow agents
@@ -25,7 +25,7 @@ import { captureToolCallHandler } from "./helpers/permission-gate-harness.ts";
  */
 
 /** A guard's refusal as the factory hands it to the model, in the profile's words. */
-const worded = (refusal: WorktreeGuardRefusal) => requireText("worktreeGuard").refusal(refusal);
+const worded = (refusal: WorktreeGuardRefusal) => worktreeGuardText.refusal(refusal);
 
 describe("worktree isolation registry", () => {
 	afterEach(() => releaseWorktreeIsolation("/tmp/cc-wt-x/tree"));

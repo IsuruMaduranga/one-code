@@ -24,35 +24,29 @@ import { context } from "./text/context/index.ts";
 import { contextBudget } from "./text/context-budget/index.ts";
 import { doctorText } from "./text/doctor/index.ts";
 import { effort } from "./text/effort/index.ts";
-import { fileTracker } from "./text/file-tracker/index.ts";
 import { handback } from "./text/handback/index.ts";
-import { hooks } from "./text/hooks/index.ts";
 import { init } from "./text/init/index.ts";
 import { lsp } from "./text/lsp/index.ts";
 import { mcp } from "./text/mcp/index.ts";
-import { memory } from "./text/memory/index.ts";
 import { nativeWeb } from "./text/native-web/index.ts";
 import { notebook } from "./text/notebook/index.ts";
 import { notificationsText } from "./text/notifications/index.ts";
 import { permissionsText } from "./text/permissions/index.ts";
 import { planModeText } from "./text/plan-mode/index.ts";
-import { plugins } from "./text/plugins/index.ts";
 import { recap } from "./text/recap/index.ts";
 import { sessionTitle } from "./text/session-title/index.ts";
 import { shellText } from "./text/shell/index.ts";
 import { skill } from "./text/skill/index.ts";
-import { subagentModelsText } from "./text/subagent-models/index.ts";
+import { subagentModels } from "./text/subagent-models/index.ts";
 import { subagentsText } from "./text/subagents/index.ts";
 import { systemPromptText } from "./text/system-prompt/index.ts";
 import { tasks } from "./text/tasks/index.ts";
-import { toolCallCorruption } from "./text/tool-call-corruption/index.ts";
 import { toolResults } from "./text/tool-results/index.ts";
 import { toolSearchText } from "./text/tool-search/index.ts";
 import { toolStyleText } from "./text/tool-style/index.ts";
 import { webFetchText } from "./text/web-fetch/index.ts";
 import { webSearch } from "./text/web-search/index.ts";
 import { workflowText } from "./text/workflow/index.ts";
-import { worktreeGuard } from "./text/worktree/guard.ts";
 import { worktree } from "./text/worktree/index.ts";
 
 export const profile: Profile = {
@@ -65,7 +59,6 @@ export const profile: Profile = {
 		askUser: askUserText(live),
 		tasks,
 		worktree,
-		worktreeGuard,
 		webFetch: webFetchText(live),
 		webSearch,
 		nativeWeb,
@@ -78,13 +71,10 @@ export const profile: Profile = {
 		skill,
 		mcp,
 		lsp,
-		hooks,
-		memory,
 		background,
 		artifacts: artifactsText(live),
 		toolStyle: toolStyleText(live),
 		contextBudget,
-		fileTracker,
 		compaction,
 		workflow: workflowText(live),
 		autoMode: autoModeText(live),
@@ -94,14 +84,12 @@ export const profile: Profile = {
 		doctor: doctorText(live),
 		notifications: notificationsText(live),
 		toolResults,
-		toolCallCorruption,
 		context,
 		toolSearch: toolSearchText(live),
 		permissions: permissionsText(live),
 		handback,
-		subagentModels: subagentModelsText(live),
+		subagentModels,
 		subagents: subagentsText(live),
-		plugins,
 	}),
 	sources: "claude-code/sources.ts",
 	globalAgentsFiles: ["~/.agents/AGENTS.md"],

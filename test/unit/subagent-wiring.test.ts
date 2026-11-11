@@ -21,6 +21,7 @@ import * as worktrees from "../../extensions/lib/agents/agent-worktree.ts";
 import type { Worktree } from "../../extensions/lib/agents/agent-worktree.ts";
 import { emptyUsage } from "../../extensions/lib/agents/usage.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { subagentModelWordsInForce } from "../../extensions/lib/models/subagent-model.ts";
 
 const model = (id: string, input: string[], cost: number) => ({
 	provider: "openai", id, name: id, input, cost: { input: cost, output: cost * 4 },
@@ -88,7 +89,7 @@ describe("subagent model command", () => {
 		const h = await mount();
 		await h.fake.commands.get("subagent")!.handler("openai/gpt-5-flash-text", h.ctx);
 		expect(defaults.persistSubagentModel).not.toHaveBeenCalled();
-		const words = requireText("subagentModels");
+		const words = subagentModelWordsInForce();
 		expect(h.notices()).toContain(words.notice({ kind: "textOnlyCall", model: "openai/gpt-5-flash-text" }));
 		// The menu offers the image-capable models only.
 		expect(h.notices()).toContain(

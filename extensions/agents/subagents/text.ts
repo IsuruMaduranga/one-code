@@ -5,7 +5,7 @@
  * reads: the tools' descriptions and parameters, their results and refusals,
  * a run's failures, the fork's framing, and the blocks the extension adds to
  * the conversation. The hand-back tool and the model menu are their own
- * groups (lib/agents/handback-text.ts, model-text.ts). Progress lines the UI shows
+ * groups (lib/agents/handback-text.ts, lib/models/subagent-model-text.ts). Progress lines the UI shows
  * and the panels are the base's. Deep modules reach the words through
  * `words.ts`.
  */
@@ -45,7 +45,7 @@ export type SubagentRefusal =
 	/** A fork in a session with no session file. */
 	| { kind: "forkNotPersisted" }
 	| { kind: "worktreeNeedsGit" }
-	/** `reason` is the resolver's own, when it has one; `menu` the models note (model-text.ts). */
+	/** `reason` is the resolver's own, when it has one; `menu` the models note (lib/models/subagent-model-text.ts). */
 	| { kind: "unknownModel"; model: string; reason?: string; menu: string }
 	/** `gate` is the expensive-model gate's sentence. */
 	| { kind: "expensiveModel"; gate: string; menu: string }

@@ -9,11 +9,12 @@
  */
 import { describe, expect, it } from "vitest";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
-import { subagentModelsText } from "../text/subagent-models/index.ts";
+import { subagentModelWords } from "../../extensions/lib/models/subagent-model-text.ts";
+import { subagentModels as subagentModelsPart } from "../text/subagent-models/index.ts";
 import { subagentsText } from "../text/subagents/index.ts";
 import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
 
-const subagentModels = subagentModelsText(ALL_LIVE);
+const subagentModels = subagentModelWords(ALL_LIVE, subagentModelsPart);
 const subagents = subagentsText(ALL_LIVE);
 
 describe("One Code's subagent text", () => {

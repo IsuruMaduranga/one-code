@@ -6,9 +6,9 @@ import { Type } from "typebox";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HookBridge } from "../../extensions/lib/agents/hook-bridge.ts";
 import { openChildSession } from "../../extensions/lib/agents/agent-loader.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { SubagentRuntime } from "../../extensions/agents/subagents/runner.ts";
 import { registerWorktreeIsolation, releaseWorktreeIsolation } from "../../extensions/lib/agents/worktree-isolation.ts";
+import { worktreeGuardText } from "../../extensions/lib/rules/worktree-guard-text.ts";
 
 describe("child hook and permission order", () => {
 	let root: string;
@@ -94,7 +94,7 @@ describe("child hook and permission order", () => {
 			const outcome = await session.extensionRunner!.emitToolCall({ type: "tool_call", toolCallId: "child-3", toolName: "write", input: { path: "own.txt", content: "text" } });
 			expect(outcome?.block).toBe(true);
 			expect(outcome?.reason).toBe(
-				requireText("worktreeGuard").refusal({
+				worktreeGuardText.refusal({
 					kind: "sharedCheckoutWrite",
 					worktreePath: worktree,
 					sharedRoot: cwd,

@@ -27,7 +27,6 @@ import { join } from "node:path";
 import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { claudeMdLimitWarning, combinedLimitWarning, projectMemoryDir } from "../../lib/context/memory.ts";
 import { INDEX_MAX_CHARS, INDEX_MAX_LINES, indexLimitStatus, stampFrontmatter } from "../../lib/context/memory-content.ts";
-import { requireText } from "../../lib/profile/profile.ts";
 import { allowedPath, sourceSwitch } from "../../lib/profile/sources.ts";
 import { agentSkippedInstructions } from "../../lib/context/instruction-budget.ts";
 import { productSettingsPath, readSettingsForWrite, writeSettings } from "../../lib/profile/product-settings.ts";
@@ -44,6 +43,7 @@ import { AUTO_MEMORY_KEY, autoMemoryEnabled, autoMemoryEnvVar, autoMemoryFromEnv
 import { registerLocalCommand } from "../../lib/ui/local-command.ts";
 import { canShowCustomUi } from "../../lib/notify/headless-output.ts";
 import { panelUi } from "../../lib/ui/panel-focus.ts";
+import { memoryText } from "./text.ts";
 
 const MEMORY_PANEL_MAX_HEIGHT = 20;
 
@@ -68,7 +68,7 @@ function memoryEntriesFor(cwd: string): MemoryEntry[] {
 }
 
 function memoryExtension(pi: ExtensionAPI) {
-	const text = requireText("memory");
+	const text = memoryText;
 	const limits = { maxLines: INDEX_MAX_LINES, maxChars: INDEX_MAX_CHARS };
 	let dir: string | undefined;
 	let dirReal = "";

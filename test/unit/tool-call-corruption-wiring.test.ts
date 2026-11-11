@@ -1,13 +1,13 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TURN_FAILED_CHANNEL } from "../../extensions/lib/notify/interrupt.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import toolCallCorruptionExtension from "../../extensions/request/tool-call-corruption/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { toolCallCorruptionText } from "../../extensions/request/tool-call-corruption/text.ts";
 
 const model = { provider: "openrouter", id: "z-ai/glm-5.3", baseUrl: "https://openrouter.ai/api/v1" };
 const corrupt = '{"command":"grep -rn \\\"","run_in_background":false}';
-const words = () => requireText("toolCallCorruption");
+const words = () => toolCallCorruptionText;
 
 describe("OpenRouter tool-call corruption wiring", () => {
 	let fake: FakePi;

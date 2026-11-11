@@ -1,15 +1,13 @@
 /**
- * One Code's tool-result and tool-call-corruption wording (profile/) where
- * the golden snapshot cannot reach it: a save that failed, a denial with the
- * user's words, and the corruption blocks (OpenRouter streaming damaged
- * arguments). It also checks the empty results and the saved-output pointer
+ * One Code's tool-result wording (profile/) where the golden snapshot
+ * cannot reach it: a save that failed and a denial with the user's words.
+ * It also checks the empty results and the saved-output pointer
  * in Claude Code's words. The golden snapshot pins the empty results, a
  * persisted output and a denial without words.
  */
 import { describe, expect, it } from "vitest";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { userDenialKind, userDenialText } from "../../extensions/lib/consent/user-denial.ts";
-import { toolCallCorruption } from "../text/tool-call-corruption/index.ts";
 import { toolResults } from "../text/tool-results/index.ts";
 
 describe("One Code's tool-result text", () => {
@@ -38,15 +36,5 @@ describe("One Code's tool-result text", () => {
 
 	it("uses Claude Code's Glob no-files text for pi find", () => {
 		expect(toolResults.noFilesFound).toBe("No files found");
-	});
-});
-
-describe("One Code's tool-call-corruption text", () => {
-	it("words the damage and both blocks", () => {
-		const reason = toolCallCorruption.damage({ kind: "cutAfterOption", option: "-rn" });
-		expect(reason).toBe('The shell command ends with "-rn" and nothing after it, the shape of arguments cut off before a quoted string.');
-		expect(toolCallCorruption.suspectBlock({ reason })).toContain("It was not run. Send the complete command again");
-		expect(toolCallCorruption.corruptBlock({ reason, repeat: true })).toContain("An earlier command in this run came through cut the same way. Do not retry this call");
-		expect(toolCallCorruption.corruptBlock({ reason, repeat: false })).not.toContain("An earlier command");
 	});
 });

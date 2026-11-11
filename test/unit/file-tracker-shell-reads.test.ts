@@ -10,12 +10,12 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import fileTrackerExtension from "../../extensions/safety/file-tracker/index.ts";
 import { expandCandidate, shellReadCandidates, shellReadPaths, shownInFull } from "../../extensions/safety/file-tracker/shell-reads.ts";
 import { describeChanges } from "../../extensions/safety/file-tracker/tracker.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { WORKTREE_CHANNEL } from "../../extensions/lib/agents/worktree-channel.ts";
 import { CHILD_WROTE_CHANNEL } from "../../extensions/lib/agents/child-writes.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { bashParserReady } from "../../extensions/lib/shell/bash-parser.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { fileTrackerText } from "../../extensions/safety/file-tracker/text.ts";
 
 vi.mock("node:fs", async (load) => {
 	const actual = await load<typeof import("node:fs")>();
@@ -26,7 +26,7 @@ beforeAll(async () => {
 	await bashParserReady();
 });
 
-const trackerText = requireText("fileTracker");
+const trackerText = fileTrackerText;
 
 const CWD = resolve("/work");
 const HOME = resolve("/home/me");

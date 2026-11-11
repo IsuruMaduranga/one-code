@@ -29,7 +29,8 @@ const ONE_CODE_ONLY = ["explore", "plan", "artifact-design", "fewer-permission-p
 /** A catalog name as a name: quoted, a slash command, or before "agent" or "skill"; `plan` and `explore` alone are English. */
 const catalogName = (name: string) => new RegExp(`["'\`]${name}["'\`]|(?<![\\w/.-])/${name}\\b|\\b${name} (sub)?agents?\\b|\\b${name} skill\\b`, "i");
 
-const OTHER_PRODUCT = /Claude Code|\bCLAUDE(\.local)?\.md\b|\bClaude session\b|claude\.ai\b/;
+// "A non-Claude session" names the model family, which the base knows (lib/models/); "another Claude session" names the product.
+const OTHER_PRODUCT = /Claude Code|\bCLAUDE(\.local)?\.md\b|(?<!non-)\bClaude session\b|claude\.ai\b/;
 
 function walk(dir: string): string[] {
 	return readdirSync(dir).flatMap((name) => {

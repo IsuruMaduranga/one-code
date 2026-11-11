@@ -1,6 +1,5 @@
 /** Reject damaged OpenRouter streams before tool execution, without changing the request prefix. */
 import { feature } from "../../lib/profile/feature.ts";
-import { requireText } from "../../lib/profile/profile.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { notifyOrPrint } from "../../lib/notify/headless-output.ts";
 import { TURN_FAILED_CHANNEL, type TurnFailedEvent } from "../../lib/notify/interrupt.ts";
@@ -18,6 +17,7 @@ import {
 	trailingPadding,
 } from "./tool-call-corruption.ts";
 import { withKeepAlive } from "../../lib/core/keep-alive.ts";
+import { toolCallCorruptionText } from "./text.ts";
 
 // Silence allowed inside a stream. Every raw chunk restarts the clock, but
 // OpenRouter's keepalive comments never reach us, so a model thinking
@@ -214,13 +214,13 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 		if (damage.kind === "suspect" && !suspectReturned) {
 			suspectReturned = true;
 			flagged.delete(event.toolCallId);
-			return { block: true, reason: requireText("toolCallCorruption").suspectBlock({ reason: damage.reason }) };
+			return { block: true, reason: toolCallCorruptionText.suspectBlock({ reason: damage.reason }) };
 		}
 		const repeat = damage.kind === "suspect";
 		flagged.set(event.toolCallId, { kind: "corrupt", reason: damage.reason });
 		return {
 			block: true,
-			reason: requireText("toolCallCorruption").corruptBlock({ reason: damage.reason, repeat }),
+			reason: toolCallCorruptionText.corruptBlock({ reason: damage.reason, repeat }),
 			terminate: true,
 		};
 	});

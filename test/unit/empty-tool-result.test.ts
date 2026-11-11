@@ -10,6 +10,7 @@ import { SessionTurnTracker } from "../../extensions/agents/subagents/session-tu
 import { applyPostToolUseOutcome } from "../../extensions/lib/rules/hook-protocol.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { fileTrackerText } from "../../extensions/safety/file-tracker/text.ts";
 
 const text = (value: string) => ({ type: "text", text: value });
 /** The profile's text for a tool that returned nothing (One Code's: profile/test/profile-tool-results-text.test.ts). */
@@ -92,7 +93,7 @@ describe("built-in empty results", () => {
 			const change = await handler(event, ctx);
 			if (change) event = { ...event, ...change };
 		}
-		expect(event.content[0].text).toBe(requireText("fileTracker").toolResult({ kind: "empty" }));
+		expect(event.content[0].text).toBe(fileTrackerText.toolResult({ kind: "empty" }));
 		expect(event.content).toHaveLength(1);
 	});
 

@@ -1,6 +1,6 @@
 /**
- * Which of pi's built-in read, write and edit results the profile words in
- * place of pi's (pure). pi's tools keep their call shapes (`path`,
+ * Which of pi's built-in read, write and edit results get our words (text.ts)
+ * in place of pi's (pure). pi's tools keep their call shapes (`path`,
  * `edits[]`) and their own behavior; only what the model reads back changes,
  * by rewriting the first text block of a result whose text is pi's exact
  * wording. Anything else (pi's truncation notes, an image, a block another
@@ -28,7 +28,7 @@ export interface FileToolResult {
 	isEmptyFile?: () => boolean;
 }
 
-/** What the first block says, for the profile to word, or undefined to leave the result as pi wrote it. */
+/** What the first block says, for text.ts to word, or undefined to leave the result as pi wrote it. */
 export function fileToolOutcome(result: FileToolResult, text: string): FileToolOutcome | undefined {
 	const { toolName, isError, path, cwd } = result;
 	if (toolName === "write" && !isError && text.startsWith("Successfully wrote to ")) return { kind: "written", path, created: !result.existedBefore };
@@ -42,7 +42,7 @@ export function fileToolOutcome(result: FileToolResult, text: string): FileToolO
 	return undefined;
 }
 
-/** The result's content with the profile's text in place of pi's, or undefined when nothing changes. */
+/** The result's content with our text in place of pi's, or undefined when nothing changes. */
 export function fileToolResultContent<B extends Block>(result: FileToolResult & { content: B[] }, words: FileTrackerText): B[] | undefined {
 	if (!Array.isArray(result.content)) return undefined;
 	const [first, ...rest] = result.content;

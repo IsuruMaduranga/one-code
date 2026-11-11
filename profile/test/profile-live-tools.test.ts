@@ -12,6 +12,7 @@ import type { LiveTools } from "../../extensions/lib/profile/live-tools.ts";
 import type { DescriptionForm } from "../../extensions/lib/profile/tool-variants.ts";
 import type { ShellBlock } from "../../extensions/lib/shell-run/shell-text.ts";
 import type { FixPromptInput } from "../../extensions/commands/doctor/text.ts";
+import { subagentModelWords } from "../../extensions/lib/models/subagent-model-text.ts";
 import { profile } from "../index.ts";
 import { PROMPT_TIERS } from "../../extensions/lib/models/model-tier.ts";
 
@@ -41,7 +42,8 @@ const FIX_INPUT: FixPromptInput = {
 /** Every text that names another tool: its label, the feature that owns it (its own tools may name each other), and the text. */
 function texts(live: LiveTools): [string, string | undefined, string][] {
 	const t = profile.text({ live });
-	const { systemPrompt, planMode, askUser, subagents, toolStyle, shell, notifications, workflow, artifacts, toolSearch, subagentModels, autoMode, permissions, webFetch } = t as Required<typeof t>;
+	const { systemPrompt, planMode, askUser, subagents, toolStyle, shell, notifications, workflow, artifacts, toolSearch, autoMode, permissions, webFetch } = t as Required<typeof t>;
+	const subagentModels = subagentModelWords(live, t.subagentModels!);
 	const out: [string, string | undefined, string][] = [];
 	const push = (label: string, owner: string | undefined, text: string) => out.push([label, owner, text]);
 	for (const tier of PROMPT_TIERS) {

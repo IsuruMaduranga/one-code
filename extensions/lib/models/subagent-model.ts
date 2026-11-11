@@ -50,7 +50,7 @@
 import { brandedId } from "../profile/brand.mjs";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { SubagentDefault } from "./subagent-default.ts";
-import type { MenuLabel, SubagentModelNotice, SubagentModelsText } from "../../agents/subagents/model-text.ts";
+import { type MenuLabel, type SubagentModelNotice, type SubagentModelWords, subagentModelWords } from "./subagent-model-text.ts";
 import {
 	crossesProvider,
 	findConfigured,
@@ -64,7 +64,7 @@ import {
 	supportsImageInput,
 } from "./model-policy.ts";
 import { pairedModel } from "./model-pairings.ts";
-import { requireText } from "../profile/profile.ts";
+import { activeProfile, requireText } from "../profile/profile.ts";
 import { atLeastTier, economicalContainedCandidates, intrinsicTier, type PromptTier, sameTierContainedCandidates } from "./model-tier.ts";
 
 /**
@@ -164,8 +164,12 @@ export interface SubagentModelResolution {
 	notices: string[];
 }
 
-/** The profile's words (model-text.ts); fails closed, as every Agent and workflow call reads them. */
-const words = (): SubagentModelsText => requireText("subagentModels");
+/**
+ * The words in force (subagent-model-text.ts), with the profile's clause; fails
+ * closed without it, as every Agent and workflow call reads them.
+ */
+export const subagentModelWordsInForce = (): SubagentModelWords => subagentModelWords(activeProfile().live, requireText("subagentModels"));
+const words = subagentModelWordsInForce;
 
 /**
  * The model-facing form of a resolution's notices, for the spawn tool's result.
@@ -288,8 +292,8 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 		if (alias in ALIAS_TIER) {
 			const resolved = resolveAlias(alias, contained, available, sessionModel, requireImageInput);
 			if (resolved?.how === "name") return { model: resolved.model, source: entry.source, notices };
-			// SCOPE the claim to this session's provider family (the profile's
-			// words say why).
+			// SCOPE the claim to this session's provider family (subagent-model-text.ts
+			// says why).
 			const session = sessionModel ? spec(sessionModel) : undefined;
 			if (resolved) {
 				// The tier reading: what the alias meant, on this provider. Stated so

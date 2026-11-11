@@ -30,8 +30,8 @@ import { WORKTREE_CHANNEL, type WorktreeLocation } from "./worktree-channel.ts";
 import { isWithin, isWritingTool, pathArgument, resolveForContainment, toAbsolute } from "../shell/paths.ts";
 import { analyzeShellCommand } from "../shell/shell-analysis.ts";
 import { namesGit, unlistedWorktreesReason, worktreeBashGuardReason } from "../rules/worktree-guards.ts";
-import type { WorktreeGuardRefusal } from "../../safety/worktree/text.ts";
-import { requireText } from "../profile/profile.ts";
+import type { WorktreeGuardRefusal } from "../rules/worktree-guard-text.ts";
+import { worktreeGuardText } from "../rules/worktree-guard-text.ts";
 
 export interface WorktreeIsolation {
 	/** The isolated worktree the run works in. */
@@ -186,7 +186,7 @@ export function worktreeGuardFactory(cwd: string): InlineExtension {
 		hidden: true,
 		factory: (pi) => {
 			// Read when a refusal is worded: every child loads this guard, and only an isolated one refuses.
-			const block = (refusal: WorktreeGuardRefusal | undefined) => (refusal ? { block: true, reason: requireText("worktreeGuard").refusal(refusal) } : undefined);
+			const block = (refusal: WorktreeGuardRefusal | undefined) => (refusal ? { block: true, reason: worktreeGuardText.refusal(refusal) } : undefined);
 			pi.on("tool_call", async (event, ctx) => {
 				const runCwd = ctx?.cwd ?? cwd;
 				const isolation = worktreeIsolationFor(runCwd);

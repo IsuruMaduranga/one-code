@@ -33,13 +33,15 @@ import { worktreePowershellGuardReason } from "./powershell-guards.ts";
 import { bashParserReady } from "../../lib/shell/bash-parser.ts";
 import { ORIGINAL_COMMAND_CHANNEL, type OriginalCommandRecord } from "../../lib/shell/original-command.ts";
 import { requireText } from "../../lib/profile/profile.ts";
-import type { EnterWorktreeFailure, RemoveBlocker, WorktreeGuardRefusal } from "./text.ts";
+import type { EnterWorktreeFailure, RemoveBlocker } from "./text.ts";
+import type { WorktreeGuardRefusal } from "../../lib/rules/worktree-guard-text.ts";
 import { rewriteToolInput, validateWorktreeName } from "./rewrite.ts";
 import { toolRenderers } from "../../lib/ui/tui-render.ts";
 import { findProjectRoot, HARNESS_GIT_CONFIG, HARNESS_GIT_NO_HOOKS, repositoryWorktrees } from "../../lib/context/git.ts";
 import { projectConfigDir, projectConfigDirName } from "../../lib/profile/sources.ts";
 import { readState, readStringsState, recordState } from "../../lib/request/ledger/state.ts";
 import { processState } from "../../lib/profile/process-state.ts";
+import { worktreeGuardText } from "../../lib/rules/worktree-guard-text.ts";
 
 const run = promisify(execFile);
 const REMINDER_KEY = "cc-worktree-session";
@@ -94,7 +96,7 @@ function isWorktreeState(value: unknown): value is WorktreeState {
 
 function worktreeExtension(pi: ExtensionAPI) {
 	const text = requireText("worktree");
-	const guardWords = requireText("worktreeGuard");
+	const guardWords = worktreeGuardText;
 	const block = (refusal: WorktreeGuardRefusal) => ({ block: true, reason: guardWords.refusal(refusal) });
 	let state: WorktreeState | undefined;
 

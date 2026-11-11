@@ -16,6 +16,7 @@ import { shellQuote } from "../../extensions/lib/shell/shell-quote.ts";
 import { WORKTREE_CHANNEL, type WorktreeLocation } from "../../extensions/lib/agents/worktree-channel.ts";
 import worktreeExtension from "../../extensions/safety/worktree/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { worktreeGuardText } from "../../extensions/lib/rules/worktree-guard-text.ts";
 
 type GateResult = { block?: boolean; reason?: string } | undefined;
 /** The worktree session a tool recorded (the state its texts name). */
@@ -24,7 +25,7 @@ type Session = Parameters<ReturnType<typeof words>["reminder"]>[0];
 const words = () => requireText("worktree");
 /** A guard's refusal of git aimed at `target`, in the profile's words. */
 const sharedTarget = (target: string) =>
-	requireText("worktreeGuard").refusal({ kind: "gitTarget", worktreePath: worktree, problem: { kind: "sharedTarget", target } });
+	worktreeGuardText.refusal({ kind: "gitTarget", worktreePath: worktree, problem: { kind: "sharedTarget", target } });
 
 let repo: string;
 let fake: FakePi;
