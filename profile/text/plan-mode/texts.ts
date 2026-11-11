@@ -142,36 +142,3 @@ export const EXIT_PLAN_MODE_DESCRIPTION = [
 	"3. Initial task: \"Add a new feature to handle user authentication\" - If unsure about auth method (OAuth, JWT, etc.), use ask_user_question first, then use exit plan mode tool after clarifying the approach.",
 	"",
 ].join("\n");
-
-/** Claude Code's EnterPlanMode result. */
-const ENTERED_PLAN_MODE = [
-	"Entered plan mode. You should now focus on exploring the codebase and designing an implementation approach.",
-	"",
-	"In plan mode, you should:",
-	"1. Thoroughly explore the codebase to understand existing patterns",
-	"2. Identify similar features and architectural approaches",
-	"3. Consider multiple approaches and their trade-offs",
-	"4. Use ask_user_question if you need to clarify the approach",
-	"5. Design a concrete implementation strategy",
-	"6. When ready, use exit_plan_mode to present your plan for approval",
-	"",
-	"Remember: DO NOT write or edit any files yet. This is a read-only exploration and planning phase.",
-].join("\n");
-
-/**
- * enter_plan_mode's result: Claude Code's text, then the plan file's path so
- * the model can start writing the plan in the same turn.
- */
-export function enteredPlanModeText(planFilePath: string): string {
-	return `${ENTERED_PLAN_MODE}\n\nYour plan file is ${planFilePath}, the one file you may write: build your plan there.`;
-}
-
-/** exit_plan_mode's result when the user approves: Claude Code's text, with the plan file's contents. */
-export function approvedPlanText(planFilePath: string, plan: string): string {
-	return `User has approved your plan. You can now start coding. Start with updating your todo list if applicable\n\nYour plan has been saved to: ${planFilePath}\nYou can refer back to it if needed during implementation.\n\n## Approved Plan:\n${plan}`;
-}
-
-/** Claude Code's reminder after the approval: plan mode is over and the plan file stays readable. */
-export function exitedPlanModeText(planFilePath: string): string {
-	return `## Exited Plan Mode\n\nYou have exited plan mode. You can now make edits, run tools, and take actions. The plan file is located at ${planFilePath} if you need to reference it.`;
-}

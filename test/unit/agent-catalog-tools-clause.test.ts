@@ -8,12 +8,12 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { userConfigDir } from "../../extensions/lib/profile/sources.ts";
 import { BUNDLED_AGENTS_DIR, parseAgentFile } from "../../extensions/lib/agents/agent-catalog.ts";
 import * as defaults from "../../extensions/lib/models/subagent-default.ts";
 import subagentsExtension from "../../extensions/agents/subagents/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { subagentResultText } from "../../extensions/lib/agents/subagent-text.ts";
 
 const session = { provider: "openai", id: "gpt-5-main", name: "gpt-5-main", input: ["text"], cost: { input: 2, output: 8 } };
 
@@ -45,8 +45,7 @@ describe("agent catalog tools clause", () => {
 			sessionManager: { getSessionId: () => "s", getSessionDir: () => dir, getSessionFile: () => undefined, getBranch: () => [] },
 		});
 		await fake.fire("session_start", {}, ctx);
-		const words = requireText("subagents");
-		const listSpy = vi.spyOn(words, "catalogList");
+		const listSpy = vi.spyOn(subagentResultText(), "catalogList");
 		const result = (await fake.tools.get("Agent")!.execute("call", { action: "list" }, undefined, undefined, ctx)) as { content: { text: string }[] };
 		const text = result.content[0].text;
 		const bundledPath = join(BUNDLED_AGENTS_DIR, "general-purpose.md");
@@ -54,7 +53,7 @@ describe("agent catalog tools clause", () => {
 		expect(listSpy).toHaveBeenCalledTimes(1);
 		expect(text).toBe(listSpy.mock.results[0].value);
 		const { rows } = listSpy.mock.calls[0][0];
-		expect(rows).toContain(words.catalogRow({ name: "mine", description: "My agent", tools: { kind: "all", builtIn: false } }));
-		expect(rows).toContain(words.catalogRow({ name: "general-purpose", description: general.description, tools: { kind: "all", builtIn: true } }));
+		expect(rows).toContain(subagentResultText().catalogRow({ name: "mine", description: "My agent", tools: { kind: "all", builtIn: false } }));
+		expect(rows).toContain(subagentResultText().catalogRow({ name: "general-purpose", description: general.description, tools: { kind: "all", builtIn: true } }));
 	});
 });

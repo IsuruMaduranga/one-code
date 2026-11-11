@@ -21,6 +21,8 @@ import { persistedFileBlock, PREVIEW_BYTES } from "../../extensions/lib/request/
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { projectConfigDirName } from "../../extensions/lib/profile/sources.ts";
 import { BUNDLED_AGENTS_DIR } from "../../extensions/lib/agents/agent-catalog.ts";
+import { subagentResultText } from "../../extensions/lib/agents/subagent-text.ts";
+import { workflowResultText } from "../../extensions/agents/workflow/text.ts";
 
 let agentDir: string;
 let cwd: string;
@@ -103,7 +105,7 @@ describe("workflow agent() sessions", () => {
 				return [mcpTool];
 			},
 		});
-		await expect(runner.run("do it", {}, controller.signal)).rejects.toThrow(requireText("workflow").runStop({ kind: "agentAborted" }));
+		await expect(runner.run("do it", {}, controller.signal)).rejects.toThrow(workflowResultText.runStop({ kind: "agentAborted" }));
 		expect(prompt).not.toHaveBeenCalled();
 	});
 
@@ -133,7 +135,7 @@ describe("workflow agent() sessions", () => {
 	it("fails loud when the agent file's allowlist matches no tool", async () => {
 		const { first, error } = await toolsOf({ agentType: "b4-broken" });
 		expect(first).toBeUndefined();
-		expect(error).toBe(requireText("subagents").unusableTools({ name: "b4-broken", tools: ["nonsense"] }));
+		expect(error).toBe(subagentResultText().unusableTools({ name: "b4-broken", tools: ["nonsense"], hint: requireText("subagents").toolNamesHint }));
 	});
 
 	it("loads the curated child extensions and the parent's MCP tools, as a subagent does (M6)", async () => {

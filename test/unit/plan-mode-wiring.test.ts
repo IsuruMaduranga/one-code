@@ -16,6 +16,7 @@ import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { userDenialText } from "../../extensions/lib/consent/user-denial.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { envName } from "../../extensions/lib/profile/brand.mjs";
+import { planModeResultText } from "../../extensions/safety/plan-mode/text.ts";
 
 const planMode = requireText("planMode");
 const buildPlanModeReminder = (planFile: string, planExists: boolean) => planMode.reminder({ planFile, planExists });
@@ -141,7 +142,7 @@ describe("plan-mode wiring", () => {
 		const standing = reminders.filter((r) => r.key === "permission-mode" && !r.remove).at(-1)?.text;
 		expect(standing).not.toBe(atEntry);
 		const plan = "# the plan\n1. Step one.\n";
-		const restore = reminders.find((r) => r.text === planMode.reattached({ planFile: planFiles[0].path, content: plan, chars: plan.length }));
+		const restore = reminders.find((r) => r.text === planModeResultText().reattached({ planFile: planFiles[0].path, content: plan, chars: plan.length }));
 		expect(restore?.placement).toBe("user-prepend");
 	});
 
@@ -241,7 +242,7 @@ describe("exit_plan_mode and the mode before planning (PERMISSIONS-REVIEW-2026-0
 		};
 		expect(result.isError).toBe(true);
 		expect(result.details.approved).toBe(false);
-		expect(result.content[0].text).toBe(planMode.noApprover(planFile));
+		expect(result.content[0].text).toBe(planModeResultText().noApprover(planFile));
 		// No mode change was requested: the session stays in plan mode.
 		expect(modeRequests).toHaveLength(0);
 	});
@@ -265,7 +266,7 @@ describe("exit_plan_mode and the mode before planning (PERMISSIONS-REVIEW-2026-0
 		fake.events.on(REMINDER_CHANNEL, (data) => exitReminders.push(data as { text?: string }));
 		const result = (await fake.tools.get("exit_plan_mode")!.execute("t3", {}, undefined, undefined, ctx)) as { details: { approved?: boolean } };
 		expect(result.details.approved).toBe(true);
-		expect(exitReminders.some((entry) => entry.text === planMode.exited(planFile))).toBe(true);
+		expect(exitReminders.some((entry) => entry.text === planModeResultText().exited(planFile))).toBe(true);
 		expect(modeRequests).toEqual([{ mode: "acceptEdits", toolCallId: "t3" }]);
 		const text = offered[0].join("\n");
 		expect(text).toContain("back to auto-accept edits (the mode before planning)");

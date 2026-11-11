@@ -17,7 +17,7 @@ import { MAX_AGENTS_PER_RUN, MAX_ITEMS_PER_CALL, MAX_NOTICES_PER_TICK, type Scri
 import { whenAborted } from "../../lib/core/abort.ts";
 import { wrapScriptBody } from "./script-source.ts";
 import { WorkflowScriptError, type AgentCallOptions } from "./types.ts";
-import { workflowWords } from "./words.ts";
+import { workflowResultText } from "./text.ts";
 
 export interface WorkflowRuntimeOptions {
 	signal?: AbortSignal;
@@ -41,8 +41,7 @@ export async function runWorkflowScript(
 	filename = "workflow.js",
 	options: WorkflowRuntimeOptions = {},
 ): Promise<unknown> {
-	const words = workflowWords();
-	if (options.signal?.aborted) throw new WorkflowScriptError(words.runStop({ kind: "aborted" }));
+	if (options.signal?.aborted) throw new WorkflowScriptError(workflowResultText.runStop({ kind: "aborted" }));
 	const timeoutMs = options.timeoutMs ?? 5_000;
 	// Two atomic slots shared with the worker: [0] the output tokens spent so
 	// far (kept current here so budget.spent()/remaining() stay synchronous in
@@ -74,7 +73,7 @@ export async function runWorkflowScript(
 				stopped = true;
 				reject(new WorkflowScriptError(message));
 			};
-			unhookAbort = whenAborted(options.signal, () => fail(words.runStop({ kind: "aborted" })));
+			unhookAbort = whenAborted(options.signal, () => fail(workflowResultText.runStop({ kind: "aborted" })));
 			watchdog = setInterval(() => {
 				updateBudget();
 				const beat = Atomics.load(shared, SLOT_HEARTBEAT);
@@ -85,7 +84,7 @@ export async function runWorkflowScript(
 				// Until the first beat the worker is still starting up: allow at least 5 s.
 				const allowed = lastBeat === 0n ? Math.max(5_000, timeoutMs) : timeoutMs;
 				if (performance.now() - lastHeartbeat > allowed) {
-					fail(words.runStop({ kind: "timedOut", ms: timeoutMs }));
+					fail(workflowResultText.runStop({ kind: "timedOut", ms: timeoutMs }));
 				}
 			}, Math.max(10, Math.min(250, timeoutMs / 4)));
 			const reply = async (message: Extract<WorkerMessage, { type: "call" }>) => {
@@ -109,7 +108,7 @@ export async function runWorkflowScript(
 				try {
 					switch (message.type) {
 						case "result": stopped = true; resolve(message.value); break;
-						case "error": fail(words.runStop({ kind: "scriptFailed", message: message.message })); break;
+						case "error": fail(workflowResultText.runStop({ kind: "scriptFailed", message: message.message })); break;
 						case "log": globals.log(message.value); break;
 						case "phase": globals.phase(message.value); break;
 						case "call": void reply(message).catch((error) => fail(String(error))); break;
@@ -118,8 +117,8 @@ export async function runWorkflowScript(
 					fail(error instanceof Error ? error.message : String(error));
 				}
 			});
-			worker.on("error", (error) => fail(words.runStop({ kind: "workerFailed", message: error instanceof Error ? error.message : String(error) })));
-			worker.on("exit", (code) => fail(words.runStop({ kind: "workerExited", code })));
+			worker.on("error", (error) => fail(workflowResultText.runStop({ kind: "workerFailed", message: error instanceof Error ? error.message : String(error) })));
+			worker.on("exit", (code) => fail(workflowResultText.runStop({ kind: "workerExited", code })));
 		});
 	} finally {
 		clearInterval(watchdog);

@@ -1,5 +1,5 @@
 import type { PendingRun } from "./text.ts";
-import { subagentWords } from "./words.ts";
+import { subagentResultText } from "../../lib/agents/subagent-text.ts";
 
 /**
  * The backstop for a fabricated agent result.
@@ -35,7 +35,7 @@ export type { PendingRun } from "./text.ts";
  * task status after a compaction).
  */
 export function runningAfterCompactionReminder(runs: readonly PendingRun[]): string | undefined {
-	return runs.length === 0 ? undefined : subagentWords().runningAfterCompaction({ runs: [...runs] });
+	return runs.length === 0 ? undefined : subagentResultText().runningAfterCompaction({ runs: [...runs] });
 }
 
 /**
@@ -44,5 +44,5 @@ export function runningAfterCompactionReminder(runs: readonly PendingRun[]): str
  * which ones it cannot have heard from.
  */
 export function pendingClaimReminder(runs: readonly PendingRun[]): string | undefined {
-	return runs.length === 0 ? undefined : subagentWords().pendingClaim({ runs: [...runs] });
+	return runs.length === 0 ? undefined : subagentResultText().pendingClaim({ runs: [...runs] });
 }

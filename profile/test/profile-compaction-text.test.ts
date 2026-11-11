@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { compactionResultText } from "../../extensions/context/compaction/text.ts";
 import { buildCompactionInstruction, COMPACTION_INSTRUCTION, compaction, continuationSummary, keptTailNote } from "../text/compaction/index.ts";
 
 describe("One Code's compaction text", () => {
@@ -19,11 +20,11 @@ describe("One Code's compaction text", () => {
 	});
 
 	it("says how much of a cleared result was left out, images included", () => {
-		expect(compaction.clearedResult({ omittedChars: 120, images: 0 })).toBe(
+		expect(compactionResultText.clearedResult({ omittedChars: 120, images: 0 })).toBe(
 			"[Tool result cleared to fit the compaction request: 120 more characters omitted. The full result is in the session transcript.]",
 		);
-		expect(compaction.clearedResult({ omittedChars: 5, images: 2 })).toContain("5 more characters and 2 images omitted");
-		expect(compaction.clearedResult({ omittedChars: 5, images: 1 })).toContain("5 more characters and 1 image omitted");
+		expect(compactionResultText.clearedResult({ omittedChars: 5, images: 2 })).toContain("5 more characters and 2 images omitted");
+		expect(compactionResultText.clearedResult({ omittedChars: 5, images: 1 })).toContain("5 more characters and 1 image omitted");
 	});
 });
 
@@ -48,7 +49,7 @@ describe("buildCompactionInstruction with a kept tail", () => {
 
 describe("cleared result wording", () => {
 	it("counts what was omitted and points at the session transcript", () => {
-		const { clearedResult } = requireText("compaction");
+		const { clearedResult } = compactionResultText;
 		const text = clearedResult({ omittedChars: 77_952, images: 0 });
 		expect(text).toContain("77952 more characters omitted");
 		expect(text).toContain("session transcript");

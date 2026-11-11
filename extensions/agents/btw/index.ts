@@ -57,6 +57,7 @@ import { applyBtwKey, type BtwBody, BTW_MAX_HEIGHT, copyAnswer, decodeBtwKey, in
 import { requireText } from "../../lib/profile/profile.ts";
 import { type BtwExchange, exchangeMessages, historyMessages } from "./prompt.ts";
 import { panelUi } from "../../lib/ui/panel-focus.ts";
+import { btwResultText } from "./text.ts";
 
 const BTW_MAX_TOKENS = 8192;
 const BTW_TIMEOUT_MS = 120_000;
@@ -169,7 +170,7 @@ function btwExtension(pi: ExtensionAPI) {
 		// No replay for this model, or it failed: the standalone call.
 		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
 		if (!auth.ok) throw new Error("No API key is available for the current model.");
-		const tools = toolStubs(pi.getActiveTools(), text.stubReason);
+		const tools = toolStubs(pi.getActiveTools(), btwResultText.stubReason);
 		// The current branch, read now: a /tree or a compaction since the last
 		// request changed it, and pi fires no `context` event for either.
 		const context = trimToTurnBoundary(withoutSystemMessages(branchMessages(ctx)));

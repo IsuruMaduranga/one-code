@@ -31,6 +31,7 @@ import { WorkflowScriptError } from "./types.ts";
 import type { ViewerRunSnapshot } from "./viewer.ts";
 import { workflowWords } from "./words.ts";
 import type { DeferRequest } from "../../lib/request/deferred.ts";
+import { workflowResultText } from "./text.ts";
 
 const WALL_CLOCK_CAP_MS = 30 * 60 * 1000;
 const RECENT_EVENTS_CAP = 200;
@@ -147,7 +148,7 @@ function formatEvent(event: RunProgressEvent): string | undefined {
 		case "agentStart":
 			return `⏳ ${event.label}${event.phase ? ` [${event.phase}]` : ""}`;
 		case "agentEnd": {
-			const words = workflowWords().progress;
+			const words = workflowResultText.progress;
 			const kept = event.worktree ? ` · ${words.worktreeKept({ path: event.worktree.path })}` : "";
 			if (event.text) return `✗ ${event.label}: ${event.text}${kept}`;
 			return `✓ ${event.label}${event.replayed ? ` ${words.replayed}` : ""}${event.tokens ? ` · ${words.outputTokens({ tokens: event.tokens.output })}` : ""}${kept}`;
@@ -215,7 +216,7 @@ export class WorkflowRunManager {
 		const resumed = Boolean(options.resumeFromRunId);
 		const runId = options.resumeFromRunId ?? `wf_${randomBytes(5).toString("hex")}`;
 		if (!/^wf_[a-z0-9-]{6,}$/.test(runId)) {
-			throw new WorkflowScriptError(workflowWords().refused({ kind: "invalidRunId", runId }));
+			throw new WorkflowScriptError(workflowResultText.refused({ kind: "invalidRunId", runId }));
 		}
 		const runDir = join(options.sessionDir, "workflows", runId);
 		const journalPath = join(runDir, "journal.jsonl");
@@ -223,10 +224,10 @@ export class WorkflowRunManager {
 		let replay: ReplayCursor | undefined;
 		if (resumed) {
 			if (this.runs.get(runId)?.status === "running") {
-				throw new WorkflowScriptError(workflowWords().refused({ kind: "stillRunning", runId }));
+				throw new WorkflowScriptError(workflowResultText.refused({ kind: "stillRunning", runId }));
 			}
 			if (!existsSync(runDir)) {
-				throw new WorkflowScriptError(workflowWords().refused({ kind: "runNotFound", runId, dir: join(options.sessionDir, "workflows") }));
+				throw new WorkflowScriptError(workflowResultText.refused({ kind: "runNotFound", runId, dir: join(options.sessionDir, "workflows") }));
 			}
 			replay = new ReplayCursor(readJournal(journalPath));
 		}
@@ -248,7 +249,7 @@ export class WorkflowRunManager {
 		replay: ReplayCursor | undefined,
 	): Promise<void> {
 		const wallClock = setTimeout(
-			() => handle.abort(workflowWords().runStop({ kind: "wallClock", minutes: WALL_CLOCK_CAP_MS / 60000 })),
+			() => handle.abort(workflowResultText.runStop({ kind: "wallClock", minutes: WALL_CLOCK_CAP_MS / 60000 })),
 			WALL_CLOCK_CAP_MS,
 		);
 		wallClock.unref?.();
@@ -310,16 +311,16 @@ export class WorkflowRunManager {
 		let label: string;
 		if (typeof nameOrRef === "string") {
 			const saved = findSavedWorkflow(options.cwd, os.homedir(), nameOrRef);
-			if (!saved) throw new WorkflowScriptError(workflowWords().callProblem({ kind: "nestedUnknown", name: nameOrRef }));
+			if (!saved) throw new WorkflowScriptError(workflowResultText.callProblem({ kind: "nestedUnknown", name: nameOrRef }));
 			source = readFileSync(saved.path, "utf8");
 			label = nameOrRef;
 		} else if (nameOrRef && typeof nameOrRef === "object" && typeof (nameOrRef as { scriptPath?: unknown }).scriptPath === "string") {
 			const path = (nameOrRef as { scriptPath: string }).scriptPath;
-			if (!existsSync(path)) throw new WorkflowScriptError(workflowWords().callProblem({ kind: "nestedPathMissing", path }));
+			if (!existsSync(path)) throw new WorkflowScriptError(workflowResultText.callProblem({ kind: "nestedPathMissing", path }));
 			source = readFileSync(path, "utf8");
 			label = path;
 		} else {
-			throw new WorkflowScriptError(workflowWords().callProblem({ kind: "nestedBadRef" }));
+			throw new WorkflowScriptError(workflowResultText.callProblem({ kind: "nestedBadRef" }));
 		}
 
 		const { meta, body } = parseWorkflowScript(source);
@@ -363,13 +364,13 @@ export function buildRunReport(handle: RunHandle): string {
 		.filter((agent) => agent.worktree)
 		.map((agent) => ({ label: agent.label, path: agent.worktree!.path, ...(agent.worktree!.branch ? { branch: agent.worktree!.branch } : {}) }));
 	const completed = handle.status === "completed";
-	return words.report({
+	return workflowResultText.report({
 		name: handle.meta.name,
 		runId: handle.runId,
 		status: handle.status as "completed" | "failed" | "aborted",
 		...(state ? { stats: { agents: state.agentCount(), outputTokens: state.outputTokens(), cost: state.cost() } } : {}),
 		seconds,
-		...(completed && handle.result !== undefined ? { result: previewValue(handle.result, RESULT_CAP, words.resultTruncated) } : {}),
+		...(completed && handle.result !== undefined ? { result: previewValue(handle.result, RESULT_CAP, workflowResultText.resultTruncated) } : {}),
 		...(completed ? {} : { reason: handle.errorMessage }),
 		progress: completed ? [] : handle.recentEvents.slice(-5),
 		keptWorktrees,

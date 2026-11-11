@@ -15,11 +15,11 @@
  */
 
 import { parse } from "acorn";
-import type { ScriptProblem, WorkflowText } from "./text.ts";
+import type { ScriptProblem, WorkflowResultText } from "./text.ts";
 import { type WorkflowMeta, WorkflowScriptError } from "./types.ts";
-import { workflowWords } from "./words.ts";
+import { workflowResultText } from "./text.ts";
 
-const problem = (p: ScriptProblem) => new WorkflowScriptError(workflowWords().scriptProblem(p));
+const problem = (p: ScriptProblem) => new WorkflowScriptError(workflowResultText.scriptProblem(p));
 
 /** Property keys that would let a "literal" reach into prototypes. */
 const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
@@ -37,8 +37,8 @@ export const SCRIPT_GLOBALS = [
 	"budget",
 ] as const;
 
-/** The guard the script runs behind: wall-clock and randomness calls throw, in the profile's words. */
-function determinismPrelude(words: WorkflowText["determinism"]): string {
+/** The guard the script runs behind: wall-clock and randomness calls throw, each with its message (text.ts). */
+function determinismPrelude(words: WorkflowResultText["determinism"]): string {
 	const say = (text: string) => JSON.stringify(text);
 	return `
 Math.random = () => { throw new Error(${say(words.random)}); };
@@ -205,5 +205,5 @@ export function parseWorkflowScript(source: string): ParsedScript {
  */
 export function wrapScriptBody(body: string): string {
 	const bindings = SCRIPT_GLOBALS.join(", ");
-	return `"use strict";\n${determinismPrelude(workflowWords().determinism)}\nconst { ${bindings} } = __workflow__;\n(async () => {\n${body}\n})();`;
+	return `"use strict";\n${determinismPrelude(workflowResultText.determinism)}\nconst { ${bindings} } = __workflow__;\n(async () => {\n${body}\n})();`;
 }

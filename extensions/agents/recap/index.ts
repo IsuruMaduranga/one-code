@@ -44,6 +44,7 @@ import { dimMarkedLine } from "../../lib/ui/tui-render.ts";
 import { requireText } from "../../lib/profile/profile.ts";
 import { recapLine, recentForRecap, REFERENCE_MARK } from "./prompt.ts";
 import { RecapScheduler } from "./scheduler.ts";
+import { recapResultText } from "./text.ts";
 
 const ENTRY_TYPE = brandedId("recap");
 const DEFAULT_IDLE_MS = 5 * 60_000; // CC's BLUR_DELAY_MS
@@ -97,7 +98,7 @@ function recapExtension(pi: ExtensionAPI) {
 		// blocks stays valid on strict providers (see the header note) without
 		// shipping every full schema (~6k tokens) to a call that must answer
 		// in text.
-		const tools = toolStubs(pi.getActiveTools(), text.stubReason);
+		const tools = toolStubs(pi.getActiveTools(), recapResultText.stubReason);
 
 		const recent = recentForRecap(withoutSystemMessages(messages));
 		// The cheap reader may be a text-only model, and the recap does not need

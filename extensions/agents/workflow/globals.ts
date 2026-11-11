@@ -27,7 +27,7 @@ import type {
 } from "./types.ts";
 import { keptWorktreeOf, type KeptWorktree, WorkflowScriptError } from "./types.ts";
 import type { ReplayCursor } from "./journal.ts";
-import { workflowWords } from "./words.ts";
+import { workflowResultText } from "./text.ts";
 
 
 export const MAX_AGENTS_PER_RUN = 1000;
@@ -145,27 +145,26 @@ export function createScriptGlobals(options: ScriptGlobalsOptions): { globals: S
 
 	let callSeq = 0;
 	let currentPhase: string | undefined;
-	const words = workflowWords();
 
 	const throwIfAborted = () => {
-		if (options.signal.aborted) throw new WorkflowScriptError(words.runStop({ kind: "aborted" }));
+		if (options.signal.aborted) throw new WorkflowScriptError(workflowResultText.runStop({ kind: "aborted" }));
 	};
 	const checkBudget = () => {
 		if (budget.total !== null && budget.remaining() <= 0) {
-			throw new WorkflowScriptError(words.runStop({ kind: "budgetExhausted", total: budget.total }));
+			throw new WorkflowScriptError(workflowResultText.runStop({ kind: "budgetExhausted", total: budget.total }));
 		}
 	};
 
 	const agent = async (prompt: string, opts: AgentCallOptions = {}): Promise<unknown> => {
 		if (typeof prompt !== "string" || !prompt.trim()) {
-			throw new WorkflowScriptError(words.callProblem({ kind: "emptyPrompt" }));
+			throw new WorkflowScriptError(workflowResultText.callProblem({ kind: "emptyPrompt" }));
 		}
 		if (opts.schema !== undefined && (typeof opts.schema !== "object" || opts.schema === null)) {
-			throw new WorkflowScriptError(words.callProblem({ kind: "schemaNotObject" }));
+			throw new WorkflowScriptError(workflowResultText.callProblem({ kind: "schemaNotObject" }));
 		}
 		throwIfAborted();
 		if (admission.agentCount() >= admission.maxAgents) {
-			throw new WorkflowScriptError(words.runStop({ kind: "agentLimit", max: admission.maxAgents }));
+			throw new WorkflowScriptError(workflowResultText.runStop({ kind: "agentLimit", max: admission.maxAgents }));
 		}
 		checkBudget();
 
@@ -175,7 +174,7 @@ export function createScriptGlobals(options: ScriptGlobalsOptions): { globals: S
 		admission.account({ agents: 1 });
 		const hash = hashAgentCall(prompt, opts);
 		const phase = opts.phase ?? currentPhase;
-		const label = opts.label ?? words.defaultAgentLabel({ n: callIndex + 1 });
+		const label = opts.label ?? workflowResultText.defaultAgentLabel({ n: callIndex + 1 });
 
 		const replayed = options.replay?.match(callIndex, hash);
 		if (replayed !== undefined) {
@@ -227,8 +226,8 @@ export function createScriptGlobals(options: ScriptGlobalsOptions): { globals: S
 				if (options.signal.aborted) {
 					// Close the record: the viewer would otherwise show a completed or
 					// stopped run with this agent still "running".
-					options.onEvent({ type: "agentEnd", callIndex, label, phase, text: words.progress.agentAborted, ...keptWorktreeField(keptWorktreeOf(error)?.path, keptWorktreeOf(error)?.branch) });
-					throw new WorkflowScriptError(words.runStop({ kind: "aborted" }));
+					options.onEvent({ type: "agentEnd", callIndex, label, phase, text: workflowResultText.progress.agentAborted, ...keptWorktreeField(keptWorktreeOf(error)?.path, keptWorktreeOf(error)?.branch) });
+					throw new WorkflowScriptError(workflowResultText.runStop({ kind: "aborted" }));
 				}
 				// A script-authoring mistake (bad agentType/model, worktree without a
 				// git repo, malformed schema) must unwind the script, not vanish into
@@ -243,7 +242,7 @@ export function createScriptGlobals(options: ScriptGlobalsOptions): { globals: S
 					callIndex,
 					label,
 					phase,
-					text: words.progress.agentFailed({ message: (error as Error).message }),
+					text: workflowResultText.progress.agentFailed({ message: (error as Error).message }),
 					...keptWorktreeField(keptWorktreeOf(error)?.path, keptWorktreeOf(error)?.branch),
 				});
 				return null;
@@ -253,7 +252,7 @@ export function createScriptGlobals(options: ScriptGlobalsOptions): { globals: S
 
 	const workflowFn = async (nameOrRef: unknown, childArgs?: unknown): Promise<unknown> => {
 		if (!options.runWorkflow) {
-			throw new WorkflowScriptError(words.callProblem({ kind: "nestedTooDeep" }));
+			throw new WorkflowScriptError(workflowResultText.callProblem({ kind: "nestedTooDeep" }));
 		}
 		return options.runWorkflow(nameOrRef, childArgs);
 	};

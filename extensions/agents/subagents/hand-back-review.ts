@@ -17,12 +17,12 @@
 import { SUBAGENT_ACTIONS_CHANNEL, type ChildAction, type SubagentActionsPayload } from "../../lib/rules/auto-mode-actions.ts";
 import type { HandBackVerdict } from "../../lib/notify/notifications.ts";
 
-import { subagentWords } from "./words.ts";
+import { subagentResultText } from "../../lib/agents/subagent-text.ts";
 /** How long a completion report waits for the gate's verdict before going out with a note instead. */
 export const HAND_BACK_REVIEW_TIMEOUT_MS = 45_000;
 
 /** The verdict that replaces one that did not arrive in time (rendered by `handBackWarning`). */
-export const handBackReviewTimeoutVerdict = (): HandBackVerdict => ({ kind: "unavailable", reason: subagentWords().reviewTimedOut });
+export const handBackReviewTimeoutVerdict = (): HandBackVerdict => ({ kind: "unavailable", reason: subagentResultText().reviewTimedOut });
 
 /** The events slice this module needs. */
 export interface ActionsEmitter {

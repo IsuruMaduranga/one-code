@@ -37,7 +37,6 @@ import { recordUsage } from "../../lib/notify/usage-bus.ts";
 import { readWorkflowSettings } from "../../lib/profile/product-settings.ts";
 import { registerVariantTool } from "../../lib/profile/tool-variants.ts";
 import type { WorkflowText } from "./text.ts";
-import { workflowWords } from "./words.ts";
 import { requireText } from "../../lib/profile/profile.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent } from "../../lib/models/model-unusable.ts";
 import { whenAborted } from "../../lib/core/abort.ts";
@@ -85,6 +84,7 @@ import { projectConfigDirName } from "../../lib/profile/sources.ts";
 import { panelUi } from "../../lib/ui/panel-focus.ts";
 import { dockRowsReporter, trackDockRows } from "../../lib/ui/dock-rows.ts";
 import { queryDeferred } from "../../lib/request/deferred.ts";
+import { workflowResultText } from "./text.ts";
 
 /** The tool's parameters, described in the profile's words. */
 function workflowParams(text: WorkflowText) {
@@ -196,11 +196,11 @@ function workflowExtension(pi: ExtensionAPI) {
 				// Settings that turn workflows off also refuse a call that reaches
 				// the tool anyway (a later setActiveTools can bring it back).
 				if (!workflowsEnabled) {
-					throw new WorkflowScriptError(text.refused({ kind: "turnedOff" }));
+					throw new WorkflowScriptError(workflowResultText.refused({ kind: "turnedOff" }));
 				}
 				// `scriptPath` takes precedence over `script` and `name`, as in Claude Code.
 				if (params.scriptPath) {
-					if (!existsSync(params.scriptPath)) throw new WorkflowScriptError(text.refused({ kind: "scriptPathMissing", path: params.scriptPath }));
+					if (!existsSync(params.scriptPath)) throw new WorkflowScriptError(workflowResultText.refused({ kind: "scriptPathMissing", path: params.scriptPath }));
 					script = readFileSync(params.scriptPath, "utf8");
 				}
 				script ??= params.script;
@@ -208,19 +208,19 @@ function workflowExtension(pi: ExtensionAPI) {
 					const saved = findSavedWorkflow(ctx.cwd, os.homedir(), params.name);
 					if (!saved) {
 						const known = discoverSavedWorkflows(ctx.cwd, os.homedir()).map((w) => w.name);
-						throw new WorkflowScriptError(text.refused({ kind: "unknownSaved", name: params.name, known }));
+						throw new WorkflowScriptError(workflowResultText.refused({ kind: "unknownSaved", name: params.name, known }));
 					}
 					script = readFileSync(saved.path, "utf8");
 				}
 				if (!script && params.resumeFromRunId) {
 					const storedScript = join(sessionDir, "workflows", params.resumeFromRunId, "script.js");
 					if (!existsSync(storedScript)) {
-						throw new WorkflowScriptError(text.refused({ kind: "noStoredScript", runId: params.resumeFromRunId }));
+						throw new WorkflowScriptError(workflowResultText.refused({ kind: "noStoredScript", runId: params.resumeFromRunId }));
 					}
 					script = readFileSync(storedScript, "utf8");
 				}
 				if (!script) {
-					throw new WorkflowScriptError(text.refused({ kind: "nothingToRun" }));
+					throw new WorkflowScriptError(workflowResultText.refused({ kind: "nothingToRun" }));
 				}
 
 				const configuredDefault = applicableSubagentDefault(loadSubagentDefault(os.homedir()), ctx.model);
@@ -265,7 +265,7 @@ function workflowExtension(pi: ExtensionAPI) {
 						});
 					};
 					handle.on("progress", onProgress);
-					const unhookAbort = whenAborted(signal, () => handle.abort(text.runStop({ kind: "stopped", by: "toolCall" })));
+					const unhookAbort = whenAborted(signal, () => handle.abort(workflowResultText.runStop({ kind: "stopped", by: "toolCall" })));
 					try {
 						await handle.finished;
 					} finally {
@@ -274,7 +274,7 @@ function workflowExtension(pi: ExtensionAPI) {
 					}
 					return {
 						// The script's path, as the background result gives it: a failed run is fixed by editing it and re-running with scriptPath.
-						content: [{ type: "text", text: text.ranToEnd({ ...(forcedSync ? { note: oneShotNote("workflow") } : {}), report: buildRunReport(handle), scriptPath: handle.scriptPath }) }],
+						content: [{ type: "text", text: workflowResultText.ranToEnd({ ...(forcedSync ? { note: oneShotNote("workflow") } : {}), report: buildRunReport(handle), scriptPath: handle.scriptPath }) }],
 						details: { runId: handle.runId, status: handle.status, scriptPath: handle.scriptPath },
 						isError: handle.status !== "completed",
 					};
@@ -285,7 +285,7 @@ function workflowExtension(pi: ExtensionAPI) {
 					content: [
 						{
 							type: "text",
-							text: text.started({ name: handle.meta.name, resumed: handle.resumed, runId: handle.runId, scriptPath: handle.scriptPath }),
+							text: workflowResultText.started({ name: handle.meta.name, resumed: handle.resumed, runId: handle.runId, scriptPath: handle.scriptPath }),
 						},
 					],
 					details: { runId: handle.runId, background: true, scriptPath: handle.scriptPath },
@@ -343,7 +343,7 @@ function workflowExtension(pi: ExtensionAPI) {
 				return "Dynamic workflows dialog dismissed";
 			}
 			if (action === "stop" && runId) {
-				const stopped = manager.abort(runId, text.runStop({ kind: "stopped", by: "command" }));
+				const stopped = manager.abort(runId, workflowResultText.runStop({ kind: "stopped", by: "command" }));
 				const message = stopped ? `Stopping ${runId}…` : `No running workflow ${runId}`;
 				ctx.ui.notify(message, stopped ? "info" : "error");
 				return message;
@@ -462,7 +462,7 @@ function workflowExtension(pi: ExtensionAPI) {
 						return ctx.isIdle() ? { consume: true } : undefined;
 					case "stop": {
 						const run = widget.selectedRun();
-						if (run) manager.abort(run.runId, text.runStop({ kind: "stopped", by: "statusStrip" }));
+						if (run) manager.abort(run.runId, workflowResultText.runStop({ kind: "stopped", by: "statusStrip" }));
 						return { consume: true };
 					}
 					case "open": {
@@ -497,7 +497,7 @@ function workflowExtension(pi: ExtensionAPI) {
 	pi.on("session_shutdown", () => {
 		// Fires on /clear, /new and /resume too (findings §8): after this the ctx
 		// is invalid, so nothing below may paint on it.
-		manager.abortAll(text.runStop({ kind: "stopped", by: "session" }));
+		manager.abortAll(workflowResultText.runStop({ kind: "stopped", by: "session" }));
 		widget.dispose();
 		lastCtx = undefined;
 	});
@@ -636,7 +636,7 @@ async function openWorkflowViewer(
 					}
 					case "stop": {
 						const run = snapshots()[state.runIndex];
-						const stopped = run && manager.abort(run.runId, workflowWords().runStop({ kind: "stopped", by: "viewer" }));
+						const stopped = run && manager.abort(run.runId, workflowResultText.runStop({ kind: "stopped", by: "viewer" }));
 						state.notice = stopped ? `stopping ${run.runId}…` : "workflow is not running";
 						break;
 					}

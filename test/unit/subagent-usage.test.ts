@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { addUsage, emptyUsage, formatStats, formatTokenCount } from "../../extensions/lib/agents/usage.ts";
+import { subagentResultText } from "../../extensions/lib/agents/subagent-text.ts";
 
 describe("addUsage", () => {
 	it("sums usage across assistant messages", () => {
@@ -35,7 +35,7 @@ describe("formatTokenCount", () => {
 });
 
 describe("formatStats", () => {
-	const stats = (p: { toolCalls: number; tokens?: string; cost?: number }) => requireText("subagents").stats(p);
+	const stats = (p: { toolCalls: number; tokens?: string; cost?: number }) => subagentResultText().stats(p);
 
 	it("hands the profile the tool count, the token count in k and the cost", () => {
 		const totals = { ...emptyUsage(), total: 2300, cost: 0.0421 };

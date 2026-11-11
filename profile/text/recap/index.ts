@@ -11,5 +11,4 @@ export const RECAP_PROMPT =
 
 export const recap: RecapText = {
 	prompt: RECAP_PROMPT,
-	stubReason: "Unavailable during this summary; answer in text.",
 };

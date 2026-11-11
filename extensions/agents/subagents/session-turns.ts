@@ -16,7 +16,7 @@ import type { HandbackSlot } from "../../lib/agents/subagent-handback.ts";
 import type { ChildOutcome } from "./outcome.ts";
 import type { RunFailure } from "./text.ts";
 import { addUsage, emptyUsage, type UsageTotals } from "../../lib/agents/usage.ts";
-import { subagentWords } from "./words.ts";
+import { subagentResultText } from "../../lib/agents/subagent-text.ts";
 
 /** Why a turn was cut short: stopped, or the wall-clock cap. */
 export type AbortReason = Extract<RunFailure, { kind: "aborted" }>["why"];
@@ -144,7 +144,7 @@ export function finishOutcome(
 ): ChildOutcome {
 	if (aborted) {
 		return {
-			output: subagentWords().failure({ kind: "aborted", why: aborted, output }),
+			output: subagentResultText().failure({ kind: "aborted", why: aborted, output }),
 			toolCalls,
 			usage,
 			actions,
@@ -153,7 +153,7 @@ export function finishOutcome(
 	}
 	if (providerError) {
 		return {
-			output: subagentWords().failure({ kind: "providerError", error: providerError, output }),
+			output: subagentResultText().failure({ kind: "providerError", error: providerError, output }),
 			toolCalls,
 			usage,
 			actions,
@@ -161,5 +161,5 @@ export function finishOutcome(
 		};
 	}
 	if (output.trim()) return { output, toolCalls, usage, actions };
-	return { output: subagentWords().noOutput, toolCalls, usage, actions };
+	return { output: subagentResultText().noOutput, toolCalls, usage, actions };
 }

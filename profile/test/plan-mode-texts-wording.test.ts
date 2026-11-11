@@ -7,15 +7,8 @@
 import { describe, expect, it } from "vitest";
 import { descriptionForm } from "../../extensions/lib/profile/tool-variants.ts";
 import { userDenialText } from "../../extensions/lib/consent/user-denial.ts";
-import {
-	approvedPlanText,
-	ENTER_PLAN_MODE_DESCRIPTION,
-	ENTER_PLAN_MODE_DESCRIPTION_WEAK,
-	enteredPlanModeText,
-	enterPlanModeDescription,
-	EXIT_PLAN_MODE_DESCRIPTION,
-	exitedPlanModeText,
-} from "../text/plan-mode/texts.ts";
+import { approvedPlanText, enteredPlanModeText, exitedPlanModeText } from "../../extensions/safety/plan-mode/text.ts";
+import { ENTER_PLAN_MODE_DESCRIPTION, ENTER_PLAN_MODE_DESCRIPTION_WEAK, enterPlanModeDescription, EXIT_PLAN_MODE_DESCRIPTION } from "../text/plan-mode/texts.ts";
 import { PROMPT_TIERS } from "../../extensions/lib/models/model-tier.ts";
 
 describe("plan-mode tool descriptions", () => {

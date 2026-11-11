@@ -14,6 +14,7 @@ import { requireText } from "../../extensions/lib/profile/profile.ts";
 import workflowExtension from "../../extensions/agents/workflow/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { notificationWords } from "../../extensions/lib/notify/notification-words.ts";
+import { workflowResultText } from "../../extensions/agents/workflow/text.ts";
 
 describe("workflow wiring: the ultracode keyword", () => {
 	let fake: FakePi;
@@ -133,8 +134,7 @@ describe("workflow wiring: one-shot modes (LIFECYCLE-REVIEW-2026-09-06 M1)", () 
 		expect(result.isError).toBe(false);
 		// The run's report with the one-shot note, and the persisted script's path the
 		// tool promises in every result, for a scriptPath re-run.
-		const words = requireText("workflow");
-		const report = words.report({
+		const report = workflowResultText.report({
 			name: "one-shot-probe",
 			runId: result.details.runId,
 			status: "completed",
@@ -145,7 +145,7 @@ describe("workflow wiring: one-shot modes (LIFECYCLE-REVIEW-2026-09-06 M1)", () 
 			keptWorktrees: [],
 		});
 		expect(result.content[0].text).toBe(
-			words.ranToEnd({ note: notificationWords().oneShotNote("workflow"), report, scriptPath: result.details.scriptPath }),
+			workflowResultText.ranToEnd({ note: notificationWords().oneShotNote("workflow"), report, scriptPath: result.details.scriptPath }),
 		);
 		// Nothing left to deliver later: no follow-up message is ever queued.
 		await new Promise((r) => setTimeout(r, 50));
@@ -170,7 +170,7 @@ describe("workflow wiring: one-shot modes (LIFECYCLE-REVIEW-2026-09-06 M1)", () 
 			details: { scriptPath: string };
 		};
 		expect(second.content[0].text).toBe(
-			requireText("workflow").started({ name: "resume-probe", resumed: true, runId: first.details.runId, scriptPath: second.details.scriptPath }),
+			workflowResultText.started({ name: "resume-probe", resumed: true, runId: first.details.runId, scriptPath: second.details.scriptPath }),
 		);
 		await vi.waitFor(() => expect(delivered()).toHaveLength(2), { timeout: 5_000 });
 		expect(delivered()[1]).toContain("SECOND");
@@ -186,7 +186,7 @@ describe("workflow wiring: one-shot modes (LIFECYCLE-REVIEW-2026-09-06 M1)", () 
 		};
 		expect(result.details.background).toBe(true);
 		expect(result.content[0].text).toBe(
-			requireText("workflow").started({ name: "one-shot-probe", resumed: false, runId: result.details.runId, scriptPath: result.details.scriptPath }),
+			workflowResultText.started({ name: "one-shot-probe", resumed: false, runId: result.details.runId, scriptPath: result.details.scriptPath }),
 		);
 		// Let the run finish so nothing leaks into the next test.
 		await new Promise((r) => setTimeout(r, 200));

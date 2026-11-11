@@ -18,12 +18,12 @@ import { RENDER_CHANNEL, type RenderRequest, toldBlockFact } from "../../lib/req
 import { PERMISSION_MODE_STATE } from "../../lib/rules/modes.ts";
 import { normalizePermissionMode } from "../../lib/rules/settings.ts";
 
-import { subagentWords } from "./words.ts";
+import { subagentResultText } from "../../lib/agents/subagent-text.ts";
 /** The told fact's key. */
 const PARENT_MODE_FACT = "parent-permission-mode";
 
 export function parentModeText(mode: string): string {
-	return subagentWords().parentMode({ mode });
+	return subagentResultText().parentMode({ mode });
 }
 
 export function parentModeExtension(getMode: () => string) {

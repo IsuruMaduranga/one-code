@@ -14,6 +14,8 @@
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { subagentWords } from "./words.ts";
+import { subagentResultText } from "../../lib/agents/subagent-text.ts";
+import { subagentToMainResultText } from "./text.ts";
 
 export function sendToMainTool(onMessage: (message: string, summary?: string) => void): ToolDefinition {
 	const words = subagentWords();
@@ -33,7 +35,7 @@ export function sendToMainTool(onMessage: (message: string, summary?: string) =>
 			// message returns isError with the fix named, never a silent success.
 			if (p.to !== undefined && p.to !== "main") {
 				return {
-					content: [{ type: "text" as const, text: words.refused({ kind: "onlyMain", got: JSON.stringify(p.to) }) }],
+					content: [{ type: "text" as const, text: subagentResultText().refused({ kind: "onlyMain", got: JSON.stringify(p.to) }) }],
 					details: {},
 					isError: true,
 				};
@@ -41,7 +43,7 @@ export function sendToMainTool(onMessage: (message: string, summary?: string) =>
 			const message = typeof p.message === "string" ? p.message.trim() : "";
 			if (!message) {
 				return {
-					content: [{ type: "text" as const, text: words.refused({ kind: "messageRequired" }) }],
+					content: [{ type: "text" as const, text: subagentResultText().refused({ kind: "messageRequired" }) }],
 					details: {},
 					isError: true,
 				};
@@ -49,7 +51,7 @@ export function sendToMainTool(onMessage: (message: string, summary?: string) =>
 			const summary = typeof p.summary === "string" ? p.summary : undefined;
 			onMessage(message, summary);
 			return {
-				content: [{ type: "text" as const, text: text.delivered }],
+				content: [{ type: "text" as const, text: subagentToMainResultText.delivered }],
 				details: { toMain: true, message, summary },
 			};
 		},

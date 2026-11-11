@@ -39,7 +39,8 @@ export type SubagentRefusal =
 	/** A nested call named no agent (`name` absent) or an unknown one; `catalog` is the rows. */
 	| { kind: "nestedUnknownAgent"; name?: string; catalog: string[] }
 	| { kind: "unknownAgents"; names: string[]; catalog: string[] }
-	| { kind: "taskRequired" }
+	/** No task given; `aliasNote` is the profile's note on the parameter's alias (`SubagentsText.taskAliasNote`). */
+	| { kind: "taskRequired"; aliasNote: string }
 	/** A fork with a `model` or `thinking` override. */
 	| { kind: "forkOverrides" }
 	/** A fork in a session with no session file. */
@@ -94,6 +95,10 @@ export type LaunchLine =
 export type RunStatus = "resident" | "running" | "finishedInline" | "finished";
 
 export interface SubagentsText {
+	/** After the error for an agent file whose `tools` list matches no tool: the names such a list may use. */
+	toolNamesHint: string;
+	/** In the refusal for a call without a task: the note on the alias of `task`, as a clause. */
+	taskAliasNote: string;
 	agentDescription(p: { form: DescriptionForm; configDir: string }): string;
 	agentPromptSnippet: string;
 	agentParams: {
@@ -111,71 +116,17 @@ export interface SubagentsText {
 	/** The Agent tool inside a non-fork child; `catalog` is the rows. */
 	nestedAgentDescription(p: { catalog: string[] }): string;
 	nestedAgentParams: { subagent_type: string; task: string; prompt: string; description: string; name: string };
-	/** One catalog row. */
-	catalogRow(p: { name: string; description: string; tools: AgentTools }): string;
-	/** The fork's catalog row. */
-	forkRow: string;
-	/** The Agent tool's list result. */
-	catalogList(p: { rows: string[] }): string;
-	/** The catalog block in the first message. */
-	catalogBlock(p: { rows: string[] }): string;
-	refused(refusal: SubagentRefusal): string;
-	runtimeProblem(problem: RuntimeProblem): string;
-	failure(failure: RunFailure): string;
-	/** The report of a run that finished without writing anything. */
-	noOutput: string;
-	/** The note when a run fell back to the session model. */
-	modelFallback(p: { model?: string; osMessage: string; fallback: string }): string;
-	/** A requested run name already taken. */
-	renamed(p: { wanted: string; takenBy: string; name: string }): string;
-	/** An agent file whose `tools` list matches no tool. */
-	unusableTools(p: { name: string; tools: string[] }): string;
-	/** Creating an isolation worktree was refused; `program` names what git would run. */
-	worktreeRefused(p: { program: CheckoutProgram }): string;
-	/** A worktree kept because it holds the agent's work. */
-	worktreeKept(p: { path: string; branch?: string }): string;
-	/** A resident running in a worktree, on its report. */
-	worktreeRunning(p: { path: string; branch: string }): string;
-	/** The run statistics after a report (`tokens` formatted, `cost` in dollars, both absent when unknown). */
-	stats(p: { toolCalls: number; tokens?: string; cost?: number }): string;
-	/** A one-shot session's inline report; `note` is the shared one-shot note. */
-	inlineReport(p: { name: string; taskId: string; note: string }): string;
-	/** A background launch's result. */
-	launched(p: { lines: string[] }): string;
-	launchLine(line: LaunchLine): string;
 	sendMessageDescription: string;
 	sendMessageParams: { to: string; message: string; summary: string };
-	/** SendMessage results. */
-	steered(p: { name: string }): string;
-	nextTurn(p: { name: string }): string;
-	sentToResident(p: { name: string; taskId: string }): string;
-	sent(p: { name: string; taskId: string }): string;
-	/** A one-shot session's inline reply; `note` is the shared one-shot note. */
-	inlineReply(p: { name: string; note: string }): string;
-	/** The resumed run's working directory is gone; it ran in `ranIn`. */
-	relocated(p: { name: string; cwd: string; worktreeRemoved: boolean; ranIn: string }): string;
 	listAgentsDescription: string;
-	noAgents: string;
-	agentList(p: { rows: string[] }): string;
-	agentRow(p: { name: string; agent: string; status: RunStatus; taskId: string }): string;
 	/** A subagent's own SendMessage tool, to the main conversation. */
-	toMain: { description: string; params: { to: string; message: string; summary: string }; delivered: string };
-	/** A nested agent's message relayed to its resident parent. */
-	fromSubagent(p: { name: string; summary?: string; body: string }): string;
+	toMain: { description: string; params: { to: string; message: string; summary: string }; };
 	/** A fork's task, framed; `isolation` when it runs in its own worktree. */
 	forkTask(p: { task: string; isolation?: { worktreePath: string; parentCwd: string } }): string;
-	/** A fork told the parent's permission mode changed. */
-	parentMode(p: { mode: string }): string;
-	/** A turn ended while runs it started were still going. */
-	pendingClaim(p: { runs: PendingRun[] }): string;
-	/** Background runs still going after a compaction. */
-	runningAfterCompaction(p: { runs: PendingRun[] }): string;
 	/** The tiny tier's delegation block. */
 	delegationSteer: string;
 	/** A delegation block withdrawn (the model left the tiny tier). */
 	delegationWithdrawn: string;
-	/** Auto mode's review of a resident's actions did not finish in time. */
-	reviewTimedOut: string;
 	/**
 	 * A built-in agent that answers questions about the product, listed below
 	 * every agent file; absent, there is none. Its prompt gets the docs, the
@@ -183,3 +134,13 @@ export interface SubagentsText {
 	 */
 	guideAgent?: { name: string; description: string; tools: readonly string[]; systemPrompt(input: GuideInput): string };
 }
+
+/** The group's results, refusals and notes, which the base words (`subagentToMainResultText`). */
+export interface SubagentToMainResultText {
+ delivered: string
+}
+
+/** The base's words of the group. */
+export const subagentToMainResultText: SubagentToMainResultText = {
+			delivered: "Message delivered to the main conversation.",
+};

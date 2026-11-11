@@ -43,6 +43,7 @@ import type { AgentCallOptions, AgentCallResult, AgentEffort, AgentRunUpdate, Ke
 import { WorkflowScriptError } from "./types.ts";
 import { workflowWords } from "./words.ts";
 import { type DeferRequest, deferLikeParentExtension, injectedByParent } from "../../lib/request/deferred.ts";
+import { workflowResultText, workflowStructuredResultText } from "./text.ts";
 
 const MAX_SCHEMA_RETRIES = 2;
 const OUTPUT_CAP = 50_000;
@@ -112,7 +113,7 @@ export async function judgeWorkflowDelegation(input: {
 }): Promise<void> {
 	if (!input.bridge) {
 		if (input.liveMode === "auto") {
-			throw new Error(workflowWords().callProblem({ kind: "noClassifierLink" }));
+			throw new Error(workflowResultText.callProblem({ kind: "noClassifierLink" }));
 		}
 		return;
 	}
@@ -122,7 +123,7 @@ export async function judgeWorkflowDelegation(input: {
 		cwd: input.cwd,
 		signal: input.signal,
 	});
-	if (verdict?.block) throw new Error(workflowWords().callProblem({ kind: "refusedByGate", reason: String(verdict.reason) }));
+	if (verdict?.block) throw new Error(workflowResultText.callProblem({ kind: "refusedByGate", reason: String(verdict.reason) }));
 }
 
 /**
@@ -179,7 +180,7 @@ export function resolveWorkflowAgentModel(input: WorkflowModelInput): {
 			requireImageInput: supportsImageInput(input.sessionModel),
 		});
 		throw new WorkflowScriptError(
-			workflowWords().callProblem({
+			workflowResultText.callProblem({
 				kind: "modelUnavailable",
 				model: resolution.unresolved,
 				...(resolution.unresolvedReason ? { reason: resolution.unresolvedReason } : {}),
@@ -189,7 +190,7 @@ export function resolveWorkflowAgentModel(input: WorkflowModelInput): {
 	}
 	const gate = expensiveModelGate(resolution, input.sessionModel, input.opts.allowExpensive);
 	if (gate) {
-		throw new WorkflowScriptError(workflowWords().callProblem({ kind: "expensiveModel", gate }));
+		throw new WorkflowScriptError(workflowResultText.callProblem({ kind: "expensiveModel", gate }));
 	}
 	return {
 		model: resolution.model,
@@ -258,7 +259,7 @@ export class AgentRunner {
 			agentDef = this.agentCatalog.find((a) => a.name === opts.agentType);
 			if (!agentDef) {
 				const known = this.agentCatalog.map((a) => a.name);
-				throw new WorkflowScriptError(workflowWords().callProblem({ kind: "unknownAgentType", agentType: opts.agentType, known }));
+				throw new WorkflowScriptError(workflowResultText.callProblem({ kind: "unknownAgentType", agentType: opts.agentType, known }));
 			}
 		}
 
@@ -278,7 +279,7 @@ export class AgentRunner {
 		let cwd = this.options.cwd;
 		if (opts.isolation === "worktree") {
 			if (!(await isGitRepo(this.options.cwd))) {
-				throw new WorkflowScriptError(workflowWords().callProblem({ kind: "worktreeNeedsGit" }));
+				throw new WorkflowScriptError(workflowResultText.callProblem({ kind: "worktreeNeedsGit" }));
 			}
 			worktree = await createWorktree(this.options.cwd, opts.label ?? "wf-agent");
 			cwd = worktree.path;
@@ -319,7 +320,7 @@ export class AgentRunner {
 				customTools,
 				sessionManager: SessionManager.inMemory(cwd),
 			},
-			onError: (error) => this.options.onNotice?.(workflowWords().notice({ kind: "extensionError", label: opts.label, event: error.event, error: `${error.error}` })),
+			onError: (error) => this.options.onNotice?.(workflowResultText.notice({ kind: "extensionError", label: opts.label, event: error.event, error: `${error.error}` })),
 		}).catch(async (error: unknown) => {
 			// Not yet under the prompt's try/finally: a session that fails to open
 			// must not leak the worktree and its branch.
@@ -371,9 +372,9 @@ export class AgentRunner {
 			if (unusable) throw new WorkflowScriptError(unusable);
 			// A stop during the waits above (MCP tools still connecting, the warm
 			// gate) aborted a session that was idle: never send the first request.
-			if (signal.aborted) throw new WorkflowScriptError(workflowWords().runStop({ kind: "agentAborted" }));
+			if (signal.aborted) throw new WorkflowScriptError(workflowResultText.runStop({ kind: "agentAborted" }));
 			await session.prompt(this.buildPrompt(prompt, Boolean(opts.schema)));
-			if (signal.aborted) throw new WorkflowScriptError(workflowWords().runStop({ kind: "agentAborted" }));
+			if (signal.aborted) throw new WorkflowScriptError(workflowResultText.runStop({ kind: "agentAborted" }));
 
 			let value: unknown;
 			if (opts.schema) {
@@ -382,7 +383,7 @@ export class AgentRunner {
 				// The handed-back report, else the agent's last message.
 				value = handback?.report ?? finalAssistantText(session.messages);
 				if (typeof value !== "string" || !value.trim()) {
-					throw new Error(workflowWords().agentFailure({ kind: "noOutput" }));
+					throw new Error(workflowResultText.agentFailure({ kind: "noOutput" }));
 				}
 				// Never cut: a long answer is saved to the run directory and the script
 				// gets Claude Code's <persisted-output> block naming the file, which a
@@ -437,7 +438,7 @@ export class AgentRunner {
 	private async settleWorktree(worktree: Worktree, label: string | undefined, error: unknown): Promise<void> {
 		if (await cleanupWorktree(this.options.cwd, worktree)) return;
 		const kept: KeptWorktree = { path: worktree.path, branch: worktree.branch };
-		this.options.onNotice?.(workflowWords().notice({ kind: "worktreeKept", label, path: kept.path, branch: kept.branch }));
+		this.options.onNotice?.(workflowResultText.notice({ kind: "worktreeKept", label, path: kept.path, branch: kept.branch }));
 		if (error instanceof Error) (error as Error & { keptWorktree?: KeptWorktree }).keptWorktree = kept;
 	}
 
@@ -463,15 +464,15 @@ export class AgentRunner {
 		signal: AbortSignal,
 	): Promise<unknown> {
 		for (let attempt = 0; attempt < MAX_SCHEMA_RETRIES && !capture.called; attempt++) {
-			if (signal.aborted) throw new WorkflowScriptError(workflowWords().runStop({ kind: "agentAborted" }));
-			await session.prompt(workflowWords().structuredNudge);
+			if (signal.aborted) throw new WorkflowScriptError(workflowResultText.runStop({ kind: "agentAborted" }));
+			await session.prompt(workflowResultText.structuredNudge);
 		}
 		if (capture.called) return capture.value;
 		// Last resort: extract a JSON object from the final assistant text.
 		const text = finalAssistantText(session.messages);
 		const extracted = extractJsonObject(text);
 		if (extracted !== undefined) return extracted;
-		throw new Error(workflowWords().agentFailure({ kind: "noStructuredOutput" }));
+		throw new Error(workflowResultText.agentFailure({ kind: "noStructuredOutput" }));
 	}
 
 	dispose(): void {
@@ -493,7 +494,7 @@ function buildStructuredOutputTool(schema: Record<string, unknown>, capture: { c
 			capture.called = true;
 			capture.value = params;
 			return {
-				content: [{ type: "text" as const, text: workflowWords().structuredOutputTool.received }],
+				content: [{ type: "text" as const, text: workflowStructuredResultText.received }],
 				details: params,
 				terminate: true,
 			};
@@ -504,7 +505,7 @@ function buildStructuredOutputTool(schema: Record<string, unknown>, capture: { c
 /** A structured_output schema must be an object schema with properties. */
 function assertObjectSchema(schema: Record<string, unknown>): void {
 	if (schema.type !== "object" || typeof schema.properties !== "object") {
-		throw new WorkflowScriptError(workflowWords().callProblem({ kind: "schemaNotObjectWithProperties" }));
+		throw new WorkflowScriptError(workflowResultText.callProblem({ kind: "schemaNotObjectWithProperties" }));
 	}
 }
 

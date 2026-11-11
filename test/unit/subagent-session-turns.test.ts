@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SessionTurnTracker } from "../../extensions/agents/subagents/session-turns.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { subagentResultText } from "../../extensions/lib/agents/subagent-text.ts";
 
-const words = () => requireText("subagents");
 
 /** Hand-built AgentSession events (the shapes session.subscribe delivers). */
 const toolStart = (toolName: string, args: unknown) => ({ type: "tool_execution_start", toolName, args });
@@ -69,7 +68,7 @@ describe("SessionTurnTracker", () => {
 		expect(t.providerError).toBe("429 rate limited");
 		const failed = t.turnOutcome();
 		expect(failed.failed).toBe(true);
-		expect(failed.output).toBe(words().failure({ kind: "providerError", error: "429 rate limited", output: "" }));
+		expect(failed.output).toBe(subagentResultText().failure({ kind: "providerError", error: "429 rate limited", output: "" }));
 
 		t.process(assistantEnd("recovered", { output: 3 }));
 		expect(t.providerError).toBeUndefined();
@@ -94,7 +93,7 @@ describe("SessionTurnTracker — aborted turns (SUBAGENT-REVIEW M3)", () => {
 		t.process(settled);
 		const outcome = t.turnOutcome();
 		expect(outcome.failed).toBe(true);
-		expect(outcome.output).toBe(words().failure({ kind: "aborted", why: "stopped", output: "I was about to" }));
+		expect(outcome.output).toBe(subagentResultText().failure({ kind: "aborted", why: "stopped", output: "I was about to" }));
 	});
 
 	it("markAborted covers an abort that lands during a tool call (no aborted assistant message)", () => {
@@ -104,14 +103,14 @@ describe("SessionTurnTracker — aborted turns (SUBAGENT-REVIEW M3)", () => {
 		t.process(toolStart("bash", { command: "sleep 100" }));
 		t.markAborted("wallClock");
 		t.process(settled);
-		expect(t.turnOutcome()).toMatchObject({ failed: true, output: words().failure({ kind: "aborted", why: "wallClock", output: "partial" }) });
+		expect(t.turnOutcome()).toMatchObject({ failed: true, output: subagentResultText().failure({ kind: "aborted", why: "wallClock", output: "partial" }) });
 	});
 
 	it("an aborted turn with no text says so, and beginTurn clears the flag", () => {
 		const t = new SessionTurnTracker();
 		t.beginTurn();
 		t.markAborted();
-		expect(t.turnOutcome()).toMatchObject({ failed: true, output: words().failure({ kind: "aborted", why: "stopped", output: "" }) });
+		expect(t.turnOutcome()).toMatchObject({ failed: true, output: subagentResultText().failure({ kind: "aborted", why: "stopped", output: "" }) });
 		t.beginTurn();
 		t.process(assistantEnd("fresh answer"));
 		t.process(settled);

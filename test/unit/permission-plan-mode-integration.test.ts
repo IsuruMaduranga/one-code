@@ -19,6 +19,7 @@ import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { brandedId, envName } from "../../extensions/lib/profile/brand.mjs";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { permissionText } from "../../extensions/lib/rules/permission-text.ts";
+import { planModeResultText } from "../../extensions/safety/plan-mode/text.ts";
 
 const permissionWords = permissionText();
 const planMode = requireText("planMode");
@@ -91,7 +92,7 @@ describe("permission mode cycle with plan-mode mounted", () => {
 		await fake.tools.get("exit_plan_mode")!.execute("approve-plan", {}, undefined, undefined, ctx);
 		expect(traffic.find((entry) => entry.key === "permission-mode" && entry.text)).toMatchObject({ toolCallId: "approve-plan" });
 		expect(traffic.find((entry) => entry.key === "permission-mode-change")).toMatchObject({ toolCallId: "approve-plan" });
-		expect(traffic.find((entry) => entry.text === planMode.exited(entered.details.planFilePath))).toMatchObject({ toolCallId: "approve-plan" });
+		expect(traffic.find((entry) => entry.text === planModeResultText().exited(entered.details.planFilePath))).toMatchObject({ toolCallId: "approve-plan" });
 		expect(boundTo("read-before")).toEqual([]);
 		expect(boundTo("approve-plan")).toHaveLength(2);
 	});

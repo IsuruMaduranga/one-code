@@ -6,7 +6,7 @@
  * them gives the run's totals, across every turn of a resident.
  */
 
-import { subagentWords } from "../../agents/subagents/words.ts";
+import { subagentResultText } from "./subagent-text.ts";
 
 export interface UsageTotals {
 	input: number;
@@ -55,5 +55,5 @@ export function formatTokenCount(n: number): string {
 
 /** A run's statistics after its report, in the profile's words; tokens and cost are dropped when none were recorded. */
 export function formatStats(toolCalls: number, totals: UsageTotals): string {
-	return subagentWords().stats({ toolCalls, ...(totals.total > 0 ? { tokens: formatTokenCount(totals.total), cost: totals.cost } : {}) });
+	return subagentResultText().stats({ toolCalls, ...(totals.total > 0 ? { tokens: formatTokenCount(totals.total), cost: totals.cost } : {}) });
 }

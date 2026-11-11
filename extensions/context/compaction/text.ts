@@ -32,6 +32,18 @@ export interface CompactionText {
 	continuation(p: { summary: string; transcriptPath?: string }): string;
 	/** The system prompt of a standalone compaction request (no tools, not cache-replayed). */
 	standaloneSystemPrompt: string;
+}
+
+/** The group's results, refusals and notes, which the base words (`compactionResultText`). */
+export interface CompactionResultText {
 	/** Stands in for the rest of a tool result cleared to fit a standalone request. */
 	clearedResult(p: { omittedChars: number; images: number }): string;
 }
+
+/** The base's words of the group. */
+export const compactionResultText: CompactionResultText = {
+	clearedResult: ({ omittedChars, images }) =>
+		`[Tool result cleared to fit the compaction request: ${omittedChars} more characters${
+			images > 0 ? ` and ${images} image${images === 1 ? "" : "s"}` : ""
+		} omitted. The full result is in the session transcript.]`,
+};

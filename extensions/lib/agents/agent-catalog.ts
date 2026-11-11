@@ -14,14 +14,14 @@
  * Subdirectories are searched recursively.
  */
 
-import { activeProfile, PROFILE_DIR } from "../profile/profile.ts";
+import { activeProfile, PROFILE_DIR, requireText } from "../profile/profile.ts";
 import { readdirSync, readFileSync, type Stats, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { parseFrontmatterLoosely } from "../core/frontmatter.ts";
 import { projectConfigDir, userConfigDir } from "../profile/sources.ts";
 import { SUBAGENT_HANDBACK } from "./subagent-handback.ts";
 import { normalizeToolName } from "../rules/matcher.ts";
-import { subagentWords } from "../../agents/subagents/words.ts";
+import { subagentResultText } from "./subagent-text.ts";
 
 export interface AgentDefinition {
 	name: string;
@@ -284,5 +284,5 @@ export function agentToolOptions(agent: AgentDefinition | undefined): { tools?: 
  */
 export function unusableAllowlistError(agent: AgentDefinition | undefined, registered: string[]): string | undefined {
 	if (!agent?.tools || usableAllowlistedTools(registered, agent.tools).length > 0) return undefined;
-	return subagentWords().unusableTools({ name: agent.name, tools: agent.tools });
+	return subagentResultText().unusableTools({ name: agent.name, tools: agent.tools, hint: requireText("subagents").toolNamesHint });
 }

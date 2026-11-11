@@ -7,10 +7,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { AgentRunner } from "../../extensions/agents/workflow/agent-session.ts";
 import { buildRunReport, WorkflowRunManager } from "../../extensions/agents/workflow/run-manager.ts";
 import { buildDetail } from "../../extensions/agents/workflow/viewer.ts";
+import { workflowResultText } from "../../extensions/agents/workflow/text.ts";
 
 vi.mock("../../extensions/agents/workflow/agent-session.ts", () => ({ AgentRunner: { create: vi.fn() } }));
 
@@ -49,9 +49,8 @@ describe("kept workflow worktrees", () => {
 		await handle.finished;
 		expect(handle.status).toBe("completed");
 
-		const words = requireText("workflow");
 		expect(buildRunReport(handle)).toBe(
-			words.report({
+			workflowResultText.report({
 				name: "kept",
 				runId: handle.runId,
 				status: "completed",
@@ -65,7 +64,7 @@ describe("kept workflow worktrees", () => {
 				],
 			}),
 		);
-		expect(handle.recentEvents.some((line) => line.includes(words.progress.worktreeKept({ path: "/tmp/cc-wt-a/tree" })))).toBe(true);
+		expect(handle.recentEvents.some((line) => line.includes(workflowResultText.progress.worktreeKept({ path: "/tmp/cc-wt-a/tree" })))).toBe(true);
 
 		const [a] = handle.agents.list();
 		expect(a.worktree).toEqual({ path: "/tmp/cc-wt-a/tree", branch: "cc-subagent/a" });

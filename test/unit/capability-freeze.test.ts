@@ -15,13 +15,13 @@ import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../exte
 import { projectConfigDir } from "../../extensions/lib/profile/sources.ts";
 import { setSkillState } from "../../extensions/lib/plugins/skill-overrides.ts";
 import { listableSkillNames } from "../../extensions/tools/skill/announce.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import skillExtension from "../../extensions/tools/skill/index.ts";
 import subagentsExtension from "../../extensions/agents/subagents/index.ts";
 import { createFakeCtx, createFakePi, type FakePi, renderRequest } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import type { Reminder } from "./helpers/tool-search-fake-pi.ts";
 import { skillResultText } from "../../extensions/tools/skill/text.ts";
+import { subagentResultText } from "../../extensions/lib/agents/subagent-text.ts";
 
 const SKILL_LISTING_HEADER = skillResultText.listingHeader;
 
@@ -142,7 +142,7 @@ describe("subagent blocks", () => {
 	});
 
 	it("keeps the three blocks as live first-prepend state, the catalog in the profile's block", async () => {
-		const catalogBlock = vi.spyOn(requireText("subagents"), "catalogBlock");
+		const catalogBlock = vi.spyOn(subagentResultText(), "catalogBlock");
 		const { reminders } = await mount();
 		const live = (key: string) => reminders.filter((r) => r.key === key && r.placement === "first-prepend").at(-1);
 		expect(live("subagent-models")?.text).toContain("main");
@@ -194,8 +194,7 @@ describe("agent catalog read at each run's start (R3-M28)", () => {
 		const ctx = createFakeCtx({ cwd, model: main, modelRegistry: { getAvailable: () => [main] }, sessionManager: { getSessionId: () => "s", getBranch: () => fake.branch } });
 		const file = join(agentsDir(), "editor.md");
 		writeFileSync(file, "---\nname: editor\ndescription: Edits prose\n---\nEdit it.\n");
-		const words = requireText("subagents");
-		const catalogBlock = vi.spyOn(words, "catalogBlock");
+		const catalogBlock = vi.spyOn(subagentResultText(), "catalogBlock");
 		await fake.fire("session_start", {}, ctx);
 		const catalog = () => reminders.filter((r) => r.key === "subagent-agents" && r.placement === "first-prepend").at(-1)?.text ?? "";
 		/** The rows of the block the catalog text was rendered from. */
@@ -203,7 +202,7 @@ describe("agent catalog read at each run's start (R3-M28)", () => {
 			expect(catalog()).toBe(catalogBlock.mock.results.at(-1)?.value);
 			return catalogBlock.mock.calls.at(-1)?.[0].rows ?? [];
 		};
-		const editor = (description: string) => words.catalogRow({ name: "editor", description, tools: { kind: "all", builtIn: false } });
+		const editor = (description: string) => subagentResultText().catalogRow({ name: "editor", description, tools: { kind: "all", builtIn: false } });
 		expect(rows()).toContain(editor("Edits prose"));
 		const before = catalog();
 		await fake.fire("before_agent_start", { prompt: "go", systemPromptOptions: {} }, ctx);

@@ -150,12 +150,10 @@ export const init: NonNullable<ProfileText["init"]> = {
 
 export const btw: NonNullable<ProfileText["btw"]> = {
 	question: (question) => mark("btw.question", question),
-	stubReason: "[btw.stubReason]",
 };
 
 export const recap: NonNullable<ProfileText["recap"]> = {
 	prompt: "[recap.prompt]",
-	stubReason: "[recap.stubReason]",
 };
 
 export const effort: NonNullable<ProfileText["effort"]> = {
@@ -169,13 +167,6 @@ export const planMode: NonNullable<ProfileText["planMode"]> = {
 		exit_plan_mode: "[planMode.descriptions.exit_plan_mode]",
 	},
 	reminder: (p) => mark("planMode.reminder", p),
-	entered: (planFile) => mark("planMode.entered", planFile),
-	notInPlanMode: "[planMode.notInPlanMode]",
-	emptyPlan: (planFile) => mark("planMode.emptyPlan", planFile),
-	noApprover: (planFile) => mark("planMode.noApprover", planFile),
-	approved: (p) => mark("planMode.approved", p),
-	exited: (planFile) => mark("planMode.exited", planFile),
-	reattached: (p) => mark("planMode.reattached", p),
 };
 
 export const skill: NonNullable<ProfileText["skill"]> = {
@@ -296,7 +287,6 @@ export const compaction: NonNullable<ProfileText["compaction"]> = {
 	instruction: (p) => mark("compaction.instruction", p),
 	continuation: (p) => mark("compaction.continuation", p),
 	standaloneSystemPrompt: "[compaction.standaloneSystemPrompt]",
-	clearedResult: (p) => mark("compaction.clearedResult", p),
 };
 
 export const workflow: NonNullable<ProfileText["workflow"]> = {
@@ -312,35 +302,9 @@ export const workflow: NonNullable<ProfileText["workflow"]> = {
 	}),
 	promptSnippet: "[workflow.promptSnippet]",
 	ultracodeReminder: "[workflow.ultracodeReminder]",
-	refused: (refusal) => mark("workflow.refused", refusal),
-	scriptProblem: (problem) => mark("workflow.scriptProblem", problem),
-	callProblem: (problem) => mark("workflow.callProblem", problem),
-	agentFailure: (failure) => mark("workflow.agentFailure", failure),
-	runStop: (stop) => mark("workflow.runStop", stop),
-	determinism: {
-		random: "[workflow.determinism.random]",
-		dateNoArgs: "[workflow.determinism.dateNoArgs]",
-		dateCall: "[workflow.determinism.dateCall]",
-		dateNow: "[workflow.determinism.dateNow]",
-	},
-	started: (p) => mark("workflow.started", p),
-	ranToEnd: (p) => mark("workflow.ranToEnd", p),
-	report: (report) => mark("workflow.report", report),
-	resultTruncated: "[workflow.resultTruncated]",
-	defaultAgentLabel: (p) => mark("workflow.defaultAgentLabel", p),
-	notice: (notice) => mark("workflow.notice", notice),
-	progress: {
-		replayed: "[workflow.progress.replayed]",
-		outputTokens: (p) => mark("workflow.progress.outputTokens", p),
-		worktreeKept: (p) => mark("workflow.progress.worktreeKept", p),
-		agentAborted: "[workflow.progress.agentAborted]",
-		agentFailed: (p) => mark("workflow.progress.agentFailed", p),
-	},
 	agentPrompt: (p) => mark("workflow.agentPrompt", p),
-	structuredNudge: "[workflow.structuredNudge]",
 	structuredOutputTool: {
 		description: "[workflow.structuredOutputTool.description]",
-		received: "[workflow.structuredOutputTool.received]",
 	},
 };
 
@@ -434,14 +398,11 @@ export const toolSearch: NonNullable<ProfileText["toolSearch"]> = {
 export const handback: NonNullable<ProfileText["handback"]> = {
 	description: "[handback.description]",
 	messageParam: "[handback.messageParam]",
-	reminder: "[handback.reminder]",
-	loadFirst: "[handback.loadFirst]",
-	delivered: "[handback.delivered]",
-	alreadyDelivered: (p) => mark("handback.alreadyDelivered", p),
-	empty: "[handback.empty]",
 };
 
 export const subagents: NonNullable<ProfileText["subagents"]> = {
+	toolNamesHint: "[subagents.toolNamesHint]",
+	taskAliasNote: "[subagents.taskAliasNote]",
 	agentDescription: (p) => mark("subagents.agentDescription", p),
 	agentPromptSnippet: "[subagents.agentPromptSnippet]",
 	agentParams: {
@@ -464,40 +425,13 @@ export const subagents: NonNullable<ProfileText["subagents"]> = {
 		description: "[subagents.nestedAgentParams.description]",
 		name: "[subagents.nestedAgentParams.name]",
 	},
-	catalogRow: (p) => mark("subagents.catalogRow", p),
-	forkRow: "[subagents.forkRow]",
-	catalogList: (p) => mark("subagents.catalogList", p),
-	catalogBlock: (p) => mark("subagents.catalogBlock", p),
-	refused: (refusal) => mark("subagents.refused", refusal),
-	runtimeProblem: (problem) => mark("subagents.runtimeProblem", problem),
-	failure: (failure) => mark("subagents.failure", failure),
-	noOutput: "[subagents.noOutput]",
-	modelFallback: (p) => mark("subagents.modelFallback", p),
-	renamed: (p) => mark("subagents.renamed", p),
-	unusableTools: (p) => mark("subagents.unusableTools", p),
-	worktreeRefused: (p) => mark("subagents.worktreeRefused", p),
-	worktreeKept: (p) => mark("subagents.worktreeKept", p),
-	worktreeRunning: (p) => mark("subagents.worktreeRunning", p),
-	stats: (p) => mark("subagents.stats", p),
-	inlineReport: (p) => mark("subagents.inlineReport", p),
-	launched: (p) => mark("subagents.launched", p),
-	launchLine: (line) => mark("subagents.launchLine", line),
 	sendMessageDescription: "[subagents.sendMessageDescription]",
 	sendMessageParams: {
 		to: "[subagents.sendMessageParams.to]",
 		message: "[subagents.sendMessageParams.message]",
 		summary: "[subagents.sendMessageParams.summary]",
 	},
-	steered: (p) => mark("subagents.steered", p),
-	nextTurn: (p) => mark("subagents.nextTurn", p),
-	sentToResident: (p) => mark("subagents.sentToResident", p),
-	sent: (p) => mark("subagents.sent", p),
-	inlineReply: (p) => mark("subagents.inlineReply", p),
-	relocated: (p) => mark("subagents.relocated", p),
 	listAgentsDescription: "[subagents.listAgentsDescription]",
-	noAgents: "[subagents.noAgents]",
-	agentList: (p) => mark("subagents.agentList", p),
-	agentRow: (p) => mark("subagents.agentRow", p),
 	toMain: {
 		description: "[subagents.toMain.description]",
 		params: {
@@ -505,16 +439,10 @@ export const subagents: NonNullable<ProfileText["subagents"]> = {
 			message: "[subagents.toMain.params.message]",
 			summary: "[subagents.toMain.params.summary]",
 		},
-		delivered: "[subagents.toMain.delivered]",
 	},
-	fromSubagent: (p) => mark("subagents.fromSubagent", p),
 	forkTask: (p) => mark("subagents.forkTask", p),
-	parentMode: (p) => mark("subagents.parentMode", p),
-	pendingClaim: (p) => mark("subagents.pendingClaim", p),
-	runningAfterCompaction: (p) => mark("subagents.runningAfterCompaction", p),
 	delegationSteer: "[subagents.delegationSteer]",
 	delegationWithdrawn: "[subagents.delegationWithdrawn]",
-	reviewTimedOut: "[subagents.reviewTimedOut]",
 };
 
 export const subagentModels: NonNullable<ProfileText["subagentModels"]> = {

@@ -2,9 +2,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { pinCatalog } from "./catalog-fixture.ts";
 import { resolveWorkflowAgentModel } from "../../extensions/agents/workflow/agent-session.ts";
 import { supportsImageInput } from "../../extensions/lib/models/model-policy.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { resolveSubagentModel, subagentModelMenu } from "../../extensions/lib/models/subagent-model.ts";
 import { subagentModelWordsInForce } from "../../extensions/lib/models/subagent-model.ts";
+import { workflowResultText } from "../../extensions/agents/workflow/text.ts";
 
 const model = (id: string, input: number) =>
 	({
@@ -37,7 +37,7 @@ function unavailable(requested: string, sessionModel: ReturnType<typeof model>, 
 	const { unresolvedReason: reason } = resolveSubagentModel({ requested, sessionModel, available, requireImageInput });
 	const fallback = resolveSubagentModel({ sessionModel, available, requireImageInput });
 	const menu = subagentModelMenu({ available, sessionModel, defaultModel: fallback.model, defaultSource: fallback.source, requireImageInput });
-	const message = requireText("workflow").callProblem({ kind: "modelUnavailable", model: requested, ...(reason ? { reason } : {}), menu });
+	const message = workflowResultText.callProblem({ kind: "modelUnavailable", model: requested, ...(reason ? { reason } : {}), menu });
 	return { message, menu, reason };
 }
 
@@ -137,7 +137,7 @@ describe("workflow model defaults", () => {
 				available: catalog,
 			}),
 		).toThrow(
-			requireText("workflow").callProblem({
+			workflowResultText.callProblem({
 				kind: "expensiveModel",
 				gate: subagentModelWordsInForce().costsMore({ model: "openai-codex/gpt-5.6-sol", price: 5, session: "openai-codex/gpt-5.6-luna", sessionPrice: 0.2 }),
 			}),

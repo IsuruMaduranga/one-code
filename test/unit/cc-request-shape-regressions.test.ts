@@ -8,12 +8,12 @@ import { deferredAddendumText } from "../../extensions/lib/request/deferred.ts";
 import { wrapReminder } from "../../extensions/lib/request/reminders.ts";
 import { subagentHandbackExtension } from "../../extensions/lib/agents/subagent-handback.ts";
 import { totalTokensBlock } from "../../extensions/lib/context/budget.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { withToolAdditions } from "../../extensions/request/tool-search/tool-additions.ts";
 import { withTurnBudgetMessages } from "../../extensions/request/system-reminder/turn-budget-layout.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { toolSearchResultText } from "../../extensions/lib/request/tool-search-text.ts";
+import { handbackResultText } from "../../extensions/lib/agents/handback-text.ts";
 
 const TOOLS_AVAILABLE = toolSearchResultText.toolsAvailable;
 /** The budget line for `left` tokens, in the profile's words. */
@@ -130,8 +130,7 @@ describe("a fork's hand-back reminder", () => {
 		fake.events.on(REMINDER_CHANNEL, (data) => texts.push((data as { text: string }).text));
 		subagentHandbackExtension({ recordHandback: () => true }, { deferred: true })(fake.pi as never);
 		await fake.fireOne("session_start", {}, createFakeCtx());
-		const handback = requireText("handback");
-		expect(texts[0]).toBe(`${handback.loadFirst}\n${handback.reminder}`);
+		expect(texts[0]).toBe(`${handbackResultText.loadFirst}\n${handbackResultText.reminder}`);
 	});
 });
 

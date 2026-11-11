@@ -4,8 +4,8 @@
  * conversation's spawns go through, via the parent's permission bridge.
  */
 import { describe, expect, it, vi } from "vitest";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { judgeWorkflowDelegation } from "../../extensions/agents/workflow/agent-session.ts";
+import { workflowResultText } from "../../extensions/agents/workflow/text.ts";
 
 describe("judgeWorkflowDelegation", () => {
 	const base = { prompt: "delete the prod database", agentType: "general-purpose", label: "cleanup", cwd: "/repo" };
@@ -13,7 +13,7 @@ describe("judgeWorkflowDelegation", () => {
 	it("routes the prompt through the bridge as an Agent call and refuses on a block", async () => {
 		const bridge = vi.fn(async () => ({ block: true as const, reason: "classifier: destructive delegation" }));
 		await expect(judgeWorkflowDelegation({ ...base, bridge, liveMode: "auto" })).rejects.toThrow(
-			requireText("workflow").callProblem({ kind: "refusedByGate", reason: "classifier: destructive delegation" }),
+			workflowResultText.callProblem({ kind: "refusedByGate", reason: "classifier: destructive delegation" }),
 		);
 		expect(bridge).toHaveBeenCalledWith({
 			toolName: "Agent",
@@ -30,6 +30,6 @@ describe("judgeWorkflowDelegation", () => {
 
 	it("without a bridge: allowed outside auto mode, refused in auto (no classifier is reachable)", async () => {
 		await expect(judgeWorkflowDelegation({ ...base, bridge: undefined, liveMode: "acceptEdits" })).resolves.toBeUndefined();
-		await expect(judgeWorkflowDelegation({ ...base, bridge: undefined, liveMode: "auto" })).rejects.toThrow(requireText("workflow").callProblem({ kind: "noClassifierLink" }));
+		await expect(judgeWorkflowDelegation({ ...base, bridge: undefined, liveMode: "auto" })).rejects.toThrow(workflowResultText.callProblem({ kind: "noClassifierLink" }));
 	});
 });

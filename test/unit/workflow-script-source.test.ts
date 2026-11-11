@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import vm from "node:vm";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { parseWorkflowScript, wrapScriptBody } from "../../extensions/agents/workflow/script-source.ts";
 import type { ScriptProblem } from "../../extensions/agents/workflow/text.ts";
+import { workflowResultText } from "../../extensions/agents/workflow/text.ts";
 
 /** A script problem as the profile words it: what the parser throws. */
-const problem = (p: ScriptProblem) => requireText("workflow").scriptProblem(p);
+const problem = (p: ScriptProblem) => workflowResultText.scriptProblem(p);
 
 const VALID = `export const meta = {
   name: 'audit',

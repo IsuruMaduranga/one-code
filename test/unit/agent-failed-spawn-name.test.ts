@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import subagentsExtension from "../../extensions/agents/subagents/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { subagentResultText } from "../../extensions/lib/agents/subagent-text.ts";
 
 /**
  * A spawn that fails validation reserves its run name before the agent type is
@@ -24,6 +24,6 @@ describe("Agent: a failed spawn leaves no addressable name", () => {
 			content: { text?: string }[];
 		};
 		const text = result.content.map((c) => c.text ?? "").join("");
-		expect(text).toBe(requireText("subagents").refused({ kind: "noRun", to: "ghost-run", known: [] }));
+		expect(text).toBe(subagentResultText().refused({ kind: "noRun", to: "ghost-run", known: [] }));
 	});
 });

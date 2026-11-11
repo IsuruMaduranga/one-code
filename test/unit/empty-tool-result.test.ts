@@ -8,10 +8,10 @@ import toolStyleExtension from "../../extensions/tools/tool-style/index.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { SessionTurnTracker } from "../../extensions/agents/subagents/session-turns.ts";
 import { applyPostToolUseOutcome } from "../../extensions/lib/rules/hook-protocol.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { fileTrackerText } from "../../extensions/safety/file-tracker/text.ts";
 import { toolResultsText } from "../../extensions/lib/request/tool-results-text.ts";
+import { subagentResultText } from "../../extensions/lib/agents/subagent-text.ts";
 
 const text = (value: string) => ({ type: "text", text: value });
 /** The profile's text for a tool that returned nothing (One Code's: profile/test/profile-tool-results-text.test.ts). */
@@ -69,7 +69,7 @@ describe("completed subagents without a reply", () => {
 		tracker.beginTurn();
 		tracker.process({ type: "message_end", message: { role: "assistant", content: [], stopReason: "stop" } });
 		tracker.process({ type: "agent_settled" });
-		expect(tracker.turnOutcome().output).toBe(requireText("subagents").noOutput);
+		expect(tracker.turnOutcome().output).toBe(subagentResultText().noOutput);
 		expect(tracker.turnOutcome().failed).toBeUndefined();
 	});
 });

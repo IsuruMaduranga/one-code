@@ -29,6 +29,7 @@ import { DEFER_CHANNEL } from "../request/deferred.ts";
 import type { HandbackText } from "./handback-text.ts";
 import { requireText } from "../profile/profile.ts";
 import { REMINDER_CHANNEL, type ReminderPayload } from "../request/reminders.ts";
+import { handbackResultText } from "./handback-text.ts";
 
 export const SUBAGENT_HANDBACK = "SubagentHandback";
 
@@ -66,12 +67,12 @@ export function subagentHandbackTool(slot: HandbackSlot, sendMessage = false): T
 			const message = (params as { message?: unknown } | undefined)?.message;
 			// Fail loud (decisions/tools.md): an empty report would end the run with nothing for the caller.
 			if (typeof message !== "string" || !message.trim()) {
-				return { content: [{ type: "text" as const, text: text.empty }], details: {}, isError: true };
+				return { content: [{ type: "text" as const, text: handbackResultText.empty }], details: {}, isError: true };
 			}
 			if (!slot.recordHandback(message)) {
-				return { content: [{ type: "text" as const, text: text.alreadyDelivered({ sendMessage }) }], details: {}, isError: true };
+				return { content: [{ type: "text" as const, text: handbackResultText.alreadyDelivered({ sendMessage }) }], details: {}, isError: true };
 			}
-			return { content: [{ type: "text" as const, text: text.delivered }], details: { handback: true }, terminate: true };
+			return { content: [{ type: "text" as const, text: handbackResultText.delivered }], details: { handback: true }, terminate: true };
 		},
 	} as ToolDefinition;
 }
@@ -89,7 +90,7 @@ export function subagentHandbackExtension(slot: HandbackSlot, options: { deferre
 		if (options.deferred) pi.events.emit(DEFER_CHANNEL, { name: SUBAGENT_HANDBACK, keywords: ["handback", "report", "result", "final", "caller"] });
 		pi.on("session_start", () => {
 			pi.events.emit(REMINDER_CHANNEL, {
-				text: options.deferred ? `${words().loadFirst}\n${words().reminder}` : words().reminder,
+				text: options.deferred ? `${handbackResultText.loadFirst}\n${handbackResultText.reminder}` : handbackResultText.reminder,
 				key: "subagent-handback",
 				placement: "sticky-append",
 			} satisfies ReminderPayload);

@@ -36,5 +36,4 @@ export const btw: BtwText = {
 	// CC's reminder, a blank line, then the user's question verbatim
 	// (captures/btw.json message 20 is exactly this string).
 	question: (question) => `${SIDE_QUESTION_REMINDER}\n\n${question}`,
-	stubReason: "Unavailable during this side question; answer in text.",
 };

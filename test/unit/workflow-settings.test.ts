@@ -17,6 +17,7 @@ import { requireText } from "../../extensions/lib/profile/profile.ts";
 import workflowExtension from "../../extensions/agents/workflow/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { envName } from "../../extensions/lib/profile/brand.mjs";
+import { workflowResultText } from "../../extensions/agents/workflow/text.ts";
 
 /** The tool's description for a guideline, in the profile's words. */
 const workflowDescription = (guideline: WorkflowSizeGuideline, configured: boolean) =>
@@ -103,7 +104,7 @@ describe("workflow wiring: settings at session start", () => {
 			isError?: boolean;
 		};
 		expect(refused.isError).toBe(true);
-		expect(refused.content[0].text).toBe(requireText("workflow").refused({ kind: "turnedOff" }));
+		expect(refused.content[0].text).toBe(workflowResultText.refused({ kind: "turnedOff" }));
 
 		// A later session with workflows on brings the tool back.
 		write(productProjectSettingsPath(cwd, home, env()), {});

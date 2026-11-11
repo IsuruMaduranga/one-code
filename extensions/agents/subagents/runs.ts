@@ -9,7 +9,7 @@
 
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { subagentWords } from "./words.ts";
+import { subagentResultText } from "../../lib/agents/subagent-text.ts";
 
 /** The synthetic agent type of a run that clones the calling conversation. */
 export const FORK_AGENT = "fork";
@@ -96,7 +96,7 @@ export function resolveRunName(
 	if (!wanted) return { name };
 	return {
 		name,
-		note: subagentWords().renamed({ wanted, takenBy: registry.resolve(wanted)?.taskId ?? "?", name }),
+		note: subagentResultText().renamed({ wanted, takenBy: registry.resolve(wanted)?.taskId ?? "?", name }),
 	};
 }
 

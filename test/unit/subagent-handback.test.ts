@@ -21,6 +21,8 @@ import { SubagentRuntime } from "../../extensions/agents/subagents/runner.ts";
 import { SessionTurnTracker } from "../../extensions/agents/subagents/session-turns.ts";
 import { AgentRunner } from "../../extensions/agents/workflow/agent-session.ts";
 import { createFakePi } from "./helpers/fake-pi.ts";
+import { handbackResultText } from "../../extensions/lib/agents/handback-text.ts";
+import { subagentResultText } from "../../extensions/lib/agents/subagent-text.ts";
 
 type ToolResult = { content: Array<{ text: string }>; isError?: boolean; terminate?: boolean };
 
@@ -42,7 +44,7 @@ describe("the SubagentHandback tool", () => {
 		const tool = subagentHandbackTool(slot, true);
 		await tool.execute("c1", { message: "Report." }, undefined, undefined, undefined as never);
 		const again = (await tool.execute("c2", { message: "More." }, undefined, undefined, undefined as never)) as { content: { text: string }[] };
-		expect(again.content[0].text).toBe(handback.alreadyDelivered({ sendMessage: true }));
+		expect(again.content[0].text).toBe(handbackResultText.alreadyDelivered({ sendMessage: true }));
 	});
 
 	it("records the report once and ends the run", async () => {
@@ -51,14 +53,14 @@ describe("the SubagentHandback tool", () => {
 		const run = (message: unknown) => tool.execute("h", { message } as never, undefined, undefined, {} as never) as Promise<ToolResult>;
 
 		const delivered = await run("The file is app.py.");
-		expect(delivered.content[0].text).toBe(handback.delivered);
+		expect(delivered.content[0].text).toBe(handbackResultText.delivered);
 		expect(delivered.terminate).toBe(true);
 		expect(delivered.isError).toBeUndefined();
 		expect(slot.report).toBe("The file is app.py.");
 
 		const again = await run("a second report");
 		expect(again).toMatchObject({ isError: true });
-		expect(again.content[0].text).toBe(handback.alreadyDelivered({ sendMessage: false }));
+		expect(again.content[0].text).toBe(handbackResultText.alreadyDelivered({ sendMessage: false }));
 		expect(slot.report).toBe("The file is app.py.");
 	});
 
@@ -66,7 +68,7 @@ describe("the SubagentHandback tool", () => {
 		const slot = oneTurnHandbackSlot();
 		const result = (await subagentHandbackTool(slot).execute("h", { message: "  " } as never, undefined, undefined, {} as never)) as ToolResult;
 		expect(result).toMatchObject({ isError: true });
-		expect(result.content[0].text).toBe(handback.empty);
+		expect(result.content[0].text).toBe(handbackResultText.empty);
 		expect(slot.report).toBeUndefined();
 	});
 });
@@ -83,7 +85,7 @@ describe("the hand-back extension a child loads", () => {
 		expect(deferred).toEqual([]);
 		expect(reminders).toEqual([]);
 		await fake.fire("session_start", { reason: "startup" });
-		expect(reminders).toEqual([{ text: handback.reminder, key: "subagent-handback", placement: "sticky-append" }]);
+		expect(reminders).toEqual([{ text: handbackResultText.reminder, key: "subagent-handback", placement: "sticky-append" }]);
 	});
 
 	it("defers the tool in a fork, which sends the parent's tool list", () => {
@@ -124,7 +126,7 @@ describe("SessionTurnTracker: the handed-back report is the turn's result", () =
 		const tracker = new SessionTurnTracker();
 		tracker.recordHandback("Partial.");
 		tracker.markAborted();
-		expect(tracker.turnOutcome()).toMatchObject({ failed: true, output: requireText("subagents").failure({ kind: "aborted", why: "stopped", output: "Partial." }) });
+		expect(tracker.turnOutcome()).toMatchObject({ failed: true, output: subagentResultText().failure({ kind: "aborted", why: "stopped", output: "Partial." }) });
 	});
 });
 

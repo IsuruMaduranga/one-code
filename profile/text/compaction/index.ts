@@ -191,8 +191,4 @@ export const compaction: CompactionText = {
 	continuation: ({ summary, transcriptPath }) => continuationSummary(summary, transcriptPath),
 	standaloneSystemPrompt:
 		"You are the coding assistant from the conversation below, asked to summarize it so work can continue in a fresh context. Respond with text only.",
-	clearedResult: ({ omittedChars, images }) =>
-		`[Tool result cleared to fit the compaction request: ${omittedChars} more characters${
-			images > 0 ? ` and ${images} image${images === 1 ? "" : "s"}` : ""
-		} omitted. The full result is in the session transcript.]`,
 };

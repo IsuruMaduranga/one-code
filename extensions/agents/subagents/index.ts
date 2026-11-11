@@ -124,6 +124,7 @@ import { readStringsState, recordState } from "../../lib/request/ledger/state.ts
 import { panelUi } from "../../lib/ui/panel-focus.ts";
 import { dockRowsReporter, trackDockRows } from "../../lib/ui/dock-rows.ts";
 import { cronWords } from "../../lib/agents/cron-text.ts";
+import { subagentResultText } from "../../lib/agents/subagent-text.ts";
 
 /** How the guide's setup list names a server that is not connected. */
 const MCP_STATUS_LABELS: Record<McpStatusKind, string | undefined> = {
@@ -269,7 +270,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 	/** The profile's subagent words (fails closed: every Agent call reads them). */
 	const words = subagentWords();
 	/** A refused Agent call (the nested Agent tool's too). */
-	const refuseCall = (r: SubagentRefusal) => ({ content: [{ type: "text" as const, text: words.refused(r) }], details: {}, isError: true });
+	const refuseCall = (r: SubagentRefusal) => ({ content: [{ type: "text" as const, text: subagentResultText().refused(r) }], details: {}, isError: true });
 	const requestTier = sessionModelTier(pi);
 	const registry = new RunRegistry();
 	/**
@@ -463,8 +464,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 	/** The runtime, or the startup error as a message a failed run can report. */
 	const runtimeOrError = (ctx: ExtensionContext): Promise<SubagentRuntime | string> =>
 		getRuntime(ctx)
-			.then((runtime) => (shuttingDown ? words.runtimeProblem({ kind: "sessionEnded" }) : runtime))
-			.catch((error: unknown) => words.runtimeProblem({ kind: "failed", osMessage: error instanceof Error ? error.message : String(error) }));
+			.then((runtime) => (shuttingDown ? subagentResultText().runtimeProblem({ kind: "sessionEnded" }) : runtime))
+			.catch((error: unknown) => subagentResultText().runtimeProblem({ kind: "failed", osMessage: error instanceof Error ? error.message : String(error) }));
 
 	// The mcp extension answers a status request synchronously on the bus.
 	let mcpStatus: McpServerStatus[] | undefined;
@@ -556,13 +557,13 @@ function subagentsExtension(pi: ExtensionAPI) {
 
 	/** One catalog row per agent, the shape every catalog the model reads uses. */
 	const catalogLines = (agents: AgentDefinition[]): string[] =>
-		agents.map((a) => words.catalogRow({ name: a.name, description: a.description, tools: agentTools(a) }));
+		agents.map((a) => subagentResultText().catalogRow({ name: a.name, description: a.description, tools: agentTools(a) }));
 
 	/** The catalog rows with the fork's. */
-	const describeAgents = (cwd: string, sources?: AgentSources): string[] => [...catalogLines(loadAgents(cwd, sources)), words.forkRow];
+	const describeAgents = (cwd: string, sources?: AgentSources): string[] => [...catalogLines(loadAgents(cwd, sources)), subagentResultText().forkRow];
 
 	/** A background launch's line, in the profile's words. */
-	const launchLine = (line: LaunchLine): string => words.launchLine(line);
+	const launchLine = (line: LaunchLine): string => subagentResultText().launchLine(line);
 
 	const reconstructRuns = (ctx: ExtensionContext) => {
 		/** Loop-invariant; computed lazily so worktree-free histories pay nothing. */
@@ -715,7 +716,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		if (catalogMemo?.stamp !== stamp) {
 			catalogMemo = {
 				stamp,
-				text: words.catalogBlock({ rows: describeAgents(ctx.cwd, sources) }),
+				text: subagentResultText().catalogBlock({ rows: describeAgents(ctx.cwd, sources) }),
 			};
 		}
 		return catalogMemo.text;
@@ -1282,7 +1283,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			toMain();
 			return;
 		}
-		void parent.handle.send(words.fromSubagent({ name, summary, body })).catch(toMain);
+		void parent.handle.send(subagentResultText().fromSubagent({ name, summary, body })).catch(toMain);
 	};
 
 	const boundedMessage = (name: string, message: string) => bounded(message, `message-${name}-${Date.now()}`, MESSAGE_TO_MAIN_CAP);
@@ -1536,14 +1537,14 @@ function subagentsExtension(pi: ExtensionAPI) {
 				if (agentName.toLowerCase() === FORK_AGENT) return refuseCall({ kind: "nestedFork" });
 				const agents = loadAgents(parentRecord.cwd);
 				// Only a fork's schema (the parent's) offers these; a nested run has none of them.
-				if (p.action === "list") return { content: [{ type: "text" as const, text: words.catalogList({ rows: catalogLines(agents) }) }], details: {} };
+				if (p.action === "list") return { content: [{ type: "text" as const, text: subagentResultText().catalogList({ rows: catalogLines(agents) }) }], details: {} };
 				const unsupported = (["model", "thinking", "isolation"] as const).filter((key) => p[key] != null);
 				if (unsupported.length > 0) return refuseCall({ kind: "nestedOptions", options: unsupported });
 				const agentDef = agents.find((a) => a.name.toLowerCase() === agentName.toLowerCase());
 				if (!agentDef) {
 					return refuseCall({ kind: "nestedUnknownAgent", ...(agentName ? { name: agentName } : {}), catalog: catalogLines(agents) });
 				}
-				if (!task) return refuseCall({ kind: "taskRequired" });
+				if (!task) return refuseCall({ kind: "taskRequired", aliasNote: subagentWords().taskAliasNote });
 
 				const { name, note: renamedNote } = resolveRunName(registry, agentDef.name, typeof p.name === "string" ? p.name : undefined);
 				// Same parent-side model resolution as the main Agent tool, minus
@@ -1591,14 +1592,14 @@ function subagentsExtension(pi: ExtensionAPI) {
 						: undefined;
 					if (!bridge || verdict?.block) {
 						return {
-							content: [{ type: "text" as const, text: words.refused(verdict?.block ? { kind: "nestedDenied", reason: verdict.reason } : { kind: "nestedNoBridge" }) }],
+							content: [{ type: "text" as const, text: subagentResultText().refused(verdict?.block ? { kind: "nestedDenied", reason: verdict.reason } : { kind: "nestedNoBridge" }) }],
 							details: { agentRuns: [] as AgentRunRecord[] },
 							isError: true,
 						};
 					}
 				} catch (error) {
 					return {
-						content: [{ type: "text" as const, text: words.refused({ kind: "nestedCheckFailed", osMessage: (error as Error).message }) }],
+						content: [{ type: "text" as const, text: subagentResultText().refused({ kind: "nestedCheckFailed", osMessage: (error as Error).message }) }],
 						details: { agentRuns: [] as AgentRunRecord[] },
 						isError: true,
 					};
@@ -1707,7 +1708,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		// the task id in runningIds, where SendMessage would call it "still running".
 		const runtime = await runtimeOrError(ctx);
 		if (typeof runtime === "string") {
-			return { agent: request.agent, name: request.name, taskId: record.taskId, task: request.task, output: words.failure({ kind: "failed", osMessage: runtime }), toolCalls: 0, usage: emptyUsage(), failed: true };
+			return { agent: request.agent, name: request.name, taskId: record.taskId, task: request.task, output: subagentResultText().failure({ kind: "failed", osMessage: runtime }), toolCalls: 0, usage: emptyUsage(), failed: true };
 		}
 
 		let worktree: Worktree | undefined;
@@ -1720,7 +1721,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 					name: request.name,
 					taskId: record.taskId,
 					task: request.task,
-					output: words.failure({ kind: "worktree", osMessage: (error as Error).message }),
+					output: subagentResultText().failure({ kind: "worktree", osMessage: (error as Error).message }),
 					toolCalls: 0,
 					usage: emptyUsage(),
 					failed: true,
@@ -1784,7 +1785,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				name: request.name,
 				taskId: record.taskId,
 				task: request.task,
-				output: words.failure({ kind: "failed", osMessage: (error as Error).message }),
+				output: subagentResultText().failure({ kind: "failed", osMessage: (error as Error).message }),
 				toolCalls: 0,
 				usage: emptyUsage(),
 				failed: true,
@@ -1856,7 +1857,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		const live = trackLiveRun(p.record, p.request);
 		const resident: Resident = { handle: undefined as never, startedAt: Date.now(), turnHandlers: [], reviewing: 0 };
 		const worktreeNote = worktree
-			? `\n\n${words.worktreeRunning({ path: worktree.path, branch: worktree.branch })}`
+			? `\n\n${subagentResultText().worktreeRunning({ path: worktree.path, branch: worktree.branch })}`
 			: "";
 		resident.turnHandlers.push((outcome, review, stopped) => {
 			task.status = stopped ? "stopped" : outcome.failed ? "failed" : "completed";
@@ -2127,7 +2128,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 
 			if (params.action === "list" || (!params.subagent_type && !wantsRun)) {
 				return {
-					content: [{ type: "text", text: words.catalogList({ rows: describeAgents(ctx.cwd) }) }],
+					content: [{ type: "text", text: subagentResultText().catalogList({ rows: describeAgents(ctx.cwd) }) }],
 					details: { agents: agents.map((a) => a.name) },
 				};
 			}
@@ -2137,7 +2138,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			// child prompted with "" (H1). Fork included — cloning to do nothing is
 			// never intended.
 			if (!taskText || !taskText.trim()) {
-				return refuseCall({ kind: "taskRequired" });
+				return refuseCall({ kind: "taskRequired", aliasNote: subagentWords().taskAliasNote });
 			}
 
 			// Match `subagent_type` against the catalog case-insensitively and run
@@ -2333,7 +2334,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				// was never registered (WEAK-MODEL-REVIEW-2026-09-06 M3). Say it up
 				// front, in bash's and monitor's shared wording.
 				prepared[0].record.inline = true;
-				const inlineNote = words.inlineReport({ name: prepared[0].record.name, taskId: prepared[0].record.taskId, note: oneShotNote("agent") });
+				const inlineNote = subagentResultText().inlineReport({ name: prepared[0].record.name, taskId: prepared[0].record.taskId, note: oneShotNote("agent") });
 				// The background path reports renames and model fallbacks in its own
 				// result; a one-shot run must say the same things or the model reads
 				// the report believing it named the run and the model.
@@ -2370,7 +2371,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				content: [
 					{
 						type: "text",
-						text: words.launched({ lines }),
+						text: subagentResultText().launched({ lines }),
 					},
 				],
 				details: { agentRuns: records, background: true },
@@ -2396,7 +2397,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			// The main conversation's SendMessage only addresses spawned agents; the
 			// "main" recipient exists only on a subagent's own injected SendMessage.
 			return {
-				content: [{ type: "text", text: words.refused({ kind: "mainIsNotRecipient" }) }],
+				content: [{ type: "text", text: subagentResultText().refused({ kind: "mainIsNotRecipient" }) }],
 				details: {},
 				isError: true,
 			};
@@ -2410,7 +2411,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				content: [
 					{
 						type: "text",
-						text: words.refused({ kind: "noRun", to: params.to, known }),
+						text: subagentResultText().refused({ kind: "noRun", to: params.to, known }),
 					},
 				],
 				details: {},
@@ -2428,7 +2429,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 					delivery = await resident.handle.send(params.message);
 				} catch (error) {
 					return {
-						content: [{ type: "text", text: words.refused({ kind: "deliveryFailed", name: record.name, osMessage: (error as Error).message }) }],
+						content: [{ type: "text", text: subagentResultText().refused({ kind: "deliveryFailed", name: record.name, osMessage: (error as Error).message }) }],
 						details: {},
 						isError: true,
 					};
@@ -2438,7 +2439,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 						content: [
 							{
 								type: "text",
-								text: words.steered({ name: record.name }),
+								text: subagentResultText().steered({ name: record.name }),
 							},
 						],
 						details: { agentRuns: [record], steered: true },
@@ -2451,7 +2452,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 					content: [
 						{
 							type: "text",
-							text: words.nextTurn({ name: record.name }),
+							text: subagentResultText().nextTurn({ name: record.name }),
 						},
 					],
 					details: { agentRuns: [record] },
@@ -2512,7 +2513,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				content: [
 					{
 						type: "text",
-						text: words.sentToResident({ name: record.name, taskId }),
+						text: subagentResultText().sentToResident({ name: record.name, taskId }),
 					},
 				],
 				details: { agentRuns: [record], taskId },
@@ -2522,7 +2523,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		if (runningIds.has(record.taskId)) {
 			return {
 				content: [
-					{ type: "text", text: words.refused({ kind: "stillRunning", name: record.name }) },
+					{ type: "text", text: subagentResultText().refused({ kind: "stillRunning", name: record.name }) },
 				],
 				details: {},
 				isError: true,
@@ -2538,7 +2539,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				content: [
 					{
 						type: "text",
-						text: words.refused({ kind: "forkNotResumable", name: record.name }),
+						text: subagentResultText().refused({ kind: "forkNotResumable", name: record.name }),
 					},
 				],
 				details: {},
@@ -2548,7 +2549,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		if (!sessionFile) {
 			return {
 				content: [
-					{ type: "text", text: words.refused({ kind: "noSession", name: record.name }) },
+					{ type: "text", text: subagentResultText().refused({ kind: "noSession", name: record.name }) },
 				],
 				details: {},
 				isError: true,
@@ -2562,7 +2563,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		let relocationNote = "";
 		if (!existsSync(record.cwd)) {
 			const cwd = workCwd(ctx);
-			relocationNote = `${words.relocated({ name: record.name, cwd: record.cwd, worktreeRemoved: Boolean(record.worktree), ranIn: cwd })}\n\n`;
+			relocationNote = `${subagentResultText().relocated({ name: record.name, cwd: record.cwd, worktreeRemoved: Boolean(record.worktree), ranIn: cwd })}\n\n`;
 			record.cwd = cwd;
 			record.worktree = undefined;
 		}
@@ -2570,7 +2571,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		// Before the run is marked running (L8, as in executeRun).
 		const runtime = await runtimeOrError(ctx);
 		if (typeof runtime === "string") {
-			return { content: [{ type: "text", text: words.refused({ kind: "couldNotResume", name: record.name, problem: runtime }) }], details: {}, isError: true };
+			return { content: [{ type: "text", text: subagentResultText().refused({ kind: "couldNotResume", name: record.name, problem: runtime }) }], details: {}, isError: true };
 		}
 
 		const taskId = generateTaskId();
@@ -2631,7 +2632,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 					{
 						type: "text",
 						text:
-							`${words.inlineReply({ name: record.name, note: oneShotNote("agentTurn") })}\n\n` +
+							`${subagentResultText().inlineReply({ name: record.name, note: oneShotNote("agentTurn") })}\n\n` +
 							`${relocationNote}${bounded(outcome.output, `${taskId}-reply`, OUTPUT_CAP)}\n\n(${formatStats(outcome.toolCalls, outcome.usage)})`,
 					},
 				],
@@ -2688,7 +2689,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			content: [
 				{
 					type: "text",
-					text: words.sent({ name: record.name, taskId }),
+					text: subagentResultText().sent({ name: record.name, taskId }),
 				},
 			],
 			details: { agentRuns: [record], taskId },
@@ -2906,14 +2907,14 @@ function subagentsExtension(pi: ExtensionAPI) {
 			const runs = registry.list();
 			if (runs.length === 0) {
 				return {
-					content: [{ type: "text", text: words.noAgents }],
+					content: [{ type: "text", text: subagentResultText().noAgents }],
 					details: { agents: [] as unknown[] },
 				};
 			}
 			const agents = runs.map((r) => ({ name: r.name, agent: r.agent, taskId: r.taskId, status: agentStatus(r) }));
-			const rows = agents.map((a) => words.agentRow(a));
+			const rows = agents.map((a) => subagentResultText().agentRow(a));
 			return {
-				content: [{ type: "text", text: words.agentList({ rows }) }],
+				content: [{ type: "text", text: subagentResultText().agentList({ rows }) }],
 				details: { agents },
 			};
 		},
@@ -2937,7 +2938,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			if (ctx.mode === "rpc" && registry.list().length) {
 				ctx.ui.notify([
 					"The live subagent panel requires TUI mode; showing spawned agents instead.",
-					...registry.list().map((run) => words.agentRow({ name: run.name, agent: run.agent, taskId: run.taskId, status: agentStatus(run) })),
+					...registry.list().map((run) => subagentResultText().agentRow({ name: run.name, agent: run.agent, taskId: run.taskId, status: agentStatus(run) })),
 					"Use /tasks for task status; task_output and task_stop inspect or stop a task.",
 				].join("\n"), "info");
 				return;

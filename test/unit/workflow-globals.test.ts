@@ -3,11 +3,11 @@ import { hashAgentCall, ReplayCursor } from "../../extensions/agents/workflow/jo
 import { createLimiter, createScriptGlobals, createRunAdmission } from "../../extensions/agents/workflow/globals.ts";
 import type { AgentCallFn } from "../../extensions/agents/workflow/types.ts";
 import { makeGlobals } from "./workflow-test-helpers.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import type { RunStop } from "../../extensions/agents/workflow/text.ts";
+import { workflowResultText } from "../../extensions/agents/workflow/text.ts";
 
 /** Why the runtime refused an agent() call, as the profile words it. */
-const runStop = (stop: RunStop) => requireText("workflow").runStop(stop);
+const runStop = (stop: RunStop) => workflowResultText.runStop(stop);
 
 describe("createLimiter", () => {
 	it("never exceeds the limit", async () => {
@@ -163,7 +163,7 @@ describe("budget + workflow()", () => {
 
 	it("workflow() throws when nesting is not available", async () => {
 		const { globals } = makeGlobals();
-		await expect(globals.workflow("child")).rejects.toThrow(requireText("workflow").callProblem({ kind: "nestedTooDeep" }));
+		await expect(globals.workflow("child")).rejects.toThrow(workflowResultText.callProblem({ kind: "nestedTooDeep" }));
 	});
 });
 

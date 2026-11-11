@@ -15,6 +15,7 @@ import { PERMISSION_STATUS_CHANNEL } from "../../extensions/lib/rules/modes.ts";
 import planModeExtension from "../../extensions/safety/plan-mode/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { envName } from "../../extensions/lib/profile/brand.mjs";
+import { planModeResultText } from "../../extensions/safety/plan-mode/text.ts";
 
 const OPUS = { provider: "anthropic", id: "claude-opus-4-8", api: "anthropic-messages" };
 const HAIKU = { provider: "anthropic", id: "claude-haiku-4-5", api: "anthropic-messages" };
@@ -94,7 +95,7 @@ describe("plan-mode wiring of the texts", () => {
 			content: Array<{ text: string }>;
 			details: { planFilePath: string };
 		};
-		expect(entered.content[0].text).toBe(planMode.entered(entered.details.planFilePath));
+		expect(entered.content[0].text).toBe(planModeResultText().entered(entered.details.planFilePath));
 		mkdirSync(join(stateDir, "plans"), { recursive: true });
 		writeFileSync(entered.details.planFilePath, "# Plan\n\n1. do it\n");
 		reminders.length = 0;
@@ -108,14 +109,14 @@ describe("plan-mode wiring of the texts", () => {
 	it("an approval returns the profile's approval text with the plan and queues the exited-plan-mode reminder", async () => {
 		const { result, path } = await planned(answer("\r"));
 		expect(result.isError).toBeUndefined();
-		expect(result.content[0].text).toBe(planMode.approved({ planFile: path, plan: "# Plan\n\n1. do it\n" }));
-		expect(reminders.map((r) => r.text)).toContain(planMode.exited(path));
+		expect(result.content[0].text).toBe(planModeResultText().approved({ planFile: path, plan: "# Plan\n\n1. do it\n" }));
+		expect(reminders.map((r) => r.text)).toContain(planModeResultText().exited(path));
 	});
 
 	it("keeping on planning returns the user's rejection as an error", async () => {
 		const { result, path } = await planned(answer("\x1b"));
 		expect(result.isError).toBe(true);
 		expect(result.content[0].text).toBe(userDenialText());
-		expect(reminders.map((r) => r.text)).not.toContain(expect.stringContaining(planMode.exited(path)));
+		expect(reminders.map((r) => r.text)).not.toContain(expect.stringContaining(planModeResultText().exited(path)));
 	});
 });

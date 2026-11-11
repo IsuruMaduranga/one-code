@@ -35,9 +35,9 @@ import type { ChildHandle, ChildOutcome, RpcChildHandle } from "./outcome.ts";
 import { sendToMainTool } from "./send-to-main-tool.ts";
 import { type AbortReason, SessionTurnTracker } from "./session-turns.ts";
 import type { UsageTotals } from "../../lib/agents/usage.ts";
-import { subagentWords } from "./words.ts";
 import { streamingText, type TranscriptBlock } from "./live-runs.ts";
 import { cutPlainText, firstNonEmptyLine, stripReminderBlocks, summarizeArgs, textContent } from "../../lib/ui/tui-render.ts";
+import { subagentResultText } from "../../lib/agents/subagent-text.ts";
 
 /**
  * Optional live sink for the subagent panel: a one-line activity string from
@@ -456,7 +456,7 @@ export class SubagentRuntime {
 			if (spec.fallbackModel && spec.fallbackModel !== spec.model && isModelUnavailableError(message)) {
 				return {
 					session: await make(spec.fallbackModel),
-					note: subagentWords().modelFallback({ model: spec.model, osMessage: message, fallback: spec.fallbackModel }),
+					note: subagentResultText().modelFallback({ model: spec.model, osMessage: message, fallback: spec.fallbackModel }),
 				};
 			}
 			throw error;
@@ -520,7 +520,7 @@ export class SubagentRuntime {
 			} catch (error) {
 				// Keep the fallback note if the model was swapped before the turn failed.
 				return withNote(
-					{ output: subagentWords().failure({ kind: "failed", osMessage: (error as Error).message }), toolCalls: tracker.toolCalls, usage: tracker.usage, actions: tracker.actions, failed: true },
+					{ output: subagentResultText().failure({ kind: "failed", osMessage: (error as Error).message }), toolCalls: tracker.toolCalls, usage: tracker.usage, actions: tracker.actions, failed: true },
 					spawnNote,
 				);
 			} finally {
@@ -645,7 +645,7 @@ export class SubagentRuntime {
 			// it as a failed turn instead of leaving the caller waiting forever.
 			void prompting.catch((error) => {
 				finishTurn({
-					output: subagentWords().failure({ kind: "turnNotStarted", osMessage: (error as Error).message }),
+					output: subagentResultText().failure({ kind: "turnNotStarted", osMessage: (error as Error).message }),
 					toolCalls: tracker.toolCalls,
 					usage: tracker.usage,
 					actions: tracker.actions,

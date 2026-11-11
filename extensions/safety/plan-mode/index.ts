@@ -57,6 +57,7 @@ import {
 
 import { MODE_CHANNEL, PLAN_FILE_CHANNEL, PLAN_FILE_ENTRY, planFileOnBranch, planFileRecords, type PlanFileRecord } from "../../lib/rules/plan-mode-channels.ts";
 import { panelUi } from "../../lib/ui/panel-focus.ts";
+import { planModeResultText } from "./text.ts";
 export { MODE_CHANNEL, PLAN_FILE_CHANNEL };
 
 const PLANS_DIR = () => join(productStateDir(), "plans");
@@ -259,7 +260,7 @@ function planModeExtension(pi: ExtensionAPI) {
 		}
 		if (!content.trim()) return;
 		// The plan the summary replaced; a large one is named, not inlined: the model reads it when it needs it.
-		const reattached = text.reattached({ planFile: path, content: content.length > PLAN_REFERENCE_CHARS ? undefined : content, chars: content.length });
+		const reattached = planModeResultText().reattached({ planFile: path, content: content.length > PLAN_REFERENCE_CHARS ? undefined : content, chars: content.length });
 		pi.events.emit(REMINDER_CHANNEL, { text: reattached, placement: "user-prepend", orTail: true, untilCompaction: true });
 	});
 
@@ -287,7 +288,7 @@ function planModeExtension(pi: ExtensionAPI) {
 				// the tool result too so the model can start writing this same turn.
 				const path = ensurePlanFile(ctx);
 				return {
-					content: [{ type: "text", text: text.entered(path) }],
+					content: [{ type: "text", text: planModeResultText().entered(path) }],
 					details: { planFilePath: path },
 				};
 			},
@@ -311,7 +312,7 @@ function planModeExtension(pi: ExtensionAPI) {
 					content: [
 						{
 							type: "text",
-							text: text.notInPlanMode,
+							text: planModeResultText().notInPlanMode,
 						},
 					],
 					details: {},
@@ -325,7 +326,7 @@ function planModeExtension(pi: ExtensionAPI) {
 					content: [
 						{
 							type: "text",
-							text: text.emptyPlan(path),
+							text: planModeResultText().emptyPlan(path),
 						},
 					],
 					details: { planFilePath: path },
@@ -344,7 +345,7 @@ function planModeExtension(pi: ExtensionAPI) {
 					content: [
 						{
 							type: "text",
-							text: text.noApprover(path),
+							text: planModeResultText().noApprover(path),
 						},
 					],
 					details: { planFilePath: path, plan, approved: false },
@@ -452,9 +453,9 @@ function planModeExtension(pi: ExtensionAPI) {
 				pi.events.emit(MODE_CHANNEL, { mode: picked.mode, toolCallId });
 				// Claude Code's exit reminder, queued from execute so it is written
 				// into this result after the mode notice.
-				pi.events.emit(REMINDER_CHANNEL, { text: text.exited(path), toolCallId });
+				pi.events.emit(REMINDER_CHANNEL, { text: planModeResultText().exited(path), toolCallId });
 				return {
-					content: [{ type: "text", text: text.approved({ planFile: path, plan }) }],
+					content: [{ type: "text", text: planModeResultText().approved({ planFile: path, plan }) }],
 					details: { plan, approved: true },
 				};
 			}

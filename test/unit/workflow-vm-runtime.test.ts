@@ -4,11 +4,11 @@ import { parseWorkflowScript } from "../../extensions/agents/workflow/script-sou
 import { runWorkflowScript, type WorkflowRuntimeOptions } from "../../extensions/agents/workflow/vm-runtime.ts";
 import { WorkflowScriptError } from "../../extensions/agents/workflow/types.ts";
 import { makeGlobals, type GlobalsOverrides } from "./workflow-test-helpers.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
 import type { RunStop } from "../../extensions/agents/workflow/text.ts";
+import { workflowResultText } from "../../extensions/agents/workflow/text.ts";
 
 /** Why a run stopped, as the profile words it: what the runtime rejects with. */
-const runStop = (stop: RunStop) => requireText("workflow").runStop(stop);
+const runStop = (stop: RunStop) => workflowResultText.runStop(stop);
 /** An error the script threw (or that was thrown into it), as the runtime reports it. */
 const scriptFailed = (message: string) => runStop({ kind: "scriptFailed", message });
 
@@ -150,7 +150,7 @@ return { one, both }
 	});
 
 	it("blocks Math.random, Date.now, and argless new Date inside the vm only", async () => {
-		const determinism = requireText("workflow").determinism;
+		const determinism = workflowResultText.determinism;
 		for (const [expr, message] of [
 			["Math.random()", determinism.random],
 			["Date.now()", determinism.dateNow],
@@ -170,7 +170,7 @@ return { one, both }
 	it("surfaces script errors as WorkflowScriptError", async () => {
 		const { result } = run(`${META}throw new Error('script blew up')`);
 		await expect(result).rejects.toThrow(scriptFailed("script blew up"));
-		expect(() => run(`${META}syntax error here(`)).toThrow(requireText("workflow").scriptProblem({ kind: "parse", osMessage: "Unexpected token (2:7)" }));
+		expect(() => run(`${META}syntax error here(`)).toThrow(workflowResultText.scriptProblem({ kind: "parse", osMessage: "Unexpected token (2:7)" }));
 	});
 
 	it("does not leak host globals into the vm", async () => {

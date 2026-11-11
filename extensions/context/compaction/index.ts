@@ -67,6 +67,7 @@ import { withoutThinking } from "../../lib/request/kept-thinking.ts";
 import { COMPACTION_MAX_TOKENS, extractSummary } from "./prompt.ts";
 import type { CompactionText, KeptTail, KeptTailLandmark } from "./text.ts";
 import { requireText } from "../../lib/profile/profile.ts";
+import { compactionResultText } from "./text.ts";
 
 /** Compaction reads a whole context window; give it more room than the classifier's 30s. */
 const COMPACTION_TIMEOUT_MS = 120_000;
@@ -367,7 +368,7 @@ function replayRequest(
 export function standaloneRequest(model: Model<Api>, preparation: Preparation, instruction: string, maxTokens: number, words: CompactionText): Context {
 	const span = withoutThinking(withoutUsage(convertToLlm(reconstructFromEntries(preparation))), model.api);
 	const messages = [...span, instructionMessage(instruction)];
-	return fitToBudget(model, { systemPrompt: words.standaloneSystemPrompt, messages }, maxTokens, words.clearedResult).request;
+	return fitToBudget(model, { systemPrompt: words.standaloneSystemPrompt, messages }, maxTokens, compactionResultText.clearedResult).request;
 }
 
 const instructionMessage = (instruction: string): Message => ({ role: "user", content: instruction, timestamp: Date.now() });

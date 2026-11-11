@@ -13,54 +13,55 @@ import { subagentModelWords } from "../../extensions/lib/models/subagent-model-t
 import { subagentModels as subagentModelsPart } from "../text/subagent-models/index.ts";
 import { subagentsText } from "../text/subagents/index.ts";
 import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
+import { subagentResultText } from "../../extensions/lib/agents/subagent-text.ts";
 
 const subagentModels = subagentModelWords(ALL_LIVE, subagentModelsPart);
 const subagents = subagentsText(ALL_LIVE);
 
 describe("One Code's subagent text", () => {
 	it("closes each catalog row with Claude Code's tools clause", () => {
-		expect(subagents.catalogRow({ name: "a", description: "d", tools: { kind: "all", builtIn: true } })).toBe("- a: d (Tools: *)");
-		expect(subagents.catalogRow({ name: "a", description: "", tools: { kind: "all", builtIn: false } })).toBe("- a: (no description) (Tools: All tools)");
-		expect(subagents.catalogRow({ name: "a", description: "d", tools: { kind: "allExcept", tools: ["Edit", "Write"] } })).toBe("- a: d (Tools: All tools except Edit, Write)");
-		expect(subagents.catalogRow({ name: "a", description: "d", tools: { kind: "listed", tools: [] } })).toBe("- a: d (Tools: none)");
+		expect(subagentResultText().catalogRow({ name: "a", description: "d", tools: { kind: "all", builtIn: true } })).toBe("- a: d (Tools: *)");
+		expect(subagentResultText().catalogRow({ name: "a", description: "", tools: { kind: "all", builtIn: false } })).toBe("- a: (no description) (Tools: All tools)");
+		expect(subagentResultText().catalogRow({ name: "a", description: "d", tools: { kind: "allExcept", tools: ["Edit", "Write"] } })).toBe("- a: d (Tools: All tools except Edit, Write)");
+		expect(subagentResultText().catalogRow({ name: "a", description: "d", tools: { kind: "listed", tools: [] } })).toBe("- a: d (Tools: none)");
 	});
 
 	it("words the nested Agent tool's refusals", () => {
-		expect(subagents.refused({ kind: "nestedOptions", options: ["model"] })).toMatch(/^`model` is not available .* Call again without it\.$/);
-		expect(subagents.refused({ kind: "nestedOptions", options: ["model", "thinking"] })).toContain("are not available");
-		expect(subagents.refused({ kind: "nestedUnknownAgent", catalog: ["- a: d"] })).toBe("`subagent_type` is required. Available agents:\n- a: d");
-		expect(subagents.refused({ kind: "nestedNoBridge" })).toBe("Nested Agent call refused: no permission bridge is available to judge the delegation");
+		expect(subagentResultText().refused({ kind: "nestedOptions", options: ["model"] })).toMatch(/^`model` is not available .* Call again without it\.$/);
+		expect(subagentResultText().refused({ kind: "nestedOptions", options: ["model", "thinking"] })).toContain("are not available");
+		expect(subagentResultText().refused({ kind: "nestedUnknownAgent", catalog: ["- a: d"] })).toBe("`subagent_type` is required. Available agents:\n- a: d");
+		expect(subagentResultText().refused({ kind: "nestedNoBridge" })).toBe("Nested Agent call refused: no permission bridge is available to judge the delegation");
 		expect(subagents.nestedAgentDescription({ catalog: ["- a: d"] })).toContain('Available agents:\n- a: d\n(No "fork" here');
 	});
 
 	it("words a background launch, line by line", () => {
-		expect(subagents.launchLine({ kind: "running", name: "x-1", taskId: "t", logPath: "/l" })).toBe("⏳ x-1 (task t) running in background — interim output readable at /l");
-		expect(subagents.launchLine({ kind: "startFailed", name: "x-1", osMessage: "boom" })).toBe("✗ x-1: could not start: boom");
-		expect(subagents.launched({ lines: ["L"] })).toMatch(/^L\n\nCompletion \(with the agent's report\) will arrive/);
-		expect(subagents.sentToResident({ name: "x", taskId: "t" })).toContain("You know nothing about the agent's result");
+		expect(subagentResultText().launchLine({ kind: "running", name: "x-1", taskId: "t", logPath: "/l" })).toBe("⏳ x-1 (task t) running in background — interim output readable at /l");
+		expect(subagentResultText().launchLine({ kind: "startFailed", name: "x-1", osMessage: "boom" })).toBe("✗ x-1: could not start: boom");
+		expect(subagentResultText().launched({ lines: ["L"] })).toMatch(/^L\n\nCompletion \(with the agent's report\) will arrive/);
+		expect(subagentResultText().sentToResident({ name: "x", taskId: "t" })).toContain("You know nothing about the agent's result");
 	});
 
 	it("heads the agent catalog as Claude Code does and words each row", () => {
 		const words = requireText("subagents");
-		const row = words.catalogRow({ name: "editor", description: "Edits prose", tools: { kind: "all", builtIn: false } });
+		const row = subagentResultText().catalogRow({ name: "editor", description: "Edits prose", tools: { kind: "all", builtIn: false } });
 		expect(row.startsWith("- editor: Edits prose")).toBe(true);
-		expect(words.catalogBlock({ rows: [row] })).toMatch(/^Available agent types for the Agent tool:\n- editor: Edits prose/);
+		expect(subagentResultText().catalogBlock({ rows: [row] })).toMatch(/^Available agent types for the Agent tool:\n- editor: Edits prose/);
 	});
 
 	it("words a run cut short", () => {
-		expect(subagents.failure({ kind: "aborted", why: "wallClock", output: "half" })).toBe("half\n\n[terminated: turn hit the wall-clock cap]");
-		expect(subagents.failure({ kind: "aborted", why: "stopped", output: " " })).toBe("Subagent terminated before the turn finished.");
-		expect(subagents.failure({ kind: "providerError", error: "401", output: "" })).toContain("not a task failure): 401");
-		expect(subagents.stats({ toolCalls: 2 })).toBe("2 tools");
+		expect(subagentResultText().failure({ kind: "aborted", why: "wallClock", output: "half" })).toBe("half\n\n[terminated: turn hit the wall-clock cap]");
+		expect(subagentResultText().failure({ kind: "aborted", why: "stopped", output: " " })).toBe("Subagent terminated before the turn finished.");
+		expect(subagentResultText().failure({ kind: "providerError", error: "401", output: "" })).toContain("not a task failure): 401");
+		expect(subagentResultText().stats({ toolCalls: 2 })).toBe("2 tools");
 	});
 
 	it("says a subagent returned no output", () => {
-		expect(subagents.noOutput).toBe("(Subagent completed but returned no output.)");
+		expect(subagentResultText().noOutput).toBe("(Subagent completed but returned no output.)");
 	});
 
 	it("names the plan file's restriction only in plan mode", () => {
-		expect(subagents.parentMode({ mode: "plan" })).toContain("Only read-only tools run now");
-		expect(subagents.parentMode({ mode: "auto" })).toBe('The main session\'s permission mode is now "auto", and your tool calls are checked against it from here on.');
+		expect(subagentResultText().parentMode({ mode: "plan" })).toContain("Only read-only tools run now");
+		expect(subagentResultText().parentMode({ mode: "auto" })).toBe('The main session\'s permission mode is now "auto", and your tool calls are checked against it from here on.');
 	});
 
 	it("words the model notices a resolution leaves", () => {

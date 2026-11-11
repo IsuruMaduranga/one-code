@@ -24,6 +24,7 @@ import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { subagentModelWordsInForce } from "../../extensions/lib/models/subagent-model.ts";
 import { toolResultsText } from "../../extensions/lib/request/tool-results-text.ts";
 import { notificationWords } from "../../extensions/lib/notify/notification-words.ts";
+import { subagentResultText } from "../../extensions/lib/agents/subagent-text.ts";
 
 const model = (id: string, input: string[], cost: number) => ({
 	provider: "openai", id, name: id, input, cost: { input: cost, output: cost * 4 },
@@ -380,7 +381,7 @@ describe("subagent runtime build failure", () => {
 		expect(first.isError).toBe(true);
 		const words = requireText("subagents");
 		expect(first.content[0].text).toBe(
-			words.refused({ kind: "couldNotResume", name: "worker", problem: words.runtimeProblem({ kind: "failed", osMessage: "models.json: Unexpected token" }) }),
+			subagentResultText().refused({ kind: "couldNotResume", name: "worker", problem: subagentResultText().runtimeProblem({ kind: "failed", osMessage: "models.json: Unexpected token" }) }),
 		);
 		expect(await statusOf(h, "worker")).toBe("finished");
 		const second = (await h.call("SendMessage", { to: "worker", message: "Continue" })) as { isError?: boolean };
@@ -394,7 +395,7 @@ describe("subagent runtime build failure", () => {
 		const result = (await h.call("Agent", { subagent_type: "general-purpose", task: "Count the files" })) as { content: Array<{ text: string }>; isError?: boolean };
 		expect(result.isError).toBe(true);
 		const words = requireText("subagents");
-		expect(result.content[0].text).toBe(words.refused({ kind: "couldNotStart", problem: words.runtimeProblem({ kind: "failed", osMessage: "models.json: Unexpected token" }) }));
+		expect(result.content[0].text).toBe(subagentResultText().refused({ kind: "couldNotStart", problem: subagentResultText().runtimeProblem({ kind: "failed", osMessage: "models.json: Unexpected token" }) }));
 		expect(await statusOf(h, "general-purpose-1")).toBeUndefined();
 	});
 });
@@ -431,7 +432,7 @@ describe("subagent pending-claim backstop", () => {
 		await h.fake.fire("agent_start", {}, h.ctx);
 		const spawned = (await h.call("Agent", { subagent_type: "general-purpose", task: "Count the files" })) as { details: { agentRuns: AgentRunRecord[] } };
 		await h.fake.fire("agent_end", {}, h.ctx);
-		const pending = requireText("subagents").pendingClaim({ runs: [{ name: "general-purpose-1", taskId: spawned.details.agentRuns[0].taskId }] });
+		const pending = subagentResultText().pendingClaim({ runs: [{ name: "general-purpose-1", taskId: spawned.details.agentRuns[0].taskId }] });
 		expect(reminders).toEqual([pending]);
 
 		reminders.length = 0;
@@ -509,7 +510,7 @@ describe("subagent resumed turns", () => {
 		expect(settled).toBe(false); // waits for the turn, never detaches it
 		finish({ ...outcome(), output: "The follow-up answer", actions: risky });
 		const result = await pending;
-		expect(result.content[0].text).toContain(requireText("subagents").inlineReply({ name: "worker", note: oneShotNote("agentTurn") }));
+		expect(result.content[0].text).toContain(subagentResultText().inlineReply({ name: "worker", note: oneShotNote("agentTurn") }));
 		expect(result.content[0].text).toContain("The follow-up answer");
 		expect(result.content[0].text).not.toContain("task notification");
 		expect(result.isError).toBe(false);
@@ -577,11 +578,11 @@ describe("fork runs in a one-shot session", () => {
 		for (const option of [{ model: "gpt-5-flash-text" }, { thinking: "high" }, { isolation: "worktree" }]) {
 			const refused = await call(option);
 			expect(refused.isError).toBe(true);
-			expect(refused.content[0].text).toBe(words.refused({ kind: "nestedOptions", options: Object.keys(option) }));
+			expect(refused.content[0].text).toBe(subagentResultText().refused({ kind: "nestedOptions", options: Object.keys(option) }));
 		}
 		const forked = await call({ subagent_type: "fork" });
 		expect(forked.isError).toBe(true);
-		expect(forked.content[0].text).toBe(words.refused({ kind: "nestedFork" }));
+		expect(forked.content[0].text).toBe(subagentResultText().refused({ kind: "nestedFork" }));
 		expect(run).toHaveBeenCalledTimes(1);
 		const plain = await call({});
 		expect(plain.isError).toBe(false);
@@ -628,7 +629,7 @@ describe("fork runs in a one-shot session", () => {
 		const nested = (run.mock.calls[0][0] as { extraTools?: Array<{ name: string; execute: (...args: unknown[]) => Promise<Result> }> }).extraTools!.find((tool) => tool.name === "Agent")!;
 		const result = await nested.execute("nested", { subagent_type: "general-purpose", task: "Look", ...option }, undefined, undefined, h.ctx);
 		expect(result.isError).toBe(true);
-		expect(result.content[0].text).toBe(requireText("subagents").refused({ kind: "nestedOptions", options: Object.keys(option) }));
+		expect(result.content[0].text).toBe(subagentResultText().refused({ kind: "nestedOptions", options: Object.keys(option) }));
 	});
 });
 
