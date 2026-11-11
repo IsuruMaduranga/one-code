@@ -1,5 +1,5 @@
 /**
- * One Code's shell wording (profile/text/shell/) where the golden snapshot cannot
+ * The shell results' wording where the golden snapshot cannot
  * reach it: the sleep and polling-loop blocks (the permission gate stops
  * those calls first in a one-shot run), PowerShell's blocks, a background
  * start, a run ended by a signal or a timeout, and the marker for output cut
@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 import { shellResultText } from "../../extensions/lib/shell-run/shell-text.ts";
 
 
-describe("One Code's shell text", () => {
+describe("the shell text", () => {
 	it("words a standalone sleep and one with work after it", () => {
 		const block = { kind: "sleep" as const, shown: "sleep 5", sleepName: "sleep", untilExample: "until <check>; do sleep 2; done" };
 		expect(shellResultText().blocked(block)).toMatch(/^Blocked: standalone `sleep 5`\. A foreground sleep stalls the whole session/);

@@ -1,5 +1,5 @@
 /**
- * One Code's artifact wording (profile/text/artifacts/) for what the golden
+ * The artifact results' wording for what the golden
  * snapshot cannot reach: an opened browser, autoOpen off, a delete the user
  * answers, a long list, and the store's own failures, its size refusal and a
  * listed artifact's line. The golden snapshot pins the bytes of every other
@@ -11,7 +11,7 @@ import { artifactsResultText } from "../../extensions/tools/artifacts/text.ts";
 
 const page = { id: "report-a1b2c3", title: "Report", version: 1, created: true, url: "file:///s/view.html", file: "/s/index.html", galleryUrl: "file:///g.html" };
 
-describe("One Code's artifact text", () => {
+describe("the artifact text", () => {
 	it("words a publish whose browser opened, and one with autoOpen off", () => {
 		expect(artifactsResultText.published({ ...page, browser: { kind: "tried" } })).toBe(
 			'Published "Report" as the artifact report-a1b2c3.\nLink: file:///s/view.html\nFile: /s/index.html\nOpened it in the user\'s default browser.\nGallery of all artifacts: file:///g.html',

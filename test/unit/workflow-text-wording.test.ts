@@ -1,5 +1,5 @@
 /**
- * One Code's workflow wording (profile/text/workflow/) where the golden snapshot
+ * The workflow results' wording where the golden snapshot
  * cannot reach it: a background start, a stopped run's report with kept
  * worktrees, the stop reasons, and the script and call problems a one-shot
  * run does not hit. The golden snapshot pins the refusals, a determinism
@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import { workflowResultText } from "../../extensions/agents/workflow/text.ts";
 
 
-describe("One Code's workflow text", () => {
+describe("the workflow text", () => {
 	it("says a background run's result comes later and must not be predicted", () => {
 		const text = workflowResultText.started({ name: "review", resumed: true, runId: "wf_abc123", scriptPath: "/s/script.js" });
 		expect(text.startsWith("Workflow **review** resumed in the background.\nrunId: wf_abc123\nscript: /s/script.js\n")).toBe(true);
