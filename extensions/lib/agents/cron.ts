@@ -20,8 +20,7 @@ import { brandedId } from "../profile/brand.mjs";
 import { randomUUID } from "node:crypto";
 import { Type } from "typebox";
 import { sliceColumns, visibleWidth } from "../ui/text-width.ts";
-import type { CronCreateFailure, ShownJob } from "./cron-text.ts";
-import type { CronWords } from "./cron-text.ts";
+import type { CronCreateFailure, CronWords, ShownJob } from "./cron-text.ts";
 
 /** Claude Code's per-session job cap. */
 export const MAX_JOBS = 50;
@@ -514,7 +513,7 @@ function publicJob(job: CronJob & { fields?: CronFields }): CronJob {
 	return rest;
 }
 
-// ── What the texts read (the words are the profile's, text.ts CronText) ─────
+// ── What the texts read (the words: cron-text.ts) ─────
 
 /**
  * Claude Code's `CronList` clip of a prompt (its `truncate(text, 80, true)`):

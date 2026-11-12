@@ -2,9 +2,17 @@
  * The cron tools' results and refusals, for the main session's tools
  * (tools/background/) and a subagent's proxies (agent-cron.ts) alike. The
  * tools' own words (descriptions and parameters) are the profile's
- * (`CronText`, tools/background/text.ts).
+ * (`CronText`, in its `background` group).
  */
-import type { CronText } from "../../tools/background/text.ts";
+
+/** The cron tools, the main session's and a subagent's proxies alike (lib/agents/agent-cron.ts). */
+export interface CronText {
+	createDescription(p: { maxAgeDays: number }): string;
+	createParams(p: { maxAgeDays: number }): { cron: string; prompt: string; recurring: string; durable: string };
+	listDescription: string;
+	deleteDescription: string;
+	deleteIdParam: string;
+}
 
 /** Why cron_create scheduled nothing. */
 export type CronCreateFailure =

@@ -9,17 +9,8 @@
  * cadence reading (cron.ts describeCadence) and the list's 80-column prompt
  * clip (clipPrompt), which reach the words as values.
  */
-import { cronWords } from "../../lib/agents/cron-text.ts";
+import { type CronText, cronWords } from "../../lib/agents/cron-text.ts";
 import { memoOn } from "../../lib/core/text-spans.ts";
-
-/** The cron tools, the main session's and a subagent's proxies alike (lib/agents/agent-cron.ts). */
-export interface CronText {
-	createDescription(p: { maxAgeDays: number }): string;
-	createParams(p: { maxAgeDays: number }): { cron: string; prompt: string; recurring: string; durable: string };
-	listDescription: string;
-	deleteDescription: string;
-	deleteIdParam: string;
-}
 
 export type WakeupMissingField = "delayAndReason" | "prompt" | "noop";
 
