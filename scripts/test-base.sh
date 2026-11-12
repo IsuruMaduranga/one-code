@@ -12,14 +12,12 @@
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$repo/scripts/lib/checkout-copy.sh"
 work="$(mktemp -d "${TMPDIR:-/tmp}/base-suite.XXXXXX")"
 cleanup() { if [ "${KEEP:-}" = 1 ]; then echo "kept: $work"; else rm -rf "$work"; fi; }
 trap cleanup EXIT
 
-# A tracked file deleted in the working tree is left out, as a checkout of it would be.
-git -C "$repo" ls-files -z --cached --others --exclude-standard -- . ':!profile' |
-	while IFS= read -r -d '' file; do if [ -e "$repo/$file" ]; then printf '%s\0' "$file"; fi; done |
-	rsync -a --from0 --files-from=- "$repo/" "$work/"
+copy_checkout "$repo" "$work"
 ln -s "$repo/node_modules" "$work/node_modules"
 if [ -d "$repo/app/node_modules" ]; then ln -s "$repo/app/node_modules" "$work/app/node_modules"; fi
 cp -R "$repo/test/fixtures/profile" "$work/profile"

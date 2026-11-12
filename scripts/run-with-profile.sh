@@ -24,6 +24,7 @@ if [ $# -lt 1 ] || [ ! -f "$1/index.ts" ] || [ ! -f "$1/brand.json" ]; then
 fi
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$repo/scripts/lib/checkout-copy.sh"
 profile="$(cd "$1" && pwd)"
 shift
 start="$PWD"
@@ -34,10 +35,7 @@ mkdir -p "$work"
 # The copy is rebuilt on every run, so a file renamed or deleted in the repo does not linger in it; the session state stays.
 find "$work" -mindepth 1 -maxdepth 1 ! -name .agent ! -name node_modules -exec rm -rf {} +
 
-# A tracked file deleted in the working tree is left out, as a checkout of it would be.
-git -C "$repo" ls-files -z --cached --others --exclude-standard -- . ':!profile' |
-	while IFS= read -r -d '' file; do if [ -e "$repo/$file" ]; then printf '%s\0' "$file"; fi; done |
-	rsync -a --from0 --files-from=- "$repo/" "$work/"
+copy_checkout "$repo" "$work"
 [ -e "$work/node_modules" ] || ln -s "$repo/node_modules" "$work/node_modules"
 rsync -a --delete "$profile/" "$work/profile/"
 
