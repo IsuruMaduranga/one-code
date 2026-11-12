@@ -139,7 +139,7 @@ describe("the instruction files a user writes", () => {
 
 	it("are AGENTS.md and the global ONECODE.md in independent mode", () => {
 		resetConfigModeForTest("independent");
-		expect(instructionTargets(home)).toEqual({ project: "AGENTS.md", user: join(home, ".onecode", "ONECODE.md") });
+		expect(instructionTargets(home)).toEqual({ project: "AGENTS.md", user: join(home, ".onecode", "ONECODE.md"), importers: "AGENTS.md or ONECODE.md" });
 		expect(instructionFileNames(home)).toEqual(["AGENTS.md", "ONECODE.md"]);
 	});
 

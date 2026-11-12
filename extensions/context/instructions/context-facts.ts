@@ -6,7 +6,7 @@
  * status, and says what changed once. The historical blocks stay as sent.
  */
 import { buildClaudeMdBlock } from "./instructions.ts";
-import type { ContextFile } from "../../lib/context/instructions.ts";
+import { type ContextFile, instructionTargets } from "../../lib/context/instructions.ts";
 import type { ToldFact } from "../../lib/request/ledger/records.ts";
 import { contentHash } from "../../lib/request/ledger/wire.ts";
 import { toldBlockFact } from "../../lib/request/reminders.ts";
@@ -97,7 +97,7 @@ export function resumeFactsNotice(
 	compare(FACT_KEYS.instructions, live.instructions, "instructions");
 	if (changed.length === 0) return undefined;
 	return {
-		text: contextWords().changedSinceSnapshot({ changes: changed, atCompaction }),
+		text: contextWords().changedSinceSnapshot({ changes: changed, atCompaction, file: instructionTargets().project }),
 		facts,
 	};
 }

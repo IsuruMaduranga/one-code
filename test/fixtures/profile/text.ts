@@ -383,7 +383,6 @@ export const notifications: NonNullable<ProfileText["notifications"]> = {
 export const context: NonNullable<ProfileText["context"]> = {
 	productPreamble: (p) => mark("context.productPreamble", p),
 	descriptors: { product: "[context.descriptors.product]", productGlobal: "[context.descriptors.productGlobal]" },
-	instructionsChanged: "[context.instructionsChanged]",
 };
 
 export const toolSearch: NonNullable<ProfileText["toolSearch"]> = {

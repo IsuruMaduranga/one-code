@@ -13,9 +13,10 @@ import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi, renderRequest } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { contextWords } from "../../extensions/lib/context/context-words.ts";
+import { instructionTargets } from "../../extensions/lib/context/instructions.ts";
 
 /** The profile's notice for what changed since the saved context snapshot. */
-const changedNotice = (changes: Array<"git" | "memory" | "instructions">, atCompaction = false) => contextWords().changedSinceSnapshot({ changes, atCompaction });
+const changedNotice = (changes: Array<"git" | "memory" | "instructions">, atCompaction = false) => contextWords().changedSinceSnapshot({ changes, atCompaction, file: instructionTargets().project });
 
 describe("context fact comparisons", () => {
 	const files: Parameters<typeof contextFingerprints>[0] = { contextFiles: [{ path: "/CLAUDE.md", content: "rules", descriptor: "rules" }] as never, memoryIndex: { path: "/MEMORY.md", content: "memory" } };

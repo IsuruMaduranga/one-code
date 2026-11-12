@@ -33,8 +33,6 @@ export interface ContextText {
 	productPreamble(p: { above: string }): string;
 	/** A section's descriptor for the product's own instruction file, in a project and in the user's state folder. */
 	descriptors: { product: string; productGlobal: string };
-	/** In the changed-since-snapshot notice: the instruction files changed ("CLAUDE.md-family instructions changed"). */
-	instructionsChanged: string;
 }
 
 /** The words, as `contextText` builds them. */
@@ -139,9 +137,9 @@ export const contextText = (product: ContextText) => ({
 		].join("\n"),
 	/** Closes a git status cut at `maxChars`; `shellTool` is the session's shell tool. */
 	gitStatusClipped: ({ shellTool }: { maxChars: number; shellTool: string }): string => `\n... (truncated because it exceeds 2k characters. If you need more information, run "git status" using ${shellTool})`,
-	/** The workspace changed since the context block was told. */
-	changedSinceSnapshot: ({ changes, atCompaction }: { changes: ContextChange[]; atCompaction: boolean }): string =>
-		`Since the saved context snapshot, ${changes.map((change) => (change === "instructions" ? product.instructionsChanged : CHANGES[change])).join("; ")}. The earlier context block reflects ${atCompaction ? "the latest compaction" : "the session's start"}, not the current workspace. Read the current files or run git status if needed.`,
+	/** The workspace changed since the context block was told; `file` is the project instruction file's name (`instructionTargets().project`). */
+	changedSinceSnapshot: ({ changes, atCompaction, file }: { changes: ContextChange[]; atCompaction: boolean; file: string }): string =>
+		`Since the saved context snapshot, ${changes.map((change) => (change === "instructions" ? `${file}-family instructions changed` : CHANGES[change])).join("; ")}. The earlier context block reflects ${atCompaction ? "the latest compaction" : "the session's start"}, not the current workspace. Read the current files or run git status if needed.`,
 	/** In a skipped instruction file's slot; `imported` names the files inlined into it. */
 	skippedInstruction: ({ tokens, contextWindow, imported }: { tokens: number; contextWindow: number; imported: readonly string[] }): string => {
 		const what = imported.length > 0 ? `This file and the files it imports (${imported.join(", ")}) are not loaded: together they are` : "This file is not loaded: it is";

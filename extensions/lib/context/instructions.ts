@@ -563,7 +563,8 @@ export function openInstructions(home: string, agentDir: string | undefined): In
 export function instructionTargets(home: string = os.homedir(), stateDir: string = productStateDir(process.env, home)): InstructionTargets {
 	const provided = openSources(home).instructionTargets;
 	if (provided) return provided;
-	return { project: "AGENTS.md", user: firstProductFile(stateDir) ?? join(stateDir, brand.productFile) };
+	// Both of the base's project files can import (`BASE_VIEW.externalIncludes` scans the two).
+	return { project: "AGENTS.md", user: firstProductFile(stateDir) ?? join(stateDir, brand.productFile), importers: `AGENTS.md or ${brand.productFile}` };
 }
 
 /** The names of the instruction files a user writes: `CLAUDE.md`, or `AGENTS.md` and the product file's. */

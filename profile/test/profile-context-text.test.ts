@@ -33,7 +33,7 @@ describe("One Code's context text", () => {
 	it("names what changed since the saved snapshot", () => {
 		const notice = resumeFactsNotice(new Map([["git", "a"]]), true, { git: "b" } as never);
 		if (notice) expect(notice.text).toMatch(/^Since the saved context snapshot, git status changed\. The earlier context block reflects the latest compaction/);
-		expect(context.changedSinceSnapshot({ changes: ["memory", "instructions"], atCompaction: false })).toContain(
+		expect(context.changedSinceSnapshot({ changes: ["memory", "instructions"], atCompaction: false, file: "CLAUDE.md" })).toContain(
 			"the memory index changed; CLAUDE.md-family instructions changed. The earlier context block reflects the session's start",
 		);
 	});
@@ -68,13 +68,13 @@ describe("git snapshot wording", () => {
 describe("context change notice wording", () => {
 	it("names each changed category and what the earlier block reflects", () => {
 		const { changedSinceSnapshot } = contextWords();
-		expect(changedSinceSnapshot({ changes: ["memory"], atCompaction: false })).toBe(
+		expect(changedSinceSnapshot({ changes: ["memory"], atCompaction: false, file: "CLAUDE.md" })).toBe(
 			"Since the saved context snapshot, the memory index changed. The earlier context block reflects the session's start, not the current workspace. Read the current files or run git status if needed.",
 		);
-		expect(changedSinceSnapshot({ changes: ["git", "memory", "instructions"], atCompaction: false })).toContain(
+		expect(changedSinceSnapshot({ changes: ["git", "memory", "instructions"], atCompaction: false, file: "CLAUDE.md" })).toContain(
 			"git status changed; the memory index changed; CLAUDE.md-family instructions changed",
 		);
-		expect(changedSinceSnapshot({ changes: ["git"], atCompaction: true })).toContain("reflects the latest compaction");
+		expect(changedSinceSnapshot({ changes: ["git"], atCompaction: true, file: "CLAUDE.md" })).toContain("reflects the latest compaction");
 	});
 });
 
