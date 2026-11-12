@@ -76,8 +76,9 @@ Start with `package.json` (the `pi.extensions` list) and `app/bin.mjs`.
 
 Each folder under `extensions/` is one pi extension with a thin `index.ts`
 that wires pi events to pure logic modules beside it. Shared logic lives in
-`extensions/lib/`. `extensions/auto-mode/` is the one folder that is not an
-extension: it is the auto-mode classifier library that `permissions` calls.
+`extensions/lib/`. `extensions/safety/permissions/auto-mode/` is not an
+extension of its own: it is the auto-mode classifier library that
+`permissions` calls.
 
 ```mermaid
 flowchart LR
@@ -92,7 +93,7 @@ flowchart LR
         s1["permissions<br/>+ auto-mode library"]
         s2["hooks"]
         s3["file-tracker<br/>worktree"]
-        s4["tool-call-corruption"]
+        s4["tool-call-corruption<br/>secret-values"]
     end
 
     subgraph eco["Ecosystem"]
@@ -117,18 +118,18 @@ flowchart LR
         u1["branding · tool-style<br/>footer · spinner"]
         u2["turn-duration · interrupted<br/>send-now · session-title"]
         u3["recap · btw · effort<br/>model-default · newer-model"]
-        u4["doctor<br/>exit · init · clear"]
+        u4["doctor · run-status<br/>exit · init · clear"]
     end
 ```
 
 | Role | What the group does |
 |---|---|
 | Prompt and context | Builds the system prompt per model tier, loads project instructions and memory into the first message, steers the model through `<system-reminder>` blocks, defers rarely used tools behind `tool_search`, and compacts long sessions. |
-| Safety | Decides whether each tool call runs (rules, modes, the auto-mode classifier), runs user hooks, guards against stale edits, confines work to a Git worktree, and stops calls from damaged provider streams. |
+| Safety | Decides whether each tool call runs (rules, modes, the auto-mode classifier), runs user hooks, guards against stale edits, confines work to a Git worktree, stops calls from damaged provider streams, and redacts a product's secret values from tool results. |
 | Tools | The tools the model calls, beyond pi's built-in `read`, `edit` and `write`. |
 | Agents | Background subagents with two-way messaging, and JavaScript workflow scripts that fan work out across many agents. |
 | Ecosystem | Discovers Claude Code skills, commands, agents and plugins, and connects MCP servers. |
-| Terminal UI and commands | Everything the user sees around the conversation, plus small slash commands. |
+| Terminal UI and commands | Everything the user sees around the conversation, plus small slash commands. `run-status` makes a failed one-shot run exit non-zero. |
 
 The architecture rules that keep these extensions working together are in
 [Extension rules](extension-rules.md).

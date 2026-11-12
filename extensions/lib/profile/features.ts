@@ -18,7 +18,7 @@
 export interface FeatureSpec {
 	/** Entry files, relative to `extensions/`. */
 	entries: readonly string[];
-	/** Part of the safety core or the request pipeline; never off. */
+	/** Part of the core every session needs (the safety gates, the request pipeline, a run's exit status); never off. */
 	required?: true;
 	/** Guards tool calls: only a profile, never the environment, turns it off. */
 	guard?: true;
@@ -180,7 +180,7 @@ export function featureProblems(features: Partial<Record<string, boolean>>): str
 		.filter((id) => !isFeatureId(id))
 		.map((id) => `unknown feature "${id}"`);
 	for (const id of FEATURE_IDS) {
-		if ("required" in FEATURES[id] && features[id] === false) problems.push(`"${id}" is part of the safety core or the request pipeline and cannot be turned off`);
+		if ("required" in FEATURES[id] && features[id] === false) problems.push(`"${id}" is part of the required core and cannot be turned off`);
 	}
 	return problems;
 }

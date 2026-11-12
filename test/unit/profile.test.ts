@@ -141,7 +141,7 @@ describe("resolveProfile", () => {
 	it("merges ONECODE_FEATURES_OFF and reports every problem at once", () => {
 		expect(resolveProfile(empty, { [envName("FEATURES_OFF")]: "mcp" }, "/p").features.has("mcp")).toBe(false);
 		expect(() => resolveProfile({ ...empty, tools: { tool_search: { enabled: false } } }, { [envName("FEATURES_OFF")]: "ledger,nope" }, "/p")).toThrow(
-			/unknown feature "nope".*"ledger" is part of the safety core.*"tool_search" cannot be turned off/,
+			/unknown feature "nope".*"ledger" is part of the required core.*"tool_search" cannot be turned off/,
 		);
 	});
 

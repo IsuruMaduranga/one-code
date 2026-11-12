@@ -66,7 +66,7 @@ describe("feature maps", () => {
 	it("reports a required feature turned off and an unknown name", () => {
 		expect(featureProblems({ permissions: false, plugin: false })).toEqual([
 			'unknown feature "plugin"',
-			'"permissions" is part of the safety core or the request pipeline and cannot be turned off',
+			'"permissions" is part of the required core and cannot be turned off',
 		]);
 		expect(featureProblems({ plugins: false })).toEqual([]);
 	});
