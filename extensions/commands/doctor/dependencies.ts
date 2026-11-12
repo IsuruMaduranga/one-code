@@ -22,7 +22,7 @@ import { getProviderKind } from "pi-web-search/src/api.ts";
 import { installHint, serverInstallHint } from "../../tools/lsp/install-hints.ts";
 import { languageIdForPath, SERVERS } from "../../tools/lsp/servers.ts";
 import { typescriptPreflight } from "../../tools/lsp/servers.ts";
-import { profileText } from "../../lib/profile/profile.ts";
+import { featureEnabled } from "../../lib/profile/profile.ts";
 import type { McpServer } from "../../tools/mcp/config.ts";
 import { BRAVE_KEY_ENV, resolveChain, TAVILY_KEY_ENV, type WebSearchSettings } from "../../tools/web/backends.ts";
 import type { Finding, ReportLine, ReportSection } from "./report.ts";
@@ -204,10 +204,9 @@ export function checkDependencies(input: DependencyInput): DependencyReport {
 			});
 		}
 		if (needed && found && config.command === "typescript-language-server") {
-			// Worded by the language-server text, which is there whenever that feature is on.
-			const preflight = typescriptPreflight(cwd);
-			const words = profileText().lsp;
-			if (preflight && words) findings.push({ level: "warn", text: lspResultText.failure(preflight) });
+			// The feature's own check: only a session that has the language-server tool runs into it.
+			const preflight = featureEnabled("lsp") ? typescriptPreflight(cwd) : undefined;
+			if (preflight) findings.push({ level: "warn", text: lspResultText.failure(preflight) });
 		}
 	}
 
