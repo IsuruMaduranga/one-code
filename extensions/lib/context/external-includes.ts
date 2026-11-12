@@ -66,7 +66,7 @@ export function persistExternalIncludesApproval(cwd: string, home: string, appro
 }
 
 /** The dialog text; pi's plain select carries the body in its multiline title, including over RPC. */
-export function externalIncludesDialog(paths: string[], home: string, file: string, importers: string = file): string {
+export function externalIncludesDialog(paths: string[], home: string, file: string, importers: string): string {
 	const shown = paths.length <= 8 ? paths : paths.slice(0, 6);
 	const hidden = paths.length - shown.length;
 	const preview = shown.map((path) => `  ${escapeControlText(tildify(path, home))}`);

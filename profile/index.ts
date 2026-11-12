@@ -14,7 +14,7 @@
 import type { Profile } from "../extensions/sdk/profile.ts";
 import { artifactsText } from "./text/artifacts/index.ts";
 import { askUserText } from "./text/ask-user/index.ts";
-import { permissionsText } from "./text/auto-mode/index.ts";
+import { permissionsText } from "./text/permissions/index.ts";
 import { classifier } from "./text/auto-mode/classifier.ts";
 import { autoModeSetup } from "./text/auto-mode/setup.ts";
 import { background } from "./text/background/index.ts";

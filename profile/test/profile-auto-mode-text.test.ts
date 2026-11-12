@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
-import { permissionsText } from "../text/auto-mode/index.ts";
+import { permissionsText } from "../text/permissions/index.ts";
 import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
 import { autoModeResultText } from "../../extensions/safety/permissions/auto-mode/text.ts";
 

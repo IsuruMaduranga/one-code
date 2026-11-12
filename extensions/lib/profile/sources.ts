@@ -129,10 +129,9 @@ export interface InstructionTargets {
 	user: string;
 	/**
 	 * How the project files whose imports need the user's consent are named
-	 * in that dialog, when it is more than `project`: "CLAUDE.md or
-	 * .claude/rules".
+	 * in that dialog: "CLAUDE.md or .claude/rules".
 	 */
-	importers?: string;
+	importers: string;
 }
 
 /**

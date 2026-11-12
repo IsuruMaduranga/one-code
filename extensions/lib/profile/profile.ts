@@ -128,9 +128,36 @@ export const TEXT_GROUP_READERS: Readonly<Record<OptionalGroup, readonly Feature
 	subagentModels: ["subagents", "workflow", "doctor"],
 };
 
-/** The optional groups `text` lacks although a feature that reads them is on, one sentence each. */
+/** The text groups every profile supplies: the contract's required members. */
+const REQUIRED_GROUPS: Readonly<Record<Exclude<keyof ProfileText, OptionalGroup>, true>> = {
+	systemPrompt: true,
+	permissions: true,
+	classifier: true,
+	autoModeSetup: true,
+	notifications: true,
+	context: true,
+	toolSearch: true,
+};
+
+/** The fields a profile may set; a misspelled or retired one would otherwise be ignored in silence. */
+const PROFILE_FIELDS: Readonly<Record<keyof Profile, true>> = {
+	features: true,
+	tools: true,
+	childExtensions: true,
+	text: true,
+	providers: true,
+	secretFiles: true,
+	readOnlyCommands: true,
+	languageServers: true,
+	sources: true,
+	globalAgentsFiles: true,
+};
+
+/** The groups `text` lacks: a required one, or an optional one a feature that is on reads; one sentence each. */
 function missingTextProblems(text: ProfileText, features: ReadonlySet<FeatureId>): string[] {
-	const problems: string[] = [];
+	const problems: string[] = Object.keys(REQUIRED_GROUPS)
+		.filter((group) => text[group as keyof ProfileText] === undefined)
+		.map((group) => `it has no text for "${group}", which every profile supplies`);
 	for (const [group, readers] of Object.entries(TEXT_GROUP_READERS) as Array<[OptionalGroup, readonly FeatureId[]]>) {
 		if (text[group] !== undefined) continue;
 		const on = readers.filter((id) => features.has(id));
@@ -208,6 +235,7 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 	const problems = featureProblems(featureMap);
 	for (const id of envOff.filter(isGuardFeature)) problems.push(`${envName("FEATURES_OFF")} cannot turn off "${id}": it guards tool calls (only a profile can)`);
 	const envTools = envList(env, envName("TOOLS_OFF"));
+	for (const field of Object.keys(profile)) if (!(field in PROFILE_FIELDS)) problems.push(`unknown profile field "${field}"`);
 	problems.push(...misspelledTools(Object.keys(profile.tools)));
 	// The user's own list: name the variable, since the fix is theirs to make.
 	problems.push(...misspelledTools(envTools).map((problem) => `${envName("TOOLS_OFF")}: ${problem}`));
@@ -234,7 +262,7 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 	const text = profile.text({ live });
 	const textProblems = missingTextProblems(text, features);
 	// An empty refusal would reach the model as an error with no reason.
-	if (text.permissions.secretFileRefusal?.trim() === "") textProblems.push(`its text "permissions.secretFileRefusal" must not be empty: leave it out for the base's own wording`);
+	if (text.permissions?.secretFileRefusal?.trim() === "") textProblems.push(`its text "permissions.secretFileRefusal" must not be empty: leave it out for the base's own wording`);
 	if (textProblems.length > 0) throw new Error(`Invalid profile: ${textProblems.join("; ")}.`);
 	return {
 		features,

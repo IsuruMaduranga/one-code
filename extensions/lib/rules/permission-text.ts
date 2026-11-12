@@ -10,6 +10,7 @@
  */
 
 import { type LiveTools, type ToolPassages, withoutOff } from "../profile/live-tools.ts";
+import { memoOn } from "../core/text-spans.ts";
 import { forLive } from "../profile/live-words.ts";
 import { requireText } from "../profile/profile.ts";
 
@@ -199,8 +200,10 @@ export const permissionWords = (live: LiveTools, secretFileRefusal?: string) => 
 	reviewFailed: ({ osMessage }: { osMessage: string }): string => `the review itself failed (${osMessage})`,
 });
 
-/** The words for this session's tools (the profile in force), built once per live set. */
-export const permissionText = forLive((live) => permissionWords(live, requireText("permissions").secretFileRefusal));
+const wordsFor = forLive((live) => memoOn((group: PermissionsText) => permissionWords(live, group.secretFileRefusal)));
+
+/** The words for this session's tools and the profile's part (the profile in force), built once per pair. */
+export const permissionText = () => wordsFor()(requireText("permissions"));
 
 /** Why the gate refused a call, in this session's words. */
 export const refusalText = (refusal: PermissionRefusal): string => permissionText().refused(refusal);

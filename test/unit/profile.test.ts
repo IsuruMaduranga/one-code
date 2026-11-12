@@ -88,6 +88,12 @@ describe("resolveProfile", () => {
 		expect(resolveProfile({ ...empty, features: off, text: without("subagentModels", "handback", "notebook", "worktree", "subagents", "workflow", "doctor") }, {}, "/p").text.notebook).toBeUndefined();
 	});
 
+	it("refuses a field it does not know and a text without a required group, by name", () => {
+		expect(() => resolveProfile({ ...empty, secretFileRefusal: "Ask the user." } as Profile, {}, "/p")).toThrow(/unknown profile field "secretFileRefusal"/);
+		const without = (group: string): Profile["text"] => (env) => Object.fromEntries(Object.entries(shippedProfile.text(env)).filter(([name]) => name !== group)) as ReturnType<Profile["text"]>;
+		expect(() => resolveProfile({ ...empty, text: without("permissions") }, {}, "/p")).toThrow(/Invalid profile: it has no text for "permissions", which every profile supplies/);
+	});
+
 	it("refuses an empty secret-file refusal", () => {
 		const refusing = (secretFileRefusal: string): Profile["text"] => (env) => {
 			const text = shippedProfile.text(env);
