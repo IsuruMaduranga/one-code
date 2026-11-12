@@ -977,7 +977,9 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 			clearInterval(poll);
 			rmSync(dir, { recursive: true, force: true });
 		}
-		expect(ranToEnd.mock.calls[0][0]).toMatchObject({ end: { kind: "aborted" }, events: 0, output: "failed early\ntorn down" });
+		// Windows ends the process tree without a signal, so the trap never runs there.
+		const output = process.platform === "win32" ? "failed early" : "failed early\ntorn down";
+		expect(ranToEnd.mock.calls[0][0]).toMatchObject({ end: { kind: "aborted" }, events: 0, output });
 	});
 
 	it("withoutJobReport removes only bash's job report lines", () => {

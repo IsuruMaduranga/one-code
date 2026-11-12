@@ -105,7 +105,7 @@ echo "PASS: onecode doctor ran under the bundled app."
 
 # Scratch git project as cwd, and a throwaway HOME so nothing touches real state.
 mkdir -p "$S/proj"
-(cd "$S/proj" && git init -q && printf '# Smoke project\n' > CLAUDE.md && git add . && git commit -qm init)
+(cd "$S/proj" && git init -q && printf '# Smoke project\n' > CLAUDE.md && git add . && git -c user.name=smoke -c user.email=smoke@example.invalid commit -qm init)
 
 echo "smoke: launching onecode -p (no credentials expected)"
 OUT="$S/out.txt"
