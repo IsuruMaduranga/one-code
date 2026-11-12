@@ -130,11 +130,10 @@ function isStopContinuation(event: unknown): boolean {
 }
 
 function hooksExtension(pi: ExtensionAPI) {
-	const text = hooksText;
-	const contextText = (event: CcHookEvent, added: string) => text.additionalContext({ event, text: added });
+	const contextText = (event: CcHookEvent, added: string) => hooksText.additionalContext({ event, text: added });
 	/** A PostToolUse hook's added context and the notice of a file it changed, as one appended block. */
 	const postToolUseContext = (added: string | undefined, changedPath: string | undefined) =>
-		[added && wrapReminder(contextText("PostToolUse", added)), changedPath && wrapReminder(text.fileChangedByHook({ path: changedPath }))]
+		[added && wrapReminder(contextText("PostToolUse", added)), changedPath && wrapReminder(hooksText.fileChangedByHook({ path: changedPath }))]
 			.filter(Boolean)
 			.join("\n") || undefined;
 	const workCwd = followWorkCwd(pi.events);
@@ -214,7 +213,7 @@ function hooksExtension(pi: ExtensionAPI) {
 	});
 
 	/** A single outcome with its block reason worded (a cancel before or after the hooks ran). */
-	const worded = ({ block, ...rest }: HookOutcome): MergedHookOutcome => (block ? { ...rest, block: { reason: text.blockReason(block) } } : rest);
+	const worded = ({ block, ...rest }: HookOutcome): MergedHookOutcome => (block ? { ...rest, block: { reason: hooksText.blockReason(block) } } : rest);
 
 	/**
 	 * Run every matched hook in parallel (CC runs matching hooks concurrently)
@@ -261,7 +260,7 @@ function hooksExtension(pi: ExtensionAPI) {
 						scope: source.pluginName ? `plugin:${source.pluginName}` : source.scope,
 						command: hook.command,
 						decision: decision as "allow" | "block" | "context" | "error",
-						reason: outcome.block && text.blockReason(outcome.block),
+						reason: outcome.block && hooksText.blockReason(outcome.block),
 						exitCode: run.exitCode,
 						durationMs: run.durationMs,
 					};
@@ -286,7 +285,7 @@ function hooksExtension(pi: ExtensionAPI) {
 				// Stop follow-up), so it is bounded like the other hook texts —
 				// stderr on an exit-2 hook is easily a full stack trace (review M2).
 				if (!merged.block && outcome.block) {
-					merged.block = { reason: capHookText(text.blockReason(outcome.block), ctx, `${event}-block`) };
+					merged.block = { reason: capHookText(hooksText.blockReason(outcome.block), ctx, `${event}-block`) };
 				}
 				if (outcome.updatedInput) merged.updatedInput = { ...merged.updatedInput, ...outcome.updatedInput };
 				if ("updatedToolResult" in outcome) {
@@ -325,7 +324,7 @@ function hooksExtension(pi: ExtensionAPI) {
 			tool_input: ccToolInput(event.toolName, event.input as Record<string, unknown>),
 		};
 		const outcome = await dispatch(ctx, "PreToolUse", { candidates: toolMatchCandidates(event.toolName) }, payload);
-		if (outcome.block) return { block: true, reason: text.preToolUseBlocked(outcome.block) };
+		if (outcome.block) return { block: true, reason: hooksText.preToolUseBlocked(outcome.block) };
 		if (outcome.updatedInput) {
 			// In-place, so worktree/file-tracker/permissions (later in the
 			// extension order) all see the rewritten input — CC applies hook
@@ -360,7 +359,7 @@ function hooksExtension(pi: ExtensionAPI) {
 		// CC feeds PostToolUse block reasons back to the model in the result the
 		// same way; the assembly rules live in applyPostToolUseOutcome.
 		const content = applyPostToolUseOutcome(event.content, {
-			objection: outcome.block && text.postToolUseBlocked(outcome.block),
+			objection: outcome.block && hooksText.postToolUseBlocked(outcome.block),
 			updatedToolResult: outcome.updatedToolResult,
 			additionalContext: postToolUseContext(outcome.additionalContext, changed),
 		}, event.toolName);
@@ -539,7 +538,7 @@ function hooksExtension(pi: ExtensionAPI) {
 			if (!ctx) return {};
 			const outcome = await dispatch(ctx, "PreToolUse", { candidates: toolMatchCandidates(call.toolName) }, childPayload(call, "PreToolUse"));
 			return {
-				refusal: outcome.block && text.preToolUseBlocked(outcome.block),
+				refusal: outcome.block && hooksText.preToolUseBlocked(outcome.block),
 				updatedInput: outcome.updatedInput ? nativeToolInput(call.toolName, outcome.updatedInput) : undefined,
 				additionalContext: outcome.additionalContext ? contextText("PreToolUse", outcome.additionalContext) : undefined,
 			};
@@ -561,7 +560,7 @@ function hooksExtension(pi: ExtensionAPI) {
 			});
 			const changed = target && before && changedSince(target, before) ? target : undefined;
 			return {
-				objection: outcome.block && text.postToolUseBlocked(outcome.block),
+				objection: outcome.block && hooksText.postToolUseBlocked(outcome.block),
 				updatedToolResult: outcome.updatedToolResult,
 				additionalContext: postToolUseContext(outcome.additionalContext, changed),
 			};
@@ -649,7 +648,7 @@ function hooksExtension(pi: ExtensionAPI) {
 			pi.sendMessage(
 				{
 					customType: STOP_CONTINUATION_TYPE,
-					content: text.stopBlocked(outcome.block),
+					content: hooksText.stopBlocked(outcome.block),
 					display: false,
 				},
 				{ deliverAs: "followUp", triggerTurn: true },

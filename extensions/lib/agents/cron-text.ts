@@ -56,7 +56,7 @@ function createFailed(failure: CronCreateFailure): string {
 }
 
 /** The base's words of the group. */
-export const cronResultText: CronResultText = {
+const cronResultText: CronResultText = {
 	created: ({ job, maxAgeDays }) =>
 		job.recurring
 			? `Scheduled recurring job ${job.id} (${job.cadence}). ${SESSION_ONLY}. Auto-expires after ${maxAgeDays} days. Use cron_delete to cancel sooner.`

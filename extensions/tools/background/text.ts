@@ -127,7 +127,7 @@ const MISSING: Record<WakeupMissingField, string> = {
 };
 
 /** The base's words of the group. */
-export const wakeupResultText: WakeupResultText = {
+const wakeupResultText: WakeupResultText = {
 	scheduled: ({ clock, inSeconds, clampedTo }) => {
 		const clamped = clampedTo !== undefined ? ` (clamped to ${clampedTo}s from your requested value)` : "";
 		return `Next wakeup scheduled for ${clock} (in ${inSeconds}s)${clamped}. Nothing more to do this turn — the harness re-invokes you when the wakeup fires or a task-notification arrives.`;
@@ -187,7 +187,7 @@ function how(end: MonitorEnd): string {
 }
 
 /** The base's words of the group. */
-export const monitorResultText: MonitorResultText = {
+const monitorResultText: MonitorResultText = {
 	startFailed,
 	started: ({ id, description }) =>
 		`Monitor ${id} started (${description}). Events arrive as task notifications; stop with task_stop, inspect with task_output.`,
@@ -214,7 +214,7 @@ export interface TaskToolsResultText {
 }
 
 /** The base's words of the group. */
-export const taskToolsResultText: TaskToolsResultText = {
+const taskToolsResultText: TaskToolsResultText = {
 	unknownTask: ({ id, known }) => `No background task "${id}". Known tasks: ${known.join(", ") || "(none)"}`,
 	taskLine: (task: ShownTask) =>
 		`${task.id} [${task.kind}] ${task.status} · ${task.description} · started ${task.finished ? `${task.seconds}s` : `${task.seconds}s ago`}`,

@@ -10,7 +10,7 @@ import type { CheckoutProgram } from "../../lib/shell/git-checkout-programs.ts";
 import { checkoutProgram } from "../../lib/rules/worktree-guard-text.ts";
 
 /** The worktree session as the result and reminder texts name it. */
-export interface WorktreeSessionView {
+interface WorktreeSessionView {
 	path: string;
 	branch?: string;
 	originalCwd: string;

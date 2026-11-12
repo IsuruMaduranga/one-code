@@ -12,7 +12,7 @@ export type ArgumentDamage =
 	| { kind: "cutAfterOption"; option: string }
 	| { kind: "unbalancedQuote" };
 
-export interface ToolCallCorruptionText {
+interface ToolCallCorruptionText {
 	damage(damage: ArgumentDamage): string;
 	/** A suspect call, returned once so the model can resend it; `reason` is the damage worded. */
 	suspectBlock(p: { reason: string }): string;

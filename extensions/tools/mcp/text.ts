@@ -51,7 +51,7 @@ export type ImageProblem =
 	| { kind: "webp"; defect: "truncated" | "shorterThanRiff" | "noImage" | "chunkPastData" };
 
 /** One server's instructions as shown (already cut to the cap). */
-export interface ServerInstructions {
+interface ServerInstructions {
 	name: string;
 	text: string;
 }

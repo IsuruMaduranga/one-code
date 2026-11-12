@@ -7,12 +7,12 @@
  */
 
 /** The index's load limits, as the base enforces them. */
-export interface IndexLimits {
+interface IndexLimits {
 	maxLines: number;
 	maxChars: number;
 }
 
-export interface MemoryText {
+interface MemoryText {
 	/** The reminder after a write leaves MEMORY.md within 10% of a limit. */
 	indexNearLimit(limits: IndexLimits): string;
 	/** Added to the result (marked an error) of a write that left MEMORY.md past a limit; the write itself succeeded. */

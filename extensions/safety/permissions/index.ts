@@ -148,14 +148,12 @@ import { builtinRuleCounts } from "./auto-mode/rules.ts";
 import { autoModeSystemNote } from "./auto-mode/system-note.ts";
 import { announceArgumentHint } from "../../lib/ui/argument-hints.ts";
 import { userDenialText } from "../../lib/consent/user-denial.ts";
-import { type PermissionRefusal, permissionText } from "../../lib/rules/permission-text.ts";
+import { permissionText, refusalText } from "../../lib/rules/permission-text.ts";
 import { liveUiCtx } from "../../lib/ui/tui-render.ts";
 
 /** Shown when a permission prompt is held behind an open panel (serializePrompt). */
 const PROMPT_WAITS_FOR_PANEL = "A permission request is waiting. Close this panel to answer it.";
 
-/** Why the gate refused a call, in the profile's words (text.ts). */
-const refused = (refusal: PermissionRefusal): string => permissionText().refused(refusal);
 /** Claude Code's first outside-read prompt in auto mode (2.1.282): title, question, answers. */
 const OUTSIDE_READ_TITLE = "Read outside the working directories";
 const OUTSIDE_READ_QUESTION = "Allow reads outside the working directories?";
@@ -169,7 +167,7 @@ const OUTSIDE_READ_EXPLAINER = (settingsFile: string) =>
 	`Auto mode reads outside the working directories without asking. Yes or Block settles this question; Ask again asks on the next outside read. Block: the file tools refuse reads outside the working directories in every project. To undo, remove permissions.blockReadsOutsideWorkingDirectories from ${settingsFile}.`;
 /** The text a classifier block hands the model: a timeout, a call never judged, or a denial. */
 const classifierBlockReason = (outcome: { tier?: string; noVerdict?: boolean; reason: string }): string =>
-	refused({
+	refusalText({
 		kind: outcome.tier === "timeout" ? "classifierTimedOut" : outcome.noVerdict ? "classifierNoVerdict" : "classifierDenied",
 		reason: outcome.reason,
 	});
@@ -199,21 +197,21 @@ const askTitle = (actor: string, preview: string, cause: string, pausedResume: b
 const denyReason = (result: { cause?: string; rule?: { raw?: string } }): string => {
 	switch (result.cause) {
 		case "plan-mode":
-			return refused({ kind: "planMode" });
+			return refusalText({ kind: "planMode" });
 		case "protected-path":
-			return refused({ kind: "protectedPath" });
+			return refusalText({ kind: "protectedPath" });
 		case "blocked-outside-read":
-			return refused({ kind: "outsideReadsBlocked" });
+			return refusalText({ kind: "outsideReadsBlocked" });
 		case "working-dir":
-			return refused({ kind: "outsideWorkingDir" });
+			return refusalText({ kind: "outsideWorkingDir" });
 		case "mode":
-			return refused({ kind: "dontAsk" });
+			return refusalText({ kind: "dontAsk" });
 		case "profile-disabled":
-			return refused({ kind: "toolOff" });
+			return refusalText({ kind: "toolOff" });
 		case "secret-file":
-			return refused({ kind: "secretFile" });
+			return refusalText({ kind: "secretFile" });
 		default:
-			return refused({ kind: "rule", rule: result.rule?.raw ?? "deny" });
+			return refusalText({ kind: "rule", rule: result.rule?.raw ?? "deny" });
 	}
 };
 
@@ -1265,7 +1263,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 	/** A context overflow judged nothing: ask once, or stop a headless turn. */
 	const transcriptOverflow = async (ctx: ExtensionContext, toolName: string, subject: string, signal = ctx.signal): Promise<ChildGateDecision> => {
 		if (!ctx.hasUI || ctx.mode === "print") {
-			const reason = refused({ kind: "classifierOverflowHeadless" });
+			const reason = refusalText({ kind: "classifierOverflowHeadless" });
 			ctx.ui.notify(`${reason}. Compact the session (/compact) and continue.`, "error");
 			// A failed one-shot run, not a user cancel (request/run-status/index.ts).
 			pi.events.emit(TURN_FAILED_CHANNEL, { reason } satisfies TurnFailedEvent);
@@ -1288,7 +1286,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			), signal);
 			return { block: true, reason: userDenialText(feedback) };
 		}
-		return { block: true, reason: refused({ kind: "manualApprovalWithheld" }) };
+		return { block: true, reason: refusalText({ kind: "manualApprovalWithheld" }) };
 	};
 
 	/**
@@ -1348,7 +1346,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 	/** The block reason for a first-read prompt answered with Block or Ask again; undefined to run the read. */
 	const outsideReadRefusal = async (ctx: ExtensionContext, toolName: string, path: string, signal = ctx.signal): Promise<string | undefined> => {
 		const answer = await firstOutsideRead(ctx, toolName, path, signal);
-		return answer === "allow" ? undefined : answer === "block" ? refused({ kind: "userBlockedOutsideReads" }) : userDenialText();
+		return answer === "allow" ? undefined : answer === "block" ? refusalText({ kind: "userBlockedOutsideReads" }) : userDenialText();
 	};
 
 	/**
@@ -1368,7 +1366,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		await bashParserReady();
 		const normalizedTool = normalizeToolName(event.toolName);
 		const conflict = isPathSubjectTool(normalizedTool) ? conflictingPathArguments(event.input as Record<string, unknown>) : undefined;
-		if (conflict) return { block: true, reason: refused({ kind: "conflictingPaths", fields: conflict }) };
+		if (conflict) return { block: true, reason: refusalText({ kind: "conflictingPaths", fields: conflict }) };
 		const subject = extractSubject(normalizedTool, event.input as Record<string, unknown>);
 		// In a worktree session, worktree's tool_call handler (which runs before this
 		// one) cd-wraps bash commands for execution and publishes the model's
@@ -1592,7 +1590,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 
 		// ask
 		if (!ctx.hasUI) {
-			return { block: true, reason: refused({ kind: "nonInteractive" }) };
+			return { block: true, reason: refusalText({ kind: "nonInteractive" }) };
 		}
 
 		const preview = previewSubject(matchSubject);
@@ -1611,10 +1609,10 @@ function permissionsExtension(pi: ExtensionAPI) {
 		const { choice, unanswered } = await askMaybeTimed(pausedResume, title, (show) => serializePrompt(show, ctx.signal), (text, timeout) =>
 			ctx.ui.select(text, askOptions(grant), { signal: ctx.signal, timeout }),
 		);
-		if (ctx.signal?.aborted) return { block: true, reason: refused({ kind: "stoppedWhileWaiting", who: "turn" }) };
+		if (ctx.signal?.aborted) return { block: true, reason: refusalText({ kind: "stoppedWhileWaiting", who: "turn" }) };
 		if (unanswered) {
 			logDecision(ctx, { tool: event.toolName, subject: matchSubject, outcome: "block", source: "user", reason: "resume prompt unanswered" });
-			return { block: true, reason: refused({ kind: "unansweredResume" }) };
+			return { block: true, reason: refusalText({ kind: "unansweredResume" }) };
 		}
 
 		// The user's answer is itself a gate decision worth recording — it is the
@@ -1685,7 +1683,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		const { toolName, input, cwd } = call;
 		const normalizedTool = normalizeToolName(toolName);
 		const conflict = isPathSubjectTool(normalizedTool) ? conflictingPathArguments(input) : undefined;
-		if (conflict) return { block: true, reason: refused({ kind: "conflictingPaths", fields: conflict }) };
+		if (conflict) return { block: true, reason: refusalText({ kind: "conflictingPaths", fields: conflict }) };
 		const subject = extractSubject(normalizedTool, input);
 		const resolvedSubject =
 			isPathSubjectTool(normalizedTool) && subject
@@ -1762,7 +1760,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		// handler's paused branch does — a pause is a full-session stop awaiting the
 		// user, and child work must not continue through it unattended.
 		if (result.decision === "classify" && !pauseTracker.isPaused()) {
-			if (!ctx) return { block: true, reason: refused({ kind: "nonInteractive" }) };
+			if (!ctx) return { block: true, reason: refusalText({ kind: "nonInteractive" }) };
 			const appendEntry: TranscriptEntry = {
 				kind: "tool",
 				tool: normalizedTool,
@@ -1785,7 +1783,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		}
 
 		// ask: needs the user. Bubble it to the parent's terminal; no UI → fail closed.
-		if (!ctx || !ctx.hasUI) return { block: true, reason: refused({ kind: "nonInteractive" }) };
+		if (!ctx || !ctx.hasUI) return { block: true, reason: refusalText({ kind: "nonInteractive" }) };
 		const preview = previewSubject(subject);
 		// Reaching here from the classify branch only happens while auto mode is
 		// paused — this is the resume prompt, not a per-action approval.
@@ -1804,10 +1802,10 @@ function permissionsExtension(pi: ExtensionAPI) {
 		const { choice, unanswered } = await askMaybeTimed(pausedResume, title, childPrompt, (text, timeout) =>
 			ctx.ui.select(text, askOptions(grant), { signal: call.signal, timeout }),
 		);
-		if (call.signal?.aborted) return { block: true, reason: refused({ kind: "stoppedWhileWaiting", who: "agent" }) };
+		if (call.signal?.aborted) return { block: true, reason: refusalText({ kind: "stoppedWhileWaiting", who: "agent" }) };
 		if (unanswered) {
 			logDecision(ctx, { tool: toolName, subject, outcome: "block", source: "user", reason: "resume prompt unanswered" });
-			return { block: true, reason: refused({ kind: "unansweredResume" }) };
+			return { block: true, reason: refusalText({ kind: "unansweredResume" }) };
 		}
 
 		if (pausedResume) {

@@ -11,7 +11,7 @@ import type { SubagentModelSource } from "./subagent-model.ts";
 import type { LiveTools } from "../profile/live-tools.ts";
 
 /** Where a choice in the resolution chain came from, other than the automatic pick and the session. */
-export type ChainSource = "call" | "agent" | "default";
+type ChainSource = "call" | "agent" | "default";
 
 /** What a resolution noticed on the way. `session` is the session model's spec, when there is one. */
 export type SubagentModelNotice =

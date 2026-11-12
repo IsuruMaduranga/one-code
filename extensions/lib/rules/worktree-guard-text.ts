@@ -53,7 +53,7 @@ export type WorktreeGuardRefusal =
  * The guard refusals' words. Not tied to one feature: the worktree tools,
  * subagents and workflows all run isolated sessions.
  */
-export interface WorktreeGuardText {
+interface WorktreeGuardText {
 	refusal(refusal: WorktreeGuardRefusal): string;
 }
 

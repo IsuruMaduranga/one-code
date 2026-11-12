@@ -15,7 +15,7 @@ import type { WorkflowSizeGuideline } from "../../lib/profile/product-settings.t
 import { brand } from "../../lib/profile/brand.mjs";
 
 /** A workflow call refused before any run starts. */
-export type WorkflowRefusal =
+type WorkflowRefusal =
 	/** The settings turn workflows off. */
 	| { kind: "turnedOff" }
 	| { kind: "scriptPathMissing"; path: string }
@@ -45,7 +45,7 @@ export type ScriptProblem =
 	| { kind: "metaField"; field: "name" | "description" | "whenToUse" | "phases" | "phaseTitle" };
 
 /** A script's call the runtime refuses; thrown into the script. */
-export type ScriptCallProblem =
+type ScriptCallProblem =
 	| { kind: "emptyPrompt" }
 	| { kind: "schemaNotObject" }
 	| { kind: "unknownAgentType"; agentType: string; known: string[] }
@@ -67,7 +67,7 @@ export type ScriptCallProblem =
 	| { kind: "schemaNotObjectWithProperties" };
 
 /** Why an agent call failed (the call resolves null; the failure shows in the progress lines). */
-export type AgentFailure = { kind: "noOutput" } | { kind: "noStructuredOutput" };
+type AgentFailure = { kind: "noOutput" } | { kind: "noStructuredOutput" };
 
 /** Why a run stopped short; it becomes the report's reason. */
 export type RunStop =
@@ -85,12 +85,12 @@ export type RunStop =
 	| { kind: "stopped"; by: "toolCall" | "session" | "command" | "statusStrip" | "viewer" };
 
 /** Something an agent's run reported along the way (a progress line). */
-export type AgentNotice =
+type AgentNotice =
 	| { kind: "extensionError"; label?: string; event: string; error: string }
 	| { kind: "worktreeKept"; label?: string; path: string; branch?: string };
 
 /** A finished run, for its report. */
-export interface RunReport {
+interface RunReport {
 	name: string;
 	runId: string;
 	status: "completed" | "failed" | "aborted";

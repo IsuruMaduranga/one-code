@@ -9,7 +9,7 @@
 import { escapeRegExp } from "../core/text-spans.ts";
 
 /** What a tool_search call did, by tool name as the model wrote it. */
-export interface SearchOutcome {
+interface SearchOutcome {
 	/** Loaded by this call. */
 	added: string[];
 	/** Callable already. */

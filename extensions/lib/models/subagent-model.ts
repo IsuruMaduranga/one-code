@@ -170,7 +170,6 @@ export interface SubagentModelResolution {
  * closed without it, as every Agent and workflow call reads them.
  */
 export const subagentModelWordsInForce = forLive((live): SubagentModelWords => subagentModelWords(live, requireText("subagentModels")));
-const words = subagentModelWordsInForce;
 
 /**
  * The model-facing form of a resolution's notices, for the spawn tool's result.
@@ -197,7 +196,7 @@ const words = subagentModelWordsInForce;
 export function subagentModelNotes(resolution: Pick<SubagentModelResolution, "model" | "notices" | "source">): string[] {
 	if (resolution.notices.length === 0) return [];
 	if (!resolution.model) return [...resolution.notices];
-	return [...resolution.notices, words().runsOn({ model: spec(resolution.model), source: resolution.source })];
+	return [...resolution.notices, subagentModelWordsInForce().runsOn({ model: spec(resolution.model), source: resolution.source })];
 }
 
 interface AliasResolution {
@@ -247,7 +246,7 @@ function resolveAlias(
 export function resolveSubagentModel(input: ResolveInput): SubagentModelResolution {
 	const { available, sessionModel } = input;
 	const notices: string[] = [];
-	const note = (notice: SubagentModelNotice) => notices.push(words().notice(notice));
+	const note = (notice: SubagentModelNotice) => notices.push(subagentModelWordsInForce().notice(notice));
 
 	const chain: { value: string; source: "call" | "agent" | "default" }[] = [];
 	if (input.requested) chain.push({ value: input.requested, source: "call" });
@@ -325,7 +324,7 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 				// the user configured it once and it should not break a fork.
 				if (entry.source === "call") {
 					callFailed = wanted;
-					callFailedReason = words().notice({ kind: "textOnlyCall", model: spec(resolved) });
+					callFailedReason = subagentModelWordsInForce().notice({ kind: "textOnlyCall", model: spec(resolved) });
 					notices.push(callFailedReason);
 				} else {
 					note({ kind: "textOnly", model: spec(resolved), source: entry.source });
@@ -425,7 +424,7 @@ export function expensiveModelGate(
 	const sessionPrice = pricedInput(sessionModel);
 	const requestedPrice = pricedInput(resolution.model);
 	if (sessionPrice === undefined || requestedPrice === undefined || requestedPrice <= sessionPrice) return undefined;
-	return words().costsMore({ model: spec(resolution.model), price: requestedPrice, session: spec(sessionModel), sessionPrice });
+	return subagentModelWordsInForce().costsMore({ model: spec(resolution.model), price: requestedPrice, session: spec(sessionModel), sessionPrice });
 }
 
 export interface MenuOptions {
@@ -465,7 +464,7 @@ export function subagentModelMenu({ available, sessionModel, defaultModel, defau
 	const add = (model: Model<Api>, label: MenuLabel) => {
 		if (listed.has(spec(model)) || !imageOk(model)) return;
 		listed.add(spec(model));
-		lines.push(words().menuLine({ model: spec(model), price: pricedInput(model), label }));
+		lines.push(subagentModelWordsInForce().menuLine({ model: spec(model), price: pricedInput(model), label }));
 	};
 
 	if (defaultModel) {
@@ -506,7 +505,7 @@ export function defaultCostsMoreWarning({ sessionModel, defaultModel }: MenuOpti
 	const sessionPrice = pricedInput(sessionModel);
 	const defaultPrice = pricedInput(defaultModel);
 	if (sessionPrice === undefined || defaultPrice === undefined || defaultPrice <= sessionPrice) return undefined;
-	return words().defaultCostsMore({ price: defaultPrice, sessionPrice });
+	return subagentModelWordsInForce().defaultCostsMore({ price: defaultPrice, sessionPrice });
 }
 
 /**
@@ -524,7 +523,7 @@ export function settingOverrideNotice({ sessionModel, defaultModel, defaultSourc
 	// already explains the override — no "runs on it" line for the model then.
 	if (configured?.source !== "subagentModel setting" || defaultSource !== "default" || !defaultModel) return undefined;
 	const cross = sessionModel && crossesProvider(defaultModel, sessionModel);
-	return words().settingPinned({ model: spec(defaultModel), otherProvider: cross ? spec(sessionModel as Model<Api>) : undefined });
+	return subagentModelWordsInForce().settingPinned({ model: spec(defaultModel), otherProvider: cross ? spec(sessionModel as Model<Api>) : undefined });
 }
 
 /**
@@ -533,7 +532,7 @@ export function settingOverrideNotice({ sessionModel, defaultModel, defaultSourc
  * session's own model).
  */
 export function refusedModelNote(refused: string, defaultModel: Model<Api> | undefined): string {
-	return words().refused({ model: refused, newDefault: defaultModel ? spec(defaultModel) : undefined });
+	return subagentModelWordsInForce().refused({ model: refused, newDefault: defaultModel ? spec(defaultModel) : undefined });
 }
 
 /** The every-turn reminder body. Kept short: its tokens are paid on every call. */
@@ -541,5 +540,5 @@ export function subagentModelsReminder(options: MenuOptions): string {
 	const menu = subagentModelMenu(options);
 	const setting = settingOverrideNotice(options);
 	const warning = defaultCostsMoreWarning(options);
-	return words().menu({ lines: menu, notes: [...(setting ? [setting] : []), ...(warning ? [warning] : [])] });
+	return subagentModelWordsInForce().menu({ lines: menu, notes: [...(setting ? [setting] : []), ...(warning ? [warning] : [])] });
 }

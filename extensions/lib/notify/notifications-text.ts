@@ -15,7 +15,7 @@ import { type LiveTools, type ToolPassages, withoutOff } from "../profile/live-t
 import type { TaskStatus } from "./notifications.ts";
 
 /** A task notification's `<summary>`. */
-export type TaskSummary =
+type TaskSummary =
 	| { kind: "agent"; name: string; status: TaskStatus; reason?: string }
 	/** `detail` explains a failure an exit code does not (a timeout, a signal). */
 	| { kind: "shell"; description: string; status: TaskStatus; exitCode: number | null; detail?: string }

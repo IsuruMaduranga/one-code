@@ -97,8 +97,7 @@ function isWorktreeState(value: unknown): value is WorktreeState {
 
 function worktreeExtension(pi: ExtensionAPI) {
 	const text = requireText("worktree");
-	const guardWords = worktreeGuardText;
-	const block = (refusal: WorktreeGuardRefusal) => ({ block: true, reason: guardWords.refusal(refusal) });
+	const block = (refusal: WorktreeGuardRefusal) => ({ block: true, reason: worktreeGuardText.refusal(refusal) });
 	let state: WorktreeState | undefined;
 
 	const applyState = (next: WorktreeState | undefined, toolCallId?: string) => {

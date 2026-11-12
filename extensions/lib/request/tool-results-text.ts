@@ -7,7 +7,7 @@
  * the preview's length are the base's.
  */
 
-export interface ToolResultsText {
+interface ToolResultsText {
 	/** A tool that returned nothing; `tool` is its display name (Bash, Grep). */
 	empty(p: { tool: string }): string;
 	/** In place of pi's "No files found matching pattern". */

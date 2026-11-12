@@ -68,7 +68,6 @@ function memoryEntriesFor(cwd: string): MemoryEntry[] {
 }
 
 function memoryExtension(pi: ExtensionAPI) {
-	const text = memoryText;
 	const limits = { maxLines: INDEX_MAX_LINES, maxChars: INDEX_MAX_CHARS };
 	let dir: string | undefined;
 	let dirReal = "";
@@ -157,10 +156,10 @@ function memoryExtension(pi: ExtensionAPI) {
 		}
 		const status = indexLimitStatus(index);
 		if (status === "near") {
-			pi.events.emit(REMINDER_CHANNEL, { text: text.indexNearLimit(limits) });
+			pi.events.emit(REMINDER_CHANNEL, { text: memoryText.indexNearLimit(limits) });
 		} else if (status === "over") {
 			return {
-				content: [...(event.content ?? []), { type: "text", text: text.indexOverLimit(limits) }],
+				content: [...(event.content ?? []), { type: "text", text: memoryText.indexOverLimit(limits) }],
 				isError: true,
 			};
 		}

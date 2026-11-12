@@ -12,7 +12,7 @@
 
 import type { CcHookEvent, HookBlock } from "../../lib/rules/hook-protocol.ts";
 
-export interface HooksText {
+interface HooksText {
 	/** A hook's added context as the model reads it; the caller wraps it in a system reminder. */
 	additionalContext(p: { event: CcHookEvent; text: string }): string;
 	/** Why a hook blocked: the hook's stated reason, or the default for a verdict that gave none. */
