@@ -42,7 +42,7 @@ import { isUserRun, PROMPT_OPTIONS_CHANNEL } from "../ui/prompt-options.ts";
 import { wrapReminder } from "../request/reminders.ts";
 import { HAND_BACK_POINTER_PREFIX, type NotificationWords, type OneShotWork } from "./notifications-text.ts";
 import { notificationWords } from "./notification-words.ts";
-import { commonPrefix, escapeRegExp, memoOn } from "../core/text-spans.ts";
+import { escapeRegExp, memoOn } from "../core/text-spans.ts";
 
 /** pi's session-mode union, derived from the context (the package root does not export ExtensionMode itself). */
 type ExtensionMode = ExtensionContext["mode"];
@@ -288,7 +288,7 @@ const framing = memoOn((words: NotificationWords): { delivery: RegExp; frame: Re
 	const { preamble, agentMessage: message } = words;
 	const delivery = new RegExp(
 		[
-			`<system-reminder>\\n(?=${escapeRegExp(commonPrefix(preamble.alone, preamble.withUserTurn))})`,
+			`<system-reminder>\\n(?=${escapeRegExp(preamble.alone)}|${escapeRegExp(preamble.withUserTurn)})`,
 			"(?<=</task-notification>)\\n</system-reminder>",
 			escapeRegExp(preamble.alone),
 			escapeRegExp(preamble.withUserTurn),
@@ -298,7 +298,7 @@ const framing = memoOn((words: NotificationWords): { delivery: RegExp; frame: Re
 	const frame = new RegExp(
 		[
 			"<task-notification>\\n([\\s\\S]*?)\\n</task-notification>",
-			`(?:${escapeRegExp(message.openerMidTurn)}|${escapeRegExp(message.opener)})\\n<agent-message from="([^"]*)">\\n([\\s\\S]*?)\\n</agent-message>\\n\\n${escapeRegExp(message.guard)}[^\\n]*`,
+			`(?:${escapeRegExp(message.openerMidTurn)}|${escapeRegExp(message.opener)})\\n<agent-message from="([^"]*)">\\n([\\s\\S]*?)\\n</agent-message>\\n\\n${escapeRegExp(message.guard)}(?:${escapeRegExp(message.replyHint)})?`,
 		].join("|"),
 		"g",
 	);

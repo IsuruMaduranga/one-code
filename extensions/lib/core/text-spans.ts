@@ -1,15 +1,8 @@
 /**
  * Small helpers for text that is built in one place and recognised in
- * another: the start two renderings share, a literal as a pattern, and a
- * value computed once per object. A leaf module.
+ * another: a literal as a pattern, and a value computed once per object. A
+ * leaf module.
  */
-
-/** The longest start two texts share. */
-export function commonPrefix(a: string, b: string): string {
-	let i = 0;
-	while (i < a.length && a[i] === b[i]) i++;
-	return a.slice(0, i);
-}
 
 export const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
